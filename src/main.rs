@@ -43,7 +43,7 @@ fn main() -> Result<()> {
         (reader.heap_map()?.size() as f32) / (1024.0 * 1024.0)
     );
 
-    reader.pointers_in_stack()?.iter().for_each(|(map, ptr)| {
+    reader.pointers_in_stack()?.for_each(|(map, ptr)| {
         println!(
             "0x{:016x} is in {}",
             ptr,

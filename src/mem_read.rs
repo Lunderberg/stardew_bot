@@ -140,27 +140,36 @@ impl MemoryReader {
         })
     }
 
-    pub fn pointers_in_stack(&self) -> Result<Vec<(MapRange, u64)>> {
+    pub fn pointers_in_stack(
+        &self,
+    ) -> Result<impl Iterator<Item = (MapRange, u64)> + '_> {
         let stack = self.read_stack()?;
 
-        println!("stack size: {}", stack.len());
-
         Ok(stack
-            .iter()
-            .chunks(8)
             .into_iter()
-            .map(|chunk| {
-                let mut bytes: [u8; 8] = [0; 8];
-                chunk.into_iter().zip(bytes.iter_mut()).for_each(
-                    |(val, out)| {
-                        *out = *val;
-                    },
-                );
-                u64::from_ne_bytes(bytes)
-            })
-            .filter_map(|ptr| {
-                self.find_containing_map(ptr).map(|map| (map.clone(), ptr))
-            })
-            .collect())
+            .scan(
+                ([0u8; 8], 0usize),
+                |state: &mut ([u8; 8], usize),
+                 byte: u8|
+                 -> Option<Option<u64>> {
+                    let (arr, byte_num): &mut ([u8; 8], usize) = state;
+                    arr[*byte_num] = byte;
+                    *byte_num += 1;
+
+                    if *byte_num == 8 {
+                        let output: u64 = u64::from_ne_bytes(*arr);
+                        *arr = [0; 8];
+                        *byte_num = 0;
+                        Some(Some(output))
+                    } else {
+                        Some(None)
+                    }
+                },
+            )
+            .filter_map(|opt_ptr| opt_ptr)
+            .filter_map(|ptr: u64| {
+                self.find_containing_map(ptr)
+                    .map(move |map| (map.clone(), ptr))
+            }))
     }
 }
