@@ -1,3 +1,5 @@
+use super::memory_reader::Error as MemoryReadError;
+
 use thiserror::Error;
 
 pub type Result<T> = std::result::Result<T, Error>;
@@ -6,22 +8,10 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("Stardew Valley process not running")]
     StardewNotRunning,
-    #[error("/proc/{0}/maps not found")]
-    MemoryMapNotFound(u32),
-    #[error("Could not find memory map {0}")]
-    MissingMemoryMapSection(String),
-    #[error(
-        "No permissions to read memory.  \
-         Consider temporarily disabling ptrace_scope protections \
-         with 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'"
-    )]
-    MemoryReadPermissionError,
-    #[error("Bad address in remote process")]
-    MemoryReadBadAddress,
-    #[error("Error {err} reading process memory.")]
-    MemoryReadOtherError {
-        #[source]
-        err: std::io::Error,
+    #[error("")]
+    MemoryReadError {
+        #[from]
+        err: MemoryReadError,
     },
 }
 

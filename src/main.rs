@@ -1,8 +1,4 @@
-mod mem_read;
-use mem_read::MemoryReader;
-
-mod error;
-use error::{Error, Result};
+use stardew_bot::{Error, MemoryReader, Result};
 
 use sysinfo::{PidExt, ProcessExt, SystemExt};
 
@@ -36,23 +32,27 @@ fn main() -> Result<()> {
 
     println!(
         "Stack size: {} MB",
-        (reader.stack_map()?.size() as f32) / (1024.0 * 1024.0)
-    );
-    println!(
-        "Heap size: {} MB",
-        (reader.heap_map()?.size() as f32) / (1024.0 * 1024.0)
+        (reader.stack()?.size_bytes() as f32) / (1024.0 * 1024.0)
     );
 
-    reader.pointers_in_stack()?.for_each(|(map, ptr)| {
-        println!(
-            "0x{:016x} is in {}",
-            ptr,
-            map.filename()
-                .map(|p| p.to_str())
-                .flatten()
-                .unwrap_or_else(|| "???")
-        )
-    });
+    // reader.pointers_in_stack()?.for_each(|(map, ptr)| {
+    //     println!(
+    //         "0x{:016x} is in {}",
+    //         ptr,
+    //         map.filename()
+    //             .map(|p| p.to_str())
+    //             .flatten()
+    //             .unwrap_or_else(|| "???")
+    //     )
+    // });
+
+    reader
+        .potential_frame_pointers()?
+        .into_iter()
+        .for_each(|ptr_ptr| {
+            let region = reader.find_containing_region(ptr_ptr.value).unwrap();
+            println!("{} is in {}", ptr_ptr.value, region)
+        });
 
     Ok(())
 }
