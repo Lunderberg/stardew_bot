@@ -16,7 +16,7 @@ impl MemoryRegion {
         self.bytes
             .iter()
             .enumerate()
-            .map(|(i, val)| MemoryValue::new(self.start + (i as u64), val))
+            .map(|(i, val)| MemoryValue::new(self.start + i, val))
     }
 
     pub fn into_iter_bytes(self) -> impl Iterator<Item = MemoryValue<u8>> {
@@ -24,7 +24,7 @@ impl MemoryRegion {
         self.bytes
             .into_iter()
             .enumerate()
-            .map(move |(i, val)| MemoryValue::new(start + (i as u64), val))
+            .map(move |(i, val)| MemoryValue::new(start + i, val))
     }
 }
 

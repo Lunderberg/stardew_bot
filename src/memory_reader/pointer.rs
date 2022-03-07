@@ -7,7 +7,7 @@ use crate::memory_reader::{Error, Result};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pointer {
-    address: u64,
+    address: usize,
 }
 
 impl Pointer {
@@ -21,7 +21,8 @@ impl Pointer {
 
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
         let mut process_io =
-            unsafe { ProcessVirtualMemoryIO::new(pid, self.address) }.unwrap();
+            unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }
+                .unwrap();
 
         let mut buffer = vec![0u8; num_bytes];
 
@@ -40,17 +41,17 @@ impl Pointer {
     }
 }
 
-impl std::ops::Add<u64> for Pointer {
+impl std::ops::Add<usize> for Pointer {
     type Output = Pointer;
 
-    fn add(self, rhs: u64) -> Self::Output {
+    fn add(self, rhs: usize) -> Self::Output {
         let address = self.address + rhs;
         Self { address }
     }
 }
 
 impl std::ops::Sub for Pointer {
-    type Output = u64;
+    type Output = usize;
 
     fn sub(self, rhs: Self) -> Self::Output {
         self.address - rhs.address
@@ -69,16 +70,8 @@ impl Display for Pointer {
     }
 }
 
-impl From<u64> for Pointer {
-    fn from(address: u64) -> Self {
-        Self { address }
-    }
-}
-
 impl From<usize> for Pointer {
     fn from(address: usize) -> Self {
-        Self {
-            address: address as u64,
-        }
+        Self { address }
     }
 }

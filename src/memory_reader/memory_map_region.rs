@@ -28,7 +28,7 @@ impl MemoryMapRegion {
         }
     }
 
-    pub fn size_bytes(&self) -> u64 {
+    pub fn size_bytes(&self) -> usize {
         self.end - self.start
     }
 

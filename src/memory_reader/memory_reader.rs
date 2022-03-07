@@ -34,11 +34,11 @@ impl MemoryReader {
         self.regions.iter().find(|region| region.matches_name(name))
     }
 
-    pub fn total_memory(&self) -> u64 {
+    pub fn total_memory(&self) -> usize {
         self.regions.iter().map(|region| region.size_bytes()).sum()
     }
 
-    pub fn total_readable_memory(&self) -> u64 {
+    pub fn total_readable_memory(&self) -> usize {
         self.regions
             .iter()
             .filter(|region| region.is_readable)
@@ -97,7 +97,7 @@ impl MemoryReader {
             .into_iter_bytes()
             .iter_byte_arr()
             .map(|arr_val: MemoryValue<[u8; 8]>| -> MemoryValue<Pointer> {
-                arr_val.map(|arr| u64::from_ne_bytes(arr).into())
+                arr_val.map(|arr| usize::from_ne_bytes(arr).into())
             })
             .filter(|ptr_ptr: &MemoryValue<Pointer>| -> bool {
                 self.find_containing_region(ptr_ptr.value).is_some()
