@@ -7,10 +7,11 @@ pub struct MemoryMapRegion {
     pid: u32,
     start: Pointer,
     end: Pointer,
-    name: Option<String>,
+    pub name: Option<String>,
     pub is_executable: bool,
     pub is_readable: bool,
     pub is_writable: bool,
+    pub is_shared_memory: bool,
 }
 
 impl MemoryMapRegion {
@@ -22,9 +23,10 @@ impl MemoryMapRegion {
             name: map_range
                 .filename()
                 .map(|p| p.to_str().unwrap().to_string()),
-            is_executable: map_range.is_exec(),
             is_readable: map_range.is_read(),
             is_writable: map_range.is_write(),
+            is_executable: map_range.is_exec(),
+            is_shared_memory: &map_range.flags[3..4] == "s",
         }
     }
 
@@ -41,6 +43,16 @@ impl MemoryMapRegion {
             .as_ref()
             .map(|name| name == search_name)
             .unwrap_or(false)
+    }
+
+    pub fn flag_str(&self) -> String {
+        format!(
+            "{}{}{}{}",
+            if self.is_readable { 'r' } else { '-' },
+            if self.is_writable { 'w' } else { '-' },
+            if self.is_executable { 'x' } else { '-' },
+            if self.is_shared_memory { 's' } else { 'p' },
+        )
     }
 
     pub fn read(&self) -> Result<MemoryRegion> {

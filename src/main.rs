@@ -1,3 +1,5 @@
+//use itertools::Itertools;
+
 use stardew_bot::{Error, MemoryReader, Result};
 
 use sysinfo::{PidExt, ProcessExt, SystemExt};
@@ -35,24 +37,53 @@ fn main() -> Result<()> {
         (reader.stack()?.size_bytes() as f32) / (1024.0 * 1024.0)
     );
 
-    // reader.pointers_in_stack()?.for_each(|(map, ptr)| {
-    //     println!(
-    //         "0x{:016x} is in {}",
-    //         ptr,
-    //         map.filename()
-    //             .map(|p| p.to_str())
-    //             .flatten()
-    //             .unwrap_or_else(|| "???")
-    //     )
-    // });
+    // reader
+    //     .potential_frame_pointers()?
+    //     .into_iter()
+    //     .sorted_by_key(|ptr_ptr| ptr_ptr.location)
+    //     .for_each(|ptr_ptr| {
+    //         let pointer_from = ptr_ptr.location;
+    //         let pointer_to = ptr_ptr.value;
+    //         let direction = if pointer_to > pointer_from { "+" } else { "-" };
+    //         let abs_delta = if pointer_to > pointer_from {
+    //             pointer_to - pointer_from
+    //         } else {
+    //             pointer_from - pointer_to
+    //         };
+    //         println!(
+    //             "Pointer at {} points to {}, delta = {}{}",
+    //             pointer_from, pointer_to, direction, abs_delta
+    //         );
+    //     });
 
-    reader
-        .potential_frame_pointers()?
-        .into_iter()
-        .for_each(|ptr_ptr| {
-            let region = reader.find_containing_region(ptr_ptr.value).unwrap();
-            println!("{} is in {}", ptr_ptr.value, region)
-        });
+    // let num_ptr_executable =
+    //     reader.potential_return_instruction_pointers()?.count();
+    // println!(
+    //     "There exist {} pointers to executable space in the [stack]",
+    //     num_ptr_executable
+    // );
+
+    // reader.potential_return_instruction_pointers()?.for_each(
+    //     |(ptr_ptr, region)| {
+    //         println!(
+    //             "Pointer at {} points to {}, located in {:?}",
+    //             ptr_ptr.location, ptr_ptr.value, region.name
+    //         );
+    //     },
+    // );
+
+    // reader
+    //     .pointers_in_stack_with_region()?
+    //     .for_each(|(ptr_ptr, region)| {
+    //         let name =
+    //             region.name.as_ref().map(|p| p.as_str()).unwrap_or("???");
+    //         println!(
+    //             "Pointer at {} points to {}, located in {}",
+    //             ptr_ptr.location, ptr_ptr.value, name
+    //         );
+    //     });
+
+    reader.print_stack()?;
 
     Ok(())
 }

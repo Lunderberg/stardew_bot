@@ -88,6 +88,54 @@ impl MemoryReader {
         self.regions.iter().find(|region| region.contains(ptr))
     }
 
+    pub fn print_stack(&self) -> Result<()> {
+        self.read_stack()?
+            .into_iter_bytes()
+            .iter_byte_arr()
+            .for_each(|arr: MemoryValue<[u8; 8]>| {
+                let as_pointer: Pointer =
+                    usize::from_ne_bytes(arr.value).into();
+                if let Some(region) = self.find_containing_region(as_pointer) {
+                    let name = region
+                        .name
+                        .as_ref()
+                        .map(|p| p.as_str())
+                        .unwrap_or("???");
+                    println!(
+                        "Pointer at {} points to {}, located in {} ({})",
+                        arr.location,
+                        as_pointer,
+                        name,
+                        region.flag_str(),
+                    );
+                } else {
+                    println!(
+                        "Value   at {} is        {}",
+                        arr.location, as_pointer
+                    );
+                }
+                //
+            });
+        Ok(())
+    }
+
+    pub fn pointers_in_stack_with_region(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = (MemoryValue<Pointer>, &MemoryMapRegion)> + '_,
+    > {
+        let stack = self.read_stack()?;
+
+        Ok(stack
+            .into_iter_bytes()
+            .iter_byte_arr()
+            .map(|arr_val| arr_val.map(|arr| usize::from_ne_bytes(arr).into()))
+            .filter_map(|ptr_ptr| {
+                self.find_containing_region(ptr_ptr.value)
+                    .map(move |region| (ptr_ptr, region))
+            }))
+    }
+
     pub fn pointers_in_stack(
         &self,
     ) -> Result<impl Iterator<Item = MemoryValue<Pointer>> + '_> {
@@ -108,11 +156,9 @@ impl MemoryReader {
         &self,
     ) -> Result<Vec<MemoryValue<Pointer>>> {
         let stack_to_stack: Vec<_> = self
-            .pointers_in_stack()?
-            .filter(|ptr_ptr| {
-                self.find_containing_region(ptr_ptr.value)
-                    .map(|region| region.matches_name("[stack]"))
-                    .unwrap_or(false)
+            .pointers_in_stack_with_region()?
+            .filter_map(|(ptr_ptr, region)| {
+                region.matches_name("[stack]").then(move || ptr_ptr)
             })
             .collect();
 
@@ -125,5 +171,16 @@ impl MemoryReader {
             .collect();
 
         Ok(unique_stack_to_stack)
+    }
+
+    pub fn potential_return_instruction_pointers(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = (MemoryValue<Pointer>, &MemoryMapRegion)> + '_,
+    > {
+        Ok(self
+            .pointers_in_stack_with_region()?
+            .filter(|(_ptr_ptr, region)| region.is_executable)
+            .filter(|(_ptr_ptr, region)| !region.matches_name("[stack]")))
     }
 }
