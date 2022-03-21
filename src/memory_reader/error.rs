@@ -23,6 +23,11 @@ pub enum Error {
         #[source]
         err: std::io::Error,
     },
+    #[error("Error {err} in TuiExplorer.")]
+    TuiIoError {
+        #[source]
+        err: std::io::Error,
+    },
 }
 
 impl std::fmt::Debug for Error {

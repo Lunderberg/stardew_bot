@@ -2,7 +2,7 @@ use std::fmt::Display;
 
 use super::{MemoryRegion, Pointer, Result};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MemoryMapRegion {
     pid: u32,
     start: Pointer,

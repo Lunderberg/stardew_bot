@@ -2,6 +2,7 @@ use super::{MemoryValue, Pointer};
 
 use std::ops::Deref;
 
+#[derive(Clone)]
 pub struct MemoryRegion {
     start: Pointer,
     bytes: Vec<u8>,
@@ -12,11 +13,15 @@ impl MemoryRegion {
         Self { start, bytes }
     }
 
-    pub fn iter_bytes(&self) -> impl Iterator<Item = MemoryValue<&u8>> + '_ {
+    pub fn size_bytes(&self) -> usize {
+        self.bytes.len()
+    }
+
+    pub fn iter_bytes(&self) -> impl Iterator<Item = MemoryValue<u8>> + '_ {
         self.bytes
             .iter()
             .enumerate()
-            .map(|(i, val)| MemoryValue::new(self.start + i, val))
+            .map(|(i, &val)| MemoryValue::new(self.start + i, val))
     }
 
     pub fn into_iter_bytes(self) -> impl Iterator<Item = MemoryValue<u8>> {

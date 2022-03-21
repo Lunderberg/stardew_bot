@@ -46,6 +46,14 @@ impl MemoryReader {
             .sum()
     }
 
+    pub fn total_writable_memory(&self) -> usize {
+        self.regions
+            .iter()
+            .filter(|region| region.is_writable)
+            .map(|region| region.size_bytes())
+            .sum()
+    }
+
     pub fn full_dump<P: Into<PathBuf>>(&self, filename: P) -> Result<()> {
         let write_file = OpenOptions::new()
             .write(true)

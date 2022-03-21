@@ -1,6 +1,6 @@
 //use itertools::Itertools;
 
-use stardew_bot::{Error, MemoryReader, Result};
+use stardew_bot::{Error, Result, TuiExplorer};
 
 use sysinfo::{PidExt, ProcessExt, SystemExt};
 
@@ -20,22 +20,30 @@ fn main() -> Result<()> {
 
     println!("Stardew PID: {}", pid);
 
-    let reader = MemoryReader::new(pid)?;
+    let mut tui = TuiExplorer::new(pid)?;
+    tui.run()?;
 
-    println!(
-        "Total memory: {} MB",
-        (reader.total_memory() as f32) / (1024.0 * 1024.0)
-    );
+    // let reader = MemoryReader::new(pid)?;
 
-    println!(
-        "Total readable memory: {} MB",
-        (reader.total_readable_memory() as f32) / (1024.0 * 1024.0)
-    );
+    // println!(
+    //     "Total memory: {} MB",
+    //     (reader.total_memory() as f32) / (1024.0 * 1024.0)
+    // );
 
-    println!(
-        "Stack size: {} MB",
-        (reader.stack()?.size_bytes() as f32) / (1024.0 * 1024.0)
-    );
+    // println!(
+    //     "Total readable memory: {} MB",
+    //     (reader.total_readable_memory() as f32) / (1024.0 * 1024.0)
+    // );
+
+    // println!(
+    //     "Total writable memory: {} MB",
+    //     (reader.total_writable_memory() as f32) / (1024.0 * 1024.0)
+    // );
+
+    // println!(
+    //     "Stack size: {} MB",
+    //     (reader.stack()?.size_bytes() as f32) / (1024.0 * 1024.0)
+    // );
 
     // reader
     //     .potential_frame_pointers()?
@@ -83,7 +91,7 @@ fn main() -> Result<()> {
     //         );
     //     });
 
-    reader.print_stack()?;
+    // reader.print_stack()?;
 
     Ok(())
 }
