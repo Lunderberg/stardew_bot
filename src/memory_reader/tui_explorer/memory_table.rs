@@ -6,25 +6,29 @@ use tui::{
     Frame,
 };
 
-use crate::memory_reader::{
-    CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer, Result,
-};
+use crate::memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer};
 
 pub struct MemoryTable {
     state: TableState,
-    _reader: MemoryReader,
     region: MemoryRegion,
 }
 
+const POINTER_SIZE: usize = 8;
+
 impl MemoryTable {
-    pub fn new(pid: u32) -> Result<Self> {
-        let reader = MemoryReader::new(pid)?;
-        let region = reader.stack()?.read()?;
-        Ok(Self {
+    pub fn new(region: MemoryRegion) -> Self {
+        Self {
             state: TableState::default(),
-            _reader: reader,
             region,
-        })
+        }
+    }
+
+    pub fn selected_value(&self) -> MemoryValue<Pointer> {
+        let selected = self.state.selected().unwrap_or(0);
+        let byte_offset = selected * POINTER_SIZE;
+        self.region
+            .bytes_at_offset(byte_offset)
+            .map(|bytes| bytes.into())
     }
 
     pub fn move_selection_down(&mut self) {
@@ -44,7 +48,7 @@ impl MemoryTable {
     }
 
     fn table_size(&self) -> usize {
-        self.region.size_bytes() / 8
+        self.region.size_bytes() / POINTER_SIZE
     }
 
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
@@ -79,8 +83,7 @@ impl MemoryTable {
                 //     self.state.selected().unwrap_or(0).abs_diff(i) < area.height;
 
                 let cells = if is_near_selected {
-                    let as_pointer: Pointer =
-                        usize::from_ne_bytes(arr.value).into();
+                    let as_pointer: Pointer = arr.value.into();
                     vec![
                         Cell::from(format!("{}", arr.location)),
                         Cell::from(format!("{}", as_pointer)),

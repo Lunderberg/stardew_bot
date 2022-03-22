@@ -40,7 +40,7 @@ impl RunningLog {
             .map(|(timestamp, entry)| {
                 ListItem::new(format!(
                     "{} {}",
-                    timestamp.format("%Y-%m-%d %H:%M:%S"),
+                    timestamp.format("%H:%M:%S"),
                     entry
                 ))
             })

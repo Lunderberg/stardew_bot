@@ -101,8 +101,7 @@ impl MemoryReader {
             .into_iter_bytes()
             .iter_byte_arr()
             .for_each(|arr: MemoryValue<[u8; 8]>| {
-                let as_pointer: Pointer =
-                    usize::from_ne_bytes(arr.value).into();
+                let as_pointer: Pointer = arr.value.into();
                 if let Some(region) = self.find_containing_region(as_pointer) {
                     let name = region
                         .name

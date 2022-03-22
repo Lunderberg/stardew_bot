@@ -1,4 +1,6 @@
-use crate::memory_reader::{Error, Result, SigintHandler};
+use crate::memory_reader::{
+    Error, MemoryReader, MemoryRegion, Result, SigintHandler,
+};
 
 use super::{DetailView, MemoryTable, RunningLog, TerminalContext};
 
@@ -10,7 +12,11 @@ use tui::{
 };
 
 pub struct TuiExplorer {
+    // Application state
     _pid: u32,
+    reader: MemoryReader,
+    memory_region: MemoryRegion,
+    // Display widgets
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
@@ -18,19 +24,17 @@ pub struct TuiExplorer {
 
 impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self> {
-        let mut detail_view = DetailView::new();
-        detail_view.load_details(
-            vec!["a", "b"]
-                .into_iter()
-                .enumerate()
-                .map(|(i, name)| (name.to_string(), i.to_string())),
-        );
-        Ok(Self {
-            _pid: pid,
+        let reader = MemoryReader::new(pid)?;
+        let memory_region = reader.stack()?.read()?;
+        let out = Self {
             running_log: RunningLog::new(100),
-            memory_table: MemoryTable::new(pid)?,
-            detail_view,
-        })
+            memory_table: MemoryTable::new(memory_region.clone()),
+            detail_view: DetailView::new(),
+            _pid: pid,
+            reader,
+            memory_region,
+        };
+        Ok(out)
     }
 
     pub fn run(&mut self) -> Result<()> {
@@ -66,9 +70,9 @@ impl TuiExplorer {
             .margin(1)
             .constraints(
                 [
-                    Constraint::Percentage(20),
-                    Constraint::Percentage(60),
-                    Constraint::Percentage(20),
+                    Constraint::Min(25),
+                    Constraint::Min(45),
+                    Constraint::Percentage(50),
                 ]
                 .as_ref(),
             )
@@ -90,8 +94,12 @@ impl TuiExplorer {
                 }
                 KeyCode::Down => {
                     self.memory_table.move_selection_down();
+                    self.update_details();
                 }
-                KeyCode::Up => self.memory_table.move_selection_up(),
+                KeyCode::Up => {
+                    self.memory_table.move_selection_up();
+                    self.update_details();
+                }
                 _ => {
                     self.running_log.add_log(format!(
                         "{:?}, {:?}",
@@ -101,5 +109,17 @@ impl TuiExplorer {
             }
         }
         Ok(false)
+    }
+
+    fn update_details(&mut self) {
+        let selected_value = self.memory_table.selected_value();
+        let details = [
+            (
+                "Location".to_string(),
+                format!("{}", selected_value.location),
+            ),
+            ("Value".to_string(), format!("{}", selected_value.value)),
+        ];
+        self.detail_view.load_details(details.into_iter());
     }
 }

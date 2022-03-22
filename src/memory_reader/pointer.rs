@@ -75,3 +75,10 @@ impl From<usize> for Pointer {
         Self { address }
     }
 }
+
+impl From<[u8; 8]> for Pointer {
+    fn from(bytes: [u8; 8]) -> Self {
+        let address = usize::from_ne_bytes(bytes).into();
+        Self { address }
+    }
+}

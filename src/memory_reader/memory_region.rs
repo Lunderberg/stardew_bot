@@ -13,6 +13,17 @@ impl MemoryRegion {
         Self { start, bytes }
     }
 
+    pub fn bytes_at_offset<const N: usize>(
+        &self,
+        byte_offset: usize,
+    ) -> MemoryValue<[u8; N]> {
+        let mut out = [0; N];
+        (0..N).zip(out.iter_mut()).for_each(|(i, out_byte)| {
+            *out_byte = self[i];
+        });
+        MemoryValue::new(self.start + byte_offset, out)
+    }
+
     pub fn size_bytes(&self) -> usize {
         self.bytes.len()
     }
