@@ -51,7 +51,7 @@ impl MemoryTable {
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
 
-        let header_cells = ["Address", "Hex", "Temp_i"].iter().map(|h| {
+        let header_cells = ["Address", "Hex"].iter().map(|h| {
             Cell::from(*h).style(
                 Style::default()
                     .fg(Color::LightCyan)
@@ -64,14 +64,31 @@ impl MemoryTable {
             .bottom_margin(1);
         let rows = self.region.iter_bytes().iter_byte_arr().enumerate().map(
             |(i, arr): (_, MemoryValue<[u8; 8]>)| {
-                let as_pointer: Pointer =
-                    usize::from_ne_bytes(arr.value).into();
-                let cells = [
-                    Cell::from(format!("{}", arr.location)),
-                    Cell::from(format!("{}", as_pointer)),
-                    Cell::from(format!("{}", i)),
-                ];
-                Row::new(cells).height(1).bottom_margin(0)
+                let selected = self.state.selected().unwrap_or(0);
+                let dist_to_selected = if i > selected {
+                    i - selected
+                } else {
+                    selected - i
+                };
+                let is_near_selected =
+                    dist_to_selected < (area.height as usize);
+
+                // TODO: Use abs_diff, stabilized in 1.60
+                //
+                // let is_near_selected =
+                //     self.state.selected().unwrap_or(0).abs_diff(i) < area.height;
+
+                let cells = if is_near_selected {
+                    let as_pointer: Pointer =
+                        usize::from_ne_bytes(arr.value).into();
+                    vec![
+                        Cell::from(format!("{}", arr.location)),
+                        Cell::from(format!("{}", as_pointer)),
+                    ]
+                } else {
+                    vec![]
+                };
+                Row::new(cells.into_iter()).height(1).bottom_margin(0)
             },
         );
 
