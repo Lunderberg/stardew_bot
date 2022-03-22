@@ -11,6 +11,7 @@ use crate::memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer};
 pub struct MemoryTable {
     state: TableState,
     region: MemoryRegion,
+    previous_height: Option<usize>,
 }
 
 const POINTER_SIZE: usize = 8;
@@ -20,6 +21,7 @@ impl MemoryTable {
         Self {
             state: TableState::default(),
             region,
+            previous_height: None,
         }
     }
 
@@ -31,20 +33,52 @@ impl MemoryTable {
             .map(|bytes| bytes.into())
     }
 
-    pub fn move_selection_down(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => (i + 1) % self.table_size(),
-            None => 0,
+    fn move_selection(&mut self, delta: i64) {
+        let n = self.table_size();
+        let i = match (self.state.selected(), delta.signum()) {
+            // If no prior selection, moving down a line selects the
+            // first element, but still allows a page down.
+            (None, 1) => (delta as usize) - 1,
+
+            // Wrapping to the end of the list selects the last
+            // element, regardless of step size.
+            (None | Some(0), -1) => n - 1,
+
+            // Wrapping to the beginning of the list selects the first
+            // element, regardless of step size.
+            (Some(i), 1) if i == n - 1 => 0,
+
+            // Otherwise, go in the direction specified, but capped at
+            // the endpoint.
+            (Some(i), -1) => ((i as i64) + delta).max(0) as usize,
+            (Some(i), 1) => (i + (delta as usize)).min(n - 1),
+            // (i + delta) % self.table_size(),
+            _ => panic!("This shouldn't happen"),
         };
         self.state.select(Some(i));
     }
 
+    pub fn move_selection_down(&mut self) {
+        self.move_selection(1);
+    }
+
     pub fn move_selection_up(&mut self) {
-        let i = match self.state.selected() {
-            Some(i) => (i + (self.table_size() - 1)) % self.table_size(),
-            None => self.table_size() - 1,
-        };
-        self.state.select(Some(i));
+        self.move_selection(-1);
+    }
+
+    pub fn move_selection_page_down(&mut self) {
+        self.move_selection(self.displayed_rows() as i64);
+    }
+
+    pub fn move_selection_page_up(&mut self) {
+        self.move_selection(-(self.displayed_rows() as i64));
+    }
+
+    fn displayed_rows(&self) -> usize {
+        let non_data_rows = 5;
+        self.previous_height
+            .map(|height| height - non_data_rows)
+            .unwrap_or(1)
     }
 
     fn table_size(&self) -> usize {
@@ -52,6 +86,8 @@ impl MemoryTable {
     }
 
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        self.previous_height = Some(area.height as usize);
+
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
 

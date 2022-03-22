@@ -100,6 +100,14 @@ impl TuiExplorer {
                     self.memory_table.move_selection_up();
                     self.update_details();
                 }
+                KeyCode::PageUp => {
+                    self.memory_table.move_selection_page_up();
+                    self.update_details();
+                }
+                KeyCode::PageDown => {
+                    self.memory_table.move_selection_page_down();
+                    self.update_details();
+                }
                 _ => {
                     self.running_log.add_log(format!(
                         "{:?}, {:?}",
