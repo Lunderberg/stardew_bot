@@ -58,6 +58,14 @@ impl MemoryTable {
         self.state.select(Some(i));
     }
 
+    pub fn move_selection_start(&mut self) {
+        self.state.select(Some(0));
+    }
+
+    pub fn move_selection_end(&mut self) {
+        self.state.select(Some(self.table_size() - 1));
+    }
+
     pub fn move_selection_down(&mut self) {
         self.move_selection(1);
     }
