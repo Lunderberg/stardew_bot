@@ -14,8 +14,8 @@ use tui::{
 pub struct TuiExplorer {
     // Application state
     _pid: u32,
-    reader: MemoryReader,
-    memory_region: MemoryRegion,
+    _reader: MemoryReader,
+    _memory_region: MemoryRegion,
     // Display widgets
     running_log: RunningLog,
     memory_table: MemoryTable,
@@ -31,8 +31,8 @@ impl TuiExplorer {
             memory_table: MemoryTable::new(memory_region.clone()),
             detail_view: DetailView::new(),
             _pid: pid,
-            reader,
-            memory_region,
+            _reader: reader,
+            _memory_region: memory_region,
         };
         Ok(out)
     }
