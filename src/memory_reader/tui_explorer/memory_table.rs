@@ -27,12 +27,10 @@ impl MemoryTable {
         }
     }
 
-    pub fn selected_value(&self) -> MemoryValue<Pointer> {
+    pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let selected = self.state.selected().unwrap_or(0);
         let byte_offset = selected * POINTER_SIZE;
-        self.region
-            .bytes_at_offset(byte_offset)
-            .map(|bytes| bytes.into())
+        self.region.bytes_at_offset(byte_offset)
     }
 
     fn move_selection(&mut self, delta: i64) {

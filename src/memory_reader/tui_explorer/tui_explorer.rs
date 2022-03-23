@@ -1,5 +1,5 @@
 use crate::memory_reader::{
-    Error, MemoryReader, MemoryRegion, Result, SigintHandler,
+    Error, MemoryReader, MemoryRegion, Pointer, Result, SigintHandler,
 };
 
 use super::{DetailView, MemoryTable, RunningLog, TerminalContext};
@@ -14,7 +14,7 @@ use tui::{
 pub struct TuiExplorer {
     // Application state
     _pid: u32,
-    _reader: MemoryReader,
+    reader: MemoryReader,
     _memory_region: MemoryRegion,
     // Display widgets
     running_log: RunningLog,
@@ -31,7 +31,7 @@ impl TuiExplorer {
             memory_table: MemoryTable::new(memory_region.clone()),
             detail_view: DetailView::new(),
             _pid: pid,
-            _reader: reader,
+            reader,
             _memory_region: memory_region,
         };
         Ok(out)
@@ -130,14 +130,35 @@ impl TuiExplorer {
     }
 
     fn update_details(&mut self) {
-        let selected_value = self.memory_table.selected_value();
-        let details = [
-            (
-                "Location".to_string(),
-                format!("{}", selected_value.location),
-            ),
-            ("Value".to_string(), format!("{}", selected_value.value)),
+        let selection = self.memory_table.selected_value();
+        let value: usize = usize::from_ne_bytes(selection.value);
+        let mut details = vec![
+            ("Location".to_string(), format!("{}", selection.location)),
+            ("Hex Value".to_string(), format!("{:x}", value)),
+            ("Dec Value".to_string(), format!("{}", value)),
         ];
+
+        let as_pointer: Pointer = value.into();
+        let pointed_region = self.reader.find_containing_region(as_pointer);
+        if let Some(pointed_region) = pointed_region {
+            use std::path::Path;
+
+            let region_name: String = pointed_region.name.as_ref().map_or_else(
+                || "anonymous".to_string(),
+                |name: &String| {
+                    Path::new(name)
+                        .file_name()
+                        .unwrap()
+                        .to_str()
+                        .unwrap()
+                        .to_string()
+                },
+            );
+
+            details.push(("".to_string(), "".to_string()));
+            details.push(("Points to: ".to_string(), region_name));
+        }
+
         self.detail_view.load_details(details.into_iter());
     }
 }
