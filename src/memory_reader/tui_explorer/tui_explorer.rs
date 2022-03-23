@@ -71,7 +71,7 @@ impl TuiExplorer {
             .constraints(
                 [
                     Constraint::Min(25),
-                    Constraint::Min(45),
+                    Constraint::Min(48),
                     Constraint::Percentage(50),
                 ]
                 .as_ref(),
