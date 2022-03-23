@@ -12,3 +12,6 @@ pub use memory_table::*;
 
 mod detail_view;
 pub use detail_view::*;
+
+mod vertical_bar;
+pub use vertical_bar::*;

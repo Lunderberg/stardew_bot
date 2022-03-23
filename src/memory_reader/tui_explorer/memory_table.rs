@@ -1,6 +1,6 @@
 use tui::{
     backend::Backend,
-    layout::{Constraint, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
@@ -13,6 +13,8 @@ pub struct MemoryTable {
     region: MemoryRegion,
     previous_height: Option<usize>,
 }
+
+use super::VerticalBar;
 
 const POINTER_SIZE: usize = 8;
 
@@ -94,6 +96,46 @@ impl MemoryTable {
     }
 
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let border =
+            Block::default().borders(Borders::ALL).title("Memory table");
+
+        let chunks = Layout::default()
+            .direction(Direction::Horizontal)
+            .margin(0)
+            .constraints(
+                [Constraint::Min(5), Constraint::Percentage(100)].as_ref(),
+            )
+            .split(border.inner(area));
+
+        frame.render_widget(border, area);
+        self.draw_scrollbar(frame, chunks[0]);
+        self.draw_table(frame, chunks[1]);
+    }
+
+    fn draw_scrollbar<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+        let selected = self.state.selected().unwrap_or(0);
+        let table_size = self.table_size();
+        let rows_shown = area.height as usize;
+        let (top_ratio, bottom_ratio) = if selected < rows_shown {
+            (0.0, (rows_shown as f64) / (table_size as f64))
+        } else if selected > table_size - rows_shown {
+            (
+                ((table_size - rows_shown) as f64) / (table_size as f64),
+                1.0,
+            )
+        } else {
+            (
+                ((selected - rows_shown / 2) as f64) / (table_size as f64),
+                ((selected + rows_shown / 2) as f64) / (table_size as f64),
+            )
+        };
+        let bar = VerticalBar::default()
+            .bar_top_ratio(top_ratio)
+            .bar_bottom_ratio(bottom_ratio);
+        frame.render_widget(bar, area);
+    }
+
+    fn draw_table<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
         self.previous_height = Some(area.height as usize);
 
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
@@ -141,7 +183,6 @@ impl MemoryTable {
 
         let table = Table::new(rows)
             .header(header)
-            .block(Block::default().borders(Borders::ALL).title("Memory table"))
             .highlight_style(selected_style)
             .highlight_symbol(">> ")
             .widths(&[
