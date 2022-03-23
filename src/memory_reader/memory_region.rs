@@ -19,7 +19,7 @@ impl MemoryRegion {
     ) -> MemoryValue<[u8; N]> {
         let mut out = [0; N];
         (0..N).zip(out.iter_mut()).for_each(|(i, out_byte)| {
-            *out_byte = self[i];
+            *out_byte = self[byte_offset + i];
         });
         MemoryValue::new(self.start + byte_offset, out)
     }
