@@ -65,9 +65,9 @@ impl MemoryTable {
         self.region.bytes_at_offset(byte_offset)
     }
 
-    fn move_selection(&mut self, delta: i64) {
+    fn move_selection_relative(&mut self, delta: i64) {
         let n = self.table_size();
-        let i = match (self.active_state().selected(), delta.signum()) {
+        let row = match (self.active_state().selected(), delta.signum()) {
             // If no prior selection, moving down a line selects the
             // first element, but still allows a page down.
             (None, 1) => (delta as usize) - 1,
@@ -86,34 +86,36 @@ impl MemoryTable {
             (Some(i), 1) => (i + (delta as usize)).min(n - 1),
             _ => panic!("This shouldn't happen"),
         };
-        self.state.select(Some(i));
+        self.move_selection_absolute(row);
+    }
+
+    fn move_selection_absolute(&mut self, row: usize) {
+        self.state.select(Some(row));
         self.cancel_search();
     }
 
     pub fn move_selection_start(&mut self) {
-        self.state.select(Some(0));
-        self.cancel_search();
+        self.move_selection_absolute(0);
     }
 
     pub fn move_selection_end(&mut self) {
-        self.state.select(Some(self.table_size() - 1));
-        self.cancel_search();
+        self.move_selection_absolute(self.table_size() - 1);
     }
 
     pub fn move_selection_down(&mut self) {
-        self.move_selection(1);
+        self.move_selection_relative(1);
     }
 
     pub fn move_selection_up(&mut self) {
-        self.move_selection(-1);
+        self.move_selection_relative(-1);
     }
 
     pub fn move_selection_page_down(&mut self) {
-        self.move_selection(self.displayed_rows() as i64);
+        self.move_selection_relative(self.displayed_rows() as i64);
     }
 
     pub fn move_selection_page_up(&mut self) {
-        self.move_selection(-(self.displayed_rows() as i64));
+        self.move_selection_relative(-(self.displayed_rows() as i64));
     }
 
     pub fn search_is_active(&self) -> bool {
