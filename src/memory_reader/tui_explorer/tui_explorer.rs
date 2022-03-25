@@ -88,36 +88,65 @@ impl TuiExplorer {
         if let Event::Key(key) = event {
             match (key.code, key.modifiers) {
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(true),
+
                 (KeyCode::Down, _)
                 | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_down();
                     self.update_details();
                 }
+
                 (KeyCode::Up, _)
                 | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_up();
                     self.update_details();
                 }
+
                 (KeyCode::PageUp, _)
                 | (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_page_up();
                     self.update_details();
                 }
+
                 (KeyCode::PageDown, _)
                 | (KeyCode::Char('v'), KeyModifiers::ALT) => {
                     self.memory_table.move_selection_page_down();
                     self.update_details();
                 }
+
                 (KeyCode::Home, KeyModifiers::CONTROL)
                 | (
                     KeyCode::Char('<'),
                     KeyModifiers::ALT | KeyModifiers::SHIFT,
                 ) => self.memory_table.move_selection_start(),
+
                 (KeyCode::End, KeyModifiers::CONTROL)
                 | (
                     KeyCode::Char('>'),
                     KeyModifiers::ALT | KeyModifiers::SHIFT,
                 ) => self.memory_table.move_selection_end(),
+
+                (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                    self.memory_table.search_forward()
+                }
+
+                (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                    if self.memory_table.search_is_active() =>
+                {
+                    self.memory_table.cancel_search()
+                }
+
+                (KeyCode::Backspace, _)
+                    if self.memory_table.search_is_active() =>
+                {
+                    self.memory_table.backspace_search_character()
+                }
+
+                (KeyCode::Char(c), _)
+                    if self.memory_table.search_is_active() =>
+                {
+                    self.memory_table.add_search_character(c)
+                }
+
                 _ => {
                     self.running_log.add_log(format!(
                         "{:?}, {:?}",
