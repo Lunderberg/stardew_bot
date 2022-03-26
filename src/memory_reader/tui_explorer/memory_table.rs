@@ -1,5 +1,3 @@
-use std::iter;
-
 use tui::{
     backend::Backend,
     layout::{Constraint, Rect},
@@ -17,35 +15,170 @@ pub struct MemoryTable {
     state: TableState,
     region: MemoryRegion,
     previous_height: Option<usize>,
-    search_stack: Vec<SearchItem>,
-    search_scroll_state: Option<TableState>,
+    search_state: Option<SearchState>,
+}
+
+struct SearchState {
+    stack: Vec<SearchItem>,
+    table_state: TableState,
+    initial_row: usize,
+    table_size: usize,
 }
 
 struct SearchItem {
     command: SearchCommand,
-    result: SearchResult,
+    search_result: Option<usize>,
 }
 
 enum SearchCommand {
-    Initialize(usize),
     NextResult,
     AddChar(char),
 }
 
-enum SearchResult {
-    Found(usize),
-    NoMatches,
-}
-
 const POINTER_SIZE: usize = 8;
 
-impl SearchCommand {
-    fn as_char(&self) -> Option<char> {
-        if let SearchCommand::AddChar(c) = &self {
-            Some(*c)
-        } else {
-            None
+impl SearchState {
+    fn new(table_state: TableState, table_size: usize) -> Self {
+        let initial_row = table_state.selected().unwrap_or(0);
+        Self {
+            stack: Vec::new(),
+            table_state,
+            initial_row,
+            table_size,
         }
+    }
+
+    fn advance_to_next_result<F, const N: usize>(&mut self, row_generator: F)
+    where
+        F: FnMut(usize) -> [String; N],
+    {
+        let command = SearchCommand::NextResult;
+
+        let search_start: Option<usize> = self
+            .stack
+            .last()
+            .map(|item| {
+                // If the previous search didn't find anything, then
+                // don't bother searching again.  Otherwise, start
+                // just after it.
+                item.search_result.map(|row| row + 1)
+            })
+            // But if no previous search exists, start at the
+            // pre-search selection.
+            .unwrap_or(Some(self.initial_row));
+
+        let search_result = search_start
+            .map(|row_num| self.search(row_num, None, row_generator))
+            .flatten();
+
+        self.stack.push(SearchItem {
+            command,
+            search_result,
+        });
+        self.update_table_selection();
+    }
+
+    fn add_char<F, const N: usize>(&mut self, c: char, row_generator: F)
+    where
+        F: FnMut(usize) -> [String; N],
+    {
+        let command = SearchCommand::AddChar(c);
+
+        // Search starts at the default row, or just before the
+        // previous match.
+        let search_start: Option<usize> = self
+            .stack
+            .last()
+            .map(|item| {
+                // If the previous search didn't find anything, then
+                // don't bother searching again.  Otherwise, start
+                // at the same location.
+                item.search_result
+            })
+            // But if no previous search exists, start at the
+            // pre-search selection.
+            .unwrap_or(Some(self.initial_row));
+
+        let search_result = search_start
+            .map(|row_num| self.search(row_num, Some(c), row_generator))
+            .flatten();
+
+        self.stack.push(SearchItem {
+            command,
+            search_result,
+        });
+        self.update_table_selection();
+    }
+
+    // Undo the most recent command.
+    fn pop_command(&mut self) {
+        self.stack.pop();
+        self.update_table_selection();
+    }
+
+    // Return the string being searched for.
+    fn get_search_string(&self, last_char: Option<char>) -> String {
+        self.stack
+            .iter()
+            .filter_map(|item| match item.command {
+                SearchCommand::AddChar(c) => Some(c),
+                _ => None,
+            })
+            .chain(last_char.iter().copied())
+            .collect()
+    }
+
+    // Return a tuple of 2 strings, where the first string is the
+    // portion of the search string that was found, and the second
+    // string is the portion of the search string that wasn't found.
+    fn get_search_string_parts(&self) -> (String, String) {
+        let vals: Vec<(char, bool)> = self
+            .stack
+            .iter()
+            .filter_map(|item| match item.command {
+                SearchCommand::AddChar(c) => {
+                    Some((c, item.search_result.is_some()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        let matching_part =
+            vals.iter().filter(|(_, p)| *p).map(|(c, _)| c).collect();
+        let non_matching_part =
+            vals.iter().filter(|(_, p)| !*p).map(|(c, _)| c).collect();
+        (matching_part, non_matching_part)
+    }
+
+    fn search<F, const N: usize>(
+        &mut self,
+        search_start: usize,
+        last_char: Option<char>,
+        mut row_generator: F,
+    ) -> Option<usize>
+    where
+        F: FnMut(usize) -> [String; N],
+    {
+        let needle = self.get_search_string(last_char);
+        (search_start..self.table_size)
+            .filter(|row| {
+                row_generator(*row)
+                    .iter()
+                    .any(|cell_text| cell_text.contains(&needle))
+            })
+            .next()
+    }
+
+    // Select the most recent match if any exist, otherwise the
+    // initial location of the search.
+    fn update_table_selection(&mut self) {
+        let selected_row = self
+            .stack
+            .iter()
+            .rev()
+            .find_map(|item| item.search_result)
+            .unwrap_or(self.initial_row);
+        self.table_state.select(Some(selected_row));
     }
 }
 
@@ -55,8 +188,7 @@ impl MemoryTable {
             state: TableState::default(),
             region,
             previous_height: None,
-            search_stack: Vec::new(),
-            search_scroll_state: None,
+            search_state: None,
         }
     }
 
@@ -119,103 +251,34 @@ impl MemoryTable {
     }
 
     pub fn search_is_active(&self) -> bool {
-        !self.search_stack.is_empty()
+        self.search_state.is_some()
     }
 
     pub fn search_forward(&mut self) {
-        if self.search_stack.is_empty() {
-            self.search_command(SearchCommand::Initialize(self.selected_row()));
-        } else {
-            self.search_command(SearchCommand::NextResult);
-        }
-        self.update_search_selection();
+        self.search_state = Some(self.search_state.take().map_or_else(
+            || SearchState::new(self.state.clone(), self.table_size()),
+            |mut search_state| {
+                search_state.advance_to_next_result(|row| self.row_text(row));
+                search_state
+            },
+        ));
     }
 
     pub fn add_search_character(&mut self, c: char) {
-        self.search_command(SearchCommand::AddChar(c));
-        self.update_search_selection();
+        self.search_state = self.search_state.take().map(|mut search_state| {
+            search_state.add_char(c, |row| self.row_text(row));
+            search_state
+        });
     }
 
     pub fn backspace_search_character(&mut self) {
-        self.search_stack.pop();
-        self.update_search_selection();
-    }
-
-    pub fn cancel_search(&mut self) {
-        self.search_stack.clear();
-        self.update_search_selection();
-    }
-
-    fn update_search_selection(&mut self) {
-        let selection =
-            self.search_stack
-                .iter()
-                .rev()
-                .find_map(|item| match item.result {
-                    SearchResult::Found(pos) => Some(pos),
-                    SearchResult::NoMatches => None,
-                });
-
-        if let Some(selection) = selection {
-            if self.search_scroll_state.is_none() {
-                self.search_scroll_state = Some(self.state.clone());
-            }
-            self.search_scroll_state
-                .as_mut()
-                .unwrap()
-                .select(Some(selection));
-        } else {
-            self.search_scroll_state = None;
+        if let Some(search_state) = self.search_state.as_mut() {
+            search_state.pop_command();
         }
     }
 
-    fn search_command(&mut self, command: SearchCommand) {
-        let search_string: String = self
-            .search_stack
-            .iter()
-            .map(|item| &item.command)
-            .chain(iter::once(&command))
-            .filter_map(|command| command.as_char())
-            .collect();
-
-        let previous_result = self
-            .search_stack
-            .iter()
-            .filter_map(|item| {
-                if let SearchResult::Found(loc) = item.result {
-                    Some(loc)
-                } else {
-                    None
-                }
-            })
-            .last();
-
-        let result = match (previous_result, &command) {
-            (None, SearchCommand::Initialize(loc)) => SearchResult::Found(*loc),
-            (Some(prev), SearchCommand::NextResult) => {
-                self.search_for(prev + 1, &search_string)
-            }
-            (Some(prev), SearchCommand::AddChar(_)) => {
-                self.search_for(prev, &search_string)
-            }
-            (None, _) => panic!("Expected initialized stack"),
-            (Some(_), SearchCommand::Initialize(_)) => {
-                panic!("Expected initialization only at start")
-            }
-        };
-
-        self.search_stack.push(SearchItem { command, result });
-    }
-
-    fn search_for(&self, start_pos: usize, needle: &str) -> SearchResult {
-        (start_pos..self.table_size())
-            .filter(|row| {
-                self.row_text(*row)
-                    .iter()
-                    .any(|cell_text| cell_text.contains(needle))
-            })
-            .next()
-            .map_or(SearchResult::NoMatches, |pos| SearchResult::Found(pos))
+    pub fn cancel_search(&mut self) {
+        self.search_state = None;
     }
 
     fn displayed_rows(&self) -> usize {
@@ -237,11 +300,17 @@ impl MemoryTable {
     }
 
     fn active_state(&self) -> &TableState {
-        self.search_scroll_state.as_ref().unwrap_or(&self.state)
+        self.search_state
+            .as_ref()
+            .map_or(&self.state, |search_state| &search_state.table_state)
     }
 
     fn active_state_mut(&mut self) -> &mut TableState {
-        self.search_scroll_state.as_mut().unwrap_or(&mut self.state)
+        self.search_state
+            .as_mut()
+            .map_or(&mut self.state, |search_state| {
+                &mut search_state.table_state
+            })
     }
 
     fn selected_row(&self) -> usize {
@@ -264,10 +333,10 @@ impl MemoryTable {
         // https://github.com/fdehau/tui-rs/pull/519 to see if the
         // utilites improve.
 
-        let search_area_height = if self.search_stack.is_empty() {
-            0
-        } else {
+        let search_area_height = if self.search_is_active() {
             inner_area.height.min(3)
+        } else {
+            0
         };
         let table_height = inner_area.height - search_area_height;
         let header_height = table_height.min(2);
@@ -307,21 +376,15 @@ impl MemoryTable {
         frame: &mut Frame<B>,
         area: Rect,
     ) {
-        let text = Spans::from(
-            self.search_stack
-                .iter()
-                .filter_map(|item| {
-                    item.command.as_char().map(|c| {
-                        let c_str = c.to_string();
-                        if let SearchResult::NoMatches = item.result {
-                            Span::styled(c_str, Style::default().bg(Color::Red))
-                        } else {
-                            Span::raw(c_str)
-                        }
-                    })
-                })
-                .collect::<Vec<_>>(),
-        );
+        let (matching_part, non_matching_part) = self
+            .search_state
+            .as_ref()
+            .map(|search_state| search_state.get_search_string_parts())
+            .unwrap_or_else(|| ("".to_string(), "".to_string()));
+        let text = Spans::from(vec![
+            Span::raw(matching_part),
+            Span::styled(non_matching_part, Style::default().bg(Color::Red)),
+        ]);
         let widget = Paragraph::new(text)
             .block(Block::default().borders(Borders::ALL).title("Search"));
         frame.render_widget(widget, area);
@@ -359,10 +422,10 @@ impl MemoryTable {
         let search_result_other_style = Style::default().bg(Color::LightYellow);
 
         let search_string: String = self
-            .search_stack
-            .iter()
-            .filter_map(|item| item.command.as_char())
-            .collect();
+            .search_state
+            .as_ref()
+            .map(|search_state| search_state.get_search_string(None))
+            .unwrap_or_else(|| "".to_string());
 
         let format_text = |text: &str, is_selected: bool| -> Spans {
             let result_style = if is_selected {
