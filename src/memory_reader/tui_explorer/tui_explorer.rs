@@ -65,22 +65,25 @@ impl TuiExplorer {
     }
 
     fn draw<B: Backend>(&mut self, frame: &mut Frame<B>) {
-        let chunks = Layout::default()
+        let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)
             .constraints(
-                [
-                    Constraint::Min(25),
-                    Constraint::Min(48),
-                    Constraint::Percentage(50),
-                ]
-                .as_ref(),
+                [Constraint::Min(60), Constraint::Percentage(40)].as_ref(),
             )
             .split(frame.size());
 
-        self.running_log.draw(frame, chunks[0]);
-        self.memory_table.draw(frame, chunks[1]);
-        self.detail_view.draw(frame, chunks[2]);
+        let v_chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .margin(0)
+            .constraints(
+                [Constraint::Min(20), Constraint::Percentage(30)].as_ref(),
+            )
+            .split(h_chunks[1]);
+
+        self.memory_table.draw(frame, h_chunks[0]);
+        self.detail_view.draw(frame, v_chunks[0]);
+        self.running_log.draw(frame, v_chunks[1]);
     }
 
     fn update_state(&mut self, event: Event) -> Result<bool> {
