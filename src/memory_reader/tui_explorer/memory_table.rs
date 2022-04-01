@@ -255,20 +255,21 @@ impl MemoryTable {
     }
 
     pub fn search_forward(&mut self) {
-        self.search_state = Some(self.search_state.take().map_or_else(
-            || SearchState::new(self.state.clone(), self.table_size()),
-            |mut search_state| {
-                search_state.advance_to_next_result(|row| self.row_text(row));
-                search_state
-            },
-        ));
+        let region = &self.region;
+        if let Some(search_state) = self.search_state.as_mut() {
+            search_state
+                .advance_to_next_result(|row| Self::row_text(region, row));
+        } else {
+            self.search_state =
+                Some(SearchState::new(self.state.clone(), self.table_size()));
+        }
     }
 
     pub fn add_search_character(&mut self, c: char) {
-        self.search_state = self.search_state.take().map(|mut search_state| {
-            search_state.add_char(c, |row| self.row_text(row));
-            search_state
-        });
+        let region = &self.region;
+        if let Some(search_state) = self.search_state.as_mut() {
+            search_state.add_char(c, |row| Self::row_text(region, row));
+        }
     }
 
     pub fn backspace_search_character(&mut self) {
@@ -292,9 +293,9 @@ impl MemoryTable {
         self.region.size_bytes() / POINTER_SIZE
     }
 
-    fn row_text(&self, row: usize) -> [String; 2] {
+    fn row_text(region: &MemoryRegion, row: usize) -> [String; 2] {
         let arr: MemoryValue<[u8; 8]> =
-            self.region.bytes_at_offset(row * POINTER_SIZE);
+            region.bytes_at_offset(row * POINTER_SIZE);
         let as_pointer: Pointer = arr.value.into();
         [format!("{}", arr.location), format!("{}", as_pointer)]
     }
