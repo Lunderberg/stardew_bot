@@ -54,22 +54,22 @@ impl SearchState {
     {
         let command = SearchCommand::NextResult;
 
-        let search_start: Option<usize> = self
+        let search_start: usize = self
             .stack
             .last()
             .map(|item| {
-                // If the previous search didn't find anything, then
-                // don't bother searching again.  Otherwise, start
-                // just after it.
-                item.search_result.map(|row| row + 1)
+                // Default to starting just after the previous result
+                item.search_result
+                    .map(|row| row + 1)
+                    // Wrapping around to the start if the previous
+                    // search was a failure.
+                    .unwrap_or(0)
             })
             // But if no previous search exists, start at the
             // pre-search selection.
-            .unwrap_or(Some(self.initial_row));
+            .unwrap_or(self.initial_row);
 
-        let search_result = search_start
-            .map(|row_num| self.search(row_num, None, row_generator))
-            .flatten();
+        let search_result = self.search(search_start, None, row_generator);
 
         self.stack.push(SearchItem {
             command,
@@ -179,6 +179,44 @@ impl SearchState {
             .find_map(|item| item.search_result)
             .unwrap_or(self.initial_row);
         self.table_state.select(Some(selected_row));
+    }
+
+    fn description(&self) -> String {
+        let is_searching = self
+            .stack
+            .iter()
+            .filter(|item| match item.command {
+                SearchCommand::AddChar(_) => true,
+                _ => false,
+            })
+            .next()
+            .is_some();
+
+        let is_failing_search = self
+            .stack
+            .last()
+            .as_ref()
+            .map(|item| item.search_result.is_none())
+            .unwrap_or(false);
+
+        let is_wrapped_search = self
+            .stack
+            .iter()
+            .skip_while(|item| item.search_result.is_some())
+            .skip(1)
+            .any(|item| match item.command {
+                SearchCommand::NextResult => true,
+                SearchCommand::AddChar(_) => false,
+            });
+
+        let desc = match (is_searching, is_failing_search, is_wrapped_search) {
+            (false, _, _) => "I-Search",
+            (true, false, false) => "I-search",
+            (true, true, false) => "Failed I-search",
+            (true, false, true) => "Wrapped I-search",
+            (true, true, true) => "Failed wrapped I-search",
+        };
+        desc.to_string()
     }
 }
 
@@ -386,8 +424,15 @@ impl MemoryTable {
             Span::raw(matching_part),
             Span::styled(non_matching_part, Style::default().bg(Color::Red)),
         ]);
+
+        let title = self
+            .search_state
+            .as_ref()
+            .map(|state| state.description())
+            .unwrap_or("".to_string());
+
         let widget = Paragraph::new(text)
-            .block(Block::default().borders(Borders::ALL).title("Search"));
+            .block(Block::default().borders(Borders::ALL).title(title));
         frame.render_widget(widget, area);
     }
 
