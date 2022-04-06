@@ -132,6 +132,10 @@ impl TuiExplorer {
                     self.memory_table.search_forward()
                 }
 
+                (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
+                    self.memory_table.search_backward()
+                }
+
                 (KeyCode::Char('g'), KeyModifiers::CONTROL)
                     if self.memory_table.search_is_active() =>
                 {

@@ -11,6 +11,8 @@ use crate::memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer};
 
 use super::VerticalBar;
 
+use itertools::Either;
+
 pub struct MemoryTable {
     state: TableState,
     region: MemoryRegion,
@@ -21,7 +23,7 @@ pub struct MemoryTable {
 struct SearchState {
     stack: Vec<SearchItem>,
     table_state: TableState,
-    initial_row: usize,
+    initial_item: SearchItem,
     table_size: usize,
 }
 
@@ -31,76 +33,95 @@ struct SearchItem {
 }
 
 enum SearchCommand {
-    NextResult,
+    NextResult(Direction),
     AddChar(char),
+}
+
+#[derive(Clone, Copy)]
+enum Direction {
+    Forward,
+    Reverse,
 }
 
 const POINTER_SIZE: usize = 8;
 
 impl SearchState {
-    fn new(table_state: TableState, table_size: usize) -> Self {
+    fn new(
+        table_state: TableState,
+        table_size: usize,
+        initial_direction: Direction,
+    ) -> Self {
         let initial_row = table_state.selected().unwrap_or(0);
+        let initial_item = SearchItem {
+            command: SearchCommand::NextResult(initial_direction),
+            search_result: Some(initial_row),
+        };
         Self {
             stack: Vec::new(),
             table_state,
-            initial_row,
+            initial_item,
             table_size,
         }
     }
 
-    fn advance_to_next_result<F, const N: usize>(&mut self, row_generator: F)
-    where
-        F: FnMut(usize) -> [String; N],
-    {
-        let command = SearchCommand::NextResult;
-
-        let search_start: usize = self
-            .stack
-            .last()
-            .map(|item| {
-                // Default to starting just after the previous result
-                item.search_result
-                    .map(|row| row + 1)
-                    // Wrapping around to the start if the previous
-                    // search was a failure.
-                    .unwrap_or(0)
-            })
-            // But if no previous search exists, start at the
-            // pre-search selection.
-            .unwrap_or(self.initial_row);
-
-        let search_result = self.search(search_start, None, row_generator);
-
-        self.stack.push(SearchItem {
-            command,
-            search_result,
-        });
-        self.update_table_selection();
+    fn stack(&self) -> impl DoubleEndedIterator<Item = &SearchItem> + '_ {
+        std::iter::once(&self.initial_item).chain(self.stack.iter())
     }
 
-    fn add_char<F, const N: usize>(&mut self, c: char, row_generator: F)
-    where
+    fn apply_command<F, const N: usize>(
+        &mut self,
+        command: SearchCommand,
+        row_generator: F,
+    ) where
         F: FnMut(usize) -> [String; N],
     {
-        let command = SearchCommand::AddChar(c);
+        use Direction::*;
+        use SearchCommand::*;
 
-        // Search starts at the default row, or just before the
-        // previous match.
-        let search_start: Option<usize> = self
-            .stack
-            .last()
-            .map(|item| {
-                // If the previous search didn't find anything, then
-                // don't bother searching again.  Otherwise, start
-                // at the same location.
-                item.search_result
+        let previous_result: Option<usize> =
+            self.stack().last().unwrap().search_result;
+
+        let previous_direction = self
+            .stack()
+            .rev()
+            .find_map(|item| match item.command {
+                NextResult(dir) => Some(dir),
+                AddChar(_) => None,
             })
-            // But if no previous search exists, start at the
-            // pre-search selection.
-            .unwrap_or(Some(self.initial_row));
+            .unwrap();
 
-        let search_result = search_start
-            .map(|row_num| self.search(row_num, Some(c), row_generator))
+        let search_range = match (&command, previous_result, previous_direction)
+        {
+            (NextResult(Forward), None, _) => {
+                Some(Either::Left(0..self.table_size))
+            }
+            (NextResult(Forward), Some(prev), _) => {
+                Some(Either::Left((prev + 1)..self.table_size))
+            }
+            (NextResult(Reverse), None, _) => {
+                Some(Either::Right((0..self.table_size).rev()))
+            }
+            (NextResult(Reverse), Some(prev), _) => {
+                Some(Either::Right((0..prev).rev()))
+            }
+            (AddChar(_), None, _) => None,
+            (AddChar(_), Some(prev), Forward) => {
+                Some(Either::Left(prev..self.table_size))
+            }
+            (AddChar(_), Some(prev), Reverse) => {
+                Some(Either::Right((0..(prev + 1)).rev()))
+            }
+        };
+
+        let new_char = match command {
+            NextResult(_) => None,
+            AddChar(c) => Some(c),
+        };
+
+        let search_result: Option<usize> = search_range
+            .map(|search_range| {
+                self.search(search_range, new_char, row_generator)
+            })
             .flatten();
 
         self.stack.push(SearchItem {
@@ -118,8 +139,7 @@ impl SearchState {
 
     // Return the string being searched for.
     fn get_search_string(&self, last_char: Option<char>) -> String {
-        self.stack
-            .iter()
+        self.stack()
             .filter_map(|item| match item.command {
                 SearchCommand::AddChar(c) => Some(c),
                 _ => None,
@@ -133,8 +153,7 @@ impl SearchState {
     // string is the portion of the search string that wasn't found.
     fn get_search_string_parts(&self) -> (String, String) {
         let vals: Vec<(char, bool)> = self
-            .stack
-            .iter()
+            .stack()
             .filter_map(|item| match item.command {
                 SearchCommand::AddChar(c) => {
                     Some((c, item.search_result.is_some()))
@@ -152,7 +171,7 @@ impl SearchState {
 
     fn search<F, const N: usize>(
         &mut self,
-        search_start: usize,
+        search_range: impl Iterator<Item = usize>,
         last_char: Option<char>,
         mut row_generator: F,
     ) -> Option<usize>
@@ -160,7 +179,7 @@ impl SearchState {
         F: FnMut(usize) -> [String; N],
     {
         let needle = self.get_search_string(last_char);
-        (search_start..self.table_size)
+        search_range
             .filter(|row| {
                 row_generator(*row)
                     .iter()
@@ -173,48 +192,52 @@ impl SearchState {
     // initial location of the search.
     fn update_table_selection(&mut self) {
         let selected_row = self
-            .stack
-            .iter()
+            .stack()
             .rev()
             .find_map(|item| item.search_result)
-            .unwrap_or(self.initial_row);
+            .unwrap();
         self.table_state.select(Some(selected_row));
     }
 
     fn description(&self) -> String {
-        let is_searching = self
-            .stack
-            .iter()
-            .filter(|item| match item.command {
-                SearchCommand::AddChar(_) => true,
-                _ => false,
-            })
-            .next()
-            .is_some();
+        use Direction::*;
+        use SearchCommand::*;
 
         let is_failing_search = self
-            .stack
+            .stack()
             .last()
             .as_ref()
-            .map(|item| item.search_result.is_none())
-            .unwrap_or(false);
+            .unwrap()
+            .search_result
+            .is_none();
 
         let is_wrapped_search = self
-            .stack
-            .iter()
+            .stack()
             .skip_while(|item| item.search_result.is_some())
             .skip(1)
             .any(|item| match item.command {
-                SearchCommand::NextResult => true,
-                SearchCommand::AddChar(_) => false,
+                NextResult(_) => true,
+                AddChar(_) => false,
             });
 
-        let desc = match (is_searching, is_failing_search, is_wrapped_search) {
-            (false, _, _) => "I-Search",
-            (true, false, false) => "I-search",
-            (true, true, false) => "Failed I-search",
-            (true, false, true) => "Wrapped I-search",
-            (true, true, true) => "Failed wrapped I-search",
+        let direction = self
+            .stack()
+            .rev()
+            .find_map(|item| match item.command {
+                NextResult(dir) => Some(dir),
+                AddChar(_) => None,
+            })
+            .unwrap();
+
+        let desc = match (is_failing_search, is_wrapped_search, direction) {
+            (false, false, Forward) => "I-search",
+            (true, false, Forward) => "Failing I-search",
+            (false, true, Forward) => "Wrapped I-search",
+            (true, true, Forward) => "Failing wrapped I-search",
+            (false, false, Reverse) => "I-search backward",
+            (true, false, Reverse) => "Failing I-search backward",
+            (false, true, Reverse) => "Wrapped I-search backward",
+            (true, true, Reverse) => "Failing wrapped I-search backward",
         };
         desc.to_string()
     }
@@ -293,20 +316,35 @@ impl MemoryTable {
     }
 
     pub fn search_forward(&mut self) {
+        self.search(Direction::Forward);
+    }
+
+    pub fn search_backward(&mut self) {
+        self.search(Direction::Reverse);
+    }
+
+    fn search(&mut self, direction: Direction) {
         let region = &self.region;
         if let Some(search_state) = self.search_state.as_mut() {
             search_state
-                .advance_to_next_result(|row| Self::row_text(region, row));
+                .apply_command(SearchCommand::NextResult(direction), |row| {
+                    Self::row_text(region, row)
+                });
         } else {
-            self.search_state =
-                Some(SearchState::new(self.state.clone(), self.table_size()));
+            self.search_state = Some(SearchState::new(
+                self.state.clone(),
+                self.table_size(),
+                direction,
+            ));
         }
     }
 
     pub fn add_search_character(&mut self, c: char) {
         let region = &self.region;
         if let Some(search_state) = self.search_state.as_mut() {
-            search_state.add_char(c, |row| Self::row_text(region, row));
+            search_state.apply_command(SearchCommand::AddChar(c), |row| {
+                Self::row_text(region, row)
+            });
         }
     }
 
