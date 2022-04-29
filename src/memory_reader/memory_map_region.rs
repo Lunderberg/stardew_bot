@@ -59,7 +59,7 @@ impl MemoryMapRegion {
         let bytes = self
             .start
             .read_bytes(self.pid, self.size_bytes() as usize)?;
-        Ok(MemoryRegion::new(self.start, bytes))
+        Ok(MemoryRegion::new(self.start, bytes, self.clone()))
     }
 }
 

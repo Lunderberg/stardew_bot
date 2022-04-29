@@ -28,7 +28,10 @@ impl TuiExplorer {
         let memory_region = reader.stack()?.read()?;
         let out = Self {
             running_log: RunningLog::new(100),
-            memory_table: MemoryTable::new(memory_region.clone()),
+            memory_table: MemoryTable::new(
+                memory_region.clone(),
+                memory_region.end(),
+            ),
             detail_view: DetailView::new(),
             _pid: pid,
             reader,

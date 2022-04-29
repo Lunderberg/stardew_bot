@@ -50,6 +50,15 @@ impl std::ops::Add<usize> for Pointer {
     }
 }
 
+impl std::ops::Sub<usize> for Pointer {
+    type Output = Pointer;
+
+    fn sub(self, rhs: usize) -> Self::Output {
+        let address = self.address - rhs;
+        Self { address }
+    }
+}
+
 impl std::ops::Sub for Pointer {
     type Output = usize;
 

@@ -1,4 +1,4 @@
-use super::{MemoryValue, Pointer};
+use super::{MemoryMapRegion, MemoryValue, Pointer};
 
 use std::ops::Deref;
 
@@ -6,11 +6,28 @@ use std::ops::Deref;
 pub struct MemoryRegion {
     start: Pointer,
     bytes: Vec<u8>,
+    pub source: MemoryMapRegion,
 }
 
 impl MemoryRegion {
-    pub fn new(start: Pointer, bytes: Vec<u8>) -> Self {
-        Self { start, bytes }
+    pub fn new(
+        start: Pointer,
+        bytes: Vec<u8>,
+        source: MemoryMapRegion,
+    ) -> Self {
+        Self {
+            start,
+            bytes,
+            source,
+        }
+    }
+
+    pub fn start(&self) -> Pointer {
+        self.start
+    }
+
+    pub fn end(&self) -> Pointer {
+        self.start + self.bytes.len()
     }
 
     pub fn bytes_at_offset<const N: usize>(

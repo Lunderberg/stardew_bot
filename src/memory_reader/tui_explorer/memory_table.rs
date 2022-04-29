@@ -18,6 +18,7 @@ pub struct MemoryTable {
     region: MemoryRegion,
     previous_height: Option<usize>,
     search_state: Option<SearchState>,
+    entry_point: Pointer,
 }
 
 struct SearchState {
@@ -244,13 +245,24 @@ impl SearchState {
 }
 
 impl MemoryTable {
-    pub fn new(region: MemoryRegion) -> Self {
-        Self {
+    pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
+        let mut out = Self {
             state: TableState::default(),
             region,
+            entry_point,
             previous_height: None,
             search_state: None,
-        }
+        };
+
+        out.select_address(entry_point);
+
+        out
+    }
+
+    pub fn select_address(&mut self, address: Pointer) {
+        let row = (address - self.region.start()) / POINTER_SIZE;
+        let row = row.clamp(0, self.table_size() - 1);
+        self.move_selection_absolute(row);
     }
 
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
@@ -394,9 +406,31 @@ impl MemoryTable {
         self.active_state().selected().unwrap_or(0)
     }
 
+    pub fn title(&self) -> String {
+        let region_name = self
+            .region
+            .source
+            .name
+            .as_ref()
+            .map(|x| &**x)
+            .unwrap_or("[anon]");
+
+        let selected = self.selected_value().location;
+
+        let (sign, offset) = if selected >= self.entry_point {
+            ("+", selected - self.entry_point)
+        } else {
+            ("-", self.entry_point - selected)
+        };
+
+        format!(
+            "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})",
+            entry_point = self.entry_point
+        )
+    }
+
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
-        let border =
-            Block::default().borders(Borders::ALL).title("Memory table");
+        let border = Block::default().borders(Borders::ALL).title(self.title());
 
         let inner_area = border.inner(area);
 
