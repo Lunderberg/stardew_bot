@@ -14,10 +14,14 @@ use super::VerticalBar;
 use itertools::Either;
 
 pub struct MemoryTable {
-    state: TableState,
-    region: MemoryRegion,
+    view_stack: Vec<ViewFrame>,
     previous_height: Option<usize>,
     search_state: Option<SearchState>,
+}
+
+struct ViewFrame {
+    state: TableState,
+    region: MemoryRegion,
     entry_point: Pointer,
 }
 
@@ -246,10 +250,13 @@ impl SearchState {
 
 impl MemoryTable {
     pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
-        let mut out = Self {
+        let first_view = ViewFrame {
             state: TableState::default(),
             region,
             entry_point,
+        };
+        let mut out = Self {
+            view_stack: vec![first_view],
             previous_height: None,
             search_state: None,
         };
@@ -260,18 +267,18 @@ impl MemoryTable {
     }
 
     pub fn select_address(&mut self, address: Pointer) {
-        let row = (address - self.region.start()) / POINTER_SIZE;
-        let row = row.clamp(0, self.table_size() - 1);
+        let row = (address - self.active_view().region.start()) / POINTER_SIZE;
+        let row = row.clamp(0, self.num_table_rows() - 1);
         self.move_selection_absolute(row);
     }
 
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let byte_offset = self.selected_row() * POINTER_SIZE;
-        self.region.bytes_at_offset(byte_offset)
+        self.active_view().region.bytes_at_offset(byte_offset)
     }
 
     fn move_selection_relative(&mut self, delta: i64) {
-        let n = self.table_size();
+        let n = self.num_table_rows();
         let row = match (self.active_state().selected(), delta.signum()) {
             // If no prior selection, moving down a line selects the
             // first element, but still allows a page down.
@@ -295,7 +302,7 @@ impl MemoryTable {
     }
 
     fn move_selection_absolute(&mut self, row: usize) {
-        self.state.select(Some(row));
+        self.active_view_mut().state.select(Some(row));
         self.cancel_search();
     }
 
@@ -304,7 +311,7 @@ impl MemoryTable {
     }
 
     pub fn move_selection_end(&mut self) {
-        self.move_selection_absolute(self.table_size() - 1);
+        self.move_selection_absolute(self.num_table_rows() - 1);
     }
 
     pub fn move_selection_down(&mut self) {
@@ -336,23 +343,23 @@ impl MemoryTable {
     }
 
     fn search(&mut self, direction: Direction) {
-        let region = &self.region;
+        let view = self.view_stack.last().unwrap();
         if let Some(search_state) = self.search_state.as_mut() {
             search_state
                 .apply_command(SearchCommand::NextResult(direction), |row| {
-                    Self::row_text(region, row)
+                    Self::row_text(&view.region, row)
                 });
         } else {
             self.search_state = Some(SearchState::new(
-                self.state.clone(),
-                self.table_size(),
+                view.state.clone(),
+                self.num_table_rows(),
                 direction,
             ));
         }
     }
 
     pub fn add_search_character(&mut self, c: char) {
-        let region = &self.region;
+        let region = &self.view_stack.last().unwrap().region;
         if let Some(search_state) = self.search_state.as_mut() {
             search_state.apply_command(SearchCommand::AddChar(c), |row| {
                 Self::row_text(region, row)
@@ -377,8 +384,8 @@ impl MemoryTable {
             .unwrap_or(1)
     }
 
-    fn table_size(&self) -> usize {
-        self.region.size_bytes() / POINTER_SIZE
+    fn num_table_rows(&self) -> usize {
+        self.active_view().region.size_bytes() / POINTER_SIZE
     }
 
     fn row_text(region: &MemoryRegion, row: usize) -> [String; 2] {
@@ -388,16 +395,27 @@ impl MemoryTable {
         [format!("{}", arr.location), format!("{}", as_pointer)]
     }
 
+    fn active_view(&self) -> &ViewFrame {
+        self.view_stack.last().unwrap()
+    }
+
+    fn active_view_mut(&mut self) -> &mut ViewFrame {
+        self.view_stack.last_mut().unwrap()
+    }
+
     fn active_state(&self) -> &TableState {
         self.search_state
             .as_ref()
-            .map_or(&self.state, |search_state| &search_state.table_state)
+            .map_or(&self.active_view().state, |search_state| {
+                &search_state.table_state
+            })
     }
 
     fn active_state_mut(&mut self) -> &mut TableState {
+        let view = self.view_stack.last_mut().unwrap();
         self.search_state
             .as_mut()
-            .map_or(&mut self.state, |search_state| {
+            .map_or(&mut view.state, |search_state| {
                 &mut search_state.table_state
             })
     }
@@ -408,6 +426,7 @@ impl MemoryTable {
 
     pub fn title(&self) -> String {
         let region_name = self
+            .active_view()
             .region
             .source
             .name
@@ -417,15 +436,15 @@ impl MemoryTable {
 
         let selected = self.selected_value().location;
 
-        let (sign, offset) = if selected >= self.entry_point {
-            ("+", selected - self.entry_point)
+        let (sign, offset) = if selected >= self.active_view().entry_point {
+            ("+", selected - self.active_view().entry_point)
         } else {
-            ("-", self.entry_point - selected)
+            ("-", self.active_view().entry_point - selected)
         };
 
         format!(
             "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})",
-            entry_point = self.entry_point
+            entry_point = self.active_view().entry_point
         )
     }
 
@@ -510,7 +529,7 @@ impl MemoryTable {
 
     fn draw_scrollbar<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
         let selected = self.selected_row();
-        let table_size = self.table_size();
+        let table_size = self.num_table_rows();
         let rows_shown = area.height as usize;
         let (top_ratio, bottom_ratio) = if selected < rows_shown {
             (0.0, (rows_shown as f64) / (table_size as f64))
@@ -584,8 +603,13 @@ impl MemoryTable {
             .style(normal_style)
             .height(1)
             .bottom_margin(1);
-        let rows = self.region.iter_bytes().iter_byte_arr().enumerate().map(
-            |(i, arr): (_, MemoryValue<[u8; 8]>)| {
+        let rows = self
+            .active_view()
+            .region
+            .iter_bytes()
+            .iter_byte_arr()
+            .enumerate()
+            .map(|(i, arr): (_, MemoryValue<[u8; 8]>)| {
                 let selected = self.selected_row();
                 let dist_to_selected = if i > selected {
                     i - selected
@@ -615,8 +639,7 @@ impl MemoryTable {
                 }
                 .into_iter();
                 Row::new(cells).height(1).bottom_margin(0)
-            },
-        );
+            });
 
         let table = Table::new(rows)
             .header(header)
