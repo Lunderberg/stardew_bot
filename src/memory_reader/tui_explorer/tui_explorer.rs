@@ -1,5 +1,5 @@
 use crate::memory_reader::{
-    Error, MemoryReader, MemoryRegion, Pointer, Result, SigintHandler,
+    Error, MemoryReader, Pointer, Result, SigintHandler,
 };
 
 use super::{DetailView, MemoryTable, RunningLog, TerminalContext};
@@ -15,7 +15,6 @@ pub struct TuiExplorer {
     // Application state
     _pid: u32,
     reader: MemoryReader,
-    _memory_region: MemoryRegion,
     // Display widgets
     running_log: RunningLog,
     memory_table: MemoryTable,
@@ -26,16 +25,13 @@ impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self> {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
+        let stack_entry_point = memory_region.end();
         let out = Self {
             running_log: RunningLog::new(100),
-            memory_table: MemoryTable::new(
-                memory_region.clone(),
-                memory_region.end(),
-            ),
+            memory_table: MemoryTable::new(memory_region, stack_entry_point),
             detail_view: DetailView::new(),
             _pid: pid,
             reader,
-            _memory_region: memory_region,
         };
         Ok(out)
     }
