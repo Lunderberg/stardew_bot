@@ -258,6 +258,35 @@ impl ViewFrame {
         let row = row.clamp(0, self.num_table_rows() - 1);
         self.state.select(Some(row));
     }
+
+    fn value_at(&self, row_override: Option<usize>) -> MemoryValue<[u8; 8]> {
+        let row: usize = row_override.or(self.state.selected()).unwrap_or(0);
+        let byte_offset = row * POINTER_SIZE;
+        self.region.bytes_at_offset(byte_offset)
+    }
+
+    fn title(&self, row_override: Option<usize>) -> String {
+        let region_name = self
+            .region
+            .source
+            .name
+            .as_ref()
+            .map(|x| &**x)
+            .unwrap_or("[anon]");
+
+        let selected = self.value_at(row_override).location;
+        let entry_point = self.entry_point;
+
+        let (sign, offset) = if selected >= entry_point {
+            ("+", selected - entry_point)
+        } else {
+            ("-", entry_point - selected)
+        };
+
+        format!(
+            "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})"
+        )
+    }
 }
 
 impl MemoryTable {
@@ -431,34 +460,31 @@ impl MemoryTable {
         self.active_state().selected().unwrap_or(0)
     }
 
-    pub fn title(&self) -> String {
-        let view = self.active_view();
-        let region_name = view
-            .region
-            .source
-            .name
-            .as_ref()
-            .map(|x| &**x)
-            .unwrap_or("[anon]");
-
-        let selected = self.selected_value().location;
-        let entry_point = view.entry_point;
-
-        let (sign, offset) = if selected >= entry_point {
-            ("+", selected - entry_point)
-        } else {
-            ("-", entry_point - selected)
-        };
-
-        format!(
-            "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})"
-        )
-    }
-
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
-        let border = Block::default().borders(Borders::ALL).title(self.title());
+        let borders: Vec<_> = self
+            .view_stack
+            .iter()
+            .enumerate()
+            .map(|(i, view)| {
+                let is_innermost = i == self.view_stack.len() - 1;
+                let row_override: Option<usize> = is_innermost
+                    .then(|| {
+                        self.search_state
+                            .as_ref()
+                            .map(|search_state| {
+                                search_state.table_state.selected()
+                            })
+                            .flatten()
+                    })
+                    .flatten();
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(view.title(row_override))
+            })
+            .collect();
 
-        let inner_area = border.inner(area);
+        let inner_area =
+            borders.iter().fold(area, |prev, border| border.inner(prev));
 
         // Layout.split puts all excess space into the last widget,
         // which I want to be a fixed size.  Doing the layout
@@ -500,7 +526,9 @@ impl MemoryTable {
             table_height,
         );
 
-        frame.render_widget(border, area);
+        borders
+            .into_iter()
+            .for_each(|border| frame.render_widget(border, area));
         if search_area_height > 0 {
             self.draw_search_area(frame, search_area);
         }
