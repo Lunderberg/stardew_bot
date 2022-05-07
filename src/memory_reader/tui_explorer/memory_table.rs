@@ -266,13 +266,7 @@ impl ViewFrame {
     }
 
     fn title(&self, row_override: Option<usize>) -> String {
-        let region_name = self
-            .region
-            .source
-            .name
-            .as_ref()
-            .map(|x| &**x)
-            .unwrap_or("[anon]");
+        let region_name = self.region.source.short_name();
 
         let selected = self.value_at(row_override).location;
         let entry_point = self.entry_point;
@@ -291,20 +285,37 @@ impl ViewFrame {
 
 impl MemoryTable {
     pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
-        let first_view = ViewFrame {
+        let mut first_view = ViewFrame {
             state: TableState::default(),
             region,
             entry_point,
         };
-        let mut out = Self {
+
+        first_view.select_address(entry_point);
+
+        Self {
             view_stack: vec![first_view],
             previous_height: None,
             search_state: None,
+        }
+    }
+
+    pub fn push_view(&mut self, region: MemoryRegion, entry_point: Pointer) {
+        let mut view = ViewFrame {
+            state: TableState::default(),
+            region,
+            entry_point,
         };
+        view.select_address(entry_point);
 
-        out.select_address(entry_point);
+        self.finalize_search();
+        self.view_stack.push(view);
+    }
 
-        out
+    pub fn pop_view(&mut self) {
+        if self.view_stack.len() > 1 {
+            self.view_stack.pop();
+        }
     }
 
     pub fn select_address(&mut self, address: Pointer) {
@@ -372,6 +383,12 @@ impl MemoryTable {
 
     pub fn search_is_active(&self) -> bool {
         self.search_state.is_some()
+    }
+
+    pub fn finalize_search(&mut self) {
+        if let Some(search_state) = self.search_state.take() {
+            self.active_view_mut().state = search_state.table_state;
+        }
     }
 
     pub fn search_forward(&mut self) {
@@ -483,8 +500,17 @@ impl MemoryTable {
             })
             .collect();
 
+        let border_areas: Vec<Rect> = borders
+            .iter()
+            .scan(area, |state, border| {
+                let prev = *state;
+                *state = border.inner(prev);
+                Some(prev)
+            })
+            .collect();
+
         let inner_area =
-            borders.iter().fold(area, |prev, border| border.inner(prev));
+            borders.last().unwrap().inner(*border_areas.last().unwrap());
 
         // Layout.split puts all excess space into the last widget,
         // which I want to be a fixed size.  Doing the layout
@@ -526,9 +552,9 @@ impl MemoryTable {
             table_height,
         );
 
-        borders
-            .into_iter()
-            .for_each(|border| frame.render_widget(border, area));
+        borders.into_iter().zip(border_areas.into_iter()).for_each(
+            |(border, border_area)| frame.render_widget(border, border_area),
+        );
         if search_area_height > 0 {
             self.draw_search_area(frame, search_area);
         }

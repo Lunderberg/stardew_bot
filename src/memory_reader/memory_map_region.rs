@@ -1,4 +1,5 @@
 use std::fmt::Display;
+use std::path::Path;
 
 use super::{MemoryRegion, Pointer, Result};
 
@@ -28,6 +29,20 @@ impl MemoryMapRegion {
             is_executable: map_range.is_exec(),
             is_shared_memory: &map_range.flags[3..4] == "s",
         }
+    }
+
+    pub fn short_name(&self) -> String {
+        self.name.as_ref().map_or_else(
+            || "[anon]".to_string(),
+            |name: &String| {
+                Path::new(name)
+                    .file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .to_string()
+            },
+        )
     }
 
     pub fn size_bytes(&self) -> usize {
