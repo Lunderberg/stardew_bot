@@ -153,6 +153,36 @@ impl TuiExplorer {
                     self.memory_table.add_search_character(c)
                 }
 
+                (KeyCode::Enter, _) => {
+                    let selection = self.memory_table.selected_value();
+                    let as_pointer: Pointer = selection.value.into();
+                    let pointed_map_region =
+                        self.reader.find_containing_region(as_pointer);
+                    if let Some(pointed_map_region) = pointed_map_region {
+                        let pointed_region = pointed_map_region.read();
+                        match pointed_region {
+                            Ok(region) => {
+                                self.memory_table.push_view(region, as_pointer);
+                                self.update_details();
+                            }
+                            Err(_) => self
+                                .running_log
+                                .add_log("Error reading region".to_string()),
+                        }
+                    } else {
+                        self.running_log.add_log(
+                            "Value does not point to any memory region"
+                                .to_string(),
+                        );
+                    }
+                }
+
+                (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                    if !self.memory_table.search_is_active() =>
+                {
+                    self.memory_table.pop_view()
+                }
+
                 _ => {
                     self.running_log.add_log(format!(
                         "{:?}, {:?}",
@@ -176,19 +206,7 @@ impl TuiExplorer {
         let as_pointer: Pointer = value.into();
         let pointed_region = self.reader.find_containing_region(as_pointer);
         if let Some(pointed_region) = pointed_region {
-            use std::path::Path;
-
-            let region_name: String = pointed_region.name.as_ref().map_or_else(
-                || "anonymous".to_string(),
-                |name: &String| {
-                    Path::new(name)
-                        .file_name()
-                        .unwrap()
-                        .to_str()
-                        .unwrap()
-                        .to_string()
-                },
-            );
+            let region_name: String = pointed_region.short_name();
 
             details.push(("".to_string(), "".to_string()));
             details.push(("Points to: ".to_string(), region_name));
