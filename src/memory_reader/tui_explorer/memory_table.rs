@@ -318,11 +318,6 @@ impl MemoryTable {
         }
     }
 
-    pub fn select_address(&mut self, address: Pointer) {
-        self.active_view_mut().select_address(address);
-        self.cancel_search();
-    }
-
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let byte_offset = self.selected_row() * POINTER_SIZE;
         self.active_view().region.bytes_at_offset(byte_offset)
