@@ -212,6 +212,10 @@ impl TuiExplorer {
             details.push(("Points to: ".to_string(), region_name));
         }
 
+        if let Ok(as_utf8) = std::str::from_utf8(&selection.value) {
+            details.push(("UTF-8: ".to_string(), as_utf8.to_string()));
+        }
+
         self.detail_view.load_details(details.into_iter());
     }
 }
