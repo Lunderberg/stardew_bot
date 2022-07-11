@@ -8,7 +8,7 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("Stardew Valley process not running")]
     StardewNotRunning,
-    #[error("")]
+    #[error("{err}")]
     MemoryReadError {
         #[from]
         err: MemoryReadError,
