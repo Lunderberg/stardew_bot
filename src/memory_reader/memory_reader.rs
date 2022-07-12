@@ -64,12 +64,12 @@ impl MemoryReader {
 
         self.regions
             .iter()
-            .filter(|region| region.is_readable)
-            .filter(|region| !region.matches_name("[vvar]"))
-            .map(|region| region.read())
-            .try_for_each(|data| -> Result<()> {
+            .filter(|map_region| map_region.is_readable)
+            .filter(|map_region| !map_region.matches_name("[vvar]"))
+            .map(|map_region| map_region.read())
+            .try_for_each(|region| -> Result<()> {
                 writer
-                    .write(&data?)
+                    .write(region?.data())
                     .expect("Could not write to output file");
                 Ok(())
             })?;
