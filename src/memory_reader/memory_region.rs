@@ -38,11 +38,8 @@ impl MemoryRegion {
         &self,
         byte_offset: usize,
     ) -> MemoryValue<[u8; N]> {
-        let mut out = [0; N];
-        (0..N).zip(out.iter_mut()).for_each(|(i, out_byte)| {
-            *out_byte = self[byte_offset + i];
-        });
-        MemoryValue::new(self.start + byte_offset, out)
+        let bytes = std::array::from_fn(|i| self[byte_offset + i]);
+        MemoryValue::new(self.start + byte_offset, bytes)
     }
 
     pub fn bytes_at_pointer<const N: usize>(
