@@ -10,7 +10,8 @@ fn stardew_valley_pid() -> Result<u32> {
     sys.processes()
         .iter()
         .find_map(|(pid, proc)| {
-            (proc.name() == "Stardew Valley").then(|| pid.as_u32())
+            (proc.name() == "Stardew Valley" || proc.name() == "StardewValley")
+                .then(|| pid.as_u32())
         })
         .ok_or(Error::StardewNotRunning)
 }
