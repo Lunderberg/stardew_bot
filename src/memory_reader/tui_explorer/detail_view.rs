@@ -7,7 +7,7 @@ use tui::{
 
 pub struct DetailView {
     state: TableState,
-    values: Vec<(String, String)>,
+    values: Vec<(&'static str, String)>,
 }
 
 impl DetailView {
@@ -20,7 +20,7 @@ impl DetailView {
 
     pub fn load_details<I>(&mut self, details: I)
     where
-        I: Iterator<Item = (String, String)>,
+        I: Iterator<Item = (&'static str, String)>,
     {
         self.values = details.collect();
     }
@@ -28,7 +28,7 @@ impl DetailView {
     pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
         let rows = self.values.iter().map(|(key, value)| {
             let height = value.chars().filter(|c| *c == '\n').count() + 1;
-            let cells = [Cell::from(key.as_str()), Cell::from(value.as_str())];
+            let cells = [Cell::from(*key), Cell::from(value.as_str())];
             Row::new(cells).height(height as u16)
         });
 

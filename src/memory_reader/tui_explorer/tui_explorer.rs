@@ -198,9 +198,9 @@ impl TuiExplorer {
         let selection = self.memory_table.selected_value();
         let value: usize = usize::from_ne_bytes(selection.value);
         let mut details = vec![
-            ("Location".to_string(), format!("{}", selection.location)),
-            ("Hex Value".to_string(), format!("{:x}", value)),
-            ("Dec Value".to_string(), format!("{}", value)),
+            ("Location", format!("{}", selection.location)),
+            ("Hex Value", format!("{:x}", value)),
+            ("Dec Value", format!("{}", value)),
         ];
 
         let as_pointer: Pointer = value.into();
@@ -208,12 +208,12 @@ impl TuiExplorer {
         if let Some(pointed_region) = pointed_region {
             let region_name: String = pointed_region.short_name();
 
-            details.push(("".to_string(), "".to_string()));
-            details.push(("Points to: ".to_string(), region_name));
+            details.push(("", "".to_string()));
+            details.push(("Points to: ", region_name));
         }
 
         if let Ok(as_utf8) = std::str::from_utf8(&selection.value) {
-            details.push(("UTF-8: ".to_string(), as_utf8.to_string()));
+            details.push(("UTF-8: ", as_utf8.to_string()));
         }
 
         self.detail_view.load_details(details.into_iter());
