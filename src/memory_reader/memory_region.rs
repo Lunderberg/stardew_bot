@@ -6,7 +6,7 @@ use std::ops::Index;
 pub struct MemoryRegion {
     start: Pointer,
     bytes: Vec<u8>,
-    pub source: MemoryMapRegion,
+    source: MemoryMapRegion,
 }
 
 impl MemoryRegion {
@@ -28,6 +28,10 @@ impl MemoryRegion {
 
     pub fn end(&self) -> Pointer {
         self.start + self.bytes.len()
+    }
+
+    pub fn name(&self) -> String {
+        self.source.short_name()
     }
 
     pub fn bytes_at_offset<const N: usize>(

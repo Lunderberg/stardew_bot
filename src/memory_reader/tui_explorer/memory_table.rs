@@ -316,7 +316,7 @@ impl ViewFrame {
     }
 
     fn title(&self) -> String {
-        let region_name = self.region.source.short_name();
+        let region_name = self.region.name();
 
         let selected = self.selected_value().location;
         let entry_point = self.entry_point;
