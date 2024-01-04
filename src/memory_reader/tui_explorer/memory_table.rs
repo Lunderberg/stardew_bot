@@ -46,7 +46,7 @@ enum Direction {
     Reverse,
 }
 
-const POINTER_SIZE: usize = 8;
+const POINTER_SIZE: usize = std::mem::size_of::<usize>();
 
 impl ActiveSearch {
     // Undo the most recent command, unless it was the initial command
