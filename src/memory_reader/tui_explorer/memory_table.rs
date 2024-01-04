@@ -359,6 +359,13 @@ impl MemoryTable {
         }
     }
 
+    pub fn current_region(&self) -> &MemoryRegion {
+        self.view_stack
+            .last()
+            .map(|frame| &frame.region)
+            .expect("MemoryTable may not contain empty view_stack")
+    }
+
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let byte_offset = self.selected_row() * POINTER_SIZE;
         self.active_view().region.bytes_at_offset(byte_offset)

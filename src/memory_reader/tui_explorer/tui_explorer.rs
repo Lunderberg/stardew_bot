@@ -195,25 +195,37 @@ impl TuiExplorer {
     }
 
     fn update_details(&mut self) {
+        use crate::memory_reader::value_unpacker::*;
+
         let selection = self.memory_table.selected_value();
-        let value: usize = usize::from_ne_bytes(selection.value);
-        let mut details = vec![
-            ("Location", format!("{}", selection.location)),
-            ("Hex Value", format!("{:x}", value)),
-            ("Dec Value", format!("{}", value)),
-        ];
+        let mut details = Vec::new();
 
-        let as_pointer: Pointer = value.into();
-        let pointed_region = self.reader.find_containing_region(as_pointer);
-        if let Some(pointed_region) = pointed_region {
-            let region_name: String = pointed_region.short_name();
+        macro_rules! add_details {
+            ($name:expr => $formatter:expr) => {
+                if let Some(display) = $formatter.format(
+                    &self.reader,
+                    self.memory_table.current_region(),
+                    selection.location,
+                ) {
+                    details.push(($name, format!("{display}")));
+                }
+            };
 
-            details.push(("", "".to_string()));
-            details.push(("Points to: ", region_name));
+            ($($name:expr => $formatter:expr,)*
+            ) => {
+                $(
+                    add_details!{ $name => $formatter }
+                )*
+            };
         }
 
-        if let Ok(as_utf8) = std::str::from_utf8(&selection.value) {
-            details.push(("UTF-8: ", as_utf8.to_string()));
+        add_details! {
+            "Location" => FormatLocation,
+            "Hex Value" => FormatHexValue::<u8>::new(),
+            "Dec Value" => FormatDecValue::<u64>::new(),
+            "" => FormatSpacer,
+            "Points to" => FormatRegionPointedTo,
+            "UTF-8" => FormatNullTerminatedString,
         }
 
         self.detail_view.load_details(details.into_iter());

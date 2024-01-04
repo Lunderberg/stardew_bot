@@ -1,6 +1,6 @@
 use super::{MemoryMapRegion, MemoryValue, Pointer};
 
-use std::ops::Index;
+use std::ops::{Index, Range, RangeInclusive};
 
 #[derive(Clone)]
 pub struct MemoryRegion {
@@ -53,6 +53,16 @@ impl MemoryRegion {
         self.bytes.len()
     }
 
+    pub fn iter_from_pointer(
+        &self,
+        location: Pointer,
+    ) -> impl Iterator<Item = MemoryValue<u8>> + '_ {
+        self.bytes[location - self.start..]
+            .iter()
+            .enumerate()
+            .map(move |(i, &val)| MemoryValue::new(location + i, val))
+    }
+
     pub fn iter_bytes(&self) -> impl Iterator<Item = MemoryValue<u8>> + '_ {
         self.bytes
             .iter()
@@ -81,10 +91,46 @@ impl Index<usize> for MemoryRegion {
     }
 }
 
+impl Index<Range<usize>> for MemoryRegion {
+    type Output = [u8];
+
+    fn index(&self, index: Range<usize>) -> &Self::Output {
+        &self.bytes[index]
+    }
+}
+
+impl Index<RangeInclusive<usize>> for MemoryRegion {
+    type Output = [u8];
+
+    fn index(&self, index: RangeInclusive<usize>) -> &Self::Output {
+        &self.bytes[index]
+    }
+}
+
 impl Index<Pointer> for MemoryRegion {
     type Output = u8;
 
     fn index(&self, location: Pointer) -> &Self::Output {
         &self[location - self.start]
+    }
+}
+
+impl Index<Range<Pointer>> for MemoryRegion {
+    type Output = [u8];
+
+    fn index(&self, index: Range<Pointer>) -> &Self::Output {
+        let start = index.start - self.start;
+        let end = index.end - self.start;
+        &self[start..end]
+    }
+}
+
+impl Index<RangeInclusive<Pointer>> for MemoryRegion {
+    type Output = [u8];
+
+    fn index(&self, index: RangeInclusive<Pointer>) -> &Self::Output {
+        let start = *index.start() - self.start;
+        let end = *index.end() - self.start;
+        &self[start..=end]
     }
 }
