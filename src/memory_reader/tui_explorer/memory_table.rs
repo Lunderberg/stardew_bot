@@ -360,10 +360,7 @@ impl MemoryTable {
     }
 
     pub fn current_region(&self) -> &MemoryRegion {
-        self.view_stack
-            .last()
-            .map(|frame| &frame.region)
-            .expect("MemoryTable may not contain empty view_stack")
+        &self.active_view().region
     }
 
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
@@ -468,11 +465,15 @@ impl MemoryTable {
     }
 
     fn active_view(&self) -> &ViewFrame {
-        self.view_stack.last().unwrap()
+        self.view_stack
+            .last()
+            .expect("MemoryTable may not contain empty view_stack")
     }
 
     fn active_view_mut(&mut self) -> &mut ViewFrame {
-        self.view_stack.last_mut().unwrap()
+        self.view_stack
+            .last_mut()
+            .expect("MemoryTable may not contain empty view_stack")
     }
 
     fn selected_row(&self) -> usize {
