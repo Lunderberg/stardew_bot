@@ -656,19 +656,10 @@ impl MemoryTable {
             .enumerate()
             .map(|(i, arr): (_, MemoryValue<[u8; 8]>)| {
                 let selected = self.selected_row();
-                let dist_to_selected = if i > selected {
-                    i - selected
-                } else {
-                    selected - i
-                };
-                let is_near_selected =
-                    dist_to_selected < (area.height as usize);
-                let is_selected = i == selected;
 
-                // TODO: Use abs_diff, stabilized in 1.60
-                //
-                // let is_near_selected =
-                //     self.state.selected().unwrap_or(0).abs_diff(i) < area.height;
+                let is_near_selected =
+                    i.abs_diff(selected) < (area.height as usize);
+                let is_selected = i == selected;
 
                 let cells = if is_near_selected {
                     let as_pointer: Pointer = arr.value.into();
