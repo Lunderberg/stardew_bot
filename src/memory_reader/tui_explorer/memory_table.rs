@@ -543,9 +543,7 @@ impl MemoryTable {
         borders.into_iter().zip(border_areas.into_iter()).for_each(
             |(border, border_area)| frame.render_widget(border, border_area),
         );
-        if search_area_height > 0 {
-            self.draw_search_area(frame, search_area);
-        }
+        self.draw_search_area(frame, search_area);
         self.draw_scrollbar(frame, scrollbar_area);
         self.draw_table(frame, table_area);
     }
