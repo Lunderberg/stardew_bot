@@ -1,8 +1,7 @@
-use tui::{
-    backend::Backend,
+use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Block, Borders, Cell, Paragraph, Row, Table, TableState},
     Frame,
 };
@@ -480,7 +479,7 @@ impl MemoryTable {
         self.active_view().selected().unwrap_or(0)
     }
 
-    pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let borders: Vec<_> = self
             .view_stack
             .iter()
@@ -551,31 +550,28 @@ impl MemoryTable {
         self.draw_table(frame, table_area);
     }
 
-    fn draw_search_area<B: Backend>(
-        &mut self,
-        frame: &mut Frame<B>,
-        area: Rect,
-    ) {
+    fn draw_search_area(&mut self, frame: &mut Frame, area: Rect) {
         let search: Option<&ActiveSearch> = self.active_view().search.as_ref();
 
         let (matching_part, non_matching_part) = search
             .map(|search_state| search_state.get_search_string_parts())
             .unwrap_or_else(|| ("".to_string(), "".to_string()));
-        let text = Spans::from(vec![
+        let line: Line = vec![
             Span::raw(matching_part),
             Span::styled(non_matching_part, Style::default().bg(Color::Red)),
-        ]);
+        ]
+        .into();
 
         let title = search
             .map(|state| state.description())
             .unwrap_or("".to_string());
 
-        let widget = Paragraph::new(text)
+        let widget = Paragraph::new(line)
             .block(Block::default().borders(Borders::ALL).title(title));
         frame.render_widget(widget, area);
     }
 
-    fn draw_scrollbar<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    fn draw_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
         let selected = self.selected_row();
         let table_size = self.active_view().num_table_rows();
         let rows_shown = area.height as usize;
@@ -598,7 +594,7 @@ impl MemoryTable {
         frame.render_widget(bar, area);
     }
 
-    fn draw_table<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
         self.previous_height = Some(area.height as usize);
 
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
@@ -613,7 +609,7 @@ impl MemoryTable {
             .map(|search_state| search_state.get_search_string(None))
             .unwrap_or_else(|| "".to_string());
 
-        let format_text = |text: &str, is_selected: bool| -> Spans {
+        let format_text = |text: &str, is_selected: bool| -> Line {
             let result_style = if is_selected {
                 search_result_current_style
             } else {
@@ -638,7 +634,7 @@ impl MemoryTable {
             if !haystack.is_empty() {
                 spans.push(Span::raw(haystack.to_string()));
             }
-            Spans::from(spans)
+            spans.into()
         };
 
         let header_cells = ["Address", "Hex"].iter().map(|h| {
@@ -690,15 +686,17 @@ impl MemoryTable {
                 Row::new(cells).height(1).bottom_margin(0)
             });
 
-        let table = Table::new(rows)
-            .header(header)
-            .highlight_style(selected_style)
-            .highlight_symbol(">> ")
-            .widths(&[
+        let table = Table::new(
+            rows,
+            [
                 Constraint::Min(19),
                 Constraint::Percentage(50),
                 Constraint::Min(5),
-            ]);
+            ],
+        )
+        .header(header)
+        .highlight_style(selected_style)
+        .highlight_symbol(">> ");
         frame.render_stateful_widget(
             table,
             area,

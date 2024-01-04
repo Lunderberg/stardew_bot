@@ -1,7 +1,6 @@
 use std::collections::VecDeque;
 
-use tui::{
-    backend::Backend,
+use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, ListState},
@@ -32,7 +31,7 @@ impl RunningLog {
         }
     }
 
-    pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let items: Vec<_> = self
             .items
             .iter()

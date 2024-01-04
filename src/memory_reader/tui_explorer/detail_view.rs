@@ -1,5 +1,4 @@
-use tui::{
-    backend::Backend,
+use ratatui::{
     layout::{Constraint, Rect},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
@@ -25,20 +24,22 @@ impl DetailView {
         self.values = details.collect();
     }
 
-    pub fn draw<B: Backend>(&mut self, frame: &mut Frame<B>, area: Rect) {
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let rows = self.values.iter().map(|(key, value)| {
             let height = value.chars().filter(|c| *c == '\n').count() + 1;
             let cells = [Cell::from(*key), Cell::from(value.as_str())];
             Row::new(cells).height(height as u16)
         });
 
-        let table = Table::new(rows)
-            .block(Block::default().borders(Borders::ALL).title("Detail View"))
-            .widths(&[
+        let table = Table::new(
+            rows,
+            [
                 Constraint::Percentage(50),
                 Constraint::Length(30),
                 Constraint::Min(10),
-            ]);
+            ],
+        )
+        .block(Block::default().borders(Borders::ALL).title("Detail View"));
         frame.render_stateful_widget(table, area, &mut self.state);
     }
 }

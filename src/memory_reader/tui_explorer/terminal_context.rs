@@ -1,7 +1,9 @@
 use crate::memory_reader::{Error, Result};
 
+use ratatui::{backend, Terminal};
+
 pub struct TerminalContext {
-    terminal: tui::Terminal<tui::backend::CrosstermBackend<std::io::Stdout>>,
+    terminal: Terminal<backend::CrosstermBackend<std::io::Stdout>>,
 }
 
 impl TerminalContext {
@@ -16,9 +18,9 @@ impl TerminalContext {
             event::EnableMouseCapture,
         )
         .map_err(|err| Error::TuiIoError { err })?;
-        let backend = tui::backend::CrosstermBackend::new(stdout);
-        let terminal = tui::Terminal::new(backend)
-            .map_err(|err| Error::TuiIoError { err })?;
+        let backend = backend::CrosstermBackend::new(stdout);
+        let terminal =
+            Terminal::new(backend).map_err(|err| Error::TuiIoError { err })?;
         Ok(Self { terminal })
     }
 }
@@ -39,8 +41,7 @@ impl std::ops::Drop for TerminalContext {
 }
 
 impl std::ops::Deref for TerminalContext {
-    type Target =
-        tui::Terminal<tui::backend::CrosstermBackend<std::io::Stdout>>;
+    type Target = Terminal<backend::CrosstermBackend<std::io::Stdout>>;
 
     fn deref(&self) -> &Self::Target {
         &self.terminal

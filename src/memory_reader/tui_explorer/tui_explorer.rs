@@ -5,8 +5,7 @@ use crate::memory_reader::{
 use super::{DetailView, MemoryTable, RunningLog, TerminalContext};
 
 use crossterm::event::Event;
-use tui::{
-    backend::Backend,
+use ratatui::{
     layout::{Constraint, Direction, Layout},
     Frame,
 };
@@ -63,7 +62,7 @@ impl TuiExplorer {
         Ok(())
     }
 
-    fn draw<B: Backend>(&mut self, frame: &mut Frame<B>) {
+    fn draw(&mut self, frame: &mut Frame) {
         let h_chunks = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)

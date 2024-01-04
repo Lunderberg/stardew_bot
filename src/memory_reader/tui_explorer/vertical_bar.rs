@@ -1,4 +1,4 @@
-use tui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
+use ratatui::{buffer::Buffer, layout::Rect, style::Style, widgets::Widget};
 
 pub struct VerticalBar {
     bar_top_ratio: f64,
