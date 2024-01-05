@@ -10,7 +10,7 @@ use crate::memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer};
 
 use super::VerticalBar;
 
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 
 pub struct MemoryTable {
     view_stack: Vec<ViewFrame>,
@@ -331,11 +331,20 @@ impl ViewFrame {
         )
     }
 
-    fn row_text(region: &MemoryRegion, row: usize) -> [String; 2] {
+    fn row_text(region: &MemoryRegion, row: usize) -> [String; 3] {
         let arr: MemoryValue<[u8; 8]> =
             region.bytes_at_offset(row * POINTER_SIZE);
-        let as_pointer: Pointer = arr.value.into();
-        [format!("{}", arr.location), format!("{}", as_pointer)]
+        let hex = arr.value.iter().map(|byte| format!("{byte:02x}")).join("");
+        let ascii = arr
+            .value
+            .iter()
+            .map(|&byte| {
+                char::from_u32(byte.into())
+                    .filter(|c| c.is_ascii() && !c.is_ascii_control())
+                    .unwrap_or('☒')
+            })
+            .collect();
+        [format!("{}", arr.location), hex, ascii]
     }
 }
 
@@ -635,7 +644,7 @@ impl MemoryTable {
             spans.into()
         };
 
-        let header_cells = ["Address", "Hex"].iter().map(|h| {
+        let header_cells = ["Address", "Hex", "ASCII"].iter().map(|h| {
             Cell::from(*h).style(
                 Style::default()
                     .fg(Color::LightCyan)
@@ -660,14 +669,32 @@ impl MemoryTable {
                 let is_selected = i == selected;
 
                 let cells = if is_near_selected {
-                    let as_pointer: Pointer = arr.value.into();
                     let loc: Cell =
                         format_text(&format!("{}", arr.location), is_selected)
                             .into();
-                    let value: Cell =
-                        format_text(&format!("{}", as_pointer), is_selected)
-                            .into();
-                    vec![loc, value]
+                    let value: Cell = format_text(
+                        &arr.value
+                            .iter()
+                            .map(|byte| format!("{byte:02x}"))
+                            .join(""),
+                        is_selected,
+                    )
+                    .into();
+                    let ascii: Cell = format_text(
+                        &arr.value
+                            .iter()
+                            .map(|&byte| {
+                                char::from_u32(byte.into())
+                                    .filter(|c| {
+                                        c.is_ascii() && !c.is_ascii_control()
+                                    })
+                                    .unwrap_or('☒')
+                            })
+                            .collect::<String>(),
+                        is_selected,
+                    )
+                    .into();
+                    vec![loc, value, ascii]
                 } else {
                     vec![]
                 }
@@ -678,14 +705,16 @@ impl MemoryTable {
         let table = Table::new(
             rows,
             [
-                Constraint::Min(19),
-                Constraint::Percentage(50),
-                Constraint::Min(5),
+                Constraint::Min((2 * POINTER_SIZE + 3) as u16),
+                Constraint::Min((2 * POINTER_SIZE + 3) as u16),
+                Constraint::Min((POINTER_SIZE + 1) as u16),
+                Constraint::Percentage(1),
             ],
         )
         .header(header)
         .highlight_style(selected_style)
         .highlight_symbol(">> ");
+
         frame.render_stateful_widget(
             table,
             area,
