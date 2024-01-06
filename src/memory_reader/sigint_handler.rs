@@ -6,6 +6,12 @@ static mut CLOSE_ON_SIGTERM: Option<Arc<AtomicBool>> = None;
 
 pub struct SigintHandler;
 
+impl Default for SigintHandler {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SigintHandler {
     pub fn new() -> Self {
         INIT.call_once(|| {

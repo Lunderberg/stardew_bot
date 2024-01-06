@@ -71,16 +71,14 @@ impl MemoryMapRegion {
     }
 
     pub fn read(&self) -> Result<MemoryRegion> {
-        let bytes = self
-            .start
-            .read_bytes(self.pid, self.size_bytes() as usize)?;
+        let bytes = self.start.read_bytes(self.pid, self.size_bytes())?;
         Ok(MemoryRegion::new(self.start, bytes, self.clone()))
     }
 }
 
 impl Display for MemoryMapRegion {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let name = self.name.as_ref().map(|n| n.as_str()).unwrap_or("???");
+        let name = self.name.as_deref().unwrap_or("???");
         write!(
             f,
             "Region(PID {}, {} - {}, \"{}\")",

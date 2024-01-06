@@ -24,7 +24,7 @@ impl Pointer {
     }
 
     pub fn as_aligned(self, alignment: usize) -> Option<Self> {
-        self.is_aligned(alignment).then(|| self)
+        self.is_aligned(alignment).then_some(self)
     }
 
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
@@ -95,7 +95,7 @@ impl From<usize> for Pointer {
 
 impl From<[u8; 8]> for Pointer {
     fn from(bytes: [u8; 8]) -> Self {
-        let address = usize::from_ne_bytes(bytes).into();
+        let address = usize::from_ne_bytes(bytes);
         Self { address }
     }
 }

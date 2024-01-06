@@ -103,11 +103,7 @@ impl MemoryReader {
             .for_each(|arr: MemoryValue<[u8; 8]>| {
                 let as_pointer: Pointer = arr.value.into();
                 if let Some(region) = self.find_containing_region(as_pointer) {
-                    let name = region
-                        .name
-                        .as_ref()
-                        .map(|p| p.as_str())
-                        .unwrap_or("???");
+                    let name = region.name.as_deref().unwrap_or("???");
                     println!(
                         "Pointer at {} points to {}, located in {} ({})",
                         arr.location,
@@ -165,7 +161,7 @@ impl MemoryReader {
         let stack_to_stack: Vec<_> = self
             .pointers_in_stack_with_region()?
             .filter_map(|(ptr_ptr, region)| {
-                region.matches_name("[stack]").then(move || ptr_ptr)
+                region.matches_name("[stack]").then_some(ptr_ptr)
             })
             .collect();
 

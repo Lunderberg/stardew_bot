@@ -146,11 +146,10 @@ impl ActiveSearch {
             _ => None,
         };
 
-        let search_result: Option<usize> = search_range
-            .map(|search_range| {
+        let search_result: Option<usize> =
+            search_range.and_then(|search_range| {
                 self.search(search_range, new_char, row_generator)
-            })
-            .flatten();
+            });
 
         self.stack.push(SearchItem {
             command,
@@ -561,7 +560,7 @@ impl MemoryTable {
             table_height,
         );
 
-        borders.into_iter().zip(border_areas.into_iter()).for_each(
+        borders.into_iter().zip(border_areas).for_each(
             |(border, border_area)| frame.render_widget(border, border_area),
         );
         self.draw_search_area(frame, search_area);
@@ -631,7 +630,7 @@ impl MemoryTable {
             .search
             .as_ref()
             .map(|search_state| search_state.get_search_string(None))
-            .unwrap_or_else(|| "".to_string());
+            .unwrap_or_default();
 
         let format_text = |text: &str, is_selected: bool| -> Line {
             let result_style = if is_selected {
@@ -641,7 +640,7 @@ impl MemoryTable {
             };
 
             let mut spans = Vec::new();
-            let mut haystack: &str = &text;
+            let mut haystack: &str = text;
             if !search_string.is_empty() {
                 while let Some(pos) = haystack.find(&search_string) {
                     if pos > 0 {
@@ -716,7 +715,7 @@ impl MemoryTable {
                         &reader
                             .find_containing_region(arr.value.into())
                             .map(|pointed_region| pointed_region.short_name())
-                            .unwrap_or_else(String::new),
+                            .unwrap_or_default(),
                         is_selected,
                     )
                     .into();
