@@ -5,7 +5,7 @@ use crate::{
 
 use std::fmt::Display;
 
-pub trait FormatFromPointer {
+pub trait InfoFormatter {
     fn format(
         &self,
         reader: &MemoryReader,

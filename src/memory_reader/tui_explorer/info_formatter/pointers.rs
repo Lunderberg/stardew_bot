@@ -5,12 +5,12 @@ use crate::{
     MemoryReader,
 };
 
-use super::FormatFromPointer;
+use super::InfoFormatter;
 
 pub struct FormatRegionPointedTo;
 pub struct FormatPointerOffset;
 
-impl FormatFromPointer for FormatRegionPointedTo {
+impl InfoFormatter for FormatRegionPointedTo {
     fn format(
         &self,
         reader: &MemoryReader,
@@ -25,7 +25,7 @@ impl FormatFromPointer for FormatRegionPointedTo {
     }
 }
 
-impl FormatFromPointer for FormatPointerOffset {
+impl InfoFormatter for FormatPointerOffset {
     fn format(
         &self,
         _reader: &MemoryReader,

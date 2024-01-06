@@ -5,7 +5,7 @@ use crate::{
     MemoryReader,
 };
 
-use super::FormatFromPointer;
+use super::InfoFormatter;
 
 pub struct FormatHexValue<T>(PhantomData<T>);
 pub struct FormatDecValue<T>(PhantomData<T>);
@@ -24,7 +24,7 @@ impl<T> FormatDecValue<T> {
 macro_rules! primitive_formatter {
     ($prim:ty) => {
 
-        impl FormatFromPointer for FormatDecValue<$prim>
+        impl InfoFormatter for FormatDecValue<$prim>
         {
             fn format(
                 &self,
@@ -42,7 +42,7 @@ macro_rules! primitive_formatter {
             }
         }
 
-        impl FormatFromPointer for FormatHexValue<$prim>
+        impl InfoFormatter for FormatHexValue<$prim>
         {
             fn format(
                 &self,

@@ -5,13 +5,13 @@ use crate::{
     MemoryReader,
 };
 
-use super::FormatFromPointer;
+use super::InfoFormatter;
 
 pub struct FormatNullTerminatedString;
 pub struct FormatStringPointerWithLength;
 pub struct FormatStringPointerNullTerminated;
 
-impl FormatFromPointer for FormatNullTerminatedString {
+impl InfoFormatter for FormatNullTerminatedString {
     fn format(
         &self,
         _reader: &MemoryReader,
@@ -27,7 +27,7 @@ impl FormatFromPointer for FormatNullTerminatedString {
     }
 }
 
-impl FormatFromPointer for FormatStringPointerWithLength {
+impl InfoFormatter for FormatStringPointerWithLength {
     fn format(
         &self,
         _reader: &MemoryReader,
@@ -60,7 +60,7 @@ impl FormatFromPointer for FormatStringPointerWithLength {
     }
 }
 
-impl FormatFromPointer for FormatStringPointerNullTerminated {
+impl InfoFormatter for FormatStringPointerNullTerminated {
     fn format(
         &self,
         _reader: &MemoryReader,
