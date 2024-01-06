@@ -11,7 +11,7 @@ use super::{
 use itertools::Itertools;
 
 pub struct MemoryReader {
-    pub pid: u32,
+    pid: u32,
     regions: Vec<MemoryMapRegion>,
 }
 
@@ -19,6 +19,10 @@ impl MemoryReader {
     pub fn new(pid: u32) -> Result<Self> {
         let regions = Self::get_memory_regions(pid)?;
         Ok(Self { pid, regions })
+    }
+
+    pub fn pid(&self) -> u32 {
+        self.pid
     }
 
     fn get_memory_regions(pid: u32) -> Result<Vec<MemoryMapRegion>> {
