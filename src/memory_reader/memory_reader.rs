@@ -10,6 +10,7 @@ use super::{
 
 use itertools::Itertools;
 
+#[derive(Clone)]
 pub struct MemoryReader {
     pub pid: u32,
     regions: Vec<MemoryMapRegion>,

@@ -31,7 +31,11 @@ impl TuiExplorer {
             .unwrap_or_else(|| memory_region.end());
         let mut out = Self {
             running_log: RunningLog::new(100),
-            memory_table: MemoryTable::new(memory_region, stack_entry_point),
+            memory_table: MemoryTable::new(
+                reader.clone(),
+                memory_region,
+                stack_entry_point,
+            ),
             detail_view: DetailView::new(),
             _pid: pid,
             reader,
