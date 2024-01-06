@@ -22,6 +22,8 @@ impl MemoryRegion {
         }
     }
 
+    pub const POINTER_SIZE: usize = std::mem::size_of::<usize>();
+
     pub fn start(&self) -> Pointer {
         self.start
     }

@@ -47,7 +47,7 @@ impl InfoFormatter for FormatStringPointerWithLength {
             return None;
         }
 
-        let len_location = location - std::mem::size_of::<usize>();
+        let len_location = location - MemoryRegion::POINTER_SIZE;
         let len =
             usize::from_ne_bytes(region.bytes_at_pointer(len_location)?.value);
 

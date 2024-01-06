@@ -49,8 +49,6 @@ enum Direction {
     Reverse,
 }
 
-const POINTER_SIZE: usize = std::mem::size_of::<usize>();
-
 impl ActiveSearch {
     // Undo the most recent command, unless it was the initial command
     // that started the search.
@@ -242,7 +240,7 @@ impl ViewFrame {
     }
 
     fn num_table_rows(&self) -> usize {
-        self.region.size_bytes() / POINTER_SIZE
+        self.region.size_bytes() / MemoryRegion::POINTER_SIZE
     }
 
     fn select(&mut self, row: usize) {
@@ -255,7 +253,7 @@ impl ViewFrame {
     }
 
     fn select_address(&mut self, address: Pointer) {
-        let row = (address - self.region.start()) / POINTER_SIZE;
+        let row = (address - self.region.start()) / MemoryRegion::POINTER_SIZE;
         let row = row.clamp(0, self.num_table_rows() - 1);
         self.select(row);
     }
@@ -310,7 +308,7 @@ impl ViewFrame {
 
     fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let row: usize = self.selected().unwrap_or(0);
-        let byte_offset = row * POINTER_SIZE;
+        let byte_offset = row * MemoryRegion::POINTER_SIZE;
         self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
             panic!("Selected row {row} is outside of the MemoryRegion")
         })
@@ -335,7 +333,7 @@ impl ViewFrame {
 
     fn row_text(region: &MemoryRegion, row: usize) -> [String; 3] {
         let arr: MemoryValue<[u8; 8]> = region
-            .bytes_at_offset(row * POINTER_SIZE)
+            .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
             .unwrap_or_else(|| {
                 panic!("Row {row} is outside of the memory region")
             });
@@ -728,9 +726,9 @@ impl MemoryTable {
         let table = Table::new(
             rows,
             [
-                Constraint::Min((2 * POINTER_SIZE + 3) as u16),
-                Constraint::Min((2 * POINTER_SIZE + 3) as u16),
-                Constraint::Min((POINTER_SIZE + 1) as u16),
+                Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
+                Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
+                Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
                 Constraint::Percentage(100),
             ],
         )
