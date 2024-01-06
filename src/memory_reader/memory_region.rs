@@ -34,6 +34,17 @@ impl MemoryRegion {
         self.source.contains(location)
     }
 
+    pub fn rfind_pattern(&self, pat: &[u8]) -> Option<Pointer> {
+        self.bytes
+            .windows(pat.len())
+            .enumerate()
+            .rev()
+            .find(|(_, window)| {
+                window.iter().zip(pat.iter()).all(|(a, b)| a == b)
+            })
+            .map(|(offset, _)| self.start + offset)
+    }
+
     pub fn name(&self) -> String {
         self.source.short_name()
     }

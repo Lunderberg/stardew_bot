@@ -24,7 +24,11 @@ impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self> {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
-        let stack_entry_point = memory_region.end();
+        let stack_entry_point = memory_region
+            .rfind_pattern(
+                &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
+            )
+            .unwrap_or_else(|| memory_region.end());
         let mut out = Self {
             running_log: RunningLog::new(100),
             memory_table: MemoryTable::new(memory_region, stack_entry_point),
