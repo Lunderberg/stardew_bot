@@ -219,34 +219,41 @@ impl TuiExplorer {
         let mut details = Vec::new();
 
         macro_rules! add_details {
-            ($name:expr => $formatter:expr) => {
-                if let Some(display) = $formatter.format(
+            ($formatter:expr) => {
+                let formatter = $formatter;
+                if let Some(display) = formatter.format(
                     &self.reader,
                     self.memory_table.current_region(),
                     selection.location,
                 ) {
-                    details.push(($name, format!("{display}")));
+                    details.push(
+                        (
+                            formatter.name(),
+                            format!("{display}"),
+                        )
+                    );
                 }
             };
 
-            ($($name:expr => $formatter:expr,)*
+            (
+                $($formatter:expr,)*
             ) => {
                 $(
-                    add_details!{ $name => $formatter }
+                    add_details!{ $formatter }
                 )*
             };
         }
 
         add_details! {
-            "Location" => FormatLocation,
-            "Hex Value" => FormatHexValue::<u64>::new(),
-            "Dec Value" => FormatDecValue::<u64>::new(),
-            "UTF-8" => FormatNullTerminatedString,
-            "" => FormatSpacer,
-            "Points to" => FormatRegionPointedTo,
-            "Offset" => FormatPointerOffset,
-            "(char*,len)" => FormatStringPointerWithLength,
-            "char*" => FormatStringPointerNullTerminated,
+            FormatLocation,
+            FormatHexValue::<u64>::new(),
+            FormatDecValue::<u64>::new(),
+            FormatNullTerminatedString,
+            FormatSpacer,
+            FormatRegionPointedTo,
+            FormatPointerOffset,
+            FormatStringPointerWithLength,
+            FormatStringPointerNullTerminated,
         }
 
         self.detail_view.load_details(details.into_iter());

@@ -12,6 +12,10 @@ pub struct FormatStringPointerWithLength;
 pub struct FormatStringPointerNullTerminated;
 
 impl InfoFormatter for FormatNullTerminatedString {
+    fn name(&self) -> &'static str {
+        "UTF-8"
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,
@@ -28,6 +32,10 @@ impl InfoFormatter for FormatNullTerminatedString {
 }
 
 impl InfoFormatter for FormatStringPointerWithLength {
+    fn name(&self) -> &'static str {
+        "(char*,len)"
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,
@@ -61,6 +69,10 @@ impl InfoFormatter for FormatStringPointerWithLength {
 }
 
 impl InfoFormatter for FormatStringPointerNullTerminated {
+    fn name(&self) -> &'static str {
+        "char*"
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,

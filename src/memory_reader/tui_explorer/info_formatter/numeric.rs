@@ -26,6 +26,10 @@ macro_rules! primitive_formatter {
 
         impl InfoFormatter for FormatDecValue<$prim>
         {
+            fn name(&self) -> &'static str {
+                "Dec Value"
+            }
+
             fn format(
                 &self,
                 _reader: &MemoryReader,
@@ -44,6 +48,10 @@ macro_rules! primitive_formatter {
 
         impl InfoFormatter for FormatHexValue<$prim>
         {
+            fn name(&self) -> &'static str {
+                "Hex Value"
+            }
+
             fn format(
                 &self,
                 _reader: &MemoryReader,

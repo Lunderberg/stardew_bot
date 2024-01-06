@@ -11,6 +11,10 @@ pub struct FormatSpacer;
 pub struct FormatLocation;
 
 impl InfoFormatter for FormatSpacer {
+    fn name(&self) -> &'static str {
+        ""
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,
@@ -22,6 +26,10 @@ impl InfoFormatter for FormatSpacer {
 }
 
 impl InfoFormatter for FormatLocation {
+    fn name(&self) -> &'static str {
+        "Location"
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,

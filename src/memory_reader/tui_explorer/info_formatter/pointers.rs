@@ -11,6 +11,10 @@ pub struct FormatRegionPointedTo;
 pub struct FormatPointerOffset;
 
 impl InfoFormatter for FormatRegionPointedTo {
+    fn name(&self) -> &'static str {
+        "Points to"
+    }
+
     fn format(
         &self,
         reader: &MemoryReader,
@@ -26,6 +30,10 @@ impl InfoFormatter for FormatRegionPointedTo {
 }
 
 impl InfoFormatter for FormatPointerOffset {
+    fn name(&self) -> &'static str {
+        "Offset"
+    }
+
     fn format(
         &self,
         _reader: &MemoryReader,
