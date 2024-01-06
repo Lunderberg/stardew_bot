@@ -33,13 +33,12 @@ macro_rules! primitive_formatter {
                 location: Pointer,
             ) -> Option<impl Display> {
                 const ALIGNMENT: usize = std::mem::align_of::<$prim>();
-                location.is_aligned(ALIGNMENT).then(|| {
-                    const NBYTES: usize = std::mem::size_of::<$prim>();
+                let location = location.as_aligned(ALIGNMENT)?;
+                const NBYTES: usize = std::mem::size_of::<$prim>();
 
-                    let data = region.bytes_at_pointer::<NBYTES>(location);
-                    let data = <$prim>::from_ne_bytes(data.value);
-                    format!("{data}")
-                })
+                let data = region.bytes_at_pointer::<NBYTES>(location)?;
+                let data = <$prim>::from_ne_bytes(data.value);
+                Some(format!("{data}"))
             }
         }
 
@@ -52,13 +51,13 @@ macro_rules! primitive_formatter {
                 location: Pointer,
             ) -> Option<impl Display> {
                 const ALIGNMENT: usize = std::mem::align_of::<$prim>();
-                location.is_aligned(ALIGNMENT).then(|| {
-                    const NBYTES: usize = std::mem::size_of::<$prim>();
+                let location = location.as_aligned(ALIGNMENT)?;
 
-                    let data = region.bytes_at_pointer::<NBYTES>(location);
-                    let data = <$prim>::from_ne_bytes(data.value);
-                    format!("0x{data:02x}")
-                })
+                const NBYTES: usize = std::mem::size_of::<$prim>();
+
+                let data = region.bytes_at_pointer::<NBYTES>(location)?;
+                let data = <$prim>::from_ne_bytes(data.value);
+                Some(format!("0x{data:02x}"))
             }
         }
 

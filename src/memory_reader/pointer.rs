@@ -19,8 +19,12 @@ impl Pointer {
         self.address == 0
     }
 
-    pub fn is_aligned(&self, bytes: usize) -> bool {
-        self.address % bytes == 0
+    pub fn is_aligned(&self, alignment: usize) -> bool {
+        self.address % alignment == 0
+    }
+
+    pub fn as_aligned(self, alignment: usize) -> Option<Self> {
+        self.is_aligned(alignment).then(|| self)
     }
 
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {

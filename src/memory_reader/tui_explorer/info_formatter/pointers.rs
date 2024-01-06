@@ -17,7 +17,7 @@ impl FormatFromPointer for FormatRegionPointedTo {
         region: &MemoryRegion,
         location: Pointer,
     ) -> Option<impl Display> {
-        let data = region.bytes_at_pointer(location);
+        let data = region.bytes_at_pointer(location)?;
         let pointer: Pointer = data.value.into();
         reader
             .find_containing_region(pointer)
@@ -32,7 +32,7 @@ impl FormatFromPointer for FormatPointerOffset {
         region: &MemoryRegion,
         location: Pointer,
     ) -> Option<impl Display> {
-        let pointer = region.bytes_at_pointer(location).value.into();
+        let pointer = region.bytes_at_pointer(location)?.value.into();
         region.contains(pointer).then(|| pointer - location)
     }
 }

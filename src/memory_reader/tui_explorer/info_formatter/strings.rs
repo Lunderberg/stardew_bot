@@ -34,17 +34,14 @@ impl FormatFromPointer for FormatStringPointerWithLength {
         region: &MemoryRegion,
         location: Pointer,
     ) -> Option<impl Display> {
-        let pointer = region.bytes_at_pointer(location).value.into();
+        let pointer = region.bytes_at_pointer(location)?.value.into();
         if !region.contains(pointer) {
             return None;
         }
 
         let len_location = location - std::mem::size_of::<usize>();
-        if !region.contains(len_location) {
-            return None;
-        }
         let len =
-            usize::from_ne_bytes(region.bytes_at_pointer(len_location).value);
+            usize::from_ne_bytes(region.bytes_at_pointer(len_location)?.value);
 
         let last_char = pointer + len - 1;
         if !region.contains(last_char) {
@@ -70,7 +67,7 @@ impl FormatFromPointer for FormatStringPointerNullTerminated {
         region: &MemoryRegion,
         location: Pointer,
     ) -> Option<impl Display> {
-        let pointer = region.bytes_at_pointer(location).value.into();
+        let pointer = region.bytes_at_pointer(location)?.value.into();
         if !region.contains(pointer) {
             return None;
         }

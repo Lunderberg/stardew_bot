@@ -52,16 +52,22 @@ impl MemoryRegion {
     pub fn bytes_at_offset<const N: usize>(
         &self,
         byte_offset: usize,
-    ) -> MemoryValue<[u8; N]> {
-        let bytes = std::array::from_fn(|i| self[byte_offset + i]);
-        MemoryValue::new(self.start + byte_offset, bytes)
+    ) -> Option<MemoryValue<[u8; N]>> {
+        (byte_offset + N <= self.bytes.len()).then(|| {
+            let bytes = std::array::from_fn(|i| self[byte_offset + i]);
+            MemoryValue::new(self.start + byte_offset, bytes)
+        })
     }
 
     pub fn bytes_at_pointer<const N: usize>(
         &self,
         location: Pointer,
-    ) -> MemoryValue<[u8; N]> {
-        self.bytes_at_offset(location - self.start)
+    ) -> Option<MemoryValue<[u8; N]>> {
+        if location >= self.start {
+            self.bytes_at_offset(location - self.start)
+        } else {
+            None
+        }
     }
 
     pub fn size_bytes(&self) -> usize {

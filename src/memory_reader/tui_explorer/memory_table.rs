@@ -314,7 +314,9 @@ impl ViewFrame {
     fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         let row: usize = self.selected().unwrap_or(0);
         let byte_offset = row * POINTER_SIZE;
-        self.region.bytes_at_offset(byte_offset)
+        self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
+            panic!("Selected row {row} is outside of the MemoryRegion")
+        })
     }
 
     fn title(&self) -> String {
@@ -335,8 +337,11 @@ impl ViewFrame {
     }
 
     fn row_text(region: &MemoryRegion, row: usize) -> [String; 3] {
-        let arr: MemoryValue<[u8; 8]> =
-            region.bytes_at_offset(row * POINTER_SIZE);
+        let arr: MemoryValue<[u8; 8]> = region
+            .bytes_at_offset(row * POINTER_SIZE)
+            .unwrap_or_else(|| {
+                panic!("Row {row} is outside of the memory region")
+            });
         let hex = arr.value.iter().map(|byte| format!("{byte:02x}")).join("");
         let ascii = arr
             .value
@@ -375,8 +380,7 @@ impl MemoryTable {
     }
 
     pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
-        let byte_offset = self.selected_row() * POINTER_SIZE;
-        self.active_view().region.bytes_at_offset(byte_offset)
+        self.active_view().selected_value()
     }
 
     fn move_selection_relative(&mut self, delta: i64) {
