@@ -15,3 +15,5 @@ pub use detail_view::*;
 
 mod vertical_bar;
 pub use vertical_bar::*;
+
+pub mod info_formatter;

@@ -212,7 +212,8 @@ impl TuiExplorer {
     }
 
     fn update_details(&mut self) {
-        use crate::memory_reader::value_unpacker::*;
+        use super::info_formatter::*;
+        // use crate::memory_reader::value_unpacker::*;
 
         let selection = self.memory_table.selected_value();
         let mut details = Vec::new();
@@ -244,8 +245,8 @@ impl TuiExplorer {
             "" => FormatSpacer,
             "Points to" => FormatRegionPointedTo,
             "Offset" => FormatPointerOffset,
-            "(char*,len)" => FormatStringWithLength,
-            "char*" => FormatStringNullTerminated,
+            "(char*,len)" => FormatStringPointerWithLength,
+            "char*" => FormatStringPointerNullTerminated,
         }
 
         self.detail_view.load_details(details.into_iter());
