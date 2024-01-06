@@ -53,12 +53,13 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let mut location = Pointer::null();
         let mut value = [0; N];
-        for i in 0..N {
+
+        for (i, element) in value.iter_mut().enumerate() {
             if let Some(val) = self.iter.next() {
                 if i == 0 {
                     location = val.location;
                 }
-                value[i] = val.value;
+                *element = val.value;
             } else {
                 return None;
             }

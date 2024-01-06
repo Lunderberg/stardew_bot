@@ -50,15 +50,15 @@ impl TuiExplorer {
         while !handler.received() {
             context
                 .draw(|frame| self.draw(frame))
-                .map_err(|err| Error::TuiIoError { err })?;
+                .map_err(|err| Error::TuiIo { err })?;
 
             let timeout = std::time::Duration::from_millis(100);
-            let poll = event::poll(timeout)
-                .map_err(|err| Error::TuiIoError { err })?;
+            let poll =
+                event::poll(timeout).map_err(|err| Error::TuiIo { err })?;
 
             if poll {
                 let event_received =
-                    event::read().map_err(|err| Error::TuiIoError { err })?;
+                    event::read().map_err(|err| Error::TuiIo { err })?;
                 let should_exit = self.update_state(event_received)?;
                 if should_exit {
                     break;

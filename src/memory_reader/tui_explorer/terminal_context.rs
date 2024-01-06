@@ -10,17 +10,17 @@ impl TerminalContext {
     pub fn new() -> Result<Self> {
         use crossterm::{event, execute, terminal};
 
-        terminal::enable_raw_mode().map_err(|err| Error::TuiIoError { err })?;
+        terminal::enable_raw_mode().map_err(|err| Error::TuiIo { err })?;
         let mut stdout = std::io::stdout();
         execute!(
             stdout,
             terminal::EnterAlternateScreen,
             event::EnableMouseCapture,
         )
-        .map_err(|err| Error::TuiIoError { err })?;
+        .map_err(|err| Error::TuiIo { err })?;
         let backend = backend::CrosstermBackend::new(stdout);
         let terminal =
-            Terminal::new(backend).map_err(|err| Error::TuiIoError { err })?;
+            Terminal::new(backend).map_err(|err| Error::TuiIo { err })?;
         Ok(Self { terminal })
     }
 }

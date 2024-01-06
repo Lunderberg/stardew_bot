@@ -69,7 +69,7 @@ impl MemoryReader {
             .map(|map_region| map_region.read())
             .try_for_each(|region| -> Result<()> {
                 writer
-                    .write(region?.data())
+                    .write_all(region?.data())
                     .expect("Could not write to output file");
                 Ok(())
             })?;

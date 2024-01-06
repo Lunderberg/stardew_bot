@@ -37,11 +37,11 @@ impl Pointer {
         process_io.read_exact(&mut buffer).map_err(|err| {
             let err_string = format!("{}", err);
             if err_string.contains("Operation not permitted") {
-                Error::MemoryReadPermissionError
+                Error::MemoryReadInsufficientPermission
             } else if err_string.contains("Bad address") {
                 Error::MemoryReadBadAddress
             } else {
-                Error::MemoryReadOtherError { err }
+                Error::MemoryReadOther { err }
             }
         })?;
 

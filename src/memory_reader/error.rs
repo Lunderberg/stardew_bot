@@ -15,16 +15,16 @@ pub enum Error {
          Consider temporarily disabling ptrace_scope protections \
          with 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'"
     )]
-    MemoryReadPermissionError,
+    MemoryReadInsufficientPermission,
     #[error("Bad address in remote process")]
     MemoryReadBadAddress,
     #[error("Error {err} reading process memory.")]
-    MemoryReadOtherError {
+    MemoryReadOther {
         #[source]
         err: std::io::Error,
     },
     #[error("Error {err} in TuiExplorer.")]
-    TuiIoError {
+    TuiIo {
         #[source]
         err: std::io::Error,
     },

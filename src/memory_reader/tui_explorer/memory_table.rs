@@ -160,7 +160,7 @@ impl ActiveSearch {
 
     fn search<F, const N: usize>(
         &mut self,
-        search_range: impl Iterator<Item = usize>,
+        search_range: impl IntoIterator<Item = usize>,
         last_char: Option<char>,
         mut row_generator: F,
     ) -> Option<usize>
@@ -168,13 +168,11 @@ impl ActiveSearch {
         F: FnMut(usize) -> [String; N],
     {
         let needle = self.get_search_string(last_char);
-        search_range
-            .filter(|row| {
-                row_generator(*row)
-                    .iter()
-                    .any(|cell_text| cell_text.contains(&needle))
-            })
-            .next()
+        search_range.into_iter().find(|row| {
+            row_generator(*row)
+                .iter()
+                .any(|cell_text| cell_text.contains(&needle))
+        })
     }
 
     // Select the most recent match if any exist, otherwise the
