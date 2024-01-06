@@ -16,13 +16,11 @@ use super::VerticalBar;
 use itertools::Either;
 
 pub struct MemoryTable {
-    reader: MemoryReader,
     view_stack: Vec<ViewFrame>,
     previous_height: Option<usize>,
 }
 
 struct ViewFrame {
-    reader: MemoryReader,
     region: MemoryRegion,
     entry_point: Pointer,
     table_state: TableState,
@@ -240,13 +238,8 @@ impl ActiveSearch {
 }
 
 impl ViewFrame {
-    pub fn new(
-        reader: MemoryReader,
-        region: MemoryRegion,
-        entry_point: Pointer,
-    ) -> Self {
+    pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
         let mut frame = ViewFrame {
-            reader,
             region,
             entry_point,
             table_state: TableState::default(),
@@ -292,14 +285,17 @@ impl ViewFrame {
         }
     }
 
-    fn apply_search_command(&mut self, command: SearchCommand) {
+    fn apply_search_command(
+        &mut self,
+        command: SearchCommand,
+        reader: &MemoryReader,
+    ) {
         use SearchCommand::*;
 
         let table_size = self.num_table_rows();
 
         match (self.search.as_mut(), command) {
             (Some(active), _) => {
-                let reader = &self.reader;
                 let region = &self.region;
                 let row_generator = |row| Self::row_text(reader, region, row);
                 active.apply_command(
@@ -378,29 +374,16 @@ impl ViewFrame {
 }
 
 impl MemoryTable {
-    pub fn new(
-        reader: MemoryReader,
-        region: MemoryRegion,
-        entry_point: Pointer,
-    ) -> Self {
+    pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
         Self {
-            view_stack: vec![ViewFrame::new(
-                reader.clone(),
-                region,
-                entry_point,
-            )],
+            view_stack: vec![ViewFrame::new(region, entry_point)],
             previous_height: None,
-            reader,
         }
     }
 
     pub fn push_view(&mut self, region: MemoryRegion, entry_point: Pointer) {
         self.finalize_search();
-        self.view_stack.push(ViewFrame::new(
-            self.reader.clone(),
-            region,
-            entry_point,
-        ));
+        self.view_stack.push(ViewFrame::new(region, entry_point));
     }
 
     pub fn pop_view(&mut self) {
@@ -479,23 +462,23 @@ impl MemoryTable {
         self.active_view_mut().finalize_search();
     }
 
-    pub fn search_forward(&mut self) {
-        self.active_view_mut()
-            .apply_search_command(SearchCommand::NextResult(
-                Direction::Forward,
-            ));
+    pub fn search_forward(&mut self, reader: &MemoryReader) {
+        self.active_view_mut().apply_search_command(
+            SearchCommand::NextResult(Direction::Forward),
+            reader,
+        );
     }
 
-    pub fn search_backward(&mut self) {
-        self.active_view_mut()
-            .apply_search_command(SearchCommand::NextResult(
-                Direction::Reverse,
-            ));
+    pub fn search_backward(&mut self, reader: &MemoryReader) {
+        self.active_view_mut().apply_search_command(
+            SearchCommand::NextResult(Direction::Reverse),
+            reader,
+        );
     }
 
-    pub fn add_search_character(&mut self, c: char) {
+    pub fn add_search_character(&mut self, c: char, reader: &MemoryReader) {
         self.active_view_mut()
-            .apply_search_command(SearchCommand::AddChar(c));
+            .apply_search_command(SearchCommand::AddChar(c), reader);
     }
 
     pub fn backspace_search_character(&mut self) {
