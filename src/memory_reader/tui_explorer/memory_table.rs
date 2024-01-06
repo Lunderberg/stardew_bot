@@ -6,7 +6,10 @@ use ratatui::{
     Frame,
 };
 
-use crate::memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer};
+use crate::{
+    memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer},
+    MemoryReader,
+};
 
 use super::VerticalBar;
 
@@ -488,7 +491,12 @@ impl MemoryTable {
         self.active_view().selected().unwrap_or(0)
     }
 
-    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn draw(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        reader: &MemoryReader,
+    ) {
         let borders: Vec<_> = self
             .view_stack
             .iter()
@@ -554,7 +562,7 @@ impl MemoryTable {
         );
         self.draw_search_area(frame, search_area);
         self.draw_scrollbar(frame, scrollbar_area);
-        self.draw_table(frame, table_area);
+        self.draw_table(frame, table_area, reader);
     }
 
     fn draw_search_area(&mut self, frame: &mut Frame, area: Rect) {
@@ -601,7 +609,12 @@ impl MemoryTable {
         frame.render_widget(bar, area);
     }
 
-    fn draw_table(&mut self, frame: &mut Frame, area: Rect) {
+    fn draw_table(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        reader: &MemoryReader,
+    ) {
         self.previous_height = Some(area.height as usize);
 
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
@@ -644,13 +657,14 @@ impl MemoryTable {
             spans.into()
         };
 
-        let header_cells = ["Address", "Hex", "ASCII"].iter().map(|h| {
-            Cell::from(*h).style(
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-        });
+        let header_cells =
+            ["Address", "Hex", "ASCII", "PointsTo"].iter().map(|h| {
+                Cell::from(*h).style(
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            });
         let header = Row::new(header_cells)
             .style(normal_style)
             .height(1)
@@ -694,7 +708,15 @@ impl MemoryTable {
                         is_selected,
                     )
                     .into();
-                    vec![loc, value, ascii]
+                    let points_to: Cell = format_text(
+                        &reader
+                            .find_containing_region(arr.value.into())
+                            .map(|pointed_region| pointed_region.short_name())
+                            .unwrap_or_else(String::new),
+                        is_selected,
+                    )
+                    .into();
+                    vec![loc, value, ascii, points_to]
                 } else {
                     vec![]
                 }
@@ -708,7 +730,7 @@ impl MemoryTable {
                 Constraint::Min((2 * POINTER_SIZE + 3) as u16),
                 Constraint::Min((2 * POINTER_SIZE + 3) as u16),
                 Constraint::Min((POINTER_SIZE + 1) as u16),
-                Constraint::Percentage(1),
+                Constraint::Percentage(100),
             ],
         )
         .header(header)

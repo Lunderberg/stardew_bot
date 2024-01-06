@@ -85,7 +85,7 @@ impl TuiExplorer {
             )
             .split(h_chunks[1]);
 
-        self.memory_table.draw(frame, h_chunks[0]);
+        self.memory_table.draw(frame, h_chunks[0], &self.reader);
         self.detail_view.draw(frame, v_chunks[0]);
         self.running_log.draw(frame, v_chunks[1]);
     }
