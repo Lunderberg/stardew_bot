@@ -19,6 +19,8 @@ pub struct FormatDecValue<T>(PhantomData<T>);
 pub struct FormatNullTerminatedString;
 pub struct FormatRegionPointedTo;
 pub struct FormatPointerOffset;
+pub struct FormatStringWithLength;
+pub struct FormatStringNullTerminated;
 
 impl FormatFromPointer for FormatSpacer {
     fn format(
@@ -157,5 +159,68 @@ impl FormatFromPointer for FormatPointerOffset {
     ) -> Option<impl Display> {
         let pointer = region.bytes_at_pointer(location).value.into();
         region.contains(pointer).then(|| pointer - location)
+    }
+}
+
+impl FormatFromPointer for FormatStringWithLength {
+    fn format(
+        &self,
+        _reader: &MemoryReader,
+        region: &MemoryRegion,
+        location: Pointer,
+    ) -> Option<impl Display> {
+        let pointer = region.bytes_at_pointer(location).value.into();
+        if !region.contains(pointer) {
+            return None;
+        }
+
+        let len_location = location - std::mem::size_of::<usize>();
+        if !region.contains(len_location) {
+            return None;
+        }
+        let len =
+            usize::from_ne_bytes(region.bytes_at_pointer(len_location).value);
+
+        let last_char = pointer + len - 1;
+        if !region.contains(last_char) {
+            return None;
+        }
+
+        let str = region
+            .iter_from_pointer(pointer)
+            .map(|mem_byte| mem_byte.value)
+            .take(len)
+            .take_while(|&byte| byte > 0)
+            .map(|byte| byte as char)
+            .collect::<String>();
+
+        Some(str)
+    }
+}
+
+impl FormatFromPointer for FormatStringNullTerminated {
+    fn format(
+        &self,
+        _reader: &MemoryReader,
+        region: &MemoryRegion,
+        location: Pointer,
+    ) -> Option<impl Display> {
+        let pointer = region.bytes_at_pointer(location).value.into();
+        if !region.contains(pointer) {
+            return None;
+        }
+
+        region
+            .iter_from_pointer(pointer)
+            .map(|mem_byte| mem_byte.value)
+            .take_while(|&byte| byte > 0)
+            .map(|byte| byte as char)
+            .map(|c| {
+                Some(c)
+                    .filter(|c| c.is_ascii())
+                    .filter(|c| !c.is_ascii_control())
+            })
+            .collect::<Option<String>>()
+            .filter(|str| str.len() > 2)
     }
 }
