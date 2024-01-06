@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use crate::{
     memory_reader::{MemoryRegion, Pointer},
     MemoryReader,
@@ -21,13 +19,14 @@ impl InfoFormatter for FormatNullTerminatedString {
         _reader: &MemoryReader,
         region: &MemoryRegion,
         location: Pointer,
-    ) -> Option<impl Display> {
+    ) -> Option<String> {
         region
             .iter_from_pointer(location)
             .take_while(|byte| byte.value > 0)
             .last()
             .map(|byte| &region[location..=byte.location])
             .and_then(|slice| std::str::from_utf8(slice).ok())
+            .map(|str| str.to_string())
     }
 }
 
@@ -41,7 +40,7 @@ impl InfoFormatter for FormatStringPointerWithLength {
         _reader: &MemoryReader,
         region: &MemoryRegion,
         location: Pointer,
-    ) -> Option<impl Display> {
+    ) -> Option<String> {
         let pointer = region.bytes_at_pointer(location)?.value.into();
         if !region.contains(pointer) {
             return None;
@@ -78,7 +77,7 @@ impl InfoFormatter for FormatStringPointerNullTerminated {
         _reader: &MemoryReader,
         region: &MemoryRegion,
         location: Pointer,
-    ) -> Option<impl Display> {
+    ) -> Option<String> {
         let pointer = region.bytes_at_pointer(location)?.value.into();
         if !region.contains(pointer) {
             return None;

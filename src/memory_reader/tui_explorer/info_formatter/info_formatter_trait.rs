@@ -3,8 +3,6 @@ use crate::{
     MemoryReader,
 };
 
-use std::fmt::Display;
-
 pub trait InfoFormatter {
     fn name(&self) -> &'static str;
 
@@ -13,5 +11,5 @@ pub trait InfoFormatter {
         reader: &MemoryReader,
         region: &MemoryRegion,
         location: Pointer,
-    ) -> Option<impl Display>;
+    ) -> Option<String>;
 }

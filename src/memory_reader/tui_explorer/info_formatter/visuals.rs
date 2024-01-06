@@ -1,5 +1,3 @@
-use std::fmt::Display;
-
 use crate::{
     memory_reader::{MemoryRegion, Pointer},
     MemoryReader,
@@ -20,8 +18,8 @@ impl InfoFormatter for FormatSpacer {
         _reader: &MemoryReader,
         _region: &MemoryRegion,
         _location: Pointer,
-    ) -> Option<impl Display> {
-        Some("")
+    ) -> Option<String> {
+        Some(String::default())
     }
 }
 
@@ -35,7 +33,7 @@ impl InfoFormatter for FormatLocation {
         _reader: &MemoryReader,
         _region: &MemoryRegion,
         location: Pointer,
-    ) -> Option<impl Display> {
-        Some(location)
+    ) -> Option<String> {
+        Some(format!("{location}"))
     }
 }

@@ -1,4 +1,4 @@
-use std::{fmt::Display, marker::PhantomData};
+use std::marker::PhantomData;
 
 use crate::{
     memory_reader::{MemoryRegion, Pointer},
@@ -35,7 +35,7 @@ macro_rules! primitive_formatter {
                 _reader: &MemoryReader,
                 region: &MemoryRegion,
                 location: Pointer,
-            ) -> Option<impl Display> {
+            ) -> Option<String> {
                 const ALIGNMENT: usize = std::mem::align_of::<$prim>();
                 let location = location.as_aligned(ALIGNMENT)?;
                 const NBYTES: usize = std::mem::size_of::<$prim>();
@@ -57,7 +57,7 @@ macro_rules! primitive_formatter {
                 _reader: &MemoryReader,
                 region: &MemoryRegion,
                 location: Pointer,
-            ) -> Option<impl Display> {
+            ) -> Option<String> {
                 const ALIGNMENT: usize = std::mem::align_of::<$prim>();
                 let location = location.as_aligned(ALIGNMENT)?;
 
