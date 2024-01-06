@@ -7,7 +7,9 @@ use ratatui::{
 };
 
 use crate::{
-    memory_reader::{CollectBytes, MemoryRegion, MemoryValue, Pointer},
+    memory_reader::{
+        CollectBytes, ColumnFormatter, MemoryRegion, MemoryValue, Pointer,
+    },
     MemoryReader,
 };
 
@@ -18,6 +20,7 @@ use itertools::Either;
 pub struct MemoryTable {
     view_stack: Vec<ViewFrame>,
     previous_height: Option<usize>,
+    formatters: Vec<Box<dyn ColumnFormatter>>,
 }
 
 struct ViewFrame {
@@ -47,17 +50,6 @@ enum SearchCommand {
 enum Direction {
     Forward,
     Reverse,
-}
-
-macro_rules! for_each_column {
-    ($macro:tt) => {
-        use super::column_formatter::*;
-
-        $macro! { AddressColumn }
-        $macro! { HexColumn }
-        $macro! { AsciiColumn }
-        $macro! { PointsToColumn }
-    };
 }
 
 impl ActiveSearch {
@@ -289,6 +281,7 @@ impl ViewFrame {
         &mut self,
         command: SearchCommand,
         reader: &MemoryReader,
+        formatters: &[Box<dyn ColumnFormatter>],
     ) {
         use SearchCommand::*;
 
@@ -297,7 +290,17 @@ impl ViewFrame {
         match (self.search.as_mut(), command) {
             (Some(active), _) => {
                 let region = &self.region;
-                let row_generator = |row| Self::row_text(reader, region, row);
+                let row_generator = |row: usize| -> Vec<String> {
+                    let row: MemoryValue<[u8; 8]> = region
+                        .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
+                        .unwrap_or_else(|| {
+                            panic!("Row {row} is outside of the memory region")
+                        });
+                    formatters
+                        .iter()
+                        .map(|formatter| formatter.format(reader, region, &row))
+                        .collect()
+                };
                 active.apply_command(
                     command,
                     table_size,
@@ -345,39 +348,21 @@ impl ViewFrame {
             "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})"
         )
     }
-
-    fn row_text(
-        reader: &MemoryReader,
-        region: &MemoryRegion,
-        row: usize,
-    ) -> Vec<String> {
-        let row: MemoryValue<[u8; 8]> = region
-            .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
-            .unwrap_or_else(|| {
-                panic!("Row {row} is outside of the memory region")
-            });
-
-        let mut row_text = Vec::new();
-
-        macro_rules! generate_text {
-            ($formatter:expr) => {
-                let formatter = $formatter;
-                let cell_text = formatter.format(reader, region, &row);
-                row_text.push(cell_text);
-            };
-        }
-
-        for_each_column! {generate_text}
-
-        row_text
-    }
 }
 
 impl MemoryTable {
     pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
+        use super::column_formatter::*;
+
         Self {
             view_stack: vec![ViewFrame::new(region, entry_point)],
             previous_height: None,
+            formatters: vec![
+                Box::new(AddressColumn),
+                Box::new(HexColumn),
+                Box::new(AsciiColumn),
+                Box::new(PointsToColumn),
+            ],
         }
     }
 
@@ -463,22 +448,21 @@ impl MemoryTable {
     }
 
     pub fn search_forward(&mut self, reader: &MemoryReader) {
-        self.active_view_mut().apply_search_command(
+        self.apply_search_command(
             SearchCommand::NextResult(Direction::Forward),
             reader,
         );
     }
 
     pub fn search_backward(&mut self, reader: &MemoryReader) {
-        self.active_view_mut().apply_search_command(
+        self.apply_search_command(
             SearchCommand::NextResult(Direction::Reverse),
             reader,
         );
     }
 
     pub fn add_search_character(&mut self, c: char, reader: &MemoryReader) {
-        self.active_view_mut()
-            .apply_search_command(SearchCommand::AddChar(c), reader);
+        self.apply_search_command(SearchCommand::AddChar(c), reader);
     }
 
     pub fn backspace_search_character(&mut self) {
@@ -487,6 +471,21 @@ impl MemoryTable {
 
     pub fn cancel_search(&mut self) {
         self.active_view_mut().cancel_search();
+    }
+
+    fn apply_search_command(
+        &mut self,
+        command: SearchCommand,
+        reader: &MemoryReader,
+    ) {
+        // Can't use `self.active_view_mut()` here, because that would
+        // mutably borrow `self`, preventing the immutable borrow of
+        // `self.formatters`.
+        let view = self
+            .view_stack
+            .last_mut()
+            .expect("MemoryTable may not contain empty view_stack");
+        view.apply_search_command(command, reader, &self.formatters);
     }
 
     fn displayed_rows(&self) -> usize {
@@ -678,26 +677,17 @@ impl MemoryTable {
             spans.into()
         };
 
-        let header_cells = {
-            let mut headers = Vec::new();
-
-            macro_rules! push_header {
-                ($formatter:expr) => {
-                    let formatter = $formatter;
-                    headers.push(formatter.name());
-                };
-            }
-            for_each_column! { push_header }
-            headers
-        }
-        .into_iter()
-        .map(|header| {
-            Cell::from(header).style(
-                Style::default()
-                    .fg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD),
-            )
-        });
+        let header_cells = self
+            .formatters
+            .iter()
+            .map(|formatter| formatter.name())
+            .map(|header| {
+                Cell::from(header).style(
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            });
         let header = Row::new(header_cells)
             .style(normal_style)
             .height(1)
@@ -716,25 +706,15 @@ impl MemoryTable {
 
                 let is_selected = i == selected;
 
-                let mut cells = Vec::new();
+                let region = &self.active_view().region;
+                let cells = self
+                    .formatters
+                    .iter()
+                    .filter(|_| is_near_selected)
+                    .map(|formatter| formatter.format(&reader, region, &row))
+                    .map(|text| format_text(&text, is_selected));
 
-                if is_near_selected {
-                    let region = &self.active_view().region;
-
-                    macro_rules! make_cell {
-                        ($formatter:expr) => {
-                            let formatter = $formatter;
-                            let text = formatter.format(&reader, region, &row);
-                            let line = format_text(&text, is_selected);
-                            let cell: Cell = line.into();
-                            cells.push(cell);
-                        };
-                    }
-
-                    for_each_column! {make_cell}
-                }
-
-                Row::new(cells.into_iter()).height(1).bottom_margin(0)
+                Row::new(cells).height(1).bottom_margin(0)
             });
 
         let table = Table::new(

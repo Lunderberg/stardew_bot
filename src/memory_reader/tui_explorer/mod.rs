@@ -17,6 +17,7 @@ mod vertical_bar;
 pub use vertical_bar::*;
 
 pub mod column_formatter;
+pub use column_formatter::ColumnFormatter;
 
 pub mod info_formatter;
 pub use info_formatter::InfoFormatter;
