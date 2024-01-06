@@ -29,10 +29,27 @@ impl TuiExplorer {
                 &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
             )
             .unwrap_or_else(|| memory_region.end());
+
+        let detail_view = {
+            use super::info_formatter::*;
+
+            DetailView::new(vec![
+                Box::new(FormatLocation),
+                Box::new(FormatHexValue::<u64>::new()),
+                Box::new(FormatDecValue::<u64>::new()),
+                Box::new(FormatNullTerminatedString),
+                Box::new(FormatSpacer),
+                Box::new(FormatRegionPointedTo),
+                Box::new(FormatPointerOffset),
+                Box::new(FormatStringPointerWithLength),
+                Box::new(FormatStringPointerNullTerminated),
+            ])
+        };
+
         let mut out = Self {
             running_log: RunningLog::new(100),
             memory_table: MemoryTable::new(memory_region, stack_entry_point),
-            detail_view: DetailView::new(),
+            detail_view,
             _pid: pid,
             reader,
         };
@@ -212,50 +229,12 @@ impl TuiExplorer {
     }
 
     fn update_details(&mut self) {
-        use super::info_formatter::*;
-        // use crate::memory_reader::value_unpacker::*;
-
         let selection = self.memory_table.selected_value();
-        let mut details = Vec::new();
 
-        macro_rules! add_details {
-            ($formatter:expr) => {
-                let formatter = $formatter;
-                if let Some(display) = formatter.format(
-                    &self.reader,
-                    self.memory_table.current_region(),
-                    selection.location,
-                ) {
-                    details.push(
-                        (
-                            formatter.name(),
-                            format!("{display}"),
-                        )
-                    );
-                }
-            };
-
-            (
-                $($formatter:expr,)*
-            ) => {
-                $(
-                    add_details!{ $formatter }
-                )*
-            };
-        }
-
-        add_details! {
-            FormatLocation,
-            FormatHexValue::<u64>::new(),
-            FormatDecValue::<u64>::new(),
-            FormatNullTerminatedString,
-            FormatSpacer,
-            FormatRegionPointedTo,
-            FormatPointerOffset,
-            FormatStringPointerWithLength,
-            FormatStringPointerNullTerminated,
-        }
-
-        self.detail_view.load_details(details.into_iter());
+        self.detail_view.update_details(
+            &self.reader,
+            self.memory_table.current_region(),
+            selection.location,
+        );
     }
 }

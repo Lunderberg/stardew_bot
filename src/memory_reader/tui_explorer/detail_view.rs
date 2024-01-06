@@ -4,24 +4,43 @@ use ratatui::{
     Frame,
 };
 
+use crate::{
+    memory_reader::{MemoryRegion, Pointer},
+    MemoryReader,
+};
+
+use super::InfoFormatter;
+
 pub struct DetailView {
     state: TableState,
     values: Vec<(&'static str, String)>,
+    formatters: Vec<Box<dyn InfoFormatter>>,
 }
 
 impl DetailView {
-    pub fn new() -> Self {
+    pub fn new(formatters: Vec<Box<dyn InfoFormatter>>) -> Self {
         Self {
             state: TableState::default(),
             values: Vec::new(),
+            formatters,
         }
     }
 
-    pub fn load_details<I>(&mut self, details: I)
-    where
-        I: Iterator<Item = (&'static str, String)>,
-    {
-        self.values = details.collect();
+    pub fn update_details(
+        &mut self,
+        reader: &MemoryReader,
+        region: &MemoryRegion,
+        pointer: Pointer,
+    ) {
+        self.values = self
+            .formatters
+            .iter()
+            .filter_map(|formatter| {
+                formatter
+                    .format(reader, region, pointer)
+                    .map(|text| (formatter.name(), text))
+            })
+            .collect()
     }
 
     pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
