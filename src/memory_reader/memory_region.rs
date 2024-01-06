@@ -30,6 +30,10 @@ impl MemoryRegion {
         self.start + self.bytes.len()
     }
 
+    pub fn contains(&self, location: Pointer) -> bool {
+        self.source.contains(location)
+    }
+
     pub fn name(&self) -> String {
         self.source.short_name()
     }

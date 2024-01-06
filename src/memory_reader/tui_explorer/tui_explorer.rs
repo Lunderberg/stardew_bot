@@ -222,9 +222,10 @@ impl TuiExplorer {
             "Location" => FormatLocation,
             "Hex Value" => FormatHexValue::<u8>::new(),
             "Dec Value" => FormatDecValue::<u64>::new(),
+            "UTF-8" => FormatNullTerminatedString,
             "" => FormatSpacer,
             "Points to" => FormatRegionPointedTo,
-            "UTF-8" => FormatNullTerminatedString,
+            "Offset" => FormatPointerOffset,
         }
 
         self.detail_view.load_details(details.into_iter());
