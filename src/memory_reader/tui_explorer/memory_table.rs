@@ -639,8 +639,7 @@ impl MemoryTable {
 
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
-        let search_result_current_style = Style::default().bg(Color::Yellow);
-        let search_result_other_style = Style::default().bg(Color::LightYellow);
+        let search_result_style = Style::default().bg(Color::Yellow);
 
         let search_string: String = self
             .active_view()
@@ -649,12 +648,8 @@ impl MemoryTable {
             .map(|search_state| search_state.get_search_string(None))
             .unwrap_or_default();
 
-        let format_text = |text: &str, is_selected: bool| -> Line {
-            let result_style = if is_selected {
-                search_result_current_style
-            } else {
-                search_result_other_style
-            };
+        let format_text = |text: &str| -> Line {
+            let result_style = search_result_style;
 
             let mut spans = Vec::new();
             let mut haystack: &str = text;
@@ -704,15 +699,13 @@ impl MemoryTable {
                 let is_near_selected =
                     i.abs_diff(selected) < (area.height as usize);
 
-                let is_selected = i == selected;
-
                 let region = &self.active_view().region;
                 let cells = self
                     .formatters
                     .iter()
                     .filter(|_| is_near_selected)
                     .map(|formatter| formatter.format(&reader, region, &row))
-                    .map(|text| format_text(&text, is_selected));
+                    .map(|text| format_text(&text));
 
                 Row::new(cells).height(1).bottom_margin(0)
             });
