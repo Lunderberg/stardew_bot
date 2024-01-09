@@ -15,7 +15,7 @@ use crate::{
 
 use super::VerticalBar;
 
-use itertools::Either;
+use itertools::{Either, Itertools};
 
 pub struct MemoryTable {
     view_stack: Vec<ViewFrame>,
@@ -641,35 +641,30 @@ impl MemoryTable {
         let normal_style = Style::default().bg(Color::Blue);
         let search_result_style = Style::default().bg(Color::Yellow);
 
-        let search_string: String = self
+        let search_string = self
             .active_view()
             .search
             .as_ref()
-            .map(|search_state| search_state.get_search_string(None))
-            .unwrap_or_default();
+            .map(|search_state| search_state.get_search_string(None));
 
-        let format_text = |text: &str| -> Line {
+        let highlight_search_matches = |text: &str| -> Line {
             let result_style = search_result_style;
 
-            let mut spans = Vec::new();
-            let mut haystack: &str = text;
-            if !search_string.is_empty() {
-                while let Some(pos) = haystack.find(&search_string) {
-                    if pos > 0 {
-                        spans.push(Span::raw(haystack[..pos].to_string()));
-                    }
-                    let end = pos + search_string.len();
-                    spans.push(Span::styled(
-                        haystack[pos..end].to_string(),
-                        result_style,
-                    ));
-                    haystack = &haystack[end..];
+            match search_string.as_ref() {
+                Some(split_on) if !split_on.is_empty() => {
+                    Either::Left(text.split(split_on))
                 }
+                _ => Either::Right(std::iter::once(text)),
             }
-            if !haystack.is_empty() {
-                spans.push(Span::raw(haystack.to_string()));
-            }
-            spans.into()
+            .map(|s| Span::raw(s.to_string()))
+            .intersperse_with(|| {
+                Span::styled(
+                    search_string.clone().unwrap_or_default(),
+                    result_style,
+                )
+            })
+            .collect::<Vec<_>>()
+            .into()
         };
 
         let header_cells = self
@@ -704,8 +699,8 @@ impl MemoryTable {
                     .formatters
                     .iter()
                     .filter(|_| is_near_selected)
-                    .map(|formatter| formatter.format(&reader, region, &row))
-                    .map(|text| format_text(&text));
+                    .map(|formatter| formatter.format(reader, region, &row))
+                    .map(|text| highlight_search_matches(&text));
 
                 Row::new(cells).height(1).bottom_margin(0)
             });
