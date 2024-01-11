@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
+use std::ops::Range;
 use std::path::PathBuf;
 
 use super::{
@@ -83,6 +84,17 @@ impl MemoryReader {
 
     pub fn stack(&self) -> Result<&MemoryMapRegion> {
         self.find_region("[stack]").ok_or(Error::StackNotFound)
+    }
+
+    pub fn libc_address_ranges(&self) -> Vec<Range<Pointer>> {
+        self.regions
+            .iter()
+            .filter(|region| {
+                let name = region.short_name();
+                name.starts_with("libc-") && name.ends_with(".so")
+            })
+            .map(|region| region.address_range())
+            .collect()
     }
 
     pub fn read_stack(&self) -> Result<MemoryRegion> {

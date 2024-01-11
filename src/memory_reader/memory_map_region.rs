@@ -1,5 +1,5 @@
-use std::fmt::Display;
 use std::path::Path;
+use std::{fmt::Display, ops::Range};
 
 use super::{MemoryRegion, Pointer, Result};
 
@@ -47,6 +47,10 @@ impl MemoryMapRegion {
 
     pub fn size_bytes(&self) -> usize {
         self.end - self.start
+    }
+
+    pub fn address_range(&self) -> Range<Pointer> {
+        self.start..self.end
     }
 
     pub fn contains(&self, ptr: Pointer) -> bool {

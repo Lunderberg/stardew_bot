@@ -29,17 +29,11 @@ pub trait CollectBytes: Iterator<Item = MemoryValue<u8>> {
 
 impl<T> CollectBytes for T where T: Iterator<Item = MemoryValue<u8>> {}
 
-pub struct ByteCollector<I, const N: usize>
-where
-    I: Iterator<Item = MemoryValue<u8>>,
-{
+pub struct ByteCollector<I, const N: usize> {
     iter: I,
 }
 
-impl<I, const N: usize> ByteCollector<I, N>
-where
-    I: Iterator<Item = MemoryValue<u8>>,
-{
+impl<I, const N: usize> ByteCollector<I, N> {
     fn new(iter: I) -> Self {
         Self { iter }
     }
@@ -55,14 +49,30 @@ where
         let mut value = [0; N];
 
         for (i, element) in value.iter_mut().enumerate() {
-            if let Some(val) = self.iter.next() {
-                if i == 0 {
-                    location = val.location;
-                }
-                *element = val.value;
-            } else {
-                return None;
+            let val = self.iter.next()?;
+            if i == 0 {
+                location = val.location;
             }
+            *element = val.value;
+        }
+        Some(Self::Item { location, value })
+    }
+}
+
+impl<I, const N: usize> DoubleEndedIterator for ByteCollector<I, N>
+where
+    I: DoubleEndedIterator<Item = MemoryValue<u8>>,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        let mut location = Pointer::null();
+        let mut value = [0; N];
+
+        for (i, element) in value.iter_mut().enumerate().rev() {
+            let val = self.iter.next_back()?;
+            if i == 0 {
+                location = val.location;
+            }
+            *element = val.value;
         }
         Some(Self::Item { location, value })
     }

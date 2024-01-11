@@ -1,4 +1,4 @@
-use super::{MemoryMapRegion, MemoryValue, Pointer};
+use super::{CollectBytes as _, MemoryMapRegion, MemoryValue, Pointer};
 
 use std::ops::{Index, Range, RangeInclusive};
 
@@ -107,6 +107,40 @@ impl MemoryRegion {
 
     pub(crate) fn data(&self) -> &[u8] {
         &self.bytes
+    }
+
+    pub fn stack_pointers(
+        &self,
+        libc_address_ranges: Vec<Range<Pointer>>,
+    ) -> impl Iterator<Item = Pointer> + '_ {
+        self.bytes
+            .iter()
+            .enumerate()
+            .map(|(i, &val)| MemoryValue::new(self.start + i, val))
+            .iter_byte_arr()
+            .rev()
+            .map(|bytes: MemoryValue<[u8; 8]>| -> MemoryValue<Pointer> {
+                bytes.map(|b| b.into())
+            })
+            // The bottom stack frame has a return pointer into libc.so
+            .skip_while(move |pointer| {
+                libc_address_ranges.iter().all(|libc_address_range| {
+                    !libc_address_range.contains(&pointer.value)
+                })
+            })
+            .scan(Pointer::null(), |state: &mut Pointer, pointer| {
+                // So the bottom stack frame pointer is the first NULL
+                // after a pointer to libc.so, and every stack frame
+                // after that can be found by searching for a pointer
+                // to the previous.
+                if *state == pointer.value {
+                    *state = pointer.location;
+                    Some(Some(pointer.location))
+                } else {
+                    Some(None)
+                }
+            })
+            .filter_map(|x| x)
     }
 }
 

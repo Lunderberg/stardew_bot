@@ -24,10 +24,15 @@ impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self> {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
-        let stack_entry_point = memory_region
-            .rfind_pattern(
-                &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
-            )
+
+        let bottom_stack_frame = memory_region
+            .stack_pointers(reader.libc_address_ranges())
+            .next();
+        let x86_64_tag = memory_region.rfind_pattern(
+            &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
+        );
+        let stack_entry_point = bottom_stack_frame
+            .or(x86_64_tag)
             .unwrap_or_else(|| memory_region.end());
 
         let detail_view = {
