@@ -7,6 +7,9 @@ pub use terminal_context::*;
 mod running_log;
 pub use running_log::*;
 
+mod stack_frame_table;
+pub use stack_frame_table::*;
+
 mod memory_table;
 pub use memory_table::*;
 
@@ -21,3 +24,5 @@ pub use column_formatter::ColumnFormatter;
 
 pub mod info_formatter;
 pub use info_formatter::InfoFormatter;
+
+pub(crate) mod extensions;

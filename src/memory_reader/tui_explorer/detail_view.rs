@@ -52,11 +52,7 @@ impl DetailView {
 
         let table = Table::new(
             rows,
-            [
-                Constraint::Percentage(50),
-                Constraint::Length(30),
-                Constraint::Min(10),
-            ],
+            [Constraint::Min(15), Constraint::Percentage(100)],
         )
         .block(Block::default().borders(Borders::ALL).title("Detail View"));
         frame.render_stateful_widget(table, area, &mut self.state);

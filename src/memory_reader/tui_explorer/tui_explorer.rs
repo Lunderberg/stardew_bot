@@ -1,8 +1,11 @@
+use crate::memory_reader::tui_explorer::extensions::*;
 use crate::memory_reader::{
     Error, MemoryReader, Pointer, Result, SigintHandler,
 };
 
-use super::{DetailView, MemoryTable, RunningLog, TerminalContext};
+use super::{
+    DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
+};
 
 use crossterm::event::Event;
 use ratatui::{
@@ -15,6 +18,7 @@ pub struct TuiExplorer {
     _pid: u32,
     reader: MemoryReader,
     // Display widgets
+    stack_frame_table: StackFrameTable,
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
@@ -52,6 +56,7 @@ impl TuiExplorer {
         };
 
         let mut out = Self {
+            stack_frame_table: StackFrameTable::new(&reader, &memory_region),
             running_log: RunningLog::new(100),
             memory_table: MemoryTable::new(memory_region, stack_entry_point),
             detail_view,
@@ -91,25 +96,26 @@ impl TuiExplorer {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let h_chunks = Layout::default()
+        let (stack_view, mem_view, detail_column) = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)
-            .constraints(
-                [Constraint::Min(60), Constraint::Percentage(40)].as_ref(),
-            )
-            .split(frame.size());
+            .constraints([
+                Constraint::Percentage(100),
+                Constraint::Min(80),
+                Constraint::Min(40),
+            ])
+            .split_tuple(frame.size());
 
-        let v_chunks = Layout::default()
+        let (detail_view, log_view) = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
-            .constraints(
-                [Constraint::Min(20), Constraint::Percentage(30)].as_ref(),
-            )
-            .split(h_chunks[1]);
+            .constraints([Constraint::Min(20), Constraint::Percentage(30)])
+            .split_tuple(detail_column);
 
-        self.memory_table.draw(frame, h_chunks[0], &self.reader);
-        self.detail_view.draw(frame, v_chunks[0]);
-        self.running_log.draw(frame, v_chunks[1]);
+        self.stack_frame_table.draw(frame, stack_view);
+        self.memory_table.draw(frame, mem_view, &self.reader);
+        self.detail_view.draw(frame, detail_view);
+        self.running_log.draw(frame, log_view);
     }
 
     fn update_state(&mut self, event: Event) -> Result<bool> {
@@ -235,6 +241,10 @@ impl TuiExplorer {
 
     fn update_details(&mut self) {
         let selection = self.memory_table.selected_value();
+
+        // TODO: Move this to a better location?  Should the cursor be
+        // able to be moved up/down directly in the stack frames?
+        self.stack_frame_table.select_address(selection.location);
 
         self.detail_view.update_details(
             &self.reader,
