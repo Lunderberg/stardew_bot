@@ -255,6 +255,20 @@ impl ViewFrame {
         self.table_state.selected()
     }
 
+    fn selected_address(&self) -> Pointer {
+        let row: usize = self.selected().unwrap_or(0);
+        let byte_offset = row * MemoryRegion::POINTER_SIZE;
+        self.region.at_offset(byte_offset)
+    }
+
+    fn selected_value(&self) -> MemoryValue<[u8; 8]> {
+        let row: usize = self.selected().unwrap_or(0);
+        let byte_offset = row * MemoryRegion::POINTER_SIZE;
+        self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
+            panic!("Selected row {row} is outside of the MemoryRegion")
+        })
+    }
+
     fn select_address(&mut self, address: Pointer) {
         let row = (address - self.region.start()) / MemoryRegion::POINTER_SIZE;
         let row = row.clamp(0, self.num_table_rows() - 1);
@@ -285,6 +299,7 @@ impl ViewFrame {
     ) {
         use SearchCommand::*;
 
+        let selected_address = self.selected_address();
         let table_size = self.num_table_rows();
 
         match (self.search.as_mut(), command) {
@@ -298,7 +313,14 @@ impl ViewFrame {
                         });
                     formatters
                         .iter()
-                        .map(|formatter| formatter.format(reader, region, &row))
+                        .map(|formatter| {
+                            formatter.cell_text(
+                                reader,
+                                region,
+                                selected_address,
+                                &row,
+                            )
+                        })
                         .collect()
                 };
                 active.apply_command(
@@ -322,14 +344,6 @@ impl ViewFrame {
             }
             (None, AddChar(_)) => {}
         }
-    }
-
-    fn selected_value(&self) -> MemoryValue<[u8; 8]> {
-        let row: usize = self.selected().unwrap_or(0);
-        let byte_offset = row * MemoryRegion::POINTER_SIZE;
-        self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
-            panic!("Selected row {row} is outside of the MemoryRegion")
-        })
     }
 
     fn title(&self) -> String {
@@ -637,6 +651,9 @@ impl MemoryTable {
     ) {
         self.previous_height = Some(area.height as usize);
 
+        let selected_row = self.selected_row();
+        let selected_address = self.active_view().selected_address();
+
         let selected_style = Style::default().add_modifier(Modifier::REVERSED);
         let normal_style = Style::default().bg(Color::Blue);
         let search_result_style = Style::default().bg(Color::Yellow);
@@ -647,24 +664,35 @@ impl MemoryTable {
             .as_ref()
             .map(|search_state| search_state.get_search_string(None));
 
-        let highlight_search_matches = |text: &str| -> Line {
-            let result_style = search_result_style;
-
-            match search_string.as_ref() {
-                Some(split_on) if !split_on.is_empty() => {
-                    Either::Left(text.split(split_on))
-                }
-                _ => Either::Right(std::iter::once(text)),
+        let highlight_search_matches = |line| {
+            if search_string.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return line;
             }
-            .map(|s| Span::raw(s.to_string()))
-            .intersperse_with(|| {
-                Span::styled(
-                    search_string.clone().unwrap_or_default(),
-                    result_style,
-                )
-            })
-            .collect::<Vec<_>>()
-            .into()
+
+            let Line { spans, alignment } = line;
+            let search_string: &str = search_string.as_ref().unwrap();
+
+            // Not technically correct, as it doesn't handle cases
+            // where the match crosses a border between spans.  But,
+            // close enough for now.
+            let spans = spans
+                .into_iter()
+                .flat_map(|span| {
+                    span.content
+                        .split(search_string)
+                        .map(|s| Span::styled(s.to_string(), span.style))
+                        .intersperse_with(|| {
+                            Span::styled(
+                                search_string.to_string(),
+                                span.style.patch(search_result_style),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                })
+                .collect();
+
+            Line { spans, alignment }
         };
 
         let header_cells = self
@@ -678,29 +706,37 @@ impl MemoryTable {
                         .add_modifier(Modifier::BOLD),
                 )
             });
+
         let header = Row::new(header_cells)
             .style(normal_style)
             .height(1)
             .bottom_margin(1);
-        let rows = self
-            .active_view()
+
+        let active_view = self.view_stack.last_mut().unwrap();
+
+        let rows = active_view
             .region
             .iter_bytes()
             .iter_byte_arr()
             .enumerate()
             .map(|(i, row): (_, MemoryValue<[u8; 8]>)| {
-                let selected = self.selected_row();
-
                 let is_near_selected =
-                    i.abs_diff(selected) < (area.height as usize);
+                    i.abs_diff(selected_row) < (area.height as usize);
 
-                let region = &self.active_view().region;
+                let region = &active_view.region;
                 let cells = self
                     .formatters
                     .iter()
                     .filter(|_| is_near_selected)
-                    .map(|formatter| formatter.format(reader, region, &row))
-                    .map(|text| highlight_search_matches(&text));
+                    .map(|formatter| {
+                        formatter.formatted_cell(
+                            reader,
+                            region,
+                            selected_address,
+                            &row,
+                        )
+                    })
+                    .map(move |line| highlight_search_matches(line));
 
                 Row::new(cells).height(1).bottom_margin(0)
             });
@@ -718,10 +754,6 @@ impl MemoryTable {
         .highlight_style(selected_style)
         .highlight_symbol(">> ");
 
-        frame.render_stateful_widget(
-            table,
-            area,
-            &mut self.active_view_mut().table_state,
-        );
+        frame.render_stateful_widget(table, area, &mut active_view.table_state);
     }
 }

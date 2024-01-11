@@ -36,6 +36,10 @@ impl MemoryRegion {
         self.source.contains(location)
     }
 
+    pub fn at_offset(&self, byte_offset: usize) -> Pointer {
+        self.start + byte_offset
+    }
+
     pub fn rfind_pattern(&self, pat: &[u8]) -> Option<Pointer> {
         self.bytes
             .windows(pat.len())
