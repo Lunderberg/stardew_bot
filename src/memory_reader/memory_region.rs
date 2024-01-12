@@ -64,7 +64,6 @@ impl MemoryRegion {
             MemoryValue::new(self.start + byte_offset, bytes)
         })
     }
-
     pub fn bytes_at_pointer<const N: usize>(
         &self,
         location: Pointer,
@@ -112,7 +111,7 @@ impl MemoryRegion {
     pub fn stack_pointers(
         &self,
         libc_address_ranges: Vec<Range<Pointer>>,
-    ) -> impl Iterator<Item = Pointer> + '_ {
+    ) -> impl Iterator<Item = MemoryValue<Pointer>> + '_ {
         self.bytes
             .iter()
             .enumerate()
@@ -135,7 +134,7 @@ impl MemoryRegion {
                 // to the previous.
                 if *state == pointer.value {
                     *state = pointer.location;
-                    Some(Some(pointer.location))
+                    Some(Some(pointer))
                 } else {
                     Some(None)
                 }

@@ -31,6 +31,7 @@ impl TuiExplorer {
 
         let bottom_stack_frame = memory_region
             .stack_pointers(reader.libc_address_ranges())
+            .map(|p| p.location)
             .next();
         let x86_64_tag = memory_region.rfind_pattern(
             &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
@@ -112,7 +113,7 @@ impl TuiExplorer {
             .constraints([Constraint::Min(20), Constraint::Percentage(30)])
             .split_tuple(detail_column);
 
-        self.stack_frame_table.draw(frame, stack_view);
+        self.stack_frame_table.draw(frame, stack_view, &self.reader);
         self.memory_table.draw(frame, mem_view, &self.reader);
         self.detail_view.draw(frame, detail_view);
         self.running_log.draw(frame, log_view);
