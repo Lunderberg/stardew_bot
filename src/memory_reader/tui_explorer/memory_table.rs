@@ -10,7 +10,7 @@ use crate::{
     memory_reader::{
         CollectBytes, ColumnFormatter, MemoryRegion, MemoryValue, Pointer,
     },
-    MemoryReader,
+    MemoryReader, NonEmptyVec,
 };
 
 use super::VerticalBar;
@@ -18,7 +18,7 @@ use super::VerticalBar;
 use itertools::{Either, Itertools};
 
 pub struct MemoryTable {
-    view_stack: Vec<ViewFrame>,
+    view_stack: NonEmptyVec<ViewFrame>,
     previous_height: Option<usize>,
     formatters: Vec<Box<dyn ColumnFormatter>>,
 }
@@ -31,7 +31,7 @@ struct ViewFrame {
 }
 
 struct ActiveSearch {
-    stack: Vec<SearchItem>,
+    stack: NonEmptyVec<SearchItem>,
     pre_search_state: TableState,
 }
 
@@ -108,8 +108,7 @@ impl ActiveSearch {
         use Direction::*;
         use SearchCommand::*;
 
-        let previous_result: Option<usize> =
-            self.stack.last().unwrap().search_result;
+        let previous_result: Option<usize> = self.stack.last().search_result;
 
         let previous_direction = self
             .stack
@@ -192,8 +191,7 @@ impl ActiveSearch {
         use Direction::*;
         use SearchCommand::*;
 
-        let is_failing_search =
-            self.stack.last().as_ref().unwrap().search_result.is_none();
+        let is_failing_search = self.stack.last().search_result.is_none();
 
         let is_wrapped_search = self
             .stack
@@ -336,9 +334,8 @@ impl ViewFrame {
                     command,
                     search_result: Some(initial_row),
                 };
-                let stack = vec![initial_item];
                 self.search = Some(ActiveSearch {
-                    stack,
+                    stack: NonEmptyVec::new(initial_item),
                     pre_search_state: self.table_state.clone(),
                 });
             }
@@ -369,7 +366,7 @@ impl MemoryTable {
         use super::column_formatter::*;
 
         Self {
-            view_stack: vec![ViewFrame::new(region, entry_point)],
+            view_stack: NonEmptyVec::new(ViewFrame::new(region, entry_point)),
             previous_height: None,
             formatters: vec![
                 Box::new(AddressColumn),
@@ -495,11 +492,11 @@ impl MemoryTable {
         // Can't use `self.active_view_mut()` here, because that would
         // mutably borrow `self`, preventing the immutable borrow of
         // `self.formatters`.
-        let view = self
-            .view_stack
-            .last_mut()
-            .expect("MemoryTable may not contain empty view_stack");
-        view.apply_search_command(command, reader, &self.formatters);
+        self.view_stack.last_mut().apply_search_command(
+            command,
+            reader,
+            &self.formatters,
+        );
     }
 
     fn displayed_rows(&self) -> usize {
@@ -510,15 +507,11 @@ impl MemoryTable {
     }
 
     fn active_view(&self) -> &ViewFrame {
-        self.view_stack
-            .last()
-            .expect("MemoryTable may not contain empty view_stack")
+        self.view_stack.last()
     }
 
     fn active_view_mut(&mut self) -> &mut ViewFrame {
-        self.view_stack
-            .last_mut()
-            .expect("MemoryTable may not contain empty view_stack")
+        self.view_stack.last_mut()
     }
 
     fn selected_row(&self) -> usize {
@@ -712,7 +705,7 @@ impl MemoryTable {
             .height(1)
             .bottom_margin(1);
 
-        let active_view = self.view_stack.last_mut().unwrap();
+        let active_view = self.view_stack.last_mut();
 
         let rows = active_view
             .region

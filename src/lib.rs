@@ -14,3 +14,6 @@ pub use memory_reader::{MemoryReader, SigintHandler, TuiExplorer};
 
 mod error;
 pub use error::{Error, Result};
+
+mod non_empty_vec;
+pub(crate) use non_empty_vec::*;
