@@ -118,7 +118,10 @@ impl ActiveSearch {
                 NextResult(dir) => Some(dir),
                 _ => None,
             })
-            .unwrap();
+            .expect(
+                "If no others, \
+                 first item in search stack should have direction",
+            );
 
         let search_range = match (&command, previous_result, previous_direction)
         {
@@ -183,7 +186,10 @@ impl ActiveSearch {
             .iter()
             .rev()
             .find_map(|item| item.search_result)
-            .unwrap();
+            .expect(
+                "If no others, \
+                 first item in search stack should be Some(row)",
+            );
         table_state.select(Some(selected_row));
     }
 
@@ -211,7 +217,10 @@ impl ActiveSearch {
                 NextResult(dir) => Some(dir),
                 AddChar(_) => None,
             })
-            .unwrap();
+            .expect(
+                "If no others, \
+                 first item in search stack should have direction",
+            );
 
         let desc = match (is_failing_search, is_wrapped_search, direction) {
             (false, false, Forward) => "I-search",
