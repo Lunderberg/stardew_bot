@@ -70,7 +70,12 @@ impl std::ops::Sub for Pointer {
     type Output = usize;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self.address - rhs.address
+        self.address.checked_sub(rhs.address).unwrap_or_else(|| {
+            panic!(
+                "Subtracting {rhs} from {self} causes overflow (diff = -{})",
+                rhs - self
+            )
+        })
     }
 }
 

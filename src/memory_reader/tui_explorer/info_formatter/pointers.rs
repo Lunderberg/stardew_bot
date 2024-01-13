@@ -39,9 +39,12 @@ impl InfoFormatter for FormatPointerOffset {
         location: Pointer,
     ) -> Option<String> {
         let pointer = region.bytes_at_pointer(location)?.value.into();
-        region
-            .contains(pointer)
-            .then(|| pointer - location)
-            .map(|offset| format!("{offset}"))
+        region.contains(pointer).then(|| {
+            if location < pointer {
+                format!("+{}", pointer - location)
+            } else {
+                format!("-{}", location - pointer)
+            }
+        })
     }
 }
