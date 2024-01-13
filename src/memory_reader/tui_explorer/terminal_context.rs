@@ -44,28 +44,60 @@ fn make_panic_hook() -> (
              {payload}"
         );
 
-        {
+        let _ = {
             let env =
                 std::env::var("RUST_BACKTRACE").unwrap_or("0".to_string());
             match env.as_str() {
                 "full" => {
                     let backtrace = std::backtrace::Backtrace::capture();
-                    let _ = write!(message, "\n{backtrace:#}");
+                    write!(message, "\n{backtrace:#}")
                 }
                 "1" => {
                     let backtrace = std::backtrace::Backtrace::capture();
-                    let _ = write!(message, "\n{backtrace}");
+                    // TODO: When `backtrace_frames` is stabilized,
+                    // filter out stack frames before formatting.  As
+                    // it is, a stack trace can be formatted, but not
+                    // much else.
+                    //
+                    // https://github.com/rust-lang/rust/issues/79676
+
+                    let backtrace_str = format!("{backtrace}");
+                    let mut backtrace: &str = &backtrace_str;
+
+                    if let Some(end) =
+                        backtrace.find("__rust_begin_short_backtrace")
+                    {
+                        backtrace = &backtrace[..end];
+                        let newline = backtrace.rfind('\n').unwrap_or(0);
+                        backtrace = &backtrace[..=newline];
+                    }
+
+                    // The default formatter includes the column,
+                    // which may be different between the stack trace
+                    // and the panic location.
+                    let location =
+                        format!("{}:{}", location.file(), location.line());
+                    if let Some(begin) = backtrace.find(&location) {
+                        let begin = backtrace[..begin].rfind('\n').unwrap_or(0);
+                        let begin = backtrace[..begin]
+                            .rfind('\n')
+                            .map(|i| i + 1)
+                            .unwrap_or(0);
+                        backtrace = &backtrace[begin..];
+                    }
+
+                    write!(message, "\n{backtrace}")
                 }
                 _ => {
-                    let _ = writeln!(
+                    writeln!(
                         message,
                         "\n\
                          note: run with `RUST_BACKTRACE=1` environment variable \
                          to display a backtrace"
-                    );
+                    )
                 }
             }
-        }
+        };
 
         let _ = message_arc.lock().unwrap().insert(message);
     };
