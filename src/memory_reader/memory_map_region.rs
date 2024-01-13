@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::{fmt::Display, ops::Range};
 
-use super::{MemoryRegion, Pointer, Result};
+use super::{Error, MemoryRegion, Pointer, Result};
 
 #[derive(Debug, Clone)]
 pub struct MemoryMapRegion {
@@ -16,33 +16,38 @@ pub struct MemoryMapRegion {
 }
 
 impl MemoryMapRegion {
-    pub fn new(map_range: proc_maps::MapRange, pid: u32) -> Self {
-        Self {
+    pub fn new(map_range: proc_maps::MapRange, pid: u32) -> Result<Self> {
+        let name = map_range
+            .filename()
+            .map(|p| {
+                p.to_str()
+                    .ok_or(Error::InvalidUTF8InPath)
+                    .map(|s| s.to_string())
+            })
+            .transpose()?;
+        Ok(Self {
             pid,
             start: map_range.start().into(),
             end: (map_range.start() + map_range.size()).into(),
-            name: map_range
-                .filename()
-                .map(|p| p.to_str().unwrap().to_string()),
+            name,
             is_readable: map_range.is_read(),
             is_writable: map_range.is_write(),
             is_executable: map_range.is_exec(),
             is_shared_memory: &map_range.flags[3..4] == "s",
-        }
+        })
     }
 
-    pub fn short_name(&self) -> String {
-        self.name.as_ref().map_or_else(
-            || "[anon]".to_string(),
-            |name: &String| {
+    pub fn short_name(&self) -> &str {
+        self.name
+            .as_ref()
+            .map(|name: &String| {
                 Path::new(name)
                     .file_name()
-                    .unwrap()
+                    .expect("mmap region ends in ..")
                     .to_str()
-                    .unwrap()
-                    .to_string()
-            },
-        )
+                    .unwrap_or("Non-UTF8 string after splitting path")
+            })
+            .unwrap_or("[anon]")
     }
 
     pub fn size_bytes(&self) -> usize {

@@ -29,8 +29,7 @@ impl Pointer {
 
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
         let mut process_io =
-            unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }
-                .unwrap();
+            unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }?;
 
         let mut buffer = vec![0u8; num_bytes];
 

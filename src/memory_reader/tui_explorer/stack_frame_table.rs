@@ -2,7 +2,7 @@ use std::cmp::Reverse;
 
 use ratatui::{
     layout::{Constraint, Rect},
-    widgets::{Block, Borders, Table, TableState},
+    widgets::{Block, Borders, Cell, Table, TableState},
     Frame,
 };
 
@@ -74,11 +74,13 @@ impl StackFrameTable {
             .rev()
             .map(|frame| {
                 [
-                    format!("{}", frame.frame_pointer.location),
-                    reader
-                        .find_containing_region(frame.return_address.value)
-                        .map(|reg| reg.short_name())
-                        .unwrap_or("".to_string()),
+                    Cell::new(format!("{}", frame.frame_pointer.location)),
+                    Cell::new(
+                        reader
+                            .find_containing_region(frame.return_address.value)
+                            .map(|reg| reg.short_name())
+                            .unwrap_or(""),
+                    ),
                 ]
                 .collect_row()
             })

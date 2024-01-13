@@ -8,6 +8,8 @@ pub enum Error {
     MemoryMapNotFound(u32),
     #[error("Stack memory map not found")]
     StackNotFound,
+    #[error("Path not convertible to UTF-8")]
+    InvalidUTF8InPath,
     #[error("Could not find memory map {0}")]
     MissingMemoryMapSection(String),
     #[error(
@@ -28,10 +30,21 @@ pub enum Error {
         #[source]
         err: std::io::Error,
     },
+    #[error("Error {err} reading process memory")]
+    ProcessVM {
+        #[source]
+        err: process_vm_io::Error,
+    },
 }
 
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self)
+    }
+}
+
+impl From<process_vm_io::Error> for Error {
+    fn from(err: process_vm_io::Error) -> Self {
+        Error::ProcessVM { err }
     }
 }

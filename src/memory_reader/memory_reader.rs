@@ -27,12 +27,15 @@ impl MemoryReader {
     }
 
     fn get_memory_regions(pid: u32) -> Result<Vec<MemoryMapRegion>> {
-        let process_maps = proc_maps::get_process_maps(pid.try_into().unwrap())
-            .map_err(|_| Error::MemoryMapNotFound(pid))?
-            .into_iter()
-            .map(|map_range| MemoryMapRegion::new(map_range, pid))
-            .collect();
-        Ok(process_maps)
+        proc_maps::get_process_maps(
+            pid.try_into().unwrap_or_else(|_| {
+                panic!("Could not convert PID {pid} to pid_t")
+            }),
+        )
+        .map_err(|_| Error::MemoryMapNotFound(pid))?
+        .into_iter()
+        .map(|map_range| MemoryMapRegion::new(map_range, pid))
+        .collect()
     }
 
     fn find_region(&self, name: &str) -> Option<&MemoryMapRegion> {
@@ -186,7 +189,7 @@ impl MemoryReader {
 
         let unique_stack_to_stack = stack_to_stack
             .into_iter()
-            .filter(|ptr_ptr| counts.get(&ptr_ptr.value).unwrap() == &1)
+            .filter(|ptr_ptr| matches!(counts.get(&ptr_ptr.value), Some(1)))
             .collect();
 
         Ok(unique_stack_to_stack)

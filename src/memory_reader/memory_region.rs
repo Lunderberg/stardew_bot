@@ -51,7 +51,7 @@ impl MemoryRegion {
             .map(|(offset, _)| self.start + offset)
     }
 
-    pub fn name(&self) -> String {
+    pub fn name(&self) -> &str {
         self.source.short_name()
     }
 

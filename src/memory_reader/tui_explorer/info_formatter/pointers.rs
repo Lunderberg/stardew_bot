@@ -23,7 +23,7 @@ impl InfoFormatter for FormatRegionPointedTo {
         let pointer: Pointer = data.value.into();
         reader
             .find_containing_region(pointer)
-            .map(|pointed_region| pointed_region.short_name())
+            .map(|pointed_region| pointed_region.short_name().to_string())
     }
 }
 

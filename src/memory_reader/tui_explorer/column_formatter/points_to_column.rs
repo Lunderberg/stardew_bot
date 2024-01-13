@@ -23,5 +23,6 @@ impl ColumnFormatter for PointsToColumn {
             .find_containing_region(row.value.into())
             .map(|pointed_region| pointed_region.short_name())
             .unwrap_or_default()
+            .to_string()
     }
 }
