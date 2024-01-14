@@ -6,12 +6,11 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    MemoryReader,
-    {CollectBytes, ColumnFormatter, MemoryRegion, MemoryValue, Pointer},
+use memory_reader::{
+    CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
 
-use super::{NonEmptyVec, VerticalBar};
+use crate::{ColumnFormatter, NonEmptyVec, VerticalBar};
 
 use itertools::{Either, Itertools};
 

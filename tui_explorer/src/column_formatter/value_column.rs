@@ -4,9 +4,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use crate::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use super::ColumnFormatter;
+use crate::ColumnFormatter;
 
 pub struct HexColumn;
 pub struct AsciiColumn;

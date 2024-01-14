@@ -473,13 +473,9 @@ dependencies = [
 name = "memory_reader"
 version = "0.1.0"
 dependencies = [
- "chrono",
- "crossterm",
  "itertools 0.10.3",
  "proc-maps",
  "process_vm_io",
- "ratatui",
- "signal-hook",
  "thiserror",
 ]
 
@@ -831,6 +827,7 @@ dependencies = [
  "memory_reader",
  "sysinfo",
  "thiserror",
+ "tui_explorer",
 ]
 
 [[package]]
@@ -910,6 +907,19 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.48",
+]
+
+[[package]]
+name = "tui_explorer"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "crossterm",
+ "itertools 0.10.3",
+ "memory_reader",
+ "ratatui",
+ "signal-hook",
+ "thiserror",
 ]
 
 [[package]]

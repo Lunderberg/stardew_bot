@@ -1,7 +1,7 @@
 mod error;
 use error::Error;
 
-use memory_reader::TuiExplorer;
+use tui_explorer::TuiExplorer;
 
 use sysinfo::{PidExt, ProcessExt, SystemExt};
 

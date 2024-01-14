@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::{Error, Result};
+use crate::Error;
 
 use ratatui::{backend, Terminal};
 
@@ -106,20 +106,18 @@ fn make_panic_hook() -> (
 }
 
 impl TerminalContext {
-    pub fn new() -> Result<Self> {
+    pub fn new() -> Result<Self, Error> {
         use crossterm::{event, execute, terminal};
 
-        terminal::enable_raw_mode().map_err(|err| Error::TuiIo { err })?;
+        terminal::enable_raw_mode()?;
         let mut stdout = std::io::stdout();
         execute!(
             stdout,
             terminal::EnterAlternateScreen,
             event::EnableMouseCapture,
-        )
-        .map_err(|err| Error::TuiIo { err })?;
+        )?;
         let backend = backend::CrosstermBackend::new(stdout);
-        let terminal =
-            Terminal::new(backend).map_err(|err| Error::TuiIo { err })?;
+        let terminal = Terminal::new(backend)?;
 
         let (panic_info, panic_hook) = make_panic_hook();
         std::panic::set_hook(Box::new(panic_hook));

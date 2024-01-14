@@ -2,6 +2,7 @@
 members = [
   "memory_reader",
   "stardew_bot",
+  "tui_explorer",
 ]
 resolver = "2"
 

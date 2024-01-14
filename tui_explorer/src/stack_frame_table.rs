@@ -6,9 +6,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use super::extensions::*;
+use crate::extensions::*;
 
 pub struct StackFrameTable {
     stack_frames: Vec<StackFrame>,

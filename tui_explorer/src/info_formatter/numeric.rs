@@ -1,8 +1,8 @@
 use std::marker::PhantomData;
 
-use crate::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
-use super::InfoFormatter;
+use crate::InfoFormatter;
 
 pub struct FormatHexValue<T>(PhantomData<T>);
 pub struct FormatDecValue<T>(PhantomData<T>);

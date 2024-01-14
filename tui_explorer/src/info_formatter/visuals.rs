@@ -1,4 +1,4 @@
-use crate::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
 use super::InfoFormatter;
 

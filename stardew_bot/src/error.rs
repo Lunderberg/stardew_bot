@@ -4,10 +4,17 @@ use thiserror::Error;
 pub enum Error {
     #[error("Stardew Valley process not running")]
     StardewNotRunning,
+
     #[error("{err}")]
     MemoryReadError {
         #[from]
         err: memory_reader::Error,
+    },
+
+    #[error("{err}")]
+    TuiError {
+        #[from]
+        err: tui_explorer::Error,
     },
 }
 

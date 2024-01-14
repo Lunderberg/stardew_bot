@@ -10,20 +10,40 @@
 // [2] https://github.com/rust-lang/rust/issues/89151
 #![allow(unstable_name_collisions)]
 
-mod memory_reader;
-pub use memory_reader::MemoryReader;
+mod tui_explorer;
+pub use tui_explorer::*;
 
 mod error;
-pub use error::{Error, Result};
+pub use error::Error;
 
-mod memory_map_region;
-pub use memory_map_region::*;
+mod terminal_context;
+pub use terminal_context::*;
 
-mod memory_region;
-pub use memory_region::*;
+mod sigint_handler;
+pub use sigint_handler::*;
 
-mod pointer;
-pub use pointer::*;
+mod running_log;
+pub use running_log::*;
 
-mod memory_value;
-pub use memory_value::*;
+mod stack_frame_table;
+pub use stack_frame_table::*;
+
+mod memory_table;
+pub use memory_table::*;
+
+mod detail_view;
+pub use detail_view::*;
+
+mod vertical_bar;
+pub use vertical_bar::*;
+
+pub mod column_formatter;
+pub use column_formatter::ColumnFormatter;
+
+pub mod info_formatter;
+pub use info_formatter::InfoFormatter;
+
+pub(crate) mod extensions;
+
+mod non_empty_vec;
+pub(crate) use non_empty_vec::NonEmptyVec;

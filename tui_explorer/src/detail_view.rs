@@ -4,9 +4,9 @@ use ratatui::{
     Frame,
 };
 
-use crate::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
-use super::InfoFormatter;
+use crate::InfoFormatter;
 
 pub struct DetailView {
     state: TableState,

@@ -1,5 +1,7 @@
-use crate::tui_explorer::extensions::*;
-use crate::{Error, MemoryReader, Pointer, Result, SigintHandler};
+use crate::extensions::*;
+use crate::{Error, SigintHandler};
+
+use memory_reader::{MemoryReader, Pointer};
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
@@ -23,7 +25,7 @@ pub struct TuiExplorer {
 }
 
 impl TuiExplorer {
-    pub fn new(pid: u32) -> Result<Self> {
+    pub fn new(pid: u32) -> Result<Self, Error> {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
 
@@ -67,24 +69,20 @@ impl TuiExplorer {
         Ok(out)
     }
 
-    pub fn run(&mut self) -> Result<()> {
+    pub fn run(&mut self) -> Result<(), Error> {
         use crossterm::event;
 
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
         while !handler.received() {
-            context
-                .draw(|frame| self.draw(frame))
-                .map_err(|err| Error::TuiIo { err })?;
+            context.draw(|frame| self.draw(frame))?;
 
             let timeout = std::time::Duration::from_millis(100);
-            let poll =
-                event::poll(timeout).map_err(|err| Error::TuiIo { err })?;
+            let poll = event::poll(timeout)?;
 
             if poll {
-                let event_received =
-                    event::read().map_err(|err| Error::TuiIo { err })?;
+                let event_received = event::read()?;
                 let should_exit = self.update_state(event_received)?;
                 if should_exit {
                     break;
@@ -117,7 +115,7 @@ impl TuiExplorer {
         self.running_log.draw(frame, log_view);
     }
 
-    fn update_state(&mut self, event: Event) -> Result<bool> {
+    fn update_state(&mut self, event: Event) -> Result<bool, Error> {
         use crossterm::event::{KeyCode, KeyModifiers};
         if let Event::Key(key) = event {
             match (key.code, key.modifiers) {

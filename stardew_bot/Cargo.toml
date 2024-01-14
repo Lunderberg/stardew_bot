@@ -13,3 +13,4 @@ thiserror = "*"
 itertools = "*"
 sysinfo = "*"
 memory_reader = {path = "../memory_reader"}
+tui_explorer = {path = "../tui_explorer"}
