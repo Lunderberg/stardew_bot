@@ -9,7 +9,13 @@ fn stardew_valley_pid() -> Result<u32> {
         .iter()
         .map(|(_pid, proc)| proc)
         .find(|proc| {
-            proc.name() == "Stardew Valley" || proc.name() == "StardewValley"
+            let correct_name = proc.name() == "Stardew Valley"
+                || proc.name() == "StardewValley";
+            let is_bash_script = matches!(
+                proc.exe().file_name().and_then(|s| s.to_str()),
+                Some("bash")
+            );
+            correct_name && !is_bash_script
         })
         .map(|proc| proc.pid().as_u32())
         .ok_or(Error::StardewNotRunning)
