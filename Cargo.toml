@@ -1,5 +1,6 @@
 [workspace]
 members = [
+  "memory_reader",
   "stardew_bot",
 ]
 resolver = "2"

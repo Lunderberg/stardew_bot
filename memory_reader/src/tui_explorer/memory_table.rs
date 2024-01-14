@@ -7,13 +7,11 @@ use ratatui::{
 };
 
 use crate::{
-    memory_reader::{
-        CollectBytes, ColumnFormatter, MemoryRegion, MemoryValue, Pointer,
-    },
-    MemoryReader, NonEmptyVec,
+    MemoryReader,
+    {CollectBytes, ColumnFormatter, MemoryRegion, MemoryValue, Pointer},
 };
 
-use super::VerticalBar;
+use super::{NonEmptyVec, VerticalBar};
 
 use itertools::{Either, Itertools};
 

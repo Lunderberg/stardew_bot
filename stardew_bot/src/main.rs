@@ -1,8 +1,11 @@
-use stardew_bot::{Error, Result, TuiExplorer};
+mod error;
+use error::Error;
+
+use memory_reader::TuiExplorer;
 
 use sysinfo::{PidExt, ProcessExt, SystemExt};
 
-fn stardew_valley_pid() -> Result<u32> {
+fn stardew_valley_pid() -> Result<u32, Error> {
     let mut sys = sysinfo::System::new_all();
     sys.refresh_processes();
     sys.processes()
@@ -21,7 +24,7 @@ fn stardew_valley_pid() -> Result<u32> {
         .ok_or(Error::StardewNotRunning)
 }
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Error> {
     let pid = stardew_valley_pid()?;
 
     println!("Stardew PID: {}", pid);

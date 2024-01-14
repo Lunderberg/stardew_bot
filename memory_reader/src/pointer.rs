@@ -3,7 +3,7 @@ use std::io::Read;
 
 use process_vm_io::ProcessVirtualMemoryIO;
 
-use crate::memory_reader::{Error, Result};
+use crate::{Error, Result};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pointer {

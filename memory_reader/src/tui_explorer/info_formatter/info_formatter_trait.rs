@@ -1,7 +1,4 @@
-use crate::{
-    memory_reader::{MemoryRegion, Pointer},
-    MemoryReader,
-};
+use crate::{MemoryReader, MemoryRegion, Pointer};
 
 pub trait InfoFormatter {
     fn name(&self) -> &'static str;

@@ -8,12 +8,28 @@
 // [0] https://github.com/rust-lang/rust/issues/88967
 // [1] https://github.com/rust-lang/rfcs/pull/2845
 // [2] https://github.com/rust-lang/rust/issues/89151
-#[allow(unstable_name_collisions)]
+#![allow(unstable_name_collisions)]
+
 mod memory_reader;
-pub use memory_reader::{MemoryReader, SigintHandler, TuiExplorer};
+pub use memory_reader::MemoryReader;
 
 mod error;
 pub use error::{Error, Result};
 
-mod non_empty_vec;
-pub(crate) use non_empty_vec::*;
+mod memory_map_region;
+pub use memory_map_region::*;
+
+mod memory_region;
+pub use memory_region::*;
+
+mod pointer;
+pub use pointer::*;
+
+mod memory_value;
+pub use memory_value::*;
+
+mod tui_explorer;
+pub use tui_explorer::*;
+
+mod sigint_handler;
+pub use sigint_handler::*;

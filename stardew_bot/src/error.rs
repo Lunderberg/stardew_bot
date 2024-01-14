@@ -1,8 +1,4 @@
-use super::memory_reader::Error as MemoryReadError;
-
 use thiserror::Error;
-
-pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Error)]
 pub enum Error {
@@ -11,7 +7,7 @@ pub enum Error {
     #[error("{err}")]
     MemoryReadError {
         #[from]
-        err: MemoryReadError,
+        err: memory_reader::Error,
     },
 }
 

@@ -4,7 +4,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use crate::memory_reader::{Error, Result};
+use crate::{Error, Result};
 
 use ratatui::{backend, Terminal};
 

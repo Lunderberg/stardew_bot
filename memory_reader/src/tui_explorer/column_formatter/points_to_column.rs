@@ -1,7 +1,4 @@
-use crate::{
-    memory_reader::{MemoryRegion, MemoryValue, Pointer},
-    MemoryReader,
-};
+use crate::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use super::ColumnFormatter;
 

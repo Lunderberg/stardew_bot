@@ -1,9 +1,6 @@
 use ratatui::text::Line;
 
-use crate::{
-    memory_reader::{MemoryRegion, MemoryValue, Pointer},
-    MemoryReader,
-};
+use crate::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 pub trait ColumnFormatter {
     fn name(&self) -> &'static str;

@@ -1,7 +1,5 @@
-use crate::memory_reader::tui_explorer::extensions::*;
-use crate::memory_reader::{
-    Error, MemoryReader, Pointer, Result, SigintHandler,
-};
+use crate::tui_explorer::extensions::*;
+use crate::{Error, MemoryReader, Pointer, Result, SigintHandler};
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,

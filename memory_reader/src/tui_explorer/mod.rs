@@ -26,3 +26,6 @@ pub mod info_formatter;
 pub use info_formatter::InfoFormatter;
 
 pub(crate) mod extensions;
+
+mod non_empty_vec;
+pub(crate) use non_empty_vec::NonEmptyVec;

@@ -8,16 +8,8 @@ edition = "2021"
 name = "stardew_bot"
 path = "src/main.rs"
 
-[lib]
-name = "stardew_bot"
-
 [dependencies]
-sysinfo = "*"
-itertools = "*"
-proc-maps = "*"
-process_vm_io = "*"
 thiserror = "*"
-ratatui = "*"
-crossterm = "*"
-signal-hook = "*"
-chrono = "*"
+itertools = "*"
+sysinfo = "*"
+memory_reader = {path = "../memory_reader"}

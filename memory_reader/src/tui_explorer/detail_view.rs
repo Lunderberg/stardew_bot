@@ -4,10 +4,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{
-    memory_reader::{MemoryRegion, Pointer},
-    MemoryReader,
-};
+use crate::{MemoryReader, MemoryRegion, Pointer};
 
 use super::InfoFormatter;
 
