@@ -1,0 +1,23 @@
+[package]
+name = "stardew_bot"
+version = "0.1.0"
+edition = "2021"
+
+
+[[bin]]
+name = "stardew_bot"
+path = "src/main.rs"
+
+[lib]
+name = "stardew_bot"
+
+[dependencies]
+sysinfo = "*"
+itertools = "*"
+proc-maps = "*"
+process_vm_io = "*"
+thiserror = "*"
+ratatui = "*"
+crossterm = "*"
+signal-hook = "*"
+chrono = "*"

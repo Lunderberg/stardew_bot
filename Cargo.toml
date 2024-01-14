@@ -1,27 +1,9 @@
-[package]
-name = "stardew_bot"
-version = "0.1.0"
-edition = "2021"
+[workspace]
+members = [
+  "stardew_bot",
+]
+resolver = "2"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [profile.release]
 debug = true
-
-[[bin]]
-name = "stardew_bot"
-path = "src/main.rs"
-
-[lib]
-name = "stardew_bot"
-
-[dependencies]
-sysinfo = "*"
-itertools = "*"
-proc-maps = "*"
-process_vm_io = "*"
-thiserror = "*"
-ratatui = "*"
-crossterm = "*"
-signal-hook = "*"
-chrono = "*"
