@@ -6,6 +6,7 @@ use ratatui::{
     Frame,
 };
 
+use memory_reader::extensions::*;
 use memory_reader::{
     CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
@@ -361,8 +362,15 @@ impl ViewFrame {
             ("-", entry_point - selected)
         };
 
+        let prefix = self.region.as_range().prefix();
+
+        let selected = selected - prefix;
+        let entry_point = entry_point - prefix;
+
         format!(
-            "{region_name} @ {selected} ({entry_point} {sign} 0x{offset:x})"
+            "{region_name} (offset {prefix}) \
+             @ {selected:#x} \
+             ({entry_point:#x} {sign} 0x{offset:x})"
         )
     }
 }
@@ -740,10 +748,13 @@ impl MemoryTable {
                 Row::new(cells).height(1).bottom_margin(0)
             });
 
+        let address_width =
+            active_view.region.as_range().suffix_hexadecimal_digits();
+
         let table = Table::new(
             rows,
             [
-                Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
+                Constraint::Min((address_width + 3) as u16),
                 Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
                 Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
                 Constraint::Percentage(100),

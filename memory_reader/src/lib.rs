@@ -27,3 +27,5 @@ pub use pointer::*;
 
 mod memory_value;
 pub use memory_value::*;
+
+pub mod extensions;

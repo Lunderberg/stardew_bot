@@ -98,7 +98,7 @@ impl TuiExplorer {
             .margin(1)
             .constraints([
                 Constraint::Percentage(100),
-                Constraint::Min(80),
+                Constraint::Min(65),
                 Constraint::Min(40),
             ])
             .split_tuple(frame.size());

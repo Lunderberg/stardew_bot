@@ -7,7 +7,7 @@ use crate::{Error, Result};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pointer {
-    address: usize,
+    pub(crate) address: usize,
 }
 
 impl Pointer {

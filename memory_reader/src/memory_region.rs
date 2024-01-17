@@ -24,6 +24,11 @@ impl MemoryRegion {
 
     pub const POINTER_SIZE: usize = std::mem::size_of::<usize>();
 
+    pub fn as_range(&self) -> Range<Pointer> {
+        let end = self.start + self.bytes.len();
+        self.start..end
+    }
+
     pub fn start(&self) -> Pointer {
         self.start
     }

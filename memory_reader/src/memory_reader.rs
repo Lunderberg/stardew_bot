@@ -12,8 +12,8 @@ use super::{
 use itertools::Itertools;
 
 pub struct MemoryReader {
-    pid: u32,
-    regions: Vec<MemoryMapRegion>,
+    pub pid: u32,
+    pub regions: Vec<MemoryMapRegion>,
 }
 
 impl MemoryReader {
