@@ -264,6 +264,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e78d4f1cc4ae33bbfc157ed5d5a5ef3bc29227303d595861deb238fcec4e9457"
 
 [[package]]
+name = "elf"
+version = "0.7.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4445909572dbd556c457c849c4ca58623d84b27c8fff1e74b0b4227d8b90d17b"
+
+[[package]]
 name = "errno"
 version = "0.3.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -347,15 +353,6 @@ name = "indoc"
 version = "2.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1e186cfbae8084e513daff4240b4797e342f988cecda4fb6c939150f96315fd8"
-
-[[package]]
-name = "itertools"
-version = "0.10.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9a9d19fa1e79b6215ff29b9d6880b706147f16e9b1dbb1e4e5947b5b02bc5e3"
-dependencies = [
- "either",
-]
 
 [[package]]
 name = "itertools"
@@ -473,7 +470,8 @@ dependencies = [
 name = "memory_reader"
 version = "0.1.0"
 dependencies = [
- "itertools 0.10.3",
+ "elf",
+ "itertools",
  "proc-maps",
  "process_vm_io",
  "thiserror",
@@ -658,7 +656,7 @@ dependencies = [
  "cassowary",
  "crossterm",
  "indoc",
- "itertools 0.12.0",
+ "itertools",
  "lru",
  "paste",
  "stability",
@@ -823,7 +821,8 @@ dependencies = [
 name = "stardew_bot"
 version = "0.1.0"
 dependencies = [
- "itertools 0.10.3",
+ "elf",
+ "itertools",
  "memory_reader",
  "sysinfo",
  "thiserror",
@@ -915,7 +914,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
- "itertools 0.10.3",
+ "itertools",
  "memory_reader",
  "ratatui",
  "signal-hook",

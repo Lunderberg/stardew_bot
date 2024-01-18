@@ -8,6 +8,7 @@ pub struct MemoryMapRegion {
     pid: u32,
     start: Pointer,
     end: Pointer,
+    file_offset: usize,
     pub name: Option<String>,
     pub is_executable: bool,
     pub is_readable: bool,
@@ -29,6 +30,7 @@ impl MemoryMapRegion {
             pid,
             start: map_range.start().into(),
             end: (map_range.start() + map_range.size()).into(),
+            file_offset: map_range.offset,
             name,
             is_readable: map_range.is_read(),
             is_writable: map_range.is_write(),
@@ -52,6 +54,10 @@ impl MemoryMapRegion {
 
     pub fn size_bytes(&self) -> usize {
         self.end - self.start
+    }
+
+    pub fn mmap_start_address(&self) -> Pointer {
+        self.start - self.file_offset
     }
 
     pub fn address_range(&self) -> Range<Pointer> {

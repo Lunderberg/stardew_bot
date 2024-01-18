@@ -1,7 +1,7 @@
 use crate::extensions::*;
 use crate::{Error, SigintHandler};
 
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, Symbol};
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
@@ -17,6 +17,7 @@ pub struct TuiExplorer {
     // Application state
     _pid: u32,
     reader: MemoryReader,
+    symbols: Vec<Symbol>,
     // Display widgets
     stack_frame_table: StackFrameTable,
     running_log: RunningLog,
@@ -28,6 +29,12 @@ impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self, Error> {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
+
+        let symbols: Vec<Symbol> = reader
+            .regions
+            .iter()
+            .flat_map(Symbol::iter_symbols)
+            .collect();
 
         let bottom_stack_frame = memory_region
             .stack_pointers(reader.libc_address_ranges())
@@ -50,6 +57,7 @@ impl TuiExplorer {
                 Box::new(FormatNullTerminatedString),
                 Box::new(FormatSpacer),
                 Box::new(FormatRegionPointedTo),
+                Box::new(FormatSymbolPointedTo(symbols.clone())),
                 Box::new(FormatPointerOffset),
                 Box::new(FormatStringPointerWithLength),
                 Box::new(FormatStringPointerNullTerminated),
@@ -60,6 +68,7 @@ impl TuiExplorer {
             stack_frame_table: StackFrameTable::new(&reader, &memory_region),
             running_log: RunningLog::new(100),
             memory_table: MemoryTable::new(memory_region, stack_entry_point),
+            symbols,
             detail_view,
             _pid: pid,
             reader,

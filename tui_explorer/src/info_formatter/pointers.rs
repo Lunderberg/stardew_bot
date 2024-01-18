@@ -1,9 +1,10 @@
-use memory_reader::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, Pointer, Symbol};
 
 use crate::InfoFormatter;
 
 pub struct FormatRegionPointedTo;
 pub struct FormatPointerOffset;
+pub struct FormatSymbolPointedTo(pub Vec<Symbol>);
 
 impl InfoFormatter for FormatRegionPointedTo {
     fn name(&self) -> &'static str {
@@ -43,5 +44,26 @@ impl InfoFormatter for FormatPointerOffset {
                 format!("-{}", location - pointer)
             }
         })
+    }
+}
+
+impl InfoFormatter for FormatSymbolPointedTo {
+    fn name(&self) -> &'static str {
+        "Symbol"
+    }
+
+    fn format(
+        &self,
+        _reader: &MemoryReader,
+        region: &MemoryRegion,
+        location: Pointer,
+    ) -> Option<String> {
+        let data = region.bytes_at_pointer(location)?;
+        let pointer: Pointer = data.value.into();
+
+        self.0
+            .iter()
+            .find(|symbol| symbol.location.contains(&pointer))
+            .map(|symbol| symbol.name.clone())
     }
 }

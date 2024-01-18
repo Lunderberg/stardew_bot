@@ -30,6 +30,18 @@ pub enum Error {
         #[from]
         err: process_vm_io::Error,
     },
+
+    #[error(transparent)]
+    Io {
+        #[from]
+        err: std::io::Error,
+    },
+
+    #[error(transparent)]
+    InvalidElfFormat {
+        #[from]
+        err: elf::ParseError,
+    },
 }
 
 impl std::fmt::Debug for Error {
