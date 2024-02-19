@@ -17,7 +17,7 @@ use itertools::{Either, Itertools};
 
 pub struct MemoryTable {
     view_stack: NonEmptyVec<ViewFrame>,
-    previous_height: Option<usize>,
+
     formatters: Vec<Box<dyn ColumnFormatter>>,
 }
 
@@ -26,6 +26,7 @@ struct ViewFrame {
     entry_point: Pointer,
     table_state: TableState,
     search: Option<ActiveSearch>,
+    previous_height: Option<usize>,
 }
 
 struct ActiveSearch {
@@ -241,6 +242,7 @@ impl ViewFrame {
             entry_point,
             table_state: TableState::default(),
             search: None,
+            previous_height: None,
         };
 
         frame.select_address(entry_point);
@@ -256,18 +258,18 @@ impl ViewFrame {
         self.table_state.select(Some(row));
     }
 
-    fn selected_row(&self) -> Option<usize> {
-        self.table_state.selected()
+    fn selected_row(&self) -> usize {
+        self.table_state.selected().unwrap_or(0)
     }
 
     fn selected_address(&self) -> Pointer {
-        let row: usize = self.selected_row().unwrap_or(0);
+        let row: usize = self.selected_row();
         let byte_offset = row * MemoryRegion::POINTER_SIZE;
         self.region.at_offset(byte_offset)
     }
 
     fn selected_value(&self) -> MemoryValue<[u8; 8]> {
-        let row: usize = self.selected_row().unwrap_or(0);
+        let row: usize = self.selected_row();
         let byte_offset = row * MemoryRegion::POINTER_SIZE;
         self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
             panic!("Selected row {row} is outside of the MemoryRegion")
@@ -381,6 +383,211 @@ impl ViewFrame {
         frame.render_widget(border, area);
         inner_area
     }
+
+    fn draw_inner(
+        &mut self,
+        frame: &mut Frame,
+        inner_area: Rect,
+        reader: &MemoryReader,
+        formatters: &[Box<dyn ColumnFormatter>],
+    ) {
+        // Layout.split puts all excess space into the last widget,
+        // which I want to be a fixed size.  Doing the layout
+        // explicitly, at least until there are more flexible
+        // utilities.
+        //
+        // Should keep an eye on
+        // https://github.com/fdehau/tui-rs/pull/596 and
+        // https://github.com/fdehau/tui-rs/pull/519 to see if the
+        // utilites improve.
+
+        let search_area_height = if self.search.is_some() {
+            inner_area.height.min(3)
+        } else {
+            0
+        };
+        let table_height = inner_area.height - search_area_height;
+        let header_height = table_height.min(2);
+        let scrollbar_width = inner_area.width.min(1);
+
+        let search_area = Rect::new(
+            inner_area.x,
+            inner_area.bottom() - search_area_height,
+            inner_area.width,
+            search_area_height,
+        );
+
+        let scrollbar_area = Rect::new(
+            inner_area.x,
+            inner_area.y + header_height,
+            scrollbar_width,
+            table_height - header_height,
+        );
+
+        let table_area = Rect::new(
+            inner_area.x + scrollbar_width,
+            inner_area.y,
+            inner_area.width - scrollbar_width,
+            table_height,
+        );
+
+        self.draw_search_area(frame, search_area);
+        self.draw_scrollbar(frame, scrollbar_area);
+        self.draw_table(frame, table_area, reader, formatters);
+    }
+
+    fn draw_search_area(&mut self, frame: &mut Frame, area: Rect) {
+        let search: Option<&ActiveSearch> = self.search.as_ref();
+
+        let (matching_part, non_matching_part) = search
+            .map(|search_state| search_state.get_search_string_parts())
+            .unwrap_or_else(|| ("".to_string(), "".to_string()));
+        let line: Line = vec![
+            Span::raw(matching_part),
+            Span::styled(non_matching_part, Style::default().bg(Color::Red)),
+        ]
+        .into();
+
+        let title = search
+            .map(|state| state.description())
+            .unwrap_or("".to_string());
+
+        let widget = Paragraph::new(line)
+            .block(Block::default().borders(Borders::ALL).title(title));
+        frame.render_widget(widget, area);
+    }
+
+    fn draw_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
+        let selected = self.selected_row();
+        let table_size = self.num_table_rows();
+        let rows_shown = area.height as usize;
+        let (top_ratio, bottom_ratio) = if selected < rows_shown {
+            (0.0, (rows_shown as f64) / (table_size as f64))
+        } else if selected > table_size - rows_shown {
+            (
+                ((table_size - rows_shown) as f64) / (table_size as f64),
+                1.0,
+            )
+        } else {
+            (
+                ((selected - rows_shown / 2) as f64) / (table_size as f64),
+                ((selected + rows_shown / 2) as f64) / (table_size as f64),
+            )
+        };
+        let bar = VerticalBar::default()
+            .bar_top_ratio(top_ratio)
+            .bar_bottom_ratio(bottom_ratio);
+        frame.render_widget(bar, area);
+    }
+
+    fn draw_table(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        reader: &MemoryReader,
+        formatters: &[Box<dyn ColumnFormatter>],
+    ) {
+        self.previous_height = Some(area.height as usize);
+
+        let selected_row = self.selected_row();
+        let selected_address = self.selected_address();
+
+        let selected_style = Style::default().add_modifier(Modifier::REVERSED);
+        let normal_style = Style::default().bg(Color::Blue);
+        let search_result_style = Style::default().bg(Color::Yellow);
+
+        let search_string = self
+            .search
+            .as_ref()
+            .map(|search_state| search_state.get_search_string(None));
+
+        let highlight_search_matches = |line| {
+            if search_string.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
+                return line;
+            }
+
+            let Line { spans, alignment } = line;
+            let search_string: &str = search_string.as_ref().unwrap();
+
+            // Not technically correct, as it doesn't handle cases
+            // where the match crosses a border between spans.  But,
+            // close enough for now.
+            let spans = spans
+                .into_iter()
+                .flat_map(|span| {
+                    span.content
+                        .split(search_string)
+                        .map(|s| Span::styled(s.to_string(), span.style))
+                        .intersperse_with(|| {
+                            Span::styled(
+                                search_string.to_string(),
+                                span.style.patch(search_result_style),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                })
+                .collect();
+
+            Line { spans, alignment }
+        };
+
+        let header_cells = formatters
+            .iter()
+            .map(|formatter| formatter.name())
+            .map(|header| {
+                Cell::from(header).style(
+                    Style::default()
+                        .fg(Color::LightCyan)
+                        .add_modifier(Modifier::BOLD),
+                )
+            });
+
+        let header = Row::new(header_cells)
+            .style(normal_style)
+            .height(1)
+            .bottom_margin(1);
+
+        let rows = self.region.iter_bytes().iter_byte_arr().enumerate().map(
+            |(i, row): (_, MemoryValue<[u8; 8]>)| {
+                let is_near_selected =
+                    i.abs_diff(selected_row) < (area.height as usize);
+
+                let region = &self.region;
+                let cells = formatters
+                    .iter()
+                    .filter(|_| is_near_selected)
+                    .map(|formatter| {
+                        formatter.formatted_cell(
+                            reader,
+                            region,
+                            selected_address,
+                            &row,
+                        )
+                    })
+                    .map(move |line| highlight_search_matches(line));
+
+                Row::new(cells).height(1).bottom_margin(0)
+            },
+        );
+
+        let address_width = self.region.as_range().suffix_hexadecimal_digits();
+
+        let table = Table::new(
+            rows,
+            [
+                Constraint::Min((address_width + 3) as u16),
+                Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
+                Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
+                Constraint::Percentage(100),
+            ],
+        )
+        .header(header)
+        .highlight_style(selected_style)
+        .highlight_symbol(">> ");
+
+        frame.render_stateful_widget(table, area, &mut self.table_state);
+    }
 }
 
 impl MemoryTable {
@@ -389,7 +596,6 @@ impl MemoryTable {
 
         Self {
             view_stack: NonEmptyVec::new(ViewFrame::new(region, entry_point)),
-            previous_height: None,
             formatters: vec![
                 Box::new(AddressColumn),
                 Box::new(HexColumn),
@@ -523,7 +729,8 @@ impl MemoryTable {
 
     fn displayed_rows(&self) -> usize {
         let non_data_rows = 5;
-        self.previous_height
+        self.active_view()
+            .previous_height
             .map(|height| height - non_data_rows)
             .unwrap_or(1)
     }
@@ -537,7 +744,7 @@ impl MemoryTable {
     }
 
     fn selected_row(&self) -> usize {
-        self.active_view().selected_row().unwrap_or(0)
+        self.active_view().selected_row()
     }
 
     pub fn draw(
@@ -551,209 +758,11 @@ impl MemoryTable {
             .iter()
             .fold(area, |area, view| view.draw_border(frame, area));
 
-        // Layout.split puts all excess space into the last widget,
-        // which I want to be a fixed size.  Doing the layout
-        // explicitly, at least until there are more flexible
-        // utilities.
-        //
-        // Should keep an eye on
-        // https://github.com/fdehau/tui-rs/pull/596 and
-        // https://github.com/fdehau/tui-rs/pull/519 to see if the
-        // utilites improve.
-
-        let search_area_height = if self.search_is_active() {
-            inner_area.height.min(3)
-        } else {
-            0
-        };
-        let table_height = inner_area.height - search_area_height;
-        let header_height = table_height.min(2);
-        let scrollbar_width = inner_area.width.min(1);
-
-        let search_area = Rect::new(
-            inner_area.x,
-            inner_area.bottom() - search_area_height,
-            inner_area.width,
-            search_area_height,
+        self.view_stack.last_mut().draw_inner(
+            frame,
+            inner_area,
+            reader,
+            &self.formatters,
         );
-
-        let scrollbar_area = Rect::new(
-            inner_area.x,
-            inner_area.y + header_height,
-            scrollbar_width,
-            table_height - header_height,
-        );
-
-        let table_area = Rect::new(
-            inner_area.x + scrollbar_width,
-            inner_area.y,
-            inner_area.width - scrollbar_width,
-            table_height,
-        );
-
-        self.draw_search_area(frame, search_area);
-        self.draw_scrollbar(frame, scrollbar_area);
-        self.draw_table(frame, table_area, reader);
-    }
-
-    fn draw_search_area(&mut self, frame: &mut Frame, area: Rect) {
-        let search: Option<&ActiveSearch> = self.active_view().search.as_ref();
-
-        let (matching_part, non_matching_part) = search
-            .map(|search_state| search_state.get_search_string_parts())
-            .unwrap_or_else(|| ("".to_string(), "".to_string()));
-        let line: Line = vec![
-            Span::raw(matching_part),
-            Span::styled(non_matching_part, Style::default().bg(Color::Red)),
-        ]
-        .into();
-
-        let title = search
-            .map(|state| state.description())
-            .unwrap_or("".to_string());
-
-        let widget = Paragraph::new(line)
-            .block(Block::default().borders(Borders::ALL).title(title));
-        frame.render_widget(widget, area);
-    }
-
-    fn draw_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
-        let selected = self.selected_row();
-        let table_size = self.active_view().num_table_rows();
-        let rows_shown = area.height as usize;
-        let (top_ratio, bottom_ratio) = if selected < rows_shown {
-            (0.0, (rows_shown as f64) / (table_size as f64))
-        } else if selected > table_size - rows_shown {
-            (
-                ((table_size - rows_shown) as f64) / (table_size as f64),
-                1.0,
-            )
-        } else {
-            (
-                ((selected - rows_shown / 2) as f64) / (table_size as f64),
-                ((selected + rows_shown / 2) as f64) / (table_size as f64),
-            )
-        };
-        let bar = VerticalBar::default()
-            .bar_top_ratio(top_ratio)
-            .bar_bottom_ratio(bottom_ratio);
-        frame.render_widget(bar, area);
-    }
-
-    fn draw_table(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        reader: &MemoryReader,
-    ) {
-        self.previous_height = Some(area.height as usize);
-
-        let selected_row = self.selected_row();
-        let selected_address = self.active_view().selected_address();
-
-        let selected_style = Style::default().add_modifier(Modifier::REVERSED);
-        let normal_style = Style::default().bg(Color::Blue);
-        let search_result_style = Style::default().bg(Color::Yellow);
-
-        let search_string = self
-            .active_view()
-            .search
-            .as_ref()
-            .map(|search_state| search_state.get_search_string(None));
-
-        let highlight_search_matches = |line| {
-            if search_string.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return line;
-            }
-
-            let Line { spans, alignment } = line;
-            let search_string: &str = search_string.as_ref().unwrap();
-
-            // Not technically correct, as it doesn't handle cases
-            // where the match crosses a border between spans.  But,
-            // close enough for now.
-            let spans = spans
-                .into_iter()
-                .flat_map(|span| {
-                    span.content
-                        .split(search_string)
-                        .map(|s| Span::styled(s.to_string(), span.style))
-                        .intersperse_with(|| {
-                            Span::styled(
-                                search_string.to_string(),
-                                span.style.patch(search_result_style),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                })
-                .collect();
-
-            Line { spans, alignment }
-        };
-
-        let header_cells = self
-            .formatters
-            .iter()
-            .map(|formatter| formatter.name())
-            .map(|header| {
-                Cell::from(header).style(
-                    Style::default()
-                        .fg(Color::LightCyan)
-                        .add_modifier(Modifier::BOLD),
-                )
-            });
-
-        let header = Row::new(header_cells)
-            .style(normal_style)
-            .height(1)
-            .bottom_margin(1);
-
-        let active_view = self.view_stack.last_mut();
-
-        let rows = active_view
-            .region
-            .iter_bytes()
-            .iter_byte_arr()
-            .enumerate()
-            .map(|(i, row): (_, MemoryValue<[u8; 8]>)| {
-                let is_near_selected =
-                    i.abs_diff(selected_row) < (area.height as usize);
-
-                let region = &active_view.region;
-                let cells = self
-                    .formatters
-                    .iter()
-                    .filter(|_| is_near_selected)
-                    .map(|formatter| {
-                        formatter.formatted_cell(
-                            reader,
-                            region,
-                            selected_address,
-                            &row,
-                        )
-                    })
-                    .map(move |line| highlight_search_matches(line));
-
-                Row::new(cells).height(1).bottom_margin(0)
-            });
-
-        let address_width =
-            active_view.region.as_range().suffix_hexadecimal_digits();
-
-        let table = Table::new(
-            rows,
-            [
-                Constraint::Min((address_width + 3) as u16),
-                Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
-                Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
-                Constraint::Percentage(100),
-            ],
-        )
-        .header(header)
-        .highlight_style(selected_style)
-        .highlight_symbol(">> ");
-
-        frame.render_stateful_widget(table, area, &mut active_view.table_state);
     }
 }
