@@ -251,23 +251,23 @@ impl ViewFrame {
         self.region.size_bytes() / MemoryRegion::POINTER_SIZE
     }
 
-    fn select(&mut self, row: usize) {
+    fn select_row(&mut self, row: usize) {
         self.finalize_search();
         self.table_state.select(Some(row));
     }
 
-    fn selected(&self) -> Option<usize> {
+    fn selected_row(&self) -> Option<usize> {
         self.table_state.selected()
     }
 
     fn selected_address(&self) -> Pointer {
-        let row: usize = self.selected().unwrap_or(0);
+        let row: usize = self.selected_row().unwrap_or(0);
         let byte_offset = row * MemoryRegion::POINTER_SIZE;
         self.region.at_offset(byte_offset)
     }
 
     fn selected_value(&self) -> MemoryValue<[u8; 8]> {
-        let row: usize = self.selected().unwrap_or(0);
+        let row: usize = self.selected_row().unwrap_or(0);
         let byte_offset = row * MemoryRegion::POINTER_SIZE;
         self.region.bytes_at_offset(byte_offset).unwrap_or_else(|| {
             panic!("Selected row {row} is outside of the MemoryRegion")
@@ -277,7 +277,7 @@ impl ViewFrame {
     fn select_address(&mut self, address: Pointer) {
         let row = (address - self.region.start()) / MemoryRegion::POINTER_SIZE;
         let row = row.clamp(0, self.num_table_rows() - 1);
-        self.select(row);
+        self.select_row(row);
     }
 
     fn cancel_search(&mut self) {
@@ -373,6 +373,14 @@ impl ViewFrame {
              ({entry_point:#x} {sign} 0x{offset:x})"
         )
     }
+
+    fn draw_border(&self, frame: &mut Frame, area: Rect) -> Rect {
+        let border = Block::default().borders(Borders::ALL).title(self.title());
+        let inner_area = border.inner(area);
+
+        frame.render_widget(border, area);
+        inner_area
+    }
 }
 
 impl MemoryTable {
@@ -436,7 +444,7 @@ impl MemoryTable {
     }
 
     fn move_selection_absolute(&mut self, row: usize) {
-        self.active_view_mut().select(row);
+        self.active_view_mut().select_row(row);
         self.cancel_search();
     }
 
@@ -529,7 +537,7 @@ impl MemoryTable {
     }
 
     fn selected_row(&self) -> usize {
-        self.active_view().selected().unwrap_or(0)
+        self.active_view().selected_row().unwrap_or(0)
     }
 
     pub fn draw(
@@ -538,25 +546,10 @@ impl MemoryTable {
         area: Rect,
         reader: &MemoryReader,
     ) {
-        let borders: Vec<_> = self
+        let inner_area = self
             .view_stack
             .iter()
-            .map(|view| {
-                Block::default().borders(Borders::ALL).title(view.title())
-            })
-            .collect();
-
-        let border_areas: Vec<Rect> = borders
-            .iter()
-            .scan(area, |state, border| {
-                let prev = *state;
-                *state = border.inner(prev);
-                Some(prev)
-            })
-            .collect();
-
-        let inner_area =
-            borders.last().unwrap().inner(*border_areas.last().unwrap());
+            .fold(area, |area, view| view.draw_border(frame, area));
 
         // Layout.split puts all excess space into the last widget,
         // which I want to be a fixed size.  Doing the layout
@@ -598,9 +591,6 @@ impl MemoryTable {
             table_height,
         );
 
-        borders.into_iter().zip(border_areas).for_each(
-            |(border, border_area)| frame.render_widget(border, border_area),
-        );
         self.draw_search_area(frame, search_area);
         self.draw_scrollbar(frame, scrollbar_area);
         self.draw_table(frame, table_area, reader);
