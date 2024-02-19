@@ -1,3 +1,4 @@
+use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -11,7 +12,7 @@ use memory_reader::{
     CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
 
-use crate::{ColumnFormatter, NonEmptyVec, VerticalBar};
+use crate::{ColumnFormatter, NonEmptyVec, RunningLog, VerticalBar};
 
 use itertools::{Either, Itertools};
 
@@ -221,6 +222,95 @@ impl MemoryTable {
             reader,
             &self.formatters,
         );
+    }
+
+    pub fn handle_event(
+        &mut self,
+        key: KeyEvent,
+        reader: &MemoryReader,
+        log: &mut RunningLog,
+    ) {
+        use crossterm::event::{KeyCode, KeyModifiers};
+        match (key.code, key.modifiers) {
+            (KeyCode::Down, _)
+            | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
+                self.move_selection_down();
+            }
+
+            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
+                self.move_selection_up();
+            }
+
+            (KeyCode::PageUp, _)
+            | (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
+                self.move_selection_page_up();
+            }
+
+            (KeyCode::PageDown, _)
+            | (KeyCode::Char('v'), KeyModifiers::ALT) => {
+                self.move_selection_page_down();
+            }
+
+            (KeyCode::Home, KeyModifiers::CONTROL)
+            | (KeyCode::Char('<'), KeyModifiers::ALT | KeyModifiers::SHIFT) => {
+                self.move_selection_start();
+            }
+
+            (KeyCode::End, KeyModifiers::CONTROL)
+            | (KeyCode::Char('>'), KeyModifiers::ALT | KeyModifiers::SHIFT) => {
+                self.move_selection_end();
+            }
+
+            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
+                self.search_forward(&reader);
+            }
+
+            (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
+                self.search_backward(&reader);
+            }
+
+            (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                if self.search_is_active() =>
+            {
+                self.cancel_search();
+            }
+
+            (KeyCode::Backspace, _) if self.search_is_active() => {
+                self.backspace_search_character();
+            }
+
+            (KeyCode::Char(c), _) if self.search_is_active() => {
+                self.add_search_character(c, &reader);
+            }
+
+            (KeyCode::Enter, _) => {
+                let selection = self.selected_value();
+                let as_pointer: Pointer = selection.value.into();
+                let pointed_map_region =
+                    reader.find_containing_region(as_pointer);
+                if let Some(pointed_map_region) = pointed_map_region {
+                    let pointed_region = pointed_map_region.read();
+                    match pointed_region {
+                        Ok(region) => {
+                            self.push_view(region, as_pointer);
+                        }
+                        Err(_) => log.add_log("Error reading region"),
+                    }
+                } else {
+                    log.add_log("Value does not point to any memory region");
+                }
+            }
+
+            (KeyCode::Char('g'), KeyModifiers::CONTROL)
+                if !self.search_is_active() =>
+            {
+                self.pop_view();
+            }
+
+            _ => {
+                log.add_log(format!("{:?}, {:?}", key.code, key.modifiers));
+            }
+        }
     }
 }
 

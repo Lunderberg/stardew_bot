@@ -1,7 +1,7 @@
 use crate::extensions::*;
 use crate::{Error, SigintHandler};
 
-use memory_reader::{MemoryReader, Pointer, Symbol};
+use memory_reader::{MemoryReader, Symbol};
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
@@ -92,7 +92,7 @@ impl TuiExplorer {
 
             if poll {
                 let event_received = event::read()?;
-                let should_exit = self.update_state(event_received)?;
+                let should_exit = self.handle_event(event_received);
                 if should_exit {
                     break;
                 }
@@ -124,113 +124,26 @@ impl TuiExplorer {
         self.running_log.draw(frame, log_view);
     }
 
-    fn update_state(&mut self, event: Event) -> Result<bool, Error> {
+    fn handle_event(&mut self, event: Event) -> bool {
+        let mut should_exit = false;
+
         use crossterm::event::{KeyCode, KeyModifiers};
         if let Event::Key(key) = event {
             match (key.code, key.modifiers) {
-                (KeyCode::Char('c'), KeyModifiers::CONTROL) => return Ok(true),
-
-                (KeyCode::Down, _)
-                | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                    self.memory_table.move_selection_down();
+                (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
+                    should_exit = true;
                 }
 
-                (KeyCode::Up, _)
-                | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                    self.memory_table.move_selection_up();
-                }
-
-                (KeyCode::PageUp, _)
-                | (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
-                    self.memory_table.move_selection_page_up();
-                }
-
-                (KeyCode::PageDown, _)
-                | (KeyCode::Char('v'), KeyModifiers::ALT) => {
-                    self.memory_table.move_selection_page_down();
-                }
-
-                (KeyCode::Home, KeyModifiers::CONTROL)
-                | (
-                    KeyCode::Char('<'),
-                    KeyModifiers::ALT | KeyModifiers::SHIFT,
-                ) => {
-                    self.memory_table.move_selection_start();
-                }
-
-                (KeyCode::End, KeyModifiers::CONTROL)
-                | (
-                    KeyCode::Char('>'),
-                    KeyModifiers::ALT | KeyModifiers::SHIFT,
-                ) => {
-                    self.memory_table.move_selection_end();
-                }
-
-                (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                    self.memory_table.search_forward(&self.reader);
-                }
-
-                (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                    self.memory_table.search_backward(&self.reader);
-                }
-
-                (KeyCode::Char('g'), KeyModifiers::CONTROL)
-                    if self.memory_table.search_is_active() =>
-                {
-                    self.memory_table.cancel_search();
-                }
-
-                (KeyCode::Backspace, _)
-                    if self.memory_table.search_is_active() =>
-                {
-                    self.memory_table.backspace_search_character();
-                }
-
-                (KeyCode::Char(c), _)
-                    if self.memory_table.search_is_active() =>
-                {
-                    self.memory_table.add_search_character(c, &self.reader);
-                }
-
-                (KeyCode::Enter, _) => {
-                    let selection = self.memory_table.selected_value();
-                    let as_pointer: Pointer = selection.value.into();
-                    let pointed_map_region =
-                        self.reader.find_containing_region(as_pointer);
-                    if let Some(pointed_map_region) = pointed_map_region {
-                        let pointed_region = pointed_map_region.read();
-                        match pointed_region {
-                            Ok(region) => {
-                                self.memory_table.push_view(region, as_pointer);
-                            }
-                            Err(_) => {
-                                self.running_log.add_log("Error reading region")
-                            }
-                        }
-                    } else {
-                        self.running_log.add_log(
-                            "Value does not point to any memory region",
-                        );
-                    }
-                }
-
-                (KeyCode::Char('g'), KeyModifiers::CONTROL)
-                    if !self.memory_table.search_is_active() =>
-                {
-                    self.memory_table.pop_view();
-                }
-
-                _ => {
-                    self.running_log.add_log(format!(
-                        "{:?}, {:?}",
-                        key.code, key.modifiers
-                    ));
-                }
+                _ => self.memory_table.handle_event(
+                    key,
+                    &self.reader,
+                    &mut self.running_log,
+                ),
             }
 
             self.update_details()
         }
-        Ok(false)
+        should_exit
     }
 
     fn update_details(&mut self) {
