@@ -17,7 +17,7 @@ pub struct TuiExplorer {
     // Application state
     _pid: u32,
     reader: MemoryReader,
-    symbols: Vec<Symbol>,
+    _symbols: Vec<Symbol>,
     // Display widgets
     stack_frame_table: StackFrameTable,
     running_log: RunningLog,
@@ -68,7 +68,7 @@ impl TuiExplorer {
             stack_frame_table: StackFrameTable::new(&reader, &memory_region),
             running_log: RunningLog::new(100),
             memory_table: MemoryTable::new(memory_region, stack_entry_point),
-            symbols,
+            _symbols: symbols,
             detail_view,
             _pid: pid,
             reader,

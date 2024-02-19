@@ -204,10 +204,6 @@ impl MemoryTable {
         self.view_stack.last_mut()
     }
 
-    fn selected_row(&self) -> usize {
-        self.active_view().selected_row()
-    }
-
     pub fn draw(
         &mut self,
         frame: &mut Frame,
