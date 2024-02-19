@@ -133,25 +133,21 @@ impl TuiExplorer {
                 (KeyCode::Down, _)
                 | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_down();
-                    self.update_details();
                 }
 
                 (KeyCode::Up, _)
                 | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_up();
-                    self.update_details();
                 }
 
                 (KeyCode::PageUp, _)
                 | (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
                     self.memory_table.move_selection_page_up();
-                    self.update_details();
                 }
 
                 (KeyCode::PageDown, _)
                 | (KeyCode::Char('v'), KeyModifiers::ALT) => {
                     self.memory_table.move_selection_page_down();
-                    self.update_details();
                 }
 
                 (KeyCode::Home, KeyModifiers::CONTROL)
@@ -160,7 +156,6 @@ impl TuiExplorer {
                     KeyModifiers::ALT | KeyModifiers::SHIFT,
                 ) => {
                     self.memory_table.move_selection_start();
-                    self.update_details();
                 }
 
                 (KeyCode::End, KeyModifiers::CONTROL)
@@ -169,38 +164,32 @@ impl TuiExplorer {
                     KeyModifiers::ALT | KeyModifiers::SHIFT,
                 ) => {
                     self.memory_table.move_selection_end();
-                    self.update_details();
                 }
 
                 (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
                     self.memory_table.search_forward(&self.reader);
-                    self.update_details();
                 }
 
                 (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
                     self.memory_table.search_backward(&self.reader);
-                    self.update_details();
                 }
 
                 (KeyCode::Char('g'), KeyModifiers::CONTROL)
                     if self.memory_table.search_is_active() =>
                 {
                     self.memory_table.cancel_search();
-                    self.update_details();
                 }
 
                 (KeyCode::Backspace, _)
                     if self.memory_table.search_is_active() =>
                 {
                     self.memory_table.backspace_search_character();
-                    self.update_details();
                 }
 
                 (KeyCode::Char(c), _)
                     if self.memory_table.search_is_active() =>
                 {
                     self.memory_table.add_search_character(c, &self.reader);
-                    self.update_details();
                 }
 
                 (KeyCode::Enter, _) => {
@@ -213,7 +202,6 @@ impl TuiExplorer {
                         match pointed_region {
                             Ok(region) => {
                                 self.memory_table.push_view(region, as_pointer);
-                                self.update_details();
                             }
                             Err(_) => {
                                 self.running_log.add_log("Error reading region")
@@ -230,7 +218,6 @@ impl TuiExplorer {
                     if !self.memory_table.search_is_active() =>
                 {
                     self.memory_table.pop_view();
-                    self.update_details();
                 }
 
                 _ => {
@@ -240,6 +227,8 @@ impl TuiExplorer {
                     ));
                 }
             }
+
+            self.update_details()
         }
         Ok(false)
     }
