@@ -102,7 +102,7 @@ impl TuiExplorer {
     }
 
     fn draw(&mut self, frame: &mut Frame) {
-        let (stack_view, mem_view, detail_column) = Layout::default()
+        let (stack_detail_column, mem_view, log_view) = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)
             .constraints([
@@ -112,11 +112,11 @@ impl TuiExplorer {
             ])
             .split_tuple(frame.size());
 
-        let (detail_view, log_view) = Layout::default()
+        let (stack_view, detail_view) = Layout::default()
             .direction(Direction::Vertical)
             .margin(0)
-            .constraints([Constraint::Min(20), Constraint::Percentage(30)])
-            .split_tuple(detail_column);
+            .constraints([Constraint::Min(15), Constraint::Percentage(70)])
+            .split_tuple(stack_detail_column);
 
         self.stack_frame_table.draw(frame, stack_view, &self.reader);
         self.memory_table.draw(frame, mem_view, &self.reader);

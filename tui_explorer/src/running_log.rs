@@ -46,7 +46,7 @@ impl RunningLog {
             .collect();
 
         let running_log = List::new(items)
-            .block(Block::default().title("Running info").borders(Borders::ALL))
+            .block(Block::default().title("Log").borders(Borders::ALL))
             .highlight_style(
                 Style::default()
                     .bg(Color::LightGreen)
