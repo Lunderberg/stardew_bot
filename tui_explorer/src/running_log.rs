@@ -24,8 +24,8 @@ impl RunningLog {
         }
     }
 
-    pub fn add_log(&mut self, log: String) {
-        self.items.push_back((Local::now(), log));
+    pub fn add_log(&mut self, log: impl Into<String>) {
+        self.items.push_back((Local::now(), log.into()));
         while self.items.len() > self.max_elements {
             self.items.pop_front();
         }

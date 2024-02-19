@@ -215,14 +215,13 @@ impl TuiExplorer {
                                 self.memory_table.push_view(region, as_pointer);
                                 self.update_details();
                             }
-                            Err(_) => self
-                                .running_log
-                                .add_log("Error reading region".to_string()),
+                            Err(_) => {
+                                self.running_log.add_log("Error reading region")
+                            }
                         }
                     } else {
                         self.running_log.add_log(
-                            "Value does not point to any memory region"
-                                .to_string(),
+                            "Value does not point to any memory region",
                         );
                     }
                 }
