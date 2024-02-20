@@ -16,6 +16,9 @@ pub use tui_explorer::*;
 mod error;
 pub use error::Error;
 
+mod key_sequence;
+pub use key_sequence::KeySequence;
+
 mod terminal_context;
 pub use terminal_context::*;
 

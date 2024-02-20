@@ -14,6 +14,9 @@ pub enum Error {
         #[from]
         err: memory_reader::Error,
     },
+
+    #[error("Invalid emacs-style key sequence: {0}")]
+    InvalidKeyBinding(String),
 }
 
 impl std::fmt::Debug for Error {
