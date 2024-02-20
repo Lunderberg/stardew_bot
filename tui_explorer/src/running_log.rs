@@ -31,7 +31,7 @@ impl RunningLog {
         }
     }
 
-    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+    pub fn draw(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
         let items: Vec<_> = self
             .items
             .iter()
@@ -46,7 +46,12 @@ impl RunningLog {
             .collect();
 
         let running_log = List::new(items)
-            .block(Block::default().title("Log").borders(Borders::ALL))
+            .block(
+                Block::default()
+                    .title("Log")
+                    .borders(Borders::ALL)
+                    .border_style(border_style),
+            )
             .highlight_style(
                 Style::default()
                     .bg(Color::LightGreen)

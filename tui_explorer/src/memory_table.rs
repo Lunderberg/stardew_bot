@@ -210,11 +210,20 @@ impl MemoryTable {
         frame: &mut Frame,
         area: Rect,
         reader: &MemoryReader,
+        border_style: Style,
     ) {
-        let inner_area = self
-            .view_stack
-            .iter()
-            .fold(area, |area, view| view.draw_border(frame, area));
+        let inner_area = self.view_stack.iter().with_position().fold(
+            area,
+            |area, (position, view)| {
+                let style = match position {
+                    itertools::Position::First | itertools::Position::Only => {
+                        border_style
+                    }
+                    _ => Style::new(),
+                };
+                view.draw_border(frame, area, style)
+            },
+        );
 
         self.view_stack.last_mut().draw_inner(
             frame,
@@ -455,8 +464,11 @@ impl ViewFrame {
         )
     }
 
-    fn draw_border(&self, frame: &mut Frame, area: Rect) -> Rect {
-        let border = Block::default().borders(Borders::ALL).title(self.title());
+    fn draw_border(&self, frame: &mut Frame, area: Rect, style: Style) -> Rect {
+        let border = Block::default()
+            .borders(Borders::ALL)
+            .border_style(style)
+            .title(self.title());
         let inner_area = border.inner(area);
 
         frame.render_widget(border, area);

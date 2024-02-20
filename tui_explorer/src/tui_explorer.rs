@@ -2,14 +2,16 @@ use crate::extensions::*;
 use crate::{Error, SigintHandler};
 
 use memory_reader::{MemoryReader, Symbol};
+use ratatui::style::Stylize as _;
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
 };
 
-use crossterm::event::Event;
+use crossterm::event::{Event, KeyEvent};
 use ratatui::{
     layout::{Constraint, Direction, Layout},
+    prelude::Style,
     Frame,
 };
 
@@ -23,6 +25,15 @@ pub struct TuiExplorer {
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
+    // Display state
+    selected_region: SelectableRegion,
+    key_sequence: Vec<KeyEvent>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SelectableRegion {
+    MemoryTable,
+    Log,
 }
 
 impl TuiExplorer {
@@ -72,6 +83,8 @@ impl TuiExplorer {
             detail_view,
             _pid: pid,
             reader,
+            selected_region: SelectableRegion::MemoryTable,
+            key_sequence: Vec::new(),
         };
         out.update_details();
 
@@ -118,20 +131,59 @@ impl TuiExplorer {
             .constraints([Constraint::Min(15), Constraint::Percentage(70)])
             .split_tuple(stack_detail_column);
 
+        let get_border_style = {
+            let normal_border_style = Style::new();
+            let selected_border_style = Style::new().light_green();
+            let selected_region = self.selected_region;
+
+            move |region: SelectableRegion| {
+                if region == selected_region {
+                    selected_border_style
+                } else {
+                    normal_border_style
+                }
+            }
+        };
+
         self.stack_frame_table.draw(frame, stack_view, &self.reader);
-        self.memory_table.draw(frame, mem_view, &self.reader);
+        self.memory_table.draw(
+            frame,
+            mem_view,
+            &self.reader,
+            get_border_style(SelectableRegion::MemoryTable),
+        );
         self.detail_view.draw(frame, detail_view);
-        self.running_log.draw(frame, log_view);
+        self.running_log.draw(
+            frame,
+            log_view,
+            get_border_style(SelectableRegion::Log),
+        );
     }
 
     fn handle_event(&mut self, event: Event) -> bool {
         let mut should_exit = false;
+        let mut clear_sequence = true;
 
         use crossterm::event::{KeyCode, KeyModifiers};
         if let Event::Key(key) = event {
             match (key.code, key.modifiers) {
                 (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
                     should_exit = true;
+                }
+
+                // TODO: Have a better way to handle sequences of
+                // keystrokes.
+                (KeyCode::Char('x'), KeyModifiers::CONTROL) => {
+                    self.key_sequence.push(key);
+                    clear_sequence = false;
+                }
+                (KeyCode::Char('o'), KeyModifiers::NONE)
+                    if self.key_sequence.len() == 1 =>
+                {
+                    self.selected_region = match self.selected_region {
+                        SelectableRegion::MemoryTable => SelectableRegion::Log,
+                        SelectableRegion::Log => SelectableRegion::MemoryTable,
+                    };
                 }
 
                 _ => self.memory_table.handle_event(
@@ -143,6 +195,11 @@ impl TuiExplorer {
 
             self.update_details()
         }
+
+        if clear_sequence {
+            self.key_sequence.clear();
+        }
+
         should_exit
     }
 
