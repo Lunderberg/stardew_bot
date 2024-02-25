@@ -25,6 +25,9 @@ pub use terminal_context::*;
 mod sigint_handler;
 pub use sigint_handler::*;
 
+mod search_window;
+pub use search_window::*;
+
 mod running_log;
 pub use running_log::*;
 
