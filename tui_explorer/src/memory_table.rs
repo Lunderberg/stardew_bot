@@ -1,4 +1,4 @@
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -12,7 +12,9 @@ use memory_reader::{
     CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
 
-use crate::{ColumnFormatter, NonEmptyVec, RunningLog, VerticalBar};
+use crate::{
+    ColumnFormatter, KeyBindingMatch, NonEmptyVec, RunningLog, VerticalBar,
+};
 
 use itertools::{Either, Itertools};
 
@@ -233,66 +235,68 @@ impl MemoryTable {
         );
     }
 
-    pub fn handle_event(
+    pub fn apply_key_binding(
         &mut self,
-        key: KeyEvent,
+        keystrokes: &[KeyEvent],
         reader: &MemoryReader,
         log: &mut RunningLog,
-    ) {
-        use crossterm::event::{KeyCode, KeyModifiers};
-        match (key.code, key.modifiers) {
-            (KeyCode::Down, _)
-            | (KeyCode::Char('n'), KeyModifiers::CONTROL) => {
-                self.move_selection_down();
-            }
-
-            (KeyCode::Up, _) | (KeyCode::Char('p'), KeyModifiers::CONTROL) => {
-                self.move_selection_up();
-            }
-
-            (KeyCode::PageUp, _)
-            | (KeyCode::Char('v'), KeyModifiers::CONTROL) => {
-                self.move_selection_page_up();
-            }
-
-            (KeyCode::PageDown, _)
-            | (KeyCode::Char('v'), KeyModifiers::ALT) => {
-                self.move_selection_page_down();
-            }
-
-            (KeyCode::Home, KeyModifiers::CONTROL)
-            | (KeyCode::Char('<'), KeyModifiers::ALT | KeyModifiers::SHIFT) => {
-                self.move_selection_start();
-            }
-
-            (KeyCode::End, KeyModifiers::CONTROL)
-            | (KeyCode::Char('>'), KeyModifiers::ALT | KeyModifiers::SHIFT) => {
-                self.move_selection_end();
-            }
-
-            (KeyCode::Char('s'), KeyModifiers::CONTROL) => {
-                self.search_forward(&reader);
-            }
-
-            (KeyCode::Char('r'), KeyModifiers::CONTROL) => {
-                self.search_backward(&reader);
-            }
-
-            (KeyCode::Char('g'), KeyModifiers::CONTROL)
-                if self.search_is_active() =>
-            {
-                self.cancel_search();
-            }
-
-            (KeyCode::Backspace, _) if self.search_is_active() => {
-                self.backspace_search_character();
-            }
-
-            (KeyCode::Char(c), _) if self.search_is_active() => {
-                self.add_search_character(c, &reader);
-            }
-
-            (KeyCode::Enter, _) => {
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_try_bindings(["<down>", "C-n"], keystrokes, || {
+                self.move_selection_down()
+            })
+            .or_try_bindings(["<up>", "C-p"], keystrokes, || {
+                self.move_selection_up()
+            })
+            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
+                self.move_selection_page_up()
+            })
+            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
+                self.move_selection_page_down()
+            })
+            .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
+                self.move_selection_start()
+            })
+            .or_try_bindings(["C-<end>", "M->"], keystrokes, || {
+                self.move_selection_end()
+            })
+            .or_try_binding("C-s", keystrokes, || self.search_forward(&reader))
+            .or_try_binding("C-r", keystrokes, || self.search_backward(&reader))
+            .or_else(|| {
+                if self.search_is_active() {
+                    KeyBindingMatch::Mismatch
+                        .or_try_binding("C-g", keystrokes, || {
+                            self.cancel_search()
+                        })
+                        .or_try_binding("<backspace>", keystrokes, || {
+                            self.backspace_search_character()
+                        })
+                        .or_else(|| {
+                            if keystrokes.len() == 1 {
+                                match &keystrokes[0] {
+                                    KeyEvent {
+                                        code: KeyCode::Char(c),
+                                        modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                                        ..
+                                    } => {
+                                        self.add_search_character(*c, &reader);
+                                        KeyBindingMatch::Full
+                                    }
+                                    _ => KeyBindingMatch::Mismatch,
+                                }
+                            } else {
+                                KeyBindingMatch::Mismatch
+                            }
+                        })
+                } else {
+                    KeyBindingMatch::Mismatch.or_try_binding(
+                        "C-g",
+                        keystrokes,
+                        || self.pop_view(),
+                    )
+                }
+            })
+            .or_try_binding("<enter>", keystrokes, || {
                 let selection = self.selected_value();
                 let as_pointer: Pointer = selection.value.into();
                 let pointed_map_region =
@@ -308,18 +312,7 @@ impl MemoryTable {
                 } else {
                     log.add_log("Value does not point to any memory region");
                 }
-            }
-
-            (KeyCode::Char('g'), KeyModifiers::CONTROL)
-                if !self.search_is_active() =>
-            {
-                self.pop_view();
-            }
-
-            _ => {
-                log.add_log(format!("{:?}, {:?}", key.code, key.modifiers));
-            }
-        }
+            })
     }
 }
 

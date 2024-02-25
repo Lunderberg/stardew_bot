@@ -17,7 +17,7 @@ mod error;
 pub use error::Error;
 
 mod key_sequence;
-pub use key_sequence::KeySequence;
+pub use key_sequence::{KeyBindingMatch, KeySequence};
 
 mod terminal_context;
 pub use terminal_context::*;

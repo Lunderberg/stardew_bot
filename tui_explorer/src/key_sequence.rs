@@ -1,13 +1,90 @@
 use std::str::FromStr;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use itertools::Itertools;
 
 use crate::Error;
 
 #[derive(Debug, PartialEq)]
 pub struct KeySequence {
     sequence: Vec<KeyEvent>,
+}
+
+pub enum KeyBindingMatch {
+    Full,
+    Partial,
+    Mismatch,
+}
+
+impl KeySequence {
+    pub fn match_binding(
+        binding: &str,
+        keystrokes: &[KeyEvent],
+    ) -> KeyBindingMatch {
+        let binding: Self = binding.parse().unwrap();
+        binding.matches(keystrokes)
+    }
+
+    pub fn matches(&self, keystrokes: &[KeyEvent]) -> KeyBindingMatch {
+        if keystrokes.len() == self.sequence.len()
+            && self.sequence == keystrokes
+        {
+            KeyBindingMatch::Full
+        } else if keystrokes.len() < self.sequence.len()
+            && &self.sequence[..keystrokes.len()] == keystrokes
+        {
+            KeyBindingMatch::Partial
+        } else {
+            KeyBindingMatch::Mismatch
+        }
+    }
+}
+
+impl KeyBindingMatch {
+    pub fn or_else(
+        self,
+        mut callback: impl FnMut() -> KeyBindingMatch,
+    ) -> Self {
+        let next = match self {
+            KeyBindingMatch::Full => KeyBindingMatch::Mismatch,
+            _ => callback(),
+        };
+        match (self, next) {
+            (KeyBindingMatch::Full, _) | (_, KeyBindingMatch::Full) => {
+                KeyBindingMatch::Full
+            }
+            (KeyBindingMatch::Partial, _) | (_, KeyBindingMatch::Partial) => {
+                KeyBindingMatch::Partial
+            }
+
+            _ => KeyBindingMatch::Mismatch,
+        }
+    }
+
+    pub fn or_try_binding(
+        self,
+        binding: &str,
+        keystrokes: &[KeyEvent],
+        mut callback: impl FnMut(),
+    ) -> Self {
+        self.or_else(|| {
+            let res = KeySequence::match_binding(binding, keystrokes);
+            if matches!(res, KeyBindingMatch::Full) {
+                callback();
+            }
+            res
+        })
+    }
+
+    pub fn or_try_bindings<'a>(
+        self,
+        bindings: impl IntoIterator<Item = &'a str>,
+        keystrokes: &[KeyEvent],
+        mut callback: impl FnMut(),
+    ) -> Self {
+        bindings.into_iter().fold(self, |before, binding| {
+            before.or_try_binding(binding, keystrokes, || callback())
+        })
+    }
 }
 
 impl FromStr for KeySequence {
@@ -47,26 +124,23 @@ impl FromStr for KeySequence {
                     .next()
                     .and_then(|c| match c {
                         '<' => {
-                            let name: String =
-                                chars.take_while_ref(|c| *c != '>').collect();
+                            let name: String = chars.collect();
                             match name.as_str() {
-                                "home" => Some(KeyCode::Home),
-                                "end" => Some(KeyCode::End),
-                                "prior" | "pageup" => Some(KeyCode::PageUp),
-                                "next" | "pagedown" => Some(KeyCode::PageDown),
-                                "up" => Some(KeyCode::Up),
-                                "down" => Some(KeyCode::Down),
-                                "left" => Some(KeyCode::Left),
-                                "right" => Some(KeyCode::Right),
-                                "backspace" => Some(KeyCode::Backspace),
+                                "home>" => Some(KeyCode::Home),
+                                "end>" => Some(KeyCode::End),
+                                "enter>" => Some(KeyCode::Enter),
+                                "prior>" | "pageup>" => Some(KeyCode::PageUp),
+                                "next>" | "pagedown>" => {
+                                    Some(KeyCode::PageDown)
+                                }
+                                "up>" => Some(KeyCode::Up),
+                                "down>" => Some(KeyCode::Down),
+                                "left>" => Some(KeyCode::Left),
+                                "right>" => Some(KeyCode::Right),
+                                "backspace>" => Some(KeyCode::Backspace),
+                                "" => Some(KeyCode::Char('<')),
                                 _ => None,
                             }
-                            .filter(|_| {
-                                matches!(
-                                    (chars.next(), chars.next()),
-                                    (Some('>'), None)
-                                )
-                            })
                         }
                         c => chars.next().is_none().then(|| KeyCode::Char(c)),
                     })

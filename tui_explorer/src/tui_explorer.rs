@@ -1,4 +1,4 @@
-use crate::extensions::*;
+use crate::{extensions::*, KeyBindingMatch};
 use crate::{Error, SigintHandler};
 
 use memory_reader::{MemoryReader, Symbol};
@@ -26,8 +26,9 @@ pub struct TuiExplorer {
     memory_table: MemoryTable,
     detail_view: DetailView,
     // Display state
+    should_exit: bool,
     selected_region: SelectableRegion,
-    key_sequence: Vec<KeyEvent>,
+    keystrokes: Vec<KeyEvent>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -83,8 +84,9 @@ impl TuiExplorer {
             detail_view,
             _pid: pid,
             reader,
+            should_exit: false,
             selected_region: SelectableRegion::MemoryTable,
-            key_sequence: Vec::new(),
+            keystrokes: Vec::new(),
         };
         out.update_details();
 
@@ -97,7 +99,7 @@ impl TuiExplorer {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
-        while !handler.received() {
+        while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;
 
             let timeout = std::time::Duration::from_millis(100);
@@ -105,10 +107,7 @@ impl TuiExplorer {
 
             if poll {
                 let event_received = event::read()?;
-                let should_exit = self.handle_event(event_received);
-                if should_exit {
-                    break;
-                }
+                self.handle_event(event_received);
             }
         }
         Ok(())
@@ -160,47 +159,42 @@ impl TuiExplorer {
         );
     }
 
-    fn handle_event(&mut self, event: Event) -> bool {
-        let mut should_exit = false;
-        let mut clear_sequence = true;
-
-        use crossterm::event::{KeyCode, KeyModifiers};
+    fn handle_event(&mut self, event: Event) {
         if let Event::Key(key) = event {
-            match (key.code, key.modifiers) {
-                (KeyCode::Char('c'), KeyModifiers::CONTROL) => {
-                    should_exit = true;
-                }
+            self.keystrokes.push(key);
 
-                // TODO: Have a better way to handle sequences of
-                // keystrokes.
-                (KeyCode::Char('x'), KeyModifiers::CONTROL) => {
-                    self.key_sequence.push(key);
-                    clear_sequence = false;
+            match self.apply_key_binding() {
+                KeyBindingMatch::Full => self.keystrokes.clear(),
+                KeyBindingMatch::Partial => {}
+                KeyBindingMatch::Mismatch => {
+                    self.running_log.add_log(format!("{:?}", self.keystrokes));
+                    self.keystrokes.clear();
                 }
-                (KeyCode::Char('o'), KeyModifiers::NONE)
-                    if self.key_sequence.len() == 1 =>
-                {
-                    self.selected_region = match self.selected_region {
-                        SelectableRegion::MemoryTable => SelectableRegion::Log,
-                        SelectableRegion::Log => SelectableRegion::MemoryTable,
-                    };
-                }
-
-                _ => self.memory_table.handle_event(
-                    key,
-                    &self.reader,
-                    &mut self.running_log,
-                ),
             }
 
             self.update_details()
         }
+    }
 
-        if clear_sequence {
-            self.key_sequence.clear();
-        }
-
-        should_exit
+    fn apply_key_binding(&mut self) -> KeyBindingMatch {
+        let keystrokes = &self.keystrokes;
+        KeyBindingMatch::Mismatch
+            .or_try_binding("C-c", keystrokes, || {
+                self.should_exit = true;
+            })
+            .or_try_binding("C-x o", keystrokes, || {
+                self.selected_region = match self.selected_region {
+                    SelectableRegion::MemoryTable => SelectableRegion::Log,
+                    SelectableRegion::Log => SelectableRegion::MemoryTable,
+                };
+            })
+            .or_else(|| {
+                self.memory_table.apply_key_binding(
+                    keystrokes,
+                    &self.reader,
+                    &mut self.running_log,
+                )
+            })
     }
 
     fn update_details(&mut self) {
