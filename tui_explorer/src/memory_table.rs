@@ -67,28 +67,7 @@ impl MemoryTable {
     }
 
     fn move_selection_relative(&mut self, delta: i64) {
-        let n = self.active_view().num_table_rows();
-        let row =
-            match (self.active_view().table_state.selected(), delta.signum()) {
-                // If no prior selection, moving down a line selects the
-                // first element, but still allows a page down.
-                (None, 1) => (delta as usize) - 1,
-
-                // Wrapping to the end of the list selects the last
-                // element, regardless of step size.
-                (None | Some(0), -1) => n - 1,
-
-                // Wrapping to the beginning of the list selects the first
-                // element, regardless of step size.
-                (Some(i), 1) if i == n - 1 => 0,
-
-                // Otherwise, go in the direction specified, but capped at
-                // the endpoint.
-                (Some(i), -1) => ((i as i64) + delta).max(0) as usize,
-                (Some(i), 1) => (i + (delta as usize)).min(n - 1),
-                _ => panic!("This shouldn't happen"),
-            };
-        self.move_selection_absolute(row);
+        self.active_view_mut().move_selection_relative(delta);
     }
 
     fn move_selection_absolute(&mut self, row: usize) {
@@ -219,60 +198,14 @@ impl MemoryTable {
         log: &mut RunningLog,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
-            .or_try_bindings(["<down>", "C-n"], keystrokes, || {
-                self.move_selection_down()
-            })
-            .or_try_bindings(["<up>", "C-p"], keystrokes, || {
-                self.move_selection_up()
-            })
-            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
-                self.move_selection_page_up()
-            })
-            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
-                self.move_selection_page_down()
-            })
-            .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
-                self.move_selection_start()
-            })
-            .or_try_bindings(["C-<end>", "M->"], keystrokes, || {
-                self.move_selection_end()
-            })
-            .or_try_binding("C-s", keystrokes, || self.search_forward(&reader))
-            .or_try_binding("C-r", keystrokes, || self.search_backward(&reader))
             .or_else(|| {
-                if self.search_is_active() {
-                    KeyBindingMatch::Mismatch
-                        .or_try_binding("C-g", keystrokes, || {
-                            self.cancel_search()
-                        })
-                        .or_try_binding("<backspace>", keystrokes, || {
-                            self.backspace_search_character()
-                        })
-                        .or_else(|| {
-                            if keystrokes.len() == 1 {
-                                match &keystrokes[0] {
-                                    KeyEvent {
-                                        code: KeyCode::Char(c),
-                                        modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
-                                        ..
-                                    } => {
-                                        self.add_search_character(*c, &reader);
-                                        KeyBindingMatch::Full
-                                    }
-                                    _ => KeyBindingMatch::Mismatch,
-                                }
-                            } else {
-                                KeyBindingMatch::Mismatch
-                            }
-                        })
-                } else {
-                    KeyBindingMatch::Mismatch.or_try_binding(
-                        "C-g",
-                        keystrokes,
-                        || self.pop_view(),
-                    )
-                }
+                self.view_stack.last_mut().apply_key_binding(
+                    keystrokes,
+                    reader,
+                    &self.formatters,
+                )
             })
+            .or_try_binding("C-g", keystrokes, || self.pop_view())
             .or_try_binding("<enter>", keystrokes, || {
                 let selection = self.selected_value();
                 let as_pointer: Pointer = selection.value.into();
@@ -316,6 +249,30 @@ impl ViewFrame {
         self.table_state.select(Some(row));
     }
 
+    fn move_selection_relative(&mut self, delta: i64) {
+        let n = self.num_table_rows();
+        let row = match (self.table_state.selected(), delta.signum()) {
+            // If no prior selection, moving down a line selects the
+            // first element, but still allows a page down.
+            (None, 1) => (delta as usize) - 1,
+
+            // Wrapping to the end of the list selects the last
+            // element, regardless of step size.
+            (None | Some(0), -1) => n - 1,
+
+            // Wrapping to the beginning of the list selects the first
+            // element, regardless of step size.
+            (Some(i), 1) if i == n - 1 => 0,
+
+            // Otherwise, go in the direction specified, but capped at
+            // the endpoint.
+            (Some(i), -1) => ((i as i64) + delta).max(0) as usize,
+            (Some(i), 1) => (i + (delta as usize)).min(n - 1),
+            _ => panic!("This shouldn't happen"),
+        };
+        self.select_row(row);
+    }
+
     fn selected_row(&self) -> usize {
         self.table_state.selected().unwrap_or(0)
     }
@@ -356,6 +313,86 @@ impl ViewFrame {
             self.table_state
                 .select(Some(active.recommended_row_selection()));
         }
+    }
+
+    pub fn apply_key_binding(
+        &mut self,
+        keystrokes: &[KeyEvent],
+        reader: &MemoryReader,
+        formatters: &[Box<dyn ColumnFormatter>],
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_try_bindings(["<down>", "C-n"], keystrokes, || {
+                self.move_selection_relative(1)
+            })
+            .or_try_bindings(["<up>", "C-p"], keystrokes, || {
+                self.move_selection_relative(-1)
+            })
+            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
+                self.move_selection_relative(-self.page_up_down_distance())
+            })
+            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
+                self.move_selection_relative(self.page_up_down_distance())
+            })
+            .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
+                self.select_row(0)
+            })
+            .or_try_bindings(["C-<end>", "M->"], keystrokes, || {
+                self.select_row(self.num_table_rows() - 1)
+            })
+            .or_try_binding("C-s", keystrokes, || {
+                self.apply_search_command(
+                    SearchCommand::NextResult(SearchDirection::Forward),
+                    reader,
+                    formatters,
+                )
+            })
+            .or_try_binding("C-r", keystrokes, || {
+                self.apply_search_command(
+                    SearchCommand::NextResult(SearchDirection::Reverse),
+                    reader,
+                    formatters,
+                )
+            })
+            .or_else(|| {
+                if self.search.is_some() {
+                    KeyBindingMatch::Mismatch
+                        .or_try_binding("C-g", keystrokes, || {
+                            self.cancel_search()
+                        })
+                        .or_try_binding("<backspace>", keystrokes, || {
+                            self.undo_search_command()
+                        })
+                        .or_else(|| {
+                            if keystrokes.len() != 1 {
+                                return KeyBindingMatch::Mismatch;
+                            }
+
+                            let KeyEvent {
+                                code: KeyCode::Char(c),
+                                modifiers:
+                                    KeyModifiers::NONE | KeyModifiers::SHIFT,
+                                ..
+                            } = &keystrokes[0]
+                            else {
+                                return KeyBindingMatch::Mismatch;
+                            };
+                            self.apply_search_command(
+                                SearchCommand::AddChar(*c),
+                                reader,
+                                formatters,
+                            );
+
+                            KeyBindingMatch::Full
+                        })
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+    }
+
+    fn page_up_down_distance(&self) -> i64 {
+        self.previous_height.map(|height| height - 3).unwrap_or(1) as i64
     }
 
     fn apply_search_command(
