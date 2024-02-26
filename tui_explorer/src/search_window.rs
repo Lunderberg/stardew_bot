@@ -8,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{KeyBindingMatch, NonEmptyVec};
+use crate::{KeyBindingMatch, KeySequence, NonEmptyVec};
 
 pub struct SearchWindow<T> {
     pub stack: NonEmptyVec<SearchItem>,
@@ -77,14 +77,14 @@ impl<T> SearchWindow<T> {
 
     pub(crate) fn apply_key_binding(
         &mut self,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         table_size: usize,
         mut row_generator: impl FnMut(usize) -> Vec<String>,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_try_binding("<backspace>", keystrokes, || self.pop_command())
             .or_else(|| {
-                if keystrokes.len() != 1 {
+                if keystrokes.sequence.len() != 1 {
                     return KeyBindingMatch::Mismatch;
                 }
 
@@ -92,7 +92,7 @@ impl<T> SearchWindow<T> {
                     code: KeyCode::Char(c),
                     modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
                     ..
-                } = &keystrokes[0]
+                } = &keystrokes.sequence[0]
                 else {
                     return KeyBindingMatch::Mismatch;
                 };

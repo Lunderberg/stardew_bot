@@ -1,4 +1,3 @@
-use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -13,8 +12,8 @@ use memory_reader::{
 };
 
 use crate::{
-    ColumnFormatter, KeyBindingMatch, NonEmptyVec, RunningLog, SearchCommand,
-    SearchDirection, SearchItem, SearchWindow, VerticalBar,
+    ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
+    SearchCommand, SearchDirection, SearchItem, SearchWindow, VerticalBar,
 };
 
 use itertools::Itertools;
@@ -193,7 +192,7 @@ impl MemoryTable {
 
     pub fn apply_key_binding(
         &mut self,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         reader: &MemoryReader,
         log: &mut RunningLog,
     ) -> KeyBindingMatch {
@@ -317,7 +316,7 @@ impl ViewFrame {
 
     pub fn apply_key_binding(
         &mut self,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         reader: &MemoryReader,
         formatters: &[Box<dyn ColumnFormatter>],
     ) -> KeyBindingMatch {

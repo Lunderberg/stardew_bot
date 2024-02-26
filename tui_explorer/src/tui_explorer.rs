@@ -1,4 +1,4 @@
-use crate::{extensions::*, KeyBindingMatch};
+use crate::{extensions::*, KeyBindingMatch, KeySequence};
 use crate::{Error, SigintHandler};
 
 use memory_reader::{MemoryReader, Symbol};
@@ -8,7 +8,7 @@ use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
 };
 
-use crossterm::event::{Event, KeyEvent};
+use crossterm::event::Event;
 use ratatui::{
     layout::{Constraint, Direction, Layout},
     prelude::Style,
@@ -28,7 +28,7 @@ pub struct TuiExplorer {
     // Display state
     should_exit: bool,
     selected_region: SelectableRegion,
-    keystrokes: Vec<KeyEvent>,
+    keystrokes: KeySequence,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,7 +86,7 @@ impl TuiExplorer {
             reader,
             should_exit: false,
             selected_region: SelectableRegion::MemoryTable,
-            keystrokes: Vec::new(),
+            keystrokes: KeySequence::default(),
         };
         out.update_details();
 

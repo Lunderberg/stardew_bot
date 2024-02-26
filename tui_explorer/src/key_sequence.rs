@@ -4,9 +4,9 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 
 use crate::Error;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Default)]
 pub struct KeySequence {
-    sequence: Vec<KeyEvent>,
+    pub(crate) sequence: Vec<KeyEvent>,
 }
 
 pub enum KeyBindingMatch {
@@ -16,21 +16,29 @@ pub enum KeyBindingMatch {
 }
 
 impl KeySequence {
+    pub fn push(&mut self, event: KeyEvent) {
+        self.sequence.push(event)
+    }
+
+    pub fn clear(&mut self) {
+        self.sequence.clear()
+    }
+
     pub fn match_binding(
         binding: &str,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
     ) -> KeyBindingMatch {
         let binding: Self = binding.parse().unwrap();
         binding.matches(keystrokes)
     }
 
-    pub fn matches(&self, keystrokes: &[KeyEvent]) -> KeyBindingMatch {
-        if keystrokes.len() == self.sequence.len()
-            && self.sequence == keystrokes
-        {
+    pub fn matches(&self, keystrokes: &KeySequence) -> KeyBindingMatch {
+        let self_seq = &self.sequence;
+        let user_seq = &keystrokes.sequence;
+        if user_seq.len() == self_seq.len() && self_seq == user_seq {
             KeyBindingMatch::Full
-        } else if keystrokes.len() < self.sequence.len()
-            && &self.sequence[..keystrokes.len()] == keystrokes
+        } else if user_seq.len() < self_seq.len()
+            && &self_seq[..user_seq.len()] == user_seq
         {
             KeyBindingMatch::Partial
         } else {
@@ -70,7 +78,7 @@ impl KeyBindingMatch {
     pub fn or_try_binding(
         self,
         binding: &str,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         mut callback: impl FnMut(),
     ) -> Self {
         self.or_else(|| Self::try_binding(binding, keystrokes, || callback()))
@@ -78,7 +86,7 @@ impl KeyBindingMatch {
 
     pub fn try_binding(
         binding: &str,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         mut callback: impl FnMut(),
     ) -> Self {
         let res = KeySequence::match_binding(binding, keystrokes);
@@ -91,7 +99,7 @@ impl KeyBindingMatch {
     pub fn or_try_bindings<'a>(
         self,
         bindings: impl IntoIterator<Item = &'a str>,
-        keystrokes: &[KeyEvent],
+        keystrokes: &KeySequence,
         mut callback: impl FnMut(),
     ) -> Self {
         bindings.into_iter().fold(self, |before, binding| {
