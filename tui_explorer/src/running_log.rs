@@ -16,7 +16,7 @@ pub struct RunningLog {
 }
 
 impl RunningLog {
-    pub fn new(max_elements: usize) -> Self {
+    pub(crate) fn new(max_elements: usize) -> Self {
         Self {
             max_elements,
             state: ListState::default(),
@@ -24,14 +24,19 @@ impl RunningLog {
         }
     }
 
-    pub fn add_log(&mut self, log: impl Into<String>) {
+    pub(crate) fn add_log(&mut self, log: impl Into<String>) {
         self.items.push_back((Local::now(), log.into()));
         while self.items.len() > self.max_elements {
             self.items.pop_front();
         }
     }
 
-    pub fn draw(&mut self, frame: &mut Frame, area: Rect, border_style: Style) {
+    pub(crate) fn draw(
+        &mut self,
+        frame: &mut Frame,
+        area: Rect,
+        border_style: Style,
+    ) {
         let items: Vec<_> = self
             .items
             .iter()

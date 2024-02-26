@@ -15,7 +15,7 @@ pub struct DetailView {
 }
 
 impl DetailView {
-    pub fn new(formatters: Vec<Box<dyn InfoFormatter>>) -> Self {
+    pub(crate) fn new(formatters: Vec<Box<dyn InfoFormatter>>) -> Self {
         Self {
             state: TableState::default(),
             values: Vec::new(),
@@ -23,7 +23,7 @@ impl DetailView {
         }
     }
 
-    pub fn update_details(
+    pub(crate) fn update_details(
         &mut self,
         reader: &MemoryReader,
         region: &MemoryRegion,
@@ -40,7 +40,7 @@ impl DetailView {
             .collect()
     }
 
-    pub fn draw(&mut self, frame: &mut Frame, area: Rect) {
+    pub(crate) fn draw(&mut self, frame: &mut Frame, area: Rect) {
         let rows = self.values.iter().map(|(key, value)| {
             let height = value.chars().filter(|c| *c == '\n').count() + 1;
             let cells = [Cell::from(*key), Cell::from(value.as_str())];

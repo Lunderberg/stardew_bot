@@ -21,7 +21,7 @@ struct StackFrame {
 }
 
 impl StackFrameTable {
-    pub fn new(reader: &MemoryReader, stack: &MemoryRegion) -> Self {
+    pub(crate) fn new(reader: &MemoryReader, stack: &MemoryRegion) -> Self {
         let stack_frames: Vec<_> = stack
             .stack_pointers(reader.libc_address_ranges())
             .map(|frame_pointer| {
@@ -46,7 +46,7 @@ impl StackFrameTable {
         }
     }
 
-    pub fn select_address(&mut self, address: Pointer) {
+    pub(crate) fn select_address(&mut self, address: Pointer) {
         let frame_containing_address = self
             .stack_frames
             .binary_search_by_key(&Reverse(address), |frame| {
@@ -59,7 +59,7 @@ impl StackFrameTable {
         self.table_state.select(Some(row));
     }
 
-    pub fn draw(
+    pub(crate) fn draw(
         &mut self,
         frame: &mut Frame,
         area: Rect,

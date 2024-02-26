@@ -33,7 +33,7 @@ struct ViewFrame {
 }
 
 impl MemoryTable {
-    pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
+    pub(crate) fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
         use super::column_formatter::*;
 
         Self {
@@ -47,112 +47,31 @@ impl MemoryTable {
         }
     }
 
-    pub fn push_view(&mut self, region: MemoryRegion, entry_point: Pointer) {
+    pub(crate) fn push_view(
+        &mut self,
+        region: MemoryRegion,
+        entry_point: Pointer,
+    ) {
         self.finalize_search();
         self.view_stack.push(ViewFrame::new(region, entry_point));
     }
 
-    pub fn pop_view(&mut self) {
+    pub(crate) fn pop_view(&mut self) {
         if self.view_stack.len() > 1 {
             self.view_stack.pop();
         }
     }
 
-    pub fn current_region(&self) -> &MemoryRegion {
+    pub(crate) fn current_region(&self) -> &MemoryRegion {
         &self.active_view().region
     }
 
-    pub fn selected_value(&self) -> MemoryValue<[u8; 8]> {
+    pub(crate) fn selected_value(&self) -> MemoryValue<[u8; 8]> {
         self.active_view().selected_value()
     }
 
-    fn move_selection_relative(&mut self, delta: i64) {
-        self.active_view_mut().move_selection_relative(delta);
-    }
-
-    fn move_selection_absolute(&mut self, row: usize) {
-        self.active_view_mut().select_row(row);
-    }
-
-    pub fn move_selection_start(&mut self) {
-        self.move_selection_absolute(0);
-    }
-
-    pub fn move_selection_end(&mut self) {
-        self.move_selection_absolute(self.active_view().num_table_rows() - 1);
-    }
-
-    pub fn move_selection_down(&mut self) {
-        self.move_selection_relative(1);
-    }
-
-    pub fn move_selection_up(&mut self) {
-        self.move_selection_relative(-1);
-    }
-
-    pub fn move_selection_page_down(&mut self) {
-        self.move_selection_relative(self.displayed_rows() as i64);
-    }
-
-    pub fn move_selection_page_up(&mut self) {
-        self.move_selection_relative(-(self.displayed_rows() as i64));
-    }
-
-    pub fn search_is_active(&self) -> bool {
-        self.active_view().search.is_some()
-    }
-
-    pub fn finalize_search(&mut self) {
+    pub(crate) fn finalize_search(&mut self) {
         self.active_view_mut().finalize_search();
-    }
-
-    pub fn search_forward(&mut self, reader: &MemoryReader) {
-        self.apply_search_command(
-            SearchCommand::NextResult(SearchDirection::Forward),
-            reader,
-        );
-    }
-
-    pub fn search_backward(&mut self, reader: &MemoryReader) {
-        self.apply_search_command(
-            SearchCommand::NextResult(SearchDirection::Reverse),
-            reader,
-        );
-    }
-
-    pub fn add_search_character(&mut self, c: char, reader: &MemoryReader) {
-        self.apply_search_command(SearchCommand::AddChar(c), reader);
-    }
-
-    pub fn backspace_search_character(&mut self) {
-        self.active_view_mut().undo_search_command();
-    }
-
-    pub fn cancel_search(&mut self) {
-        self.active_view_mut().cancel_search();
-    }
-
-    fn apply_search_command(
-        &mut self,
-        command: SearchCommand,
-        reader: &MemoryReader,
-    ) {
-        // Can't use `self.active_view_mut()` here, because that would
-        // mutably borrow `self`, preventing the immutable borrow of
-        // `self.formatters`.
-        self.view_stack.last_mut().apply_search_command(
-            command,
-            reader,
-            &self.formatters,
-        );
-    }
-
-    fn displayed_rows(&self) -> usize {
-        let non_data_rows = 5;
-        self.active_view()
-            .table_height
-            .map(|height| height - non_data_rows)
-            .unwrap_or(1)
     }
 
     fn active_view(&self) -> &ViewFrame {
@@ -163,7 +82,7 @@ impl MemoryTable {
         self.view_stack.last_mut()
     }
 
-    pub fn draw(
+    pub(crate) fn draw(
         &mut self,
         frame: &mut Frame,
         area: Rect,
@@ -191,7 +110,7 @@ impl MemoryTable {
         );
     }
 
-    pub fn apply_key_binding(
+    pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
         reader: &MemoryReader,
@@ -227,7 +146,7 @@ impl MemoryTable {
 }
 
 impl ViewFrame {
-    pub fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
+    pub(crate) fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
         let mut frame = ViewFrame {
             region,
             entry_point,
@@ -307,15 +226,7 @@ impl ViewFrame {
         self.search = None;
     }
 
-    fn undo_search_command(&mut self) {
-        if let Some(active) = &mut self.search {
-            active.pop_command();
-            self.table_state
-                .select(Some(active.recommended_row_selection()));
-        }
-    }
-
-    pub fn apply_key_binding(
+    pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
         reader: &MemoryReader,
