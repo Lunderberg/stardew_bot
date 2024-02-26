@@ -7,7 +7,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::{KeyBindingMatch, KeySequence, NonEmptyVec};
+use crate::{KeyBindingMatch, KeySequence, NonEmptyVec, ScrollableState};
 
 pub struct SearchWindow<T> {
     pub stack: NonEmptyVec<SearchItem>,
@@ -32,6 +32,23 @@ pub enum SearchDirection {
 }
 
 impl<T> SearchWindow<T> {
+    pub(crate) fn new(direction: SearchDirection, pre_search_state: T) -> Self
+    where
+        T: ScrollableState,
+    {
+        let command = SearchCommand::NextResult(direction);
+        let initial_row = pre_search_state.selected_row().unwrap_or(0);
+        let initial_item = SearchItem {
+            command,
+            search_result: Some(initial_row),
+        };
+
+        Self {
+            stack: NonEmptyVec::new(initial_item),
+            pre_search_state,
+        }
+    }
+
     // Undo the most recent command, unless it was the initial command
     // that started the search.
     pub(crate) fn pop_command(&mut self) {
@@ -82,6 +99,20 @@ impl<T> SearchWindow<T> {
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_try_binding("<backspace>", keystrokes, || self.pop_command())
+            .or_try_binding("C-s", keystrokes, || {
+                self.apply_command(
+                    SearchCommand::NextResult(SearchDirection::Forward),
+                    table_size,
+                    |i| row_generator(i),
+                )
+            })
+            .or_try_binding("C-r", keystrokes, || {
+                self.apply_command(
+                    SearchCommand::NextResult(SearchDirection::Reverse),
+                    table_size,
+                    |i| row_generator(i),
+                )
+            })
             .or_else(|| {
                 if let Some(c) = keystrokes.as_char() {
                     self.apply_command(

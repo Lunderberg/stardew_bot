@@ -15,7 +15,7 @@ use crate::extensions::*;
 use crate::scroll_bar::ScrollableState;
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
-    SearchCommand, SearchDirection, SearchItem, SearchWindow,
+    SearchDirection, SearchWindow,
 };
 
 use itertools::Itertools;
@@ -193,6 +193,11 @@ impl ViewFrame {
         self.select_row(row);
     }
 
+    fn start_search(&mut self, direction: SearchDirection) {
+        self.search =
+            Some(SearchWindow::new(direction, self.table_state.clone()));
+    }
+
     fn cancel_search(&mut self) {
         if let Some(search) = self.search.take() {
             self.table_state = search.pre_search_state;
@@ -215,20 +220,6 @@ impl ViewFrame {
                     keystrokes,
                     self.num_table_rows(),
                     self.num_rows_shown() - 1,
-                )
-            })
-            .or_try_binding("C-s", keystrokes, || {
-                self.apply_search_command(
-                    SearchCommand::NextResult(SearchDirection::Forward),
-                    reader,
-                    formatters,
-                )
-            })
-            .or_try_binding("C-r", keystrokes, || {
-                self.apply_search_command(
-                    SearchCommand::NextResult(SearchDirection::Reverse),
-                    reader,
-                    formatters,
                 )
             })
             .or_else(|| {
@@ -258,6 +249,12 @@ impl ViewFrame {
                     KeyBindingMatch::Mismatch
                 }
             })
+            .or_try_binding("C-s", keystrokes, || {
+                self.start_search(SearchDirection::Forward)
+            })
+            .or_try_binding("C-r", keystrokes, || {
+                self.start_search(SearchDirection::Reverse)
+            })
     }
 
     fn num_rows_shown(&self) -> usize {
@@ -282,44 +279,6 @@ impl ViewFrame {
                     formatter.cell_text(reader, region, selected_address, &row)
                 })
                 .collect()
-        }
-    }
-
-    fn apply_search_command(
-        &mut self,
-        command: SearchCommand,
-        reader: &MemoryReader,
-        formatters: &[Box<dyn ColumnFormatter>],
-    ) {
-        use SearchCommand::*;
-
-        let selected_address = self.selected_address();
-        let table_size = self.num_table_rows();
-
-        match (self.search.as_mut(), command) {
-            (Some(active), _) => {
-                let row_generator = Self::get_row_generator(
-                    &reader,
-                    &self.region,
-                    selected_address,
-                    formatters,
-                );
-                active.apply_command(command, table_size, row_generator);
-                self.table_state
-                    .select(Some(active.recommended_row_selection()));
-            }
-            (None, NextResult(_)) => {
-                let initial_row = self.table_state.selected().unwrap_or(0);
-                let initial_item = SearchItem {
-                    command,
-                    search_result: Some(initial_row),
-                };
-                self.search = Some(SearchWindow {
-                    stack: NonEmptyVec::new(initial_item),
-                    pre_search_state: self.table_state.clone(),
-                });
-            }
-            (None, AddChar(_)) => {}
         }
     }
 
