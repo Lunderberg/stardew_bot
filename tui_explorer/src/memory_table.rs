@@ -11,9 +11,10 @@ use memory_reader::{
     CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
 
+use crate::extensions::*;
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
-    SearchCommand, SearchDirection, SearchItem, SearchWindow, VerticalBar,
+    SearchCommand, SearchDirection, SearchItem, SearchWindow,
 };
 
 use itertools::Itertools;
@@ -28,7 +29,7 @@ struct ViewFrame {
     entry_point: Pointer,
     table_state: TableState,
     search: Option<SearchWindow<TableState>>,
-    previous_height: Option<usize>,
+    table_height: Option<usize>,
 }
 
 impl MemoryTable {
@@ -149,7 +150,7 @@ impl MemoryTable {
     fn displayed_rows(&self) -> usize {
         let non_data_rows = 5;
         self.active_view()
-            .previous_height
+            .table_height
             .map(|height| height - non_data_rows)
             .unwrap_or(1)
     }
@@ -232,7 +233,7 @@ impl ViewFrame {
             entry_point,
             table_state: TableState::default(),
             search: None,
-            previous_height: None,
+            table_height: None,
         };
 
         frame.select_address(entry_point);
@@ -328,10 +329,10 @@ impl ViewFrame {
                 self.move_selection_relative(-1)
             })
             .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
-                self.move_selection_relative(-self.page_up_down_distance())
+                self.move_selection_relative(-(self.num_rows_shown() - 1))
             })
             .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
-                self.move_selection_relative(self.page_up_down_distance())
+                self.move_selection_relative(self.num_rows_shown() - 1)
             })
             .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
                 self.select_row(0)
@@ -382,8 +383,8 @@ impl ViewFrame {
             })
     }
 
-    fn page_up_down_distance(&self) -> i64 {
-        self.previous_height.map(|height| height - 3).unwrap_or(1) as i64
+    fn num_rows_shown(&self) -> i64 {
+        self.table_height.map(|height| height - 2).unwrap_or(1) as i64
     }
 
     fn get_row_generator<'a>(
@@ -502,9 +503,6 @@ impl ViewFrame {
         } else {
             0
         };
-        let table_height = inner_area.height - search_area_height;
-        let header_height = table_height.min(2);
-        let scrollbar_width = inner_area.width.min(1);
 
         let search_area = Rect::new(
             inner_area.x,
@@ -513,59 +511,29 @@ impl ViewFrame {
             search_area_height,
         );
 
-        let scrollbar_area = Rect::new(
-            inner_area.x,
-            inner_area.y + header_height,
-            scrollbar_width,
-            table_height - header_height,
-        );
-
         let table_area = Rect::new(
-            inner_area.x + scrollbar_width,
+            inner_area.x,
             inner_area.y,
-            inner_area.width - scrollbar_width,
-            table_height,
+            inner_area.width,
+            inner_area.height - search_area_height,
         );
 
         if let Some(search) = self.search.as_ref() {
             search.draw(frame, search_area);
         }
-        self.draw_scrollbar(frame, scrollbar_area);
-        self.draw_table(frame, table_area, reader, formatters);
+
+        self.table_height = Some(table_area.height as usize);
+        let table = self
+            .generate_table(reader, formatters)
+            .with_scrollbar(self.num_table_rows());
+        frame.render_stateful_widget(table, table_area, &mut self.table_state);
     }
 
-    fn draw_scrollbar(&mut self, frame: &mut Frame, area: Rect) {
-        let selected = self.selected_row();
-        let table_size = self.num_table_rows();
-        let rows_shown = area.height as usize;
-        let (top_ratio, bottom_ratio) = if selected < rows_shown {
-            (0.0, (rows_shown as f64) / (table_size as f64))
-        } else if selected > table_size - rows_shown {
-            (
-                ((table_size - rows_shown) as f64) / (table_size as f64),
-                1.0,
-            )
-        } else {
-            (
-                ((selected - rows_shown / 2) as f64) / (table_size as f64),
-                ((selected + rows_shown / 2) as f64) / (table_size as f64),
-            )
-        };
-        let bar = VerticalBar::default()
-            .bar_top_ratio(top_ratio)
-            .bar_bottom_ratio(bottom_ratio);
-        frame.render_widget(bar, area);
-    }
-
-    fn draw_table(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
+    fn generate_table<'a>(
+        &self,
         reader: &MemoryReader,
-        formatters: &[Box<dyn ColumnFormatter>],
-    ) {
-        self.previous_height = Some(area.height as usize);
-
+        formatters: &'a [Box<dyn ColumnFormatter>],
+    ) -> Table<'a> {
         let selected_row = self.selected_row();
         let selected_address = self.selected_address();
 
@@ -628,7 +596,7 @@ impl ViewFrame {
         let rows = self.region.iter_bytes().iter_byte_arr().enumerate().map(
             |(i, row): (_, MemoryValue<[u8; 8]>)| {
                 let is_near_selected =
-                    i.abs_diff(selected_row) < (area.height as usize);
+                    i.abs_diff(selected_row) < (self.num_rows_shown() as usize);
 
                 let region = &self.region;
                 let cells = formatters
@@ -663,6 +631,6 @@ impl ViewFrame {
         .highlight_style(selected_style)
         .highlight_symbol(">> ");
 
-        frame.render_stateful_widget(table, area, &mut self.table_state);
+        table
     }
 }

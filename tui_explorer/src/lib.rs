@@ -25,6 +25,9 @@ pub use terminal_context::*;
 mod sigint_handler;
 pub use sigint_handler::*;
 
+mod scroll_bar;
+pub(crate) use scroll_bar::*;
+
 mod search_window;
 pub use search_window::*;
 
