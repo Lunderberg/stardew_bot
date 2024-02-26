@@ -189,12 +189,17 @@ impl TuiExplorer {
                     SelectableRegion::Log => SelectableRegion::MemoryTable,
                 };
             })
-            .or_else(|| {
-                self.memory_table.apply_key_binding(
-                    keystrokes,
-                    &self.reader,
-                    &mut self.running_log,
-                )
+            .or_else(|| match self.selected_region {
+                SelectableRegion::MemoryTable => {
+                    self.memory_table.apply_key_binding(
+                        keystrokes,
+                        &self.reader,
+                        &mut self.running_log,
+                    )
+                }
+                SelectableRegion::Log => {
+                    self.running_log.apply_key_binding(keystrokes)
+                }
             })
     }
 
