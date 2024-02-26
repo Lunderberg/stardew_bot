@@ -12,6 +12,7 @@ use memory_reader::{
 };
 
 use crate::extensions::*;
+use crate::scroll_bar::ScrollableState;
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
     SearchCommand, SearchDirection, SearchItem, SearchWindow,
@@ -168,30 +169,6 @@ impl ViewFrame {
         self.table_state.select(Some(row));
     }
 
-    fn move_selection_relative(&mut self, delta: i64) {
-        let n = self.num_table_rows();
-        let row = match (self.table_state.selected(), delta.signum()) {
-            // If no prior selection, moving down a line selects the
-            // first element, but still allows a page down.
-            (None, 1) => (delta as usize) - 1,
-
-            // Wrapping to the end of the list selects the last
-            // element, regardless of step size.
-            (None | Some(0), -1) => n - 1,
-
-            // Wrapping to the beginning of the list selects the first
-            // element, regardless of step size.
-            (Some(i), 1) if i == n - 1 => 0,
-
-            // Otherwise, go in the direction specified, but capped at
-            // the endpoint.
-            (Some(i), -1) => ((i as i64) + delta).max(0) as usize,
-            (Some(i), 1) => (i + (delta as usize)).min(n - 1),
-            _ => panic!("This shouldn't happen"),
-        };
-        self.select_row(row);
-    }
-
     fn selected_row(&self) -> usize {
         self.table_state.selected().unwrap_or(0)
     }
@@ -233,23 +210,12 @@ impl ViewFrame {
         formatters: &[Box<dyn ColumnFormatter>],
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
-            .or_try_bindings(["<down>", "C-n"], keystrokes, || {
-                self.move_selection_relative(1)
-            })
-            .or_try_bindings(["<up>", "C-p"], keystrokes, || {
-                self.move_selection_relative(-1)
-            })
-            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
-                self.move_selection_relative(-(self.num_rows_shown() - 1))
-            })
-            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
-                self.move_selection_relative(self.num_rows_shown() - 1)
-            })
-            .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
-                self.select_row(0)
-            })
-            .or_try_bindings(["C-<end>", "M->"], keystrokes, || {
-                self.select_row(self.num_table_rows() - 1)
+            .or_else(|| {
+                self.table_state.apply_key_binding(
+                    keystrokes,
+                    self.num_table_rows(),
+                    self.num_rows_shown() - 1,
+                )
             })
             .or_try_binding("C-s", keystrokes, || {
                 self.apply_search_command(
@@ -294,8 +260,8 @@ impl ViewFrame {
             })
     }
 
-    fn num_rows_shown(&self) -> i64 {
-        self.table_height.map(|height| height - 2).unwrap_or(1) as i64
+    fn num_rows_shown(&self) -> usize {
+        self.table_height.map(|height| height - 2).unwrap_or(1)
     }
 
     fn get_row_generator<'a>(

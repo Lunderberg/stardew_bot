@@ -3,7 +3,7 @@ use ratatui::{
     widgets::{StatefulWidget, Widget},
 };
 
-use crate::extensions::*;
+use crate::{extensions::*, KeyBindingMatch, KeySequence};
 
 use crate::VerticalBar;
 
@@ -17,6 +17,59 @@ pub(crate) trait ScrollableState {
     fn selected_row(&self) -> Option<usize>;
 
     fn select_row(&mut self, row: Option<usize>);
+
+    fn apply_key_binding(
+        &mut self,
+        keystrokes: &KeySequence,
+        num_rows: usize,
+        page_up_down_size: usize,
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_try_bindings(["<down>", "C-n"], keystrokes, || {
+                self.move_selection_relative(num_rows, 1)
+            })
+            .or_try_bindings(["<up>", "C-p"], keystrokes, || {
+                self.move_selection_relative(num_rows, -1)
+            })
+            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
+                self.move_selection_relative(
+                    num_rows,
+                    -(page_up_down_size as i64),
+                )
+            })
+            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
+                self.move_selection_relative(num_rows, page_up_down_size as i64)
+            })
+            .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
+                self.select_row(Some(0))
+            })
+            .or_try_bindings(["C-<end>", "M->"], keystrokes, || {
+                self.select_row(Some(num_rows - 1))
+            })
+    }
+
+    fn move_selection_relative(&mut self, num_rows: usize, delta: i64) {
+        let row = match (self.selected_row(), delta.signum()) {
+            // If no prior selection, moving down a line selects the
+            // first element, but still allows a page down.
+            (None, 1) => (delta as usize) - 1,
+
+            // Wrapping to the end of the list selects the last
+            // element, regardless of step size.
+            (None | Some(0), -1) => num_rows - 1,
+
+            // Wrapping to the beginning of the list selects the first
+            // element, regardless of step size.
+            (Some(i), 1) if i == num_rows - 1 => 0,
+
+            // Otherwise, go in the direction specified, but capped at
+            // the endpoint.
+            (Some(i), -1) => ((i as i64) + delta).max(0) as usize,
+            (Some(i), 1) => (i + (delta as usize)).min(num_rows - 1),
+            _ => panic!("This shouldn't happen"),
+        };
+        self.select_row(Some(row));
+    }
 }
 
 impl<Inner> WithScrollbar<Inner> {
