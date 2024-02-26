@@ -164,15 +164,16 @@ impl TuiExplorer {
             self.keystrokes.push(key);
 
             match self.apply_key_binding() {
-                KeyBindingMatch::Full => self.keystrokes.clear(),
+                KeyBindingMatch::Full => {
+                    self.update_details();
+                    self.keystrokes.clear();
+                }
                 KeyBindingMatch::Partial => {}
                 KeyBindingMatch::Mismatch => {
                     self.running_log.add_log(format!("{:?}", self.keystrokes));
                     self.keystrokes.clear();
                 }
             }
-
-            self.update_details()
         }
     }
 
