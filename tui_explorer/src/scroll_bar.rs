@@ -13,34 +13,10 @@ pub(crate) struct WithScrollbar<Inner> {
     num_header_rows: usize,
 }
 
-pub(crate) trait Scrollable: StatefulWidget {
-    fn selected_row(state: &Self::State) -> usize;
+pub(crate) trait ScrollableState {
+    fn selected_row(&self) -> Option<usize>;
 
-    fn select_row(state: &mut Self::State, row: usize);
-
-    fn make_scrollbar(
-        &self,
-        num_rows: usize,
-        area: Rect,
-        state: &Self::State,
-    ) -> impl Widget {
-        let selected_row = Self::selected_row(state);
-        let rows_shown = area.height as usize;
-        let (top_ratio, bottom_ratio) = if selected_row < rows_shown {
-            (0.0, (rows_shown as f64) / (num_rows as f64))
-        } else if selected_row > num_rows - rows_shown {
-            (((num_rows - rows_shown) as f64) / (num_rows as f64), 1.0)
-        } else {
-            (
-                ((selected_row - rows_shown / 2) as f64) / (num_rows as f64),
-                ((selected_row + rows_shown / 2) as f64) / (num_rows as f64),
-            )
-        };
-        let bar = VerticalBar::default()
-            .bar_top_ratio(top_ratio)
-            .bar_bottom_ratio(bottom_ratio);
-        bar
-    }
+    fn select_row(&mut self, row: Option<usize>);
 }
 
 impl<Inner> WithScrollbar<Inner> {
@@ -77,11 +53,40 @@ impl<Inner> WithScrollbar<Inner> {
 
         (scrollbar_area, inner_area)
     }
+
+    fn make_scrollbar(&self, area: Rect, state: &Inner::State) -> impl Widget
+    where
+        Inner: StatefulWidget,
+        Inner::State: ScrollableState,
+    {
+        let selected_row = state.selected_row().unwrap_or(0);
+        let rows_shown = area.height as usize;
+        let (top_ratio, bottom_ratio) = if selected_row < rows_shown {
+            (0.0, (rows_shown as f64) / (self.num_rows as f64))
+        } else if selected_row > self.num_rows - rows_shown {
+            (
+                ((self.num_rows - rows_shown) as f64) / (self.num_rows as f64),
+                1.0,
+            )
+        } else {
+            (
+                ((selected_row - rows_shown / 2) as f64)
+                    / (self.num_rows as f64),
+                ((selected_row + rows_shown / 2) as f64)
+                    / (self.num_rows as f64),
+            )
+        };
+        let bar = VerticalBar::default()
+            .bar_top_ratio(top_ratio)
+            .bar_bottom_ratio(bottom_ratio);
+        bar
+    }
 }
 
 impl<Inner> StatefulWidget for WithScrollbar<Inner>
 where
-    Inner: Scrollable,
+    Inner: StatefulWidget,
+    Inner::State: ScrollableState,
 {
     type State = Inner::State;
 
@@ -93,29 +98,27 @@ where
     ) {
         let (scrollbar_area, inner_area) = self.split_scroll_area(area);
 
-        self.inner
-            .make_scrollbar(self.num_rows, area, state)
-            .render(scrollbar_area, buf);
+        self.make_scrollbar(area, state).render(scrollbar_area, buf);
         self.inner.render(inner_area, buf, state);
     }
 }
 
-impl Scrollable for ratatui::widgets::Table<'_> {
-    fn selected_row(state: &Self::State) -> usize {
-        state.selected().unwrap_or(0)
+impl ScrollableState for ratatui::widgets::TableState {
+    fn selected_row(&self) -> Option<usize> {
+        self.selected()
     }
 
-    fn select_row(state: &mut Self::State, row: usize) {
-        state.select(Some(row))
+    fn select_row(&mut self, row: Option<usize>) {
+        self.select(row)
     }
 }
 
-impl Scrollable for ratatui::widgets::List<'_> {
-    fn selected_row(state: &Self::State) -> usize {
-        state.selected().unwrap_or(0)
+impl ScrollableState for ratatui::widgets::ListState {
+    fn selected_row(&self) -> Option<usize> {
+        self.selected()
     }
 
-    fn select_row(state: &mut Self::State, row: usize) {
-        state.select(Some(row))
+    fn select_row(&mut self, row: Option<usize>) {
+        self.select(row)
     }
 }
