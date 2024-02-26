@@ -40,6 +40,13 @@ impl KeySequence {
 }
 
 impl KeyBindingMatch {
+    pub fn then(self, mut callback: impl FnMut()) -> Self {
+        if matches!(self, KeyBindingMatch::Full) {
+            callback()
+        }
+        self
+    }
+
     pub fn or_else(
         self,
         mut callback: impl FnMut() -> KeyBindingMatch,
@@ -66,13 +73,19 @@ impl KeyBindingMatch {
         keystrokes: &[KeyEvent],
         mut callback: impl FnMut(),
     ) -> Self {
-        self.or_else(|| {
-            let res = KeySequence::match_binding(binding, keystrokes);
-            if matches!(res, KeyBindingMatch::Full) {
-                callback();
-            }
-            res
-        })
+        self.or_else(|| Self::try_binding(binding, keystrokes, || callback()))
+    }
+
+    pub fn try_binding(
+        binding: &str,
+        keystrokes: &[KeyEvent],
+        mut callback: impl FnMut(),
+    ) -> Self {
+        let res = KeySequence::match_binding(binding, keystrokes);
+        if matches!(res, KeyBindingMatch::Full) {
+            callback();
+        }
+        res
     }
 
     pub fn or_try_bindings<'a>(

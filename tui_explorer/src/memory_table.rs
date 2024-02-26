@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -355,35 +355,27 @@ impl ViewFrame {
                 )
             })
             .or_else(|| {
-                if self.search.is_some() {
-                    KeyBindingMatch::Mismatch
+                let selected_address = self.selected_address();
+                let table_size = self.num_table_rows();
+                if let Some(search) = self.search.as_mut() {
+                    search
+                        .apply_key_binding(
+                            keystrokes,
+                            table_size,
+                            Self::get_row_generator(
+                                &reader,
+                                &self.region,
+                                selected_address,
+                                formatters,
+                            ),
+                        )
+                        .then(|| {
+                            self.table_state.select(Some(
+                                search.recommended_row_selection(),
+                            ))
+                        })
                         .or_try_binding("C-g", keystrokes, || {
                             self.cancel_search()
-                        })
-                        .or_try_binding("<backspace>", keystrokes, || {
-                            self.undo_search_command()
-                        })
-                        .or_else(|| {
-                            if keystrokes.len() != 1 {
-                                return KeyBindingMatch::Mismatch;
-                            }
-
-                            let KeyEvent {
-                                code: KeyCode::Char(c),
-                                modifiers:
-                                    KeyModifiers::NONE | KeyModifiers::SHIFT,
-                                ..
-                            } = &keystrokes[0]
-                            else {
-                                return KeyBindingMatch::Mismatch;
-                            };
-                            self.apply_search_command(
-                                SearchCommand::AddChar(*c),
-                                reader,
-                                formatters,
-                            );
-
-                            KeyBindingMatch::Full
                         })
                 } else {
                     KeyBindingMatch::Mismatch
@@ -393,6 +385,27 @@ impl ViewFrame {
 
     fn page_up_down_distance(&self) -> i64 {
         self.previous_height.map(|height| height - 3).unwrap_or(1) as i64
+    }
+
+    fn get_row_generator<'a>(
+        reader: &'a MemoryReader,
+        region: &'a MemoryRegion,
+        selected_address: Pointer,
+        formatters: &'a [Box<dyn ColumnFormatter>],
+    ) -> impl Fn(usize) -> Vec<String> + 'a {
+        move |row: usize| -> Vec<String> {
+            let row: MemoryValue<[u8; 8]> = region
+                .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
+                .unwrap_or_else(|| {
+                    panic!("Row {row} is outside of the memory region")
+                });
+            formatters
+                .iter()
+                .map(|formatter| {
+                    formatter.cell_text(reader, region, selected_address, &row)
+                })
+                .collect()
+        }
     }
 
     fn apply_search_command(
@@ -408,25 +421,12 @@ impl ViewFrame {
 
         match (self.search.as_mut(), command) {
             (Some(active), _) => {
-                let region = &self.region;
-                let row_generator = |row: usize| -> Vec<String> {
-                    let row: MemoryValue<[u8; 8]> = region
-                        .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
-                        .unwrap_or_else(|| {
-                            panic!("Row {row} is outside of the memory region")
-                        });
-                    formatters
-                        .iter()
-                        .map(|formatter| {
-                            formatter.cell_text(
-                                reader,
-                                region,
-                                selected_address,
-                                &row,
-                            )
-                        })
-                        .collect()
-                };
+                let row_generator = Self::get_row_generator(
+                    &reader,
+                    &self.region,
+                    selected_address,
+                    formatters,
+                );
                 active.apply_command(command, table_size, row_generator);
                 self.table_state
                     .select(Some(active.recommended_row_selection()));

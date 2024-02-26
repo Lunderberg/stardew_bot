@@ -1,3 +1,4 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use itertools::Either;
 use ratatui::{
     layout::Rect,
@@ -7,7 +8,7 @@ use ratatui::{
     Frame,
 };
 
-use crate::NonEmptyVec;
+use crate::{KeyBindingMatch, NonEmptyVec};
 
 pub struct SearchWindow<T> {
     pub stack: NonEmptyVec<SearchItem>,
@@ -72,6 +73,37 @@ impl<T> SearchWindow<T> {
         let non_matching_part =
             vals.iter().filter(|(_, p)| !*p).map(|(c, _)| c).collect();
         (matching_part, non_matching_part)
+    }
+
+    pub(crate) fn apply_key_binding(
+        &mut self,
+        keystrokes: &[KeyEvent],
+        table_size: usize,
+        mut row_generator: impl FnMut(usize) -> Vec<String>,
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_try_binding("<backspace>", keystrokes, || self.pop_command())
+            .or_else(|| {
+                if keystrokes.len() != 1 {
+                    return KeyBindingMatch::Mismatch;
+                }
+
+                let KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                    ..
+                } = &keystrokes[0]
+                else {
+                    return KeyBindingMatch::Mismatch;
+                };
+                self.apply_command(
+                    SearchCommand::AddChar(*c),
+                    table_size,
+                    |i| row_generator(i),
+                );
+
+                KeyBindingMatch::Full
+            })
     }
 
     pub(crate) fn apply_command<F>(
