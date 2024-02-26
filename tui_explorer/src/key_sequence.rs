@@ -45,6 +45,23 @@ impl KeySequence {
             KeyBindingMatch::Mismatch
         }
     }
+
+    pub fn as_char(&self) -> Option<char> {
+        (self.sequence.len() == 1)
+            .then(|| {
+                if let KeyEvent {
+                    code: KeyCode::Char(c),
+                    modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
+                    ..
+                } = &self.sequence[0]
+                {
+                    Some(*c)
+                } else {
+                    None
+                }
+            })
+            .flatten()
+    }
 }
 
 impl KeyBindingMatch {

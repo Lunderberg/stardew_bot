@@ -1,4 +1,3 @@
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use itertools::Either;
 use ratatui::{
     layout::Rect,
@@ -84,25 +83,16 @@ impl<T> SearchWindow<T> {
         KeyBindingMatch::Mismatch
             .or_try_binding("<backspace>", keystrokes, || self.pop_command())
             .or_else(|| {
-                if keystrokes.sequence.len() != 1 {
-                    return KeyBindingMatch::Mismatch;
+                if let Some(c) = keystrokes.as_char() {
+                    self.apply_command(
+                        SearchCommand::AddChar(c),
+                        table_size,
+                        |i| row_generator(i),
+                    );
+                    KeyBindingMatch::Full
+                } else {
+                    KeyBindingMatch::Mismatch
                 }
-
-                let KeyEvent {
-                    code: KeyCode::Char(c),
-                    modifiers: KeyModifiers::NONE | KeyModifiers::SHIFT,
-                    ..
-                } = &keystrokes.sequence[0]
-                else {
-                    return KeyBindingMatch::Mismatch;
-                };
-                self.apply_command(
-                    SearchCommand::AddChar(*c),
-                    table_size,
-                    |i| row_generator(i),
-                );
-
-                KeyBindingMatch::Full
             })
     }
 
