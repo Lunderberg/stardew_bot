@@ -1,7 +1,6 @@
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    text::{Line, Span},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
     Frame,
 };
@@ -375,46 +374,6 @@ impl ViewFrame {
         let selected_row = self.selected_row();
         let selected_address = self.selected_address();
 
-        let selected_style = Style::default().add_modifier(Modifier::REVERSED);
-        let normal_style = Style::default().bg(Color::Blue);
-        let search_result_style = Style::default().bg(Color::Yellow);
-
-        let search_string = self
-            .search
-            .as_ref()
-            .map(|search_state| search_state.get_search_string(None));
-
-        let highlight_search_matches = |line| {
-            if search_string.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return line;
-            }
-
-            let Line { spans, alignment } = line;
-            let search_string: &str = search_string.as_ref().unwrap();
-
-            // Not technically correct, as it doesn't handle cases
-            // where the match crosses a border between spans.  But,
-            // close enough for now.
-            let spans = spans
-                .into_iter()
-                .flat_map(|span| {
-                    span.content
-                        .split(search_string)
-                        .map(|s| Span::styled(s.to_string(), span.style))
-                        .intersperse_with(|| {
-                            Span::styled(
-                                search_string.to_string(),
-                                span.style.patch(search_result_style),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                })
-                .collect();
-
-            Line { spans, alignment }
-        };
-
         let header_cells = formatters
             .iter()
             .map(|formatter| formatter.name())
@@ -427,7 +386,7 @@ impl ViewFrame {
             });
 
         let header = Row::new(header_cells)
-            .style(normal_style)
+            .style(Style::default().bg(Color::Blue))
             .height(1)
             .bottom_margin(1);
 
@@ -448,7 +407,13 @@ impl ViewFrame {
                             &row,
                         )
                     })
-                    .map(move |line| highlight_search_matches(line));
+                    .map(|line| {
+                        if let Some(search) = self.search.as_ref() {
+                            search.highlight_search_matches(line)
+                        } else {
+                            line.into()
+                        }
+                    });
 
                 Row::new(cells).height(1).bottom_margin(0)
             },
@@ -466,7 +431,7 @@ impl ViewFrame {
             ],
         )
         .header(header)
-        .highlight_style(selected_style)
+        .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
         table

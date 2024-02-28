@@ -2,14 +2,12 @@ use std::collections::VecDeque;
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Modifier, Style},
-    text::{Line, Span},
+    style::{Modifier, Style},
     widgets::{Block, Borders, List, ListState},
     Frame,
 };
 
 use chrono::prelude::*;
-use itertools::Itertools;
 
 use crate::{
     KeyBindingMatch, KeySequence, ScrollableState as _, SearchDirection,
@@ -126,46 +124,15 @@ impl RunningLog {
 
         let row_generator = Self::get_row_generator(&self.items);
 
-        let search_result_style = Style::default().bg(Color::Yellow);
-        let search_string = self
-            .search
-            .as_ref()
-            .map(|search_state| search_state.get_search_string(None));
-
-        let highlight_search_matches = |line| {
-            if search_string.as_ref().map(|s| s.is_empty()).unwrap_or(true) {
-                return line;
-            }
-
-            let Line { spans, alignment } = line;
-            let search_string: &str = search_string.as_ref().unwrap();
-
-            // Not technically correct, as it doesn't handle cases
-            // where the match crosses a border between spans.  But,
-            // close enough for now.
-            let spans = spans
-                .into_iter()
-                .flat_map(|span| {
-                    span.content
-                        .split(search_string)
-                        .map(|s| Span::styled(s.to_string(), span.style))
-                        .intersperse_with(|| {
-                            Span::styled(
-                                search_string.to_string(),
-                                span.style.patch(search_result_style),
-                            )
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                })
-                .collect();
-
-            Line { spans, alignment }
-        };
-
         let items = (0..self.items.len())
             .map(|i| row_generator(i).pop().unwrap())
-            .map(move |line| highlight_search_matches(line.into()));
+            .map(|line| {
+                if let Some(search) = self.search.as_ref() {
+                    search.highlight_search_matches(line)
+                } else {
+                    line.into()
+                }
+            });
 
         let running_log = List::new(items)
             .block(

@@ -1,4 +1,4 @@
-use itertools::Either;
+use itertools::{Either, Itertools};
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -55,6 +55,41 @@ impl<T> SearchWindow<T> {
         if self.stack.len() > 1 {
             self.stack.pop();
         }
+    }
+
+    pub(crate) fn highlight_search_matches<'a>(
+        &self,
+        line: impl Into<Line<'a>>,
+    ) -> Line<'a> {
+        let search_string = self.get_search_string(None);
+
+        let line = line.into();
+
+        if search_string.is_empty() {
+            return line;
+        }
+
+        let Line { spans, alignment } = line;
+
+        let search_result_style = Style::default().bg(Color::Yellow);
+        let spans = spans
+            .into_iter()
+            .flat_map(|span| {
+                span.content
+                    .split(&search_string)
+                    .map(|s| Span::styled(s.to_string(), span.style))
+                    .intersperse_with(|| {
+                        Span::styled(
+                            search_string.to_string(),
+                            span.style.patch(search_result_style),
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .into_iter()
+            })
+            .collect();
+
+        Line { spans, alignment }
     }
 
     // Return the string being searched for.
