@@ -216,11 +216,13 @@ impl ViewFrame {
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
-                self.table_state.apply_key_binding(
-                    keystrokes,
-                    self.num_table_rows(),
-                    self.num_rows_shown() - 1,
-                )
+                self.table_state
+                    .apply_key_binding(
+                        keystrokes,
+                        self.num_table_rows(),
+                        self.num_rows_shown() - 1,
+                    )
+                    .then(|| self.finalize_search())
             })
             .or_else(|| {
                 let selected_address = self.selected_address();

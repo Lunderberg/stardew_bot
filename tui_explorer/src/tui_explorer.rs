@@ -99,6 +99,8 @@ impl TuiExplorer {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
+        (0..100).for_each(|i| self.running_log.add_log(format!("Event {i}")));
+
         while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;
 
