@@ -11,6 +11,10 @@ pub struct Pointer {
 }
 
 impl Pointer {
+    pub fn new(address: impl Into<Self>) -> Self {
+        address.into()
+    }
+
     pub fn null() -> Self {
         Self { address: 0 }
     }
