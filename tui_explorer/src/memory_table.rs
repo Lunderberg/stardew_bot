@@ -10,8 +10,8 @@ use memory_reader::{
     CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
 };
 
-use crate::extensions::*;
 use crate::scroll_bar::ScrollableState;
+use crate::{extensions::*, InputWindow};
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
     SearchDirection, SearchWindow,
@@ -22,6 +22,7 @@ use itertools::Itertools;
 pub struct MemoryTable {
     view_stack: NonEmptyVec<ViewFrame>,
     formatters: Vec<Box<dyn ColumnFormatter>>,
+    jump_to_window: Option<InputWindow>,
 }
 
 struct ViewFrame {
@@ -44,6 +45,7 @@ impl MemoryTable {
                 Box::new(AsciiColumn),
                 Box::new(PointsToColumn),
             ],
+            jump_to_window: None,
         }
     }
 
@@ -60,6 +62,57 @@ impl MemoryTable {
         if self.view_stack.len() > 1 {
             self.view_stack.pop();
         }
+    }
+
+    pub(crate) fn start_jump_to_address(&mut self) {
+        self.jump_to_window = Some(InputWindow::new("Jump to Address"))
+    }
+
+    pub(crate) fn finalize_jump_to_address(
+        &mut self,
+        reader: &MemoryReader,
+        log: &mut RunningLog,
+    ) {
+        let Some(input_window) = self.jump_to_window.take() else {
+            log.add_log("Finalization of jump when not in-progress");
+            return;
+        };
+        let text = input_window.text();
+
+        let res_address = if text.starts_with("0x") {
+            usize::from_str_radix(text.strip_prefix("0x").unwrap(), 16)
+        } else {
+            usize::from_str_radix(&text, 10)
+        };
+        let address = match res_address {
+            Ok(address) => address,
+            Err(err) => {
+                log.add_log(format!("Invalid hex address: {err}"));
+                return;
+            }
+        };
+        let address: Pointer = address.into();
+
+        //self.view_stack.first().region.contains(address);
+
+        let Some(region) = reader
+            .regions
+            .iter()
+            .find(|region| region.contains(address))
+        else {
+            log.add_log(format!("Address {address} not found in any region"));
+            return;
+        };
+
+        let region = match region.read() {
+            Ok(region) => region,
+            Err(err) => {
+                log.add_log(format!("Region cannot be read: {err}"));
+                return;
+            }
+        };
+
+        self.view_stack = NonEmptyVec::new(ViewFrame::new(region, address));
     }
 
     pub(crate) fn current_region(&self) -> &MemoryRegion {
@@ -89,7 +142,15 @@ impl MemoryTable {
         reader: &MemoryReader,
         border_style: Style,
     ) {
-        let inner_area = self.view_stack.iter().with_position().fold(
+        let area = if let Some(window) = self.jump_to_window.as_mut() {
+            let (top, bottom) = area.split_from_bottom(3);
+            window.draw(frame, bottom);
+            top
+        } else {
+            area
+        };
+
+        let area = self.view_stack.iter().with_position().fold(
             area,
             |area, (position, view)| {
                 let style = match position {
@@ -104,7 +165,7 @@ impl MemoryTable {
 
         self.view_stack.last_mut().draw_inner(
             frame,
-            inner_area,
+            area,
             reader,
             &self.formatters,
         );
@@ -124,7 +185,38 @@ impl MemoryTable {
                     &self.formatters,
                 )
             })
-            .or_try_binding("C-g", keystrokes, || self.pop_view())
+            .or_else(|| {
+                if let Some(window) = self.jump_to_window.as_mut() {
+                    window.apply_key_binding(keystrokes)
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_else(|| {
+                if self.jump_to_window.is_some() {
+                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
+                        self.jump_to_window = None;
+                    })
+                } else if self.view_stack.len() > 1 {
+                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
+                        self.pop_view()
+                    })
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_else(|| {
+                if self.jump_to_window.is_some() {
+                    KeyBindingMatch::try_binding("<enter>", keystrokes, || {
+                        self.finalize_jump_to_address(reader, log)
+                    })
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_try_binding("M-g g", keystrokes, || {
+                self.start_jump_to_address()
+            })
             .or_try_binding("<enter>", keystrokes, || {
                 let selection = self.selected_value();
                 let as_pointer: Pointer = selection.value.into();
@@ -341,19 +433,8 @@ impl ViewFrame {
             0
         };
 
-        let search_area = Rect::new(
-            inner_area.x,
-            inner_area.bottom() - search_area_height,
-            inner_area.width,
-            search_area_height,
-        );
-
-        let table_area = Rect::new(
-            inner_area.x,
-            inner_area.y,
-            inner_area.width,
-            inner_area.height - search_area_height,
-        );
+        let (table_area, search_area) =
+            inner_area.split_from_bottom(search_area_height);
 
         if let Some(search) = self.search.as_ref() {
             search.draw(frame, search_area);

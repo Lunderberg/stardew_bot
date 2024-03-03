@@ -10,3 +10,6 @@ pub use collect_ratatui::CollectRatatuiTable as _;
 
 mod with_scrollbar;
 pub use with_scrollbar::WidgetWithScrollbar as _;
+
+mod split_from_bottom;
+pub use split_from_bottom::SplitFromBottom as _;

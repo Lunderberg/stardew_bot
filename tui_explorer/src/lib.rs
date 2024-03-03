@@ -31,6 +31,9 @@ pub(crate) use scroll_bar::*;
 mod search_window;
 pub use search_window::*;
 
+mod input_window;
+pub use input_window::*;
+
 mod running_log;
 pub use running_log::*;
 
