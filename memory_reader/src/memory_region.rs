@@ -73,11 +73,9 @@ impl MemoryRegion {
         &self,
         location: Pointer,
     ) -> Option<MemoryValue<[u8; N]>> {
-        if location >= self.start {
-            self.bytes_at_offset(location - self.start)
-        } else {
-            None
-        }
+        location
+            .checked_sub(self.start)
+            .and_then(|diff| self.bytes_at_offset(diff))
     }
 
     pub fn size_bytes(&self) -> usize {

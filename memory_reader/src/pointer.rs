@@ -3,6 +3,7 @@ use std::io::Read;
 
 use process_vm_io::ProcessVirtualMemoryIO;
 
+use crate::numeric_traits::{CheckedAdd, CheckedSub};
 use crate::{Error, Result};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -50,14 +51,53 @@ impl Pointer {
 
         Ok(buffer)
     }
+
+    pub fn checked_add<RHS>(
+        self,
+        rhs: RHS,
+    ) -> Option<<Self as CheckedAdd<RHS>>::Output>
+    where
+        Self: CheckedAdd<RHS>,
+    {
+        <Self as CheckedAdd<RHS>>::checked_add(self, rhs)
+    }
+
+    pub fn checked_sub<RHS>(
+        self,
+        rhs: RHS,
+    ) -> Option<<Self as CheckedSub<RHS>>::Output>
+    where
+        Self: CheckedSub<RHS>,
+    {
+        <Self as CheckedSub<RHS>>::checked_sub(self, rhs)
+    }
+}
+
+impl CheckedAdd<usize> for Pointer {
+    type Output = Pointer;
+
+    fn checked_add(self, rhs: usize) -> Option<Self::Output> {
+        self.address
+            .checked_add(rhs)
+            .map(|address| Self { address })
+    }
 }
 
 impl std::ops::Add<usize> for Pointer {
     type Output = Pointer;
 
     fn add(self, rhs: usize) -> Self::Output {
-        let address = self.address + rhs;
-        Self { address }
+        self.checked_add(rhs).unwrap()
+    }
+}
+
+impl CheckedSub<usize> for Pointer {
+    type Output = Pointer;
+
+    fn checked_sub(self, rhs: usize) -> Option<Self::Output> {
+        self.address
+            .checked_sub(rhs)
+            .map(|address| Self { address })
     }
 }
 
@@ -65,8 +105,15 @@ impl std::ops::Sub<usize> for Pointer {
     type Output = Pointer;
 
     fn sub(self, rhs: usize) -> Self::Output {
-        let address = self.address - rhs;
-        Self { address }
+        self.checked_sub(rhs).unwrap()
+    }
+}
+
+impl CheckedSub<Pointer> for Pointer {
+    type Output = usize;
+
+    fn checked_sub(self, rhs: Pointer) -> Option<Self::Output> {
+        self.address.checked_sub(rhs.address)
     }
 }
 
@@ -74,7 +121,7 @@ impl std::ops::Sub for Pointer {
     type Output = usize;
 
     fn sub(self, rhs: Self) -> Self::Output {
-        self.address.checked_sub(rhs.address).unwrap_or_else(|| {
+        self.checked_sub(rhs).unwrap_or_else(|| {
             panic!(
                 "Subtracting {rhs} from {self} causes overflow (diff = -{})",
                 rhs - self

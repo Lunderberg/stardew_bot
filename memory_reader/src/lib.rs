@@ -32,3 +32,5 @@ mod symbol;
 pub use symbol::Symbol;
 
 pub mod extensions;
+
+pub mod numeric_traits;
