@@ -27,6 +27,14 @@ impl<T> NonEmptyVec<T> {
         std::iter::once(&self.first).chain(&self.rest)
     }
 
+    pub fn first(&self) -> &T {
+        &self.first
+    }
+
+    pub fn first_mut(&mut self) -> &mut T {
+        &mut self.first
+    }
+
     pub fn last(&self) -> &T {
         self.rest.last().unwrap_or(&self.first)
     }
