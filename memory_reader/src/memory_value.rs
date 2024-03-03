@@ -1,5 +1,6 @@
 use super::Pointer;
 
+#[derive(Clone)]
 pub struct MemoryValue<T> {
     pub location: Pointer,
     pub value: T,

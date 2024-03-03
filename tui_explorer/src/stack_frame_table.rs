@@ -23,7 +23,7 @@ struct StackFrame {
 impl StackFrameTable {
     pub(crate) fn new(reader: &MemoryReader, stack: &MemoryRegion) -> Self {
         let stack_frames: Vec<_> = stack
-            .stack_pointers(reader.libc_address_ranges())
+            .stack_pointers(reader)
             .map(|frame_pointer| {
                 let return_address = stack
                     .bytes_at_pointer(

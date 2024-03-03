@@ -1,6 +1,8 @@
 use std::path::Path;
 use std::{fmt::Display, ops::Range};
 
+use crate::Symbol;
+
 use super::{Error, MemoryRegion, Pointer, Result};
 
 #[derive(Debug, Clone)]
@@ -88,6 +90,10 @@ impl MemoryMapRegion {
     pub fn read(&self) -> Result<MemoryRegion> {
         let bytes = self.start.read_bytes(self.pid, self.size_bytes())?;
         Ok(MemoryRegion::new(self.start, bytes, self.clone()))
+    }
+
+    pub fn iter_symbols(&self) -> impl Iterator<Item = Symbol> {
+        Symbol::iter_symbols(self)
     }
 }
 

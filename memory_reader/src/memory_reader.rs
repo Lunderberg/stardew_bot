@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
-use std::ops::Range;
 use std::path::PathBuf;
+
+use crate::Symbol;
 
 use super::{
     CollectBytes, Error, MemoryMapRegion, MemoryRegion, MemoryValue, Pointer,
@@ -40,6 +41,18 @@ impl MemoryReader {
 
     fn find_region(&self, name: &str) -> Option<&MemoryMapRegion> {
         self.regions.iter().find(|region| region.matches_name(name))
+    }
+
+    pub fn is_in_executable_region(&self, address: Pointer) -> bool {
+        self.regions
+            .iter()
+            .filter(|region| region.is_executable)
+            .map(|region| region.address_range())
+            .any(|range| range.contains(&address))
+    }
+
+    pub fn iter_symbols(&self) -> impl Iterator<Item = Symbol> + '_ {
+        self.regions.iter().flat_map(|region| region.iter_symbols())
     }
 
     pub fn total_memory(&self) -> usize {
@@ -87,17 +100,6 @@ impl MemoryReader {
 
     pub fn stack(&self) -> Result<&MemoryMapRegion> {
         self.find_region("[stack]").ok_or(Error::StackNotFound)
-    }
-
-    pub fn libc_address_ranges(&self) -> Vec<Range<Pointer>> {
-        self.regions
-            .iter()
-            .filter(|region| {
-                let name = region.short_name();
-                name.starts_with("libc-") && name.ends_with(".so")
-            })
-            .map(|region| region.address_range())
-            .collect()
     }
 
     pub fn read_stack(&self) -> Result<MemoryRegion> {

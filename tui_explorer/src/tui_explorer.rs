@@ -42,14 +42,10 @@ impl TuiExplorer {
         let reader = MemoryReader::new(pid)?;
         let memory_region = reader.stack()?.read()?;
 
-        let symbols: Vec<Symbol> = reader
-            .regions
-            .iter()
-            .flat_map(Symbol::iter_symbols)
-            .collect();
+        let symbols: Vec<Symbol> = reader.iter_symbols().collect();
 
         let bottom_stack_frame = memory_region
-            .stack_pointers(reader.libc_address_ranges())
+            .stack_pointers(&reader)
             .map(|p| p.location)
             .next();
         let x86_64_tag = memory_region.rfind_pattern(

@@ -1,3 +1,7 @@
+use itertools::Itertools as _;
+
+use crate::MemoryReader;
+
 use super::{CollectBytes as _, MemoryMapRegion, MemoryValue, Pointer};
 
 use std::ops::{Index, Range, RangeInclusive};
@@ -86,8 +90,10 @@ impl MemoryRegion {
         &self,
         location: Pointer,
     ) -> impl Iterator<Item = MemoryValue<u8>> + '_ {
-        self.bytes[location - self.start..]
-            .iter()
+        location
+            .checked_sub(self.start)
+            .into_iter()
+            .flat_map(|diff| &self.bytes[..diff])
             .enumerate()
             .map(move |(i, &val)| MemoryValue::new(location + i, val))
     }
@@ -107,15 +113,21 @@ impl MemoryRegion {
             .map(move |(i, val)| MemoryValue::new(start + i, val))
     }
 
-    pub(crate) fn data(&self) -> &[u8] {
-        &self.bytes
+    pub fn iter_as_pointers(
+        &self,
+    ) -> impl Iterator<Item = MemoryValue<Pointer>> + '_ {
+        self.iter_as_pointers_from(
+            self.start + (self.bytes.len() - Self::POINTER_SIZE),
+        )
     }
 
-    pub fn stack_pointers(
+    pub fn iter_as_pointers_from(
         &self,
-        libc_address_ranges: Vec<Range<Pointer>>,
+        after_address: Pointer,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> + '_ {
-        self.bytes
+        let byte_offset: usize =
+            after_address.checked_sub(self.start).unwrap_or(0);
+        self.bytes[..byte_offset]
             .iter()
             .enumerate()
             .map(|(i, &val)| MemoryValue::new(self.start + i, val))
@@ -124,25 +136,54 @@ impl MemoryRegion {
             .map(|bytes: MemoryValue<[u8; 8]>| -> MemoryValue<Pointer> {
                 bytes.map(|b| b.into())
             })
-            // The bottom stack frame has a return pointer into libc.so
-            .skip_while(move |pointer| {
-                libc_address_ranges.iter().all(|libc_address_range| {
-                    !libc_address_range.contains(&pointer.value)
+    }
+
+    pub(crate) fn data(&self) -> &[u8] {
+        &self.bytes
+    }
+
+    pub fn find_pointer_to(
+        &self,
+        address_range: Range<Pointer>,
+    ) -> Option<MemoryValue<Pointer>> {
+        self.iter_as_pointers()
+            .find(|pointer| address_range.contains(&pointer.value))
+    }
+
+    pub fn stack_pointers<'a>(
+        &'a self,
+        reader: &'a MemoryReader,
+    ) -> impl Iterator<Item = MemoryValue<Pointer>> + 'a {
+        let libc_start_main = reader
+            .regions
+            .iter()
+            .filter(|region| {
+                let name = region.short_name();
+                name.starts_with("libc-") && name.ends_with(".so")
+            })
+            .flat_map(|region| region.iter_symbols())
+            .find(|symbol| symbol.name == "__libc_start_main")
+            .map(|symbol| symbol.location)
+            .expect("Couldn't find ELF symbol for __libc_start_main");
+
+        let bottom_frame: Option<MemoryValue<Pointer>> = self
+            .find_pointer_to(libc_start_main)
+            .and_then(|return_pointer| {
+                self.bytes_at_pointer(
+                    return_pointer.location - Self::POINTER_SIZE,
+                )
+            })
+            .map(|bytes| bytes.map(Into::into));
+
+        std::iter::successors(bottom_frame, |prev| {
+            self.iter_as_pointers_from(prev.location)
+                .tuple_windows()
+                .find(|(return_pointer, stack_pointer)| {
+                    stack_pointer.value == prev.location
+                        && reader.is_in_executable_region(return_pointer.value)
                 })
-            })
-            .scan(Pointer::null(), |state: &mut Pointer, pointer| {
-                // So the bottom stack frame pointer is the first NULL
-                // after a pointer to libc.so, and every stack frame
-                // after that can be found by searching for a pointer
-                // to the previous.
-                if *state == pointer.value {
-                    *state = pointer.location;
-                    Some(Some(pointer))
-                } else {
-                    Some(None)
-                }
-            })
-            .filter_map(|x| x)
+                .map(|(_, stack_pointer)| stack_pointer)
+        })
     }
 }
 
