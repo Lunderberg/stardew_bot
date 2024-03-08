@@ -1,3 +1,7 @@
+use std::mem::MaybeUninit;
+
+use crate::extensions::IterConversion;
+
 use super::Pointer;
 
 #[derive(Clone)]
@@ -76,5 +80,48 @@ where
             *element = val.value;
         }
         Some(Self::Item { location, value })
+    }
+}
+
+impl<const N: usize, T> IterConversion<MemoryValue<T>> for MemoryValue<[T; N]> {
+    fn convert_next<Iter: Iterator<Item = MemoryValue<T>>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        let mut location: Option<Pointer> = None;
+        let mut wrapper = std::iter::from_fn(|| {
+            let item = iter.next()?;
+            location.get_or_insert(item.location);
+            Some(item.value)
+        });
+        <[T; N] as IterConversion<T>>::convert_next(&mut wrapper).map(|value| {
+            MemoryValue {
+                location: location.unwrap(),
+                value,
+            }
+        })
+    }
+
+    fn convert_next_back<Iter: DoubleEndedIterator<Item = MemoryValue<T>>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        let mut array = std::array::from_fn(|_| MaybeUninit::uninit());
+        let mut location = None;
+
+        for (i, element) in array.iter_mut().enumerate().rev() {
+            if let Some(val) = iter.next_back() {
+                location = Some(val.location);
+                element.write(val.value);
+            } else {
+                array[i + 1..]
+                    .iter_mut()
+                    .for_each(|item| unsafe { item.assume_init_drop() });
+                return None;
+            }
+        }
+        let value = array.map(|item| unsafe { item.assume_init() });
+        Some(MemoryValue {
+            location: location.unwrap(),
+            value,
+        })
     }
 }

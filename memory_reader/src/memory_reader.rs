@@ -3,11 +3,11 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
+use crate::extensions::*;
 use crate::Symbol;
 
 use super::{
-    CollectBytes, Error, MemoryMapRegion, MemoryRegion, MemoryValue, Pointer,
-    Result,
+    Error, MemoryMapRegion, MemoryRegion, MemoryValue, Pointer, Result,
 };
 
 use itertools::Itertools;
@@ -119,15 +119,16 @@ impl MemoryReader {
 
     pub fn print_stack(&self) -> Result<()> {
         self.read_stack()?
-            .into_iter_bytes()
-            .iter_byte_arr()
-            .for_each(|arr: MemoryValue<[u8; 8]>| {
-                let as_pointer: Pointer = arr.value.into();
+            .into_iter()
+            .iter_as::<MemoryValue<Pointer>>()
+            .for_each(|value| {
+                let as_pointer: Pointer = value.value;
+
                 if let Some(region) = self.find_containing_region(as_pointer) {
                     let name = region.name.as_deref().unwrap_or("???");
                     println!(
                         "Pointer at {} points to {}, located in {} ({})",
-                        arr.location,
+                        value.location,
                         as_pointer,
                         name,
                         region.flag_str(),
@@ -135,7 +136,7 @@ impl MemoryReader {
                 } else {
                     println!(
                         "Value   at {} is        {}",
-                        arr.location, as_pointer
+                        value.location, as_pointer
                     );
                 }
                 //
@@ -151,9 +152,8 @@ impl MemoryReader {
         let stack = self.read_stack()?;
 
         Ok(stack
-            .into_iter_bytes()
-            .iter_byte_arr()
-            .map(|arr_val| arr_val.map(|arr| usize::from_ne_bytes(arr).into()))
+            .into_iter()
+            .iter_as::<MemoryValue<Pointer>>()
             .filter_map(|ptr_ptr| {
                 self.find_containing_region(ptr_ptr.value)
                     .map(move |region| (ptr_ptr, region))
@@ -165,15 +165,11 @@ impl MemoryReader {
     ) -> Result<impl Iterator<Item = MemoryValue<Pointer>> + '_> {
         let stack = self.read_stack()?;
 
-        Ok(stack
-            .into_iter_bytes()
-            .iter_byte_arr()
-            .map(|arr_val: MemoryValue<[u8; 8]>| -> MemoryValue<Pointer> {
-                arr_val.map(|arr| usize::from_ne_bytes(arr).into())
-            })
-            .filter(|ptr_ptr: &MemoryValue<Pointer>| -> bool {
+        Ok(stack.into_iter().iter_as::<MemoryValue<Pointer>>().filter(
+            |ptr_ptr: &MemoryValue<Pointer>| -> bool {
                 self.find_containing_region(ptr_ptr.value).is_some()
-            }))
+            },
+        ))
     }
 
     pub fn potential_frame_pointers(

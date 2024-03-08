@@ -1,43 +1,57 @@
-use std::mem::MaybeUninit;
+use std::{marker::PhantomData, mem::MaybeUninit};
 
-pub trait IterAsExtension: Sized {
-    fn iter_as<T>(self) -> <Self as IterAs<T>>::OutputIter
-    where
-        Self: IterAs<T>,
-    {
-        <Self as IterAs<T>>::iter_as_impl(self)
+pub trait IterAs: Sized {
+    fn iter_as<T>(self) -> IterConverter<Self, T> {
+        IterConverter {
+            iter: self,
+            _phantom: PhantomData,
+        }
     }
 }
 
-pub trait IterAs<T> {
-    type OutputIter: Iterator<Item = T>;
-    fn iter_as_impl(self) -> Self::OutputIter;
+impl<Iter> IterAs for Iter where Iter: Iterator {}
+
+pub trait IterConversion<T>: Sized {
+    fn convert_next<Iter: Iterator<Item = T>>(iter: &mut Iter) -> Option<Self>;
+
+    fn convert_next_back<Iter: DoubleEndedIterator<Item = T>>(
+        iter: &mut Iter,
+    ) -> Option<Self>;
 }
 
-impl<const N: usize, T, Iter> IterAs<[T; N]> for Iter
+pub struct IterConverter<Iter, T> {
+    iter: Iter,
+    _phantom: PhantomData<T>,
+}
+
+impl<Iter, T> Iterator for IterConverter<Iter, T>
 where
-    Iter: Iterator<Item = T>,
+    Iter: Iterator,
+    T: IterConversion<Iter::Item>,
 {
-    type OutputIter = IterAsArray<Iter, N>;
-    fn iter_as_impl(self) -> Self::OutputIter {
-        IterAsArray { iter: self }
-    }
-}
+    type Item = T;
 
-pub struct IterAsArray<I, const N: usize> {
-    iter: I,
-}
-
-impl<const N: usize, T, Iter> Iterator for IterAsArray<Iter, N>
-where
-    Iter: Iterator<Item = T>,
-{
-    type Item = [T; N];
     fn next(&mut self) -> Option<Self::Item> {
+        <T as IterConversion<Iter::Item>>::convert_next(&mut self.iter)
+    }
+}
+
+impl<Iter, T> DoubleEndedIterator for IterConverter<Iter, T>
+where
+    Iter: DoubleEndedIterator,
+    T: IterConversion<Iter::Item>,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        <T as IterConversion<Iter::Item>>::convert_next_back(&mut self.iter)
+    }
+}
+
+impl<const N: usize, T> IterConversion<T> for [T; N] {
+    fn convert_next<Iter: Iterator<Item = T>>(iter: &mut Iter) -> Option<Self> {
         let mut array = std::array::from_fn(|_| MaybeUninit::uninit());
 
         for (i, element) in array.iter_mut().enumerate() {
-            if let Some(val) = self.iter.next() {
+            if let Some(val) = iter.next() {
                 element.write(val);
             } else {
                 array[..i]
@@ -48,17 +62,14 @@ where
         }
         Some(array.map(|item| unsafe { item.assume_init() }))
     }
-}
 
-impl<const N: usize, T, Iter> DoubleEndedIterator for IterAsArray<Iter, N>
-where
-    Iter: DoubleEndedIterator<Item = T>,
-{
-    fn next_back(&mut self) -> Option<Self::Item> {
+    fn convert_next_back<Iter: DoubleEndedIterator<Item = T>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
         let mut array = std::array::from_fn(|_| MaybeUninit::uninit());
 
         for (i, element) in array.iter_mut().enumerate().rev() {
-            if let Some(val) = self.iter.next_back() {
+            if let Some(val) = iter.next_back() {
                 element.write(val);
             } else {
                 array[i + 1..]

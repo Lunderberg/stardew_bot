@@ -98,19 +98,25 @@ impl MemoryRegion {
             .map(move |(i, &val)| MemoryValue::new(location + i, val))
     }
 
-    pub fn iter_bytes(&self) -> impl Iterator<Item = MemoryValue<u8>> + '_ {
+    pub fn iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = MemoryValue<u8>> + '_ {
         self.bytes
             .iter()
             .enumerate()
             .map(|(i, &val)| MemoryValue::new(self.start + i, val))
     }
 
-    pub fn into_iter_bytes(self) -> impl Iterator<Item = MemoryValue<u8>> {
+    pub fn into_iter(self) -> impl DoubleEndedIterator<Item = MemoryValue<u8>> {
         let start = self.start;
         self.bytes
             .into_iter()
             .enumerate()
             .map(move |(i, val)| MemoryValue::new(start + i, val))
+    }
+
+    pub fn into_iter_bytes(self) -> impl Iterator<Item = MemoryValue<u8>> {
+        self.into_iter()
     }
 
     pub fn iter_as_pointers(

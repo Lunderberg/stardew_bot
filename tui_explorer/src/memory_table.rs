@@ -6,9 +6,7 @@ use ratatui::{
 };
 
 use memory_reader::extensions::*;
-use memory_reader::{
-    CollectBytes, MemoryReader, MemoryRegion, MemoryValue, Pointer,
-};
+use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use crate::scroll_bar::ScrollableState;
 use crate::{extensions::*, InputWindow};
@@ -471,8 +469,12 @@ impl ViewFrame {
             .height(1)
             .bottom_margin(1);
 
-        let rows = self.region.iter_bytes().iter_byte_arr().enumerate().map(
-            |(i, row): (_, MemoryValue<[u8; 8]>)| {
+        let rows = self
+            .region
+            .iter()
+            .iter_as::<MemoryValue<[u8; 8]>>()
+            .enumerate()
+            .map(|(i, row)| {
                 let is_near_selected =
                     i.abs_diff(selected_row) < (self.num_rows_shown() as usize);
 
@@ -497,8 +499,7 @@ impl ViewFrame {
                     });
 
                 Row::new(cells).height(1).bottom_margin(0)
-            },
-        );
+            });
 
         let address_width = self.region.as_range().suffix_hexadecimal_digits();
 

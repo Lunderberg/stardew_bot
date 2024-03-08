@@ -3,8 +3,9 @@ use std::io::Read;
 
 use process_vm_io::ProcessVirtualMemoryIO;
 
+use crate::extensions::IterConversion;
 use crate::numeric_traits::{CheckedAdd, CheckedSub};
-use crate::{Error, Result};
+use crate::{Error, MemoryValue, Result};
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Pointer {
@@ -152,5 +153,55 @@ impl From<[u8; 8]> for Pointer {
     fn from(bytes: [u8; 8]) -> Self {
         let address = usize::from_ne_bytes(bytes);
         Self { address }
+    }
+}
+
+impl IterConversion<usize> for Pointer {
+    fn convert_next<Iter: Iterator<Item = usize>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        iter.next().map(Into::into)
+    }
+
+    fn convert_next_back<Iter: DoubleEndedIterator<Item = usize>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        iter.next_back().map(Into::into)
+    }
+}
+
+impl IterConversion<MemoryValue<usize>> for MemoryValue<Pointer> {
+    fn convert_next<Iter: Iterator<Item = MemoryValue<usize>>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        iter.next().map(|value| value.map(Into::into))
+    }
+
+    fn convert_next_back<
+        Iter: DoubleEndedIterator<Item = MemoryValue<usize>>,
+    >(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        iter.next_back().map(|value| value.map(Into::into))
+    }
+}
+
+impl IterConversion<MemoryValue<u8>> for MemoryValue<Pointer> {
+    fn convert_next<Iter: Iterator<Item = MemoryValue<u8>>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        <MemoryValue<[u8; 8]> as IterConversion<MemoryValue<u8>>>::convert_next(
+            iter,
+        )
+        .map(|value| value.map(Into::into))
+    }
+
+    fn convert_next_back<Iter: DoubleEndedIterator<Item = MemoryValue<u8>>>(
+        iter: &mut Iter,
+    ) -> Option<Self> {
+        <MemoryValue<[u8; 8]> as IterConversion<MemoryValue<u8>>>::convert_next_back(
+            iter,
+        )
+        .map(|value| value.map(Into::into))
     }
 }
