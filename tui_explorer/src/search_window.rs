@@ -1,4 +1,4 @@
-use itertools::{Either, Itertools};
+use itertools::Either;
 use ratatui::{
     layout::Rect,
     style::{Color, Style},
@@ -7,6 +7,7 @@ use ratatui::{
     Frame,
 };
 
+use crate::extensions::*;
 use crate::{KeyBindingMatch, KeySequence, NonEmptyVec, ScrollableState};
 
 pub struct SearchWindow<T> {
@@ -61,35 +62,10 @@ impl<T> SearchWindow<T> {
         &self,
         line: impl Into<Line<'a>>,
     ) -> Line<'a> {
-        let search_string = self.get_search_string(None);
-
-        let line = line.into();
-
-        if search_string.is_empty() {
-            return line;
-        }
-
-        let Line { spans, alignment } = line;
-
-        let search_result_style = Style::default().bg(Color::Yellow);
-        let spans = spans
-            .into_iter()
-            .flat_map(|span| {
-                span.content
-                    .split(&search_string)
-                    .map(|s| Span::styled(s.to_string(), span.style))
-                    .intersperse_with(|| {
-                        Span::styled(
-                            search_string.to_string(),
-                            span.style.patch(search_result_style),
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .into_iter()
-            })
-            .collect();
-
-        Line { spans, alignment }
+        line.into().style_substring(
+            &self.get_search_string(None),
+            Style::default().bg(Color::Yellow),
+        )
     }
 
     // Return the string being searched for.

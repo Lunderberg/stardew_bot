@@ -917,6 +917,7 @@ dependencies = [
  "itertools",
  "memory_reader",
  "ratatui",
+ "regex",
  "signal-hook",
  "thiserror",
 ]
