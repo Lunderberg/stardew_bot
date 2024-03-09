@@ -1,14 +1,18 @@
 use std::collections::VecDeque;
 
+use memory_reader::{MemoryReader, Pointer};
 use ratatui::{
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
+    text::Line,
     widgets::{Block, Borders, List, ListState},
     Frame,
 };
 
 use chrono::prelude::*;
+use regex::Regex;
 
+use crate::{extensions::*, MemoryTable};
 use crate::{
     KeyBindingMatch, KeySequence, ScrollableState as _, SearchDirection,
     SearchWindow,
@@ -63,6 +67,38 @@ impl RunningLog {
         self.search = None;
     }
 
+    fn jump_to_address(
+        &mut self,
+        reader: &MemoryReader,
+        table: &mut MemoryTable,
+    ) {
+        let Some(line_num) = self.state.selected() else {
+            self.add_log("Cannot jump to address, no line selected");
+            return;
+        };
+
+        let (_, line) = self
+            .items
+            .get(self.items.len() - line_num - 1)
+            .expect("Invalid line num selected");
+
+        let Some(addr) = Regex::new("0x[0-9A-Fa-f]+")
+            .expect("Invalid regex")
+            .find(&line)
+            .map(|addr_match| addr_match.as_str())
+            .map(|addr_str| {
+                usize::from_str_radix(&addr_str[2..], 16)
+                    .expect("Conversion should succeed from prev regex")
+            })
+            .map(|addr_usize| Pointer::new(addr_usize))
+        else {
+            self.add_log("Line doesn't contain an address");
+            return;
+        };
+
+        table.jump_to_address(addr, reader, self);
+    }
+
     fn get_row_generator<'a>(
         items: &'a VecDeque<(DateTime<Local>, String)>,
     ) -> impl Fn(usize) -> Vec<String> + 'a {
@@ -75,6 +111,8 @@ impl RunningLog {
     pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
+        reader: &MemoryReader,
+        table: &mut MemoryTable,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -112,6 +150,9 @@ impl RunningLog {
             .or_try_binding("C-r", keystrokes, || {
                 self.start_search(SearchDirection::Reverse)
             })
+            .or_try_binding("<enter>", keystrokes, || {
+                self.jump_to_address(reader, table)
+            })
     }
 
     pub(crate) fn draw(
@@ -126,11 +167,18 @@ impl RunningLog {
 
         let items = (0..self.items.len())
             .map(|i| row_generator(i).pop().unwrap())
+            .map(|line| -> Line { line.into() })
+            .map(|line| {
+                line.style_regex(
+                    "0x[0-9a-fA-F]+",
+                    Style::default().fg(Color::Red),
+                )
+            })
             .map(|line| {
                 if let Some(search) = self.search.as_ref() {
                     search.highlight_search_matches(line)
                 } else {
-                    line.into()
+                    line
                 }
             });
 

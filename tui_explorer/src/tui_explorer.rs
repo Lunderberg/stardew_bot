@@ -224,9 +224,11 @@ impl TuiExplorer {
                         &mut self.running_log,
                     )
                 }
-                SelectableRegion::Log => {
-                    self.running_log.apply_key_binding(keystrokes)
-                }
+                SelectableRegion::Log => self.running_log.apply_key_binding(
+                    keystrokes,
+                    &self.reader,
+                    &mut self.memory_table,
+                ),
             })
     }
 

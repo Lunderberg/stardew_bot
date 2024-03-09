@@ -91,8 +91,15 @@ impl MemoryTable {
         };
         let address: Pointer = address.into();
 
-        //self.view_stack.first().region.contains(address);
+        self.jump_to_address(address, reader, log);
+    }
 
+    pub(crate) fn jump_to_address(
+        &mut self,
+        address: Pointer,
+        reader: &MemoryReader,
+        log: &mut RunningLog,
+    ) {
         let Some(region) = reader
             .regions
             .iter()
