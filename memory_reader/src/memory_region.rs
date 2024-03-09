@@ -1,5 +1,6 @@
 use itertools::Itertools as _;
 
+use crate::extensions::*;
 use crate::MemoryReader;
 
 use super::{CollectBytes as _, MemoryMapRegion, MemoryValue, Pointer};
@@ -160,7 +161,7 @@ impl MemoryRegion {
         &'a self,
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> + 'a {
-        let libc_start_main = reader
+        let starting_symbols: Vec<_> = reader
             .regions
             .iter()
             .filter(|region| {
@@ -168,12 +169,21 @@ impl MemoryRegion {
                 name.starts_with("libc-") && name.ends_with(".so")
             })
             .flat_map(|region| region.iter_symbols())
-            .find(|symbol| symbol.name == "__libc_start_main")
+            .filter(|symbol| {
+                symbol.name == "__libc_start_main" || symbol.name == "clone"
+            })
             .map(|symbol| symbol.location)
-            .expect("Couldn't find ELF symbol for __libc_start_main");
+            .collect();
 
         let bottom_frame: Option<MemoryValue<Pointer>> = self
-            .find_pointer_to(libc_start_main)
+            .iter()
+            .iter_as::<MemoryValue<Pointer>>()
+            .rev()
+            .find(|pointer| {
+                starting_symbols
+                    .iter()
+                    .any(|range| range.contains(&pointer.value))
+            })
             .and_then(|return_pointer| {
                 self.bytes_at_pointer(
                     return_pointer.location - Self::POINTER_SIZE,

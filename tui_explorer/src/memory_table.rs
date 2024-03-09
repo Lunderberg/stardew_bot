@@ -8,8 +8,8 @@ use ratatui::{
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::scroll_bar::ScrollableState;
 use crate::{extensions::*, InputWindow};
+use crate::{scroll_bar::ScrollableState, StackFrameTable};
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
     SearchDirection, SearchWindow,
@@ -70,6 +70,7 @@ impl MemoryTable {
         &mut self,
         reader: &MemoryReader,
         log: &mut RunningLog,
+        stack_frame_table: &mut StackFrameTable,
     ) {
         let Some(input_window) = self.jump_to_window.take() else {
             log.add_log("Finalization of jump when not in-progress");
@@ -91,13 +92,14 @@ impl MemoryTable {
         };
         let address: Pointer = address.into();
 
-        self.jump_to_address(address, reader, log);
+        self.jump_to_address(address, reader, stack_frame_table, log);
     }
 
     pub(crate) fn jump_to_address(
         &mut self,
         address: Pointer,
         reader: &MemoryReader,
+        stack_frame_table: &mut StackFrameTable,
         log: &mut RunningLog,
     ) {
         let Some(region) = reader
@@ -117,6 +119,7 @@ impl MemoryTable {
             }
         };
 
+        *stack_frame_table = StackFrameTable::new(reader, &region);
         self.view_stack = NonEmptyVec::new(ViewFrame::new(region, address));
     }
 
@@ -181,6 +184,7 @@ impl MemoryTable {
         keystrokes: &KeySequence,
         reader: &MemoryReader,
         log: &mut RunningLog,
+        stack_frame_table: &mut StackFrameTable,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -213,7 +217,11 @@ impl MemoryTable {
             .or_else(|| {
                 if self.jump_to_window.is_some() {
                     KeyBindingMatch::try_binding("<enter>", keystrokes, || {
-                        self.finalize_jump_to_address(reader, log)
+                        self.finalize_jump_to_address(
+                            reader,
+                            log,
+                            stack_frame_table,
+                        )
                     })
                 } else {
                     KeyBindingMatch::Mismatch

@@ -147,7 +147,7 @@ impl TuiExplorer {
             .constraints([
                 Constraint::Percentage(100),
                 Constraint::Min(65),
-                Constraint::Min(40),
+                Constraint::Min(60),
             ])
             .split_tuple(frame.size());
 
@@ -222,12 +222,14 @@ impl TuiExplorer {
                         keystrokes,
                         &self.reader,
                         &mut self.running_log,
+                        &mut self.stack_frame_table,
                     )
                 }
                 SelectableRegion::Log => self.running_log.apply_key_binding(
                     keystrokes,
                     &self.reader,
                     &mut self.memory_table,
+                    &mut self.stack_frame_table,
                 ),
             })
     }

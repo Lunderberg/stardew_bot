@@ -12,7 +12,7 @@ use ratatui::{
 use chrono::prelude::*;
 use regex::Regex;
 
-use crate::{extensions::*, MemoryTable};
+use crate::{extensions::*, MemoryTable, StackFrameTable};
 use crate::{
     KeyBindingMatch, KeySequence, ScrollableState as _, SearchDirection,
     SearchWindow,
@@ -71,6 +71,7 @@ impl RunningLog {
         &mut self,
         reader: &MemoryReader,
         table: &mut MemoryTable,
+        stack_frame_table: &mut StackFrameTable,
     ) {
         let Some(line_num) = self.state.selected() else {
             self.add_log("Cannot jump to address, no line selected");
@@ -96,7 +97,7 @@ impl RunningLog {
             return;
         };
 
-        table.jump_to_address(addr, reader, self);
+        table.jump_to_address(addr, reader, stack_frame_table, self);
     }
 
     fn get_row_generator<'a>(
@@ -113,6 +114,7 @@ impl RunningLog {
         keystrokes: &KeySequence,
         reader: &MemoryReader,
         table: &mut MemoryTable,
+        stack_frame_table: &mut StackFrameTable,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -151,7 +153,7 @@ impl RunningLog {
                 self.start_search(SearchDirection::Reverse)
             })
             .or_try_binding("<enter>", keystrokes, || {
-                self.jump_to_address(reader, table)
+                self.jump_to_address(reader, table, stack_frame_table)
             })
     }
 
