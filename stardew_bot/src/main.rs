@@ -3,7 +3,7 @@ use error::Error;
 
 use tui_explorer::TuiExplorer;
 
-use sysinfo::{PidExt, ProcessExt, SystemExt};
+//use sysinfo::{PidExt, ProcessExt, SystemExt};
 
 fn stardew_valley_pid() -> Result<u32, Error> {
     let mut sys = sysinfo::System::new_all();
@@ -15,7 +15,9 @@ fn stardew_valley_pid() -> Result<u32, Error> {
             let correct_name = proc.name() == "Stardew Valley"
                 || proc.name() == "StardewValley";
             let is_bash_script = matches!(
-                proc.exe().file_name().and_then(|s| s.to_str()),
+                proc.exe()
+                    .and_then(|path| path.file_name())
+                    .and_then(|name| name.to_str()),
                 Some("bash")
             );
             correct_name && !is_bash_script

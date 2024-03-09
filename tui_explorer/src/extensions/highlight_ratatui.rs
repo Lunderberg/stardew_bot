@@ -66,11 +66,10 @@ impl<'a> HighlightLine for Line<'a> {
             } else if range.start < i_span_end {
                 let i_from_start = usize::min(i_span_end, range.end);
                 let i_from_span = i_from_start - i_span_begin;
-                let (mut span_to_style, remainder) = span.split_at(i_from_span);
-                span_to_style.patch_style(style);
+                let (span_to_style, remainder) = span.split_at(i_from_span);
 
                 i_span_begin += span_to_style.content.len();
-                spans.push(span_to_style);
+                spans.push(span_to_style.patch_style(style));
 
                 if remainder.content.is_empty() {
                     opt_range = Some(range);
@@ -92,6 +91,7 @@ impl<'a> HighlightLine for Line<'a> {
         Line {
             spans,
             alignment: self.alignment,
+            ..Default::default()
         }
     }
 
