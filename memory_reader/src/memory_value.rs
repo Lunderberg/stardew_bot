@@ -4,7 +4,7 @@ use crate::extensions::IterConversion;
 
 use super::Pointer;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct MemoryValue<T> {
     pub location: Pointer,
     pub value: T,
@@ -123,5 +123,11 @@ impl<const N: usize, T> IterConversion<MemoryValue<T>> for MemoryValue<[T; N]> {
             location: location.unwrap(),
             value,
         })
+    }
+}
+
+impl<T: std::fmt::Display> std::fmt::Display for MemoryValue<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "[{} => {}]", self.location, self.value)
     }
 }

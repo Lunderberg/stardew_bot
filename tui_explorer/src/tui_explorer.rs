@@ -1,5 +1,6 @@
 use crate::{extensions::*, KeyBindingMatch, KeySequence};
 use crate::{Error, SigintHandler};
+use memory_reader::extensions::*;
 
 use memory_reader::{MemoryReader, Symbol};
 use ratatui::style::Stylize as _;
@@ -95,7 +96,35 @@ impl TuiExplorer {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
-        (0..100).for_each(|i| self.running_log.add_log(format!("Event {i}")));
+        let posix_clone = self
+            ._symbols
+            .iter()
+            .find(|symbol| symbol.name == "clone")
+            .map(|symbol| symbol.location.clone())
+            .unwrap();
+
+        use memory_reader::{MemoryValue, Pointer};
+        self.reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.name.is_none()
+                    && !region.is_executable
+                    && region.is_readable
+                    && region.is_writable
+            })
+            .flat_map(|region| {
+                region
+                    .read()
+                    .unwrap()
+                    .into_iter()
+                    .iter_as::<MemoryValue<Pointer>>()
+                    .rev()
+            })
+            .filter(|mem_pointer| posix_clone.contains(&mem_pointer.value))
+            .for_each(|mem_pointer| {
+                self.running_log.add_log(format!("{mem_pointer}"))
+            });
 
         while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;
