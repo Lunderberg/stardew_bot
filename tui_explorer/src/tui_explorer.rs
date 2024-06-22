@@ -64,6 +64,7 @@ impl TuiExplorer {
                 Box::new(FormatHexValue::<u64>::new()),
                 Box::new(FormatDecValue::<u64>::new()),
                 Box::new(FormatNullTerminatedString),
+                Box::new(FormatUTF16String),
                 Box::new(FormatSpacer),
                 Box::new(FormatRegionPointedTo),
                 Box::new(FormatSymbolPointedTo(symbols.clone())),

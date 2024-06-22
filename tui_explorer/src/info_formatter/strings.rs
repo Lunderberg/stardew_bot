@@ -1,3 +1,4 @@
+use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
 use crate::InfoFormatter;
@@ -5,6 +6,7 @@ use crate::InfoFormatter;
 pub struct FormatNullTerminatedString;
 pub struct FormatStringPointerWithLength;
 pub struct FormatStringPointerNullTerminated;
+pub struct FormatUTF16String;
 
 impl InfoFormatter for FormatNullTerminatedString {
     fn name(&self) -> &'static str {
@@ -92,5 +94,34 @@ impl InfoFormatter for FormatStringPointerNullTerminated {
             })
             .collect::<Option<String>>()
             .filter(|str| str.len() > 2)
+    }
+}
+
+impl InfoFormatter for FormatUTF16String {
+    fn name(&self) -> &'static str {
+        "UTF-16"
+    }
+
+    fn format(
+        &self,
+        _reader: &MemoryReader,
+        region: &MemoryRegion,
+        location: Pointer,
+    ) -> Option<String> {
+        let u16_iter = region
+            .iter_from_pointer(location)
+            .map(|byte| byte.value)
+            .iter_as::<[u8; 2]>()
+            .map(|arr| u16::from_be_bytes(arr));
+
+        let out: String = char::decode_utf16(u16_iter)
+            .map_while(|res| res.ok())
+            .take_while(|c| c.is_ascii() && !c.is_ascii_control())
+            .collect();
+        if out.is_empty() {
+            None
+        } else {
+            Some(out)
+        }
     }
 }

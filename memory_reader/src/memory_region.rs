@@ -94,7 +94,7 @@ impl MemoryRegion {
         location
             .checked_sub(self.start)
             .into_iter()
-            .flat_map(|diff| &self.bytes[..diff])
+            .flat_map(|diff| &self.bytes[diff..])
             .enumerate()
             .map(move |(i, &val)| MemoryValue::new(location + i, val))
     }
