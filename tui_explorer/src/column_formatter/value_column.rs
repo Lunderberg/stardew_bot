@@ -11,6 +11,35 @@ use crate::ColumnFormatter;
 pub struct HexColumn;
 pub struct AsciiColumn;
 
+fn formatted_cell(
+    text: String,
+    text_loc: Pointer,
+    pointer_at_cursor: Option<Pointer>,
+    chars_per_byte: usize,
+) -> Line<'static> {
+    if let Some(as_pointer) = pointer_at_cursor {
+        if text_loc <= as_pointer
+            && as_pointer < text_loc + MemoryRegion::POINTER_SIZE
+        {
+            let mut chars = text.chars();
+
+            let raw: String = chars
+                .by_ref()
+                .take(chars_per_byte * (as_pointer - text_loc))
+                .collect();
+            let styled: String = chars.collect();
+
+            return vec![
+                Span::raw(raw),
+                Span::styled(styled, Style::default().fg(Color::LightRed)),
+            ]
+            .into();
+        }
+    }
+
+    text.into()
+}
+
 impl ColumnFormatter for HexColumn {
     fn name(&self) -> &'static str {
         "Hex"
@@ -34,30 +63,11 @@ impl ColumnFormatter for HexColumn {
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
         let text = self.cell_text(reader, region, pointed_to, row);
+        let pointer_at_cursor = region
+            .bytes_at_pointer(pointed_to)
+            .map(|bytes| bytes.value.into());
 
-        // TODO: De-dup the repeated parts between this and AsciiColumn
-        if let Some(value_at_pointer) = region.bytes_at_pointer(pointed_to) {
-            let as_pointer: Pointer = value_at_pointer.value.into();
-            if row.location <= as_pointer
-                && as_pointer < row.location + MemoryRegion::POINTER_SIZE
-            {
-                let mut chars = text.chars();
-
-                let raw: String = chars
-                    .by_ref()
-                    .take(2 * (as_pointer - row.location))
-                    .collect();
-                let styled: String = chars.collect();
-
-                return vec![
-                    Span::raw(raw),
-                    Span::styled(styled, Style::default().fg(Color::LightRed)),
-                ]
-                .into();
-            }
-        }
-
-        text.into()
+        formatted_cell(text, row.location, pointer_at_cursor, 2)
     }
 }
 
@@ -91,26 +101,10 @@ impl ColumnFormatter for AsciiColumn {
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
         let text = self.cell_text(reader, region, pointed_to, row);
+        let pointer_at_cursor = region
+            .bytes_at_pointer(pointed_to)
+            .map(|bytes| bytes.value.into());
 
-        if let Some(value_at_pointer) = region.bytes_at_pointer(pointed_to) {
-            let as_pointer: Pointer = value_at_pointer.value.into();
-            if row.location <= as_pointer
-                && as_pointer < row.location + MemoryRegion::POINTER_SIZE
-            {
-                let mut chars = text.chars();
-
-                let raw: String =
-                    chars.by_ref().take(as_pointer - row.location).collect();
-                let styled: String = chars.collect();
-
-                return vec![
-                    Span::raw(raw),
-                    Span::styled(styled, Style::default().fg(Color::LightRed)),
-                ]
-                .into();
-            }
-        }
-
-        text.into()
+        formatted_cell(text, row.location, pointer_at_cursor, 1)
     }
 }
