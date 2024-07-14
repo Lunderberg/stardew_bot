@@ -1,3 +1,4 @@
+use itertools::Itertools as _;
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
@@ -19,11 +20,20 @@ impl InfoFormatter for FormatNullTerminatedString {
         region: &MemoryRegion,
         location: Pointer,
     ) -> Option<String> {
+        let is_str_char = |byte: u8| -> bool {
+            let c: char = byte.into();
+            (c.is_ascii_graphic() || c.is_ascii_whitespace())
+                && !c.is_ascii_control()
+        };
+
         region
             .iter_from_pointer(location)
-            .take_while(|byte| byte.value > 0)
+            .take_while_inclusive(|byte| {
+                byte.value > 0 && is_str_char(byte.value)
+            })
             .last()
-            .map(|byte| &region[location..=byte.location])
+            .filter(|byte| byte.location > location)
+            .map(|byte| &region[location..byte.location])
             .and_then(|slice| std::str::from_utf8(slice).ok())
             .map(|str| str.to_string())
     }

@@ -258,6 +258,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "dll_unpacker"
+version = "0.1.0"
+dependencies = [
+ "itertools",
+ "memory_reader",
+ "thiserror",
+]
+
+[[package]]
 name = "either"
 version = "1.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -900,6 +909,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
+ "dll_unpacker",
  "itertools",
  "memory_reader",
  "ratatui",

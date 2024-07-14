@@ -14,6 +14,11 @@ pub enum Error {
         #[from]
         err: memory_reader::Error,
     },
+    #[error("dll_unpacker::Error{{ {err} }}")]
+    DLLUnpacker {
+        #[from]
+        err: dll_unpacker::Error,
+    },
 
     #[error("Invalid emacs-style key sequence: {0}")]
     InvalidKeyBinding(String),

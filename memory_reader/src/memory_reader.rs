@@ -39,8 +39,11 @@ impl MemoryReader {
         .collect()
     }
 
-    fn find_region(&self, name: &str) -> Option<&MemoryMapRegion> {
-        self.regions.iter().find(|region| region.matches_name(name))
+    pub fn find_region(
+        &self,
+        mut filter: impl FnMut(&MemoryMapRegion) -> bool,
+    ) -> Option<&MemoryMapRegion> {
+        self.regions.iter().find(|reg| filter(reg))
     }
 
     pub fn is_in_executable_region(&self, address: Pointer) -> bool {
@@ -99,7 +102,8 @@ impl MemoryReader {
     }
 
     pub fn stack(&self) -> Result<&MemoryMapRegion> {
-        self.find_region("[stack]").ok_or(Error::StackNotFound)
+        self.find_region(|reg| reg.matches_name("[stack]"))
+            .ok_or(Error::StackNotFound)
     }
 
     pub fn read_stack(&self) -> Result<MemoryRegion> {

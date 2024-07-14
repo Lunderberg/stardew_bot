@@ -33,7 +33,12 @@ impl<'a> HighlightLine for Line<'a> {
         let style: Style = style.into();
 
         let mut iter_match_range = regex
-            .find_iter(&text)
+            .captures_iter(&text)
+            .map(|regex_capture| {
+                regex_capture
+                    .name("highlight")
+                    .unwrap_or_else(|| regex_capture.get(0).unwrap())
+            })
             .map(|regex_match| regex_match.range());
         let mut iter_span = self.spans.into_iter();
         let mut i_span_begin = 0;

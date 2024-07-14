@@ -145,7 +145,7 @@ impl MemoryRegion {
             })
     }
 
-    pub(crate) fn data(&self) -> &[u8] {
+    pub fn data(&self) -> &[u8] {
         &self.bytes
     }
 

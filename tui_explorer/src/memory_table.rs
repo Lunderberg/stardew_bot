@@ -8,7 +8,7 @@ use ratatui::{
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extensions::*, InputWindow};
+use crate::{extensions::*, Annotation, InputWindow};
 use crate::{scroll_bar::ScrollableState, StackFrameTable};
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
@@ -148,6 +148,7 @@ impl MemoryTable {
         frame: &mut Frame,
         area: Rect,
         reader: &MemoryReader,
+        annotations: &[Annotation],
         border_style: Style,
     ) {
         let area = if let Some(window) = self.jump_to_window.as_mut() {
@@ -175,6 +176,7 @@ impl MemoryTable {
             frame,
             area,
             reader,
+            annotations,
             &self.formatters,
         );
     }
@@ -428,6 +430,7 @@ impl ViewFrame {
         frame: &mut Frame,
         inner_area: Rect,
         reader: &MemoryReader,
+        annotations: &[Annotation],
         formatters: &[Box<dyn ColumnFormatter>],
     ) {
         // Layout.split puts all excess space into the last widget,
@@ -455,7 +458,7 @@ impl ViewFrame {
 
         self.table_height = Some(table_area.height as usize);
         let table = self
-            .generate_table(reader, formatters)
+            .generate_table(reader, formatters, annotations)
             .with_scrollbar(self.num_table_rows());
         frame.render_stateful_widget(table, table_area, &mut self.table_state);
     }
@@ -464,6 +467,7 @@ impl ViewFrame {
         &self,
         reader: &MemoryReader,
         formatters: &'a [Box<dyn ColumnFormatter>],
+        annotations: &[Annotation],
     ) -> Table<'a> {
         let selected_row = self.selected_row();
         let selected_address = self.selected_address();
@@ -502,6 +506,7 @@ impl ViewFrame {
                             reader,
                             region,
                             selected_address,
+                            annotations,
                             &row,
                         )
                     })

@@ -3,6 +3,7 @@ members = [
   "memory_reader",
   "stardew_bot",
   "tui_explorer",
+  "dll_unpacker",
 ]
 resolver = "2"
 

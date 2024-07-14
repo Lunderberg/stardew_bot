@@ -1,5 +1,5 @@
 [package]
-name = "tui_explorer"
+name = "dll_unpacker"
 version = "0.1.0"
 edition = "2021"
 
@@ -8,12 +8,5 @@ edition = "2021"
 [dependencies]
 itertools = "*"
 thiserror = "*"
-regex = "*"
 
-ratatui = "*"
-crossterm = "*"
-signal-hook = "*"
-chrono = "*"
-
-dll_unpacker = { path = "../dll_unpacker" }
 memory_reader = { path = "../memory_reader" }

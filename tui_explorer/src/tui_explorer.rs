@@ -1,6 +1,8 @@
+use std::ops::Range;
+
 use crate::{extensions::*, KeyBindingMatch, KeySequence};
 use crate::{Error, SigintHandler};
-use memory_reader::extensions::*;
+use memory_reader::{extensions::*, Pointer};
 
 use memory_reader::{MemoryReader, Symbol};
 use ratatui::style::Stylize as _;
@@ -26,10 +28,17 @@ pub struct TuiExplorer {
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
+    annotations: Vec<Annotation>,
     // Display state
     should_exit: bool,
     selected_region: SelectableRegion,
     keystrokes: KeySequence,
+}
+
+pub struct Annotation {
+    pub range: std::ops::Range<Pointer>,
+    pub name: String,
+    pub value: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -41,20 +50,11 @@ enum SelectableRegion {
 impl TuiExplorer {
     pub fn new(pid: u32) -> Result<Self, Error> {
         let reader = MemoryReader::new(pid)?;
-        let memory_region = reader.stack()?.read()?;
+        let stack_memory = reader.stack()?.read()?;
 
         let symbols: Vec<Symbol> = reader.iter_symbols().collect();
 
-        let bottom_stack_frame = memory_region
-            .stack_pointers(&reader)
-            .map(|p| p.location)
-            .next();
-        let x86_64_tag = memory_region.rfind_pattern(
-            &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
-        );
-        let stack_entry_point = bottom_stack_frame
-            .or(x86_64_tag)
-            .unwrap_or_else(|| memory_region.end());
+        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
 
         let detail_view = {
             use super::info_formatter::*;
@@ -74,10 +74,67 @@ impl TuiExplorer {
             ])
         };
 
+        let mut annotations = Vec::new();
+
+        let dll_region = reader
+            .find_region(|reg| reg.short_name() == "Stardew Valley.dll")
+            .ok_or(memory_reader::Error::MissingMemoryMapSection(
+                "Stardew Valley.dll".to_string(),
+            ))?
+            .read()?;
+
+        let dll_info = dll_unpacker::Unpacker::new(&dll_region);
+
+        dll_info.collect_annotations(
+            |range: Range<Pointer>, name: &'static str, value: String| {
+                annotations.push(Annotation {
+                    range,
+                    name: name.to_string(),
+                    value,
+                });
+            },
+        )?;
+
+        (0..2).map(|i| dll_info.section_header(i))
+            .try_for_each(|section_header|->Result<(),Error>{
+                let section_header = section_header?;
+                let name = section_header.name()?.value;
+                let virtual_address = section_header.virtual_address()?.value;
+                let virtual_size = section_header.virtual_size()?.value ;
+                let virtual_range = virtual_address..virtual_address+virtual_size;
+                let raw_address = section_header.raw_address()?.value;
+                let raw_size = section_header.raw_size()?.value ;
+                let raw_range = raw_address..raw_address+raw_size;
+
+                let characteristics = section_header.characteristics()?.value;
+                println!("SectionHeader {{ name: {name:?}, virtual_range: {virtual_range:?}, raw_range: {raw_range:?}, characteristics: {characteristics} }}");
+                Ok(())
+        })?;
+
+        let memory_table = {
+            let start = dll_region.start() + dll_info.offset_so_far;
+            MemoryTable::new(dll_region, start)
+        };
+
+        // let memory_table = {
+        //     let bottom_stack_frame = stack_memory
+        //         .stack_pointers(&reader)
+        //         .map(|p| p.location)
+        //         .next();
+        //     let x86_64_tag = stack_memory.rfind_pattern(
+        //         &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
+        //     );
+        //     let stack_entry_point = bottom_stack_frame
+        //         .or(x86_64_tag)
+        //         .unwrap_or_else(|| stack_memory.end());
+        //     MemoryTable::new(stack_memory, stack_entry_point)
+        // };
+
         let mut out = Self {
-            stack_frame_table: StackFrameTable::new(&reader, &memory_region),
+            stack_frame_table,
             running_log: RunningLog::new(100),
-            memory_table: MemoryTable::new(memory_region, stack_entry_point),
+            memory_table,
+            annotations,
             _symbols: symbols,
             detail_view,
             _pid: pid,
@@ -177,6 +234,7 @@ impl TuiExplorer {
             frame,
             mem_view,
             &self.reader,
+            &self.annotations,
             get_border_style(SelectableRegion::MemoryTable),
         );
         self.detail_view.draw(frame, detail_view);
@@ -245,6 +303,7 @@ impl TuiExplorer {
         self.detail_view.update_details(
             &self.reader,
             self.memory_table.current_region(),
+            &self.annotations,
             selection.location,
         );
     }
