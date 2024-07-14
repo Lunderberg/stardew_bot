@@ -40,8 +40,8 @@ fn formatted_cell(
 
     line = annotations
         .iter()
+        .dedup_by(|a, b| a.range == b.range)
         .enumerate()
-        .inspect(|(_, ann)| assert!(ann.range.end > ann.range.start))
         .filter(|(_, ann)| {
             ann.range.start < text_loc.end && text_loc.start < ann.range.end
         })

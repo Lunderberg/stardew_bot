@@ -23,12 +23,83 @@ pub struct PEHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
+/// Bitflags for the PE header
+///
+/// https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#characteristics
+pub struct PEHeaderCharacteristics {
+    /// The raw 16-bit value.
+    raw: u16,
+
+    /// Bit 0x0001.  Indicates if the relocation table has been
+    /// removed.
+    relocations_stripped: bool,
+
+    /// Bit 0x0002.  Indicates if the linking step was successful.
+    valid_executable: bool,
+
+    /// Bit 0x0004.  Indicates if the line numbers have been stripped.
+    _deprecated_line_nums_stripped: bool,
+
+    /// Bit 0x0008.  Indicates if local symbols have been stripped
+    /// from the symbol table.
+    _deprecated_local_symbols_stripped: bool,
+
+    /// Bit 0x0010.  Deprecated runtime flag.
+    _deprecated_aggressively_trim_working_set: bool,
+
+    /// Bit 0x0020.  Indicates if addresses beyond 2 GB can be
+    /// handled.
+    large_address_aware: bool,
+
+    /// Bit 0x0040.
+    _reserved_bit6: bool,
+
+    /// Bit 0x0080.  Deprecated.
+    _deprecated_is_little_endian: bool,
+
+    /// Bit 0x0100.
+    is_32bit: bool,
+
+    /// Bit 0x0200.
+    debug_info_stripped: bool,
+
+    /// Bit 0x0400.  If launched from a removable drive, copy to swap
+    /// before executing.
+    run_from_swap_if_removable_drive: bool,
+
+    /// Bit 0x0800.  If launched from a network drive, copy to swap
+    /// before executing.
+    run_from_swap_if_network_drive: bool,
+
+    /// Bit 0x1000.  If true, file is a system file, not a user file.
+    is_system_file: bool,
+
+    /// Bit 0x2000.  If true, the file is a DLL.
+    is_dll: bool,
+
+    /// Bit 0x4000.  If true, the file should only be run on a
+    /// uniprocessor machine.
+    is_uniprocessor_machine: bool,
+
+    /// Bit 0x8000.  Deprecated.
+    _deprecated_is_big_endian: bool,
+}
+
 pub struct OptionalHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
 pub struct SectionHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
+}
+
+impl<T> UnpackedValue<T> {
+    pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
+        UnpackedValue {
+            value: func(self.value),
+            loc: self.loc,
+        }
+    }
 }
 
 trait NormalizeOffset: Copy {
@@ -288,7 +359,18 @@ impl<'a> PEHeaderUnpacker<'a> {
         annotate! {symbol_table_pointer};
         annotate! {num_symbols};
         annotate! {optional_header_size};
-        annotate! {characteristics};
+
+        let characteristics = self.characteristics()?;
+        callback(
+            characteristics.loc.clone(),
+            "Characteristics",
+            format!("{}", characteristics.value.raw),
+        );
+        characteristics.value.collect_annotations(
+            |name: &'static str, value: String| {
+                callback(characteristics.loc.clone(), name, value)
+            },
+        )?;
 
         Ok(())
     }
@@ -331,8 +413,68 @@ impl<'a> PEHeaderUnpacker<'a> {
         self.bytes.get_u16(20)
     }
 
-    pub fn characteristics(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(22)
+    pub fn characteristics(
+        &self,
+    ) -> Result<UnpackedValue<PEHeaderCharacteristics>, Error> {
+        self.bytes
+            .get_u16(22)
+            .map(|unpacked| unpacked.map(PEHeaderCharacteristics::new))
+    }
+}
+
+impl PEHeaderCharacteristics {
+    pub fn new(value: u16) -> Self {
+        Self {
+            raw: value,
+            relocations_stripped: value & 0x0001 != 0,
+            valid_executable: value & 0x0002 != 0,
+            _deprecated_line_nums_stripped: value & 0x0004 != 0,
+            _deprecated_local_symbols_stripped: value & 0x0008 != 0,
+            _deprecated_aggressively_trim_working_set: value & 0x0010 != 0,
+            large_address_aware: value & 0x0020 != 0,
+            _reserved_bit6: value & 0x0040 != 0,
+            _deprecated_is_little_endian: value & 0x0080 != 0,
+            is_32bit: value & 0x0100 != 0,
+            debug_info_stripped: value & 0x0200 != 0,
+            run_from_swap_if_removable_drive: value & 0x0400 != 0,
+            run_from_swap_if_network_drive: value & 0x0800 != 0,
+            is_system_file: value & 0x1000 != 0,
+            is_dll: value & 0x2000 != 0,
+            is_uniprocessor_machine: value & 0x4000 != 0,
+            _deprecated_is_big_endian: value & 0x8000 != 0,
+        }
+    }
+
+    fn collect_annotations(
+        &self,
+        mut callback: impl FnMut(&'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                if self.$field {
+                    callback("Flag", stringify!($field).to_string());
+                }
+            };
+        }
+
+        annotate! {relocations_stripped};
+        annotate! {valid_executable};
+        // annotate! {_deprecated_line_nums_stripped};
+        // annotate! {_deprecated_local_symbols_stripped};
+        // annotate! {_deprecated_aggressive_working_set_trimmed};
+        annotate! {large_address_aware};
+        // annotate! {_reserved_bit6};
+        // annotate! {_deprecated_is_little_endian};
+        annotate! {is_32bit};
+        annotate! {debug_info_stripped};
+        annotate! {run_from_swap_if_removable_drive};
+        annotate! {run_from_swap_if_network_drive};
+        annotate! {is_system_file};
+        annotate! {is_dll};
+        annotate! {is_uniprocessor_machine};
+        // annotate! {_deprecated_is_big_endian};
+
+        Ok(())
     }
 }
 
