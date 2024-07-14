@@ -20,9 +20,10 @@ fn formatted_cell(
     pointer_at_cursor: Option<Pointer>,
     annotations: &[Annotation],
 ) -> Line<'static> {
-    let chars_per_byte = text.len() / (text_loc.end - text_loc.start);
+    let num_chars = text.chars().count();
+    let chars_per_byte = num_chars / (text_loc.end - text_loc.start);
     assert!(chars_per_byte > 0);
-    assert!(text.len() % chars_per_byte == 0);
+    assert!(num_chars % chars_per_byte == 0);
 
     let mut line: Line = text.into();
 
