@@ -89,6 +89,12 @@ pub struct OptionalHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
+#[derive(Debug)]
+pub enum MagicValue {
+    PE32,
+    PE32plus,
+}
+
 pub struct SectionHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
@@ -99,6 +105,17 @@ impl<T> UnpackedValue<T> {
             value: func(self.value),
             loc: self.loc,
         }
+    }
+
+    pub fn try_map<U, E>(
+        self,
+        func: impl FnOnce(T) -> Result<U, E>,
+    ) -> Result<UnpackedValue<U>, E> {
+        let value = func(self.value)?;
+        Ok(UnpackedValue {
+            value,
+            loc: self.loc,
+        })
     }
 }
 
@@ -494,7 +511,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
             };
         }
 
-        callback(self.magic_value()?.loc, "Magic value", "".to_string());
+        annotate! {magic_value};
         annotate! {linker_major_version};
         annotate! {linker_minor_version};
         annotate! {code_size};
@@ -528,16 +545,10 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         Ok(())
     }
 
-    pub fn magic_value(&self) -> Result<UnpackedValue<()>, Error> {
-        let unpacked = self.bytes.get_u16(0)?;
-        if unpacked.value == 0x010B || unpacked.value == 0x020B {
-            Ok(UnpackedValue {
-                value: (),
-                loc: unpacked.loc,
-            })
-        } else {
-            Err(Error::IncorrectMagicValue)
-        }
+    pub fn magic_value(&self) -> Result<UnpackedValue<MagicValue>, Error> {
+        self.bytes
+            .get_u16(0)
+            .and_then(|unpacked| unpacked.try_map(MagicValue::new))
     }
 
     pub fn linker_major_version(&self) -> Result<UnpackedValue<u8>, Error> {
@@ -699,6 +710,25 @@ impl<'a> OptionalHeaderUnpacker<'a> {
 
     pub fn num_data_directories(&self) -> Result<UnpackedValue<u32>, Error> {
         self.bytes.get_u32(92)
+    }
+}
+
+impl MagicValue {
+    pub fn new(value: u16) -> Result<Self, Error> {
+        match value {
+            0x010b => Ok(MagicValue::PE32),
+            0x020b => Ok(MagicValue::PE32plus),
+            other => Err(Error::InvalidMagicValue(other)),
+        }
+    }
+}
+
+impl std::fmt::Display for MagicValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MagicValue::PE32 => write!(f, "PE32"),
+            MagicValue::PE32plus => write!(f, "PE32+"),
+        }
     }
 }
 

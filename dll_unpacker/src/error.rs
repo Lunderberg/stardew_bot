@@ -8,8 +8,10 @@ pub enum Error {
     IncorrectDOSStub,
     #[error("IncorrectPESignature")]
     IncorrectPESignature,
-    #[error("IncorrectMagicValue")]
-    IncorrectMagicValue,
+    #[error(
+        "InvalidMagicValue(0x{0:x}), should be 0x10b (PE32) or 0x20b (PE32+)"
+    )]
+    InvalidMagicValue(u16),
     #[error("IncorrectOSMajor({0}), should be 5")]
     IncorrectOSMajor(u16),
     #[error("IncorrectOSMinor({0}), should be 0")]
