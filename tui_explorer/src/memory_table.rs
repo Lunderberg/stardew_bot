@@ -69,6 +69,7 @@ impl MemoryTable {
     pub(crate) fn finalize_jump_to_address(
         &mut self,
         reader: &MemoryReader,
+        current_region_start: Pointer,
         log: &mut RunningLog,
         stack_frame_table: &mut StackFrameTable,
     ) {
@@ -90,7 +91,16 @@ impl MemoryTable {
                 return;
             }
         };
-        let address: Pointer = address.into();
+
+        // Bit of a hack, should have distinct syntax for a location
+        // relative to the current MemoryRegion and a global address.
+        let address: Pointer = if address < 0x100000 {
+            current_region_start + address
+        } else {
+            address.into()
+        };
+
+        // let address: Pointer = address.into();
 
         self.jump_to_address(address, reader, stack_frame_table, log);
     }
@@ -221,6 +231,7 @@ impl MemoryTable {
                     KeyBindingMatch::try_binding("<enter>", keystrokes, || {
                         self.finalize_jump_to_address(
                             reader,
+                            self.view_stack.last().region.start(),
                             log,
                             stack_frame_table,
                         )

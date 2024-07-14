@@ -53,6 +53,8 @@ pub enum Error {
         num_sections: usize,
         i_section: usize,
     },
+    #[error("Virtual address 0x{0:x} was not found in any section")]
+    InvalidVirtualAddress(u32),
 }
 
 impl std::fmt::Debug for Error {

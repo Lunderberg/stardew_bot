@@ -95,22 +95,6 @@ impl TuiExplorer {
             },
         )?;
 
-        (0..2).map(|i| dll_info.section_header(i))
-            .try_for_each(|section_header|->Result<(),Error>{
-                let section_header = section_header?;
-                let name = section_header.name()?.value;
-                let virtual_address = section_header.virtual_address()?.value;
-                let virtual_size = section_header.virtual_size()?.value ;
-                let virtual_range = virtual_address..virtual_address+virtual_size;
-                let raw_address = section_header.raw_address()?.value;
-                let raw_size = section_header.raw_size()?.value ;
-                let raw_range = raw_address..raw_address+raw_size;
-
-                let characteristics = section_header.characteristics()?.value;
-                println!("SectionHeader {{ name: {name:?}, virtual_range: {virtual_range:?}, raw_range: {raw_range:?}, characteristics: {characteristics} }}");
-                Ok(())
-        })?;
-
         let memory_table = {
             let start = dll_region.start() + dll_info.offset_so_far;
             MemoryTable::new(dll_region, start)

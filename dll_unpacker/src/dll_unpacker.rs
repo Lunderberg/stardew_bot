@@ -100,7 +100,7 @@ pub enum MagicValue {
     PE32plus,
 }
 
-pub struct DataDirectory {
+pub struct VirtualRange {
     rva: u32,
     size: u32,
 }
@@ -121,11 +121,15 @@ pub enum DataDirectoryKind {
     BoundImportTable,
     ImportAddressTable,
     DelayImportDescriptor,
-    CLRRuntimeHeader,
+    ClrRuntimeHeader,
     Reserved15,
 }
 
 pub struct SectionHeaderUnpacker<'a> {
+    bytes: ByteRange<'a>,
+}
+
+pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
@@ -230,6 +234,19 @@ impl<'a> ByteRange<'a> {
         })
     }
 
+    fn get_virtual_range(
+        &self,
+        loc: impl NormalizeOffset,
+    ) -> Result<UnpackedValue<VirtualRange>, Error> {
+        let start = loc.as_offset(self.start);
+        let rva = self.get_u32(start)?.value;
+        let size = self.get_u32(start + 4)?.value;
+        Ok(UnpackedValue {
+            loc: self.address_range(start..start + 8),
+            value: VirtualRange { rva, size },
+        })
+    }
+
     fn subrange(&self, range: Range<impl NormalizeOffset>) -> ByteRange {
         let start = range.start.as_offset(self.start);
         let end = range.end.as_offset(self.start);
@@ -278,7 +295,7 @@ impl<'a> Unpacker<'a> {
                 start: region.start(),
                 bytes: region.data(),
             },
-            offset_so_far: 0,
+            offset_so_far: 512,
         }
     }
 
@@ -300,7 +317,12 @@ impl<'a> Unpacker<'a> {
 
         let pe_header = self.pe_header()?;
         pe_header.collect_annotations(&mut callback)?;
+
         self.optional_header()?.collect_annotations(&mut callback)?;
+
+        self.clr_runtime_header()?
+            .collect_annotations(&mut callback)?;
+
         for i_section in 0..pe_header.num_sections()?.value as usize {
             self.section_header(i_section)?
                 .collect_annotations(&mut callback)?;
@@ -395,6 +417,67 @@ impl<'a> Unpacker<'a> {
             optional_header.bytes.end() + i_section * section_header_size;
         let bytes = self.bytes.subrange(start..start + section_header_size);
         Ok(SectionHeaderUnpacker { bytes })
+    }
+
+    pub fn iter_section_header(
+        &self,
+    ) -> Result<impl Iterator<Item = SectionHeaderUnpacker>, Error> {
+        let pe_header = self.pe_header()?;
+        let num_sections = pe_header.num_sections()?.value as usize;
+        let optional_header = self.optional_header()?;
+
+        let section_header_base = optional_header.bytes.end();
+
+        let section_header_size = 40;
+
+        let iter = (0..num_sections)
+            .map(move |i_section| {
+                section_header_base + i_section * section_header_size
+            })
+            .map(move |start| {
+                let bytes =
+                    self.bytes.subrange(start..start + section_header_size);
+                SectionHeaderUnpacker { bytes }
+            });
+
+        Ok(iter)
+    }
+
+    fn virtual_address_to_raw(&self, addr: u32) -> Result<Pointer, Error> {
+        self.iter_section_header()?
+            .find_map(|section| {
+                let virtual_range = section.virtual_range().ok()?;
+                if virtual_range.contains(&addr) {
+                    let addr_within_section =
+                        (virtual_range.start - addr) as usize;
+                    let raw_section_addr =
+                        section.raw_address().ok()?.value as usize;
+
+                    Some(
+                        self.bytes.start
+                            + raw_section_addr
+                            + addr_within_section,
+                    )
+                } else {
+                    None
+                }
+            })
+            .ok_or(Error::InvalidVirtualAddress(addr))
+    }
+
+    pub fn clr_runtime_header(
+        &self,
+    ) -> Result<ClrRuntimeHeaderUnpacker, Error> {
+        let optional_header = self.optional_header()?;
+        let data_dir = optional_header
+            .data_directory(DataDirectoryKind::ClrRuntimeHeader)?
+            .value;
+
+        let addr = self.virtual_address_to_raw(data_dir.rva)?;
+
+        let size = data_dir.size as usize;
+        let bytes = self.bytes.subrange(addr..addr + size);
+        Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 }
 
@@ -818,21 +901,14 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     pub fn data_directory(
         &self,
         dir: DataDirectoryKind,
-    ) -> Result<UnpackedValue<DataDirectory>, Error> {
+    ) -> Result<UnpackedValue<VirtualRange>, Error> {
         let base = match self.magic_value {
             MagicValue::PE32 => 96,
             MagicValue::PE32plus => 112,
         };
         let dir_size = 8;
-        let start = base + dir.index() * dir_size;
 
-        let rva = self.bytes.get_u32(start)?.value;
-        let size = self.bytes.get_u32(start + 4)?.value;
-        let loc = self.bytes.address_range(start..start + dir_size);
-        Ok(UnpackedValue {
-            value: DataDirectory { rva, size },
-            loc,
-        })
+        self.bytes.get_virtual_range(base + dir.index() * dir_size)
     }
 }
 
@@ -843,6 +919,12 @@ impl MagicValue {
             0x020b => Ok(MagicValue::PE32plus),
             other => Err(Error::InvalidMagicValue(other)),
         }
+    }
+}
+
+impl std::fmt::Display for VirtualRange {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}\n{} bytes", self.rva, self.size)
     }
 }
 
@@ -863,7 +945,7 @@ impl DataDirectoryKind {
             Self::BoundImportTable => 11,
             Self::ImportAddressTable => 12,
             Self::DelayImportDescriptor => 13,
-            Self::CLRRuntimeHeader => 14,
+            Self::ClrRuntimeHeader => 14,
             Self::Reserved15 => 15,
         }
     }
@@ -888,7 +970,7 @@ impl TryFrom<u32> for DataDirectoryKind {
             11 => Ok(Self::BoundImportTable),
             12 => Ok(Self::ImportAddressTable),
             13 => Ok(Self::DelayImportDescriptor),
-            14 => Ok(Self::CLRRuntimeHeader),
+            14 => Ok(Self::ClrRuntimeHeader),
             15 => Ok(Self::Reserved15),
             other => Err(Error::InvalidDataDirectoryIndex(other)),
         }
@@ -948,6 +1030,12 @@ impl<'a> SectionHeaderUnpacker<'a> {
 
     pub fn virtual_address(&self) -> Result<UnpackedValue<u32>, Error> {
         self.bytes.get_u32(12)
+    }
+
+    pub fn virtual_range(&self) -> Result<Range<u32>, Error> {
+        let start = self.virtual_address()?.value;
+        let size = self.virtual_size()?.value;
+        Ok(start..start + size)
     }
 
     pub fn raw_size(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -1024,5 +1112,92 @@ impl<'a> SectionHeaderUnpacker<'a> {
 
     pub fn is_writable(&self) -> Result<bool, Error> {
         Ok(self.characteristics()?.value & 0x80000000 != 0)
+    }
+}
+
+impl<'a> ClrRuntimeHeaderUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {header_size};
+        annotate! {major_runtime_version};
+        annotate! {minor_runtime_version};
+        annotate! {metadata};
+        annotate! {flags};
+        annotate! {entry_point_token};
+        annotate! {resources};
+        annotate! {strong_name_signature};
+        annotate! {code_manager_table};
+        annotate! {vtable_fixups};
+        annotate! {export_address_table_jumps};
+        annotate! {managed_native_header};
+
+        Ok(())
+    }
+
+    fn header_size(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(0)
+    }
+
+    fn major_runtime_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(4)
+    }
+
+    fn minor_runtime_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(6)
+    }
+
+    fn metadata(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(8)
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(16)
+    }
+
+    fn entry_point_token(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(20)
+    }
+
+    fn resources(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(24)
+    }
+
+    fn strong_name_signature(
+        &self,
+    ) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(32)
+    }
+
+    fn code_manager_table(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(40)
+    }
+
+    fn vtable_fixups(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(48)
+    }
+
+    fn export_address_table_jumps(
+        &self,
+    ) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(56)
+    }
+
+    fn managed_native_header(
+        &self,
+    ) -> Result<UnpackedValue<VirtualRange>, Error> {
+        self.bytes.get_virtual_range(64)
     }
 }
