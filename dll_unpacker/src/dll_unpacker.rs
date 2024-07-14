@@ -86,13 +86,43 @@ pub struct PEHeaderCharacteristics {
 }
 
 pub struct OptionalHeaderUnpacker<'a> {
+    /// The bytes for the optional header
     bytes: ByteRange<'a>,
+
+    /// The magic_value at the start of the optional header.  Saved
+    /// here, since the location of most fields depend on it.
+    magic_value: MagicValue,
 }
 
 #[derive(Debug)]
 pub enum MagicValue {
     PE32,
     PE32plus,
+}
+
+pub struct DataDirectory {
+    rva: u32,
+    size: u32,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum DataDirectoryKind {
+    ExportTable,
+    ImportTable,
+    ResourceTable,
+    ExceptionTable,
+    CertificateTable,
+    BaseRelocationTable,
+    Debug,
+    Architecture,
+    GlobalPtr,
+    TLSTable,
+    LoadConfigTable,
+    BoundImportTable,
+    ImportAddressTable,
+    DelayImportDescriptor,
+    CLRRuntimeHeader,
+    Reserved15,
 }
 
 pub struct SectionHeaderUnpacker<'a> {
@@ -177,6 +207,21 @@ impl<'a> ByteRange<'a> {
         let byte_offset = loc.as_offset(self.start);
         let byte_range = byte_offset..byte_offset + 4;
         let value = u32::from_le_bytes(
+            self.bytes[byte_range.clone()].try_into().unwrap(),
+        );
+        Ok(UnpackedValue {
+            loc: self.address_range(byte_range),
+            value,
+        })
+    }
+
+    fn get_u64(
+        &self,
+        loc: impl NormalizeOffset,
+    ) -> Result<UnpackedValue<u64>, Error> {
+        let byte_offset = loc.as_offset(self.start);
+        let byte_range = byte_offset..byte_offset + 8;
+        let value = u64::from_le_bytes(
             self.bytes[byte_range.clone()].try_into().unwrap(),
         );
         Ok(UnpackedValue {
@@ -326,7 +371,7 @@ impl<'a> Unpacker<'a> {
             pe_header.optional_header_size()?.value as usize;
         let start = pe_header.bytes.end();
         let bytes = self.bytes.subrange(start..start + optional_header_size);
-        Ok(OptionalHeaderUnpacker { bytes })
+        OptionalHeaderUnpacker::new(bytes)
     }
 
     pub fn section_header(
@@ -496,6 +541,15 @@ impl PEHeaderCharacteristics {
 }
 
 impl<'a> OptionalHeaderUnpacker<'a> {
+    fn new(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        let mut out = Self {
+            bytes,
+            magic_value: MagicValue::PE32,
+        };
+        out.magic_value = out.magic_value()?.value;
+        Ok(out)
+    }
+
     fn collect_annotations(
         &self,
         callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
@@ -519,7 +573,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         annotate! {uninitialized_data_size};
         annotate! {rva_entry_point};
         annotate! {rva_code_section};
-        annotate! {rva_data_section};
+        // annotate! {rva_data_section};
         annotate! {image_base};
         annotate! {section_alignment};
         annotate! {file_alignment};
@@ -540,7 +594,26 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         annotate! {heap_reserve_size};
         annotate! {heap_commit_size};
         annotate! {loader_flags};
-        annotate! {num_data_directories};
+
+        let num_data_directories = self.num_data_directories()?;
+        callback(
+            num_data_directories.loc,
+            "num_data_directories",
+            format!("{}", num_data_directories.value),
+        );
+
+        for i_data_dir in 0..num_data_directories.value {
+            let data_dir_kind: DataDirectoryKind = i_data_dir.try_into()?;
+            let data_dir = self.data_directory(data_dir_kind)?;
+            callback(
+                data_dir.loc,
+                "data dir",
+                format!(
+                    "{data_dir_kind:?}\nRVA {},\n{} bytes",
+                    data_dir.value.rva, data_dir.value.size
+                ),
+            );
+        }
 
         Ok(())
     }
@@ -549,6 +622,31 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         self.bytes
             .get_u16(0)
             .and_then(|unpacked| unpacked.try_map(MagicValue::new))
+    }
+
+    fn get_size(
+        &self,
+        pe32_offset: usize,
+        pe32_plus_offset: usize,
+    ) -> Result<UnpackedValue<u64>, Error> {
+        match self.magic_value {
+            MagicValue::PE32 => self
+                .bytes
+                .get_u32(pe32_offset)
+                .map(|unpacked| unpacked.map(|value| value as u64)),
+            MagicValue::PE32plus => self.bytes.get_u64(pe32_plus_offset),
+        }
+    }
+
+    fn get_u32(
+        &self,
+        pe32_offset: usize,
+        pe32_plus_offset: usize,
+    ) -> Result<UnpackedValue<u32>, Error> {
+        match self.magic_value {
+            MagicValue::PE32 => self.bytes.get_u32(pe32_offset),
+            MagicValue::PE32plus => self.bytes.get_u32(pe32_plus_offset),
+        }
     }
 
     pub fn linker_major_version(&self) -> Result<UnpackedValue<u8>, Error> {
@@ -579,12 +677,17 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         self.bytes.get_u32(20)
     }
 
-    pub fn rva_data_section(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(24)
+    pub fn rva_data_section(
+        &self,
+    ) -> Option<Result<UnpackedValue<u32>, Error>> {
+        match self.magic_value {
+            MagicValue::PE32 => Some(self.bytes.get_u32(24)),
+            MagicValue::PE32plus => None,
+        }
     }
 
-    pub fn image_base(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(28)
+    pub fn image_base(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.get_size(28, 24)
     }
 
     pub fn section_alignment(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -688,28 +791,48 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         }
     }
 
-    pub fn stack_reserve_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(72)
+    pub fn stack_reserve_size(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.get_size(72, 72)
     }
 
-    pub fn stack_commit_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(76)
+    pub fn stack_commit_size(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.get_size(76, 80)
     }
 
-    pub fn heap_reserve_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(80)
+    pub fn heap_reserve_size(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.get_size(80, 88)
     }
 
-    pub fn heap_commit_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(84)
+    pub fn heap_commit_size(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.get_size(84, 96)
     }
 
     pub fn loader_flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(88)
+        self.get_u32(88, 104)
     }
 
     pub fn num_data_directories(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(92)
+        self.get_u32(92, 108)
+    }
+
+    pub fn data_directory(
+        &self,
+        dir: DataDirectoryKind,
+    ) -> Result<UnpackedValue<DataDirectory>, Error> {
+        let base = match self.magic_value {
+            MagicValue::PE32 => 96,
+            MagicValue::PE32plus => 112,
+        };
+        let dir_size = 8;
+        let start = base + dir.index() * dir_size;
+
+        let rva = self.bytes.get_u32(start)?.value;
+        let size = self.bytes.get_u32(start + 4)?.value;
+        let loc = self.bytes.address_range(start..start + dir_size);
+        Ok(UnpackedValue {
+            value: DataDirectory { rva, size },
+            loc,
+        })
     }
 }
 
@@ -719,6 +842,55 @@ impl MagicValue {
             0x010b => Ok(MagicValue::PE32),
             0x020b => Ok(MagicValue::PE32plus),
             other => Err(Error::InvalidMagicValue(other)),
+        }
+    }
+}
+
+impl DataDirectoryKind {
+    fn index(self) -> usize {
+        match self {
+            Self::ExportTable => 0,
+            Self::ImportTable => 1,
+            Self::ResourceTable => 2,
+            Self::ExceptionTable => 3,
+            Self::CertificateTable => 4,
+            Self::BaseRelocationTable => 5,
+            Self::Debug => 6,
+            Self::Architecture => 7,
+            Self::GlobalPtr => 8,
+            Self::TLSTable => 9,
+            Self::LoadConfigTable => 10,
+            Self::BoundImportTable => 11,
+            Self::ImportAddressTable => 12,
+            Self::DelayImportDescriptor => 13,
+            Self::CLRRuntimeHeader => 14,
+            Self::Reserved15 => 15,
+        }
+    }
+}
+
+impl TryFrom<u32> for DataDirectoryKind {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::ExportTable),
+            1 => Ok(Self::ImportTable),
+            2 => Ok(Self::ResourceTable),
+            3 => Ok(Self::ExceptionTable),
+            4 => Ok(Self::CertificateTable),
+            5 => Ok(Self::BaseRelocationTable),
+            6 => Ok(Self::Debug),
+            7 => Ok(Self::Architecture),
+            8 => Ok(Self::GlobalPtr),
+            9 => Ok(Self::TLSTable),
+            10 => Ok(Self::LoadConfigTable),
+            11 => Ok(Self::BoundImportTable),
+            12 => Ok(Self::ImportAddressTable),
+            13 => Ok(Self::DelayImportDescriptor),
+            14 => Ok(Self::CLRRuntimeHeader),
+            15 => Ok(Self::Reserved15),
+            other => Err(Error::InvalidDataDirectoryIndex(other)),
         }
     }
 }

@@ -42,6 +42,8 @@ pub enum Error {
     IncorrectLoaderFlags(u32),
     #[error("IncorrectNumberOfDataDirectories(0x{0:x}), should be 0x10")]
     IncorrectNumberOfDataDirectories(u32),
+    #[error("Invalid data directory {0}, should be in range [0,16)")]
+    InvalidDataDirectoryIndex(u32),
     #[error("InvalidSectionHeader")]
     InvalidSectionHeader,
     #[error("InvalidUTF8")]
