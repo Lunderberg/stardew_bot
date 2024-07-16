@@ -8,7 +8,7 @@ use ratatui::{
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extensions::*, Annotation, InputWindow};
+use crate::{extensions::*, Annotation, Error, InputWindow};
 use crate::{scroll_bar::ScrollableState, StackFrameTable};
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
@@ -32,19 +32,22 @@ struct ViewFrame {
 }
 
 impl MemoryTable {
-    pub(crate) fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
-        use super::column_formatter::*;
-
-        Self {
+    pub(crate) fn new(
+        reader: &MemoryReader,
+        entry_point: Pointer,
+        formatters: Vec<Box<dyn ColumnFormatter>>,
+    ) -> Result<Self, Error> {
+        let region = reader
+            .regions
+            .iter()
+            .find(|region| region.contains(entry_point))
+            .ok_or(Error::PointerNotFound(entry_point))?
+            .read()?;
+        Ok(Self {
             view_stack: NonEmptyVec::new(ViewFrame::new(region, entry_point)),
-            formatters: vec![
-                Box::new(AddressColumn),
-                Box::new(HexColumn),
-                Box::new(AsciiColumn),
-                Box::new(PointsToColumn),
-            ],
+            formatters,
             jump_to_window: None,
-        }
+        })
     }
 
     pub(crate) fn push_view(

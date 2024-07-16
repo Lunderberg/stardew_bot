@@ -2,8 +2,11 @@ use thiserror::Error;
 
 #[derive(Error)]
 pub enum Error {
-    #[error("Stardew Valley process not running")]
-    StardewNotRunning,
+    #[error("{err}")]
+    UtilError {
+        #[from]
+        err: stardew_utils::Error,
+    },
 
     #[error("{err}")]
     MemoryReadError {

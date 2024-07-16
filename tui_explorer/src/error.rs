@@ -1,3 +1,4 @@
+use memory_reader::Pointer;
 use thiserror::Error;
 
 #[derive(Error)]
@@ -22,6 +23,9 @@ pub enum Error {
 
     #[error("Invalid emacs-style key sequence: {0}")]
     InvalidKeyBinding(String),
+
+    #[error("Could not find MemoryRegion containing pointer {0}")]
+    PointerNotFound(Pointer),
 }
 
 impl std::fmt::Debug for Error {

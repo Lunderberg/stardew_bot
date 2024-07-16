@@ -1,8 +1,10 @@
 use std::ops::Range;
 
-use crate::{extensions::*, KeyBindingMatch, KeySequence};
+use crate::{
+    extensions::*, ColumnFormatter, InfoFormatter, KeyBindingMatch, KeySequence,
+};
 use crate::{Error, SigintHandler};
-use memory_reader::Pointer;
+use memory_reader::{MemoryMapRegion, Pointer};
 
 use memory_reader::{MemoryReader, Symbol};
 use ratatui::style::Stylize as _;
@@ -47,19 +49,40 @@ enum SelectableRegion {
     Log,
 }
 
-impl TuiExplorer {
+pub struct TuiExplorerBuilder {
+    pid: u32,
+    reader: MemoryReader,
+    symbols: Vec<Symbol>,
+    detail_formatters: Vec<Box<dyn InfoFormatter>>,
+    column_formatters: Vec<Box<dyn ColumnFormatter>>,
+    initial_pointer: Pointer,
+    annotations: Vec<Annotation>,
+}
+
+impl TuiExplorerBuilder {
     pub fn new(pid: u32) -> Result<Self, Error> {
-        let reader = MemoryReader::new(pid)?;
-        let stack_memory = reader.stack()?.read()?;
+        Ok(Self {
+            pid,
+            reader: MemoryReader::new(pid)?,
+            symbols: Vec::new(),
+            detail_formatters: Vec::new(),
+            column_formatters: Vec::new(),
+            initial_pointer: Pointer::null(),
+            annotations: Vec::new(),
+        })
+    }
 
-        let symbols: Vec<Symbol> = reader.iter_symbols().collect();
+    pub fn init_symbols(self) -> Self {
+        Self {
+            symbols: self.reader.iter_symbols().collect(),
+            ..self
+        }
+    }
 
-        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
-
-        let detail_view = {
-            use super::info_formatter::*;
-
-            DetailView::new(vec![
+    pub fn default_detail_formatters(self) -> Self {
+        use super::info_formatter::*;
+        Self {
+            detail_formatters: vec![
                 Box::new(FormatLocation),
                 Box::new(FormatHexValue::<u64>::new()),
                 Box::new(FormatDecValue::<u64>::new()),
@@ -67,24 +90,69 @@ impl TuiExplorer {
                 Box::new(FormatUTF16String),
                 Box::new(FormatSpacer),
                 Box::new(FormatRegionPointedTo),
-                Box::new(FormatSymbolPointedTo(symbols.clone())),
+                Box::new(FormatSymbolPointedTo(self.symbols.clone())),
                 Box::new(FormatPointerOffset),
                 Box::new(FormatStringPointerWithLength),
                 Box::new(FormatStringPointerNullTerminated),
-            ])
-        };
+            ],
+            ..self
+        }
+    }
 
-        let mut annotations = Vec::new();
+    pub fn default_column_formatters(self) -> Self {
+        use super::column_formatter::*;
+        Self {
+            column_formatters: vec![
+                Box::new(AddressColumn),
+                Box::new(HexColumn),
+                Box::new(AsciiColumn),
+                Box::new(PointsToColumn),
+            ],
+            ..self
+        }
+    }
 
-        let dll_region = reader
+    fn stardew_valley_dll(&self) -> Result<&MemoryMapRegion, Error> {
+        self.reader
             .find_region(|reg| reg.short_name() == "Stardew Valley.dll")
             .ok_or(memory_reader::Error::MissingMemoryMapSection(
                 "Stardew Valley.dll".to_string(),
-            ))?
-            .read()?;
+            ))
+            .map_err(Into::into)
+    }
 
-        let dll_info = dll_unpacker::Unpacker::new(&dll_region);
+    pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
+        Ok(Self {
+            initial_pointer: self.stardew_valley_dll()?.address_range().start,
+            ..self
+        })
+    }
 
+    pub fn initialize_view_to_stack(self) -> Result<Self, Error> {
+        let stack_memory = self.reader.stack()?.read()?;
+
+        let bottom_stack_frame = stack_memory
+            .stack_pointers(&self.reader)
+            .map(|p| p.location)
+            .next();
+        let x86_64_tag = stack_memory.rfind_pattern(
+            &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
+        );
+        let stack_entry_point = bottom_stack_frame
+            .or(x86_64_tag)
+            .unwrap_or_else(|| stack_memory.end());
+
+        Ok(Self {
+            initial_pointer: stack_entry_point,
+            ..self
+        })
+    }
+
+    pub fn initialize_annotations(self) -> Result<Self, Error> {
+        let region = self.stardew_valley_dll()?.read()?;
+        let dll_info = dll_unpacker::Unpacker::new(&region);
+
+        let mut annotations = Vec::new();
         dll_info.collect_annotations(
             |range: Range<Pointer>, name: &'static str, value: String| {
                 annotations.push(Annotation {
@@ -95,33 +163,34 @@ impl TuiExplorer {
             },
         )?;
 
-        let memory_table = {
-            let start = dll_region.start() + dll_info.offset_so_far;
-            MemoryTable::new(dll_region, start)
-        };
+        Ok(Self {
+            annotations,
+            ..self
+        })
+    }
 
-        // let memory_table = {
-        //     let bottom_stack_frame = stack_memory
-        //         .stack_pointers(&reader)
-        //         .map(|p| p.location)
-        //         .next();
-        //     let x86_64_tag = stack_memory.rfind_pattern(
-        //         &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
-        //     );
-        //     let stack_entry_point = bottom_stack_frame
-        //         .or(x86_64_tag)
-        //         .unwrap_or_else(|| stack_memory.end());
-        //     MemoryTable::new(stack_memory, stack_entry_point)
-        // };
+    pub fn build(self) -> Result<TuiExplorer, Error> {
+        let reader = MemoryReader::new(self.pid)?;
+        let stack_memory = reader.stack()?.read()?;
 
-        let mut out = Self {
+        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
+
+        let detail_view = DetailView::new(self.detail_formatters);
+
+        let memory_table = MemoryTable::new(
+            &self.reader,
+            self.initial_pointer,
+            self.column_formatters,
+        )?;
+
+        let mut out = TuiExplorer {
             stack_frame_table,
             running_log: RunningLog::new(100),
             memory_table,
-            annotations,
-            _symbols: symbols,
+            annotations: self.annotations,
+            _symbols: self.symbols,
             detail_view,
-            _pid: pid,
+            _pid: self.pid,
             reader,
             should_exit: false,
             selected_region: SelectableRegion::MemoryTable,
@@ -130,6 +199,19 @@ impl TuiExplorer {
         out.update_details();
 
         Ok(out)
+    }
+}
+
+impl TuiExplorer {
+    pub fn new(pid: u32) -> Result<Self, Error> {
+        TuiExplorerBuilder::new(pid)?
+            .init_symbols()
+            .default_detail_formatters()
+            .default_column_formatters()
+            .initialize_view_to_stardew_dll()?
+            //.initialize_view_to_stack()?
+            .initialize_annotations()?
+            .build()
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
@@ -152,7 +234,7 @@ impl TuiExplorer {
         Ok(())
     }
 
-    fn draw(&mut self, frame: &mut Frame) {
+    pub fn draw(&mut self, frame: &mut Frame) {
         let (stack_detail_column, mem_view, log_view) = Layout::default()
             .direction(Direction::Horizontal)
             .margin(1)

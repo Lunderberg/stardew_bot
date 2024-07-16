@@ -4,6 +4,7 @@ members = [
   "stardew_bot",
   "tui_explorer",
   "dll_unpacker",
+  "stardew_utils",
 ]
 resolver = "2"
 

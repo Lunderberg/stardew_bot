@@ -17,3 +17,11 @@ chrono = "*"
 
 dll_unpacker = { path = "../dll_unpacker" }
 memory_reader = { path = "../memory_reader" }
+
+[[bench]]
+name = "benchmarks"
+harness = false
+
+[dev-dependencies]
+criterion = {version = "0.3"}
+stardew_utils = { path = "../stardew_utils" }

@@ -15,3 +15,4 @@ sysinfo = "*"
 elf = "*"
 memory_reader = {path = "../memory_reader"}
 tui_explorer = {path = "../tui_explorer"}
+stardew_utils = {path = "../stardew_utils"}
