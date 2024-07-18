@@ -49,6 +49,9 @@ pub use detail_view::*;
 mod vertical_bar;
 pub use vertical_bar::*;
 
+pub(crate) mod dynamic_table;
+pub use dynamic_table::DynamicTable;
+
 pub mod column_formatter;
 pub use column_formatter::ColumnFormatter;
 

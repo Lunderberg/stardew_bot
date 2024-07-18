@@ -120,6 +120,19 @@ impl MemoryRegion {
         self.into_iter()
     }
 
+    pub fn iter_rows(
+        &self,
+    ) -> impl Iterator<Item = MemoryValue<[u8; Self::POINTER_SIZE]>> + '_ {
+        (0..(self.bytes.len() - (Self::POINTER_SIZE - 1)))
+            .step_by(Self::POINTER_SIZE)
+            .map(|i| {
+                MemoryValue::new(
+                    self.start + i,
+                    self[i..i + Self::POINTER_SIZE].try_into().unwrap(),
+                )
+            })
+    }
+
     pub fn iter_as_pointers(
         &self,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> + '_ {

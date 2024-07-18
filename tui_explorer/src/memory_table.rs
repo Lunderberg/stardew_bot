@@ -1,14 +1,15 @@
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Cell, Row, Table, TableState},
+    text::Line,
+    widgets::{Block, Borders, TableState},
     Frame,
 };
 
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extensions::*, Annotation, Error, InputWindow};
+use crate::{extensions::*, Annotation, DynamicTable, Error, InputWindow};
 use crate::{scroll_bar::ScrollableState, StackFrameTable};
 use crate::{
     ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
@@ -472,74 +473,123 @@ impl ViewFrame {
 
         self.table_height = Some(table_area.height as usize);
         let table = self
-            .generate_table(reader, formatters, annotations)
+            .generate_table(
+                reader,
+                &self.region,
+                formatters,
+                &self.search,
+                annotations,
+            )
             .with_scrollbar(self.num_table_rows());
         frame.render_stateful_widget(table, table_area, &mut self.table_state);
     }
 
     fn generate_table<'a>(
         &self,
-        reader: &MemoryReader,
+        reader: &'a MemoryReader,
+        region: &'a MemoryRegion,
         formatters: &'a [Box<dyn ColumnFormatter>],
-        annotations: &[Annotation],
-    ) -> Table<'a> {
-        let selected_row = self.selected_row();
+        search_window: &'a Option<SearchWindow<TableState>>,
+        annotations: &'a [Annotation],
+    ) -> impl ratatui::widgets::StatefulWidget<State = TableState> + 'a {
+        // let selected_row = self.selected_row();
         let selected_address = self.selected_address();
 
-        let header_cells = formatters
+        let header = formatters
             .iter()
             .map(|formatter| formatter.name())
-            .map(|header| {
-                Cell::from(header).style(
-                    Style::default()
-                        .fg(Color::LightCyan)
-                        .add_modifier(Modifier::BOLD),
-                )
-            });
+            .map(crate::dynamic_table::Cell::from)
+            .collect();
 
-        let header = Row::new(header_cells)
-            .style(Style::default().bg(Color::Blue))
-            .height(1)
-            .bottom_margin(1);
+        // let header_cells = formatters
+        //     .iter()
+        //     .map(|formatter| formatter.name())
+        //     .map(|header| {
+        //         Cell::from(header).style(
+        //             Style::default()
+        //                 .fg(Color::LightCyan)
+        //                 .add_modifier(Modifier::BOLD),
+        //         )
+        //     });
 
-        let rows = self
-            .region
-            .iter()
-            .iter_as::<MemoryValue<[u8; 8]>>()
-            .enumerate()
-            .map(|(i, row)| {
-                let is_near_selected =
-                    i.abs_diff(selected_row) < (self.num_rows_shown() as usize);
+        // let header = Row::new(header_cells)
+        //     .style(Style::default().bg(Color::Blue))
+        //     .height(1)
+        //     .bottom_margin(1);
 
-                let region = &self.region;
-                let cells = formatters
-                    .iter()
-                    .filter(|_| is_near_selected)
-                    .map(|formatter| {
-                        formatter.formatted_cell(
-                            reader,
-                            region,
-                            selected_address,
-                            annotations,
-                            &row,
-                        )
-                    })
-                    .map(|line| {
-                        if let Some(search) = self.search.as_ref() {
-                            search.highlight_search_matches(line)
-                        } else {
-                            line.into()
-                        }
-                    });
+        // let rows = std::iter::repeat(Row::default().height(1).bottom_margin(0))
+        //     .take(self.region.size_bytes() / MemoryRegion::POINTER_SIZE);
 
-                Row::new(cells).height(1).bottom_margin(0)
-            });
+        // let rows = vec![
+        //     Row::default().height(1).bottom_margin(0);
+        //     self.region.size_bytes() / MemoryRegion::POINTER_SIZE
+        // ];
 
-        let address_width = self.region.as_range().suffix_hexadecimal_digits();
+        // let rows = self.region.iter_rows().enumerate().map(|(i, row)| {
+        //     let is_near_selected =
+        //         i.abs_diff(selected_row) < (self.num_rows_shown() as usize);
+        //     let region = &self.region;
+        //     let cells = formatters
+        //         .iter()
+        //         .filter(|_| is_near_selected)
+        //         .map(|formatter| {
+        //             formatter.formatted_cell(
+        //                 reader,
+        //                 region,
+        //                 selected_address,
+        //                 annotations,
+        //                 &row,
+        //             )
+        //         })
+        //         .map(|line| {
+        //             if let Some(search) = self.search.as_ref() {
+        //                 search.highlight_search_matches(line)
+        //             } else {
+        //                 line.into()
+        //             }
+        //         });
+        //     Row::new(cells).height(1).bottom_margin(0)
+        // });
 
-        let table = Table::new(
-            rows,
-            [
+        let address_width = region.as_range().suffix_hexadecimal_digits();
+
+        // let _table = Table::new(
+        //     rows,
+        //     [
+        //         Constraint::Min((address_width + 3) as u16),
+        //         Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
+        //         Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
+        //         Constraint::Percentage(100),
+        //     ],
+        // )
+        // // .header(header)
+        // .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+        // .highlight_symbol(">> ");
+
+        let table = DynamicTable::new(
+            move |i: usize, j: usize| -> Option<Line> {
+                let row =
+                    region.bytes_at_offset(j * MemoryRegion::POINTER_SIZE)?;
+
+                let formatter = formatters.get(i)?;
+
+                let cell: Line = formatter.formatted_cell(
+                    reader,
+                    region,
+                    selected_address,
+                    annotations,
+                    &row,
+                );
+                let cell = if let Some(search) = search_window {
+                    search.highlight_search_matches(cell)
+                } else {
+                    cell
+                };
+
+                Some(cell)
+            },
+            self.num_table_rows(),
+            vec![
                 Constraint::Min((address_width + 3) as u16),
                 Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
                 Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
@@ -547,6 +597,12 @@ impl ViewFrame {
             ],
         )
         .header(header)
+        .header_style(
+            Style::default()
+                .bg(Color::Blue)
+                .fg(Color::LightCyan)
+                .add_modifier(Modifier::BOLD),
+        )
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 
