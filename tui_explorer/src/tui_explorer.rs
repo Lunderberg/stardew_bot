@@ -122,8 +122,12 @@ impl TuiExplorerBuilder {
     }
 
     pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
+        let region = self.stardew_valley_dll()?.read()?;
+        let dll_info = dll_unpacker::Unpacker::new(&region);
+
         Ok(Self {
-            initial_pointer: self.stardew_valley_dll()?.address_range().start,
+            initial_pointer: self.stardew_valley_dll()?.address_range().start
+                + dll_info.offset_so_far,
             ..self
         })
     }

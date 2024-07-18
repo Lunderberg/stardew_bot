@@ -47,9 +47,9 @@ fn formatted_cell(
         })
         .fold(line, |line, (i, ann)| {
             let style = Style::default().bg(if i % 2 == 0 {
-                Color::Indexed(250)
+                Color::Indexed(235)
             } else {
-                Color::Indexed(244)
+                Color::Indexed(240)
             });
             // let style = Style::default().bg(Color::Green);
 

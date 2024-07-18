@@ -55,6 +55,9 @@ pub enum Error {
     },
     #[error("Virtual address 0x{0:x} was not found in any section")]
     InvalidVirtualAddress(u32),
+
+    #[error("IncorrectMetadataSignature")]
+    IncorrectMetadataSignature,
 }
 
 impl std::fmt::Debug for Error {

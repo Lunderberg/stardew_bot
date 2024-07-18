@@ -133,6 +133,22 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
+pub struct MetadataUnpacker<'a> {
+    bytes: ByteRange<'a>,
+}
+
+pub struct StreamHeader<'a> {
+    /// The offset of the stream, in bytes, relative to the start of
+    /// the metadata.
+    offset: UnpackedValue<u32>,
+
+    /// The size of the stream, in bytes.
+    size: UnpackedValue<u32>,
+
+    /// The name of the metadata section.  Max of 32 ASCII characters.
+    name: UnpackedValue<&'a str>,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -295,7 +311,8 @@ impl<'a> Unpacker<'a> {
                 start: region.start(),
                 bytes: region.data(),
             },
-            offset_so_far: 512,
+            //offset_so_far: 512,
+            offset_so_far: 3240004 + 64,
         }
     }
 
@@ -327,6 +344,8 @@ impl<'a> Unpacker<'a> {
             self.section_header(i_section)?
                 .collect_annotations(&mut callback)?;
         }
+
+        self.metadata()?.collect_annotations(&mut callback)?;
 
         Ok(())
     }
@@ -449,7 +468,7 @@ impl<'a> Unpacker<'a> {
                 let virtual_range = section.virtual_range().ok()?;
                 if virtual_range.contains(&addr) {
                     let addr_within_section =
-                        (virtual_range.start - addr) as usize;
+                        (addr - virtual_range.start) as usize;
                     let raw_section_addr =
                         section.raw_address().ok()?.value as usize;
 
@@ -478,6 +497,15 @@ impl<'a> Unpacker<'a> {
         let size = data_dir.size as usize;
         let bytes = self.bytes.subrange(addr..addr + size);
         Ok(ClrRuntimeHeaderUnpacker { bytes })
+    }
+
+    pub fn metadata(&self) -> Result<MetadataUnpacker, Error> {
+        let clr_runtime_header = self.clr_runtime_header()?;
+        let metadata_range = clr_runtime_header.metadata_range()?.value;
+        let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
+        let num_bytes = metadata_range.size as usize;
+        let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
+        Ok(MetadataUnpacker { bytes })
     }
 }
 
@@ -924,7 +952,7 @@ impl MagicValue {
 
 impl std::fmt::Display for VirtualRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}\n{} bytes", self.rva, self.size)
+        write!(f, "RVA {}\n{} bytes", self.rva, self.size)
     }
 }
 
@@ -1017,7 +1045,8 @@ impl<'a> SectionHeaderUnpacker<'a> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let value = std::str::from_utf8(&self.bytes[0..8])?;
+        let value =
+            std::str::from_utf8(&self.bytes[0..8])?.trim_end_matches('\0');
         Ok(UnpackedValue {
             loc: self.bytes.address_range(0..8),
             value,
@@ -1044,6 +1073,12 @@ impl<'a> SectionHeaderUnpacker<'a> {
 
     pub fn raw_address(&self) -> Result<UnpackedValue<u32>, Error> {
         self.bytes.get_u32(20)
+    }
+
+    pub fn raw_range(&self) -> Result<Range<u32>, Error> {
+        let start = self.raw_address()?.value;
+        let size = self.raw_size()?.value;
+        Ok(start..start + size)
     }
 
     pub fn ptr_relocations(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -1134,7 +1169,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         annotate! {header_size};
         annotate! {major_runtime_version};
         annotate! {minor_runtime_version};
-        annotate! {metadata};
+        annotate! {metadata_range};
         annotate! {flags};
         annotate! {entry_point_token};
         annotate! {resources};
@@ -1159,7 +1194,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         self.bytes.get_u16(6)
     }
 
-    fn metadata(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
+    fn metadata_range(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
         self.bytes.get_virtual_range(8)
     }
 
@@ -1199,5 +1234,169 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         &self,
     ) -> Result<UnpackedValue<VirtualRange>, Error> {
         self.bytes.get_virtual_range(64)
+    }
+}
+
+impl<'a> MetadataUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        callback(
+            self.metadata_signature()?.loc,
+            "Metadata signature",
+            "".to_string(),
+        );
+        annotate! {major_version};
+        annotate! {minor_version};
+        annotate! {reserved};
+        annotate! {version_str_len};
+        annotate! {version_str};
+        annotate! {flags};
+        annotate! {num_streams};
+
+        self.iter_stream_header()?.try_for_each(
+            |stream_header| -> Result<_, Error> {
+                stream_header?.collect_annotations(callback)
+            },
+        )?;
+
+        Ok(())
+    }
+
+    pub fn metadata_signature(&self) -> Result<UnpackedValue<()>, Error> {
+        let metadata_signature = [0x42, 0x53, 0x4A, 0x42];
+
+        let byte_range = 0..4;
+        if metadata_signature == self.bytes[byte_range.clone()] {
+            Ok(UnpackedValue {
+                loc: self.bytes.address_range(byte_range),
+                value: (),
+            })
+        } else {
+            Err(Error::IncorrectMetadataSignature)
+        }
+    }
+
+    pub fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(4)
+    }
+
+    pub fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(6)
+    }
+
+    pub fn reserved(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(8)
+    }
+
+    pub fn version_str_len(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(12)
+    }
+
+    fn padded_version_str_len(&self) -> Result<usize, Error> {
+        let len = self.version_str_len()?.value as usize;
+        Ok(len.div_ceil(4) * 4)
+    }
+
+    pub fn version_str(&self) -> Result<UnpackedValue<&str>, Error> {
+        let len = self.version_str_len()?.value as usize;
+        let start = 16;
+
+        let padded_len = self.padded_version_str_len()?;
+        let value = std::str::from_utf8(&self.bytes[start..start + len])?
+            .trim_end_matches('\0');
+        Ok(UnpackedValue {
+            loc: self.bytes.address_range(start..start + padded_len),
+            value,
+        })
+    }
+
+    pub fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        let start = 16 + self.padded_version_str_len()?;
+        self.bytes.get_u16(start)
+    }
+
+    pub fn num_streams(&self) -> Result<UnpackedValue<u16>, Error> {
+        let start = 18 + self.padded_version_str_len()?;
+        self.bytes.get_u16(start)
+    }
+
+    pub fn iter_stream_header(
+        &self,
+    ) -> Result<impl Iterator<Item = Result<StreamHeader, Error>> + '_, Error>
+    {
+        let num_streams = self.num_streams()?.value;
+
+        let mut curr_offset = 20 + self.padded_version_str_len()?;
+
+        let iter = (0..num_streams).map(move |_| {
+            let stream_offset = self.bytes.get_u32(curr_offset)?;
+            let stream_size = self.bytes.get_u32(curr_offset + 4)?;
+
+            let name_start = curr_offset + 8;
+            let name_len = self.bytes[name_start..name_start + 32]
+                .iter()
+                .take_while(|byte| **byte > 0)
+                .count();
+            assert!(name_len > 0);
+
+            let padded_name_len = (name_len + 1).div_ceil(4) * 4;
+
+            let stream_name = UnpackedValue {
+                loc: self
+                    .bytes
+                    .address_range(name_start..name_start + padded_name_len),
+                value: std::str::from_utf8(
+                    &self.bytes[name_start..name_start + name_len],
+                )?,
+            };
+
+            curr_offset += 8 + padded_name_len;
+
+            Ok(StreamHeader {
+                offset: stream_offset,
+                size: stream_size,
+                name: stream_name,
+            })
+        });
+
+        Ok(iter)
+    }
+}
+
+impl<'a> StreamHeader<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        callback(
+            self.offset.loc.clone(),
+            "Stream Offset",
+            format!("{}", self.offset.value),
+        );
+        callback(
+            self.size.loc.clone(),
+            "Stream Size",
+            format!("{}", self.size.value),
+        );
+        callback(
+            self.name.loc.clone(),
+            "Stream Name",
+            format!("{}", self.name.value),
+        );
+
+        Ok(())
     }
 }
