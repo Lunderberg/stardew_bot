@@ -149,6 +149,59 @@ pub struct StreamHeader<'a> {
     name: UnpackedValue<&'a str>,
 }
 
+pub struct TildeStreamUnpacker<'a> {
+    bytes: ByteRange<'a>,
+}
+
+#[derive(Clone, Copy)]
+pub struct HeapSizes {
+    string_stream_uses_u32_addr: bool,
+    guid_stream_uses_u32_addr: bool,
+    blob_stream_uses_u32_addr: bool,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MetadataTableKind {
+    Module,
+    TypeRef,
+    TypeDef,
+    Field,
+    MethodDef,
+    Param,
+    InterfaceImpl,
+    MemberRef,
+    Constant,
+    CustomAttribute,
+    FieldMarshal,
+    DeclSecurity,
+    ClassLayout,
+    FieldLayout,
+    StandAloneSig,
+    EventMap,
+    Event,
+    PropertyMap,
+    Property,
+    MethodSemantics,
+    MethodImpl,
+    ModuleRef,
+    TypeSpec,
+    ImplMap,
+    FieldRVA,
+    Assembly,
+    AssemblyProcessor,
+    AssemblyOS,
+    AssemblyRef,
+    AssemblyRefProcessor,
+    AssemblyRefOS,
+    File,
+    ExportedType,
+    ManifestResource,
+    NestedClass,
+    GenericParam,
+    MethodSpec,
+    GenericParamConstraint,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -311,8 +364,7 @@ impl<'a> Unpacker<'a> {
                 start: region.start(),
                 bytes: region.data(),
             },
-            //offset_so_far: 512,
-            offset_so_far: 3240004 + 64,
+            offset_so_far: 3240004 + 128 + 64,
         }
     }
 
@@ -1272,6 +1324,8 @@ impl<'a> MetadataUnpacker<'a> {
             },
         )?;
 
+        self.tilde_stream()?.collect_annotations(callback)?;
+
         Ok(())
     }
 
@@ -1374,6 +1428,21 @@ impl<'a> MetadataUnpacker<'a> {
 
         Ok(iter)
     }
+
+    pub fn tilde_stream(&self) -> Result<TildeStreamUnpacker, Error> {
+        let header = self
+            .iter_stream_header()?
+            .filter_map(|res| res.ok())
+            .find(|stream_header| stream_header.name.value == "#~")
+            .ok_or(Error::NoTildeStream)?;
+
+        let offset = header.offset.value as usize;
+        let size = header.size.value as usize;
+
+        let bytes = self.bytes.subrange(offset..offset + size);
+
+        Ok(TildeStreamUnpacker { bytes })
+    }
 }
 
 impl<'a> StreamHeader<'a> {
@@ -1398,5 +1467,193 @@ impl<'a> StreamHeader<'a> {
         );
 
         Ok(())
+    }
+}
+
+impl<'a> TildeStreamUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {reserved_0};
+        annotate! {major_version};
+        annotate! {minor_version};
+        annotate! {heap_sizes};
+        annotate! {reserved_1};
+        annotate! {valid_table_bitfield};
+        annotate! {sorted_table_bitfield};
+
+        self.iter_num_rows()?
+            .try_for_each(|res| -> Result<_, Error> {
+                let (
+                    UnpackedValue {
+                        loc,
+                        value: num_rows,
+                    },
+                    kind,
+                ) = res?;
+                callback(loc, "Num rows", format!("{num_rows} ({kind:?})"));
+                Ok(())
+            })?;
+
+        Ok(())
+    }
+
+    pub fn reserved_0(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(0)
+    }
+
+    pub fn major_version(&self) -> Result<UnpackedValue<u8>, Error> {
+        self.bytes.get_u8(4)
+    }
+
+    pub fn minor_version(&self) -> Result<UnpackedValue<u8>, Error> {
+        self.bytes.get_u8(5)
+    }
+
+    pub fn heap_sizes(&self) -> Result<UnpackedValue<HeapSizes>, Error> {
+        let UnpackedValue { loc, value } = self.bytes.get_u8(6)?;
+        let heap_sizes = HeapSizes {
+            string_stream_uses_u32_addr: value & 0x1 > 0,
+            guid_stream_uses_u32_addr: value & 0x2 > 0,
+            blob_stream_uses_u32_addr: value & 0x4 > 0,
+        };
+
+        Ok(UnpackedValue {
+            value: heap_sizes,
+            loc,
+        })
+    }
+
+    pub fn reserved_1(&self) -> Result<UnpackedValue<u8>, Error> {
+        self.bytes.get_u8(7)
+    }
+
+    /// Bitfield indicating which tables are present.
+    pub fn valid_table_bitfield(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.bytes.get_u64(8)
+    }
+
+    /// Bitfield indicating which tables are sorted.  Should have
+    /// exactly 14 entries, matching the tables listed in section
+    /// II.22 of ECMA-335.
+    pub fn sorted_table_bitfield(&self) -> Result<UnpackedValue<u64>, Error> {
+        self.bytes.get_u64(16)
+    }
+
+    pub fn iter_num_rows(
+        &self,
+    ) -> Result<
+        impl Iterator<
+                Item = Result<(UnpackedValue<u32>, MetadataTableKind), Error>,
+            > + '_,
+        Error,
+    > {
+        let bitfield = self.valid_table_bitfield()?.value;
+
+        let iter = (0..64)
+            .filter(move |i_bit| bitfield & (1 << i_bit) > 0)
+            .scan(24, |offset, i_bit| {
+                let row_offset = *offset;
+                *offset += 4;
+
+                let num_rows = match self.bytes.get_u32(row_offset) {
+                    Ok(val) => val,
+                    Err(err) => return Some(Err(err)),
+                };
+                let kind = match MetadataTableKind::from_bit_index(i_bit) {
+                    Ok(val) => val,
+                    Err(err) => return Some(Err(err)),
+                };
+                Some(Ok((num_rows, kind)))
+            });
+
+        Ok(iter)
+    }
+}
+
+impl std::fmt::Display for HeapSizes {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "HeapSizes{{")?;
+
+        let mut need_comma = false;
+        if self.string_stream_uses_u32_addr {
+            write!(f, "#String")?;
+            need_comma = true;
+        }
+
+        if self.guid_stream_uses_u32_addr {
+            if need_comma {
+                write!(f, ", ")?;
+            }
+            write!(f, "#GUID")?;
+            need_comma = true;
+        }
+
+        if self.blob_stream_uses_u32_addr {
+            if need_comma {
+                write!(f, ", ")?;
+            }
+            write!(f, "#Blob")?;
+        }
+
+        write!(f, "}}")
+    }
+}
+
+impl MetadataTableKind {
+    fn from_bit_index(bit: u8) -> Result<Self, Error> {
+        match bit {
+            0x00 => Ok(Self::Module),
+            0x01 => Ok(Self::TypeRef),
+            0x02 => Ok(Self::TypeDef),
+            0x04 => Ok(Self::Field),
+            0x06 => Ok(Self::MethodDef),
+            0x08 => Ok(Self::Param),
+            0x09 => Ok(Self::InterfaceImpl),
+            0x0A => Ok(Self::MemberRef),
+            0x0B => Ok(Self::Constant),
+            0x0C => Ok(Self::CustomAttribute),
+            0x0D => Ok(Self::FieldMarshal),
+            0x0E => Ok(Self::DeclSecurity),
+            0x0F => Ok(Self::ClassLayout),
+            0x10 => Ok(Self::FieldLayout),
+            0x11 => Ok(Self::StandAloneSig),
+            0x12 => Ok(Self::EventMap),
+            0x14 => Ok(Self::Event),
+            0x15 => Ok(Self::PropertyMap),
+            0x17 => Ok(Self::Property),
+            0x18 => Ok(Self::MethodSemantics),
+            0x19 => Ok(Self::MethodImpl),
+            0x1A => Ok(Self::ModuleRef),
+            0x1B => Ok(Self::TypeSpec),
+            0x1C => Ok(Self::ImplMap),
+            0x1D => Ok(Self::FieldRVA),
+            0x20 => Ok(Self::Assembly),
+            0x21 => Ok(Self::AssemblyProcessor),
+            0x22 => Ok(Self::AssemblyOS),
+            0x23 => Ok(Self::AssemblyRef),
+            0x24 => Ok(Self::AssemblyRefProcessor),
+            0x25 => Ok(Self::AssemblyRefOS),
+            0x26 => Ok(Self::File),
+            0x27 => Ok(Self::ExportedType),
+            0x28 => Ok(Self::ManifestResource),
+            0x29 => Ok(Self::NestedClass),
+            0x2A => Ok(Self::GenericParam),
+            0x2B => Ok(Self::MethodSpec),
+            0x2C => Ok(Self::GenericParamConstraint),
+            _ => Err(Error::InvalidMetadataTable(bit)),
+        }
     }
 }
