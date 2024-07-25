@@ -1,10 +1,10 @@
-use std::ops::Range;
+use std::{marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
 
 use crate::Error;
 
-struct ByteRange<'a> {
+pub struct ByteRange<'a> {
     start: Pointer,
     bytes: &'a [u8],
 }
@@ -207,12 +207,23 @@ pub struct MetadataSizes {
     table_sizes: [u32; 38],
 }
 
-pub struct ModuleTableUnpacker<'a> {
+pub struct MetadataTableUnpacker<'a, RowUnpacker> {
+    bytes: ByteRange<'a>,
+    sizes: &'a MetadataSizes,
+    row_unpacker: PhantomData<RowUnpacker>,
+}
+
+pub struct MetadataIndex {
+    table: MetadataTableKind,
+    index: usize,
+}
+
+pub struct ModuleTableRowUnpacker<'a> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
 }
 
-pub struct ModuleTableRowUnpacker<'a> {
+pub struct TypeRefTableRowUnpacker<'a> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
 }
@@ -1527,6 +1538,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(callback))?;
 
+        self.type_ref_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(callback))?;
+
         Ok(())
     }
 
@@ -1617,38 +1632,79 @@ impl<'a> TildeStreamUnpacker<'a> {
         Ok(metadata_sizes)
     }
 
-    pub fn metadata_table_start(
-        &self,
-        kind_start: MetadataTableKind,
-        sizes: &MetadataSizes,
-    ) -> Result<usize, Error> {
-        self.iter_num_rows()?
+    fn metadata_table_bytes<'b>(
+        &'b self,
+        kind: MetadataTableKind,
+        sizes: &'b MetadataSizes,
+    ) -> Result<ByteRange<'b>, Error> {
+        let start = self
+            .iter_num_rows()?
             .map(|res| {
-                res.map(|(rows, kind)| {
+                res.map(|(rows, other_kind)| {
                     let rows = rows.value as usize;
-                    let table_offset = if kind.as_metadata_sizes_index()
-                        < kind_start.as_metadata_sizes_index()
+                    let table_offset = if other_kind.as_metadata_sizes_index()
+                        < kind.as_metadata_sizes_index()
                     {
-                        rows * kind.bytes_per_row(sizes)
+                        rows * other_kind.bytes_per_row(sizes)
                     } else {
                         0
                     };
                     table_offset + 4
                 })
             })
-            .try_fold(24, |sum, res_bytes| Ok(sum + res_bytes?))
+            .try_fold(24, |sum, res_bytes| {
+                res_bytes.map(|bytes| bytes + sum)
+            })?;
+
+        let num_rows = sizes[kind] as usize;
+        let bytes_per_row = kind.bytes_per_row(sizes);
+
+        let bytes =
+            self.bytes.subrange(start..start + num_rows * bytes_per_row);
+
+        Ok(bytes)
     }
 
     pub fn module_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<ModuleTableUnpacker<'b>, Error> {
-        let kind = MetadataTableKind::Module;
-        let start = self.metadata_table_start(kind, sizes)?;
-        let size = kind.table_bytes(sizes);
-        let bytes = self.bytes.subrange(start..start + size);
-        Ok(ModuleTableUnpacker { bytes, sizes })
+    ) -> Result<MetadataTableUnpacker<'b, ModuleTableRowUnpacker<'b>>, Error>
+    {
+        Ok(MetadataTableUnpacker {
+            bytes: self
+                .metadata_table_bytes(MetadataTableKind::Module, sizes)?,
+            sizes,
+            row_unpacker: PhantomData,
+        })
     }
+
+    pub fn type_ref_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, TypeRefTableRowUnpacker<'b>>, Error>
+    {
+        Ok(MetadataTableUnpacker {
+            bytes: self
+                .metadata_table_bytes(MetadataTableKind::TypeRef, sizes)?,
+            sizes,
+            row_unpacker: PhantomData,
+        })
+    }
+}
+
+pub trait MetadataRowUnpacker<'a> {
+    type Unpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b;
 }
 
 impl std::fmt::Display for HeapSizes {
@@ -1681,6 +1737,96 @@ impl std::fmt::Display for HeapSizes {
 }
 
 impl MetadataTableKind {
+    #[allow(dead_code)]
+    const TYPE_DEF_OR_REF: [Self; 3] =
+        [Self::TypeDef, Self::TypeRef, Self::TypeSpec];
+
+    #[allow(dead_code)]
+    const HAS_CONSTANT: [Self; 3] = [Self::Field, Self::Param, Self::Property];
+
+    #[allow(dead_code)]
+    const HAS_CUSTOM_ATTRIBUTE: [Self; 22] = [
+        Self::MethodDef,
+        Self::Field,
+        Self::TypeRef,
+        Self::TypeDef,
+        Self::Param,
+        Self::InterfaceImpl,
+        Self::MemberRef,
+        Self::Module,
+        // This option is listed as "Permission" in II.24.2.6 of
+        // ECMA-335, but no such metadata table exists.  It looks like
+        // it might be a holdover from an earlier draft.  For now,
+        // assuming that it refers to the "DeclSecurity" table, which
+        // handles object permissions.
+        Self::DeclSecurity,
+        Self::Property,
+        Self::Event,
+        Self::StandAloneSig,
+        Self::ModuleRef,
+        Self::TypeSpec,
+        Self::Assembly,
+        Self::AssemblyRef,
+        Self::File,
+        Self::ExportedType,
+        Self::ManifestResource,
+        Self::GenericParam,
+        Self::GenericParamConstraint,
+        Self::MethodSpec,
+    ];
+
+    #[allow(dead_code)]
+    const HAS_FIELD_MARSHALL: [Self; 2] = [Self::Field, Self::Param];
+
+    #[allow(dead_code)]
+    const HAS_DECL_SECURITY: [Self; 3] =
+        [Self::TypeDef, Self::MethodDef, Self::Assembly];
+
+    #[allow(dead_code)]
+    const MEMBER_REF_PARENT: [Self; 5] = [
+        Self::TypeDef,
+        Self::TypeRef,
+        Self::ModuleRef,
+        Self::MethodDef,
+        Self::TypeSpec,
+    ];
+
+    #[allow(dead_code)]
+    const HAS_SEMANTICS: [Self; 2] = [Self::Event, Self::Property];
+
+    #[allow(dead_code)]
+    const METHOD_DEF_OR_REF: [Self; 2] = [Self::MethodDef, Self::MemberRef];
+
+    #[allow(dead_code)]
+    const MEMBER_FORWARDED: [Self; 2] = [Self::Field, Self::MethodDef];
+
+    #[allow(dead_code)]
+    const IMPLEMENTATION: [Self; 3] =
+        [Self::File, Self::AssemblyRef, Self::ExportedType];
+
+    // This is the only one of the type-tag sets that has unused
+    // values.  Once I get around to unpacking it, will need to adjust
+    // the "coded_index_size" and "get_coded_index" methods to handle
+    // it.
+    #[allow(dead_code)]
+    const CUSTOM_ATTRIBUTE_TYPE: [Option<Self>; 5] = [
+        None,
+        None,
+        Some(Self::MethodDef),
+        Some(Self::MemberRef),
+        None,
+    ];
+
+    const RESOLUTION_SCOPE: [Self; 4] = [
+        Self::Module,
+        Self::ModuleRef,
+        Self::AssemblyRef,
+        Self::TypeRef,
+    ];
+
+    #[allow(dead_code)]
+    const TYPE_OR_METHOD_DEF: [Self; 2] = [Self::TypeDef, Self::MethodDef];
+
     fn from_bit_index(bit: u8) -> Result<Self, Error> {
         match bit {
             0x00 => Ok(Self::Module),
@@ -1768,17 +1914,15 @@ impl MetadataTableKind {
         }
     }
 
-    fn table_bytes(self, sizes: &MetadataSizes) -> usize {
-        let num_rows = sizes[self] as usize;
-        num_rows * self.bytes_per_row(sizes)
-    }
-
     fn bytes_per_row(self, sizes: &MetadataSizes) -> usize {
         match self {
             MetadataTableKind::Module => {
                 2 + sizes.str_index_size() + 3 * sizes.guid_index_size()
             }
-            MetadataTableKind::TypeRef => todo!(),
+            MetadataTableKind::TypeRef => {
+                sizes.coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
+                    + 2 * sizes.str_index_size()
+            }
             MetadataTableKind::TypeDef => todo!(),
             MetadataTableKind::Field => todo!(),
             MetadataTableKind::MethodDef => todo!(),
@@ -1838,20 +1982,58 @@ impl MetadataSizes {
         self.coded_index_size([table])
     }
 
-    fn coded_index_size<const N: usize>(
+    fn coded_index_bit_widths<const N: usize>(
         &self,
         tables: [MetadataTableKind; N],
-    ) -> usize {
+    ) -> (usize, usize) {
         assert!(N > 0, "Must have at least one table");
         let table_bits = N.next_power_of_two().ilog2();
         let max_rows = tables.into_iter().map(|kind| self[kind]).max().unwrap();
         let row_bits = (max_rows + 1).next_power_of_two().ilog2();
+
+        (table_bits as usize, row_bits as usize)
+    }
+
+    fn coded_index_size<const N: usize>(
+        &self,
+        tables: [MetadataTableKind; N],
+    ) -> usize {
+        let (table_bits, row_bits) = self.coded_index_bit_widths(tables);
 
         if table_bits + row_bits <= 16 {
             2
         } else {
             4
         }
+    }
+
+    fn get_coded_index<const N: usize>(
+        &self,
+        tables: [MetadataTableKind; N],
+        bytes: &ByteRange,
+        offset: usize,
+    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        let (table_bits, row_bits) = self.coded_index_bit_widths(tables);
+        let UnpackedValue { value, loc } =
+            Self::get_heap_index(bytes, offset, table_bits + row_bits > 16)?;
+
+        let table_mask = (1 << table_bits) - 1;
+        let table_index = (value & table_mask) as usize;
+
+        let table = if table_index < N {
+            tables[table_index]
+        } else {
+            return Err(Error::InvalidCodedIndex {
+                index: table_index,
+                num_tables: N,
+            });
+        };
+        let index = (value >> table_bits) as usize;
+
+        Ok(UnpackedValue {
+            value: MetadataIndex { table, index },
+            loc,
+        })
     }
 
     fn get_heap_index(
@@ -1907,21 +2089,41 @@ impl MetadataSizes {
     }
 }
 
-impl<'a> ModuleTableUnpacker<'a> {
-    pub fn iter_rows(
-        &self,
-    ) -> impl Iterator<Item = ModuleTableRowUnpacker> + '_ {
-        let kind = MetadataTableKind::Module;
+impl<'a> MetadataRowUnpacker<'a> for ModuleTableRowUnpacker<'a> {
+    type Unpacker<'b> = ModuleTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::Module;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        ModuleTableRowUnpacker { bytes, sizes }
+    }
+}
+
+impl<'a, RowUnpacker: MetadataRowUnpacker<'a>>
+    MetadataTableUnpacker<'a, RowUnpacker>
+{
+    pub fn iter_rows<'b>(
+        &'b self,
+    ) -> impl Iterator<Item = RowUnpacker::Unpacker<'b>> + 'b
+    where
+        'a: 'b,
+    {
+        let kind = RowUnpacker::KIND;
         let num_rows = self.sizes[kind] as usize;
         let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
         (0..num_rows).map(move |i_row| {
             let bytes = self
                 .bytes
                 .subrange(i_row * bytes_per_row..(i_row + 1) * bytes_per_row);
-            ModuleTableRowUnpacker {
-                bytes,
-                sizes: self.sizes,
-            }
+            RowUnpacker::from_bytes(bytes, self.sizes)
         })
     }
 }
@@ -1976,5 +2178,76 @@ impl<'a> ModuleTableRowUnpacker<'a> {
             &self.bytes,
             2 + self.sizes.str_index_size() + 2 * self.sizes.guid_index_size(),
         )
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a> for TypeRefTableRowUnpacker<'a> {
+    type Unpacker<'b> = TypeRefTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::TypeRef;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        TypeRefTableRowUnpacker { bytes, sizes }
+    }
+}
+
+impl<'a> TypeRefTableRowUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {resolution_scope};
+        annotate! {type_name_index};
+        annotate! {type_namespace_index};
+
+        Ok(())
+    }
+
+    fn resolution_scope(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.sizes.get_coded_index(
+            MetadataTableKind::RESOLUTION_SCOPE,
+            &self.bytes,
+            0,
+        )
+    }
+
+    fn type_name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE);
+        self.sizes.get_str_index(&self.bytes, offset)
+    }
+
+    fn type_namespace_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
+            + self.sizes.str_index_size();
+        self.sizes.get_str_index(&self.bytes, offset)
+    }
+}
+
+impl std::fmt::Display for MetadataIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}[{}]", self.table, self.index)
     }
 }

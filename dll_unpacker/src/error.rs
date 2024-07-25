@@ -64,6 +64,9 @@ pub enum Error {
 
     #[error("Table 0x{0:x} is marked as present, but no metadata table uses this value")]
     InvalidMetadataTable(u8),
+
+    #[error("Coded index of {index} but only {num_tables} present")]
+    InvalidCodedIndex { index: usize, num_tables: usize },
 }
 
 impl std::fmt::Debug for Error {
