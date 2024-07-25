@@ -59,8 +59,8 @@ pub enum Error {
     #[error("IncorrectMetadataSignature")]
     IncorrectMetadataSignature,
 
-    #[error("No stream header was found with name '#~'")]
-    NoTildeStream,
+    #[error("No stream header was found with name '{0}'")]
+    MissingStream(&'static str),
 
     #[error("Table 0x{0:x} is marked as present, but no metadata table uses this value")]
     InvalidMetadataTable(u8),

@@ -4,6 +4,7 @@ use memory_reader::{MemoryRegion, Pointer};
 
 use crate::Error;
 
+#[derive(Clone)]
 pub struct ByteRange<'a> {
     start: Pointer,
     bytes: &'a [u8],
@@ -151,6 +152,7 @@ pub struct StreamHeader<'a> {
 
 pub struct TildeStreamUnpacker<'a> {
     bytes: ByteRange<'a>,
+    string_heap: ByteRange<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -210,6 +212,7 @@ pub struct MetadataSizes {
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -221,11 +224,13 @@ pub struct MetadataIndex {
 pub struct ModuleTableRowUnpacker<'a> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
 }
 
 pub struct TypeRefTableRowUnpacker<'a> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
 }
 
 impl<T> UnpackedValue<T> {
@@ -327,6 +332,23 @@ impl<'a> ByteRange<'a> {
             loc: self.address_range(byte_range),
             value,
         })
+    }
+
+    fn get_null_terminated(
+        &self,
+        loc: impl NormalizeOffset,
+    ) -> Result<UnpackedValue<&str>, Error> {
+        let start = loc.as_offset(self.start);
+        let size = self.bytes[start..]
+            .iter()
+            .enumerate()
+            .take_while(|(_, byte)| **byte > 0)
+            .map(|(i, _)| i + 1)
+            .last()
+            .unwrap_or(0);
+        let value = std::str::from_utf8(&self.bytes[start..start + size])?;
+        let loc = self.address_range(start..start + size);
+        Ok(UnpackedValue { value, loc })
     }
 
     fn get_virtual_range(
@@ -1456,18 +1478,32 @@ impl<'a> MetadataUnpacker<'a> {
     }
 
     pub fn tilde_stream(&self) -> Result<TildeStreamUnpacker, Error> {
-        let header = self
-            .iter_stream_header()?
-            .filter_map(|res| res.ok())
-            .find(|stream_header| stream_header.name.value == "#~")
-            .ok_or(Error::NoTildeStream)?;
+        let mut string_stream = None;
+        let mut tilde_stream = None;
 
-        let offset = header.offset.value as usize;
-        let size = header.size.value as usize;
+        for res in self.iter_stream_header()? {
+            let header = res?;
+            let offset = header.offset.value as usize;
+            let size = header.size.value as usize;
+            let bytes = self.bytes.subrange(offset..offset + size);
 
-        let bytes = self.bytes.subrange(offset..offset + size);
+            if header.name.value == "#~" {
+                tilde_stream = Some(bytes);
+            } else if header.name.value == "#Strings" {
+                string_stream = Some(bytes);
+            }
+        }
 
-        Ok(TildeStreamUnpacker { bytes })
+        if tilde_stream.is_none() {
+            Err(Error::MissingStream("#~"))
+        } else if string_stream.is_none() {
+            Err(Error::MissingStream("#Strings"))
+        } else {
+            Ok(TildeStreamUnpacker {
+                bytes: tilde_stream.unwrap(),
+                string_heap: string_stream.unwrap(),
+            })
+        }
     }
 }
 
@@ -1674,6 +1710,7 @@ impl<'a> TildeStreamUnpacker<'a> {
             bytes: self
                 .metadata_table_bytes(MetadataTableKind::Module, sizes)?,
             sizes,
+            string_heap: self.string_heap.clone(),
             row_unpacker: PhantomData,
         })
     }
@@ -1687,6 +1724,7 @@ impl<'a> TildeStreamUnpacker<'a> {
             bytes: self
                 .metadata_table_bytes(MetadataTableKind::TypeRef, sizes)?,
             sizes,
+            string_heap: self.string_heap.clone(),
             row_unpacker: PhantomData,
         })
     }
@@ -1702,6 +1740,7 @@ pub trait MetadataRowUnpacker<'a> {
     fn from_bytes<'b>(
         bytes: ByteRange<'b>,
         sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
     ) -> Self::Unpacker<'b>
     where
         'a: 'b;
@@ -1713,7 +1752,7 @@ impl std::fmt::Display for HeapSizes {
 
         let mut need_comma = false;
         if self.string_stream_uses_u32_addr {
-            write!(f, "#String")?;
+            write!(f, "#Strings")?;
             need_comma = true;
         }
 
@@ -2099,11 +2138,16 @@ impl<'a> MetadataRowUnpacker<'a> for ModuleTableRowUnpacker<'a> {
     fn from_bytes<'b>(
         bytes: ByteRange<'b>,
         sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
     ) -> Self::Unpacker<'b>
     where
         'a: 'b,
     {
-        ModuleTableRowUnpacker { bytes, sizes }
+        ModuleTableRowUnpacker {
+            bytes,
+            sizes,
+            string_heap,
+        }
     }
 }
 
@@ -2123,7 +2167,7 @@ impl<'a, RowUnpacker: MetadataRowUnpacker<'a>>
             let bytes = self
                 .bytes
                 .subrange(i_row * bytes_per_row..(i_row + 1) * bytes_per_row);
-            RowUnpacker::from_bytes(bytes, self.sizes)
+            RowUnpacker::from_bytes(bytes, self.sizes, self.string_heap.clone())
         })
     }
 }
@@ -2145,7 +2189,11 @@ impl<'a> ModuleTableRowUnpacker<'a> {
         }
 
         annotate! {generation};
-        annotate! {name_index};
+        {
+            let index = self.name_index()?;
+            let name = self.name()?.value;
+            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+        }
         annotate! {module_id};
         annotate! {enc_id};
         annotate! {enc_base_id};
@@ -2159,6 +2207,11 @@ impl<'a> ModuleTableRowUnpacker<'a> {
 
     pub fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
         self.sizes.get_str_index(&self.bytes, 2)
+    }
+
+    pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
     }
 
     pub fn module_id(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -2191,11 +2244,16 @@ impl<'a> MetadataRowUnpacker<'a> for TypeRefTableRowUnpacker<'a> {
     fn from_bytes<'b>(
         bytes: ByteRange<'b>,
         sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
     ) -> Self::Unpacker<'b>
     where
         'a: 'b,
     {
-        TypeRefTableRowUnpacker { bytes, sizes }
+        TypeRefTableRowUnpacker {
+            bytes,
+            sizes,
+            string_heap,
+        }
     }
 }
 
@@ -2216,8 +2274,25 @@ impl<'a> TypeRefTableRowUnpacker<'a> {
         }
 
         annotate! {resolution_scope};
-        annotate! {type_name_index};
-        annotate! {type_namespace_index};
+
+        {
+            let index = self.type_name_index()?;
+            let name = self.type_name()?.value;
+            callback(
+                index.loc,
+                "type_name",
+                format!("{}\n{}", index.value, name),
+            );
+        }
+        {
+            let index = self.type_namespace_index()?;
+            let name = self.type_namespace()?.value;
+            callback(
+                index.loc,
+                "type_namespace",
+                format!("{}\n{}", index.value, name),
+            );
+        }
 
         Ok(())
     }
@@ -2237,12 +2312,22 @@ impl<'a> TypeRefTableRowUnpacker<'a> {
         self.sizes.get_str_index(&self.bytes, offset)
     }
 
+    fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.type_name_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
+    }
+
     fn type_namespace_index(&self) -> Result<UnpackedValue<u32>, Error> {
         let offset = self
             .sizes
             .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
             + self.sizes.str_index_size();
         self.sizes.get_str_index(&self.bytes, offset)
+    }
+
+    fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.type_namespace_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
     }
 }
 
