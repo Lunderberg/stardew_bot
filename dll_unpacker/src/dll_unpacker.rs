@@ -250,6 +250,12 @@ pub struct MethodDefTableRowUnpacker<'a> {
     string_heap: ByteRange<'a>,
 }
 
+pub struct ParamTableRowUnpacker<'a> {
+    bytes: ByteRange<'a>,
+    sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -447,7 +453,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.field_table(&sizes)?;
+        let table = stream.param_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1626,6 +1632,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(callback))?;
 
+        self.param_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(callback))?;
+
         Ok(())
     }
 
@@ -1801,6 +1811,14 @@ impl<'a> TildeStreamUnpacker<'a> {
     ) -> Result<MetadataTableUnpacker<'b, MethodDefTableRowUnpacker<'b>>, Error>
     {
         self.get_table(sizes, MetadataTableKind::MethodDef)
+    }
+
+    pub fn param_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ParamTableRowUnpacker<'b>>, Error>
+    {
+        self.get_table(sizes, MetadataTableKind::Param)
     }
 }
 
@@ -2050,7 +2068,7 @@ impl MetadataTableKind {
                     + sizes.blob_index_size()
                     + sizes.index_size(MetadataTableKind::Param)
             }
-            MetadataTableKind::Param => todo!(),
+            MetadataTableKind::Param => 4 + sizes.str_index_size(),
             MetadataTableKind::InterfaceImpl => todo!(),
             MetadataTableKind::MemberRef => todo!(),
             MetadataTableKind::Constant => todo!(),
@@ -2835,5 +2853,73 @@ impl<'a> MethodDefTableRowUnpacker<'a> {
             value: start_index..end_index,
             loc,
         })
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a> for ParamTableRowUnpacker<'a> {
+    type Unpacker<'b> = ParamTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::Param;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        ParamTableRowUnpacker {
+            bytes,
+            sizes,
+            string_heap,
+        }
+    }
+}
+
+impl<'a> ParamTableRowUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {flags};
+        annotate! {sequence};
+        {
+            let index = self.name_index()?;
+            let name = self.name()?.value;
+            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+        }
+
+        Ok(())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(0)
+    }
+
+    fn sequence(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(2)
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.sizes.get_str_index(&self.bytes, 4)
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
     }
 }
