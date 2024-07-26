@@ -238,6 +238,12 @@ pub struct TypeDefTableRowUnpacker<'a> {
     string_heap: ByteRange<'a>,
 }
 
+pub struct FieldTableRowUnpacker<'a> {
+    bytes: ByteRange<'a>,
+    sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -435,9 +441,9 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let type_def_table = stream.type_def_table(&sizes)?;
+        let table = stream.field_table(&sizes)?;
 
-        Ok(type_def_table.bytes.end())
+        Ok(table.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -1606,6 +1612,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(callback))?;
 
+        self.field_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(callback))?;
+
         Ok(())
     }
 
@@ -1765,6 +1775,14 @@ impl<'a> TildeStreamUnpacker<'a> {
     ) -> Result<MetadataTableUnpacker<'b, TypeDefTableRowUnpacker<'b>>, Error>
     {
         self.get_table(sizes, MetadataTableKind::TypeDef)
+    }
+
+    pub fn field_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, FieldTableRowUnpacker<'b>>, Error>
+    {
+        self.get_table(sizes, MetadataTableKind::Field)
     }
 }
 
@@ -2006,7 +2024,9 @@ impl MetadataTableKind {
                     + sizes.index_size(MetadataTableKind::Field)
                     + sizes.index_size(MetadataTableKind::MethodDef)
             }
-            MetadataTableKind::Field => todo!(),
+            MetadataTableKind::Field => {
+                2 + sizes.str_index_size() + sizes.blob_index_size()
+            }
             MetadataTableKind::MethodDef => todo!(),
             MetadataTableKind::Param => todo!(),
             MetadataTableKind::InterfaceImpl => todo!(),
@@ -2164,6 +2184,18 @@ impl MetadataSizes {
         )
     }
 
+    fn get_blob_index(
+        &self,
+        bytes: &ByteRange,
+        offset: usize,
+    ) -> Result<UnpackedValue<u32>, Error> {
+        Self::get_heap_index(
+            bytes,
+            offset,
+            self.heap_sizes.blob_stream_uses_u32_addr,
+        )
+    }
+
     fn str_index_size(&self) -> usize {
         if self.heap_sizes.string_stream_uses_u32_addr {
             4
@@ -2174,6 +2206,14 @@ impl MetadataSizes {
 
     fn guid_index_size(&self) -> usize {
         if self.heap_sizes.guid_stream_uses_u32_addr {
+            4
+        } else {
+            2
+        }
+    }
+
+    fn blob_index_size(&self) -> usize {
+        if self.heap_sizes.blob_stream_uses_u32_addr {
             4
         } else {
             2
@@ -2579,5 +2619,74 @@ impl<'a> TypeDefTableRowUnpacker<'a> {
             value: start_index..end_index,
             loc,
         })
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a> for FieldTableRowUnpacker<'a> {
+    type Unpacker<'b> = FieldTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::Field;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        FieldTableRowUnpacker {
+            bytes,
+            sizes,
+            string_heap,
+        }
+    }
+}
+
+impl<'a> FieldTableRowUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {flags};
+        {
+            let index = self.name_index()?;
+            let name = self.name()?.value;
+            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+        }
+        annotate! {signature_index};
+
+        Ok(())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(0)
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.sizes.get_str_index(&self.bytes, 2)
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn signature_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        let offset = 2 + self.sizes.str_index_size();
+        self.sizes.get_blob_index(&self.bytes, offset)
     }
 }
