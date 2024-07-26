@@ -126,8 +126,7 @@ impl TuiExplorerBuilder {
         let dll_info = dll_unpacker::Unpacker::new(&region);
 
         Ok(Self {
-            initial_pointer: self.stardew_valley_dll()?.address_range().start
-                + dll_info.offset_so_far,
+            initial_pointer: dll_info.unpacked_so_far()?,
             ..self
         })
     }
