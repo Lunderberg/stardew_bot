@@ -261,6 +261,12 @@ pub struct InterfaceImplTableRowUnpacker<'a> {
     sizes: &'a MetadataSizes,
 }
 
+pub struct MemberRefTableRowUnpacker<'a> {
+    bytes: ByteRange<'a>,
+    sizes: &'a MetadataSizes,
+    string_heap: ByteRange<'a>,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -458,7 +464,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.interface_impl_table(&sizes)?;
+        let table = stream.member_ref_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1645,6 +1651,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(callback))?;
 
+        self.member_ref_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(callback))?;
+
         Ok(())
     }
 
@@ -1838,6 +1848,14 @@ impl<'a> TildeStreamUnpacker<'a> {
         Error,
     > {
         self.get_table(sizes, MetadataTableKind::InterfaceImpl)
+    }
+
+    pub fn member_ref_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, MemberRefTableRowUnpacker<'b>>, Error>
+    {
+        self.get_table(sizes, MetadataTableKind::MemberRef)
     }
 }
 
@@ -2092,7 +2110,11 @@ impl MetadataTableKind {
                 sizes.index_size(MetadataTableKind::TypeDef)
                     + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
             }
-            MetadataTableKind::MemberRef => todo!(),
+            MetadataTableKind::MemberRef => {
+                sizes.coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
+                    + sizes.str_index_size()
+                    + sizes.blob_index_size()
+            }
             MetadataTableKind::Constant => todo!(),
             MetadataTableKind::CustomAttribute => todo!(),
             MetadataTableKind::FieldMarshal => todo!(),
@@ -2999,5 +3021,84 @@ impl<'a> InterfaceImplTableRowUnpacker<'a> {
             &self.bytes,
             offset,
         )
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a> for MemberRefTableRowUnpacker<'a> {
+    type Unpacker<'b> = MemberRefTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::MemberRef;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+        string_heap: ByteRange<'b>,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        MemberRefTableRowUnpacker {
+            bytes,
+            sizes,
+            string_heap,
+        }
+    }
+}
+
+impl<'a> MemberRefTableRowUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {class_index};
+        {
+            let index = self.name_index()?;
+            let name = self.name()?.value;
+            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+        }
+        annotate! {signature_index};
+
+        Ok(())
+    }
+
+    fn class_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.sizes.get_coded_index(
+            MetadataTableKind::MEMBER_REF_PARENT,
+            &self.bytes,
+            0,
+        )
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT);
+        self.sizes.get_str_index(&self.bytes, offset)
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value as usize;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn signature_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
+            + self.sizes.str_index_size();
+        self.sizes.get_blob_index(&self.bytes, offset)
     }
 }
