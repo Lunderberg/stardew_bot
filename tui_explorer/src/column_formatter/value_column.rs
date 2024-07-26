@@ -51,7 +51,6 @@ fn formatted_cell(
             } else {
                 Color::Indexed(240)
             });
-            // let style = Style::default().bg(Color::Green);
 
             let start_byte =
                 text_loc.start.max(ann.range.start) - text_loc.start;
@@ -65,8 +64,6 @@ fn formatted_cell(
 
             let regex =
                 format!("^.{{{start_char}}}(?<highlight>.{{{len_chars}}}).*");
-            // let regex = format!("^.{{{start_char}}}(?<highlight>.{{4}}).*");
-            // let regex = ".*";
 
             line.style_regex(regex, style)
         });

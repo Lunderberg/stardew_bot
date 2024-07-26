@@ -492,7 +492,6 @@ impl ViewFrame {
         search_window: &'a Option<SearchWindow<TableState>>,
         annotations: &'a [Annotation],
     ) -> impl ratatui::widgets::StatefulWidget<State = TableState> + 'a {
-        // let selected_row = self.selected_row();
         let selected_address = self.selected_address();
 
         let header = formatters
@@ -501,70 +500,7 @@ impl ViewFrame {
             .map(crate::dynamic_table::Cell::from)
             .collect();
 
-        // let header_cells = formatters
-        //     .iter()
-        //     .map(|formatter| formatter.name())
-        //     .map(|header| {
-        //         Cell::from(header).style(
-        //             Style::default()
-        //                 .fg(Color::LightCyan)
-        //                 .add_modifier(Modifier::BOLD),
-        //         )
-        //     });
-
-        // let header = Row::new(header_cells)
-        //     .style(Style::default().bg(Color::Blue))
-        //     .height(1)
-        //     .bottom_margin(1);
-
-        // let rows = std::iter::repeat(Row::default().height(1).bottom_margin(0))
-        //     .take(self.region.size_bytes() / MemoryRegion::POINTER_SIZE);
-
-        // let rows = vec![
-        //     Row::default().height(1).bottom_margin(0);
-        //     self.region.size_bytes() / MemoryRegion::POINTER_SIZE
-        // ];
-
-        // let rows = self.region.iter_rows().enumerate().map(|(i, row)| {
-        //     let is_near_selected =
-        //         i.abs_diff(selected_row) < (self.num_rows_shown() as usize);
-        //     let region = &self.region;
-        //     let cells = formatters
-        //         .iter()
-        //         .filter(|_| is_near_selected)
-        //         .map(|formatter| {
-        //             formatter.formatted_cell(
-        //                 reader,
-        //                 region,
-        //                 selected_address,
-        //                 annotations,
-        //                 &row,
-        //             )
-        //         })
-        //         .map(|line| {
-        //             if let Some(search) = self.search.as_ref() {
-        //                 search.highlight_search_matches(line)
-        //             } else {
-        //                 line.into()
-        //             }
-        //         });
-        //     Row::new(cells).height(1).bottom_margin(0)
-        // });
-
         let address_width = region.as_range().suffix_hexadecimal_digits();
-
-        // let _table = Table::new(
-        //     rows,
-        //     [
-        //         Constraint::Min((address_width + 3) as u16),
-        //         Constraint::Min((2 * MemoryRegion::POINTER_SIZE + 3) as u16),
-        //         Constraint::Min((MemoryRegion::POINTER_SIZE + 1) as u16),
-        //         Constraint::Percentage(100),
-        //     ],
-        // )
-        // // .header(header)
-        // .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-        // .highlight_symbol(">> ");
 
         let table = DynamicTable::new(
             move |i: usize, j: usize| -> Option<Line> {
