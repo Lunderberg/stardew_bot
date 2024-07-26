@@ -256,6 +256,11 @@ pub struct ParamTableRowUnpacker<'a> {
     string_heap: ByteRange<'a>,
 }
 
+pub struct InterfaceImplTableRowUnpacker<'a> {
+    bytes: ByteRange<'a>,
+    sizes: &'a MetadataSizes,
+}
+
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
         UnpackedValue {
@@ -453,7 +458,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.param_table(&sizes)?;
+        let table = stream.interface_impl_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1636,6 +1641,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(callback))?;
 
+        self.interface_impl_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(callback))?;
+
         Ok(())
     }
 
@@ -1819,6 +1828,16 @@ impl<'a> TildeStreamUnpacker<'a> {
     ) -> Result<MetadataTableUnpacker<'b, ParamTableRowUnpacker<'b>>, Error>
     {
         self.get_table(sizes, MetadataTableKind::Param)
+    }
+
+    pub fn interface_impl_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<
+        MetadataTableUnpacker<'b, InterfaceImplTableRowUnpacker<'b>>,
+        Error,
+    > {
+        self.get_table(sizes, MetadataTableKind::InterfaceImpl)
     }
 }
 
@@ -2069,7 +2088,10 @@ impl MetadataTableKind {
                     + sizes.index_size(MetadataTableKind::Param)
             }
             MetadataTableKind::Param => 4 + sizes.str_index_size(),
-            MetadataTableKind::InterfaceImpl => todo!(),
+            MetadataTableKind::InterfaceImpl => {
+                sizes.index_size(MetadataTableKind::TypeDef)
+                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
+            }
             MetadataTableKind::MemberRef => todo!(),
             MetadataTableKind::Constant => todo!(),
             MetadataTableKind::CustomAttribute => todo!(),
@@ -2921,5 +2943,61 @@ impl<'a> ParamTableRowUnpacker<'a> {
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
         let index = self.name_index()?.value as usize;
         self.string_heap.get_null_terminated(index)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a> for InterfaceImplTableRowUnpacker<'a> {
+    type Unpacker<'b> = InterfaceImplTableRowUnpacker<'b>
+    where
+        'a: 'b;
+
+    const KIND: MetadataTableKind = MetadataTableKind::InterfaceImpl;
+
+    fn from_bytes<'b>(
+        bytes: ByteRange<'b>,
+        sizes: &'b MetadataSizes,
+        _string_heap: ByteRange<'b>,
+    ) -> Self::Unpacker<'b>
+    where
+        'a: 'b,
+    {
+        InterfaceImplTableRowUnpacker { bytes, sizes }
+    }
+}
+
+impl<'a> InterfaceImplTableRowUnpacker<'a> {
+    fn collect_annotations(
+        &self,
+        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+    ) -> Result<(), Error> {
+        macro_rules! annotate {
+            ($field:ident) => {
+                let field = self.$field()?;
+                callback(
+                    field.loc,
+                    stringify!($field),
+                    format!("{}", field.value),
+                );
+            };
+        }
+
+        annotate! {class_index};
+        annotate! {interface};
+
+        Ok(())
+    }
+
+    fn class_index(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.sizes
+            .get_index(MetadataTableKind::TypeDef, &self.bytes, 0)
+    }
+
+    fn interface(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        let offset = self.sizes.index_size(MetadataTableKind::TypeDef);
+        self.sizes.get_coded_index(
+            MetadataTableKind::TYPE_DEF_OR_REF,
+            &self.bytes,
+            offset,
+        )
     }
 }
