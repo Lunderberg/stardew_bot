@@ -1,9 +1,6 @@
-use std::ops::Range;
-
-use itertools::Itertools as _;
 use ratatui::{
     style::{Color, Style},
-    text::Line,
+    text::{Line, Span},
 };
 
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
@@ -14,61 +11,88 @@ use crate::{Annotation, ColumnFormatter};
 pub struct HexColumn;
 pub struct AsciiColumn;
 
-fn formatted_cell(
-    text: String,
-    text_loc: Range<Pointer>,
+trait ByteFormatter {
+    fn format_byte(byte: u8) -> impl Iterator<Item = char>;
+}
+
+impl ByteFormatter for HexColumn {
+    fn format_byte(byte: u8) -> impl Iterator<Item = char> {
+        [
+            char::from_digit((byte / 16).into(), 16).unwrap(),
+            char::from_digit((byte % 16).into(), 16).unwrap(),
+        ]
+        .into_iter()
+    }
+}
+
+impl ByteFormatter for AsciiColumn {
+    fn format_byte(byte: u8) -> impl Iterator<Item = char> {
+        let c = char::from_u32(byte.into())
+            .filter(|c| c.is_ascii() && !c.is_ascii_control())
+            .unwrap_or('☒');
+        std::iter::once(c)
+    }
+}
+
+fn formatted_cell<Column: ByteFormatter>(
+    row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     pointer_at_cursor: Option<Pointer>,
     annotations: &[Annotation],
 ) -> Line<'static> {
-    let num_chars = text.chars().count();
-    let chars_per_byte = num_chars / (text_loc.end - text_loc.start);
-    assert!(chars_per_byte > 0);
-    assert!(num_chars % chars_per_byte == 0);
+    let row_loc = row.location..row.location + MemoryRegion::POINTER_SIZE;
 
-    let mut line: Line = text.into();
+    let annotation_slice_start = annotations
+        .partition_point(|annotation| annotation.range.end < row_loc.start);
+    let annotations = &annotations[annotation_slice_start..];
+    let annotations = &annotations[..annotations
+        .partition_point(|annotation| annotation.range.start < row_loc.end)];
 
-    if let Some(as_pointer) = pointer_at_cursor {
-        if text_loc.contains(&as_pointer) {
-            let offset = chars_per_byte * (as_pointer - text_loc.start);
-            let regex = format!(".{{{offset}}}(?<highlight>.*)");
-            line =
-                line.style_regex(regex, Style::default().fg(Color::LightRed));
-        }
-    }
-
-    assert!(text_loc.end > text_loc.start);
-
-    line = annotations
-        .iter()
-        .dedup_by(|a, b| a.range == b.range)
+    row.value
+        .into_iter()
         .enumerate()
-        .filter(|(_, ann)| {
-            ann.range.start < text_loc.end && text_loc.start < ann.range.end
-        })
-        .fold(line, |line, (i, ann)| {
-            let style = Style::default().bg(if i % 2 == 0 {
-                Color::Indexed(235)
+        .map(|(i_byte, byte)| -> Span {
+            let byte_loc = row_loc.start + i_byte;
+            let bg_color = annotations
+                .iter()
+                .enumerate()
+                .find(|(_, ann)| ann.range.contains(&byte_loc))
+                .map(|(i_ann, _)| {
+                    if (i_ann + annotation_slice_start) % 2 == 0 {
+                        Color::Indexed(235)
+                    } else {
+                        Color::Indexed(240)
+                    }
+                });
+
+            let fg_color = pointer_at_cursor
+                .filter(|ptr| {
+                    row_loc.contains(ptr) && *ptr - row_loc.start <= i_byte
+                })
+                .map(|_| Color::LightRed);
+
+            let style = Style::default();
+            let style = if let Some(fg) = fg_color {
+                style.fg(fg)
             } else {
-                Color::Indexed(240)
-            });
+                style
+            };
+            let style = if let Some(bg) = bg_color {
+                style.bg(bg)
+            } else {
+                style
+            };
 
-            let start_byte =
-                text_loc.start.max(ann.range.start) - text_loc.start;
-            let end_byte = text_loc.end.min(ann.range.end) - text_loc.start;
-            let len_bytes = end_byte - start_byte;
-            assert!(len_bytes > 0);
-            let start_char = chars_per_byte * start_byte;
-            let len_chars = chars_per_byte * len_bytes;
+            Span::styled(Column::format_byte(byte).collect::<String>(), style)
+        })
+        .collect()
+}
 
-            assert!(len_chars > 0);
-
-            let regex =
-                format!("^.{{{start_char}}}(?<highlight>.{{{len_chars}}}).*");
-
-            line.style_regex(regex, style)
-        });
-
-    line
+fn cell_text<Column: ByteFormatter>(
+    row: [u8; MemoryRegion::POINTER_SIZE],
+) -> String {
+    row.into_iter()
+        .flat_map(|byte| Column::format_byte(byte))
+        .collect()
 }
 
 impl ColumnFormatter for HexColumn {
@@ -83,28 +107,22 @@ impl ColumnFormatter for HexColumn {
         _pointed_to: Pointer,
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
-        row.value.iter().map(|byte| format!("{byte:02x}")).join("")
+        cell_text::<Self>(row.value)
     }
 
     fn formatted_cell(
         &self,
-        reader: &MemoryReader,
+        _reader: &MemoryReader,
         region: &MemoryRegion,
         pointed_to: Pointer,
         annotations: &[Annotation],
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
-        let text = self.cell_text(reader, region, pointed_to, row);
         let pointer_at_cursor = region
             .bytes_at_pointer(pointed_to)
             .map(|bytes| bytes.value.into());
 
-        formatted_cell(
-            text,
-            row.location..row.location + MemoryRegion::POINTER_SIZE,
-            pointer_at_cursor,
-            annotations,
-        )
+        formatted_cell::<Self>(row, pointer_at_cursor, annotations)
     }
 }
 
@@ -120,34 +138,21 @@ impl ColumnFormatter for AsciiColumn {
         _pointed_to: Pointer,
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
-        row.value
-            .iter()
-            .map(|&byte| {
-                char::from_u32(byte.into())
-                    .filter(|c| c.is_ascii() && !c.is_ascii_control())
-                    .unwrap_or('☒')
-            })
-            .collect()
+        cell_text::<Self>(row.value)
     }
 
     fn formatted_cell(
         &self,
-        reader: &MemoryReader,
+        _reader: &MemoryReader,
         region: &MemoryRegion,
         pointed_to: Pointer,
         annotations: &[Annotation],
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
-        let text = self.cell_text(reader, region, pointed_to, row);
         let pointer_at_cursor = region
             .bytes_at_pointer(pointed_to)
             .map(|bytes| bytes.value.into());
 
-        formatted_cell(
-            text,
-            row.location..row.location + MemoryRegion::POINTER_SIZE,
-            pointer_at_cursor,
-            annotations,
-        )
+        formatted_cell::<Self>(row, pointer_at_cursor, annotations)
     }
 }
