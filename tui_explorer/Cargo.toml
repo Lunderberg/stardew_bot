@@ -17,6 +17,7 @@ chrono = "*"
 
 dll_unpacker = { path = "../dll_unpacker" }
 memory_reader = { path = "../memory_reader" }
+stardew_utils = { path = "../stardew_utils" }
 
 [[bench]]
 name = "benchmarks"
@@ -24,4 +25,3 @@ harness = false
 
 [dev-dependencies]
 criterion = {version = "0.3"}
-stardew_utils = { path = "../stardew_utils" }

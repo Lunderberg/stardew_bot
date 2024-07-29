@@ -8,6 +8,7 @@ use memory_reader::{MemoryMapRegion, Pointer};
 
 use memory_reader::{MemoryReader, Symbol};
 use ratatui::style::Stylize as _;
+use stardew_utils::stardew_valley_pid;
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
@@ -60,7 +61,8 @@ pub struct TuiExplorerBuilder {
 }
 
 impl TuiExplorerBuilder {
-    pub fn new(pid: u32) -> Result<Self, Error> {
+    pub fn new() -> Result<Self, Error> {
+        let pid = stardew_valley_pid()?;
         Ok(Self {
             pid,
             reader: MemoryReader::new(pid)?,
@@ -206,8 +208,8 @@ impl TuiExplorerBuilder {
 }
 
 impl TuiExplorer {
-    pub fn new(pid: u32) -> Result<Self, Error> {
-        TuiExplorerBuilder::new(pid)?
+    pub fn new() -> Result<Self, Error> {
+        TuiExplorerBuilder::new()?
             .init_symbols()
             .default_detail_formatters()
             .default_column_formatters()

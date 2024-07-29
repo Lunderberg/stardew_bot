@@ -21,6 +21,12 @@ pub enum Error {
         err: dll_unpacker::Error,
     },
 
+    #[error("stardew_utils::Error{{ {err} }}")]
+    StardewUtilError {
+        #[from]
+        err: stardew_utils::Error,
+    },
+
     #[error("Invalid emacs-style key sequence: {0}")]
     InvalidKeyBinding(String),
 
