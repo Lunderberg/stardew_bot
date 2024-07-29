@@ -7,14 +7,32 @@ use crate::extensions::IterConversion;
 use crate::numeric_traits::{CheckedAdd, CheckedSub};
 use crate::{Error, MemoryValue, Result};
 
-#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pointer {
     pub(crate) address: usize,
+}
+
+impl std::cmp::PartialOrd for Pointer {
+    #[inline]
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        self.address.partial_cmp(&other.address)
+    }
+}
+
+impl std::cmp::Ord for Pointer {
+    #[inline]
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.address.cmp(&other.address)
+    }
 }
 
 impl Pointer {
     pub fn new(address: impl Into<Self>) -> Self {
         address.into()
+    }
+
+    pub fn as_usize(self) -> usize {
+        self.address
     }
 
     pub fn null() -> Self {
@@ -53,6 +71,7 @@ impl Pointer {
         Ok(buffer)
     }
 
+    #[inline]
     pub fn checked_add<RHS>(
         self,
         rhs: RHS,
@@ -63,6 +82,7 @@ impl Pointer {
         <Self as CheckedAdd<RHS>>::checked_add(self, rhs)
     }
 
+    #[inline]
     pub fn checked_sub<RHS>(
         self,
         rhs: RHS,
@@ -77,6 +97,7 @@ impl Pointer {
 impl CheckedAdd<usize> for Pointer {
     type Output = Pointer;
 
+    #[inline]
     fn checked_add(self, rhs: usize) -> Option<Self::Output> {
         self.address
             .checked_add(rhs)
@@ -87,6 +108,7 @@ impl CheckedAdd<usize> for Pointer {
 impl std::ops::Add<usize> for Pointer {
     type Output = Pointer;
 
+    #[inline]
     fn add(self, rhs: usize) -> Self::Output {
         self.checked_add(rhs).unwrap()
     }
@@ -95,6 +117,7 @@ impl std::ops::Add<usize> for Pointer {
 impl CheckedSub<usize> for Pointer {
     type Output = Pointer;
 
+    #[inline]
     fn checked_sub(self, rhs: usize) -> Option<Self::Output> {
         self.address
             .checked_sub(rhs)
@@ -105,6 +128,7 @@ impl CheckedSub<usize> for Pointer {
 impl std::ops::Sub<usize> for Pointer {
     type Output = Pointer;
 
+    #[inline]
     fn sub(self, rhs: usize) -> Self::Output {
         self.checked_sub(rhs).unwrap()
     }
@@ -113,6 +137,7 @@ impl std::ops::Sub<usize> for Pointer {
 impl CheckedSub<Pointer> for Pointer {
     type Output = usize;
 
+    #[inline]
     fn checked_sub(self, rhs: Pointer) -> Option<Self::Output> {
         self.address.checked_sub(rhs.address)
     }
@@ -121,13 +146,9 @@ impl CheckedSub<Pointer> for Pointer {
 impl std::ops::Sub for Pointer {
     type Output = usize;
 
+    #[inline]
     fn sub(self, rhs: Self) -> Self::Output {
-        self.checked_sub(rhs).unwrap_or_else(|| {
-            panic!(
-                "Subtracting {rhs} from {self} causes overflow (diff = -{})",
-                rhs - self
-            )
-        })
+        self.address - rhs.address
     }
 }
 
