@@ -2,7 +2,7 @@ use std::{marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
 
-use crate::Error;
+use crate::{Annotation as _, Annotator, Error};
 
 #[derive(Clone)]
 pub struct ByteRange<'a> {
@@ -10,6 +10,7 @@ pub struct ByteRange<'a> {
     bytes: &'a [u8],
 }
 
+#[derive(Clone)]
 pub struct UnpackedValue<T> {
     pub loc: Range<Pointer>,
     pub value: T,
@@ -476,29 +477,25 @@ impl<'a> Unpacker<'a> {
 
     pub fn collect_annotations(
         &self,
-        mut callback: impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        callback(self.dos_header()?.loc, "DOS header", "".to_string());
-
-        let lfanew = self.lfanew()?;
-        callback(lfanew.loc, "lfanew", format!("{0}", lfanew.value));
-
-        callback(self.dos_stub()?.loc, "DOS stub", "".to_string());
+        annotator.range(self.dos_header()?.loc).name("DOS header");
+        annotator.value(self.lfanew()?).name("lfanew");
+        annotator.range(self.dos_stub()?.loc).name("DOS stub");
 
         let pe_header = self.pe_header()?;
-        pe_header.collect_annotations(&mut callback)?;
+        pe_header.collect_annotations(annotator)?;
 
-        self.optional_header()?.collect_annotations(&mut callback)?;
+        self.optional_header()?.collect_annotations(annotator)?;
 
-        self.clr_runtime_header()?
-            .collect_annotations(&mut callback)?;
+        self.clr_runtime_header()?.collect_annotations(annotator)?;
 
         for i_section in 0..pe_header.num_sections()?.value as usize {
             self.section_header(i_section)?
-                .collect_annotations(&mut callback)?;
+                .collect_annotations(annotator)?;
         }
 
-        self.metadata()?.collect_annotations(&mut callback)?;
+        self.metadata()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -665,38 +662,27 @@ impl<'a> Unpacker<'a> {
 impl<'a> PEHeaderUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
+        annotator
+            .range(self.pe_signature()?.loc)
+            .name("PE signature");
+        annotator.value(self.machine_type()?).name("Machine type");
+        annotator.value(self.num_sections()?).name("Num sections");
+        annotator
+            .value(self.creation_timestamp()?)
+            .name("Creation timestamp");
+        annotator
+            .value(self.symbol_table_pointer()?)
+            .name("Symbol table pointer");
+        annotator.value(self.num_symbols()?).name("Num symbols");
+        annotator
+            .value(self.optional_header_size()?)
+            .name("Size of optional header");
 
-        callback(self.pe_signature()?.loc, "PE signature", "".to_string());
-        annotate! {machine_type};
-        annotate! {num_sections};
-        annotate! {creation_timestamp};
-        annotate! {symbol_table_pointer};
-        annotate! {num_symbols};
-        annotate! {optional_header_size};
-
-        let characteristics = self.characteristics()?;
-        callback(
-            characteristics.loc.clone(),
-            "Characteristics",
-            format!("{}", characteristics.value.raw),
-        );
-        characteristics.value.collect_annotations(
-            |name: &'static str, value: String| {
-                callback(characteristics.loc.clone(), name, value)
-            },
-        )?;
+        annotator
+            .value(self.characteristics()?)
+            .name("Characteristics");
 
         Ok(())
     }
@@ -770,15 +756,22 @@ impl PEHeaderCharacteristics {
             _deprecated_is_big_endian: value & 0x8000 != 0,
         }
     }
+}
 
-    fn collect_annotations(
-        &self,
-        mut callback: impl FnMut(&'static str, String),
-    ) -> Result<(), Error> {
+impl std::fmt::Display for PEHeaderCharacteristics {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        #![allow(unused_assignments)]
+        let mut is_first = true;
+
         macro_rules! annotate {
             ($field:ident) => {
                 if self.$field {
-                    callback("Flag", stringify!($field).to_string());
+                    if is_first {
+                        is_first = false;
+                    } else {
+                        write!(f, "\n")?;
+                    }
+                    write!(f, stringify!($field))?;
                 }
             };
         }
@@ -816,67 +809,73 @@ impl<'a> OptionalHeaderUnpacker<'a> {
 
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {magic_value};
-        annotate! {linker_major_version};
-        annotate! {linker_minor_version};
-        annotate! {code_size};
-        annotate! {initialized_data_size};
-        annotate! {uninitialized_data_size};
-        annotate! {rva_entry_point};
-        annotate! {rva_code_section};
+        annotator.value(self.magic_value()?).name("Magic value");
+        annotator
+            .value(self.linker_major_version()?)
+            .name("linker_major_version");
+        annotator
+            .value(self.linker_minor_version()?)
+            .name("linker_minor_version");
+        annotator.value(self.code_size()?).name("code_size");
+        annotator
+            .value(self.initialized_data_size()?)
+            .name("initialized_data_size");
+        annotator
+            .value(self.uninitialized_data_size()?)
+            .name("uninitialized_data_size");
+        annotator
+            .value(self.rva_entry_point()?)
+            .name("rva_entry_point");
+        annotator
+            .value(self.rva_code_section()?)
+            .name("rva_code_section");
         // annotate! {rva_data_section};
-        annotate! {image_base};
-        annotate! {section_alignment};
-        annotate! {file_alignment};
-        annotate! {os_major};
-        annotate! {os_minor};
-        annotate! {user_major};
-        annotate! {user_minor};
-        annotate! {subsys_major};
-        annotate! {subsys_minor};
-        annotate! {reserved_value};
-        annotate! {image_size};
-        annotate! {header_size};
-        annotate! {file_checksum};
-        annotate! {sub_system};
-        annotate! {dll_flags};
-        annotate! {stack_reserve_size};
-        annotate! {stack_commit_size};
-        annotate! {heap_reserve_size};
-        annotate! {heap_commit_size};
-        annotate! {loader_flags};
+        annotator.value(self.image_base()?).name("image_base");
+        annotator
+            .value(self.section_alignment()?)
+            .name("section_alignment");
+        annotator
+            .value(self.file_alignment()?)
+            .name("file_alignment");
+        annotator.value(self.os_major()?).name("os_major");
+        annotator.value(self.os_minor()?).name("os_minor");
+        annotator.value(self.user_major()?).name("user_major");
+        annotator.value(self.user_minor()?).name("user_minor");
+        annotator.value(self.subsys_major()?).name("subsys_major");
+        annotator.value(self.subsys_minor()?).name("subsys_minor");
+        annotator
+            .value(self.reserved_value()?)
+            .name("reserved_value");
+        annotator.value(self.image_size()?).name("image_size");
+        annotator.value(self.header_size()?).name("header_size");
+        annotator.value(self.file_checksum()?).name("file_checksum");
+        annotator.value(self.sub_system()?).name("sub_system");
+        annotator.value(self.dll_flags()?).name("dll_flags");
+        annotator
+            .value(self.stack_reserve_size()?)
+            .name("stack_reserve_size");
+        annotator
+            .value(self.stack_commit_size()?)
+            .name("stack_commit_size");
+        annotator
+            .value(self.heap_reserve_size()?)
+            .name("heap_reserve_size");
+        annotator
+            .value(self.heap_commit_size()?)
+            .name("heap_commit_size");
+        annotator.value(self.loader_flags()?).name("loader_flags");
 
         let num_data_directories = self.num_data_directories()?;
-        callback(
-            num_data_directories.loc,
-            "num_data_directories",
-            format!("{}", num_data_directories.value),
-        );
+        annotator
+            .value(num_data_directories.clone())
+            .name("Num data directories");
 
         for i_data_dir in 0..num_data_directories.value {
             let data_dir_kind: DataDirectoryKind = i_data_dir.try_into()?;
             let data_dir = self.data_directory(data_dir_kind)?;
-            callback(
-                data_dir.loc,
-                "data dir",
-                format!(
-                    "{data_dir_kind:?}\nRVA {},\n{} bytes",
-                    data_dir.value.rva, data_dir.value.size
-                ),
-            );
+            annotator.value(data_dir).name(format!("{data_dir_kind:?}"));
         }
 
         Ok(())
@@ -1170,29 +1169,30 @@ impl std::fmt::Display for MagicValue {
 impl<'a> SectionHeaderUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {name};
-        annotate! {virtual_size};
-        annotate! {virtual_address};
-        annotate! {raw_size};
-        annotate! {raw_address};
-        annotate! {ptr_relocations};
-        annotate! {ptr_line_numbers};
-        annotate! {num_relocations};
-        annotate! {num_line_numbers};
-        annotate! {characteristics};
+        annotator.value(self.name()?).name("name");
+        annotator.value(self.virtual_size()?).name("virtual_size");
+        annotator
+            .value(self.virtual_address()?)
+            .name("virtual_address");
+        annotator.value(self.raw_size()?).name("raw_size");
+        annotator.value(self.raw_address()?).name("raw_address");
+        annotator
+            .value(self.ptr_relocations()?)
+            .name("ptr_relocations");
+        annotator
+            .value(self.ptr_line_numbers()?)
+            .name("ptr_line_numbers");
+        annotator
+            .value(self.num_relocations()?)
+            .name("num_relocations");
+        annotator
+            .value(self.num_line_numbers()?)
+            .name("num_line_numbers");
+        annotator
+            .value(self.characteristics()?)
+            .name("characteristics");
 
         Ok(())
     }
@@ -1306,31 +1306,36 @@ impl<'a> SectionHeaderUnpacker<'a> {
 impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {header_size};
-        annotate! {major_runtime_version};
-        annotate! {minor_runtime_version};
-        annotate! {metadata_range};
-        annotate! {flags};
-        annotate! {entry_point_token};
-        annotate! {resources};
-        annotate! {strong_name_signature};
-        annotate! {code_manager_table};
-        annotate! {vtable_fixups};
-        annotate! {export_address_table_jumps};
-        annotate! {managed_native_header};
+        annotator.value(self.header_size()?).name("header_size");
+        annotator
+            .value(self.major_runtime_version()?)
+            .name("major_runtime_version");
+        annotator
+            .value(self.minor_runtime_version()?)
+            .name("minor_runtime_version");
+        annotator
+            .value(self.metadata_range()?)
+            .name("metadata_range");
+        annotator.value(self.flags()?).name("flags");
+        annotator
+            .value(self.entry_point_token()?)
+            .name("entry_point_token");
+        annotator.value(self.resources()?).name("resources");
+        annotator
+            .value(self.strong_name_signature()?)
+            .name("strong_name_signature");
+        annotator
+            .value(self.code_manager_table()?)
+            .name("code_manager_table");
+        annotator.value(self.vtable_fixups()?).name("vtable_fixups");
+        annotator
+            .value(self.export_address_table_jumps()?)
+            .name("export_address_table_jumps");
+        annotator
+            .value(self.managed_native_header()?)
+            .name("managed_native_header");
 
         Ok(())
     }
@@ -1393,39 +1398,28 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
 impl<'a> MetadataUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        callback(
-            self.metadata_signature()?.loc,
-            "Metadata signature",
-            "".to_string(),
-        );
-        annotate! {major_version};
-        annotate! {minor_version};
-        annotate! {reserved};
-        annotate! {version_str_len};
-        annotate! {version_str};
-        annotate! {flags};
-        annotate! {num_streams};
+        annotator
+            .range(self.metadata_signature()?.loc)
+            .name("Metadata signature");
+        annotator.value(self.major_version()?).name("major_version");
+        annotator.value(self.minor_version()?).name("minor_version");
+        annotator.value(self.reserved()?).name("reserved");
+        annotator
+            .value(self.version_str_len()?)
+            .name("version_str_len");
+        annotator.value(self.version_str()?).name("version_str");
+        annotator.value(self.flags()?).name("flags");
+        annotator.value(self.num_streams()?).name("num_streams");
 
         self.iter_stream_header()?.try_for_each(
             |stream_header| -> Result<_, Error> {
-                stream_header?.collect_annotations(callback)
+                stream_header?.collect_annotations(annotator)
             },
         )?;
 
-        self.tilde_stream()?.collect_annotations(callback)?;
+        self.tilde_stream()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -1563,23 +1557,13 @@ impl<'a> MetadataUnpacker<'a> {
 impl<'a> StreamHeader<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        callback(
-            self.offset.loc.clone(),
-            "Stream Offset",
-            format!("{}", self.offset.value),
-        );
-        callback(
-            self.size.loc.clone(),
-            "Stream Size",
-            format!("{}", self.size.value),
-        );
-        callback(
-            self.name.loc.clone(),
-            "Stream Name",
-            format!("{}", self.name.value),
-        );
+        annotator
+            .range(self.offset.loc.clone())
+            .name("Stream Offset");
+        annotator.range(self.size.loc.clone()).name("Stream Size");
+        annotator.range(self.name.loc.clone()).name("Stream Name");
 
         Ok(())
     }
@@ -1588,72 +1572,59 @@ impl<'a> StreamHeader<'a> {
 impl<'a> TildeStreamUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {reserved_0};
-        annotate! {major_version};
-        annotate! {minor_version};
-        annotate! {heap_sizes};
-        annotate! {reserved_1};
-        annotate! {valid_table_bitfield};
-        annotate! {sorted_table_bitfield};
+        annotator.value(self.reserved_0()?).name("reserved_0");
+        annotator.value(self.major_version()?).name("major_version");
+        annotator.value(self.minor_version()?).name("minor_version");
+        annotator.value(self.heap_sizes()?).name("heap_sizes");
+        annotator.value(self.reserved_1()?).name("reserved_1");
+        annotator
+            .value(self.valid_table_bitfield()?)
+            .name("valid_table_bitfield");
+        annotator
+            .value(self.sorted_table_bitfield()?)
+            .name("sorted_table_bitfield");
 
         self.iter_num_rows()?
             .try_for_each(|res| -> Result<_, Error> {
-                let (
-                    UnpackedValue {
-                        loc,
-                        value: num_rows,
-                    },
-                    kind,
-                ) = res?;
-                callback(loc, "Num rows", format!("{num_rows} ({kind:?})"));
+                let (value, kind) = res?;
+                annotator.value(value).name(format!("Num {kind:?} rows"));
                 Ok(())
             })?;
 
         let sizes = self.metadata_sizes()?;
         self.module_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.type_ref_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.type_def_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.field_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.method_def_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.param_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.interface_impl_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.member_ref_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(callback))?;
+            .try_for_each(|row| row.collect_annotations(annotator))?;
 
         Ok(())
     }
@@ -2356,28 +2327,20 @@ impl<'a, RowUnpacker: MetadataRowUnpacker<'a>>
 impl<'a> ModuleTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {generation};
+        annotator.value(self.generation()?).name("generation");
         {
             let index = self.name_index()?;
             let name = self.name()?.value;
-            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+            annotator
+                .range(index.loc)
+                .name("Name")
+                .value(format!("{}\n{}", index.value, name));
         }
-        annotate! {module_id};
-        annotate! {enc_id};
-        annotate! {enc_base_id};
+        annotator.value(self.module_id()?).name("module_id");
+        annotator.value(self.enc_id()?).name("enc_id");
+        annotator.value(self.enc_base_id()?).name("enc_base_id");
 
         Ok(())
     }
@@ -2441,38 +2404,27 @@ impl<'a> MetadataRowUnpacker<'a> for TypeRefTableRowUnpacker<'a> {
 impl<'a> TypeRefTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {resolution_scope};
+        annotator
+            .value(self.resolution_scope()?)
+            .name("resolution_scope");
 
         {
             let index = self.type_name_index()?;
             let name = self.type_name()?.value;
-            callback(
-                index.loc,
-                "type_name",
-                format!("{}\n{}", index.value, name),
-            );
+            annotator
+                .range(index.loc)
+                .name("Type name")
+                .value(format!("{}\n{}", index.value, name));
         }
         {
             let index = self.type_namespace_index()?;
             let name = self.type_namespace()?.value;
-            callback(
-                index.loc,
-                "type_namespace",
-                format!("{}\n{}", index.value, name),
-            );
+            annotator
+                .range(index.loc)
+                .name("Type namespace")
+                .value(format!("{}\n{}", index.value, name));
         }
 
         Ok(())
@@ -2538,61 +2490,46 @@ impl<'a> MetadataRowUnpacker<'a> for TypeDefTableRowUnpacker<'a> {
 impl<'a> TypeDefTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {flags};
+        annotator.value(self.flags()?).name("flags");
         {
             let index = self.type_name_index()?;
             let name = self.type_name()?.value;
-            callback(
-                index.loc,
-                "type_name",
-                format!("{}\n{}", index.value, name),
-            );
+            annotator
+                .range(index.loc)
+                .name("Type name")
+                .value(format!("{}\n{}", index.value, name));
         }
         {
             let index = self.type_namespace_index()?;
             let name = self.type_namespace()?.value;
-            callback(
-                index.loc,
-                "type_namespace",
-                format!("{}\n{}", index.value, name),
-            );
+            annotator
+                .range(index.loc)
+                .name("Type namespace")
+                .value(format!("{}\n{}", index.value, name));
         }
 
-        annotate! {extends};
+        annotator.value(self.extends()?).name("extends");
         {
             let field_indices = self.field_indices()?;
-            callback(
-                field_indices.loc,
-                "field_indices",
-                format!(
+            annotator
+                .range(field_indices.loc)
+                .name("field_indices")
+                .value(format!(
                     "{}..{}",
                     field_indices.value.start, field_indices.value.end
-                ),
-            );
+                ));
         }
         {
             let method_indices = self.method_indices()?;
-            callback(
-                method_indices.loc,
-                "method_indices",
-                format!(
+            annotator
+                .range(method_indices.loc)
+                .name("method_indices")
+                .value(format!(
                     "{}..{}",
                     method_indices.value.start, method_indices.value.end
-                ),
-            );
+                ));
         }
 
         Ok(())
@@ -2732,26 +2669,20 @@ impl<'a> MetadataRowUnpacker<'a> for FieldTableRowUnpacker<'a> {
 impl<'a> FieldTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {flags};
+        annotator.value(self.flags()?).name("flags");
         {
             let index = self.name_index()?;
             let name = self.name()?.value;
-            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
         }
-        annotate! {signature_index};
+        annotator
+            .value(self.signature_index()?)
+            .name("signature_index");
 
         Ok(())
     }
@@ -2801,39 +2732,32 @@ impl<'a> MetadataRowUnpacker<'a> for MethodDefTableRowUnpacker<'a> {
 impl<'a> MethodDefTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {rva};
-        annotate! {impl_flags};
-        annotate! {flags};
+        annotator.value(self.rva()?).name("rva");
+        annotator.value(self.impl_flags()?).name("impl_flags");
+        annotator.value(self.flags()?).name("flags");
         {
             let index = self.name_index()?;
             let name = self.name()?.value;
-            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
         }
-        annotate! {signature_index};
+        annotator
+            .value(self.signature_index()?)
+            .name("signature_index");
 
         {
             let param_indices = self.param_indices()?;
-            callback(
-                param_indices.loc,
-                "param_indices",
-                format!(
+            annotator
+                .range(param_indices.loc)
+                .name("param_indices")
+                .value(format!(
                     "{}..{}",
                     param_indices.value.start, param_indices.value.end
-                ),
-            );
+                ));
         }
 
         Ok(())
@@ -2926,25 +2850,17 @@ impl<'a> MetadataRowUnpacker<'a> for ParamTableRowUnpacker<'a> {
 impl<'a> ParamTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {flags};
-        annotate! {sequence};
+        annotator.value(self.flags()?).name("flags");
+        annotator.value(self.sequence()?).name("sequence");
         {
             let index = self.name_index()?;
             let name = self.name()?.value;
-            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
         }
 
         Ok(())
@@ -2990,21 +2906,10 @@ impl<'a> MetadataRowUnpacker<'a> for InterfaceImplTableRowUnpacker<'a> {
 impl<'a> InterfaceImplTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {class_index};
-        annotate! {interface};
+        annotator.value(self.class_index()?).name("class_index");
+        annotator.value(self.interface()?).name("interface");
 
         Ok(())
     }
@@ -3050,26 +2955,20 @@ impl<'a> MetadataRowUnpacker<'a> for MemberRefTableRowUnpacker<'a> {
 impl<'a> MemberRefTableRowUnpacker<'a> {
     fn collect_annotations(
         &self,
-        callback: &mut impl FnMut(Range<Pointer>, &'static str, String),
+        annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        macro_rules! annotate {
-            ($field:ident) => {
-                let field = self.$field()?;
-                callback(
-                    field.loc,
-                    stringify!($field),
-                    format!("{}", field.value),
-                );
-            };
-        }
-
-        annotate! {class_index};
+        annotator.value(self.class_index()?).name("class_index");
         {
             let index = self.name_index()?;
             let name = self.name()?.value;
-            callback(index.loc, "name", format!("{}\n{}", index.value, name));
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
         }
-        annotate! {signature_index};
+        annotator
+            .value(self.signature_index()?)
+            .name("signature_index");
 
         Ok(())
     }

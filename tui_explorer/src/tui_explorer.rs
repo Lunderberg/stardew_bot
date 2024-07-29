@@ -4,6 +4,8 @@ use crate::{
     extensions::*, ColumnFormatter, InfoFormatter, KeyBindingMatch, KeySequence,
 };
 use crate::{Error, SigintHandler};
+use itertools::Itertools as _;
+use memory_reader::{extensions::*, MemoryValue};
 use memory_reader::{MemoryMapRegion, Pointer};
 
 use memory_reader::{MemoryReader, Symbol};
@@ -42,6 +44,12 @@ pub struct Annotation {
     pub range: std::ops::Range<Pointer>,
     pub name: String,
     pub value: String,
+
+    /// If true, highlight this annotation in the MemoryTable.  If
+    /// false, show the annotation in the DetailView, but do not
+    /// highlight.  This allows hierarchical annotations while only
+    /// the inner-most annotation is highlighted.
+    pub highlight_range: bool,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -157,21 +165,52 @@ impl TuiExplorerBuilder {
         let region = self.stardew_valley_dll()?.read()?;
         let dll_info = dll_unpacker::Unpacker::new(&region);
 
-        let mut annotations = Vec::new();
-        dll_info.collect_annotations(
-            |range: Range<Pointer>, name: &'static str, value: String| {
-                annotations.push(Annotation {
-                    range,
-                    name: name.to_string(),
-                    value,
-                });
-            },
-        )?;
+        let mut annotator = DLLAnnotator {
+            annotations: Vec::new(),
+        };
 
-        Ok(Self {
-            annotations,
+        dll_info.collect_annotations(&mut annotator)?;
+
+        return Ok(Self {
+            annotations: annotator.annotations,
             ..self
-        })
+        });
+
+        struct DLLAnnotator {
+            annotations: Vec<Annotation>,
+        }
+
+        impl dll_unpacker::Annotator for DLLAnnotator {
+            fn range(
+                &mut self,
+                range: Range<Pointer>,
+            ) -> &mut impl dll_unpacker::Annotation {
+                self.annotations.push(Annotation {
+                    range,
+                    name: String::default(),
+                    value: String::default(),
+                    highlight_range: true,
+                });
+                self.annotations.last_mut().unwrap()
+            }
+        }
+
+        impl dll_unpacker::Annotation for Annotation {
+            fn name(&mut self, name: impl Into<String>) -> &mut Self {
+                self.name = name.into();
+                self
+            }
+
+            fn value(&mut self, value: impl std::fmt::Display) -> &mut Self {
+                self.value = format!("{value}");
+                self
+            }
+
+            fn disable_highlight(&mut self) -> &mut Self {
+                self.highlight_range = false;
+                self
+            }
+        }
     }
 
     pub fn build(self) -> Result<TuiExplorer, Error> {
@@ -224,6 +263,79 @@ impl TuiExplorer {
 
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
+
+        let stardew_dll_regions: Vec<_> = self
+            .reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.short_name() == "Stardew Valley.dll"
+                    || region.short_name() == "StardewValley.Gamedata.dll"
+            })
+            .map(|region| region.address_range())
+            .collect();
+
+        self.reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.is_readable
+                    && region.is_writable
+                    && !region.is_shared_memory
+            })
+            .flat_map(|region| {
+                region
+                    .read()
+                    .unwrap()
+                    .into_iter()
+                    .iter_as::<MemoryValue<Pointer>>()
+                    .rev()
+            })
+            .filter(|mem_pointer| {
+                stardew_dll_regions
+                    .iter()
+                    .any(|range| range.contains(&mem_pointer.value))
+            })
+            .map(|mem_pointer| mem_pointer.value)
+            .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
+            .counts()
+            .into_iter()
+            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .take(10)
+            .rev()
+            .for_each(|(addr, counts)| {
+                self.running_log.add_log(format!("Ptr to {addr}: {counts}"))
+            });
+
+        let num_ptr_to_sd_dll = self
+            .reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.is_readable
+                    && region.is_writable
+                    && !region.is_shared_memory
+            })
+            .flat_map(|region| {
+                region
+                    .read()
+                    .unwrap()
+                    .into_iter()
+                    .iter_as::<MemoryValue<Pointer>>()
+                    .rev()
+            })
+            .filter(|mem_pointer| {
+                stardew_dll_regions
+                    .iter()
+                    .any(|range| range.contains(&mem_pointer.value))
+            })
+            .map(|mem_pointer| mem_pointer.value)
+            .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
+            .counts()
+            .len();
+
+        self.running_log
+            .add_log(format!("Num ptr: {num_ptr_to_sd_dll}"));
 
         while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;
