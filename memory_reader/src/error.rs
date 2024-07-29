@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::Pointer;
+
 pub type Result<T> = std::result::Result<T, Error>;
 
 #[derive(Error)]
@@ -20,6 +22,12 @@ pub enum Error {
     MemoryReadInsufficientPermission,
     #[error("Bad address in remote process")]
     MemoryReadBadAddress,
+    #[error("Region {name:?} from address {start} to {end} could not be read")]
+    MemoryReadBadRegion {
+        name: Option<String>,
+        start: Pointer,
+        end: Pointer,
+    },
     #[error("Error {err} reading process memory.")]
     MemoryReadOther {
         #[source]

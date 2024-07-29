@@ -88,7 +88,17 @@ impl MemoryMapRegion {
     }
 
     pub fn read(&self) -> Result<MemoryRegion> {
-        let bytes = self.start.read_bytes(self.pid, self.size_bytes())?;
+        let bytes = self
+            .start
+            .read_bytes(self.pid, self.size_bytes())
+            .map_err(|err| match err {
+                Error::MemoryReadBadAddress => Error::MemoryReadBadRegion {
+                    name: self.name.clone(),
+                    start: self.start,
+                    end: self.end,
+                },
+                _ => err,
+            })?;
         Ok(MemoryRegion::new(self.start, bytes, self.clone()))
     }
 
