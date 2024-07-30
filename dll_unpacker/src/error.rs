@@ -67,6 +67,12 @@ pub enum Error {
 
     #[error("Coded index of {index} but only {num_tables} present")]
     InvalidCodedIndex { index: usize, num_tables: usize },
+
+    #[error(
+        "Blob header must start with 0, 1, or 2 leading ones, \
+         but header had {leading_ones} leading ones."
+    )]
+    InvalidBlobHeader { leading_ones: u32 },
 }
 
 impl std::fmt::Debug for Error {

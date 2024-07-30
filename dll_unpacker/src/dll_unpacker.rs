@@ -150,6 +150,7 @@ pub struct StreamHeader<'a> {
 pub struct TildeStreamUnpacker<'a> {
     bytes: ByteRange<'a>,
     string_heap: ByteRange<'a>,
+    blob_heap: ByteRange<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -210,6 +211,7 @@ pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
     string_heap: ByteRange<'a>,
+    blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -222,6 +224,7 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
     string_heap: ByteRange<'a>,
+    blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -237,31 +240,6 @@ pub struct MethodDefRowUnpacker;
 pub struct ParamRowUnpacker;
 pub struct InterfaceImplRowUnpacker;
 pub struct MemberRefRowUnpacker;
-
-impl RowUnpacker for ModuleRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::Module;
-}
-impl RowUnpacker for TypeRefRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::TypeRef;
-}
-impl RowUnpacker for TypeDefRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::TypeDef;
-}
-impl RowUnpacker for FieldRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::Field;
-}
-impl RowUnpacker for MethodDefRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::MethodDef;
-}
-impl RowUnpacker for ParamRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::Param;
-}
-impl RowUnpacker for InterfaceImplRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::InterfaceImpl;
-}
-impl RowUnpacker for MemberRefRowUnpacker {
-    const KIND: MetadataTableKind = MetadataTableKind::MemberRef;
-}
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -1569,6 +1547,7 @@ impl<'a> MetadataUnpacker<'a> {
     pub fn tilde_stream(&self) -> Result<TildeStreamUnpacker, Error> {
         let mut string_stream = None;
         let mut tilde_stream = None;
+        let mut blob_stream = None;
 
         for res in self.iter_stream_header()? {
             let header = res?;
@@ -1580,6 +1559,8 @@ impl<'a> MetadataUnpacker<'a> {
                 tilde_stream = Some(bytes);
             } else if header.name.value == "#Strings" {
                 string_stream = Some(bytes);
+            } else if header.name.value == "#Blob" {
+                blob_stream = Some(bytes);
             }
         }
 
@@ -1587,10 +1568,13 @@ impl<'a> MetadataUnpacker<'a> {
             Err(Error::MissingStream("#~"))
         } else if string_stream.is_none() {
             Err(Error::MissingStream("#Strings"))
+        } else if blob_stream.is_none() {
+            Err(Error::MissingStream("#Blob"))
         } else {
             Ok(TildeStreamUnpacker {
                 bytes: tilde_stream.unwrap(),
                 string_heap: string_stream.unwrap(),
+                blob_heap: blob_stream.unwrap(),
             })
         }
     }
@@ -1811,6 +1795,7 @@ impl<'a> TildeStreamUnpacker<'a> {
             bytes,
             sizes,
             string_heap: self.string_heap.clone(),
+            blob_heap: self.blob_heap.clone(),
             row_unpacker: PhantomData,
         })
     }
@@ -2388,12 +2373,13 @@ impl std::fmt::Display for MetadataIndex {
     }
 }
 
-impl<'a, Unpacker: RowUnpacker> MetadataTableUnpacker<'a, Unpacker> {
+impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     pub fn iter_row_unpacker<'b>(
         &'b self,
     ) -> impl Iterator<Item = MetadataRowUnpacker<'b, Unpacker>> + 'b
     where
         'a: 'b,
+        Unpacker: RowUnpacker,
     {
         let kind = Unpacker::KIND;
         let num_rows = self.sizes[kind] as usize;
@@ -2404,12 +2390,48 @@ impl<'a, Unpacker: RowUnpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 sizes: self.sizes,
                 string_heap: self.string_heap.clone(),
+                blob_heap: self.blob_heap.clone(),
                 row_unpacker: self.row_unpacker,
             }
         })
     }
 }
 
+impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
+    pub fn get_blob<'b>(&'b self, index: usize) -> Result<ByteRange, Error> {
+        let byte: u8 = self.blob_heap[index];
+
+        let leading_ones = byte.leading_ones();
+        let (size_size, size) = match leading_ones {
+            0 => {
+                let size: usize = (byte & 0x7f).into();
+                (1, size)
+            }
+            1 => {
+                let high: usize = (byte & 0x3f).into();
+                let low: usize = self.blob_heap[index + 1].into();
+                (2, (high << 8) + low)
+            }
+            2 => {
+                let high: usize = (byte & 0x1f).into();
+                let mid1: usize = self.blob_heap[index + 1].into();
+                let mid2: usize = self.blob_heap[index + 2].into();
+                let low: usize = self.blob_heap[index + 3].into();
+                (4, (high << 24) + (mid1 << 16) + (mid2 << 8) + low)
+            }
+            _ => {
+                return Err(Error::InvalidBlobHeader { leading_ones });
+            }
+        };
+
+        let bytes = self.blob_heap.subrange(index..index + size_size + size);
+        Ok(bytes)
+    }
+}
+
+impl RowUnpacker for ModuleRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Module;
+}
 impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     fn collect_annotations(
         &self,
@@ -2464,6 +2486,9 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 }
 
+impl RowUnpacker for TypeRefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::TypeRef;
+}
 impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     fn collect_annotations(
         &self,
@@ -2525,6 +2550,10 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
         let index = self.type_namespace_index()?.value as usize;
         self.string_heap.get_null_terminated(index)
     }
+}
+
+impl RowUnpacker for TypeDefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::TypeDef;
 }
 
 impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
@@ -2683,23 +2712,33 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 }
 
+impl RowUnpacker for FieldRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Field;
+}
+
 impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
+
+        let name = self.name()?.value;
         {
             let index = self.name_index()?;
-            let name = self.name()?.value;
             annotator
                 .range(index.loc)
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
+        let signature_index = self.signature_index()?;
         annotator
-            .value(self.signature_index()?)
+            .value(signature_index.clone())
             .name("signature_index");
+
+        annotator
+            .range(self.get_blob(signature_index.value as usize)?.as_range())
+            .name(format!("'{name}' signature"));
 
         Ok(())
     }
@@ -2721,6 +2760,10 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
         let offset = 2 + self.sizes.str_index_size();
         self.sizes.get_blob_index(&self.bytes, offset)
     }
+}
+
+impl RowUnpacker for MethodDefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::MethodDef;
 }
 
 impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
@@ -2818,6 +2861,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     }
 }
 
+impl RowUnpacker for ParamRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Param;
+}
+
 impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     fn collect_annotations(
         &self,
@@ -2855,6 +2902,10 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     }
 }
 
+impl RowUnpacker for InterfaceImplRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::InterfaceImpl;
+}
+
 impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
     fn collect_annotations(
         &self,
@@ -2879,6 +2930,10 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
             offset,
         )
     }
+}
+
+impl RowUnpacker for MemberRefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::MemberRef;
 }
 
 impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
