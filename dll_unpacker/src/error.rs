@@ -1,5 +1,7 @@
 use thiserror::Error;
 
+use crate::dll_unpacker::MetadataTableKind;
+
 #[derive(Error)]
 pub enum Error {
     #[error("IncorrectDOSHeader")]
@@ -73,6 +75,16 @@ pub enum Error {
          but header had {leading_ones} leading ones."
     )]
     InvalidBlobHeader { leading_ones: u32 },
+
+    #[error(
+        "Index {index} is out of bounds for table {kind}, \
+         which only has {num_rows} rows."
+    )]
+    InvalidMetadataTableIndex {
+        kind: MetadataTableKind,
+        index: usize,
+        num_rows: usize,
+    },
 }
 
 impl std::fmt::Debug for Error {
