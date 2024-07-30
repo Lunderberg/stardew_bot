@@ -1776,7 +1776,7 @@ impl<'a> TildeStreamUnpacker<'a> {
                 res_bytes.map(|bytes| bytes + sum)
             })?;
 
-        let num_rows = sizes[kind] as usize;
+        let num_rows = sizes.num_rows(kind);
         let bytes_per_row = kind.bytes_per_row(sizes);
 
         let bytes =
@@ -2234,6 +2234,10 @@ impl std::ops::IndexMut<MetadataTableKind> for MetadataSizes {
 }
 
 impl MetadataSizes {
+    fn num_rows(&self, table: MetadataTableKind) -> usize {
+        self[table] as usize
+    }
+
     fn index_size(&self, table: MetadataTableKind) -> usize {
         self.coded_index_size([table])
     }
@@ -2243,7 +2247,7 @@ impl MetadataSizes {
         kind: MetadataTableKind,
         bytes: &ByteRange,
         offset: impl NormalizeOffset,
-    ) -> Result<UnpackedValue<u32>, Error> {
+    ) -> Result<UnpackedValue<usize>, Error> {
         let num_rows = self[kind];
         Self::get_heap_index(bytes, offset, num_rows >= 65536)
     }
@@ -2284,7 +2288,7 @@ impl MetadataSizes {
             Self::get_heap_index(bytes, offset, table_bits + row_bits > 16)?;
 
         let table_mask = (1 << table_bits) - 1;
-        let table_index = (value & table_mask) as usize;
+        let table_index = value & table_mask;
 
         let table = if table_index < N {
             tables[table_index]
@@ -2294,7 +2298,7 @@ impl MetadataSizes {
                 num_tables: N,
             });
         };
-        let index = (value >> table_bits) as usize;
+        let index = value >> table_bits;
 
         Ok(UnpackedValue {
             value: MetadataIndex { table, index },
@@ -2306,11 +2310,11 @@ impl MetadataSizes {
         bytes: &ByteRange,
         offset: impl NormalizeOffset,
         is_u32_addr: bool,
-    ) -> Result<UnpackedValue<u32>, Error> {
+    ) -> Result<UnpackedValue<usize>, Error> {
         if is_u32_addr {
-            bytes.get_u32(offset)
+            Ok(bytes.get_u32(offset)?.map(|val| val as usize))
         } else {
-            Ok(bytes.get_u16(offset)?.map(|val| val as u32))
+            Ok(bytes.get_u16(offset)?.map(|val| val as usize))
         }
     }
 
@@ -2318,7 +2322,7 @@ impl MetadataSizes {
         &self,
         bytes: &ByteRange,
         offset: usize,
-    ) -> Result<UnpackedValue<u32>, Error> {
+    ) -> Result<UnpackedValue<usize>, Error> {
         Self::get_heap_index(
             bytes,
             offset,
@@ -2330,7 +2334,7 @@ impl MetadataSizes {
         &self,
         bytes: &ByteRange,
         offset: usize,
-    ) -> Result<UnpackedValue<u32>, Error> {
+    ) -> Result<UnpackedValue<usize>, Error> {
         Self::get_heap_index(
             bytes,
             offset,
@@ -2342,7 +2346,7 @@ impl MetadataSizes {
         &self,
         bytes: &ByteRange,
         offset: usize,
-    ) -> Result<UnpackedValue<u32>, Error> {
+    ) -> Result<UnpackedValue<usize>, Error> {
         Self::get_heap_index(
             bytes,
             offset,
@@ -2390,8 +2394,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: RowUnpacker,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.sizes[kind] as usize;
-        let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
+        let num_rows = self.sizes.num_rows(kind);
+        let bytes_per_row = kind.bytes_per_row(self.sizes);
         (0..num_rows).map(move |i_row| {
             let bytes = self
                 .bytes
@@ -2420,10 +2424,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: RowUnpacker,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.sizes[kind] as usize;
+        let num_rows = self.sizes.num_rows(kind);
 
         if index < num_rows {
-            let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
+            let bytes_per_row = kind.bytes_per_row(self.sizes);
             let bytes = self
                 .bytes
                 .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
@@ -2510,28 +2514,28 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
         self.bytes.get_u16(0)
     }
 
-    pub fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    pub fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_str_index(&self.bytes, 2)
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.name_index()?.value as usize;
+        let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    pub fn module_id(&self) -> Result<UnpackedValue<u32>, Error> {
+    pub fn module_id(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes
             .get_str_index(&self.bytes, 2 + self.sizes.str_index_size())
     }
 
-    pub fn enc_id(&self) -> Result<UnpackedValue<u32>, Error> {
+    pub fn enc_id(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_guid_index(
             &self.bytes,
             2 + self.sizes.str_index_size() + self.sizes.guid_index_size(),
         )
     }
 
-    pub fn enc_base_id(&self) -> Result<UnpackedValue<u32>, Error> {
+    pub fn enc_base_id(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_guid_index(
             &self.bytes,
             2 + self.sizes.str_index_size() + 2 * self.sizes.guid_index_size(),
@@ -2579,7 +2583,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
         )
     }
 
-    fn type_name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = self
             .sizes
             .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE);
@@ -2587,11 +2591,11 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.type_name_index()?.value as usize;
+        let index = self.type_name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    fn type_namespace_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = self
             .sizes
             .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
@@ -2600,7 +2604,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.type_namespace_index()?.value as usize;
+        let index = self.type_namespace_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 }
@@ -2648,7 +2652,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
             ));
         field_indices.value.clone().try_for_each(
             |field_index| -> Result<_, Error> {
-                let field = field_table.get_row(field_index as usize)?;
+                let field = field_table.get_row(field_index)?;
                 field.collect_annotations(
                     annotator,
                     type_name,
@@ -2668,7 +2672,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
             ));
         method_indices.value.clone().try_for_each(
             |method_index| -> Result<_, Error> {
-                let method = method_def_table.get_row(method_index as usize)?;
+                let method = method_def_table.get_row(method_index)?;
                 method.collect_annotations(
                     annotator,
                     type_name,
@@ -2686,22 +2690,22 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         self.bytes.get_u32(0)
     }
 
-    fn type_name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_str_index(&self.bytes, 4)
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.type_name_index()?.value as usize;
+        let index = self.type_name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    fn type_namespace_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = 4 + self.sizes.str_index_size();
         self.sizes.get_str_index(&self.bytes, offset)
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.type_namespace_index()?.value as usize;
+        let index = self.type_namespace_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
@@ -2714,7 +2718,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         )
     }
 
-    fn field_indices(&self) -> Result<UnpackedValue<Range<u32>>, Error> {
+    fn field_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
         let offset = 4
             + 2 * self.sizes.str_index_size()
             + self
@@ -2736,7 +2740,9 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                     .get_index(MetadataTableKind::Field, &next_row, offset)?
                     .value)
             })
-            .unwrap_or_else(|| Ok(self.sizes[MetadataTableKind::Field]))?;
+            .unwrap_or_else(|| {
+                Ok(self.sizes.num_rows(MetadataTableKind::Field))
+            })?;
 
         Ok(UnpackedValue {
             value: start..end,
@@ -2744,7 +2750,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         })
     }
 
-    fn method_indices(&self) -> Result<UnpackedValue<Range<u32>>, Error> {
+    fn method_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
         let offset = 4
             + 2 * self.sizes.str_index_size()
             + self
@@ -2766,7 +2772,9 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                     .get_index(MetadataTableKind::MethodDef, &next_row, offset)?
                     .value)
             })
-            .unwrap_or_else(|| Ok(self.sizes[MetadataTableKind::MethodDef]))?;
+            .unwrap_or_else(|| {
+                Ok(self.sizes.num_rows(MetadataTableKind::MethodDef))
+            })?;
 
         Ok(UnpackedValue {
             value: start..end,
@@ -2802,7 +2810,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
             .name("signature_index");
 
         annotator
-            .range(self.get_blob(signature_index.value as usize)?.as_range())
+            .range(self.get_blob(signature_index.value)?.as_range())
             .name(format!("'{type_name}.{name}' signature"));
 
         Ok(())
@@ -2812,16 +2820,16 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
         self.bytes.get_u16(0)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_str_index(&self.bytes, 2)
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.name_index()?.value as usize;
+        let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = 2 + self.sizes.str_index_size();
         self.sizes.get_blob_index(&self.bytes, offset)
     }
@@ -2857,7 +2865,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
             .value(signature_index.clone())
             .name("signature_index");
         annotator
-            .range(self.get_blob(signature_index.value as usize)?.as_range())
+            .range(self.get_blob(signature_index.value)?.as_range())
             .name(format!("'{type_name}.{name}' signature"));
 
         let param_indices = self.param_indices()?;
@@ -2877,17 +2885,14 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
                     .value
                     .clone()
                     .map(|param_index| -> Result<_, Error> {
-                        Ok(param_table
-                            .get_row(param_index as usize)?
-                            .name()?
-                            .value)
+                        Ok(param_table.get_row(param_index)?.name()?.value)
                     })
                     .collect::<Result<String, Error>>()?,
             );
 
         param_indices.value.clone().try_for_each(
             |param_index| -> Result<_, Error> {
-                let param = param_table.get_row(param_index as usize)?;
+                let param = param_table.get_row(param_index)?;
                 param.collect_annotations(
                     annotator,
                     type_name,
@@ -2913,21 +2918,21 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
         self.bytes.get_u16(6)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_str_index(&self.bytes, 8)
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.name_index()?.value as usize;
+        let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = 8 + self.sizes.str_index_size();
         self.sizes.get_blob_index(&self.bytes, offset)
     }
 
-    fn param_indices(&self) -> Result<UnpackedValue<Range<u32>>, Error> {
+    fn param_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
         let offset =
             8 + self.sizes.str_index_size() + self.sizes.blob_index_size();
 
@@ -2945,7 +2950,9 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
                     .get_index(MetadataTableKind::Param, &next_row, offset)?
                     .value)
             })
-            .unwrap_or_else(|| Ok(self.sizes[MetadataTableKind::Param]))?;
+            .unwrap_or_else(|| {
+                Ok(self.sizes.num_rows(MetadataTableKind::Param))
+            })?;
 
         Ok(UnpackedValue {
             value: start..end,
@@ -2994,12 +3001,12 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
         self.bytes.get_u16(2)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes.get_str_index(&self.bytes, 4)
     }
 
     fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        let index = self.name_index()?.value as usize;
+        let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 }
@@ -3019,7 +3026,7 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
         Ok(())
     }
 
-    fn class_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn class_index(&self) -> Result<UnpackedValue<usize>, Error> {
         self.sizes
             .get_index(MetadataTableKind::TypeDef, &self.bytes, 0)
     }
@@ -3067,7 +3074,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
         )
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = self
             .sizes
             .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT);
@@ -3075,11 +3082,11 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
-        let index = self.name_index()?.value as usize;
+        let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset = self
             .sizes
             .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
