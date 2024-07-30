@@ -28,9 +28,6 @@ pub struct PEHeaderUnpacker<'a> {
 ///
 /// https://learn.microsoft.com/en-us/windows/win32/debug/pe-format#characteristics
 pub struct PEHeaderCharacteristics {
-    /// The raw 16-bit value.
-    raw: u16,
-
     /// Bit 0x0001.  Indicates if the relocation table has been
     /// removed.
     relocations_stripped: bool,
@@ -221,51 +218,49 @@ pub struct MetadataIndex {
     index: usize,
 }
 
-pub struct ModuleTableRowUnpacker<'a> {
+pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     bytes: ByteRange<'a>,
     sizes: &'a MetadataSizes,
     string_heap: ByteRange<'a>,
+    row_unpacker: PhantomData<RowUnpacker>,
 }
 
-pub struct TypeRefTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
+pub trait RowUnpacker {
+    const KIND: MetadataTableKind;
 }
 
-pub struct TypeDefTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
-}
+pub struct ModuleRowUnpacker;
+pub struct TypeRefRowUnpacker;
+pub struct TypeDefRowUnpacker;
+pub struct FieldRowUnpacker;
+pub struct MethodDefRowUnpacker;
+pub struct ParamRowUnpacker;
+pub struct InterfaceImplRowUnpacker;
+pub struct MemberRefRowUnpacker;
 
-pub struct FieldTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
+impl RowUnpacker for ModuleRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Module;
 }
-
-pub struct MethodDefTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
+impl RowUnpacker for TypeRefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::TypeRef;
 }
-
-pub struct ParamTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
+impl RowUnpacker for TypeDefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::TypeDef;
 }
-
-pub struct InterfaceImplTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
+impl RowUnpacker for FieldRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Field;
 }
-
-pub struct MemberRefTableRowUnpacker<'a> {
-    bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
-    string_heap: ByteRange<'a>,
+impl RowUnpacker for MethodDefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::MethodDef;
+}
+impl RowUnpacker for ParamRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Param;
+}
+impl RowUnpacker for InterfaceImplRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::InterfaceImpl;
+}
+impl RowUnpacker for MemberRefRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::MemberRef;
 }
 
 impl<T> UnpackedValue<T> {
@@ -761,7 +756,6 @@ impl<'a> PEHeaderUnpacker<'a> {
 impl PEHeaderCharacteristics {
     pub fn new(value: u16) -> Self {
         Self {
-            raw: value,
             relocations_stripped: value & 0x0001 != 0,
             valid_executable: value & 0x0002 != 0,
             _deprecated_line_nums_stripped: value & 0x0004 != 0,
@@ -1653,35 +1647,35 @@ impl<'a> TildeStreamUnpacker<'a> {
             })?;
 
         self.module_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.type_ref_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.type_def_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.field_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.method_def_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.param_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.interface_impl_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.member_ref_table(&sizes)?
-            .iter_rows()
+            .iter_row_unpacker()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         Ok(())
@@ -1824,84 +1818,59 @@ impl<'a> TildeStreamUnpacker<'a> {
     pub fn module_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ModuleTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, ModuleRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::Module)
     }
 
     pub fn type_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, TypeRefTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, TypeRefRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::TypeRef)
     }
 
     pub fn type_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, TypeDefTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, TypeDefRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::TypeDef)
     }
 
     pub fn field_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, FieldTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, FieldRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::Field)
     }
 
     pub fn method_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MethodDefTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, MethodDefRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::MethodDef)
     }
 
     pub fn param_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ParamTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, ParamRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::Param)
     }
 
     pub fn interface_impl_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<
-        MetadataTableUnpacker<'b, InterfaceImplTableRowUnpacker<'b>>,
-        Error,
-    > {
+    ) -> Result<MetadataTableUnpacker<'b, InterfaceImplRowUnpacker>, Error>
+    {
         self.get_table(sizes, MetadataTableKind::InterfaceImpl)
     }
 
     pub fn member_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MemberRefTableRowUnpacker<'b>>, Error>
-    {
+    ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
         self.get_table(sizes, MetadataTableKind::MemberRef)
     }
-}
-
-pub trait MetadataRowUnpacker<'a> {
-    type Unpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b;
 }
 
 impl std::fmt::Display for HeapSizes {
@@ -2419,49 +2388,29 @@ impl std::fmt::Display for MetadataIndex {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for ModuleTableRowUnpacker<'a> {
-    type Unpacker<'b> = ModuleTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::Module;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        ModuleTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a, RowUnpacker: MetadataRowUnpacker<'a>>
-    MetadataTableUnpacker<'a, RowUnpacker>
-{
-    pub fn iter_rows<'b>(
+impl<'a, Unpacker: RowUnpacker> MetadataTableUnpacker<'a, Unpacker> {
+    pub fn iter_row_unpacker<'b>(
         &'b self,
-    ) -> impl Iterator<Item = RowUnpacker::Unpacker<'b>> + 'b
+    ) -> impl Iterator<Item = MetadataRowUnpacker<'b, Unpacker>> + 'b
     where
         'a: 'b,
     {
-        let kind = RowUnpacker::KIND;
+        let kind = Unpacker::KIND;
         let num_rows = self.sizes[kind] as usize;
         let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
         (0..num_rows).map(move |i_row| {
             let bytes = self.bytes.trim_left(i_row * bytes_per_row);
-            RowUnpacker::from_bytes(bytes, self.sizes, self.string_heap.clone())
+            MetadataRowUnpacker {
+                bytes,
+                sizes: self.sizes,
+                string_heap: self.string_heap.clone(),
+                row_unpacker: self.row_unpacker,
+            }
         })
     }
 }
 
-impl<'a> ModuleTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2515,30 +2464,7 @@ impl<'a> ModuleTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for TypeRefTableRowUnpacker<'a> {
-    type Unpacker<'b> = TypeRefTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::TypeRef;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        TypeRefTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> TypeRefTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2601,30 +2527,7 @@ impl<'a> TypeRefTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for TypeDefTableRowUnpacker<'a> {
-    type Unpacker<'b> = TypeDefTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::TypeDef;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        TypeDefTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> TypeDefTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2780,30 +2683,7 @@ impl<'a> TypeDefTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for FieldTableRowUnpacker<'a> {
-    type Unpacker<'b> = FieldTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::Field;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        FieldTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> FieldTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2843,30 +2723,7 @@ impl<'a> FieldTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for MethodDefTableRowUnpacker<'a> {
-    type Unpacker<'b> = MethodDefTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::MethodDef;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        MethodDefTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> MethodDefTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2961,30 +2818,7 @@ impl<'a> MethodDefTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for ParamTableRowUnpacker<'a> {
-    type Unpacker<'b> = ParamTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::Param;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        ParamTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> ParamTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3021,26 +2855,7 @@ impl<'a> ParamTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for InterfaceImplTableRowUnpacker<'a> {
-    type Unpacker<'b> = InterfaceImplTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::InterfaceImpl;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        _string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        InterfaceImplTableRowUnpacker { bytes, sizes }
-    }
-}
-
-impl<'a> InterfaceImplTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3066,30 +2881,7 @@ impl<'a> InterfaceImplTableRowUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a> for MemberRefTableRowUnpacker<'a> {
-    type Unpacker<'b> = MemberRefTableRowUnpacker<'b>
-    where
-        'a: 'b;
-
-    const KIND: MetadataTableKind = MetadataTableKind::MemberRef;
-
-    fn from_bytes<'b>(
-        bytes: ByteRange<'b>,
-        sizes: &'b MetadataSizes,
-        string_heap: ByteRange<'b>,
-    ) -> Self::Unpacker<'b>
-    where
-        'a: 'b,
-    {
-        MemberRefTableRowUnpacker {
-            bytes,
-            sizes,
-            string_heap,
-        }
-    }
-}
-
-impl<'a> MemberRefTableRowUnpacker<'a> {
+impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
