@@ -13,6 +13,13 @@ pub trait Annotator {
     ) -> &mut impl Annotation {
         self.range(value.loc).value(value.value)
     }
+
+    fn group(
+        &mut self,
+        range: impl Into<Range<Pointer>>,
+    ) -> &mut impl Annotation {
+        self.range(range.into()).disable_highlight()
+    }
 }
 
 pub trait Annotation: Sized {

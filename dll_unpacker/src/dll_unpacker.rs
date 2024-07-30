@@ -412,6 +412,18 @@ impl<'a> ByteRange<'a> {
     }
 }
 
+impl<'a> Into<std::ops::Range<Pointer>> for &ByteRange<'a> {
+    fn into(self) -> std::ops::Range<Pointer> {
+        self.as_range()
+    }
+}
+
+impl<'a> Into<std::ops::Range<Pointer>> for ByteRange<'a> {
+    fn into(self) -> std::ops::Range<Pointer> {
+        self.as_range()
+    }
+}
+
 impl<'a, T: NormalizeOffset> std::ops::Index<T> for ByteRange<'a> {
     type Output = u8;
 
@@ -444,7 +456,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.method_def_table(&sizes)?;
+        let table = stream.field_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -470,9 +482,8 @@ impl<'a> Unpacker<'a> {
         self.clr_runtime_header()?.collect_annotations(annotator)?;
 
         annotator
-            .range(self.section_header_bytes()?.as_range())
-            .name("Section headers")
-            .disable_highlight();
+            .group(self.section_header_bytes()?)
+            .name("Section headers");
         for i_section in 0..pe_header.num_sections()?.value as usize {
             self.section_header(i_section)?
                 .collect_annotations(annotator)?;
@@ -658,10 +669,7 @@ impl<'a> PEHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator
-            .range(self.bytes.as_range())
-            .name("PE Header")
-            .disable_highlight();
+        annotator.group(&self.bytes).name("PE Header");
 
         annotator
             .range(self.pe_signature()?.loc)
@@ -809,10 +817,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator
-            .range(self.bytes.as_range())
-            .name("Optional PE Header")
-            .disable_highlight();
+        annotator.group(&self.bytes).name("Optional PE Header");
 
         annotator.value(self.magic_value()?).name("Magic value");
         annotator
@@ -1311,10 +1316,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator
-            .range(self.bytes.as_range())
-            .name("CLR Runtime Header")
-            .disable_highlight();
+        annotator.group(&self.bytes).name("CLR Runtime Header");
 
         annotator.value(self.header_size()?).name("header_size");
         annotator
@@ -1408,10 +1410,7 @@ impl<'a> MetadataUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator
-            .range(self.bytes.as_range())
-            .name("CLR Metadata")
-            .disable_highlight();
+        annotator.group(&self.bytes).name("CLR Metadata");
 
         annotator
             .range(self.metadata_signature()?.loc)
@@ -1433,9 +1432,8 @@ impl<'a> MetadataUnpacker<'a> {
                 let start = self.bytes.start + (header.offset.value as usize);
                 let size = header.size.value as usize;
                 annotator
-                    .range(start..start + size)
-                    .name(format!("{} Stream", header.name.value))
-                    .disable_highlight();
+                    .group(start..start + size)
+                    .name(format!("{} Stream", header.name.value));
 
                 Ok(())
             },
@@ -1588,9 +1586,8 @@ impl<'a> StreamHeader<'a> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
-            .range(self.offset.loc.start..self.name.loc.end)
-            .name("CLR Stream Header")
-            .disable_highlight();
+            .group(self.offset.loc.start..self.name.loc.end)
+            .name("CLR Stream Header");
 
         annotator
             .range(self.offset.loc.clone())
@@ -1626,9 +1623,8 @@ impl<'a> TildeStreamUnpacker<'a> {
                 let (value, kind) = res?;
                 annotator.value(value).name(format!("Num {kind:?} rows"));
                 annotator
-                    .range(self.metadata_table_bytes(kind, &sizes)?.as_range())
-                    .name(format!("{kind:?} metadata table"))
-                    .disable_highlight();
+                    .group(self.metadata_table_bytes(kind, &sizes)?)
+                    .name(format!("{kind:?} metadata table"));
                 Ok(())
             })?;
 
@@ -2416,6 +2412,31 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         })
     }
 
+    pub fn address_range(
+        &self,
+        indices: Range<usize>,
+    ) -> Result<Range<Pointer>, Error>
+    where
+        Unpacker: RowUnpacker,
+    {
+        let kind = Unpacker::KIND;
+        let num_rows = self.sizes[kind] as usize;
+
+        let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
+
+        if indices.end <= num_rows {
+            Ok(self.bytes.address_range(
+                indices.start * bytes_per_row..indices.end * bytes_per_row,
+            ))
+        } else {
+            Err(Error::InvalidMetadataTableIndex {
+                kind,
+                index: indices.end,
+                num_rows,
+            })
+        }
+    }
+
     pub fn get_row<'b>(
         &'b self,
         index: usize,
@@ -2650,6 +2671,11 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 "{}..{}",
                 field_indices.value.start, field_indices.value.end
             ));
+
+        annotator
+            .group(field_table.address_range(field_indices.value.clone())?)
+            .name(format!("'{type_name}' Fields"));
+
         field_indices.value.clone().try_for_each(
             |field_index| -> Result<_, Error> {
                 let field = field_table.get_row(field_index)?;
@@ -2986,9 +3012,8 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
         }
 
         annotator
-            .range(self.bytes.as_range())
-            .name(format!("{type_name}.{method_name}.{name}"))
-            .disable_highlight();
+            .group(&self.bytes)
+            .name(format!("{type_name}.{method_name}.{name}"));
 
         Ok(())
     }
