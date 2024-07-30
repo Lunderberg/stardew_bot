@@ -11,8 +11,8 @@ pub use collect_ratatui::CollectRatatuiTable as _;
 mod with_scrollbar;
 pub use with_scrollbar::WidgetWithScrollbar as _;
 
-mod split_from_bottom;
-pub use split_from_bottom::SplitFromBottom as _;
+mod split_rect;
+pub use split_rect::SplitRect as _;
 
 mod split_span;
 pub use split_span::SplitSpan as _;
