@@ -1790,9 +1790,11 @@ impl<'a> TildeStreamUnpacker<'a> {
     fn get_table<'b, Unpacker>(
         &'b self,
         sizes: &'b MetadataSizes,
-        kind: MetadataTableKind,
-    ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error> {
-        let bytes = self.metadata_table_bytes(kind, sizes)?;
+    ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
+    where
+        Unpacker: RowUnpacker,
+    {
+        let bytes = self.metadata_table_bytes(Unpacker::KIND, sizes)?;
         Ok(MetadataTableUnpacker {
             bytes,
             sizes,
@@ -1806,42 +1808,42 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, ModuleRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::Module)
+        self.get_table(sizes)
     }
 
     pub fn type_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeRefRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::TypeRef)
+        self.get_table(sizes)
     }
 
     pub fn type_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeDefRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::TypeDef)
+        self.get_table(sizes)
     }
 
     pub fn field_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, FieldRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::Field)
+        self.get_table(sizes)
     }
 
     pub fn method_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, MethodDefRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::MethodDef)
+        self.get_table(sizes)
     }
 
     pub fn param_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, ParamRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::Param)
+        self.get_table(sizes)
     }
 
     pub fn interface_impl_table<'b>(
@@ -1849,14 +1851,14 @@ impl<'a> TildeStreamUnpacker<'a> {
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, InterfaceImplRowUnpacker>, Error>
     {
-        self.get_table(sizes, MetadataTableKind::InterfaceImpl)
+        self.get_table(sizes)
     }
 
     pub fn member_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
-        self.get_table(sizes, MetadataTableKind::MemberRef)
+        self.get_table(sizes)
     }
 }
 
