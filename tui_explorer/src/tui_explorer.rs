@@ -171,8 +171,12 @@ impl TuiExplorerBuilder {
 
         dll_info.collect_annotations(&mut annotator)?;
 
+        let mut annotations = annotator.annotations;
+
+        annotations.sort_by_key(|ann| (ann.highlight_range, ann.range.start));
+
         return Ok(Self {
-            annotations: annotator.annotations,
+            annotations,
             ..self
         });
 
@@ -297,11 +301,11 @@ impl TuiExplorer {
                     .any(|range| range.contains(&mem_pointer.value))
             })
             .map(|mem_pointer| mem_pointer.value)
-            .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
+            // .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
             .counts()
             .into_iter()
             .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
-            .take(10)
+            .take(100)
             .rev()
             .for_each(|(addr, counts)| {
                 self.running_log.add_log(format!("Ptr to {addr}: {counts}"))

@@ -41,6 +41,9 @@ fn formatted_cell<Column: ByteFormatter>(
 ) -> Line<'static> {
     let row_loc = row.location..row.location + MemoryRegion::POINTER_SIZE;
 
+    let annotations =
+        &annotations[annotations.partition_point(|ann| !ann.highlight_range)..];
+
     let annotation_slice_start = annotations
         .partition_point(|annotation| annotation.range.end < row_loc.start);
     let annotations = &annotations[annotation_slice_start..];

@@ -403,7 +403,7 @@ impl<'a> ByteRange<'a> {
         })
     }
 
-    fn subrange(&self, range: Range<impl NormalizeOffset>) -> ByteRange {
+    fn subrange(&self, range: Range<impl NormalizeOffset>) -> Self {
         let start = range.start.as_offset(self.start);
         let end = range.end.as_offset(self.start);
         Self {
@@ -430,6 +430,10 @@ impl<'a> ByteRange<'a> {
         let start = range.start.as_ptr(self.start);
         let end = range.end.as_ptr(self.start);
         start..end
+    }
+
+    fn as_range(&self) -> Range<Pointer> {
+        self.start..self.start + self.bytes.len()
     }
 }
 
@@ -490,6 +494,10 @@ impl<'a> Unpacker<'a> {
 
         self.clr_runtime_header()?.collect_annotations(annotator)?;
 
+        annotator
+            .range(self.section_header_bytes()?.as_range())
+            .name("Section headers")
+            .disable_highlight();
         for i_section in 0..pe_header.num_sections()?.value as usize {
             self.section_header(i_section)?
                 .collect_annotations(annotator)?;
@@ -565,12 +573,27 @@ impl<'a> Unpacker<'a> {
         OptionalHeaderUnpacker::new(bytes)
     }
 
+    pub fn section_header_bytes(&self) -> Result<ByteRange, Error> {
+        let pe_header = self.pe_header()?;
+        let num_sections = pe_header.num_sections()?.value as usize;
+
+        let optional_header = self.optional_header()?;
+        let section_header_size = 40;
+
+        let start = optional_header.bytes.end();
+        let size = num_sections * section_header_size;
+        let bytes = self.bytes.subrange(start..start + size);
+        Ok(bytes)
+    }
+
     pub fn section_header(
         &self,
         i_section: usize,
     ) -> Result<SectionHeaderUnpacker, Error> {
-        let pe_header = self.pe_header()?;
-        let num_sections = pe_header.num_sections()?.value as usize;
+        let section_header_size = 40;
+        let section_headers = self.section_header_bytes()?;
+        let num_sections = section_headers.len() / section_header_size;
+
         if i_section >= num_sections {
             return Err(Error::InvalidSectionNumber {
                 num_sections,
@@ -578,13 +601,9 @@ impl<'a> Unpacker<'a> {
             });
         }
 
-        let optional_header = self.optional_header()?;
-
-        let section_header_size = 40;
-
-        let start =
-            optional_header.bytes.end() + i_section * section_header_size;
-        let bytes = self.bytes.subrange(start..start + section_header_size);
+        let start = i_section * section_header_size;
+        let end = (i_section + 1) * section_header_size;
+        let bytes = section_headers.subrange(start..end);
         Ok(SectionHeaderUnpacker { bytes })
     }
 
@@ -664,6 +683,11 @@ impl<'a> PEHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
+        annotator
+            .range(self.bytes.as_range())
+            .name("PE Header")
+            .disable_highlight();
+
         annotator
             .range(self.pe_signature()?.loc)
             .name("PE signature");
@@ -811,6 +835,11 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
+        annotator
+            .range(self.bytes.as_range())
+            .name("Optional PE Header")
+            .disable_highlight();
+
         annotator.value(self.magic_value()?).name("Magic value");
         annotator
             .value(self.linker_major_version()?)
@@ -1308,6 +1337,11 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
+        annotator
+            .range(self.bytes.as_range())
+            .name("CLR Runtime Header")
+            .disable_highlight();
+
         annotator.value(self.header_size()?).name("header_size");
         annotator
             .value(self.major_runtime_version()?)
@@ -1401,6 +1435,11 @@ impl<'a> MetadataUnpacker<'a> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
+            .range(self.bytes.as_range())
+            .name("CLR Metadata")
+            .disable_highlight();
+
+        annotator
             .range(self.metadata_signature()?.loc)
             .name("Metadata signature");
         annotator.value(self.major_version()?).name("major_version");
@@ -1415,7 +1454,16 @@ impl<'a> MetadataUnpacker<'a> {
 
         self.iter_stream_header()?.try_for_each(
             |stream_header| -> Result<_, Error> {
-                stream_header?.collect_annotations(annotator)
+                let header = stream_header?;
+                header.collect_annotations(annotator)?;
+                let start = self.bytes.start + (header.offset.value as usize);
+                let size = header.size.value as usize;
+                annotator
+                    .range(start..start + size)
+                    .name(format!("{} Stream", header.name.value))
+                    .disable_highlight();
+
+                Ok(())
             },
         )?;
 
@@ -1560,6 +1608,11 @@ impl<'a> StreamHeader<'a> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
+            .range(self.offset.loc.start..self.name.loc.end)
+            .name("CLR Stream Header")
+            .disable_highlight();
+
+        annotator
             .range(self.offset.loc.clone())
             .name("Stream Offset");
         annotator.range(self.size.loc.clone()).name("Stream Size");
@@ -1586,14 +1639,19 @@ impl<'a> TildeStreamUnpacker<'a> {
             .value(self.sorted_table_bitfield()?)
             .name("sorted_table_bitfield");
 
+        let sizes = self.metadata_sizes()?;
+
         self.iter_num_rows()?
             .try_for_each(|res| -> Result<_, Error> {
                 let (value, kind) = res?;
                 annotator.value(value).name(format!("Num {kind:?} rows"));
+                annotator
+                    .range(self.metadata_table_bytes(kind, &sizes)?.as_range())
+                    .name(format!("{kind:?} metadata table"))
+                    .disable_highlight();
                 Ok(())
             })?;
 
-        let sizes = self.metadata_sizes()?;
         self.module_table(&sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
@@ -1915,7 +1973,7 @@ impl MetadataTableKind {
     ];
 
     #[allow(dead_code)]
-    const HAS_FIELD_MARSHALL: [Self; 2] = [Self::Field, Self::Param];
+    const HAS_FIELD_MARSHAL: [Self; 2] = [Self::Field, Self::Param];
 
     #[allow(dead_code)]
     const HAS_DECL_SECURITY: [Self; 3] =
@@ -2086,36 +2144,115 @@ impl MetadataTableKind {
                     + sizes.str_index_size()
                     + sizes.blob_index_size()
             }
-            MetadataTableKind::Constant => todo!(),
-            MetadataTableKind::CustomAttribute => todo!(),
-            MetadataTableKind::FieldMarshal => todo!(),
-            MetadataTableKind::DeclSecurity => todo!(),
-            MetadataTableKind::ClassLayout => todo!(),
-            MetadataTableKind::FieldLayout => todo!(),
-            MetadataTableKind::StandAloneSig => todo!(),
-            MetadataTableKind::EventMap => todo!(),
-            MetadataTableKind::Event => todo!(),
-            MetadataTableKind::PropertyMap => todo!(),
-            MetadataTableKind::Property => todo!(),
-            MetadataTableKind::MethodSemantics => todo!(),
-            MetadataTableKind::MethodImpl => todo!(),
-            MetadataTableKind::ModuleRef => todo!(),
-            MetadataTableKind::TypeSpec => todo!(),
-            MetadataTableKind::ImplMap => todo!(),
-            MetadataTableKind::FieldRVA => todo!(),
-            MetadataTableKind::Assembly => todo!(),
-            MetadataTableKind::AssemblyProcessor => todo!(),
-            MetadataTableKind::AssemblyOS => todo!(),
-            MetadataTableKind::AssemblyRef => todo!(),
-            MetadataTableKind::AssemblyRefProcessor => todo!(),
-            MetadataTableKind::AssemblyRefOS => todo!(),
-            MetadataTableKind::File => todo!(),
-            MetadataTableKind::ExportedType => todo!(),
-            MetadataTableKind::ManifestResource => todo!(),
-            MetadataTableKind::NestedClass => todo!(),
-            MetadataTableKind::GenericParam => todo!(),
-            MetadataTableKind::MethodSpec => todo!(),
-            MetadataTableKind::GenericParamConstraint => todo!(),
+            MetadataTableKind::Constant => {
+                2 + sizes.coded_index_size(MetadataTableKind::HAS_CONSTANT)
+                    + sizes.blob_index_size()
+            }
+            MetadataTableKind::CustomAttribute => {
+                2 * sizes
+                    .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
+                    + sizes.blob_index_size()
+            }
+            MetadataTableKind::FieldMarshal => {
+                sizes.coded_index_size(MetadataTableKind::HAS_FIELD_MARSHAL)
+                    + sizes.blob_index_size()
+            }
+            MetadataTableKind::DeclSecurity => {
+                2 + sizes.coded_index_size(MetadataTableKind::HAS_DECL_SECURITY)
+                    + sizes.blob_index_size()
+            }
+            MetadataTableKind::ClassLayout => {
+                2 + 4 + sizes.index_size(MetadataTableKind::TypeDef)
+            }
+            MetadataTableKind::FieldLayout => {
+                4 + sizes.index_size(MetadataTableKind::Field)
+            }
+            MetadataTableKind::StandAloneSig => sizes.blob_index_size(),
+            MetadataTableKind::EventMap => {
+                sizes.index_size(MetadataTableKind::TypeDef)
+                    + sizes.index_size(MetadataTableKind::Event)
+            }
+            MetadataTableKind::Event => {
+                2 + sizes.str_index_size()
+                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
+            }
+            MetadataTableKind::PropertyMap => {
+                sizes.index_size(MetadataTableKind::TypeDef)
+                    + sizes.index_size(MetadataTableKind::Property)
+            }
+            MetadataTableKind::Property => {
+                2 + sizes.str_index_size() + sizes.blob_index_size()
+            }
+            MetadataTableKind::MethodSemantics => {
+                2 + sizes.index_size(MetadataTableKind::MethodDef)
+                    + sizes.coded_index_size(MetadataTableKind::HAS_SEMANTICS)
+            }
+            MetadataTableKind::MethodImpl => {
+                sizes.index_size(MetadataTableKind::TypeDef)
+                    + 2 * sizes
+                        .coded_index_size(MetadataTableKind::METHOD_DEF_OR_REF)
+            }
+            MetadataTableKind::ModuleRef => sizes.str_index_size(),
+            MetadataTableKind::TypeSpec => sizes.blob_index_size(),
+            MetadataTableKind::ImplMap => {
+                2 + sizes.coded_index_size(MetadataTableKind::MEMBER_FORWARDED)
+                    + sizes.str_index_size()
+                    + sizes.index_size(MetadataTableKind::MethodDef)
+            }
+            MetadataTableKind::FieldRVA => {
+                4 + sizes.index_size(MetadataTableKind::Field)
+            }
+            MetadataTableKind::Assembly => {
+                4 + 2 * 4
+                    + 4
+                    + sizes.blob_index_size()
+                    + 2 * sizes.str_index_size()
+            }
+            MetadataTableKind::AssemblyProcessor => 4,
+            MetadataTableKind::AssemblyOS => 4 * 3,
+            MetadataTableKind::AssemblyRef => {
+                2 * 4
+                    + 4
+                    + 2 * sizes.blob_index_size()
+                    + 2 * sizes.str_index_size()
+            }
+            MetadataTableKind::AssemblyRefProcessor => {
+                4 + sizes.index_size(MetadataTableKind::AssemblyRef)
+            }
+            MetadataTableKind::AssemblyRefOS => {
+                4 * 3 + sizes.index_size(MetadataTableKind::AssemblyRef)
+            }
+            MetadataTableKind::File => {
+                4 + sizes.str_index_size() + sizes.blob_index_size()
+            }
+            MetadataTableKind::ExportedType => {
+                4 + 4
+                    + sizes.index_size(MetadataTableKind::TypeRef)
+                    + 2 * sizes.str_index_size()
+                    + sizes.coded_index_size(MetadataTableKind::IMPLEMENTATION)
+            }
+            MetadataTableKind::ManifestResource => {
+                4 + 4
+                    + sizes.str_index_size()
+                    + sizes.coded_index_size(MetadataTableKind::IMPLEMENTATION)
+            }
+            MetadataTableKind::NestedClass => {
+                2 * sizes.index_size(MetadataTableKind::TypeDef)
+            }
+            MetadataTableKind::GenericParam => {
+                2 + 2
+                    + sizes
+                        .coded_index_size(MetadataTableKind::TYPE_OR_METHOD_DEF)
+                    + sizes.str_index_size()
+            }
+            MetadataTableKind::MethodSpec => {
+                sizes.coded_index_size(MetadataTableKind::METHOD_DEF_OR_REF)
+                    + sizes.blob_index_size()
+            }
+            MetadataTableKind::GenericParamConstraint => {
+                sizes.index_size(MetadataTableKind::GenericParam)
+                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
+            }
         }
     }
 }
