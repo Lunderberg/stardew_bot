@@ -358,7 +358,7 @@ impl<'a> ByteRange<'a> {
     fn get_null_terminated(
         &self,
         loc: impl NormalizeOffset,
-    ) -> Result<UnpackedValue<&str>, Error> {
+    ) -> Result<UnpackedValue<&'a str>, Error> {
         let start = loc.as_offset(self.start);
         let size = self.bytes[start..]
             .iter()
@@ -444,7 +444,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.member_ref_table(&sizes)?;
+        let table = stream.method_def_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1640,21 +1640,19 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        let field_table = self.field_table(&sizes)?;
+        let method_table = self.method_def_table(&sizes)?;
+        let param_table = self.param_table(&sizes)?;
         self.type_def_table(&sizes)?
             .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.field_table(&sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.method_def_table(&sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.param_table(&sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
+            .try_for_each(|row| {
+                row.collect_annotations(
+                    annotator,
+                    &field_table,
+                    &method_table,
+                    &param_table,
+                )
+            })?;
 
         self.interface_impl_table(&sizes)?
             .iter_rows()
@@ -2417,7 +2415,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     pub fn get_row<'b>(
         &'b self,
         index: usize,
-    ) -> Result<MetadataRowUnpacker<'b, Unpacker>, Error>
+    ) -> Result<MetadataRowUnpacker<'a, Unpacker>, Error>
     where
         Unpacker: RowUnpacker,
     {
@@ -2615,46 +2613,71 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
+        field_table: &MetadataTableUnpacker<FieldRowUnpacker>,
+        method_def_table: &MetadataTableUnpacker<MethodDefRowUnpacker>,
+        param_table: &MetadataTableUnpacker<ParamRowUnpacker>,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
-        {
+        let type_name = {
             let index = self.type_name_index()?;
             let name = self.type_name()?.value;
             annotator
                 .range(index.loc)
                 .name("Type name")
                 .value(format!("{}\n{}", index.value, name));
-        }
-        {
+            name
+        };
+        let type_namespace = {
             let index = self.type_namespace_index()?;
-            let name = self.type_namespace()?.value;
+            let namespace = self.type_namespace()?.value;
             annotator
                 .range(index.loc)
                 .name("Type namespace")
-                .value(format!("{}\n{}", index.value, name));
-        }
+                .value(format!("{}\n{}", index.value, namespace));
+            namespace
+        };
 
         annotator.value(self.extends()?).name("extends");
-        {
-            let field_indices = self.field_indices()?;
-            annotator
-                .range(field_indices.loc)
-                .name("field_indices")
-                .value(format!(
-                    "{}..{}",
-                    field_indices.value.start, field_indices.value.end
-                ));
-        }
-        {
-            let method_indices = self.method_indices()?;
-            annotator
-                .range(method_indices.loc)
-                .name("method_indices")
-                .value(format!(
-                    "{}..{}",
-                    method_indices.value.start, method_indices.value.end
-                ));
-        }
+        let field_indices = self.field_indices()?;
+        annotator
+            .range(field_indices.loc)
+            .name("field_indices")
+            .value(format!(
+                "{}..{}",
+                field_indices.value.start, field_indices.value.end
+            ));
+        field_indices.value.clone().try_for_each(
+            |field_index| -> Result<_, Error> {
+                let field = field_table.get_row(field_index as usize)?;
+                field.collect_annotations(
+                    annotator,
+                    type_name,
+                    type_namespace,
+                )?;
+                Ok(())
+            },
+        )?;
+
+        let method_indices = self.method_indices()?;
+        annotator
+            .range(method_indices.loc)
+            .name("method_indices")
+            .value(format!(
+                "{}..{}",
+                method_indices.value.start, method_indices.value.end
+            ));
+        method_indices.value.clone().try_for_each(
+            |method_index| -> Result<_, Error> {
+                let method = method_def_table.get_row(method_index as usize)?;
+                method.collect_annotations(
+                    annotator,
+                    type_name,
+                    type_namespace,
+                    param_table,
+                )?;
+                Ok(())
+            },
+        )?;
 
         Ok(())
     }
@@ -2760,6 +2783,8 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
+        type_name: &str,
+        _type_namespace: &str,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
 
@@ -2778,7 +2803,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
 
         annotator
             .range(self.get_blob(signature_index.value as usize)?.as_range())
-            .name(format!("'{name}' signature"));
+            .name(format!("'{type_name}.{name}' signature"));
 
         Ok(())
     }
@@ -2810,32 +2835,68 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
+        type_name: &str,
+        type_namespace: &str,
+        param_table: &MetadataTableUnpacker<ParamRowUnpacker>,
     ) -> Result<(), Error> {
         annotator.value(self.rva()?).name("rva");
         annotator.value(self.impl_flags()?).name("impl_flags");
         annotator.value(self.flags()?).name("flags");
+
+        let name = self.name()?.value;
         {
             let index = self.name_index()?;
-            let name = self.name()?.value;
             annotator
                 .range(index.loc)
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
-        annotator
-            .value(self.signature_index()?)
-            .name("signature_index");
 
-        {
-            let param_indices = self.param_indices()?;
-            annotator
-                .range(param_indices.loc)
-                .name("param_indices")
-                .value(format!(
-                    "{}..{}",
-                    param_indices.value.start, param_indices.value.end
-                ));
-        }
+        let signature_index = self.signature_index()?;
+        annotator
+            .value(signature_index.clone())
+            .name("signature_index");
+        annotator
+            .range(self.get_blob(signature_index.value as usize)?.as_range())
+            .name(format!("'{type_name}.{name}' signature"));
+
+        let param_indices = self.param_indices()?;
+        annotator
+            .range(param_indices.loc.clone())
+            .name("param_indices")
+            .value(format!(
+                "{}..{}",
+                param_indices.value.start, param_indices.value.end
+            ));
+
+        annotator
+            .range(param_indices.loc)
+            .name("Param names")
+            .value(
+                param_indices
+                    .value
+                    .clone()
+                    .map(|param_index| -> Result<_, Error> {
+                        Ok(param_table
+                            .get_row(param_index as usize)?
+                            .name()?
+                            .value)
+                    })
+                    .collect::<Result<String, Error>>()?,
+            );
+
+        param_indices.value.clone().try_for_each(
+            |param_index| -> Result<_, Error> {
+                let param = param_table.get_row(param_index as usize)?;
+                param.collect_annotations(
+                    annotator,
+                    type_name,
+                    type_namespace,
+                    name,
+                )?;
+                Ok(())
+            },
+        )?;
 
         Ok(())
     }
@@ -2901,17 +2962,26 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
+        type_name: &str,
+        _type_namespace: &str,
+        method_name: &str,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
         annotator.value(self.sequence()?).name("sequence");
+
+        let name = self.name()?.value;
         {
             let index = self.name_index()?;
-            let name = self.name()?.value;
             annotator
                 .range(index.loc)
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
+
+        annotator
+            .range(self.bytes.as_range())
+            .name(format!("{type_name}.{method_name}.{name}"))
+            .disable_highlight();
 
         Ok(())
     }
@@ -2928,7 +2998,7 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
         self.sizes.get_str_index(&self.bytes, 4)
     }
 
-    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         let index = self.name_index()?.value as usize;
         self.string_heap.get_null_terminated(index)
     }
