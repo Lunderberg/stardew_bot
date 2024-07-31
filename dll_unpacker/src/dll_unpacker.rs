@@ -250,6 +250,7 @@ pub struct ParamRowUnpacker;
 pub struct InterfaceImplRowUnpacker;
 pub struct MemberRefRowUnpacker;
 pub struct ConstantRowUnpacker;
+pub struct CustomAttributeRowUnpacker;
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -457,7 +458,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.constant_table(&sizes)?;
+        let table = stream.custom_attribute_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1663,6 +1664,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.custom_attribute_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -1866,6 +1871,14 @@ impl<'a> TildeStreamUnpacker<'a> {
     ) -> Result<MetadataTableUnpacker<'b, ConstantRowUnpacker>, Error> {
         self.get_table(sizes)
     }
+
+    pub fn custom_attribute_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, CustomAttributeRowUnpacker>, Error>
+    {
+        self.get_table(sizes)
+    }
 }
 
 impl std::fmt::Display for HeapSizes {
@@ -1904,14 +1917,11 @@ impl std::fmt::Display for MetadataTableKind {
 }
 
 impl MetadataTableKind {
-    #[allow(dead_code)]
     const TYPE_DEF_OR_REF: [Self; 3] =
         [Self::TypeDef, Self::TypeRef, Self::TypeSpec];
 
-    #[allow(dead_code)]
     const HAS_CONSTANT: [Self; 3] = [Self::Field, Self::Param, Self::Property];
 
-    #[allow(dead_code)]
     const HAS_CUSTOM_ATTRIBUTE: [Self; 22] = [
         Self::MethodDef,
         Self::Field,
@@ -1942,14 +1952,11 @@ impl MetadataTableKind {
         Self::MethodSpec,
     ];
 
-    #[allow(dead_code)]
     const HAS_FIELD_MARSHAL: [Self; 2] = [Self::Field, Self::Param];
 
-    #[allow(dead_code)]
     const HAS_DECL_SECURITY: [Self; 3] =
         [Self::TypeDef, Self::MethodDef, Self::Assembly];
 
-    #[allow(dead_code)]
     const MEMBER_REF_PARENT: [Self; 5] = [
         Self::TypeDef,
         Self::TypeRef,
@@ -1958,24 +1965,15 @@ impl MetadataTableKind {
         Self::TypeSpec,
     ];
 
-    #[allow(dead_code)]
     const HAS_SEMANTICS: [Self; 2] = [Self::Event, Self::Property];
 
-    #[allow(dead_code)]
     const METHOD_DEF_OR_REF: [Self; 2] = [Self::MethodDef, Self::MemberRef];
 
-    #[allow(dead_code)]
     const MEMBER_FORWARDED: [Self; 2] = [Self::Field, Self::MethodDef];
 
-    #[allow(dead_code)]
     const IMPLEMENTATION: [Self; 3] =
         [Self::File, Self::AssemblyRef, Self::ExportedType];
 
-    // This is the only one of the type-tag sets that has unused
-    // values.  Once I get around to unpacking it, will need to adjust
-    // the "coded_index_size" and "get_coded_index" methods to handle
-    // it.
-    #[allow(dead_code)]
     const CUSTOM_ATTRIBUTE_TYPE: [Option<Self>; 5] = [
         None,
         None,
@@ -1991,7 +1989,6 @@ impl MetadataTableKind {
         Self::TypeRef,
     ];
 
-    #[allow(dead_code)]
     const TYPE_OR_METHOD_DEF: [Self; 2] = [Self::TypeDef, Self::MethodDef];
 
     fn from_bit_index(bit: u8) -> Result<Self, Error> {
@@ -2260,23 +2257,28 @@ impl MetadataSizes {
         Self::get_heap_index(bytes, offset, num_rows >= 65536)
     }
 
-    fn coded_index_bit_widths<const N: usize>(
+    fn coded_index_row_bits<const N: usize, Kind>(
         &self,
-        tables: [MetadataTableKind; N],
-    ) -> (usize, usize) {
-        assert!(N > 0, "Must have at least one table");
-        let table_bits = N.next_power_of_two().ilog2();
-        let max_rows = tables.into_iter().map(|kind| self[kind]).max().unwrap();
-        let row_bits = (max_rows + 1).next_power_of_two().ilog2();
-
-        (table_bits as usize, row_bits as usize)
+        tables: [Kind; N],
+    ) -> usize
+    where
+        Kind: Into<Option<MetadataTableKind>>,
+    {
+        let max_rows = tables
+            .into_iter()
+            .filter_map(|kind| -> Option<MetadataTableKind> { kind.into() })
+            .map(|kind| self[kind])
+            .max()
+            .expect("Index must have at least one table it can point to.");
+        (max_rows + 1).next_power_of_two().ilog2() as usize
     }
 
-    fn coded_index_size<const N: usize>(
-        &self,
-        tables: [MetadataTableKind; N],
-    ) -> usize {
-        let (table_bits, row_bits) = self.coded_index_bit_widths(tables);
+    fn coded_index_size<const N: usize, Kind>(&self, tables: [Kind; N]) -> usize
+    where
+        Kind: Into<Option<MetadataTableKind>>,
+    {
+        let table_bits = N.next_power_of_two().ilog2() as usize;
+        let row_bits = self.coded_index_row_bits(tables);
 
         if table_bits + row_bits <= 16 {
             2
@@ -2285,13 +2287,18 @@ impl MetadataSizes {
         }
     }
 
-    fn get_coded_index<const N: usize>(
+    fn get_coded_index<const N: usize, Kind>(
         &self,
-        tables: [MetadataTableKind; N],
+        tables: [Kind; N],
         bytes: &ByteRange,
         offset: usize,
-    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        let (table_bits, row_bits) = self.coded_index_bit_widths(tables);
+    ) -> Result<UnpackedValue<MetadataIndex>, Error>
+    where
+        Kind: Copy,
+        Kind: Into<Option<MetadataTableKind>>,
+    {
+        let table_bits = N.next_power_of_two().ilog2() as usize;
+        let row_bits = self.coded_index_row_bits(tables);
         let UnpackedValue { value, loc } =
             Self::get_heap_index(bytes, offset, table_bits + row_bits > 16)?;
 
@@ -2299,13 +2306,17 @@ impl MetadataSizes {
         let table_index = value & table_mask;
 
         let table = if table_index < N {
-            tables[table_index]
+            tables[table_index].into().ok_or(
+                Error::CodedIndexRefersToReservedTableIndex {
+                    index: table_index,
+                },
+            )
         } else {
-            return Err(Error::InvalidCodedIndex {
+            Err(Error::InvalidCodedIndex {
                 index: table_index,
                 num_tables: N,
-            });
-        };
+            })
+        }?;
         let index = value >> table_bits;
 
         Ok(UnpackedValue {
@@ -3179,9 +3190,9 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.type_value()?).name("Type value");
-        annotator.value(self.parent()?).name("Parent");
+        annotator.value(self.parent_index()?).name("Parent");
 
-        let value = self.value()?;
+        let value = self.value_index()?;
         annotator.value(value.clone()).name("Value");
         annotator
             .range(self.get_blob(value.value)?.as_range())
@@ -3194,7 +3205,7 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
         self.bytes.get_u8(0)
     }
 
-    fn parent(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
         self.sizes.get_coded_index(
             MetadataTableKind::HAS_CONSTANT,
             &self.bytes,
@@ -3202,9 +3213,60 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
         )
     }
 
-    fn value(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
         let offset =
             2 + self.sizes.coded_index_size(MetadataTableKind::HAS_CONSTANT);
+        self.sizes.get_blob_index(&self.bytes, offset)
+    }
+}
+
+impl RowUnpacker for CustomAttributeRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::CustomAttribute;
+}
+
+impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.parent_index()?).name("Parent");
+        annotator.value(self.type_index()?).name("Type");
+
+        let value = self.value_index()?;
+        annotator.value(value.clone()).name("Value");
+        annotator
+            .range(self.get_blob(value.value)?.as_range())
+            .name("CustomAttribute value");
+
+        Ok(())
+    }
+
+    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.sizes.get_coded_index(
+            MetadataTableKind::HAS_CUSTOM_ATTRIBUTE,
+            &self.bytes,
+            0,
+        )
+    }
+
+    fn type_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE);
+        self.sizes.get_coded_index(
+            MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE,
+            &self.bytes,
+            offset,
+        )
+    }
+
+    fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        let offset = self
+            .sizes
+            .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
+            + self
+                .sizes
+                .coded_index_size(MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE);
         self.sizes.get_blob_index(&self.bytes, offset)
     }
 }

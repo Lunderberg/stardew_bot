@@ -70,6 +70,9 @@ pub enum Error {
     #[error("Coded index of {index} but only {num_tables} present")]
     InvalidCodedIndex { index: usize, num_tables: usize },
 
+    #[error("Coded index of {index} but that points to a reserved entry.")]
+    CodedIndexRefersToReservedTableIndex { index: usize },
+
     #[error(
         "Blob header must start with 0, 1, or 2 leading ones, \
          but header had {leading_ones} leading ones."
