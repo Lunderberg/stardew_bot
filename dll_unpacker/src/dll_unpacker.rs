@@ -456,7 +456,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.field_table(&sizes)?;
+        let table = stream.member_ref_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2674,7 +2674,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
 
         annotator
             .group(field_table.address_range(field_indices.value.clone())?)
-            .name(format!("'{type_name}' Fields"));
+            .name(format!("Class '{type_name}'"));
 
         field_indices.value.clone().try_for_each(
             |field_index| -> Result<_, Error> {
@@ -2696,6 +2696,13 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 "{}..{}",
                 method_indices.value.start, method_indices.value.end
             ));
+
+        annotator
+            .group(
+                method_def_table.address_range(method_indices.value.clone())?,
+            )
+            .name(format!("Class '{type_name}'"));
+
         method_indices.value.clone().try_for_each(
             |method_index| -> Result<_, Error> {
                 let method = method_def_table.get_row(method_index)?;
@@ -2708,6 +2715,29 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 Ok(())
             },
         )?;
+
+        {
+            let method_range = method_indices.value;
+            let param_start = method_def_table
+                .get_row(method_range.start)?
+                .param_indices()?
+                .value
+                .start;
+            let param_end = if method_range.end
+                == self.sizes.num_rows(MetadataTableKind::MethodDef)
+            {
+                self.sizes.num_rows(MetadataTableKind::Param)
+            } else {
+                method_def_table
+                    .get_row(method_range.end)?
+                    .param_indices()?
+                    .value
+                    .end
+            };
+            annotator
+                .group(param_table.address_range(param_start..param_end)?)
+                .name(format!("Class '{type_name}'"));
+        }
 
         Ok(())
     }
@@ -2929,6 +2959,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
             },
         )?;
 
+        annotator
+            .group(param_table.address_range(param_indices.value.clone())?)
+            .name(format!("Method '{name}'"));
+
         Ok(())
     }
 
@@ -2995,9 +3029,9 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        type_name: &str,
+        _type_name: &str,
         _type_namespace: &str,
-        method_name: &str,
+        _method_name: &str,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
         annotator.value(self.sequence()?).name("sequence");
@@ -3010,10 +3044,6 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
-
-        annotator
-            .group(&self.bytes)
-            .name(format!("{type_name}.{method_name}.{name}"));
 
         Ok(())
     }
@@ -3076,17 +3106,24 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.class_index()?).name("class_index");
+
+        let name = self.name()?.value;
         {
             let index = self.name_index()?;
-            let name = self.name()?.value;
             annotator
                 .range(index.loc)
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
+
+        let signature_index = self.signature_index()?;
         annotator
-            .value(self.signature_index()?)
+            .value(signature_index.clone())
             .name("signature_index");
+
+        annotator
+            .range(self.get_blob(signature_index.value.clone())?.as_range())
+            .name(format!("MemberRef {name}"));
 
         Ok(())
     }
