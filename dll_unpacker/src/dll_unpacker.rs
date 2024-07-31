@@ -251,6 +251,7 @@ pub struct InterfaceImplRowUnpacker;
 pub struct MemberRefRowUnpacker;
 pub struct ConstantRowUnpacker;
 pub struct CustomAttributeRowUnpacker;
+pub struct DeclSecurityRowUnpacker;
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -1668,6 +1669,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.decl_security_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -1877,6 +1882,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, CustomAttributeRowUnpacker>, Error>
     {
+        self.get_table(sizes)
+    }
+
+    pub fn decl_security_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, DeclSecurityRowUnpacker>, Error> {
         self.get_table(sizes)
     }
 }
@@ -3267,6 +3279,49 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
             + self
                 .sizes
                 .coded_index_size(MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE);
+        self.sizes.get_blob_index(&self.bytes, offset)
+    }
+}
+
+impl RowUnpacker for DeclSecurityRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::DeclSecurity;
+}
+
+impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.action()?).name("Action");
+        annotator.value(self.parent_index()?).name("Parent");
+
+        let permission_set_index = self.permission_set_index()?;
+        annotator
+            .value(permission_set_index.clone())
+            .name("Permission set");
+        annotator
+            .range(self.get_blob(permission_set_index.value)?.as_range())
+            .name("DeclSecurity permission set");
+
+        Ok(())
+    }
+
+    fn action(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(0)
+    }
+
+    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.sizes.get_coded_index(
+            MetadataTableKind::HAS_DECL_SECURITY,
+            &self.bytes,
+            2,
+        )
+    }
+
+    fn permission_set_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        let offset = 2 + self
+            .sizes
+            .coded_index_size(MetadataTableKind::HAS_DECL_SECURITY);
         self.sizes.get_blob_index(&self.bytes, offset)
     }
 }
