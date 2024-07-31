@@ -2,8 +2,20 @@ use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 
 use tui_explorer::{Error, TerminalContext, TuiExplorer, TuiExplorerBuilder};
 
-fn bench_construct_tui_explorer(b: &mut Bencher) {
-    b.iter(|| TuiExplorer::new())
+fn bench_construct_tui_explorer(b: &mut Bencher) -> Result<(), Error> {
+    b.iter(|| TuiExplorer::new().unwrap());
+    Ok(())
+}
+
+fn bench_initialize_annotations(b: &mut Bencher) -> Result<(), Error> {
+    b.iter(|| {
+        TuiExplorerBuilder::new()
+            .unwrap()
+            .initialize_annotations()
+            .unwrap()
+    });
+
+    Ok(())
 }
 
 fn bench_initialization(c: &mut Criterion) {
@@ -14,8 +26,13 @@ fn bench_initialization(c: &mut Criterion) {
     //     .sampling_mode(criterion::SamplingMode::Flat)
     //     .measurement_time(std::time::Duration::from_secs(10));
 
-    group
-        .bench_function("construct_tui_explorer", bench_construct_tui_explorer);
+    group.bench_function("construct_tui_explorer", |bencher| {
+        bench_construct_tui_explorer(bencher).unwrap()
+    });
+
+    group.bench_function("initialize_annotations", |bencher| {
+        bench_initialize_annotations(bencher).unwrap()
+    });
 
     group.finish();
 }
