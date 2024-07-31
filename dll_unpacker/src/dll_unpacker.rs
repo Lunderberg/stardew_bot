@@ -252,6 +252,7 @@ pub struct MemberRefRowUnpacker;
 pub struct ConstantRowUnpacker;
 pub struct CustomAttributeRowUnpacker;
 pub struct DeclSecurityRowUnpacker;
+pub struct ClassLayoutRowUnpacker;
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -1673,6 +1674,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.class_layout_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -1889,6 +1894,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, DeclSecurityRowUnpacker>, Error> {
+        self.get_table(sizes)
+    }
+
+    pub fn class_layout_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ClassLayoutRowUnpacker>, Error> {
         self.get_table(sizes)
     }
 }
@@ -3323,5 +3335,35 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
             .sizes
             .coded_index_size(MetadataTableKind::HAS_DECL_SECURITY);
         self.sizes.get_blob_index(&self.bytes, offset)
+    }
+}
+
+impl RowUnpacker for ClassLayoutRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::ClassLayout;
+}
+
+impl<'a> MetadataRowUnpacker<'a, ClassLayoutRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.alignment()?).name("Alignment");
+        annotator.value(self.size()?).name("Size (bytes)");
+        annotator.value(self.type_def_index()?).name("TypeDef");
+
+        Ok(())
+    }
+
+    fn alignment(&self) -> Result<UnpackedValue<u16>, Error> {
+        self.bytes.get_u16(0)
+    }
+
+    fn size(&self) -> Result<UnpackedValue<u32>, Error> {
+        self.bytes.get_u32(2)
+    }
+
+    fn type_def_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        self.sizes
+            .get_index(MetadataTableKind::TypeDef, &self.bytes, 6)
     }
 }
