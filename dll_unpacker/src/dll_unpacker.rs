@@ -249,6 +249,7 @@ pub struct MethodDefRowUnpacker;
 pub struct ParamRowUnpacker;
 pub struct InterfaceImplRowUnpacker;
 pub struct MemberRefRowUnpacker;
+pub struct ConstantRowUnpacker;
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -456,7 +457,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.member_ref_table(&sizes)?;
+        let table = stream.constant_table(&sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -1658,6 +1659,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.constant_table(&sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -1852,6 +1857,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         sizes: &'b MetadataSizes,
     ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
+        self.get_table(sizes)
+    }
+
+    pub fn constant_table<'b>(
+        &'b self,
+        sizes: &'b MetadataSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ConstantRowUnpacker>, Error> {
         self.get_table(sizes)
     }
 }
@@ -3153,6 +3165,46 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
             .sizes
             .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
             + self.sizes.str_index_size();
+        self.sizes.get_blob_index(&self.bytes, offset)
+    }
+}
+
+impl RowUnpacker for ConstantRowUnpacker {
+    const KIND: MetadataTableKind = MetadataTableKind::Constant;
+}
+
+impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.type_value()?).name("Type value");
+        annotator.value(self.parent()?).name("Parent");
+
+        let value = self.value()?;
+        annotator.value(value.clone()).name("Value");
+        annotator
+            .range(self.get_blob(value.value)?.as_range())
+            .name("Constant value");
+
+        Ok(())
+    }
+
+    fn type_value(&self) -> Result<UnpackedValue<u8>, Error> {
+        self.bytes.get_u8(0)
+    }
+
+    fn parent(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.sizes.get_coded_index(
+            MetadataTableKind::HAS_CONSTANT,
+            &self.bytes,
+            2,
+        )
+    }
+
+    fn value(&self) -> Result<UnpackedValue<usize>, Error> {
+        let offset =
+            2 + self.sizes.coded_index_size(MetadataTableKind::HAS_CONSTANT);
         self.sizes.get_blob_index(&self.bytes, offset)
     }
 }
