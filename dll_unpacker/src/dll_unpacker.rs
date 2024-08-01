@@ -131,7 +131,7 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
-pub struct MetadataUnpacker<'a> {
+pub struct PhysicalMetadataUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
@@ -147,10 +147,19 @@ pub struct StreamHeader<'a> {
     name: UnpackedValue<&'a str>,
 }
 
+pub trait EnumKey {
+    const N: usize;
+
+    fn as_index(self) -> usize;
+
+    fn iter_keys() -> impl Iterator<Item = Self>;
+}
+
 pub struct TildeStreamUnpacker<'a> {
     bytes: ByteRange<'a>,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
+    guid_heap: ByteRange<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -202,15 +211,68 @@ pub enum MetadataTableKind {
     GenericParamConstraint,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum MetadataHeapKind {
+    String,
+    GUID,
+    Blob,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MetadataCodedIndexKind {
+    TypeDefOrRef,
+    HasConstant,
+    HasCustomAttribute,
+    HasFieldMarshal,
+    HasDeclSecurity,
+    MemberRefParent,
+    HasSemantics,
+    MethodDefOrRef,
+    MemberForwarded,
+    Implementation,
+    CustomAttributeType,
+    ResolutionScope,
+    TypeOrMethodDef,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MetadataIndexKind {
+    Heap(MetadataHeapKind),
+    Table(MetadataTableKind),
+    CodedIndex(MetadataCodedIndexKind),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum MetadataColumnType {
+    Index(MetadataIndexKind),
+    FixedSize(usize),
+}
+
+pub struct MetadataMap<Key, Value> {
+    // Once `generic_const_exprs` is available, the size can be
+    // determined from `<Key as EnumKey>::N` For now, setting it to
+    // the size required for `MetadataIndexKind`..
+    values: [Value; 3 + 38 + 13],
+    _phantom: PhantomData<Key>,
+}
+
+pub struct MetadataTableSizes {
+    num_rows: MetadataMap<MetadataTableKind, usize>,
+    index_size: MetadataMap<MetadataIndexKind, usize>,
+    bytes_per_row: MetadataMap<MetadataTableKind, usize>,
+    table_offsets: MetadataMap<MetadataTableKind, usize>,
+}
+
 pub struct MetadataSizes {
     heap_sizes: HeapSizes,
     table_sizes: [u32; 38],
 }
 
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
+    /// The bytes that represent this table
     bytes: ByteRange<'a>,
-
     sizes: &'a MetadataSizes,
+    table_sizes: &'a MetadataTableSizes,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
@@ -232,6 +294,7 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// table).
     next_row_bytes: Option<ByteRange<'a>>,
     sizes: &'a MetadataSizes,
+    table_sizes: &'a MetadataTableSizes,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
@@ -253,6 +316,15 @@ pub struct ConstantRowUnpacker;
 pub struct CustomAttributeRowUnpacker;
 pub struct DeclSecurityRowUnpacker;
 pub struct ClassLayoutRowUnpacker;
+
+impl<Key, Value: Default> Default for MetadataMap<Key, Value> {
+    fn default() -> Self {
+        Self {
+            values: std::array::from_fn(|_| Default::default()),
+            _phantom: PhantomData,
+        }
+    }
+}
 
 impl<T> UnpackedValue<T> {
     pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
@@ -457,10 +529,11 @@ impl<'a> Unpacker<'a> {
     }
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
-        let metadata = self.metadata()?;
+        let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let sizes = stream.metadata_sizes()?;
-        let table = stream.custom_attribute_table(&sizes)?;
+        let table_sizes = stream.metadata_table_sizes()?;
+        let table = stream.class_layout_table(&sizes, &table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -493,7 +566,7 @@ impl<'a> Unpacker<'a> {
                 .collect_annotations(annotator)?;
         }
 
-        self.metadata()?.collect_annotations(annotator)?;
+        self.physical_metadata()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -658,13 +731,13 @@ impl<'a> Unpacker<'a> {
         Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 
-    pub fn metadata(&self) -> Result<MetadataUnpacker, Error> {
+    pub fn physical_metadata(&self) -> Result<PhysicalMetadataUnpacker, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value;
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
-        Ok(MetadataUnpacker { bytes })
+        Ok(PhysicalMetadataUnpacker { bytes })
     }
 }
 
@@ -1409,7 +1482,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataUnpacker<'a> {
+impl<'a> PhysicalMetadataUnpacker<'a> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -1552,6 +1625,7 @@ impl<'a> MetadataUnpacker<'a> {
         let mut string_stream = None;
         let mut tilde_stream = None;
         let mut blob_stream = None;
+        let mut guid_stream = None;
 
         for res in self.iter_stream_header()? {
             let header = res?;
@@ -1565,6 +1639,8 @@ impl<'a> MetadataUnpacker<'a> {
                 string_stream = Some(bytes);
             } else if header.name.value == "#Blob" {
                 blob_stream = Some(bytes);
+            } else if header.name.value == "#GUID" {
+                guid_stream = Some(bytes);
             }
         }
 
@@ -1574,11 +1650,14 @@ impl<'a> MetadataUnpacker<'a> {
             Err(Error::MissingStream("#Strings"))
         } else if blob_stream.is_none() {
             Err(Error::MissingStream("#Blob"))
+        } else if guid_stream.is_none() {
+            Err(Error::MissingStream("#GUID"))
         } else {
             Ok(TildeStreamUnpacker {
                 bytes: tilde_stream.unwrap(),
                 string_heap: string_stream.unwrap(),
                 blob_heap: blob_stream.unwrap(),
+                guid_heap: guid_stream.unwrap(),
             })
         }
     }
@@ -1621,6 +1700,7 @@ impl<'a> TildeStreamUnpacker<'a> {
             .name("sorted_table_bitfield");
 
         let sizes = self.metadata_sizes()?;
+        let table_sizes = self.metadata_table_sizes()?;
 
         self.iter_num_rows()?
             .try_for_each(|res| -> Result<_, Error> {
@@ -1632,18 +1712,18 @@ impl<'a> TildeStreamUnpacker<'a> {
                 Ok(())
             })?;
 
-        self.module_table(&sizes)?
+        self.module_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.type_ref_table(&sizes)?
+        self.type_ref_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        let field_table = self.field_table(&sizes)?;
-        let method_table = self.method_def_table(&sizes)?;
-        let param_table = self.param_table(&sizes)?;
-        self.type_def_table(&sizes)?
+        let field_table = self.field_table(&sizes, &table_sizes)?;
+        let method_table = self.method_def_table(&sizes, &table_sizes)?;
+        let param_table = self.param_table(&sizes, &table_sizes)?;
+        self.type_def_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| {
                 row.collect_annotations(
@@ -1654,27 +1734,27 @@ impl<'a> TildeStreamUnpacker<'a> {
                 )
             })?;
 
-        self.interface_impl_table(&sizes)?
+        self.interface_impl_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.member_ref_table(&sizes)?
+        self.member_ref_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.constant_table(&sizes)?
+        self.constant_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.custom_attribute_table(&sizes)?
+        self.custom_attribute_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.decl_security_table(&sizes)?
+        self.decl_security_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.class_layout_table(&sizes)?
+        self.class_layout_table(&sizes, &table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
@@ -1753,6 +1833,106 @@ impl<'a> TildeStreamUnpacker<'a> {
         Ok(iter)
     }
 
+    pub fn metadata_table_sizes(&self) -> Result<MetadataTableSizes, Error> {
+        let heap_sizes = {
+            let mut heap_sizes =
+                MetadataMap::<MetadataHeapKind, bool>::default();
+            let raw_heap_sizes = self.heap_sizes()?.value;
+            heap_sizes[MetadataHeapKind::String] =
+                raw_heap_sizes.string_stream_uses_u32_addr;
+            heap_sizes[MetadataHeapKind::GUID] =
+                raw_heap_sizes.guid_stream_uses_u32_addr;
+            heap_sizes[MetadataHeapKind::Blob] =
+                raw_heap_sizes.blob_stream_uses_u32_addr;
+            heap_sizes
+        };
+
+        let num_rows = {
+            let mut num_rows =
+                MetadataMap::<MetadataTableKind, usize>::default();
+            for res in self.iter_num_rows()? {
+                let (num_table_rows, kind) = res?;
+                num_rows[kind] = num_table_rows.value as usize;
+            }
+            num_rows
+        };
+
+        let index_size = {
+            let mut index_size =
+                MetadataMap::<MetadataIndexKind, usize>::default();
+            for heap_kind in MetadataHeapKind::iter_keys() {
+                index_size[heap_kind] =
+                    if heap_sizes[heap_kind] { 4 } else { 2 };
+            }
+
+            for table_kind in MetadataTableKind::iter_keys() {
+                index_size[table_kind] =
+                    if num_rows[table_kind] >= 65536 { 4 } else { 2 };
+            }
+
+            for coded_index_kind in MetadataCodedIndexKind::iter_keys() {
+                let max_rows = coded_index_kind
+                    .table_options()
+                    .iter()
+                    .cloned()
+                    .filter_map(|opt_index| opt_index)
+                    .map(|index| num_rows[index])
+                    .max()
+                    .expect("Coded index must contain at least one index.");
+                let row_bits =
+                    (max_rows + 1).next_power_of_two().ilog2() as usize;
+                let table_bits = coded_index_kind.table_bits();
+
+                index_size[coded_index_kind] =
+                    if row_bits + table_bits <= 16 { 2 } else { 4 };
+            }
+
+            index_size
+        };
+
+        let row_size = {
+            let mut row_size =
+                MetadataMap::<MetadataTableKind, usize>::default();
+            for table_kind in MetadataTableKind::iter_keys() {
+                row_size[table_kind] = table_kind
+                    .column_sizes()
+                    .iter()
+                    .cloned()
+                    .map(|column_type| match column_type {
+                        MetadataColumnType::Index(index) => index_size[index],
+                        MetadataColumnType::FixedSize(nbytes) => nbytes,
+                    })
+                    .sum();
+            }
+
+            row_size
+        };
+
+        let table_offsets = {
+            let mut table_offsets =
+                MetadataMap::<MetadataTableKind, usize>::default();
+
+            let num_tables =
+                self.valid_table_bitfield()?.value.count_ones() as usize;
+            let mut curr_offset = 24 + 4 * num_tables;
+            for res in self.iter_num_rows()? {
+                let (num_rows, kind) = res?;
+                let num_rows = num_rows.value as usize;
+                table_offsets[kind] = curr_offset;
+                curr_offset += num_rows * row_size[kind];
+            }
+
+            table_offsets
+        };
+
+        Ok(MetadataTableSizes {
+            num_rows,
+            index_size,
+            bytes_per_row: row_size,
+            table_offsets,
+        })
+    }
+
     pub fn metadata_sizes(&self) -> Result<MetadataSizes, Error> {
         let heap_sizes = self.heap_sizes()?.value;
         let mut metadata_sizes = MetadataSizes {
@@ -1804,14 +1984,28 @@ impl<'a> TildeStreamUnpacker<'a> {
     fn get_table<'b, Unpacker>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
     where
         Unpacker: RowUnpacker,
     {
-        let bytes = self.metadata_table_bytes(Unpacker::KIND, sizes)?;
+        let info = self.metadata_table_sizes()?;
+        let bytes = self.bytes.subrange(
+            info.table_offsets[Unpacker::KIND]
+                ..info.table_offsets[Unpacker::KIND]
+                    + info.num_rows[Unpacker::KIND]
+                        * info.bytes_per_row[Unpacker::KIND],
+        );
+
+        let old_bytes = self.metadata_table_bytes(Unpacker::KIND, sizes)?;
+
+        assert!(old_bytes.start == bytes.start);
+        assert!(old_bytes.end() == bytes.end());
+
         Ok(MetadataTableUnpacker {
-            bytes,
+            bytes: old_bytes,
             sizes,
+            table_sizes,
             string_heap: self.string_heap.clone(),
             blob_heap: self.blob_heap.clone(),
             row_unpacker: PhantomData,
@@ -1821,87 +2015,99 @@ impl<'a> TildeStreamUnpacker<'a> {
     pub fn module_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ModuleRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn type_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeRefRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn type_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeDefRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn field_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, FieldRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn method_def_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MethodDefRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn param_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ParamRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn interface_impl_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, InterfaceImplRowUnpacker>, Error>
     {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn member_ref_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn constant_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ConstantRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn custom_attribute_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, CustomAttributeRowUnpacker>, Error>
     {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn decl_security_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, DeclSecurityRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 
     pub fn class_layout_table<'b>(
         &'b self,
         sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ClassLayoutRowUnpacker>, Error> {
-        self.get_table(sizes)
+        self.get_table(sizes, table_sizes)
     }
 }
 
@@ -2248,6 +2454,716 @@ impl MetadataTableKind {
     }
 }
 
+impl EnumKey for MetadataHeapKind {
+    const N: usize = 3;
+
+    fn as_index(self) -> usize {
+        match self {
+            Self::String => 0,
+            Self::GUID => 1,
+            Self::Blob => 2,
+        }
+    }
+
+    fn iter_keys() -> impl Iterator<Item = Self> {
+        [Self::String, Self::GUID, Self::Blob].into_iter()
+    }
+}
+
+impl EnumKey for MetadataTableKind {
+    const N: usize = 38;
+
+    fn as_index(self) -> usize {
+        match self {
+            Self::Module => 0,
+            Self::TypeRef => 1,
+            Self::TypeDef => 2,
+            Self::Field => 3,
+            Self::MethodDef => 4,
+            Self::Param => 5,
+            Self::InterfaceImpl => 6,
+            Self::MemberRef => 7,
+            Self::Constant => 8,
+            Self::CustomAttribute => 9,
+            Self::FieldMarshal => 10,
+            Self::DeclSecurity => 11,
+            Self::ClassLayout => 12,
+            Self::FieldLayout => 13,
+            Self::StandAloneSig => 14,
+            Self::EventMap => 15,
+            Self::Event => 16,
+            Self::PropertyMap => 17,
+            Self::Property => 18,
+            Self::MethodSemantics => 19,
+            Self::MethodImpl => 20,
+            Self::ModuleRef => 21,
+            Self::TypeSpec => 22,
+            Self::ImplMap => 23,
+            Self::FieldRVA => 24,
+            Self::Assembly => 25,
+            Self::AssemblyProcessor => 26,
+            Self::AssemblyOS => 27,
+            Self::AssemblyRef => 28,
+            Self::AssemblyRefProcessor => 29,
+            Self::AssemblyRefOS => 30,
+            Self::File => 31,
+            Self::ExportedType => 32,
+            Self::ManifestResource => 33,
+            Self::NestedClass => 34,
+            Self::GenericParam => 35,
+            Self::MethodSpec => 36,
+            Self::GenericParamConstraint => 37,
+        }
+    }
+
+    fn iter_keys() -> impl Iterator<Item = Self> {
+        [
+            Self::Module,
+            Self::TypeRef,
+            Self::TypeDef,
+            Self::Field,
+            Self::MethodDef,
+            Self::Param,
+            Self::InterfaceImpl,
+            Self::MemberRef,
+            Self::Constant,
+            Self::CustomAttribute,
+            Self::FieldMarshal,
+            Self::DeclSecurity,
+            Self::ClassLayout,
+            Self::FieldLayout,
+            Self::StandAloneSig,
+            Self::EventMap,
+            Self::Event,
+            Self::PropertyMap,
+            Self::Property,
+            Self::MethodSemantics,
+            Self::MethodImpl,
+            Self::ModuleRef,
+            Self::TypeSpec,
+            Self::ImplMap,
+            Self::FieldRVA,
+            Self::Assembly,
+            Self::AssemblyProcessor,
+            Self::AssemblyOS,
+            Self::AssemblyRef,
+            Self::AssemblyRefProcessor,
+            Self::AssemblyRefOS,
+            Self::File,
+            Self::ExportedType,
+            Self::ManifestResource,
+            Self::NestedClass,
+            Self::GenericParam,
+            Self::MethodSpec,
+            Self::GenericParamConstraint,
+        ]
+        .into_iter()
+    }
+}
+
+impl EnumKey for MetadataCodedIndexKind {
+    const N: usize = 13;
+
+    fn as_index(self) -> usize {
+        match self {
+            Self::TypeDefOrRef => 0,
+            Self::HasConstant => 1,
+            Self::HasCustomAttribute => 2,
+            Self::HasFieldMarshal => 3,
+            Self::HasDeclSecurity => 4,
+            Self::MemberRefParent => 5,
+            Self::HasSemantics => 6,
+            Self::MethodDefOrRef => 7,
+            Self::MemberForwarded => 8,
+            Self::Implementation => 9,
+            Self::CustomAttributeType => 10,
+            Self::ResolutionScope => 11,
+            Self::TypeOrMethodDef => 12,
+        }
+    }
+
+    fn iter_keys() -> impl Iterator<Item = Self> {
+        [
+            Self::TypeDefOrRef,
+            Self::HasConstant,
+            Self::HasCustomAttribute,
+            Self::HasFieldMarshal,
+            Self::HasDeclSecurity,
+            Self::MemberRefParent,
+            Self::HasSemantics,
+            Self::MethodDefOrRef,
+            Self::MemberForwarded,
+            Self::Implementation,
+            Self::CustomAttributeType,
+            Self::ResolutionScope,
+            Self::TypeOrMethodDef,
+        ]
+        .into_iter()
+    }
+}
+
+impl EnumKey for MetadataIndexKind {
+    const N: usize = 3 + 38 + 13;
+
+    fn as_index(self) -> usize {
+        match self {
+            Self::Heap(heap_kind) => heap_kind.as_index(),
+            Self::Table(table_kind) => {
+                MetadataHeapKind::N + table_kind.as_index()
+            }
+            Self::CodedIndex(coded_index_kind) => {
+                MetadataTableKind::N
+                    + MetadataHeapKind::N
+                    + coded_index_kind.as_index()
+            }
+        }
+    }
+
+    fn iter_keys() -> impl Iterator<Item = Self> {
+        let heaps = MetadataHeapKind::iter_keys().map(Self::Heap);
+        let tables = MetadataTableKind::iter_keys().map(Self::Table);
+        let coded_indices =
+            MetadataCodedIndexKind::iter_keys().map(Self::CodedIndex);
+
+        std::iter::empty()
+            .chain(heaps)
+            .chain(tables)
+            .chain(coded_indices)
+    }
+}
+
+impl<Key, Value> std::ops::Index<Key> for MetadataMap<Key, Value>
+where
+    Key: EnumKey,
+{
+    type Output = Value;
+
+    fn index(&self, key: Key) -> &Self::Output {
+        &self.values[key.as_index()]
+    }
+}
+
+impl<Key, Value> std::ops::IndexMut<Key> for MetadataMap<Key, Value>
+where
+    Key: EnumKey,
+{
+    fn index_mut(&mut self, key: Key) -> &mut Self::Output {
+        &mut self.values[key.as_index()]
+    }
+}
+
+impl<Value> std::ops::Index<MetadataHeapKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    type Output = Value;
+
+    fn index(&self, index: MetadataHeapKind) -> &Self::Output {
+        &self[MetadataIndexKind::Heap(index)]
+    }
+}
+
+impl<Value> std::ops::IndexMut<MetadataHeapKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    fn index_mut(&mut self, index: MetadataHeapKind) -> &mut Self::Output {
+        &mut self[MetadataIndexKind::Heap(index)]
+    }
+}
+
+impl<Value> std::ops::Index<MetadataTableKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    type Output = Value;
+
+    fn index(&self, index: MetadataTableKind) -> &Self::Output {
+        &self[MetadataIndexKind::Table(index)]
+    }
+}
+
+impl<Value> std::ops::IndexMut<MetadataTableKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    fn index_mut(&mut self, index: MetadataTableKind) -> &mut Self::Output {
+        &mut self[MetadataIndexKind::Table(index)]
+    }
+}
+
+impl<Value> std::ops::Index<MetadataCodedIndexKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    type Output = Value;
+
+    fn index(&self, index: MetadataCodedIndexKind) -> &Self::Output {
+        &self[MetadataIndexKind::CodedIndex(index)]
+    }
+}
+
+impl<Value> std::ops::IndexMut<MetadataCodedIndexKind>
+    for MetadataMap<MetadataIndexKind, Value>
+{
+    fn index_mut(
+        &mut self,
+        index: MetadataCodedIndexKind,
+    ) -> &mut Self::Output {
+        &mut self[MetadataIndexKind::CodedIndex(index)]
+    }
+}
+
+impl MetadataCodedIndexKind {
+    fn table_options(self) -> &'static [Option<MetadataTableKind>] {
+        type Table = MetadataTableKind;
+        match self {
+            Self::TypeDefOrRef => &[
+                Some(Table::TypeDef),
+                Some(Table::TypeRef),
+                Some(Table::TypeSpec),
+            ],
+            Self::HasConstant => &[
+                Some(Table::Field),
+                Some(Table::Param),
+                Some(Table::Property),
+            ],
+            Self::HasCustomAttribute => &[
+                Some(Table::MethodDef),
+                Some(Table::Field),
+                Some(Table::TypeRef),
+                Some(Table::TypeDef),
+                Some(Table::Param),
+                Some(Table::InterfaceImpl),
+                Some(Table::MemberRef),
+                Some(Table::Module),
+                // This option is listed as "Permission" in II.24.2.6 of
+                // ECMA-335, but no such metadata table exists.  It looks like
+                // it might be a holdover from an earlier draft.  For now,
+                // assuming that it refers to the "DeclSecurity" table, which
+                // handles object permissions.
+                Some(Table::DeclSecurity),
+                Some(Table::Property),
+                Some(Table::Event),
+                Some(Table::StandAloneSig),
+                Some(Table::ModuleRef),
+                Some(Table::TypeSpec),
+                Some(Table::Assembly),
+                Some(Table::AssemblyRef),
+                Some(Table::File),
+                Some(Table::ExportedType),
+                Some(Table::ManifestResource),
+                Some(Table::GenericParam),
+                Some(Table::GenericParamConstraint),
+                Some(Table::MethodSpec),
+            ],
+            Self::HasFieldMarshal => &[Some(Table::Field), Some(Table::Param)],
+            Self::HasDeclSecurity => &[
+                Some(Table::TypeDef),
+                Some(Table::MethodDef),
+                Some(Table::Assembly),
+            ],
+            Self::MemberRefParent => &[
+                Some(Table::TypeDef),
+                Some(Table::TypeRef),
+                Some(Table::ModuleRef),
+                Some(Table::MethodDef),
+                Some(Table::TypeSpec),
+            ],
+            Self::HasSemantics => &[Some(Table::Event), Some(Table::Property)],
+            Self::MethodDefOrRef => {
+                &[Some(Table::MethodDef), Some(Table::MemberRef)]
+            }
+            Self::MemberForwarded => {
+                &[Some(Table::Field), Some(Table::MethodDef)]
+            }
+            Self::Implementation => &[
+                Some(Table::File),
+                Some(Table::AssemblyRef),
+                Some(Table::ExportedType),
+            ],
+            Self::CustomAttributeType => &[
+                None,
+                None,
+                Some(Table::MethodDef),
+                Some(Table::MemberRef),
+                None,
+            ],
+            Self::ResolutionScope => &[
+                Some(Table::Module),
+                Some(Table::ModuleRef),
+                Some(Table::AssemblyRef),
+                Some(Table::TypeRef),
+            ],
+            Self::TypeOrMethodDef => {
+                &[Some(Table::TypeDef), Some(Table::MethodDef)]
+            }
+        }
+    }
+
+    fn table_bits(self) -> usize {
+        self.table_options().len().next_power_of_two().ilog2() as usize
+    }
+}
+
+impl From<usize> for MetadataColumnType {
+    fn from(value: usize) -> Self {
+        Self::FixedSize(value)
+    }
+}
+impl From<MetadataHeapKind> for MetadataColumnType {
+    fn from(value: MetadataHeapKind) -> Self {
+        Self::Index(MetadataIndexKind::Heap(value))
+    }
+}
+impl From<MetadataTableKind> for MetadataColumnType {
+    fn from(value: MetadataTableKind) -> Self {
+        Self::Index(MetadataIndexKind::Table(value))
+    }
+}
+impl From<MetadataCodedIndexKind> for MetadataColumnType {
+    fn from(value: MetadataCodedIndexKind) -> Self {
+        Self::Index(MetadataIndexKind::CodedIndex(value))
+    }
+}
+
+impl MetadataTableKind {
+    fn column_sizes(self) -> &'static [MetadataColumnType] {
+        macro_rules! field {
+            (String) => {
+                MetadataColumnType::Index(MetadataIndexKind::Heap(
+                    MetadataHeapKind::String,
+                ))
+            };
+
+            (GUID) => {
+                MetadataColumnType::Index(MetadataIndexKind::Heap(
+                    MetadataHeapKind::GUID,
+                ))
+            };
+            (Blob) => {
+                MetadataColumnType::Index(MetadataIndexKind::Heap(
+                    MetadataHeapKind::Blob,
+                ))
+            };
+
+            (Module             ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Module,
+                ))
+            };
+            (TypeRef            ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::TypeRef,
+                ))
+            };
+            (TypeDef            ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::TypeDef,
+                ))
+            };
+            (Field              ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Field,
+                ))
+            };
+            (MethodDef          ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::MethodDef,
+                ))
+            };
+            (Param              ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Param,
+                ))
+            };
+            (InterfaceImpl      ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::InterfaceImpl,
+                ))
+            };
+            (MemberRef          ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::MemberRef,
+                ))
+            };
+            (Constant           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Constant,
+                ))
+            };
+            (CustomAttribute    ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::CustomAttribute,
+                ))
+            };
+            (FieldMarshal       ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::FieldMarshal,
+                ))
+            };
+            (DeclSecurity       ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::DeclSecurity,
+                ))
+            };
+            (ClassLayout        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::ClassLayout,
+                ))
+            };
+            (FieldLayout        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::FieldLayout,
+                ))
+            };
+            (StandAloneSig      ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::StandAloneSig,
+                ))
+            };
+            (EventMap           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::EventMap,
+                ))
+            };
+            (Event              ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Event,
+                ))
+            };
+            (PropertyMap        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::PropertyMap,
+                ))
+            };
+            (Property           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Property,
+                ))
+            };
+            (MethodSemantics    ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::MethodSemantics,
+                ))
+            };
+            (MethodImpl         ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::MethodImpl,
+                ))
+            };
+            (ModuleRef          ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::ModuleRef,
+                ))
+            };
+            (TypeSpec           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::TypeSpec,
+                ))
+            };
+            (ImplMap            ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::ImplMap,
+                ))
+            };
+            (FieldRVA           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::FieldRVA,
+                ))
+            };
+            (Assembly           ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::Assembly,
+                ))
+            };
+            (AssemblyProcessor  ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::AssemblyProcessor,
+                ))
+            };
+            (AssemblyOS         ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::AssemblyOS,
+                ))
+            };
+            (AssemblyRef        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::AssemblyRef,
+                ))
+            };
+            (AssemblyRefProcessor) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::AssemblyRefProcessor,
+                ))
+            };
+            (AssemblyRefOS      ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::AssemblyRefOS,
+                ))
+            };
+            (File               ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::File,
+                ))
+            };
+            (ExportedType       ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::ExportedType,
+                ))
+            };
+            (ManifestResource   ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::ManifestResource,
+                ))
+            };
+            (NestedClass        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::NestedClass,
+                ))
+            };
+            (GenericParam       ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::GenericParam,
+                ))
+            };
+            (MethodSpec         ) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::MethodSpec,
+                ))
+            };
+            (GenericParamConstraint) => {
+                MetadataColumnType::Index(MetadataIndexKind::Table(
+                    MetadataTableKind::GenericParamConstraint,
+                ))
+            };
+
+            (TypeDefOrRef        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::TypeDefOrRef,
+                ))
+            };
+            (HasConstant         ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::HasConstant,
+                ))
+            };
+            (HasCustomAttribute  ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::HasCustomAttribute,
+                ))
+            };
+            (HasFieldMarshal     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::HasFieldMarshal,
+                ))
+            };
+            (HasDeclSecurity     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::HasDeclSecurity,
+                ))
+            };
+            (MemberRefParent     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::MemberRefParent,
+                ))
+            };
+            (HasSemantics        ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::HasSemantics,
+                ))
+            };
+            (MethodDefOrRef      ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::MethodDefOrRef,
+                ))
+            };
+            (MemberForwarded     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::MemberForwarded,
+                ))
+            };
+            (Implementation      ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::Implementation,
+                ))
+            };
+            (CustomAttributeType ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::CustomAttributeType,
+                ))
+            };
+            (ResolutionScope     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::ResolutionScope,
+                ))
+            };
+            (TypeOrMethodDef     ) => {
+                MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
+                    MetadataCodedIndexKind::TypeOrMethodDef,
+                ))
+            };
+
+            ($bytes:literal) => {
+                MetadataColumnType::FixedSize($bytes)
+            };
+        }
+        macro_rules! fields{
+            ( $( $field:tt ),+ ) => {
+                &[
+                    $( field!{$field} ),+
+                ]
+            };
+        }
+
+        match self {
+            Self::Module => fields![2, String, GUID, GUID, GUID],
+            Self::TypeRef => fields![ResolutionScope, String, String],
+            Self::TypeDef => {
+                fields![4, String, String, TypeDefOrRef, Field, MethodDef]
+            }
+            Self::Field => fields![2, String, Blob],
+            Self::MethodDef => fields![4, 2, 2, String, Blob, Param],
+            Self::Param => fields![2, 2, String],
+            Self::InterfaceImpl => fields![TypeDef, TypeDefOrRef],
+            Self::MemberRef => fields![MemberRefParent, String, Blob],
+            Self::Constant => fields![1, 1, HasConstant, Blob],
+            Self::CustomAttribute => {
+                fields![HasCustomAttribute, CustomAttributeType, Blob]
+            }
+            Self::FieldMarshal => fields![HasFieldMarshal, Blob],
+            Self::DeclSecurity => fields![2, HasDeclSecurity, Blob],
+            Self::ClassLayout => fields![2, 4, TypeDef],
+            Self::FieldLayout => fields![4, Field],
+            Self::StandAloneSig => fields![Blob],
+            Self::EventMap => fields![TypeDef, Event],
+            Self::Event => fields![2, String, TypeDefOrRef],
+            Self::PropertyMap => fields![TypeDef, Property],
+            Self::Property => fields![2, String, Blob],
+            Self::MethodSemantics => fields![2, MethodDef, HasSemantics],
+            Self::MethodImpl => {
+                fields![TypeDef, MethodDefOrRef, MethodDefOrRef]
+            }
+            Self::ModuleRef => fields![String],
+            Self::TypeSpec => fields![Blob],
+            Self::ImplMap => fields![2, MemberForwarded, String, ModuleRef],
+            Self::FieldRVA => fields![4, Field],
+            Self::Assembly => fields![4, 2, 2, 2, 2, 4, Blob, String, String],
+            Self::AssemblyProcessor => fields![4],
+            Self::AssemblyOS => fields![4, 4, 4],
+            Self::AssemblyRef => {
+                fields![2, 2, 2, 2, 4, Blob, String, String, Blob]
+            }
+            Self::AssemblyRefProcessor => fields![4, AssemblyRef],
+            Self::AssemblyRefOS => fields![4, 4, 4, AssemblyRef],
+            Self::File => fields![4, String, Blob],
+            Self::ExportedType => {
+                fields![4, TypeDef, String, String, Implementation]
+            }
+            Self::ManifestResource => fields![4, 4, String, Implementation],
+            Self::NestedClass => fields![TypeDef, TypeDef],
+            Self::GenericParam => fields![2, 2, TypeOrMethodDef, String],
+            Self::MethodSpec => fields![MethodDefOrRef, Blob],
+            Self::GenericParamConstraint => fields![GenericParam, TypeDefOrRef],
+        }
+    }
+}
+
 impl std::ops::Index<MetadataTableKind> for MetadataSizes {
     type Output = u32;
 
@@ -2436,9 +3352,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         'a: 'b,
         Unpacker: RowUnpacker,
     {
-        let kind = Unpacker::KIND;
-        let num_rows = self.sizes.num_rows(kind);
-        let bytes_per_row = kind.bytes_per_row(self.sizes);
+        let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
+        let bytes_per_row = self.table_sizes.bytes_per_row[Unpacker::KIND];
         (0..num_rows).map(move |i_row| {
             let bytes = self
                 .bytes
@@ -2452,6 +3367,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 next_row_bytes,
                 sizes: self.sizes,
+                table_sizes: self.table_sizes,
                 string_heap: self.string_heap.clone(),
                 blob_heap: self.blob_heap.clone(),
                 row_unpacker: self.row_unpacker,
@@ -2467,9 +3383,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: RowUnpacker,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.sizes[kind] as usize;
-
-        let bytes_per_row = kind.bytes_per_row(self.sizes) as usize;
+        let num_rows = self.table_sizes.num_rows[kind];
+        let bytes_per_row = self.table_sizes.bytes_per_row[kind];
 
         if indices.end <= num_rows {
             Ok(self.bytes.address_range(
@@ -2492,10 +3407,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: RowUnpacker,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.sizes.num_rows(kind);
+        let num_rows = self.table_sizes.num_rows[kind];
 
         if index < num_rows {
-            let bytes_per_row = kind.bytes_per_row(self.sizes);
+            let bytes_per_row = self.table_sizes.bytes_per_row[kind];
             let bytes = self
                 .bytes
                 .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
@@ -2508,6 +3423,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 next_row_bytes,
                 sizes: self.sizes,
+                table_sizes: self.table_sizes,
                 string_heap: self.string_heap.clone(),
                 blob_heap: self.blob_heap.clone(),
                 row_unpacker: self.row_unpacker,
