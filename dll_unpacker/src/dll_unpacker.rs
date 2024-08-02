@@ -781,7 +781,7 @@ impl<'a> ByteRange<'a> {
         })
     }
 
-    fn as_heap_index(&self) -> UnpackedValue<usize> {
+    fn as_simple_index(&self) -> UnpackedValue<usize> {
         if self.len() == 2 {
             self.as_u16().map(|val| val as usize)
         } else if self.len() == 4 {
@@ -801,7 +801,7 @@ impl<'a> ByteRange<'a> {
     {
         let table_bits = N.next_power_of_two().ilog2() as usize;
 
-        let UnpackedValue { value, loc } = self.as_heap_index();
+        let UnpackedValue { value, loc } = self.as_simple_index();
 
         let table_mask = (1 << table_bits) - 1;
         let table_index = value & table_mask;
@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.class_layout_table(&table_sizes)?;
+        let table = stream.event_map_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2143,11 +2143,27 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.field_marshal_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         self.decl_security_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.class_layout_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.field_layout_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.stand_alone_sig_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.event_map_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
@@ -2437,6 +2453,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         self.get_table(table_sizes)
     }
 
+    pub fn field_marshal_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, FieldMarshalRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
     pub fn decl_security_table<'b>(
         &'b self,
         table_sizes: &'b MetadataTableSizes,
@@ -2448,6 +2471,28 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ClassLayoutRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn field_layout_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, FieldLayoutRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn stand_alone_sig_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, StandAloneSigRowUnpacker>, Error>
+    {
+        self.get_table(table_sizes)
+    }
+
+    pub fn event_map_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, EventMapRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -3213,7 +3258,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 
     pub fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(1).as_heap_index())
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3222,15 +3267,15 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 
     pub fn module_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 
     pub fn enc_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(3).as_heap_index())
+        Ok(self.get_field_bytes(3).as_simple_index())
     }
 
     pub fn enc_base_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(4).as_heap_index())
+        Ok(self.get_field_bytes(4).as_simple_index())
     }
 }
 
@@ -3269,7 +3314,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(1).as_heap_index())
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3278,7 +3323,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3400,7 +3445,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(1).as_heap_index())
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3409,7 +3454,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3431,7 +3476,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 let range = begin_bytes.start - self.bytes.start
                     ..begin_bytes.end() - self.bytes.start;
                 let end_bytes = next_row.subrange(range);
-                end_bytes.as_heap_index().value
+                end_bytes.as_simple_index().value
             })
             .unwrap_or_else(|| {
                 self.table_sizes.num_rows[MetadataTableKind::Field]
@@ -3440,7 +3485,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         let UnpackedValue {
             value: begin_index,
             loc,
-        } = begin_bytes.as_heap_index();
+        } = begin_bytes.as_simple_index();
 
         Ok(UnpackedValue {
             value: begin_index..end_index,
@@ -3457,7 +3502,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 let range = begin_bytes.start - self.bytes.start
                     ..begin_bytes.end() - self.bytes.start;
                 let end_bytes = next_row.subrange(range);
-                end_bytes.as_heap_index().value
+                end_bytes.as_simple_index().value
             })
             .unwrap_or_else(|| {
                 self.table_sizes.num_rows[MetadataTableKind::MethodDef]
@@ -3466,7 +3511,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         let UnpackedValue {
             value: begin_index,
             loc,
-        } = begin_bytes.as_heap_index();
+        } = begin_bytes.as_simple_index();
 
         Ok(UnpackedValue {
             value: begin_index..end_index,
@@ -3509,7 +3554,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(1).as_heap_index())
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3518,7 +3563,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 }
 
@@ -3606,7 +3651,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(3).as_heap_index())
+        Ok(self.get_field_bytes(3).as_simple_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3615,7 +3660,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(4).as_heap_index())
+        Ok(self.get_field_bytes(4).as_simple_index())
     }
 
     fn param_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
@@ -3627,7 +3672,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
                 let range = begin_bytes.start - self.bytes.start
                     ..begin_bytes.end() - self.bytes.start;
                 let end_bytes = next_row.subrange(range);
-                end_bytes.as_heap_index().value
+                end_bytes.as_simple_index().value
             })
             .unwrap_or_else(|| {
                 self.table_sizes.num_rows[MetadataTableKind::Param]
@@ -3636,7 +3681,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
         let UnpackedValue {
             value: begin_index,
             loc,
-        } = begin_bytes.as_heap_index();
+        } = begin_bytes.as_simple_index();
 
         Ok(UnpackedValue {
             value: begin_index..end_index,
@@ -3677,7 +3722,7 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
@@ -3698,7 +3743,7 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
     }
 
     fn class_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(0).as_heap_index())
+        Ok(self.get_field_bytes(0).as_simple_index())
     }
 
     fn interface(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
@@ -3741,7 +3786,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(1).as_heap_index())
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3750,7 +3795,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 }
 
@@ -3782,7 +3827,7 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
     }
 
     fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(3).as_heap_index())
+        Ok(self.get_field_bytes(3).as_simple_index())
     }
 }
 
@@ -3814,7 +3859,30 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
     }
 
     fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, FieldMarshalRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.parent_index()?).name("Parent");
+        annotator
+            .value(self.native_type_index()?)
+            .name("Native type");
+
+        Ok(())
+    }
+
+    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(0)
+            .as_coded_index(MetadataTableKind::HAS_FIELD_MARSHAL)
+    }
+
+    fn native_type_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
     }
 }
 
@@ -3847,7 +3915,7 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
     }
 
     fn permission_set_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 }
 
@@ -3872,6 +3940,91 @@ impl<'a> MetadataRowUnpacker<'a, ClassLayoutRowUnpacker> {
     }
 
     fn type_def_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        Ok(self.get_field_bytes(2).as_heap_index())
+        Ok(self.get_field_bytes(2).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, FieldLayoutRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.offset()?).name("Offset");
+        annotator.value(self.field_index()?).name("Field");
+
+        Ok(())
+    }
+
+    fn offset(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(0).as_u32())
+    }
+
+    fn field_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.signature_index()?).name("Signature");
+
+        Ok(())
+    }
+
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.parent_index()?).name("Parent");
+
+        let event_indices = self.event_indices()?;
+        annotator
+            .range(event_indices.loc)
+            .name("event_indices")
+            .value(format!(
+                "{}..{}",
+                event_indices.value.start, event_indices.value.end
+            ));
+
+        Ok(())
+    }
+
+    fn parent_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn event_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
+        let begin_bytes = self.get_field_bytes(1);
+        let end_index = self
+            .next_row_bytes
+            .as_ref()
+            .map(|next_row| {
+                let range = begin_bytes.start - self.bytes.start
+                    ..begin_bytes.end() - self.bytes.start;
+                let end_bytes = next_row.subrange(range);
+                end_bytes.as_simple_index().value
+            })
+            .unwrap_or_else(|| {
+                self.table_sizes.num_rows[MetadataTableKind::Event]
+            });
+
+        let UnpackedValue {
+            value: begin_index,
+            loc,
+        } = begin_bytes.as_simple_index();
+
+        Ok(UnpackedValue {
+            value: begin_index..end_index,
+            loc,
+        })
     }
 }
