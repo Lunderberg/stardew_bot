@@ -3201,6 +3201,41 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
         self.bytes.subrange(offset..offset + size)
     }
 
+    fn get_index_range(&self, column: usize) -> UnpackedValue<Range<usize>>
+    where
+        Unpacker: RowUnpacker,
+    {
+        let begin_bytes = self.get_field_bytes(column);
+        let end_index = self
+            .next_row_bytes
+            .as_ref()
+            .map(|next_row| {
+                let range = begin_bytes.start - self.bytes.start
+                    ..begin_bytes.end() - self.bytes.start;
+                let end_bytes = next_row.subrange(range);
+                end_bytes.as_simple_index().value
+            })
+            .unwrap_or_else(|| {
+                let MetadataColumnType::Index(MetadataIndexKind::Table(
+                    table_kind,
+                )) = Unpacker::COLUMNS[column]
+                else {
+                    panic!("Only simple indices are used as ranges")
+                };
+                self.table_sizes.num_rows[table_kind]
+            });
+
+        let UnpackedValue {
+            value: begin_index,
+            loc,
+        } = begin_bytes.as_simple_index();
+
+        UnpackedValue {
+            value: begin_index..end_index,
+            loc,
+        }
+    }
+
     pub fn get_blob<'b>(&'b self, index: usize) -> Result<ByteRange, Error> {
         let byte: u8 = self.blob_heap[index];
 
@@ -3468,55 +3503,11 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn field_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let begin_bytes = self.get_field_bytes(4);
-        let end_index = self
-            .next_row_bytes
-            .as_ref()
-            .map(|next_row| {
-                let range = begin_bytes.start - self.bytes.start
-                    ..begin_bytes.end() - self.bytes.start;
-                let end_bytes = next_row.subrange(range);
-                end_bytes.as_simple_index().value
-            })
-            .unwrap_or_else(|| {
-                self.table_sizes.num_rows[MetadataTableKind::Field]
-            });
-
-        let UnpackedValue {
-            value: begin_index,
-            loc,
-        } = begin_bytes.as_simple_index();
-
-        Ok(UnpackedValue {
-            value: begin_index..end_index,
-            loc,
-        })
+        Ok(self.get_index_range(4))
     }
 
     fn method_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let begin_bytes = self.get_field_bytes(5);
-        let end_index = self
-            .next_row_bytes
-            .as_ref()
-            .map(|next_row| {
-                let range = begin_bytes.start - self.bytes.start
-                    ..begin_bytes.end() - self.bytes.start;
-                let end_bytes = next_row.subrange(range);
-                end_bytes.as_simple_index().value
-            })
-            .unwrap_or_else(|| {
-                self.table_sizes.num_rows[MetadataTableKind::MethodDef]
-            });
-
-        let UnpackedValue {
-            value: begin_index,
-            loc,
-        } = begin_bytes.as_simple_index();
-
-        Ok(UnpackedValue {
-            value: begin_index..end_index,
-            loc,
-        })
+        Ok(self.get_index_range(5))
     }
 }
 
@@ -4003,28 +3994,6 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
     }
 
     fn event_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let begin_bytes = self.get_field_bytes(1);
-        let end_index = self
-            .next_row_bytes
-            .as_ref()
-            .map(|next_row| {
-                let range = begin_bytes.start - self.bytes.start
-                    ..begin_bytes.end() - self.bytes.start;
-                let end_bytes = next_row.subrange(range);
-                end_bytes.as_simple_index().value
-            })
-            .unwrap_or_else(|| {
-                self.table_sizes.num_rows[MetadataTableKind::Event]
-            });
-
-        let UnpackedValue {
-            value: begin_index,
-            loc,
-        } = begin_bytes.as_simple_index();
-
-        Ok(UnpackedValue {
-            value: begin_index..end_index,
-            loc,
-        })
+        Ok(self.get_index_range(1))
     }
 }
