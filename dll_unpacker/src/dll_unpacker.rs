@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.property_table(&table_sizes)?;
+        let table = stream.method_semantics_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2179,6 +2179,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.method_semantics_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2526,6 +2530,14 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, PropertyRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn method_semantics_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, MethodSemanticsRowUnpacker>, Error>
+    {
         self.get_table(table_sizes)
     }
 }
@@ -4150,5 +4162,31 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
         Ok(self.get_field_bytes(2).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.semantics()?).name("Semantics");
+        annotator.value(self.method_index()?).name("Method");
+        annotator.value(self.association()?).name("Association");
+
+        Ok(())
+    }
+
+    fn semantics(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn method_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+
+    fn association(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(2)
+            .as_coded_index(MetadataTableKind::HAS_SEMANTICS)
     }
 }
