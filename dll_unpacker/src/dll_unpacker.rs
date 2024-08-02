@@ -3154,14 +3154,21 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         let kind = Unpacker::KIND;
         let num_rows = self.table_sizes.num_rows[kind];
 
-        if index < num_rows {
+        assert!(index > 0);
+
+        if index == 0 {
+            panic!(
+                "Index of zero indicates an absent optional field, \
+                 not yet handled."
+            )
+        } else if index <= num_rows {
             let bytes_per_row = self.table_sizes.bytes_per_row[kind];
             let bytes = self
                 .bytes
-                .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
+                .subrange((index - 1) * bytes_per_row..index * bytes_per_row);
             let next_row_bytes = (index + 1 < num_rows).then(|| {
                 self.bytes.subrange(
-                    (index + 1) * bytes_per_row..(index + 2) * bytes_per_row,
+                    index * bytes_per_row..(index + 1) * bytes_per_row,
                 )
             });
             Ok(MetadataRowUnpacker {
