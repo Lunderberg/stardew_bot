@@ -2199,6 +2199,38 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.field_rva_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.assembly_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.assembly_ref_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.manifest_resource_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.nested_class_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.generic_param_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.method_spec_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.generic_param_constraint_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2582,6 +2614,66 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ImplMapRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn field_rva_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, FieldRVARowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn assembly_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, AssemblyRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn assembly_ref_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, AssemblyRefRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn manifest_resource_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ManifestResourceRowUnpacker>, Error>
+    {
+        self.get_table(table_sizes)
+    }
+
+    pub fn nested_class_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, NestedClassRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn generic_param_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, GenericParamRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn method_spec_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, MethodSpecRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn generic_param_constraint_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<
+        MetadataTableUnpacker<'b, GenericParamConstraintRowUnpacker>,
+        Error,
+    > {
         self.get_table(table_sizes)
     }
 }
@@ -4360,5 +4452,365 @@ impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
 
     fn import_scope_index(&self) -> Result<UnpackedValue<usize>, Error> {
         Ok(self.get_field_bytes(2).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, FieldRVARowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.rva()?).name("RVA");
+        annotator.value(self.field_index()?).name("Field");
+
+        Ok(())
+    }
+
+    fn rva(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(0).as_u32())
+    }
+
+    fn field_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator
+            .value(self.hash_algorithm_id()?)
+            .name("Hash algorithm");
+        annotator.value(self.major_version()?).name("Major version");
+        annotator.value(self.minor_version()?).name("Minor version");
+        annotator.value(self.build_number()?).name("Build number");
+        annotator
+            .value(self.revision_number()?)
+            .name("Revision number");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        let public_key_index = self.public_key_index()?;
+        annotator.value(public_key_index.clone()).name("Public key");
+        annotator
+            .range(self.get_blob(public_key_index.value)?.as_range())
+            .name(format!("Public key, '{name}' assembly"));
+
+        Ok(())
+    }
+
+    fn hash_algorithm_id(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(0).as_u32())
+    }
+
+    fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(1).as_u16())
+    }
+
+    fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(2).as_u16())
+    }
+
+    fn build_number(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(3).as_u16())
+    }
+
+    fn revision_number(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(4).as_u16())
+    }
+
+    fn public_key_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(5).as_simple_index())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(6).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.major_version()?).name("Major version");
+        annotator.value(self.minor_version()?).name("Minor version");
+        annotator.value(self.build_number()?).name("Build number");
+        annotator
+            .value(self.revision_number()?)
+            .name("Revision number");
+
+        annotator.value(self.flags()?).name("Flags");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        let culture = self.culture()?.value;
+        {
+            let index = self.culture_index()?;
+            annotator
+                .range(index.loc)
+                .name("culture")
+                .value(format!("{}\n{}", index.value, culture));
+        }
+
+        let public_key_or_token_index = self.public_key_or_token_index()?;
+        annotator
+            .value(public_key_or_token_index.clone())
+            .name("Public key/token");
+        annotator
+            .range(self.get_blob(public_key_or_token_index.value)?.as_range())
+            .name(format!("Public key/token, '{name}' AssemblyRef"));
+
+        let hash_value_index = self.hash_value_index()?;
+        annotator.value(hash_value_index.clone()).name("Hash value");
+        annotator
+            .range(self.get_blob(hash_value_index.value)?.as_range())
+            .name(format!("HashValue, '{name}' AssemblyRef"));
+
+        Ok(())
+    }
+
+    fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(1).as_u16())
+    }
+
+    fn build_number(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(2).as_u16())
+    }
+
+    fn revision_number(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(3).as_u16())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(4).as_u32())
+    }
+
+    fn public_key_or_token_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(5).as_simple_index())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(6).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn culture_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(7).as_simple_index())
+    }
+
+    fn culture(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.culture_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn hash_value_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(8).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, ManifestResourceRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.offset()?).name("Offset");
+        annotator.value(self.flags()?).name("Flags");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        annotator
+            .value(self.implementation_index()?)
+            .name("Implementation");
+
+        Ok(())
+    }
+
+    fn offset(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(0).as_u32())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
+        Ok(self.get_field_bytes(1).as_u32())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(2).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn implementation_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        // TODO: When switching from `usize` to typed indices, this
+        // field may require special handling.  ECMA-335 (section
+        // II.22.24) explicitly calls it out as optional, and that an
+        // index of zero refers to a location within the current file.
+        //
+        // If it references the current file, `offset` is the number
+        // of bytes relative to the `Resources` entry of the CLR
+        // header. (`dll_unpacker.clr_runtime_header()?.resource()`,
+        // adjusted by `dll_unpacker.virtual_address_to_raw`)
+        self.get_field_bytes(3)
+            .as_coded_index(MetadataTableKind::IMPLEMENTATION)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, NestedClassRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator
+            .value(self.nested_class_index()?)
+            .name("Nested class");
+        annotator
+            .value(self.enclosing_class_index()?)
+            .name("Enclosing class");
+
+        Ok(())
+    }
+
+    fn nested_class_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn enclosing_class_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, GenericParamRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.number()?).name("Param number");
+        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.owner_index()?).name("Owner index");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        Ok(())
+    }
+
+    fn number(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(1).as_u16())
+    }
+
+    fn owner_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(2)
+            .as_coded_index(MetadataTableKind::TYPE_OR_METHOD_DEF)
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(3).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.method_index()?).name("Method");
+
+        let instantiation_index = self.instantiation_index()?;
+        annotator
+            .value(instantiation_index.clone())
+            .name("Instantiation");
+        annotator
+            .range(self.get_blob(instantiation_index.value)?.as_range())
+            .name("MethodSpec instantiation");
+
+        Ok(())
+    }
+
+    fn method_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(0)
+            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    }
+
+    fn instantiation_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, GenericParamConstraintRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator
+            .value(self.generic_param_index()?)
+            .name("Generic param");
+        annotator.value(self.constraint_index()?).name("Constraint");
+
+        Ok(())
+    }
+
+    fn generic_param_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn constraint_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
     }
 }
