@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.event_table(&table_sizes)?;
+        let table = stream.property_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2171,6 +2171,14 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.property_map_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.property_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2504,6 +2512,20 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, EventRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn property_map_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, PropertyMapRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn property_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, PropertyRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -3978,7 +4000,11 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.signature_index()?).name("Signature");
+        let signature_index = self.signature_index()?;
+        annotator.value(signature_index.clone()).name("Signature");
+        annotator
+            .range(self.get_blob(signature_index.value)?.as_range())
+            .name("StandAloneSig signature");
 
         Ok(())
     }
@@ -4053,5 +4079,76 @@ impl<'a> MetadataRowUnpacker<'a, EventRowUnpacker> {
     fn event_type(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
         self.get_field_bytes(2)
             .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.parent_index()?).name("Parent");
+
+        let property_indices = self.property_indices()?;
+        annotator
+            .range(property_indices.loc)
+            .name("property_indices")
+            .value(format!(
+                "{}..{}",
+                property_indices.value.start, property_indices.value.end
+            ));
+
+        Ok(())
+    }
+
+    fn parent_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn property_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
+        Ok(self.get_index_range(1))
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.flags()?).name("Flags");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        let signature_index = self.signature_index()?;
+        annotator.value(signature_index.clone()).name("Signature");
+        annotator
+            .range(self.get_blob(signature_index.value)?.as_range())
+            .name("Property signature");
+
+        Ok(())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 }
