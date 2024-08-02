@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.type_spec_table(&table_sizes)?;
+        let table = stream.impl_map_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2195,6 +2195,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.impl_map_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2571,6 +2575,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeSpecRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn impl_map_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ImplMapRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -4300,5 +4311,54 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
         Ok(self.get_field_bytes(0).as_simple_index())
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.mapping_flags()?).name("Mapping flags");
+        annotator
+            .value(self.member_forwarded()?)
+            .name("Member forwarded");
+
+        let import_name = self.import_name()?.value;
+        {
+            let index = self.import_name_index()?;
+            annotator
+                .range(index.loc)
+                .name("Import name")
+                .value(format!("{}\n{}", index.value, import_name));
+        }
+
+        annotator
+            .value(self.import_scope_index()?)
+            .name("Import scope");
+
+        Ok(())
+    }
+
+    fn mapping_flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn member_forwarded(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::MEMBER_FORWARDED)
+    }
+
+    fn import_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(2).as_simple_index())
+    }
+
+    fn import_name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.import_name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn import_scope_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(2).as_simple_index())
     }
 }
