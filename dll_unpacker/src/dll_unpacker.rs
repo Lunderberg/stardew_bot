@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.module_ref_table(&table_sizes)?;
+        let table = stream.type_spec_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2191,6 +2191,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.type_spec_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2560,6 +2564,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ModuleRefRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn type_spec_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, TypeSpecRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -4270,5 +4281,24 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRefRowUnpacker> {
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
         let index = self.name_index()?.value;
         self.string_heap.get_null_terminated(index)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        let signature_index = self.signature_index()?;
+        annotator.value(signature_index.clone()).name("Signature");
+        annotator
+            .range(self.get_blob(signature_index.value)?.as_range())
+            .name("TypeSpec signature");
+
+        Ok(())
+    }
+
+    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
     }
 }
