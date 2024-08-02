@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.method_impl_table(&table_sizes)?;
+        let table = stream.module_ref_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2187,6 +2187,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.module_ref_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2549,6 +2553,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MethodImplRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn module_ref_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, ModuleRefRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -4232,5 +4243,32 @@ impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
     ) -> Result<UnpackedValue<MetadataIndex>, Error> {
         self.get_field_bytes(2)
             .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, ModuleRefRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        Ok(())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
     }
 }
