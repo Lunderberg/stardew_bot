@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.method_semantics_table(&table_sizes)?;
+        let table = stream.method_impl_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2183,6 +2183,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.method_impl_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2538,6 +2542,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MethodSemanticsRowUnpacker>, Error>
     {
+        self.get_table(table_sizes)
+    }
+
+    pub fn method_impl_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, MethodImplRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -4188,5 +4199,38 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
     fn association(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
         self.get_field_bytes(2)
             .as_coded_index(MetadataTableKind::HAS_SEMANTICS)
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.type_index()?).name("Type");
+        annotator
+            .value(self.method_body_index()?)
+            .name("Method body");
+        annotator
+            .value(self.method_declaration_index()?)
+            .name("Method declaration");
+
+        Ok(())
+    }
+
+    fn type_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(0).as_simple_index())
+    }
+
+    fn method_body_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    }
+
+    fn method_declaration_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(2)
+            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
     }
 }
