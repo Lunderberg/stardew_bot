@@ -4,16 +4,26 @@ use memory_reader::{MemoryRegion, Pointer};
 
 use crate::{Annotation as _, Annotator, Error};
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct ByteRange<'a> {
     start: Pointer,
     bytes: &'a [u8],
 }
 
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 pub struct UnpackedValue<T> {
-    pub loc: Range<Pointer>,
-    pub value: T,
+    /// Inclusive start of the value's location.  Not stored as a
+    /// `Range<Pointer>`, because that would prevent `UnpackedValue`
+    /// from implemented Copy.
+    start: Pointer,
+
+    /// Inclusive end of the value's location.  Not stored as a
+    /// `Range<Pointer>`, because that would prevent `UnpackedValue`
+    /// from implemented Copy.
+    end: Pointer,
+
+    /// The unpacked value.
+    value: T,
 }
 
 pub struct Unpacker<'a> {
@@ -561,6 +571,7 @@ pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
+/// Index into an arbitrary metadata table
 pub struct MetadataIndex {
     table: MetadataTableKind,
     index: usize,
@@ -649,22 +660,37 @@ impl<Key, Value: Default> Default for MetadataMap<Key, Value> {
 }
 
 impl<T> UnpackedValue<T> {
-    pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
-        UnpackedValue {
-            value: func(self.value),
-            loc: self.loc,
+    pub fn new(loc: Range<Pointer>, value: T) -> Self {
+        Self {
+            start: loc.start,
+            end: loc.end,
+            value,
         }
+    }
+
+    pub fn map<U>(self, func: impl FnOnce(T) -> U) -> UnpackedValue<U> {
+        UnpackedValue::new(self.loc(), func(self.value))
     }
 
     pub fn try_map<U, E>(
         self,
         func: impl FnOnce(T) -> Result<U, E>,
     ) -> Result<UnpackedValue<U>, E> {
-        let value = func(self.value)?;
-        Ok(UnpackedValue {
-            value,
-            loc: self.loc,
-        })
+        Ok(UnpackedValue::new(self.loc(), func(self.value)?))
+    }
+
+    pub fn loc(&self) -> Range<Pointer> {
+        self.start..self.end
+    }
+
+    pub fn value(self) -> T {
+        self.value
+    }
+}
+
+impl<T> Into<(Range<Pointer>, T)> for UnpackedValue<T> {
+    fn into(self) -> (Range<Pointer>, T) {
+        (self.loc(), self.value())
     }
 }
 
@@ -698,30 +724,24 @@ impl<'a> ByteRange<'a> {
 
     fn as_u8(&self) -> UnpackedValue<u8> {
         assert!(self.len() == 1);
-        let loc = self.start..self.start + 1;
-        UnpackedValue {
-            loc,
-            value: self.bytes[0],
-        }
+        UnpackedValue::new(self.start..self.start + 1, self.bytes[0])
     }
 
     fn get_u8(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<u8>, Error> {
-        let offset = loc.as_offset(self.start);
-        let loc = loc.as_ptr(self.start);
-        Ok(UnpackedValue {
-            loc: loc..loc + 1,
-            value: self.bytes[offset],
-        })
+        let byte_offset = loc.as_offset(self.start);
+        let ptr = loc.as_ptr(self.start);
+        let value = self.bytes[byte_offset];
+        Ok(UnpackedValue::new(ptr..ptr + 1, value))
     }
 
     fn as_u16(&self) -> UnpackedValue<u16> {
         assert!(self.len() == 2);
         let loc = self.start..self.start + 2;
-        let value = u16::from_le_bytes([self.bytes[0], self.bytes[1]]);
-        UnpackedValue { loc, value }
+        let value = u16::from_le_bytes(self.bytes.try_into().unwrap());
+        UnpackedValue::new(loc, value)
     }
 
     fn get_u16(
@@ -730,25 +750,14 @@ impl<'a> ByteRange<'a> {
     ) -> Result<UnpackedValue<u16>, Error> {
         let byte_offset = loc.as_offset(self.start);
         let byte_range = byte_offset..byte_offset + 2;
-        let value = u16::from_le_bytes(
-            self.bytes[byte_range.clone()].try_into().unwrap(),
-        );
-        Ok(UnpackedValue {
-            loc: self.address_range(byte_range),
-            value,
-        })
+        Ok(self.subrange(byte_range).as_u16())
     }
 
     fn as_u32(&self) -> UnpackedValue<u32> {
         assert!(self.len() == 4);
         let loc = self.start..self.start + 4;
-        let value = u32::from_le_bytes([
-            self.bytes[0],
-            self.bytes[1],
-            self.bytes[2],
-            self.bytes[3],
-        ]);
-        UnpackedValue { loc, value }
+        let value = u32::from_le_bytes(self.bytes.try_into().unwrap());
+        UnpackedValue::new(loc, value)
     }
 
     fn get_u32(
@@ -757,13 +766,7 @@ impl<'a> ByteRange<'a> {
     ) -> Result<UnpackedValue<u32>, Error> {
         let byte_offset = loc.as_offset(self.start);
         let byte_range = byte_offset..byte_offset + 4;
-        let value = u32::from_le_bytes(
-            self.bytes[byte_range.clone()].try_into().unwrap(),
-        );
-        Ok(UnpackedValue {
-            loc: self.address_range(byte_range),
-            value,
-        })
+        Ok(self.subrange(byte_range).as_u32())
     }
 
     fn get_u64(
@@ -775,10 +778,7 @@ impl<'a> ByteRange<'a> {
         let value = u64::from_le_bytes(
             self.bytes[byte_range.clone()].try_into().unwrap(),
         );
-        Ok(UnpackedValue {
-            loc: self.address_range(byte_range),
-            value,
-        })
+        Ok(UnpackedValue::new(self.address_range(byte_range), value))
     }
 
     fn as_simple_index(&self) -> UnpackedValue<usize> {
@@ -801,7 +801,7 @@ impl<'a> ByteRange<'a> {
     {
         let table_bits = N.next_power_of_two().ilog2() as usize;
 
-        let UnpackedValue { value, loc } = self.as_simple_index();
+        let (loc, value) = self.as_simple_index().into();
 
         let table_mask = (1 << table_bits) - 1;
         let table_index = value & table_mask;
@@ -820,10 +820,7 @@ impl<'a> ByteRange<'a> {
         }?;
         let index = value >> table_bits;
 
-        Ok(UnpackedValue {
-            value: MetadataIndex { table, index },
-            loc,
-        })
+        Ok(UnpackedValue::new(loc, MetadataIndex { table, index }))
     }
 
     fn get_null_terminated(
@@ -840,7 +837,7 @@ impl<'a> ByteRange<'a> {
             .unwrap_or(0);
         let value = std::str::from_utf8(&self.bytes[start..start + size])?;
         let loc = self.address_range(start..start + size);
-        Ok(UnpackedValue { value, loc })
+        Ok(UnpackedValue::new(loc, value))
     }
 
     fn get_virtual_range(
@@ -850,10 +847,10 @@ impl<'a> ByteRange<'a> {
         let start = loc.as_offset(self.start);
         let rva = self.get_u32(start)?.value;
         let size = self.get_u32(start + 4)?.value;
-        Ok(UnpackedValue {
-            loc: self.address_range(start..start + 8),
-            value: VirtualRange { rva, size },
-        })
+        Ok(UnpackedValue::new(
+            self.address_range(start..start + 8),
+            VirtualRange { rva, size },
+        ))
     }
 
     fn subrange(&self, range: Range<impl NormalizeOffset>) -> Self {
@@ -941,9 +938,9 @@ impl<'a> Unpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.range(self.dos_header()?.loc).name("DOS header");
+        annotator.range(self.dos_header()?.loc()).name("DOS header");
         annotator.value(self.lfanew()?).name("lfanew");
-        annotator.range(self.dos_stub()?.loc).name("DOS stub");
+        annotator.range(self.dos_stub()?.loc()).name("DOS stub");
 
         let pe_header = self.pe_header()?;
         pe_header.collect_annotations(annotator)?;
@@ -979,10 +976,7 @@ impl<'a> Unpacker<'a> {
 
         let byte_range = 0..60;
         if dos_header == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue {
-                loc: self.bytes.address_range(byte_range),
-                value: (),
-            })
+            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
         } else {
             Err(Error::IncorrectDOSHeader)
         }
@@ -1002,10 +996,7 @@ impl<'a> Unpacker<'a> {
 
         let byte_range = 64..128;
         if dos_stub == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue {
-                loc: self.bytes.address_range(byte_range),
-                value: (),
-            })
+            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
         } else {
             Err(Error::IncorrectDOSHeader)
         }
@@ -1143,7 +1134,7 @@ impl<'a> PEHeaderUnpacker<'a> {
         annotator.group(&self.bytes).name("PE Header");
 
         annotator
-            .range(self.pe_signature()?.loc)
+            .range(self.pe_signature()?.loc())
             .name("PE signature");
         annotator.value(self.machine_type()?).name("Machine type");
         annotator.value(self.num_sections()?).name("Num sections");
@@ -1170,10 +1161,7 @@ impl<'a> PEHeaderUnpacker<'a> {
 
         let byte_range = 0..4;
         if pe_signature == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue {
-                loc: self.bytes.address_range(byte_range),
-                value: (),
-            })
+            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
         } else {
             Err(Error::IncorrectPESignature)
         }
@@ -1348,7 +1336,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
 
         let num_data_directories = self.num_data_directories()?;
         annotator
-            .value(num_data_directories.clone())
+            .value(num_data_directories)
             .name("Num data directories");
 
         for i_data_dir in 0..num_data_directories.value {
@@ -1679,10 +1667,7 @@ impl<'a> SectionHeaderUnpacker<'a> {
     pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
         let value =
             std::str::from_utf8(&self.bytes[0..8])?.trim_end_matches('\0');
-        Ok(UnpackedValue {
-            loc: self.bytes.address_range(0..8),
-            value,
-        })
+        Ok(UnpackedValue::new(self.bytes.address_range(0..8), value))
     }
 
     pub fn virtual_size(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -1884,7 +1869,7 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
         annotator.group(&self.bytes).name("CLR Metadata");
 
         annotator
-            .range(self.metadata_signature()?.loc)
+            .range(self.metadata_signature()?.loc())
             .name("Metadata signature");
         annotator.value(self.major_version()?).name("major_version");
         annotator.value(self.minor_version()?).name("minor_version");
@@ -1920,10 +1905,7 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
 
         let byte_range = 0..4;
         if metadata_signature == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue {
-                loc: self.bytes.address_range(byte_range),
-                value: (),
-            })
+            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
         } else {
             Err(Error::IncorrectMetadataSignature)
         }
@@ -1957,10 +1939,10 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
         let padded_len = self.padded_version_str_len()?;
         let value = std::str::from_utf8(&self.bytes[start..start + len])?
             .trim_end_matches('\0');
-        Ok(UnpackedValue {
-            loc: self.bytes.address_range(start..start + padded_len),
+        Ok(UnpackedValue::new(
+            self.bytes.address_range(start..start + padded_len),
             value,
-        })
+        ))
     }
 
     pub fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
@@ -1994,13 +1976,14 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
 
             let padded_name_len = (name_len + 1).div_ceil(4) * 4;
 
-            let stream_name = UnpackedValue {
-                loc: self
+            let stream_name = {
+                let loc = self
                     .bytes
-                    .address_range(name_start..name_start + padded_name_len),
-                value: std::str::from_utf8(
+                    .address_range(name_start..name_start + padded_name_len);
+                let value = std::str::from_utf8(
                     &self.bytes[name_start..name_start + name_len],
-                )?,
+                )?;
+                UnpackedValue::new(loc, value)
             };
 
             curr_offset += 8 + padded_name_len;
@@ -2063,14 +2046,12 @@ impl<'a> StreamHeader<'a> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
-            .group(self.offset.loc.start..self.name.loc.end)
+            .group(self.offset.loc().start..self.name.loc().end)
             .name("CLR Stream Header");
 
-        annotator
-            .range(self.offset.loc.clone())
-            .name("Stream Offset");
-        annotator.range(self.size.loc.clone()).name("Stream Size");
-        annotator.range(self.name.loc.clone()).name("Stream Name");
+        annotator.range(self.offset.loc()).name("Stream Offset");
+        annotator.range(self.size.loc()).name("Stream Size");
+        annotator.range(self.name.loc()).name("Stream Name");
 
         Ok(())
     }
@@ -2247,17 +2228,14 @@ impl<'a> TildeStreamUnpacker<'a> {
     }
 
     pub fn heap_sizes(&self) -> Result<UnpackedValue<HeapSizes>, Error> {
-        let UnpackedValue { loc, value } = self.bytes.get_u8(6)?;
+        let (loc, value) = self.bytes.get_u8(6)?.into();
         let heap_sizes = HeapSizes {
             string_stream_uses_u32_addr: value & 0x1 > 0,
             guid_stream_uses_u32_addr: value & 0x2 > 0,
             blob_stream_uses_u32_addr: value & 0x4 > 0,
         };
 
-        Ok(UnpackedValue {
-            value: heap_sizes,
-            loc,
-        })
+        Ok(UnpackedValue::new(loc, heap_sizes))
     }
 
     pub fn reserved_1(&self) -> Result<UnpackedValue<u8>, Error> {
@@ -2439,8 +2417,8 @@ impl<'a> TildeStreamUnpacker<'a> {
         Ok(MetadataTableUnpacker {
             bytes,
             table_sizes,
-            string_heap: self.string_heap.clone(),
-            blob_heap: self.blob_heap.clone(),
+            string_heap: self.string_heap,
+            blob_heap: self.blob_heap,
             row_unpacker: PhantomData,
         })
     }
@@ -3294,8 +3272,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 next_row_bytes,
                 table_sizes: self.table_sizes,
-                string_heap: self.string_heap.clone(),
-                blob_heap: self.blob_heap.clone(),
+                string_heap: self.string_heap,
+                blob_heap: self.blob_heap,
                 row_unpacker: self.row_unpacker,
             }
         })
@@ -3356,8 +3334,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 next_row_bytes,
                 table_sizes: self.table_sizes,
-                string_heap: self.string_heap.clone(),
-                blob_heap: self.blob_heap.clone(),
+                string_heap: self.string_heap,
+                blob_heap: self.blob_heap,
                 row_unpacker: self.row_unpacker,
             })
         } else {
@@ -3413,15 +3391,9 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
                 self.table_sizes.num_rows[table_kind]
             });
 
-        let UnpackedValue {
-            value: begin_index,
-            loc,
-        } = begin_bytes.as_simple_index();
+        let (loc, begin_index) = begin_bytes.as_simple_index().into();
 
-        UnpackedValue {
-            value: begin_index..end_index,
-            loc,
-        }
+        UnpackedValue::new(loc, begin_index..end_index)
     }
 
     pub fn get_blob<'b>(&'b self, index: usize) -> Result<ByteRange, Error> {
@@ -3465,7 +3437,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
             let index = self.name_index()?;
             let name = self.name()?.value;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -3515,7 +3487,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
             let index = self.type_name_index()?;
             let name = self.type_name()?.value;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Type name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -3523,7 +3495,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
             let index = self.type_namespace_index()?;
             let name = self.type_namespace()?.value;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Type namespace")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -3568,7 +3540,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
             let index = self.type_name_index()?;
             let name = self.type_name()?.value;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Type name")
                 .value(format!("{}\n{}", index.value, name));
             name
@@ -3577,7 +3549,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
             let index = self.type_namespace_index()?;
             let namespace = self.type_namespace()?.value;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Type namespace")
                 .value(format!("{}\n{}", index.value, namespace));
             namespace
@@ -3586,7 +3558,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         annotator.value(self.extends()?).name("extends");
         let field_indices = self.field_indices()?;
         annotator
-            .range(field_indices.loc)
+            .range(field_indices.loc())
             .name("field_indices")
             .value(format!(
                 "{}..{}",
@@ -3611,7 +3583,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
 
         let method_indices = self.method_indices()?;
         annotator
-            .range(method_indices.loc)
+            .range(method_indices.loc())
             .name("method_indices")
             .value(format!(
                 "{}..{}",
@@ -3712,14 +3684,12 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
         let signature_index = self.signature_index()?;
-        annotator
-            .value(signature_index.clone())
-            .name("signature_index");
+        annotator.value(signature_index).name("signature_index");
 
         annotator
             .range(self.get_blob(signature_index.value)?.as_range())
@@ -3762,22 +3732,20 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
 
         let signature_index = self.signature_index()?;
-        annotator
-            .value(signature_index.clone())
-            .name("signature_index");
+        annotator.value(signature_index).name("signature_index");
         annotator
             .range(self.get_blob(signature_index.value)?.as_range())
             .name(format!("'{type_name}.{name}' signature"));
 
         let param_indices = self.param_indices()?;
         annotator
-            .range(param_indices.loc.clone())
+            .range(param_indices.loc())
             .name("param_indices")
             .value(format!(
                 "{}..{}",
@@ -3785,7 +3753,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
             ));
 
         annotator
-            .range(param_indices.loc)
+            .range(param_indices.loc())
             .name("Param names")
             .value(
                 param_indices
@@ -3857,15 +3825,9 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
                 self.table_sizes.num_rows[MetadataTableKind::Param]
             });
 
-        let UnpackedValue {
-            value: begin_index,
-            loc,
-        } = begin_bytes.as_simple_index();
+        let (loc, begin_index) = begin_bytes.as_simple_index().into();
 
-        Ok(UnpackedValue {
-            value: begin_index..end_index,
-            loc,
-        })
+        Ok(UnpackedValue::new(loc, begin_index..end_index))
     }
 }
 
@@ -3884,7 +3846,7 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -3942,18 +3904,16 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
 
         let signature_index = self.signature_index()?;
-        annotator
-            .value(signature_index.clone())
-            .name("signature_index");
+        annotator.value(signature_index).name("signature_index");
 
         annotator
-            .range(self.get_blob(signature_index.value.clone())?.as_range())
+            .range(self.get_blob(signature_index.value)?.as_range())
             .name(format!("MemberRef {name}"));
 
         Ok(())
@@ -3987,7 +3947,7 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
         annotator.value(self.parent_index()?).name("Parent");
 
         let value = self.value_index()?;
-        annotator.value(value.clone()).name("Value");
+        annotator.value(value).name("Value");
         annotator
             .range(self.get_blob(value.value)?.as_range())
             .name("Constant value");
@@ -4019,7 +3979,7 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
         annotator.value(self.type_index()?).name("Type");
 
         let value = self.value_index()?;
-        annotator.value(value.clone()).name("Value");
+        annotator.value(value).name("Value");
         annotator
             .range(self.get_blob(value.value)?.as_range())
             .name("CustomAttribute value");
@@ -4074,9 +4034,7 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
         annotator.value(self.parent_index()?).name("Parent");
 
         let permission_set_index = self.permission_set_index()?;
-        annotator
-            .value(permission_set_index.clone())
-            .name("Permission set");
+        annotator.value(permission_set_index).name("Permission set");
         annotator
             .range(self.get_blob(permission_set_index.value)?.as_range())
             .name("DeclSecurity permission set");
@@ -4149,7 +4107,7 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         let signature_index = self.signature_index()?;
-        annotator.value(signature_index.clone()).name("Signature");
+        annotator.value(signature_index).name("Signature");
         annotator
             .range(self.get_blob(signature_index.value)?.as_range())
             .name("StandAloneSig signature");
@@ -4171,7 +4129,7 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
 
         let event_indices = self.event_indices()?;
         annotator
-            .range(event_indices.loc)
+            .range(event_indices.loc())
             .name("event_indices")
             .value(format!(
                 "{}..{}",
@@ -4201,7 +4159,7 @@ impl<'a> MetadataRowUnpacker<'a, EventRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -4239,7 +4197,7 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
 
         let property_indices = self.property_indices()?;
         annotator
-            .range(property_indices.loc)
+            .range(property_indices.loc())
             .name("property_indices")
             .value(format!(
                 "{}..{}",
@@ -4269,13 +4227,13 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
 
         let signature_index = self.signature_index()?;
-        annotator.value(signature_index.clone()).name("Signature");
+        annotator.value(signature_index).name("Signature");
         annotator
             .range(self.get_blob(signature_index.value)?.as_range())
             .name("Property signature");
@@ -4369,7 +4327,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRefRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -4393,7 +4351,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         let signature_index = self.signature_index()?;
-        annotator.value(signature_index.clone()).name("Signature");
+        annotator.value(signature_index).name("Signature");
         annotator
             .range(self.get_blob(signature_index.value)?.as_range())
             .name("TypeSpec signature");
@@ -4420,7 +4378,7 @@ impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
         {
             let index = self.import_name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("Import name")
                 .value(format!("{}\n{}", index.value, import_name));
         }
@@ -4494,13 +4452,13 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
 
         let public_key_index = self.public_key_index()?;
-        annotator.value(public_key_index.clone()).name("Public key");
+        annotator.value(public_key_index).name("Public key");
         annotator
             .range(self.get_blob(public_key_index.value)?.as_range())
             .name(format!("Public key, '{name}' assembly"));
@@ -4560,7 +4518,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -4569,21 +4527,21 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
         {
             let index = self.culture_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("culture")
                 .value(format!("{}\n{}", index.value, culture));
         }
 
         let public_key_or_token_index = self.public_key_or_token_index()?;
         annotator
-            .value(public_key_or_token_index.clone())
+            .value(public_key_or_token_index)
             .name("Public key/token");
         annotator
             .range(self.get_blob(public_key_or_token_index.value)?.as_range())
             .name(format!("Public key/token, '{name}' AssemblyRef"));
 
         let hash_value_index = self.hash_value_index()?;
-        annotator.value(hash_value_index.clone()).name("Hash value");
+        annotator.value(hash_value_index).name("Hash value");
         annotator
             .range(self.get_blob(hash_value_index.value)?.as_range())
             .name(format!("HashValue, '{name}' AssemblyRef"));
@@ -4650,7 +4608,7 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResourceRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -4733,7 +4691,7 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamRowUnpacker> {
         {
             let index = self.name_index()?;
             annotator
-                .range(index.loc)
+                .range(index.loc())
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
@@ -4772,9 +4730,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
         annotator.value(self.method_index()?).name("Method");
 
         let instantiation_index = self.instantiation_index()?;
-        annotator
-            .value(instantiation_index.clone())
-            .name("Instantiation");
+        annotator.value(instantiation_index).name("Instantiation");
         annotator
             .range(self.get_blob(instantiation_index.value)?.as_range())
             .name("MethodSpec instantiation");

@@ -11,7 +11,7 @@ pub trait Annotator {
         &mut self,
         value: UnpackedValue<T>,
     ) -> &mut impl Annotation {
-        self.range(value.loc).value(value.value)
+        self.range(value.loc()).value(value.value())
     }
 
     fn group(
