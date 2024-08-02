@@ -147,7 +147,7 @@ pub struct StreamHeader<'a> {
     name: UnpackedValue<&'a str>,
 }
 
-pub trait EnumKey {
+pub trait EnumKey: Sized {
     const N: usize;
 
     fn as_index(self) -> usize;
@@ -159,6 +159,7 @@ pub struct TildeStreamUnpacker<'a> {
     bytes: ByteRange<'a>,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
+    #[allow(dead_code)]
     guid_heap: ByteRange<'a>,
 }
 
@@ -551,15 +552,9 @@ pub struct MetadataTableSizes {
     table_offsets: MetadataMap<MetadataTableKind, usize>,
 }
 
-pub struct MetadataSizes {
-    heap_sizes: HeapSizes,
-    table_sizes: [u32; 38],
-}
-
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     /// The bytes that represent this table
     bytes: ByteRange<'a>,
-    sizes: &'a MetadataSizes,
     table_sizes: &'a MetadataTableSizes,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
@@ -581,7 +576,6 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// the next row (e.g. the Field and Method columns of the TypeDef
     /// table).
     next_row_bytes: Option<ByteRange<'a>>,
-    sizes: &'a MetadataSizes,
     table_sizes: &'a MetadataTableSizes,
     string_heap: ByteRange<'a>,
     blob_heap: ByteRange<'a>,
@@ -702,6 +696,15 @@ impl<'a> ByteRange<'a> {
         self.bytes.len()
     }
 
+    fn as_u8(&self) -> UnpackedValue<u8> {
+        assert!(self.len() == 1);
+        let loc = self.start..self.start + 1;
+        UnpackedValue {
+            loc,
+            value: self.bytes[0],
+        }
+    }
+
     fn get_u8(
         &self,
         loc: impl NormalizeOffset,
@@ -712,6 +715,13 @@ impl<'a> ByteRange<'a> {
             loc: loc..loc + 1,
             value: self.bytes[offset],
         })
+    }
+
+    fn as_u16(&self) -> UnpackedValue<u16> {
+        assert!(self.len() == 2);
+        let loc = self.start..self.start + 2;
+        let value = u16::from_le_bytes([self.bytes[0], self.bytes[1]]);
+        UnpackedValue { loc, value }
     }
 
     fn get_u16(
@@ -727,6 +737,18 @@ impl<'a> ByteRange<'a> {
             loc: self.address_range(byte_range),
             value,
         })
+    }
+
+    fn as_u32(&self) -> UnpackedValue<u32> {
+        assert!(self.len() == 4);
+        let loc = self.start..self.start + 4;
+        let value = u32::from_le_bytes([
+            self.bytes[0],
+            self.bytes[1],
+            self.bytes[2],
+            self.bytes[3],
+        ]);
+        UnpackedValue { loc, value }
     }
 
     fn get_u32(
@@ -756,6 +778,51 @@ impl<'a> ByteRange<'a> {
         Ok(UnpackedValue {
             loc: self.address_range(byte_range),
             value,
+        })
+    }
+
+    fn as_heap_index(&self) -> UnpackedValue<usize> {
+        if self.len() == 2 {
+            self.as_u16().map(|val| val as usize)
+        } else if self.len() == 4 {
+            self.as_u32().map(|val| val as usize)
+        } else {
+            panic!("Heap index is either u16 or u32");
+        }
+    }
+
+    fn as_coded_index<const N: usize, Kind>(
+        &self,
+        table_options: [Kind; N],
+    ) -> Result<UnpackedValue<MetadataIndex>, Error>
+    where
+        Kind: Copy,
+        Kind: Into<Option<MetadataTableKind>>,
+    {
+        let table_bits = N.next_power_of_two().ilog2() as usize;
+
+        let UnpackedValue { value, loc } = self.as_heap_index();
+
+        let table_mask = (1 << table_bits) - 1;
+        let table_index = value & table_mask;
+
+        let table = if table_index < N {
+            table_options[table_index].into().ok_or(
+                Error::CodedIndexRefersToReservedTableIndex {
+                    index: table_index,
+                },
+            )
+        } else {
+            Err(Error::InvalidCodedIndex {
+                index: table_index,
+                num_tables: N,
+            })
+        }?;
+        let index = value >> table_bits;
+
+        Ok(UnpackedValue {
+            value: MetadataIndex { table, index },
+            loc,
         })
     }
 
@@ -859,9 +926,8 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
-        let sizes = stream.metadata_sizes()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.class_layout_table(&sizes, &table_sizes)?;
+        let table = stream.class_layout_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2027,7 +2093,6 @@ impl<'a> TildeStreamUnpacker<'a> {
             .value(self.sorted_table_bitfield()?)
             .name("sorted_table_bitfield");
 
-        let sizes = self.metadata_sizes()?;
         let table_sizes = self.metadata_table_sizes()?;
 
         self.iter_num_rows()?
@@ -2035,23 +2100,23 @@ impl<'a> TildeStreamUnpacker<'a> {
                 let (value, kind) = res?;
                 annotator.value(value).name(format!("Num {kind:?} rows"));
                 annotator
-                    .group(self.metadata_table_bytes(kind, &sizes)?)
+                    .group(self.metadata_table_bytes(kind, &table_sizes)?)
                     .name(format!("{kind:?} metadata table"));
                 Ok(())
             })?;
 
-        self.module_table(&sizes, &table_sizes)?
+        self.module_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.type_ref_table(&sizes, &table_sizes)?
+        self.type_ref_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        let field_table = self.field_table(&sizes, &table_sizes)?;
-        let method_table = self.method_def_table(&sizes, &table_sizes)?;
-        let param_table = self.param_table(&sizes, &table_sizes)?;
-        self.type_def_table(&sizes, &table_sizes)?
+        let field_table = self.field_table(&table_sizes)?;
+        let method_table = self.method_def_table(&table_sizes)?;
+        let param_table = self.param_table(&table_sizes)?;
+        self.type_def_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| {
                 row.collect_annotations(
@@ -2062,27 +2127,27 @@ impl<'a> TildeStreamUnpacker<'a> {
                 )
             })?;
 
-        self.interface_impl_table(&sizes, &table_sizes)?
+        self.interface_impl_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.member_ref_table(&sizes, &table_sizes)?
+        self.member_ref_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.constant_table(&sizes, &table_sizes)?
+        self.constant_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.custom_attribute_table(&sizes, &table_sizes)?
+        self.custom_attribute_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.decl_security_table(&sizes, &table_sizes)?
+        self.decl_security_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.class_layout_table(&sizes, &table_sizes)?
+        self.class_layout_table(&table_sizes)?
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
@@ -2261,47 +2326,15 @@ impl<'a> TildeStreamUnpacker<'a> {
         })
     }
 
-    pub fn metadata_sizes(&self) -> Result<MetadataSizes, Error> {
-        let heap_sizes = self.heap_sizes()?.value;
-        let mut metadata_sizes = MetadataSizes {
-            heap_sizes,
-            table_sizes: [0; 38],
-        };
-
-        for res in self.iter_num_rows()? {
-            let (num_rows, kind) = res?;
-            metadata_sizes[kind] = num_rows.value;
-        }
-
-        Ok(metadata_sizes)
-    }
-
     fn metadata_table_bytes<'b>(
         &'b self,
         kind: MetadataTableKind,
-        sizes: &'b MetadataSizes,
+        table_sizes: &'b MetadataTableSizes,
     ) -> Result<ByteRange<'b>, Error> {
-        let start = self
-            .iter_num_rows()?
-            .map(|res| {
-                res.map(|(rows, other_kind)| {
-                    let rows = rows.value as usize;
-                    let table_offset = if other_kind.as_metadata_sizes_index()
-                        < kind.as_metadata_sizes_index()
-                    {
-                        rows * other_kind.bytes_per_row(sizes)
-                    } else {
-                        0
-                    };
-                    table_offset + 4
-                })
-            })
-            .try_fold(24, |sum, res_bytes| {
-                res_bytes.map(|bytes| bytes + sum)
-            })?;
+        let start = table_sizes.table_offsets[kind];
 
-        let num_rows = sizes.num_rows(kind);
-        let bytes_per_row = kind.bytes_per_row(sizes);
+        let num_rows = table_sizes.num_rows[kind];
+        let bytes_per_row = table_sizes.bytes_per_row[kind];
 
         let bytes =
             self.bytes.subrange(start..start + num_rows * bytes_per_row);
@@ -2311,28 +2344,20 @@ impl<'a> TildeStreamUnpacker<'a> {
 
     fn get_table<'b, Unpacker>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
     where
         Unpacker: RowUnpacker,
     {
         let info = self.metadata_table_sizes()?;
-        let bytes = self.bytes.subrange(
-            info.table_offsets[Unpacker::KIND]
-                ..info.table_offsets[Unpacker::KIND]
-                    + info.num_rows[Unpacker::KIND]
-                        * info.bytes_per_row[Unpacker::KIND],
-        );
 
-        let old_bytes = self.metadata_table_bytes(Unpacker::KIND, sizes)?;
-
-        assert!(old_bytes.start == bytes.start);
-        assert!(old_bytes.end() == bytes.end());
+        let offset = info.table_offsets[Unpacker::KIND];
+        let size =
+            info.num_rows[Unpacker::KIND] * info.bytes_per_row[Unpacker::KIND];
+        let bytes = self.bytes.subrange(offset..offset + size);
 
         Ok(MetadataTableUnpacker {
-            bytes: old_bytes,
-            sizes,
+            bytes,
             table_sizes,
             string_heap: self.string_heap.clone(),
             blob_heap: self.blob_heap.clone(),
@@ -2342,100 +2367,88 @@ impl<'a> TildeStreamUnpacker<'a> {
 
     pub fn module_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ModuleRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn type_ref_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeRefRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn type_def_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, TypeDefRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn field_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, FieldRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn method_def_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MethodDefRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn param_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ParamRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn interface_impl_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, InterfaceImplRowUnpacker>, Error>
     {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn member_ref_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn constant_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ConstantRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn custom_attribute_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, CustomAttributeRowUnpacker>, Error>
     {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn decl_security_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, DeclSecurityRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 
     pub fn class_layout_table<'b>(
         &'b self,
-        sizes: &'b MetadataSizes,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, ClassLayoutRowUnpacker>, Error> {
-        self.get_table(sizes, table_sizes)
+        self.get_table(table_sizes)
     }
 }
 
@@ -2510,6 +2523,7 @@ impl MetadataTableKind {
         Self::MethodSpec,
     ];
 
+    #[allow(dead_code)]
     const HAS_FIELD_MARSHAL: [Self; 2] = [Self::Field, Self::Param];
 
     const HAS_DECL_SECURITY: [Self; 3] =
@@ -2523,12 +2537,16 @@ impl MetadataTableKind {
         Self::TypeSpec,
     ];
 
+    #[allow(dead_code)]
     const HAS_SEMANTICS: [Self; 2] = [Self::Event, Self::Property];
 
+    #[allow(dead_code)]
     const METHOD_DEF_OR_REF: [Self; 2] = [Self::MethodDef, Self::MemberRef];
 
+    #[allow(dead_code)]
     const MEMBER_FORWARDED: [Self; 2] = [Self::Field, Self::MethodDef];
 
+    #[allow(dead_code)]
     const IMPLEMENTATION: [Self; 3] =
         [Self::File, Self::AssemblyRef, Self::ExportedType];
 
@@ -2547,6 +2565,7 @@ impl MetadataTableKind {
         Self::TypeRef,
     ];
 
+    #[allow(dead_code)]
     const TYPE_OR_METHOD_DEF: [Self; 2] = [Self::TypeDef, Self::MethodDef];
 
     fn from_bit_index(bit: u8) -> Result<Self, Error> {
@@ -2592,192 +2611,13 @@ impl MetadataTableKind {
             _ => Err(Error::InvalidMetadataTable(bit)),
         }
     }
+}
 
-    fn as_metadata_sizes_index(self) -> usize {
-        match self {
-            MetadataTableKind::Module => 0,
-            MetadataTableKind::TypeRef => 1,
-            MetadataTableKind::TypeDef => 2,
-            MetadataTableKind::Field => 3,
-            MetadataTableKind::MethodDef => 4,
-            MetadataTableKind::Param => 5,
-            MetadataTableKind::InterfaceImpl => 6,
-            MetadataTableKind::MemberRef => 7,
-            MetadataTableKind::Constant => 8,
-            MetadataTableKind::CustomAttribute => 9,
-            MetadataTableKind::FieldMarshal => 10,
-            MetadataTableKind::DeclSecurity => 11,
-            MetadataTableKind::ClassLayout => 12,
-            MetadataTableKind::FieldLayout => 13,
-            MetadataTableKind::StandAloneSig => 14,
-            MetadataTableKind::EventMap => 15,
-            MetadataTableKind::Event => 16,
-            MetadataTableKind::PropertyMap => 17,
-            MetadataTableKind::Property => 18,
-            MetadataTableKind::MethodSemantics => 19,
-            MetadataTableKind::MethodImpl => 20,
-            MetadataTableKind::ModuleRef => 21,
-            MetadataTableKind::TypeSpec => 22,
-            MetadataTableKind::ImplMap => 23,
-            MetadataTableKind::FieldRVA => 24,
-            MetadataTableKind::Assembly => 25,
-            MetadataTableKind::AssemblyProcessor => 26,
-            MetadataTableKind::AssemblyOS => 27,
-            MetadataTableKind::AssemblyRef => 28,
-            MetadataTableKind::AssemblyRefProcessor => 29,
-            MetadataTableKind::AssemblyRefOS => 30,
-            MetadataTableKind::File => 31,
-            MetadataTableKind::ExportedType => 32,
-            MetadataTableKind::ManifestResource => 33,
-            MetadataTableKind::NestedClass => 34,
-            MetadataTableKind::GenericParam => 35,
-            MetadataTableKind::MethodSpec => 36,
-            MetadataTableKind::GenericParamConstraint => 37,
-        }
-    }
-
-    fn bytes_per_row(self, sizes: &MetadataSizes) -> usize {
-        match self {
-            MetadataTableKind::Module => {
-                2 + sizes.str_index_size() + 3 * sizes.guid_index_size()
-            }
-            MetadataTableKind::TypeRef => {
-                sizes.coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
-                    + 2 * sizes.str_index_size()
-            }
-            MetadataTableKind::TypeDef => {
-                4 + 2 * sizes.str_index_size()
-                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
-                    + sizes.index_size(MetadataTableKind::Field)
-                    + sizes.index_size(MetadataTableKind::MethodDef)
-            }
-            MetadataTableKind::Field => {
-                2 + sizes.str_index_size() + sizes.blob_index_size()
-            }
-            MetadataTableKind::MethodDef => {
-                8 + sizes.str_index_size()
-                    + sizes.blob_index_size()
-                    + sizes.index_size(MetadataTableKind::Param)
-            }
-            MetadataTableKind::Param => 4 + sizes.str_index_size(),
-            MetadataTableKind::InterfaceImpl => {
-                sizes.index_size(MetadataTableKind::TypeDef)
-                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
-            }
-            MetadataTableKind::MemberRef => {
-                sizes.coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
-                    + sizes.str_index_size()
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::Constant => {
-                2 + sizes.coded_index_size(MetadataTableKind::HAS_CONSTANT)
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::CustomAttribute => {
-                2 * sizes
-                    .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::FieldMarshal => {
-                sizes.coded_index_size(MetadataTableKind::HAS_FIELD_MARSHAL)
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::DeclSecurity => {
-                2 + sizes.coded_index_size(MetadataTableKind::HAS_DECL_SECURITY)
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::ClassLayout => {
-                2 + 4 + sizes.index_size(MetadataTableKind::TypeDef)
-            }
-            MetadataTableKind::FieldLayout => {
-                4 + sizes.index_size(MetadataTableKind::Field)
-            }
-            MetadataTableKind::StandAloneSig => sizes.blob_index_size(),
-            MetadataTableKind::EventMap => {
-                sizes.index_size(MetadataTableKind::TypeDef)
-                    + sizes.index_size(MetadataTableKind::Event)
-            }
-            MetadataTableKind::Event => {
-                2 + sizes.str_index_size()
-                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
-            }
-            MetadataTableKind::PropertyMap => {
-                sizes.index_size(MetadataTableKind::TypeDef)
-                    + sizes.index_size(MetadataTableKind::Property)
-            }
-            MetadataTableKind::Property => {
-                2 + sizes.str_index_size() + sizes.blob_index_size()
-            }
-            MetadataTableKind::MethodSemantics => {
-                2 + sizes.index_size(MetadataTableKind::MethodDef)
-                    + sizes.coded_index_size(MetadataTableKind::HAS_SEMANTICS)
-            }
-            MetadataTableKind::MethodImpl => {
-                sizes.index_size(MetadataTableKind::TypeDef)
-                    + 2 * sizes
-                        .coded_index_size(MetadataTableKind::METHOD_DEF_OR_REF)
-            }
-            MetadataTableKind::ModuleRef => sizes.str_index_size(),
-            MetadataTableKind::TypeSpec => sizes.blob_index_size(),
-            MetadataTableKind::ImplMap => {
-                2 + sizes.coded_index_size(MetadataTableKind::MEMBER_FORWARDED)
-                    + sizes.str_index_size()
-                    + sizes.index_size(MetadataTableKind::MethodDef)
-            }
-            MetadataTableKind::FieldRVA => {
-                4 + sizes.index_size(MetadataTableKind::Field)
-            }
-            MetadataTableKind::Assembly => {
-                4 + 2 * 4
-                    + 4
-                    + sizes.blob_index_size()
-                    + 2 * sizes.str_index_size()
-            }
-            MetadataTableKind::AssemblyProcessor => 4,
-            MetadataTableKind::AssemblyOS => 4 * 3,
-            MetadataTableKind::AssemblyRef => {
-                2 * 4
-                    + 4
-                    + 2 * sizes.blob_index_size()
-                    + 2 * sizes.str_index_size()
-            }
-            MetadataTableKind::AssemblyRefProcessor => {
-                4 + sizes.index_size(MetadataTableKind::AssemblyRef)
-            }
-            MetadataTableKind::AssemblyRefOS => {
-                4 * 3 + sizes.index_size(MetadataTableKind::AssemblyRef)
-            }
-            MetadataTableKind::File => {
-                4 + sizes.str_index_size() + sizes.blob_index_size()
-            }
-            MetadataTableKind::ExportedType => {
-                4 + 4
-                    + sizes.index_size(MetadataTableKind::TypeRef)
-                    + 2 * sizes.str_index_size()
-                    + sizes.coded_index_size(MetadataTableKind::IMPLEMENTATION)
-            }
-            MetadataTableKind::ManifestResource => {
-                4 + 4
-                    + sizes.str_index_size()
-                    + sizes.coded_index_size(MetadataTableKind::IMPLEMENTATION)
-            }
-            MetadataTableKind::NestedClass => {
-                2 * sizes.index_size(MetadataTableKind::TypeDef)
-            }
-            MetadataTableKind::GenericParam => {
-                2 + 2
-                    + sizes
-                        .coded_index_size(MetadataTableKind::TYPE_OR_METHOD_DEF)
-                    + sizes.str_index_size()
-            }
-            MetadataTableKind::MethodSpec => {
-                sizes.coded_index_size(MetadataTableKind::METHOD_DEF_OR_REF)
-                    + sizes.blob_index_size()
-            }
-            MetadataTableKind::GenericParamConstraint => {
-                sizes.index_size(MetadataTableKind::GenericParam)
-                    + sizes.coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
-            }
+impl MetadataTableSizes {
+    fn column_size(&self, column_type: MetadataColumnType) -> usize {
+        match column_type {
+            MetadataColumnType::Index(index) => self.index_size[index],
+            MetadataColumnType::FixedSize(nbytes) => nbytes,
         }
     }
 }
@@ -3199,180 +3039,6 @@ impl MetadataTableKind {
     }
 }
 
-impl std::ops::Index<MetadataTableKind> for MetadataSizes {
-    type Output = u32;
-
-    fn index(&self, index: MetadataTableKind) -> &Self::Output {
-        &self.table_sizes[index.as_metadata_sizes_index()]
-    }
-}
-
-impl std::ops::IndexMut<MetadataTableKind> for MetadataSizes {
-    fn index_mut(&mut self, index: MetadataTableKind) -> &mut Self::Output {
-        &mut self.table_sizes[index.as_metadata_sizes_index()]
-    }
-}
-
-impl MetadataSizes {
-    fn num_rows(&self, table: MetadataTableKind) -> usize {
-        self[table] as usize
-    }
-
-    fn index_size(&self, table: MetadataTableKind) -> usize {
-        self.coded_index_size([table])
-    }
-
-    fn get_index(
-        &self,
-        kind: MetadataTableKind,
-        bytes: &ByteRange,
-        offset: impl NormalizeOffset,
-    ) -> Result<UnpackedValue<usize>, Error> {
-        let num_rows = self[kind];
-        Self::get_heap_index(bytes, offset, num_rows >= 65536)
-    }
-
-    fn coded_index_row_bits<const N: usize, Kind>(
-        &self,
-        tables: [Kind; N],
-    ) -> usize
-    where
-        Kind: Into<Option<MetadataTableKind>>,
-    {
-        let max_rows = tables
-            .into_iter()
-            .filter_map(|kind| -> Option<MetadataTableKind> { kind.into() })
-            .map(|kind| self[kind])
-            .max()
-            .expect("Index must have at least one table it can point to.");
-        (max_rows + 1).next_power_of_two().ilog2() as usize
-    }
-
-    fn coded_index_size<const N: usize, Kind>(&self, tables: [Kind; N]) -> usize
-    where
-        Kind: Into<Option<MetadataTableKind>>,
-    {
-        let table_bits = N.next_power_of_two().ilog2() as usize;
-        let row_bits = self.coded_index_row_bits(tables);
-
-        if table_bits + row_bits <= 16 {
-            2
-        } else {
-            4
-        }
-    }
-
-    fn get_coded_index<const N: usize, Kind>(
-        &self,
-        tables: [Kind; N],
-        bytes: &ByteRange,
-        offset: usize,
-    ) -> Result<UnpackedValue<MetadataIndex>, Error>
-    where
-        Kind: Copy,
-        Kind: Into<Option<MetadataTableKind>>,
-    {
-        let table_bits = N.next_power_of_two().ilog2() as usize;
-        let row_bits = self.coded_index_row_bits(tables);
-        let UnpackedValue { value, loc } =
-            Self::get_heap_index(bytes, offset, table_bits + row_bits > 16)?;
-
-        let table_mask = (1 << table_bits) - 1;
-        let table_index = value & table_mask;
-
-        let table = if table_index < N {
-            tables[table_index].into().ok_or(
-                Error::CodedIndexRefersToReservedTableIndex {
-                    index: table_index,
-                },
-            )
-        } else {
-            Err(Error::InvalidCodedIndex {
-                index: table_index,
-                num_tables: N,
-            })
-        }?;
-        let index = value >> table_bits;
-
-        Ok(UnpackedValue {
-            value: MetadataIndex { table, index },
-            loc,
-        })
-    }
-
-    fn get_heap_index(
-        bytes: &ByteRange,
-        offset: impl NormalizeOffset,
-        is_u32_addr: bool,
-    ) -> Result<UnpackedValue<usize>, Error> {
-        if is_u32_addr {
-            Ok(bytes.get_u32(offset)?.map(|val| val as usize))
-        } else {
-            Ok(bytes.get_u16(offset)?.map(|val| val as usize))
-        }
-    }
-
-    fn get_str_index(
-        &self,
-        bytes: &ByteRange,
-        offset: usize,
-    ) -> Result<UnpackedValue<usize>, Error> {
-        Self::get_heap_index(
-            bytes,
-            offset,
-            self.heap_sizes.string_stream_uses_u32_addr,
-        )
-    }
-
-    fn get_guid_index(
-        &self,
-        bytes: &ByteRange,
-        offset: usize,
-    ) -> Result<UnpackedValue<usize>, Error> {
-        Self::get_heap_index(
-            bytes,
-            offset,
-            self.heap_sizes.guid_stream_uses_u32_addr,
-        )
-    }
-
-    fn get_blob_index(
-        &self,
-        bytes: &ByteRange,
-        offset: usize,
-    ) -> Result<UnpackedValue<usize>, Error> {
-        Self::get_heap_index(
-            bytes,
-            offset,
-            self.heap_sizes.blob_stream_uses_u32_addr,
-        )
-    }
-
-    fn str_index_size(&self) -> usize {
-        if self.heap_sizes.string_stream_uses_u32_addr {
-            4
-        } else {
-            2
-        }
-    }
-
-    fn guid_index_size(&self) -> usize {
-        if self.heap_sizes.guid_stream_uses_u32_addr {
-            4
-        } else {
-            2
-        }
-    }
-
-    fn blob_index_size(&self) -> usize {
-        if self.heap_sizes.blob_stream_uses_u32_addr {
-            4
-        } else {
-            2
-        }
-    }
-}
-
 impl std::fmt::Display for MetadataIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{:?}[{}]", self.table, self.index)
@@ -3401,7 +3067,6 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
-                sizes: self.sizes,
                 table_sizes: self.table_sizes,
                 string_heap: self.string_heap.clone(),
                 blob_heap: self.blob_heap.clone(),
@@ -3457,7 +3122,6 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             Ok(MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
-                sizes: self.sizes,
                 table_sizes: self.table_sizes,
                 string_heap: self.string_heap.clone(),
                 blob_heap: self.blob_heap.clone(),
@@ -3474,6 +3138,24 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
 }
 
 impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
+    fn get_field_bytes(&self, column: usize) -> ByteRange<'a>
+    where
+        Unpacker: RowUnpacker,
+    {
+        let fields = Unpacker::COLUMNS;
+
+        let offset: usize = fields
+            .iter()
+            .take(column)
+            .cloned()
+            .map(|field| self.table_sizes.column_size(field))
+            .sum();
+
+        let size = self.table_sizes.column_size(fields[column]);
+
+        self.bytes.subrange(offset..offset + size)
+    }
+
     pub fn get_blob<'b>(&'b self, index: usize) -> Result<ByteRange, Error> {
         let byte: u8 = self.blob_heap[index];
 
@@ -3527,11 +3209,11 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 
     pub fn generation(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(0)
+        Ok(self.get_field_bytes(0).as_u16())
     }
 
     pub fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_str_index(&self.bytes, 2)
+        Ok(self.get_field_bytes(1).as_heap_index())
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3540,22 +3222,15 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 
     pub fn module_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes
-            .get_str_index(&self.bytes, 2 + self.sizes.str_index_size())
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 
     pub fn enc_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_guid_index(
-            &self.bytes,
-            2 + self.sizes.str_index_size() + self.sizes.guid_index_size(),
-        )
+        Ok(self.get_field_bytes(3).as_heap_index())
     }
 
     pub fn enc_base_id(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_guid_index(
-            &self.bytes,
-            2 + self.sizes.str_index_size() + 2 * self.sizes.guid_index_size(),
-        )
+        Ok(self.get_field_bytes(4).as_heap_index())
     }
 }
 
@@ -3589,18 +3264,12 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn resolution_scope(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.sizes.get_coded_index(
-            MetadataTableKind::RESOLUTION_SCOPE,
-            &self.bytes,
-            0,
-        )
+        self.get_field_bytes(0)
+            .as_coded_index(MetadataTableKind::RESOLUTION_SCOPE)
     }
 
     fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE);
-        self.sizes.get_str_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(1).as_heap_index())
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3609,11 +3278,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 
     fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::RESOLUTION_SCOPE)
-            + self.sizes.str_index_size();
-        self.sizes.get_str_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3712,9 +3377,9 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
                 .value
                 .start;
             let param_end = if method_range.end
-                == self.sizes.num_rows(MetadataTableKind::MethodDef)
+                == self.table_sizes.num_rows[MetadataTableKind::MethodDef]
             {
-                self.sizes.num_rows(MetadataTableKind::Param)
+                self.table_sizes.num_rows[MetadataTableKind::Param]
             } else {
                 method_def_table
                     .get_row(method_range.end)?
@@ -3731,11 +3396,11 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(0)
+        Ok(self.get_field_bytes(0).as_u32())
     }
 
     fn type_name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_str_index(&self.bytes, 4)
+        Ok(self.get_field_bytes(1).as_heap_index())
     }
 
     fn type_name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3744,8 +3409,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn type_namespace_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = 4 + self.sizes.str_index_size();
-        self.sizes.get_str_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 
     fn type_namespace(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3754,74 +3418,58 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
     }
 
     fn extends(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        let offset = 4 + 2 * self.sizes.str_index_size();
-        self.sizes.get_coded_index(
-            MetadataTableKind::TYPE_DEF_OR_REF,
-            &self.bytes,
-            offset,
-        )
+        self.get_field_bytes(3)
+            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
     }
 
     fn field_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let offset = 4
-            + 2 * self.sizes.str_index_size()
-            + self
-                .sizes
-                .coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF);
-
-        let UnpackedValue { value: start, loc } = self.sizes.get_index(
-            MetadataTableKind::Field,
-            &self.bytes,
-            offset,
-        )?;
-
-        let end = self
+        let begin_bytes = self.get_field_bytes(4);
+        let end_index = self
             .next_row_bytes
             .as_ref()
-            .map(|next_row| -> Result<_, Error> {
-                Ok(self
-                    .sizes
-                    .get_index(MetadataTableKind::Field, &next_row, offset)?
-                    .value)
+            .map(|next_row| {
+                let range = begin_bytes.start - self.bytes.start
+                    ..begin_bytes.end() - self.bytes.start;
+                let end_bytes = next_row.subrange(range);
+                end_bytes.as_heap_index().value
             })
             .unwrap_or_else(|| {
-                Ok(self.sizes.num_rows(MetadataTableKind::Field))
-            })?;
+                self.table_sizes.num_rows[MetadataTableKind::Field]
+            });
+
+        let UnpackedValue {
+            value: begin_index,
+            loc,
+        } = begin_bytes.as_heap_index();
 
         Ok(UnpackedValue {
-            value: start..end,
+            value: begin_index..end_index,
             loc,
         })
     }
 
     fn method_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let offset = 4
-            + 2 * self.sizes.str_index_size()
-            + self
-                .sizes
-                .coded_index_size(MetadataTableKind::TYPE_DEF_OR_REF)
-            + self.sizes.index_size(MetadataTableKind::Field);
-
-        let UnpackedValue { value: start, loc } = self.sizes.get_index(
-            MetadataTableKind::MethodDef,
-            &self.bytes,
-            offset,
-        )?;
-        let end = self
+        let begin_bytes = self.get_field_bytes(5);
+        let end_index = self
             .next_row_bytes
             .as_ref()
-            .map(|next_row| -> Result<_, Error> {
-                Ok(self
-                    .sizes
-                    .get_index(MetadataTableKind::MethodDef, &next_row, offset)?
-                    .value)
+            .map(|next_row| {
+                let range = begin_bytes.start - self.bytes.start
+                    ..begin_bytes.end() - self.bytes.start;
+                let end_bytes = next_row.subrange(range);
+                end_bytes.as_heap_index().value
             })
             .unwrap_or_else(|| {
-                Ok(self.sizes.num_rows(MetadataTableKind::MethodDef))
-            })?;
+                self.table_sizes.num_rows[MetadataTableKind::MethodDef]
+            });
+
+        let UnpackedValue {
+            value: begin_index,
+            loc,
+        } = begin_bytes.as_heap_index();
 
         Ok(UnpackedValue {
-            value: start..end,
+            value: begin_index..end_index,
             loc,
         })
     }
@@ -3857,11 +3505,11 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     }
 
     fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(0)
+        Ok(self.get_field_bytes(0).as_u16())
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_str_index(&self.bytes, 2)
+        Ok(self.get_field_bytes(1).as_heap_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3870,8 +3518,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = 2 + self.sizes.str_index_size();
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 }
 
@@ -3947,19 +3594,19 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     }
 
     fn rva(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(0)
+        Ok(self.get_field_bytes(0).as_u32())
     }
 
     fn impl_flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(4)
+        Ok(self.get_field_bytes(1).as_u16())
     }
 
     fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(6)
+        Ok(self.get_field_bytes(2).as_u16())
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_str_index(&self.bytes, 8)
+        Ok(self.get_field_bytes(3).as_heap_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -3968,34 +3615,31 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = 8 + self.sizes.str_index_size();
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(4).as_heap_index())
     }
 
     fn param_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        let offset =
-            8 + self.sizes.str_index_size() + self.sizes.blob_index_size();
-
-        let UnpackedValue { value: start, loc } = self.sizes.get_index(
-            MetadataTableKind::Param,
-            &self.bytes,
-            offset,
-        )?;
-        let end = self
+        let begin_bytes = self.get_field_bytes(5);
+        let end_index = self
             .next_row_bytes
             .as_ref()
-            .map(|next_row| -> Result<_, Error> {
-                Ok(self
-                    .sizes
-                    .get_index(MetadataTableKind::Param, &next_row, offset)?
-                    .value)
+            .map(|next_row| {
+                let range = begin_bytes.start - self.bytes.start
+                    ..begin_bytes.end() - self.bytes.start;
+                let end_bytes = next_row.subrange(range);
+                end_bytes.as_heap_index().value
             })
             .unwrap_or_else(|| {
-                Ok(self.sizes.num_rows(MetadataTableKind::Param))
-            })?;
+                self.table_sizes.num_rows[MetadataTableKind::Param]
+            });
+
+        let UnpackedValue {
+            value: begin_index,
+            loc,
+        } = begin_bytes.as_heap_index();
 
         Ok(UnpackedValue {
-            value: start..end,
+            value: begin_index..end_index,
             loc,
         })
     }
@@ -4025,15 +3669,15 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     }
 
     fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(0)
+        Ok(self.get_field_bytes(0).as_u16())
     }
 
     fn sequence(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(2)
+        Ok(self.get_field_bytes(1).as_u16())
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes.get_str_index(&self.bytes, 4)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
@@ -4054,17 +3698,12 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
     }
 
     fn class_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes
-            .get_index(MetadataTableKind::TypeDef, &self.bytes, 0)
+        Ok(self.get_field_bytes(0).as_heap_index())
     }
 
     fn interface(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        let offset = self.sizes.index_size(MetadataTableKind::TypeDef);
-        self.sizes.get_coded_index(
-            MetadataTableKind::TYPE_DEF_OR_REF,
-            &self.bytes,
-            offset,
-        )
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
     }
 }
 
@@ -4097,18 +3736,12 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 
     fn class_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.sizes.get_coded_index(
-            MetadataTableKind::MEMBER_REF_PARENT,
-            &self.bytes,
-            0,
-        )
+        self.get_field_bytes(0)
+            .as_coded_index(MetadataTableKind::MEMBER_REF_PARENT)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT);
-        self.sizes.get_str_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(1).as_heap_index())
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -4117,11 +3750,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 
     fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::MEMBER_REF_PARENT)
-            + self.sizes.str_index_size();
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 }
 
@@ -4143,21 +3772,17 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
     }
 
     fn type_value(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(0)
+        Ok(self.get_field_bytes(0).as_u8())
     }
 
     fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.sizes.get_coded_index(
-            MetadataTableKind::HAS_CONSTANT,
-            &self.bytes,
-            2,
-        )
+        // Skip get_field_bytes(1), which is a padding byte.
+        self.get_field_bytes(2)
+            .as_coded_index(MetadataTableKind::HAS_CONSTANT)
     }
 
     fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset =
-            2 + self.sizes.coded_index_size(MetadataTableKind::HAS_CONSTANT);
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(3).as_heap_index())
     }
 }
 
@@ -4179,32 +3804,17 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
     }
 
     fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.sizes.get_coded_index(
-            MetadataTableKind::HAS_CUSTOM_ATTRIBUTE,
-            &self.bytes,
-            0,
-        )
+        self.get_field_bytes(0)
+            .as_coded_index(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
     }
 
     fn type_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE);
-        self.sizes.get_coded_index(
-            MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE,
-            &self.bytes,
-            offset,
-        )
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE)
     }
 
     fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = self
-            .sizes
-            .coded_index_size(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
-            + self
-                .sizes
-                .coded_index_size(MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE);
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 }
 
@@ -4228,22 +3838,16 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
     }
 
     fn action(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(0)
+        Ok(self.get_field_bytes(0).as_u16())
     }
 
     fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.sizes.get_coded_index(
-            MetadataTableKind::HAS_DECL_SECURITY,
-            &self.bytes,
-            2,
-        )
+        self.get_field_bytes(1)
+            .as_coded_index(MetadataTableKind::HAS_DECL_SECURITY)
     }
 
     fn permission_set_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        let offset = 2 + self
-            .sizes
-            .coded_index_size(MetadataTableKind::HAS_DECL_SECURITY);
-        self.sizes.get_blob_index(&self.bytes, offset)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 }
 
@@ -4260,15 +3864,14 @@ impl<'a> MetadataRowUnpacker<'a, ClassLayoutRowUnpacker> {
     }
 
     fn alignment(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(0)
+        Ok(self.get_field_bytes(0).as_u16())
     }
 
     fn size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(2)
+        Ok(self.get_field_bytes(1).as_u32())
     }
 
     fn type_def_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.sizes
-            .get_index(MetadataTableKind::TypeDef, &self.bytes, 6)
+        Ok(self.get_field_bytes(2).as_heap_index())
     }
 }
