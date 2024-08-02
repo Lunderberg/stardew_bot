@@ -927,7 +927,7 @@ impl<'a> Unpacker<'a> {
         let metadata = self.physical_metadata()?;
         let stream = metadata.tilde_stream()?;
         let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.event_map_table(&table_sizes)?;
+        let table = stream.event_table(&table_sizes)?;
 
         Ok(table.bytes.end())
     }
@@ -2167,6 +2167,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
+        self.event_table(&table_sizes)?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
         Ok(())
     }
 
@@ -2493,6 +2497,13 @@ impl<'a> TildeStreamUnpacker<'a> {
         &'b self,
         table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, EventMapRowUnpacker>, Error> {
+        self.get_table(table_sizes)
+    }
+
+    pub fn event_table<'b>(
+        &'b self,
+        table_sizes: &'b MetadataTableSizes,
+    ) -> Result<MetadataTableUnpacker<'b, EventRowUnpacker>, Error> {
         self.get_table(table_sizes)
     }
 }
@@ -4002,5 +4013,45 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
 
     fn event_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
         Ok(self.get_index_range(1))
+    }
+}
+
+impl<'a> MetadataRowUnpacker<'a, EventRowUnpacker> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.flags()?).name("Flags");
+
+        let name = self.name()?.value;
+        {
+            let index = self.name_index()?;
+            annotator
+                .range(index.loc)
+                .name("name")
+                .value(format!("{}\n{}", index.value, name));
+        }
+
+        annotator.value(self.event_type()?).name("Event type");
+
+        Ok(())
+    }
+
+    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+        Ok(self.get_field_bytes(0).as_u16())
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.get_field_bytes(1).as_simple_index())
+    }
+
+    fn name(&self) -> Result<UnpackedValue<&str>, Error> {
+        let index = self.name_index()?.value;
+        self.string_heap.get_null_terminated(index)
+    }
+
+    fn event_type(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
+        self.get_field_bytes(2)
+            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
     }
 }
