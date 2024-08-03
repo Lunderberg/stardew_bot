@@ -574,7 +574,6 @@ pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     bytes: ByteRange<'a>,
     tables: &'a MetadataTables<'a>,
     table_sizes: &'a MetadataTableSizes,
-    blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -590,10 +589,11 @@ pub trait TypedMetadataIndex {
     fn access<'a>(
         self,
         tables: &MetadataTables<'a>,
-    ) -> Result<UnpackedValue<Self::Output<'a>>, Error>;
+    ) -> Result<Self::Output<'a>, Error>;
 }
 
 pub struct MetadataStringIndex(usize);
+pub struct MetadataBlobIndex(usize);
 
 pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// The bytes that are directly owned by this row of the table.
@@ -609,7 +609,6 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     tables: &'a MetadataTables<'a>,
 
     table_sizes: &'a MetadataTableSizes,
-    blob_heap: ByteRange<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -715,6 +714,18 @@ impl<'a> UnpackMetadataFromBytes<'a> for MetadataStringIndex {
 impl std::fmt::Display for MetadataStringIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "String[{}]", self.0)
+    }
+}
+
+impl<'a> UnpackMetadataFromBytes<'a> for MetadataBlobIndex {
+    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
+        Ok(bytes.unpack()?.map(Self))
+    }
+}
+
+impl std::fmt::Display for MetadataBlobIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Blob[{}]", self.0)
     }
 }
 
@@ -2506,15 +2517,11 @@ impl<'a> MetadataTables<'a> {
             bytes,
             tables: &self,
             table_sizes: &self.table_sizes,
-            blob_heap: self.heaps[MetadataHeapKind::Blob],
             row_unpacker: PhantomData,
         })
     }
 
-    pub fn get<Index>(
-        &self,
-        index: Index,
-    ) -> Result<UnpackedValue<Index::Output<'a>>, Error>
+    pub fn get<Index>(&self, index: Index) -> Result<Index::Output<'a>, Error>
     where
         Index: TypedMetadataIndex,
     {
@@ -2581,20 +2588,60 @@ where
     fn access<'a>(
         self,
         tables: &MetadataTables<'a>,
-    ) -> Result<UnpackedValue<Self::Output<'a>>, Error> {
+    ) -> Result<Self::Output<'a>, Error> {
         self.value().access(tables)
     }
 }
 
 impl TypedMetadataIndex for MetadataStringIndex {
-    type Output<'a> = &'a str;
+    type Output<'a> = UnpackedValue<&'a str>;
 
     fn access<'a>(
         self,
         tables: &MetadataTables<'a>,
-    ) -> Result<UnpackedValue<Self::Output<'a>>, Error> {
+    ) -> Result<UnpackedValue<&'a str>, Error> {
         let bytes = tables.heaps[MetadataHeapKind::String];
         bytes.get_null_terminated(self.0)
+    }
+}
+
+impl TypedMetadataIndex for MetadataBlobIndex {
+    type Output<'a> = ByteRange<'a>;
+
+    fn access<'a>(
+        self,
+        tables: &MetadataTables<'a>,
+    ) -> Result<ByteRange<'a>, Error> {
+        let blob_heap = tables.heaps[MetadataHeapKind::Blob];
+        let index = self.0;
+
+        let byte: u8 = blob_heap[index];
+
+        let leading_ones = byte.leading_ones();
+        let (size_size, size) = match leading_ones {
+            0 => {
+                let size: usize = (byte & 0x7f).into();
+                (1, size)
+            }
+            1 => {
+                let high: usize = (byte & 0x3f).into();
+                let low: usize = blob_heap[index + 1].into();
+                (2, (high << 8) + low)
+            }
+            2 => {
+                let high: usize = (byte & 0x1f).into();
+                let mid1: usize = blob_heap[index + 1].into();
+                let mid2: usize = blob_heap[index + 2].into();
+                let low: usize = blob_heap[index + 3].into();
+                (4, (high << 24) + (mid1 << 16) + (mid2 << 8) + low)
+            }
+            _ => {
+                return Err(Error::InvalidBlobHeader { leading_ones });
+            }
+        };
+
+        let bytes = blob_heap.subrange(index..index + size_size + size);
+        Ok(bytes)
     }
 }
 
@@ -3215,7 +3262,6 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 next_row_bytes,
                 tables: self.tables,
                 table_sizes: self.table_sizes,
-                blob_heap: self.blob_heap,
                 row_unpacker: self.row_unpacker,
             }
         })
@@ -3277,7 +3323,6 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 next_row_bytes,
                 tables: self.tables,
                 table_sizes: self.table_sizes,
-                blob_heap: self.blob_heap,
                 row_unpacker: self.row_unpacker,
             })
         } else {
@@ -3337,36 +3382,6 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
             begin_bytes.unpack().unwrap().into();
 
         UnpackedValue::new(loc, begin_index..end_index)
-    }
-
-    pub fn get_blob<'b>(&'b self, index: usize) -> Result<ByteRange, Error> {
-        let byte: u8 = self.blob_heap[index];
-
-        let leading_ones = byte.leading_ones();
-        let (size_size, size) = match leading_ones {
-            0 => {
-                let size: usize = (byte & 0x7f).into();
-                (1, size)
-            }
-            1 => {
-                let high: usize = (byte & 0x3f).into();
-                let low: usize = self.blob_heap[index + 1].into();
-                (2, (high << 8) + low)
-            }
-            2 => {
-                let high: usize = (byte & 0x1f).into();
-                let mid1: usize = self.blob_heap[index + 1].into();
-                let mid2: usize = self.blob_heap[index + 2].into();
-                let low: usize = self.blob_heap[index + 3].into();
-                (4, (high << 24) + (mid1 << 16) + (mid2 << 8) + low)
-            }
-            _ => {
-                return Err(Error::InvalidBlobHeader { leading_ones });
-            }
-        };
-
-        let bytes = self.blob_heap.subrange(index..index + size_size + size);
-        Ok(bytes)
     }
 }
 
@@ -3636,11 +3651,12 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
                 .name("name")
                 .value(format!("{}\n{}", index.value, name));
         }
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("signature_index");
+        annotator
+            .value(self.signature_index()?)
+            .name("signature_index");
 
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .range(self.signature()?.as_range())
             .name(format!("'{type_name}.{name}' signature"));
 
         Ok(())
@@ -3658,8 +3674,14 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
         self.tables.get(self.name_index()?)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(2).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 }
 
@@ -3684,10 +3706,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
                 .value(format!("{}\n{}", index.value, name));
         }
 
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("signature_index");
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .value(self.signature_index()?)
+            .name("signature_index");
+        annotator
+            .range(self.signature()?.as_range())
             .name(format!("'{type_name}.{name}' signature"));
 
         let param_indices = self.param_indices()?;
@@ -3752,8 +3775,14 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
         self.tables.get(self.name_index()?)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(4).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 
     fn param_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
@@ -3838,11 +3867,12 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
                 .value(format!("{}\n{}", index.value, name));
         }
 
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("signature_index");
+        annotator
+            .value(self.signature_index()?)
+            .name("signature_index");
 
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .range(self.signature()?.as_range())
             .name(format!("MemberRef {name}"));
 
         Ok(())
@@ -3861,8 +3891,14 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
         self.tables.get(self.name_index()?)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(2).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 }
 
@@ -3874,10 +3910,9 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
         annotator.value(self.type_value()?).name("Type value");
         annotator.value(self.parent_index()?).name("Parent");
 
-        let value = self.value_index()?;
-        annotator.value(value).name("Value");
+        annotator.value(self.value_index()?).name("Value");
         annotator
-            .range(self.get_blob(value.value)?.as_range())
+            .range(self.value()?.as_range())
             .name("Constant value");
 
         Ok(())
@@ -3893,8 +3928,12 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
             .as_coded_index(MetadataTableKind::HAS_CONSTANT)
     }
 
-    fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(3).unpack()
+    }
+
+    fn value(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.value_index()?)
     }
 }
 
@@ -3906,10 +3945,9 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
         annotator.value(self.parent_index()?).name("Parent");
         annotator.value(self.type_index()?).name("Type");
 
-        let value = self.value_index()?;
-        annotator.value(value).name("Value");
+        annotator.value(self.value_index()?).name("Value");
         annotator
-            .range(self.get_blob(value.value)?.as_range())
+            .range(self.value()?.as_range())
             .name("CustomAttribute value");
 
         Ok(())
@@ -3925,8 +3963,12 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
             .as_coded_index(MetadataTableKind::CUSTOM_ATTRIBUTE_TYPE)
     }
 
-    fn value_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(2).unpack()
+    }
+
+    fn value(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.value_index()?)
     }
 }
 
@@ -3948,7 +3990,9 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshalRowUnpacker> {
             .as_coded_index(MetadataTableKind::HAS_FIELD_MARSHAL)
     }
 
-    fn native_type_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn native_type_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(1).unpack()
     }
 }
@@ -3961,10 +4005,11 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
         annotator.value(self.action()?).name("Action");
         annotator.value(self.parent_index()?).name("Parent");
 
-        let permission_set_index = self.permission_set_index()?;
-        annotator.value(permission_set_index).name("Permission set");
         annotator
-            .range(self.get_blob(permission_set_index.value)?.as_range())
+            .value(self.permission_set_index()?)
+            .name("Permission set");
+        annotator
+            .range(self.permission_set()?.as_range())
             .name("DeclSecurity permission set");
 
         Ok(())
@@ -3979,8 +4024,14 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
             .as_coded_index(MetadataTableKind::HAS_DECL_SECURITY)
     }
 
-    fn permission_set_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn permission_set_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(2).unpack()
+    }
+
+    fn permission_set(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.permission_set_index()?)
     }
 }
 
@@ -4034,17 +4085,22 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("Signature");
+        annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .range(self.signature()?.as_range())
             .name("StandAloneSig signature");
 
         Ok(())
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 }
 
@@ -4159,10 +4215,9 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
                 .value(format!("{}\n{}", index.value, name));
         }
 
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("Signature");
+        annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .range(self.signature()?.as_range())
             .name("Property signature");
 
         Ok(())
@@ -4180,8 +4235,14 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
         self.tables.get(self.name_index()?)
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(2).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 }
 
@@ -4275,17 +4336,22 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let signature_index = self.signature_index()?;
-        annotator.value(signature_index).name("Signature");
+        annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.get_blob(signature_index.value)?.as_range())
+            .range(self.signature()?.as_range())
             .name("TypeSpec signature");
 
         Ok(())
     }
 
-    fn signature_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn signature_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn signature(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.signature_index()?)
     }
 }
 
@@ -4374,6 +4440,8 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
             .value(self.revision_number()?)
             .name("Revision number");
 
+        annotator.value(self.flags()?).name("Flags");
+
         let name = self.name()?.value;
         {
             let index = self.name_index()?;
@@ -4383,10 +4451,9 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
                 .value(format!("{}\n{}", index.value, name));
         }
 
-        let public_key_index = self.public_key_index()?;
-        annotator.value(public_key_index).name("Public key");
+        annotator.value(self.public_key_index()?).name("Public key");
         annotator
-            .range(self.get_blob(public_key_index.value)?.as_range())
+            .range(self.public_key()?.as_range())
             .name(format!("Public key, '{name}' assembly"));
 
         Ok(())
@@ -4412,12 +4479,22 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
         self.get_field_bytes(4).unpack()
     }
 
-    fn public_key_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
         self.get_field_bytes(5).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn public_key_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(6).unpack()
+    }
+
+    fn public_key(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.public_key_index()?)
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+        self.get_field_bytes(7).unpack()
     }
 
     fn name(&self) -> Result<UnpackedValue<&str>, Error> {
@@ -4457,18 +4534,16 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
                 .value(format!("{}\n{}", index.value, culture));
         }
 
-        let public_key_or_token_index = self.public_key_or_token_index()?;
         annotator
-            .value(public_key_or_token_index)
+            .value(self.public_key_or_token_index()?)
             .name("Public key/token");
         annotator
-            .range(self.get_blob(public_key_or_token_index.value)?.as_range())
+            .range(self.public_key_or_token()?.as_range())
             .name(format!("Public key/token, '{name}' AssemblyRef"));
 
-        let hash_value_index = self.hash_value_index()?;
-        annotator.value(hash_value_index).name("Hash value");
+        annotator.value(self.hash_value_index()?).name("Hash value");
         annotator
-            .range(self.get_blob(hash_value_index.value)?.as_range())
+            .range(self.hash_value()?.as_range())
             .name(format!("HashValue, '{name}' AssemblyRef"));
 
         Ok(())
@@ -4494,8 +4569,14 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
         self.get_field_bytes(4).unpack()
     }
 
-    fn public_key_or_token_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn public_key_or_token_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(5).unpack()
+    }
+
+    fn public_key_or_token(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.public_key_or_token_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -4516,8 +4597,14 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
         self.tables.get(self.culture_index()?)
     }
 
-    fn hash_value_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn hash_value_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(8).unpack()
+    }
+
+    fn hash_value(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.hash_value_index()?)
     }
 }
 
@@ -4652,10 +4739,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
     ) -> Result<(), Error> {
         annotator.value(self.method_index()?).name("Method");
 
-        let instantiation_index = self.instantiation_index()?;
-        annotator.value(instantiation_index).name("Instantiation");
         annotator
-            .range(self.get_blob(instantiation_index.value)?.as_range())
+            .value(self.instantiation_index()?)
+            .name("Instantiation");
+        annotator
+            .range(self.instantiation()?.as_range())
             .name("MethodSpec instantiation");
 
         Ok(())
@@ -4666,8 +4754,14 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
             .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
     }
 
-    fn instantiation_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn instantiation_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
         self.get_field_bytes(1).unpack()
+    }
+
+    fn instantiation(&self) -> Result<ByteRange, Error> {
+        self.tables.get(self.instantiation_index()?)
     }
 }
 
