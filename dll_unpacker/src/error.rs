@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use thiserror::Error;
 
 use crate::dll_unpacker::MetadataTableKind;
@@ -86,6 +88,18 @@ pub enum Error {
     InvalidMetadataTableIndex {
         kind: MetadataTableKind,
         index: usize,
+        num_rows: usize,
+    },
+
+    #[error(
+        "Index range {}..{} \
+         is out of bounds for table {kind}, \
+         which only has {num_rows} rows.",
+        indices.start, indices.end
+    )]
+    InvalidMetadataTableIndexRange {
+        kind: MetadataTableKind,
+        indices: Range<usize>,
         num_rows: usize,
     },
 
