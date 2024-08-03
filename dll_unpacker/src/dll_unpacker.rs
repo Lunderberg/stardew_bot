@@ -1084,7 +1084,10 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.field_layout_table()?.bytes.end())
+        Ok(metadata_tables
+            .generic_param_constraint_table()?
+            .bytes
+            .end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4527,13 +4530,10 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
         annotator.value(self.flags()?).name("Flags");
 
         let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(name);
 
         annotator.value(self.signature_index()?).name("Signature");
         annotator
@@ -4572,7 +4572,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.semantics()?).name("Semantics");
-        annotator.value(self.method_index()?).name("Method");
+        annotator
+            .value(self.method_index()?)
+            .name("Method")
+            .append_value(self.method()?.name()?.value);
         annotator.value(self.association()?).name("Association");
 
         Ok(())
@@ -4582,8 +4585,17 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn method_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn method_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<MethodDefRowUnpacker>>, Error>
+    {
         self.get_field_bytes(1).unpack()
+    }
+
+    fn method(
+        &self,
+    ) -> Result<MetadataRowUnpacker<'a, MethodDefRowUnpacker>, Error> {
+        self.tables.get(self.method_index()?)
     }
 
     fn association(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
@@ -4597,7 +4609,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.type_index()?).name("Type");
+        annotator
+            .value(self.class_index()?)
+            .name("Class")
+            .append_value(self.class()?.type_name()?.value);
         annotator
             .value(self.method_body_index()?)
             .name("Method body");
@@ -4608,8 +4623,17 @@ impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
         Ok(())
     }
 
-    fn type_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn class_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
+    {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn class(
+        &self,
+    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+        self.tables.get(self.class_index()?)
     }
 
     fn method_body_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
@@ -4685,18 +4709,15 @@ impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
             .value(self.member_forwarded()?)
             .name("Member forwarded");
 
-        let import_name = self.import_name()?.value;
-        {
-            let index = self.import_name_index()?;
-            annotator
-                .range(index.loc())
-                .name("Import name")
-                .value(format!("{}\n{}", index.value, import_name));
-        }
+        annotator
+            .value(self.import_name_index()?)
+            .name("Import name")
+            .append_value(self.import_name()?.value);
 
         annotator
             .value(self.import_scope_index()?)
-            .name("Import scope");
+            .name("Import scope")
+            .append_value(self.import_scope()?.name()?.value);
 
         Ok(())
     }
@@ -4720,8 +4741,17 @@ impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
         self.tables.get(self.import_name_index()?)
     }
 
-    fn import_scope_index(&self) -> Result<UnpackedValue<usize>, Error> {
-        self.get_field_bytes(2).unpack()
+    fn import_scope_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<ModuleRefRowUnpacker>>, Error>
+    {
+        self.get_field_bytes(3).unpack()
+    }
+
+    fn import_scope(
+        &self,
+    ) -> Result<MetadataRowUnpacker<ModuleRefRowUnpacker>, Error> {
+        self.tables.get(self.import_scope_index()?)
     }
 }
 
@@ -4731,7 +4761,10 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVARowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.rva()?).name("RVA");
-        annotator.value(self.field_index()?).name("Field");
+        annotator
+            .value(self.field_index()?)
+            .name("Field")
+            .append_value(self.field()?.name()?.value);
 
         Ok(())
     }
@@ -4740,8 +4773,15 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVARowUnpacker> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn field_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn field_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<FieldRowUnpacker>>, Error>
+    {
         self.get_field_bytes(1).unpack()
+    }
+
+    fn field(&self) -> Result<MetadataRowUnpacker<FieldRowUnpacker>, Error> {
+        self.tables.get(self.field_index()?)
     }
 }
 
@@ -4992,20 +5032,40 @@ impl<'a> MetadataRowUnpacker<'a, NestedClassRowUnpacker> {
     ) -> Result<(), Error> {
         annotator
             .value(self.nested_class_index()?)
-            .name("Nested class");
+            .name("Nested class")
+            .append_value(self.nested_class()?.type_name()?.value);
         annotator
             .value(self.enclosing_class_index()?)
-            .name("Enclosing class");
+            .name("Enclosing class")
+            .append_value(self.enclosing_class()?.type_name()?.value);
 
         Ok(())
     }
 
-    fn nested_class_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn nested_class_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
+    {
         self.get_field_bytes(0).unpack()
     }
 
-    fn enclosing_class_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn nested_class(
+        &self,
+    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+        self.tables.get(self.nested_class_index()?)
+    }
+
+    fn enclosing_class_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
+    {
         self.get_field_bytes(1).unpack()
+    }
+
+    fn enclosing_class(
+        &self,
+    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+        self.tables.get(self.enclosing_class_index()?)
     }
 }
 
@@ -5092,14 +5152,24 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraintRowUnpacker> {
     ) -> Result<(), Error> {
         annotator
             .value(self.generic_param_index()?)
-            .name("Generic param");
+            .name("Generic param")
+            .append_value(self.generic_param()?.name()?.value);
         annotator.value(self.constraint_index()?).name("Constraint");
 
         Ok(())
     }
 
-    fn generic_param_index(&self) -> Result<UnpackedValue<usize>, Error> {
+    fn generic_param_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndex<GenericParamRowUnpacker>>, Error>
+    {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn generic_param(
+        &self,
+    ) -> Result<MetadataRowUnpacker<GenericParamRowUnpacker>, Error> {
+        self.tables.get(self.generic_param_index()?)
     }
 
     fn constraint_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
