@@ -36,7 +36,16 @@ pub trait Annotator {
 pub trait Annotation: Sized {
     fn name(&mut self, name: impl Into<String>) -> &mut Self;
 
+    fn current_value(&self) -> &str;
+
     fn value(&mut self, value: impl Display) -> &mut Self;
 
     fn disable_highlight(&mut self) -> &mut Self;
+
+    fn append_value(&mut self, value: impl Display) -> &mut Self {
+        // Not the most efficient if done in a loop, but convenient
+        // enough for now.
+        let value = format!("{}\n{}", self.current_value(), value);
+        self.value(value)
+    }
 }

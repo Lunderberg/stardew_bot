@@ -205,6 +205,10 @@ impl TuiExplorerBuilder {
                 self
             }
 
+            fn current_value(&self) -> &str {
+                self.value.as_str()
+            }
+
             fn value(&mut self, value: impl std::fmt::Display) -> &mut Self {
                 self.value = format!("{value}");
                 self

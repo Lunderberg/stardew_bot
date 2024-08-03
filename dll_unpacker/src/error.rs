@@ -108,6 +108,13 @@ pub enum Error {
          but occurred in a context that requires a valid GUID."
     )]
     InvalidGuidIndexZero,
+
+    #[error(
+        "Metadata index zero is reserved for NULL indices, \
+         but occurred in a context that \
+         requires a valid table index."
+    )]
+    InvalidMetadataTableIndexZero { kind: MetadataTableKind },
 }
 
 impl std::fmt::Debug for Error {
