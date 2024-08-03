@@ -165,12 +165,18 @@ pub trait EnumKey: Sized {
     fn iter_keys() -> impl Iterator<Item = Self>;
 }
 
-pub struct TildeStreamUnpacker<'a> {
+pub struct MetadataTablesHeaderUnpacker<'a> {
+    /// The entire contents of the #~ stream of the metadata.  While
+    /// most of the unpacker types only have access to bytes that they
+    /// directly contain, the size of the header for metadata tables
+    /// depends on the number of tables present.
     bytes: ByteRange<'a>,
-    string_heap: ByteRange<'a>,
-    blob_heap: ByteRange<'a>,
-    #[allow(dead_code)]
-    guid_heap: ByteRange<'a>,
+}
+
+pub struct MetadataTables<'a> {
+    bytes: ByteRange<'a>,
+    table_sizes: MetadataTableSizes,
+    heaps: MetadataMap<MetadataHeapKind, ByteRange<'a>>,
 }
 
 #[derive(Clone, Copy)]
@@ -686,6 +692,15 @@ impl<'a> UnpackMetadataFromBytes<'a> for usize {
     }
 }
 
+impl<Key, Value> MetadataMap<Key, Value> {
+    fn init(func: impl Fn() -> Value) -> Self {
+        Self {
+            values: std::array::from_fn(|_| func()),
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<Key, Value: Default> Default for MetadataMap<Key, Value> {
     fn default() -> Self {
         Self {
@@ -936,11 +951,8 @@ impl<'a> Unpacker<'a> {
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
-        let stream = metadata.tilde_stream()?;
-        let table_sizes = stream.metadata_table_sizes()?;
-        let table = stream.impl_map_table(&table_sizes)?;
-
-        Ok(table.bytes.end())
+        let metadata_tables = metadata.metadata_tables()?;
+        Ok(metadata_tables.param_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -1909,7 +1921,10 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
             },
         )?;
 
-        self.tilde_stream()?.collect_annotations(annotator)?;
+        self.metadata_tables_header()?
+            .collect_annotations(annotator)?;
+
+        self.metadata_tables()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -2012,9 +2027,28 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
         Ok(iter)
     }
 
-    pub fn tilde_stream(&self) -> Result<TildeStreamUnpacker, Error> {
+    pub fn metadata_tables_header(
+        &self,
+    ) -> Result<MetadataTablesHeaderUnpacker, Error> {
+        let header = self
+            .iter_stream_header()?
+            .filter_map(|res_header| res_header.ok())
+            .find(|header| header.name.value == "#~")
+            .ok_or(Error::MissingStream("#~"))?;
+
+        let bytes = {
+            let offset = header.offset.value as usize;
+            let size = header.size.value as usize;
+            self.bytes.subrange(offset..offset + size)
+        };
+
+        Ok(MetadataTablesHeaderUnpacker { bytes })
+    }
+
+    pub fn metadata_heaps(
+        &self,
+    ) -> Result<MetadataMap<MetadataHeapKind, ByteRange<'a>>, Error> {
         let mut string_stream = None;
-        let mut tilde_stream = None;
         let mut blob_stream = None;
         let mut guid_stream = None;
 
@@ -2024,9 +2058,7 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
             let size = header.size.value as usize;
             let bytes = self.bytes.subrange(offset..offset + size);
 
-            if header.name.value == "#~" {
-                tilde_stream = Some(bytes);
-            } else if header.name.value == "#Strings" {
+            if header.name.value == "#Strings" {
                 string_stream = Some(bytes);
             } else if header.name.value == "#Blob" {
                 blob_stream = Some(bytes);
@@ -2035,22 +2067,32 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
             }
         }
 
-        if tilde_stream.is_none() {
-            Err(Error::MissingStream("#~"))
-        } else if string_stream.is_none() {
-            Err(Error::MissingStream("#Strings"))
-        } else if blob_stream.is_none() {
-            Err(Error::MissingStream("#Blob"))
-        } else if guid_stream.is_none() {
-            Err(Error::MissingStream("#GUID"))
-        } else {
-            Ok(TildeStreamUnpacker {
-                bytes: tilde_stream.unwrap(),
-                string_heap: string_stream.unwrap(),
-                blob_heap: blob_stream.unwrap(),
-                guid_heap: guid_stream.unwrap(),
-            })
-        }
+        let mut heaps = MetadataMap::init(|| ByteRange {
+            start: Pointer::null(),
+            bytes: &[],
+        });
+        heaps[MetadataHeapKind::String] =
+            string_stream.ok_or(Error::MissingStream("#Strings"))?;
+        heaps[MetadataHeapKind::Blob] =
+            blob_stream.ok_or(Error::MissingStream("#Blob"))?;
+        heaps[MetadataHeapKind::GUID] =
+            guid_stream.ok_or(Error::MissingStream("#GUID"))?;
+
+        Ok(heaps)
+    }
+
+    pub fn metadata_tables(&self) -> Result<MetadataTables, Error> {
+        let heaps = self.metadata_heaps()?;
+        let header = self.metadata_tables_header()?;
+
+        let table_sizes = header.metadata_table_sizes()?;
+        let bytes = header.tables_after_header()?;
+
+        Ok(MetadataTables {
+            bytes,
+            table_sizes,
+            heaps,
+        })
     }
 }
 
@@ -2071,7 +2113,7 @@ impl<'a> StreamHeader<'a> {
     }
 }
 
-impl<'a> TildeStreamUnpacker<'a> {
+impl<'a> MetadataTablesHeaderUnpacker<'a> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2088,143 +2130,10 @@ impl<'a> TildeStreamUnpacker<'a> {
             .value(self.sorted_table_bitfield()?)
             .name("sorted_table_bitfield");
 
-        let table_sizes = self.metadata_table_sizes()?;
-
-        self.iter_num_rows()?
-            .try_for_each(|res| -> Result<_, Error> {
-                let (value, kind) = res?;
-                annotator.value(value).name(format!("Num {kind:?} rows"));
-                annotator
-                    .group(self.metadata_table_bytes(kind, &table_sizes)?)
-                    .name(format!("{kind:?} metadata table"));
-                Ok(())
-            })?;
-
-        self.module_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.type_ref_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        let field_table = self.field_table(&table_sizes)?;
-        let method_table = self.method_def_table(&table_sizes)?;
-        let param_table = self.param_table(&table_sizes)?;
-        self.type_def_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| {
-                row.collect_annotations(
-                    annotator,
-                    &field_table,
-                    &method_table,
-                    &param_table,
-                )
-            })?;
-
-        self.interface_impl_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.member_ref_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.constant_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.custom_attribute_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.field_marshal_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.decl_security_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.class_layout_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.field_layout_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.stand_alone_sig_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.event_map_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.event_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.property_map_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.property_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.method_semantics_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.method_impl_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.module_ref_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.type_spec_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.impl_map_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.field_rva_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.assembly_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.assembly_ref_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.manifest_resource_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.nested_class_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.generic_param_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.method_spec_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
-
-        self.generic_param_constraint_table(&table_sizes)?
-            .iter_rows()
-            .try_for_each(|row| row.collect_annotations(annotator))?;
+        for res in self.iter_num_rows()? {
+            let (value, kind) = res?;
+            annotator.value(value).name(format!("Num {kind:?} rows"));
+        }
 
         Ok(())
     }
@@ -2377,9 +2286,7 @@ impl<'a> TildeStreamUnpacker<'a> {
             let mut table_offsets =
                 MetadataMap::<MetadataTableKind, usize>::default();
 
-            let num_tables =
-                self.valid_table_bitfield()?.value.count_ones() as usize;
-            let mut curr_offset = 24 + 4 * num_tables;
+            let mut curr_offset = 0;
             for res in self.iter_num_rows()? {
                 let (num_rows, kind) = res?;
                 let num_rows = num_rows.value as usize;
@@ -2398,277 +2305,236 @@ impl<'a> TildeStreamUnpacker<'a> {
         })
     }
 
-    fn metadata_table_bytes<'b>(
-        &'b self,
-        kind: MetadataTableKind,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<ByteRange<'b>, Error> {
-        let start = table_sizes.table_offsets[kind];
-
-        let num_rows = table_sizes.num_rows[kind];
-        let bytes_per_row = table_sizes.bytes_per_row[kind];
-
-        let bytes =
-            self.bytes.subrange(start..start + num_rows * bytes_per_row);
-
+    fn tables_after_header(&self) -> Result<ByteRange<'a>, Error> {
+        let num_tables =
+            self.valid_table_bitfield()?.value.count_ones() as usize;
+        let header_size = 24 + 4 * num_tables;
+        let bytes = self.bytes.subrange(header_size..self.bytes.len());
         Ok(bytes)
+    }
+}
+
+impl<'a> MetadataTables<'a> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        for table_kind in MetadataTableKind::iter_keys() {
+            let table_start = self.table_sizes.table_offsets[table_kind];
+            let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
+            let num_rows = self.table_sizes.num_rows[table_kind];
+            for i_row in 0..num_rows {
+                let row_start = table_start + i_row * bytes_per_row;
+                let bytes =
+                    self.bytes.subrange(row_start..row_start + bytes_per_row);
+                annotator.range(bytes.as_range()).name(format!(
+                    "{}[{}]",
+                    table_kind,
+                    i_row + 1
+                ));
+            }
+        }
+
+        self.module_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.type_ref_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        let field_table = self.field_table()?;
+        let method_table = self.method_def_table()?;
+        let param_table = self.param_table()?;
+        self.type_def_table()?.iter_rows().try_for_each(|row| {
+            row.collect_annotations(
+                annotator,
+                &field_table,
+                &method_table,
+                &param_table,
+            )
+        })?;
+
+        self.interface_impl_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.member_ref_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.constant_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.custom_attribute_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.field_marshal_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.decl_security_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.class_layout_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.field_layout_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.stand_alone_sig_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.event_map_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.event_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.property_map_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.property_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.method_semantics_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.method_impl_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.module_ref_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.type_spec_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.impl_map_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.field_rva_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.assembly_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.assembly_ref_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.manifest_resource_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.nested_class_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.generic_param_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.method_spec_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.generic_param_constraint_table()?
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        Ok(())
     }
 
     fn get_table<'b, Unpacker>(
         &'b self,
-        table_sizes: &'b MetadataTableSizes,
     ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
     where
         Unpacker: RowUnpacker,
     {
-        let info = self.metadata_table_sizes()?;
+        let table_kind = Unpacker::KIND;
 
-        let offset = info.table_offsets[Unpacker::KIND];
-        let size =
-            info.num_rows[Unpacker::KIND] * info.bytes_per_row[Unpacker::KIND];
+        let offset = self.table_sizes.table_offsets[table_kind];
+        let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
+        let num_rows = self.table_sizes.num_rows[table_kind];
+        let size = bytes_per_row * num_rows;
         let bytes = self.bytes.subrange(offset..offset + size);
 
         Ok(MetadataTableUnpacker {
             bytes,
-            table_sizes,
-            string_heap: self.string_heap,
-            blob_heap: self.blob_heap,
+            table_sizes: &self.table_sizes,
+            string_heap: self.heaps[MetadataHeapKind::String],
+            blob_heap: self.heaps[MetadataHeapKind::Blob],
             row_unpacker: PhantomData,
         })
     }
-
-    pub fn module_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ModuleRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn type_ref_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, TypeRefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn type_def_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, TypeDefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn field_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, FieldRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn method_def_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MethodDefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn param_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ParamRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn interface_impl_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, InterfaceImplRowUnpacker>, Error>
-    {
-        self.get_table(table_sizes)
-    }
-
-    pub fn member_ref_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MemberRefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn constant_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ConstantRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn custom_attribute_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, CustomAttributeRowUnpacker>, Error>
-    {
-        self.get_table(table_sizes)
-    }
-
-    pub fn field_marshal_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, FieldMarshalRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn decl_security_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, DeclSecurityRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn class_layout_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ClassLayoutRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn field_layout_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, FieldLayoutRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn stand_alone_sig_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, StandAloneSigRowUnpacker>, Error>
-    {
-        self.get_table(table_sizes)
-    }
-
-    pub fn event_map_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, EventMapRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn event_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, EventRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn property_map_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, PropertyMapRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn property_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, PropertyRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn method_semantics_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MethodSemanticsRowUnpacker>, Error>
-    {
-        self.get_table(table_sizes)
-    }
-
-    pub fn method_impl_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MethodImplRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn module_ref_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ModuleRefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn type_spec_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, TypeSpecRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn impl_map_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ImplMapRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn field_rva_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, FieldRVARowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn assembly_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, AssemblyRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn assembly_ref_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, AssemblyRefRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn manifest_resource_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, ManifestResourceRowUnpacker>, Error>
-    {
-        self.get_table(table_sizes)
-    }
-
-    pub fn nested_class_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, NestedClassRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn generic_param_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, GenericParamRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn method_spec_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<MetadataTableUnpacker<'b, MethodSpecRowUnpacker>, Error> {
-        self.get_table(table_sizes)
-    }
-
-    pub fn generic_param_constraint_table<'b>(
-        &'b self,
-        table_sizes: &'b MetadataTableSizes,
-    ) -> Result<
-        MetadataTableUnpacker<'b, GenericParamConstraintRowUnpacker>,
-        Error,
-    > {
-        self.get_table(table_sizes)
-    }
 }
+
+macro_rules! define_table_method {
+    ($method_name:ident,$unpacker_name:ident) => {
+        impl<'a> MetadataTables<'a> {
+            pub fn $method_name<'b>(
+                &'b self,
+            ) -> Result<MetadataTableUnpacker<'b, $unpacker_name>, Error> {
+                self.get_table()
+            }
+        }
+    };
+}
+define_table_method! { module_table, ModuleRowUnpacker }
+define_table_method! { type_ref_table, TypeRefRowUnpacker }
+define_table_method! { type_def_table, TypeDefRowUnpacker }
+define_table_method! { field_table, FieldRowUnpacker }
+define_table_method! { method_def_table, MethodDefRowUnpacker }
+define_table_method! { param_table, ParamRowUnpacker }
+define_table_method! { interface_impl_table, InterfaceImplRowUnpacker }
+define_table_method! { member_ref_table, MemberRefRowUnpacker }
+define_table_method! { constant_table, ConstantRowUnpacker }
+define_table_method! { custom_attribute_table, CustomAttributeRowUnpacker }
+define_table_method! { field_marshal_table, FieldMarshalRowUnpacker }
+define_table_method! { decl_security_table, DeclSecurityRowUnpacker }
+define_table_method! { class_layout_table, ClassLayoutRowUnpacker }
+define_table_method! { field_layout_table, FieldLayoutRowUnpacker }
+define_table_method! { stand_alone_sig_table, StandAloneSigRowUnpacker }
+define_table_method! { event_map_table, EventMapRowUnpacker }
+define_table_method! { event_table, EventRowUnpacker }
+define_table_method! { property_map_table, PropertyMapRowUnpacker }
+define_table_method! { property_table, PropertyRowUnpacker }
+define_table_method! { method_semantics_table, MethodSemanticsRowUnpacker }
+define_table_method! { method_impl_table, MethodImplRowUnpacker }
+define_table_method! { module_ref_table, ModuleRefRowUnpacker }
+define_table_method! { type_spec_table, TypeSpecRowUnpacker }
+define_table_method! { impl_map_table, ImplMapRowUnpacker }
+define_table_method! { field_rva_table, FieldRVARowUnpacker }
+define_table_method! { assembly_table, AssemblyRowUnpacker }
+define_table_method! { assembly_processor_table, AssemblyProcessorRowUnpacker }
+define_table_method! { assembly_os_table, AssemblyOSRowUnpacker }
+define_table_method! { assembly_ref_table, AssemblyRefRowUnpacker }
+define_table_method! { assembly_ref_processor_table, AssemblyRefProcessorRowUnpacker }
+define_table_method! { assembly_ref_os_table, AssemblyRefOSRowUnpacker }
+define_table_method! { file_table, FileRowUnpacker }
+define_table_method! { exported_type_table, ExportedTypeRowUnpacker }
+define_table_method! { manifest_resource_table, ManifestResourceRowUnpacker }
+define_table_method! { nested_class_table, NestedClassRowUnpacker }
+define_table_method! { generic_param_table, GenericParamRowUnpacker }
+define_table_method! { method_spec_table, MethodSpecRowUnpacker }
+define_table_method! { generic_param_constraint_table, GenericParamConstraintRowUnpacker }
 
 impl std::fmt::Display for HeapSizes {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
