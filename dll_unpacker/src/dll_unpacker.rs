@@ -592,8 +592,13 @@ pub trait TypedMetadataIndex {
     ) -> Result<Self::Output<'a, 'b>, Error>;
 }
 
+#[derive(Clone, Copy)]
 pub struct MetadataStringIndex(usize);
+
+#[derive(Clone, Copy)]
 pub struct MetadataBlobIndex(usize);
+
+#[derive(Clone, Copy)]
 pub struct MetadataGuidIndex(usize);
 
 /// Typed index into a specific metadata type
@@ -611,6 +616,13 @@ pub struct MetadataTableIndexRange<Unpacker> {
     start: usize,
     end: usize,
     _phantom: PhantomData<Unpacker>,
+}
+
+#[derive(Clone, Copy)]
+pub struct MetadataCodedIndex<CodedIndexType> {
+    index: usize,
+    kind: MetadataTableKind,
+    _phantom: PhantomData<CodedIndexType>,
 }
 
 pub struct MetadataRowUnpacker<'a, RowUnpacker> {
@@ -686,6 +698,81 @@ decl_row_unpacker! { NestedClass, NestedClassRowUnpacker, [TypeDef, TypeDef]}
 decl_row_unpacker! { GenericParam, GenericParamRowUnpacker, [2, 2, TypeOrMethodDef, String]}
 decl_row_unpacker! { MethodSpec, MethodSpecRowUnpacker, [MethodDefOrRef, Blob]}
 decl_row_unpacker! { GenericParamConstraint, GenericParamConstraintRowUnpacker, [GenericParam, TypeDefOrRef]}
+
+pub trait CodedIndex {
+    const OPTIONS: &'static [Option<MetadataTableKind>];
+}
+
+macro_rules! decl_coded_index_type {
+    () => {
+        pub struct CodedResolutionScope;
+
+        impl CodedIndex for CodedResolutionScope {
+            const OPTIONS: &'static [Option<MetadataTableKind>] = &[
+                Some(MetadataTableKind::Module),
+                Some(MetadataTableKind::ModuleRef),
+                Some(MetadataTableKind::AssemblyRef),
+                Some(MetadataTableKind::TypeRef),
+            ];
+        }
+
+        pub enum MetadataResolutionScope<'a> {
+            Module(MetadataRowUnpacker<'a, ModuleRowUnpacker>),
+            ModuleRef(MetadataRowUnpacker<'a, ModuleRefRowUnpacker>),
+            AssemblyRef(MetadataRowUnpacker<'a, AssemblyRefRowUnpacker>),
+            TypeRef(MetadataRowUnpacker<'a, TypeRefRowUnpacker>),
+        }
+
+        impl std::fmt::Display for MetadataCodedIndex<CodedResolutionScope> {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}[{}]", self.kind, self.index)
+            }
+        }
+    };
+}
+
+decl_coded_index_type! {}
+
+impl TypedMetadataIndex for MetadataCodedIndex<CodedResolutionScope> {
+    type Output<'a: 'b, 'b> = MetadataResolutionScope<'b>;
+
+    fn access<'a: 'b, 'b>(
+        self,
+        tables: &'b MetadataTables<'a>,
+    ) -> Result<Self::Output<'a, 'b>, Error> {
+        Ok(match self.kind {
+            MetadataTableKind::Module => MetadataResolutionScope::Module(
+                tables.get(MetadataTableIndex::new(self.index))?,
+            ),
+            MetadataTableKind::ModuleRef => MetadataResolutionScope::ModuleRef(
+                tables.get(MetadataTableIndex::new(self.index))?,
+            ),
+            MetadataTableKind::TypeRef => MetadataResolutionScope::TypeRef(
+                tables.get(MetadataTableIndex::new(self.index))?,
+            ),
+            MetadataTableKind::AssemblyRef => {
+                MetadataResolutionScope::AssemblyRef(
+                    tables.get(MetadataTableIndex::new(self.index))?,
+                )
+            }
+            _ => panic!(
+                "Shouldn't be possible for ResolutionScope to contain {}",
+                self.kind
+            ),
+        })
+    }
+}
+
+impl<'a> MetadataResolutionScope<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataResolutionScope::Module(row) => row.name(),
+            MetadataResolutionScope::ModuleRef(row) => row.name(),
+            MetadataResolutionScope::AssemblyRef(row) => row.name(),
+            MetadataResolutionScope::TypeRef(row) => row.name(),
+        }
+    }
+}
 
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error>;
@@ -817,6 +904,58 @@ impl<Unpacker> Clone for MetadataTableIndex<Unpacker> {
 }
 
 impl<Unpacker> Copy for MetadataTableIndex<Unpacker> {}
+
+impl<Unpacker> MetadataTableIndex<Unpacker> {
+    fn new(index: usize) -> Self {
+        Self {
+            index,
+            _phantom: PhantomData,
+        }
+    }
+}
+
+impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
+    for Option<MetadataCodedIndex<CodedIndexType>>
+where
+    CodedIndexType: CodedIndex,
+{
+    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
+        let num_tables = CodedIndexType::OPTIONS.len();
+        let table_bits = num_tables.next_power_of_two().ilog2() as usize;
+
+        let (loc, raw_index): (_, usize) = bytes.unpack()?.into();
+
+        let table_mask = (1 << table_bits) - 1;
+        let table_index = raw_index & table_mask;
+        let index = raw_index >> table_bits;
+
+        let opt_coded_index = CodedIndexType::OPTIONS
+            .get(table_index)
+            .ok_or(Error::InvalidCodedIndex {
+                table_index,
+                num_tables,
+            })?
+            .map(|kind| MetadataCodedIndex {
+                index,
+                kind,
+                _phantom: PhantomData,
+            });
+
+        Ok(UnpackedValue::new(loc, opt_coded_index))
+    }
+}
+
+impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
+    for MetadataCodedIndex<CodedIndexType>
+where
+    CodedIndexType: CodedIndex,
+{
+    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
+        bytes.unpack()?.try_map(|opt_coded_index: Option<Self>| {
+            opt_coded_index.ok_or(Error::CodedIndexRefersToReservedTableIndex)
+        })
+    }
+}
 
 impl<Key, Value> MetadataMap<Key, Value> {
     fn init(func: impl Fn() -> Value) -> Self {
@@ -968,14 +1107,12 @@ impl<'a> ByteRange<'a> {
         let table_index = value & table_mask;
 
         let table = if table_index < N {
-            table_options[table_index].into().ok_or(
-                Error::CodedIndexRefersToReservedTableIndex {
-                    index: table_index,
-                },
-            )
+            table_options[table_index]
+                .into()
+                .ok_or(Error::CodedIndexRefersToReservedTableIndex)
         } else {
             Err(Error::InvalidCodedIndex {
-                index: table_index,
+                table_index,
                 num_tables: N,
             })
         }?;
@@ -1084,10 +1221,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables
-            .generic_param_constraint_table()?
-            .bytes
-            .end())
+        Ok(metadata_tables.type_ref_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -3717,44 +3851,49 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
-            .value(self.resolution_scope()?)
-            .name("resolution_scope");
+            .value(self.resolution_scope_index()?)
+            .name("resolution_scope")
+            .append_value(self.resolution_scope()?.name()?.value);
 
         annotator
-            .value(self.type_name_index()?)
+            .value(self.name_index()?)
             .name("Type name")
-            .append_value(self.type_name()?.value);
+            .append_value(self.name()?.value);
         annotator
-            .value(self.type_namespace_index()?)
+            .value(self.namespace_index()?)
             .name("Type namespace")
-            .append_value(self.type_namespace()?.value);
+            .append_value(self.namespace()?.value);
 
         Ok(())
     }
 
-    fn resolution_scope(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(0)
-            .as_coded_index(MetadataTableKind::RESOLUTION_SCOPE)
+    fn resolution_scope_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<CodedResolutionScope>>, Error>
+    {
+        self.get_field_bytes(0).unpack()
     }
 
-    fn type_name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn resolution_scope(&self) -> Result<MetadataResolutionScope, Error> {
+        self.tables.get(self.resolution_scope_index()?)
+    }
+
+    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn type_name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.type_name_index()?)
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        self.tables.get(self.name_index()?)
     }
 
-    fn type_namespace_index(
+    fn namespace_index(
         &self,
     ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn type_namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.type_namespace_index()?)
+    fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        self.tables.get(self.namespace_index()?)
     }
 }
 
