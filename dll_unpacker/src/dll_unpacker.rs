@@ -1085,7 +1085,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.module_table()?.bytes.end())
+        Ok(metadata_tables.type_def_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -2626,6 +2626,27 @@ impl<'a> MetadataTables<'a> {
     {
         index.access(self)
     }
+
+    fn iter_range<Unpacker>(
+        &self,
+        indices: impl Borrow<MetadataTableIndexRange<Unpacker>>,
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Unpacker>>, Error>
+    where
+        Unpacker: RowUnpacker,
+    {
+        let indices = indices.borrow();
+        let table = self.get_table()?;
+        table.validate_index_range(*indices)?;
+
+        let iter = (indices.start..indices.end).map(move |index| {
+            table.get_row(index).expect(
+                "Out-of-bounds access \
+                 should already be caught by \
+                 `table.validate_index_range(indices)`",
+            )
+        });
+        Ok(iter)
+    }
 }
 
 macro_rules! define_table_method {
@@ -3788,33 +3809,20 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         })?;
 
         let method_indices = self.method_indices()?;
-        annotator
-            .range(method_indices.loc())
-            .name("method_indices")
-            .value(format!(
-                "{}..{}",
-                method_indices.value.start, method_indices.value.end
-            ));
+        annotator.value(method_indices).name("method_indices");
 
         annotator
-            .group(
-                method_def_table
-                    .address_range_from_untyped(method_indices.value.clone())?,
-            )
+            .group(method_def_table.address_range(method_indices)?)
             .name(format!("Class '{type_name}'"));
 
-        method_indices.value.clone().try_for_each(
-            |method_index| -> Result<_, Error> {
-                let method = method_def_table.get_row(method_index)?;
-                method.collect_annotations(
-                    annotator,
-                    type_name,
-                    type_namespace,
-                    param_table,
-                )?;
-                Ok(())
-            },
-        )?;
+        self.iter_methods()?.try_for_each(|method| {
+            method.collect_annotations(
+                annotator,
+                type_name,
+                type_namespace,
+                param_table,
+            )
+        })?;
 
         {
             let method_range = method_indices.value;
@@ -3887,18 +3895,25 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
         impl Iterator<Item = MetadataRowUnpacker<FieldRowUnpacker>>,
         Error,
     > {
-        let indices = self.field_indices()?.value;
-        let table = self.tables.get_table()?;
-        table.validate_index_range(indices)?;
-        let iter = indices
-            .into_iter()
-            .map(move |index| table.get(index).unwrap());
-
-        Ok(iter)
+        self.tables.iter_range(self.field_indices()?)
     }
 
-    fn method_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        Ok(self.get_untyped_index_range(5))
+    fn method_indices(
+        &self,
+    ) -> Result<
+        UnpackedValue<MetadataTableIndexRange<MethodDefRowUnpacker>>,
+        Error,
+    > {
+        Ok(self.get_index_range(5))
+    }
+
+    fn iter_methods(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = MetadataRowUnpacker<MethodDefRowUnpacker>>,
+        Error,
+    > {
+        self.tables.iter_range(self.method_indices()?)
     }
 }
 
@@ -3982,45 +3997,28 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
             .name(format!("'{type_name}.{name}' signature"));
 
         let param_indices = self.param_indices()?;
-        annotator
-            .range(param_indices.loc())
-            .name("param_indices")
-            .value(format!(
-                "{}..{}",
-                param_indices.value.start, param_indices.value.end
-            ));
+        annotator.value(param_indices).name("param_indices");
 
         annotator
             .range(param_indices.loc())
             .name("Param names")
             .value(
-                param_indices
-                    .value
-                    .clone()
-                    .map(|param_index| -> Result<_, Error> {
-                        Ok(param_table.get_row(param_index)?.name()?.value)
-                    })
+                self.iter_params()?
+                    .map(|param| param.name().map(|unpacked| unpacked.value()))
                     .collect::<Result<String, Error>>()?,
             );
 
-        param_indices.value.clone().try_for_each(
-            |param_index| -> Result<_, Error> {
-                let param = param_table.get_row(param_index)?;
-                param.collect_annotations(
-                    annotator,
-                    type_name,
-                    type_namespace,
-                    name,
-                )?;
-                Ok(())
-            },
-        )?;
+        self.iter_params()?.try_for_each(|param| {
+            param.collect_annotations(
+                annotator,
+                type_name,
+                type_namespace,
+                name,
+            )
+        })?;
 
         annotator
-            .group(
-                param_table
-                    .address_range_from_untyped(param_indices.value.clone())?,
-            )
+            .group(param_table.address_range(param_indices)?)
             .name(format!("Method '{name}'"));
 
         Ok(())
@@ -4056,8 +4054,20 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
         self.tables.get(self.signature_index()?)
     }
 
-    fn param_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        Ok(self.get_untyped_index_range(5))
+    fn param_indices(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<ParamRowUnpacker>>, Error>
+    {
+        Ok(self.get_index_range(5))
+    }
+
+    fn iter_params(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = MetadataRowUnpacker<ParamRowUnpacker>>,
+        Error,
+    > {
+        self.tables.iter_range(self.param_indices()?)
     }
 }
 
