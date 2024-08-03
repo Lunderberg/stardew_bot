@@ -594,6 +594,7 @@ pub trait TypedMetadataIndex {
 
 pub struct MetadataStringIndex(usize);
 pub struct MetadataBlobIndex(usize);
+pub struct MetadataGuidIndex(usize);
 
 pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// The bytes that are directly owned by this row of the table.
@@ -705,27 +706,61 @@ impl<'a> UnpackMetadataFromBytes<'a> for usize {
     }
 }
 
-impl<'a> UnpackMetadataFromBytes<'a> for MetadataStringIndex {
+macro_rules! heap_index_impl {
+    ($index_type:ident, $name:ident) => {
+        impl<'a> UnpackMetadataFromBytes<'a> for $index_type {
+            fn unpack(
+                bytes: ByteRange<'a>,
+            ) -> Result<UnpackedValue<Self>, Error> {
+                Ok(bytes.unpack()?.map(Self))
+            }
+        }
+
+        impl std::fmt::Display for $index_type {
+            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                write!(f, "{}[{}]", stringify!($name), self.0)
+            }
+        }
+    };
+}
+
+heap_index_impl! { MetadataStringIndex, String }
+heap_index_impl! { MetadataBlobIndex, Blob }
+
+impl<'a> UnpackMetadataFromBytes<'a> for MetadataGuidIndex {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        Ok(bytes.unpack()?.map(Self))
+        bytes.unpack()?.try_map(|index: usize| {
+            // Unlike indices into the #Strings or #Blob heaps, which
+            // are zero-indexed, indices into the #GUID heap are
+            // one-indexed.  An index of zero is used to represent a
+            // null GUID.
+            //
+            // Converting the indices when unpacking avoids having a
+            // Rust `usize` that cannot be used as an index.
+            if index == 0 {
+                Err(Error::InvalidGuidIndexZero)
+            } else {
+                Ok(Self(index - 1))
+            }
+        })
     }
 }
 
-impl std::fmt::Display for MetadataStringIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "String[{}]", self.0)
-    }
-}
-
-impl<'a> UnpackMetadataFromBytes<'a> for MetadataBlobIndex {
+impl<'a> UnpackMetadataFromBytes<'a> for Option<MetadataGuidIndex> {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        Ok(bytes.unpack()?.map(Self))
+        Ok(bytes.unpack()?.map(|index: usize| {
+            if index == 0 {
+                None
+            } else {
+                Some(MetadataGuidIndex(index - 1))
+            }
+        }))
     }
 }
 
-impl std::fmt::Display for MetadataBlobIndex {
+impl std::fmt::Display for MetadataGuidIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Blob[{}]", self.0)
+        write!(f, "GUID[{}]", self.0)
     }
 }
 
@@ -3400,8 +3435,8 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
                 .value(format!("{}\n{}", index.value, name));
         }
         annotator.value(self.module_id()?).name("module_id");
-        annotator.value(self.enc_id()?).name("enc_id");
-        annotator.value(self.enc_base_id()?).name("enc_base_id");
+        annotator.opt_value(self.enc_id()?).name("enc_id");
+        annotator.opt_value(self.enc_base_id()?).name("enc_base_id");
 
         Ok(())
     }
@@ -3420,15 +3455,19 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
         self.tables.get(self.name_index()?)
     }
 
-    pub fn module_id(&self) -> Result<UnpackedValue<usize>, Error> {
+    pub fn module_id(&self) -> Result<UnpackedValue<MetadataGuidIndex>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
-    pub fn enc_id(&self) -> Result<UnpackedValue<usize>, Error> {
+    pub fn enc_id(
+        &self,
+    ) -> Result<UnpackedValue<Option<MetadataGuidIndex>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
-    pub fn enc_base_id(&self) -> Result<UnpackedValue<usize>, Error> {
+    pub fn enc_base_id(
+        &self,
+    ) -> Result<UnpackedValue<Option<MetadataGuidIndex>>, Error> {
         self.get_field_bytes(4).unpack()
     }
 }

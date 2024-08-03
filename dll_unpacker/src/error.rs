@@ -88,6 +88,12 @@ pub enum Error {
         index: usize,
         num_rows: usize,
     },
+
+    #[error(
+        "GUID index zero is reserved for NULL indices, \
+         but occurred in a context that requires a valid GUID."
+    )]
+    InvalidGuidIndexZero,
 }
 
 impl std::fmt::Debug for Error {

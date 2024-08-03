@@ -14,6 +14,17 @@ pub trait Annotator {
         self.range(value.loc()).value(value.value())
     }
 
+    fn opt_value<T: Display>(
+        &mut self,
+        value: UnpackedValue<Option<T>>,
+    ) -> &mut impl Annotation {
+        let annotation = self.range(value.loc());
+        match value.value() {
+            Some(value) => annotation.value(value),
+            None => annotation.value("(null)"),
+        }
+    }
+
     fn group(
         &mut self,
         range: impl Into<Range<Pointer>>,
