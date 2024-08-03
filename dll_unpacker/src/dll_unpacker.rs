@@ -1085,7 +1085,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.type_def_table()?.bytes.end())
+        Ok(metadata_tables.event_map_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4391,15 +4391,7 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.parent_index()?).name("Parent");
-
-        let event_indices = self.event_indices()?;
-        annotator
-            .range(event_indices.loc())
-            .name("event_indices")
-            .value(format!(
-                "{}..{}",
-                event_indices.value.start, event_indices.value.end
-            ));
+        annotator.value(self.event_indices()?).name("Events");
 
         Ok(())
     }
@@ -4408,8 +4400,20 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn event_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        Ok(self.get_untyped_index_range(1))
+    fn event_indices(
+        &self,
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<EventRowUnpacker>>, Error>
+    {
+        Ok(self.get_index_range(1))
+    }
+
+    pub fn iter_events(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = MetadataRowUnpacker<EventRowUnpacker>>,
+        Error,
+    > {
+        self.tables.iter_range(self.event_indices()?)
     }
 }
 
@@ -4458,15 +4462,7 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.parent_index()?).name("Parent");
-
-        let property_indices = self.property_indices()?;
-        annotator
-            .range(property_indices.loc())
-            .name("property_indices")
-            .value(format!(
-                "{}..{}",
-                property_indices.value.start, property_indices.value.end
-            ));
+        annotator.value(self.property_indices()?).name("Properties");
 
         Ok(())
     }
@@ -4475,8 +4471,22 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn property_indices(&self) -> Result<UnpackedValue<Range<usize>>, Error> {
-        Ok(self.get_untyped_index_range(1))
+    fn property_indices(
+        &self,
+    ) -> Result<
+        UnpackedValue<MetadataTableIndexRange<PropertyRowUnpacker>>,
+        Error,
+    > {
+        Ok(self.get_index_range(1))
+    }
+
+    pub fn iter_properties(
+        &self,
+    ) -> Result<
+        impl Iterator<Item = MetadataRowUnpacker<PropertyRowUnpacker>>,
+        Error,
+    > {
+        self.tables.iter_range(self.property_indices()?)
     }
 }
 
