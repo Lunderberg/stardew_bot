@@ -642,124 +642,183 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
-pub trait RowUnpacker {
+pub trait MetadataTableTag {
     const KIND: MetadataTableKind;
 
     const COLUMNS: &'static [MetadataColumnType];
 }
 
-macro_rules! decl_row_unpacker{
-    ($table_kind:ident, $unpacker_name:ident, $fields:tt) => {
-        pub struct $unpacker_name;
+macro_rules! decl_metadata_table_tag{
+    ($table_name:ident, $fields:tt) => {
+        pub struct $table_name;
 
-        impl RowUnpacker for $unpacker_name {
-            const KIND: MetadataTableKind = MetadataTableKind::$table_kind;
+        impl MetadataTableTag for $table_name {
+            const KIND: MetadataTableKind = MetadataTableKind::$table_name;
             const COLUMNS: &'static [MetadataColumnType] = fields! $fields;
         }
     };
 }
 
-decl_row_unpacker! {Module, ModuleRowUnpacker, [2, String, GUID, GUID, GUID]}
-decl_row_unpacker! {TypeRef, TypeRefRowUnpacker, [ResolutionScope, String, String]}
-decl_row_unpacker! {TypeDef, TypeDefRowUnpacker, [4, String, String, TypeDefOrRef, Field, MethodDef]}
-decl_row_unpacker! {Field, FieldRowUnpacker, [2, String, Blob]}
-decl_row_unpacker! {MethodDef, MethodDefRowUnpacker, [4, 2, 2, String, Blob, Param]}
-decl_row_unpacker! {Param, ParamRowUnpacker, [2, 2, String]}
-decl_row_unpacker! {InterfaceImpl, InterfaceImplRowUnpacker, [TypeDef, TypeDefOrRef]}
-decl_row_unpacker! {MemberRef, MemberRefRowUnpacker, [MemberRefParent, String, Blob]}
-decl_row_unpacker! {Constant, ConstantRowUnpacker, [1, 1, HasConstant, Blob]}
-decl_row_unpacker! {CustomAttribute, CustomAttributeRowUnpacker, [HasCustomAttribute, CustomAttributeType, Blob]}
-decl_row_unpacker! {FieldMarshal, FieldMarshalRowUnpacker, [HasFieldMarshal, Blob]}
-decl_row_unpacker! {DeclSecurity, DeclSecurityRowUnpacker, [2, HasDeclSecurity, Blob]}
-decl_row_unpacker! {ClassLayout, ClassLayoutRowUnpacker, [2, 4, TypeDef]}
-
-decl_row_unpacker! { FieldLayout, FieldLayoutRowUnpacker, [4, Field]}
-decl_row_unpacker! { StandAloneSig, StandAloneSigRowUnpacker, [Blob]}
-decl_row_unpacker! { EventMap, EventMapRowUnpacker, [TypeDef, Event]}
-decl_row_unpacker! { Event, EventRowUnpacker, [2, String, TypeDefOrRef]}
-decl_row_unpacker! { PropertyMap, PropertyMapRowUnpacker, [TypeDef, Property]}
-decl_row_unpacker! { Property, PropertyRowUnpacker, [2, String, Blob]}
-decl_row_unpacker! { MethodSemantics, MethodSemanticsRowUnpacker, [2, MethodDef, HasSemantics]}
-decl_row_unpacker! { MethodImpl, MethodImplRowUnpacker, [TypeDef, MethodDefOrRef, MethodDefOrRef]}
-decl_row_unpacker! { ModuleRef, ModuleRefRowUnpacker, [String]}
-decl_row_unpacker! { TypeSpec, TypeSpecRowUnpacker, [Blob]}
-decl_row_unpacker! { ImplMap, ImplMapRowUnpacker, [2, MemberForwarded, String, ModuleRef]}
-decl_row_unpacker! { FieldRVA, FieldRVARowUnpacker, [4, Field]}
-decl_row_unpacker! { Assembly, AssemblyRowUnpacker, [4, 2, 2, 2, 2, 4, Blob, String, String]}
-decl_row_unpacker! { AssemblyProcessor, AssemblyProcessorRowUnpacker, [4]}
-decl_row_unpacker! { AssemblyOS, AssemblyOSRowUnpacker, [4, 4, 4]}
-decl_row_unpacker! { AssemblyRef, AssemblyRefRowUnpacker, [2, 2, 2, 2, 4, Blob, String, String, Blob]}
-decl_row_unpacker! { AssemblyRefProcessor, AssemblyRefProcessorRowUnpacker, [4, AssemblyRef]}
-decl_row_unpacker! { AssemblyRefOS, AssemblyRefOSRowUnpacker, [4, 4, 4, AssemblyRef]}
-decl_row_unpacker! { File, FileRowUnpacker, [4, String, Blob]}
-decl_row_unpacker! { ExportedType, ExportedTypeRowUnpacker, [4, TypeDef, String, String, Implementation]}
-decl_row_unpacker! { ManifestResource, ManifestResourceRowUnpacker, [4, 4, String, Implementation]}
-decl_row_unpacker! { NestedClass, NestedClassRowUnpacker, [TypeDef, TypeDef]}
-decl_row_unpacker! { GenericParam, GenericParamRowUnpacker, [2, 2, TypeOrMethodDef, String]}
-decl_row_unpacker! { MethodSpec, MethodSpecRowUnpacker, [MethodDefOrRef, Blob]}
-decl_row_unpacker! { GenericParamConstraint, GenericParamConstraintRowUnpacker, [GenericParam, TypeDefOrRef]}
+decl_metadata_table_tag! { Module, [2, String, GUID, GUID, GUID] }
+decl_metadata_table_tag! { TypeRef, [ResolutionScope, String, String] }
+decl_metadata_table_tag! { TypeDef, [4, String, String, TypeDefOrRef, Field, MethodDef] }
+decl_metadata_table_tag! { Field, [2, String, Blob] }
+decl_metadata_table_tag! { MethodDef, [4, 2, 2, String, Blob, Param] }
+decl_metadata_table_tag! { Param, [2, 2, String] }
+decl_metadata_table_tag! { InterfaceImpl, [TypeDef, TypeDefOrRef] }
+decl_metadata_table_tag! { MemberRef, [MemberRefParent, String, Blob] }
+decl_metadata_table_tag! { Constant, [1, 1, HasConstant, Blob] }
+decl_metadata_table_tag! { CustomAttribute, [HasCustomAttribute, CustomAttributeType, Blob] }
+decl_metadata_table_tag! { FieldMarshal, [HasFieldMarshal, Blob] }
+decl_metadata_table_tag! { DeclSecurity, [2, HasDeclSecurity, Blob] }
+decl_metadata_table_tag! { ClassLayout, [2, 4, TypeDef] }
+decl_metadata_table_tag! { FieldLayout, [4, Field] }
+decl_metadata_table_tag! { StandAloneSig, [Blob] }
+decl_metadata_table_tag! { EventMap, [TypeDef, Event] }
+decl_metadata_table_tag! { Event, [2, String, TypeDefOrRef] }
+decl_metadata_table_tag! { PropertyMap, [TypeDef, Property] }
+decl_metadata_table_tag! { Property, [2, String, Blob] }
+decl_metadata_table_tag! { MethodSemantics, [2, MethodDef, HasSemantics] }
+decl_metadata_table_tag! { MethodImpl, [TypeDef, MethodDefOrRef, MethodDefOrRef] }
+decl_metadata_table_tag! { ModuleRef, [String] }
+decl_metadata_table_tag! { TypeSpec, [Blob] }
+decl_metadata_table_tag! { ImplMap, [2, MemberForwarded, String, ModuleRef] }
+decl_metadata_table_tag! { FieldRVA, [4, Field] }
+decl_metadata_table_tag! { Assembly, [4, 2, 2, 2, 2, 4, Blob, String, String] }
+decl_metadata_table_tag! { AssemblyProcessor, [4] }
+decl_metadata_table_tag! { AssemblyOS, [4, 4, 4] }
+decl_metadata_table_tag! { AssemblyRef, [2, 2, 2, 2, 4, Blob, String, String, Blob] }
+decl_metadata_table_tag! { AssemblyRefProcessor, [4, AssemblyRef] }
+decl_metadata_table_tag! { AssemblyRefOS, [4, 4, 4, AssemblyRef] }
+decl_metadata_table_tag! { File, [4, String, Blob] }
+decl_metadata_table_tag! { ExportedType, [4, TypeDef, String, String, Implementation] }
+decl_metadata_table_tag! { ManifestResource, [4, 4, String, Implementation] }
+decl_metadata_table_tag! { NestedClass, [TypeDef, TypeDef] }
+decl_metadata_table_tag! { GenericParam, [2, 2, TypeOrMethodDef, String] }
+decl_metadata_table_tag! { MethodSpec, [MethodDefOrRef, Blob] }
+decl_metadata_table_tag! { GenericParamConstraint, [GenericParam, TypeDefOrRef] }
 
 pub trait CodedIndex {
     const OPTIONS: &'static [Option<MetadataTableKind>];
 }
 
 macro_rules! decl_coded_index_type {
-    () => {
-        pub struct CodedResolutionScope;
+    ($tag:ident,
+     $row_unpacker:ident,
+     [ $( $table_type:ident ),+ $(,)? ] $(,)?
+    ) => {
+        pub struct $tag;
 
-        impl CodedIndex for CodedResolutionScope {
+        impl CodedIndex for $tag {
             const OPTIONS: &'static [Option<MetadataTableKind>] = &[
-                Some(MetadataTableKind::Module),
-                Some(MetadataTableKind::ModuleRef),
-                Some(MetadataTableKind::AssemblyRef),
-                Some(MetadataTableKind::TypeRef),
+                $(
+                    Some(MetadataTableKind::$table_type),
+                )*
             ];
         }
 
-        pub enum MetadataResolutionScope<'a> {
-            Module(MetadataRowUnpacker<'a, ModuleRowUnpacker>),
-            ModuleRef(MetadataRowUnpacker<'a, ModuleRefRowUnpacker>),
-            AssemblyRef(MetadataRowUnpacker<'a, AssemblyRefRowUnpacker>),
-            TypeRef(MetadataRowUnpacker<'a, TypeRefRowUnpacker>),
+        pub enum $row_unpacker<'a> {
+            $(
+                $table_type(MetadataRowUnpacker<'a, $table_type>),
+            )*
         }
 
-        impl std::fmt::Display for MetadataCodedIndex<CodedResolutionScope> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}[{}]", self.kind, self.index)
+        impl TypedMetadataIndex for MetadataCodedIndex<$tag> {
+            type Output<'a: 'b, 'b> = $row_unpacker<'b>;
+
+            fn access<'a: 'b, 'b>(
+                self,
+                tables: &'b MetadataTables<'a>,
+            ) -> Result<Self::Output<'a, 'b>, Error> {
+                Ok(match self.kind {
+                    $(
+                        MetadataTableKind::$table_type => $row_unpacker::$table_type(
+                            tables.get(MetadataTableIndex::new(self.index))?,
+                        ),
+                    )*
+
+                    _ => panic!(
+                        "Shouldn't be possible for {} to contain {}",
+                        stringify!{$tag},
+                        self.kind,
+                    ),
+                })
             }
         }
     };
 }
 
-decl_coded_index_type! {}
+decl_coded_index_type! {
+    TypeDefOrRef, MetadataTypeDefOrRef,
+    [TypeDef, TypeRef, TypeSpec],
+}
+decl_coded_index_type! {
+    HasConstant, MetadataHasConstant,
+    [Field, Param, Property],
+}
+decl_coded_index_type! {
+    HasCustomAttribute, MetadataHasCustomAttribute,
+    [
+        MethodDef, Field, TypeRef, TypeDef,
+        Param, InterfaceImpl, MemberRef, Module,
+        // This option is listed as "Permission" in II.24.2.6 of
+        // ECMA-335, but no such metadata table exists.  It looks like
+        // it might be a holdover from an earlier draft.  For now,
+        // assuming that it refers to the "DeclSecurity" table, which
+        // handles object permissions.
+        DeclSecurity,
+        Property, Event, StandAloneSig, ModuleRef,
+        TypeSpec, Assembly, AssemblyRef, File,
+        ExportedType, ManifestResource, GenericParam,
+        GenericParamConstraint, MethodSpec
+    ],
+}
+decl_coded_index_type! {
+    HasFieldMarshal, MetadataHasFieldMarshal,
+    [Field, Param],
+}
+decl_coded_index_type! {
+    HasDeclSecurity, MetadataHasDeclSecurity,
+    [TypeDef, MethodDef, Assembly],
+}
+decl_coded_index_type! {
+    MemberRefParent, MetadataMemberRefParent,
+    [TypeDef, TypeRef, ModuleRef,
+     MethodDef, TypeSpec],
+}
+decl_coded_index_type! {
+    HasSemantics, MetadataHasSemantics,
+    [Event, Property],
+}
+decl_coded_index_type! {
+    MethodDefOrRef, MetadataMethodDefOrRef,
+    [MethodDef, MemberRef],
+}
+decl_coded_index_type! {
+    MemberForwarded, MetadataMemberForwarded,
+    [Field, MethodDef],
+}
+decl_coded_index_type! {
+    Implementation, MetadataImplementation,
+    [File, AssemblyRef, ExportedType],
+}
+decl_coded_index_type! {
+    ResolutionScope, MetadataResolutionScope,
+    [Module, ModuleRef, AssemblyRef, TypeRef]
+}
+decl_coded_index_type! {
+    TypeOrMethodDef, MetadataTypeOrMethodDef,
+    [Module, ModuleRef, AssemblyRef, TypeRef],
+}
 
-impl TypedMetadataIndex for MetadataCodedIndex<CodedResolutionScope> {
-    type Output<'a: 'b, 'b> = MetadataResolutionScope<'b>;
+// TODO: Define this one without the macro, because the `None` values
+// break it.
+//
+// decl_coded_index_type! { CustomAttributeType, MetadataCustomAttributeType, [None, None, MethodDef, MemberRef, None] }
 
-    fn access<'a: 'b, 'b>(
-        self,
-        tables: &'b MetadataTables<'a>,
-    ) -> Result<Self::Output<'a, 'b>, Error> {
-        Ok(match self.kind {
-            MetadataTableKind::Module => MetadataResolutionScope::Module(
-                tables.get(MetadataTableIndex::new(self.index))?,
-            ),
-            MetadataTableKind::ModuleRef => MetadataResolutionScope::ModuleRef(
-                tables.get(MetadataTableIndex::new(self.index))?,
-            ),
-            MetadataTableKind::TypeRef => MetadataResolutionScope::TypeRef(
-                tables.get(MetadataTableIndex::new(self.index))?,
-            ),
-            MetadataTableKind::AssemblyRef => {
-                MetadataResolutionScope::AssemblyRef(
-                    tables.get(MetadataTableIndex::new(self.index))?,
-                )
-            }
-            _ => panic!(
-                "Shouldn't be possible for ResolutionScope to contain {}",
-                self.kind
-            ),
-        })
+impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}[{}]", self.kind, self.index)
     }
 }
 
@@ -869,7 +928,7 @@ impl std::fmt::Display for MetadataGuidIndex {
     }
 }
 
-impl<'a, Unpacker: RowUnpacker> UnpackMetadataFromBytes<'a>
+impl<'a, Unpacker: MetadataTableTag> UnpackMetadataFromBytes<'a>
     for MetadataTableIndex<Unpacker>
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
@@ -888,7 +947,9 @@ impl<'a, Unpacker: RowUnpacker> UnpackMetadataFromBytes<'a>
     }
 }
 
-impl<Unpacker: RowUnpacker> std::fmt::Display for MetadataTableIndex<Unpacker> {
+impl<Unpacker: MetadataTableTag> std::fmt::Display
+    for MetadataTableIndex<Unpacker>
+{
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}[{}]", Unpacker::KIND, self.index)
     }
@@ -2734,7 +2795,7 @@ impl<'a> MetadataTables<'a> {
         &'b self,
     ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let table_kind = Unpacker::KIND;
 
@@ -2767,7 +2828,7 @@ impl<'a> MetadataTables<'a> {
         indices: impl Borrow<MetadataTableIndexRange<Unpacker>>,
     ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Unpacker>>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let indices = indices.borrow();
         let table = self.get_table()?;
@@ -2795,44 +2856,44 @@ macro_rules! define_table_method {
         }
     };
 }
-define_table_method! { module_table, ModuleRowUnpacker }
-define_table_method! { type_ref_table, TypeRefRowUnpacker }
-define_table_method! { type_def_table, TypeDefRowUnpacker }
-define_table_method! { field_table, FieldRowUnpacker }
-define_table_method! { method_def_table, MethodDefRowUnpacker }
-define_table_method! { param_table, ParamRowUnpacker }
-define_table_method! { interface_impl_table, InterfaceImplRowUnpacker }
-define_table_method! { member_ref_table, MemberRefRowUnpacker }
-define_table_method! { constant_table, ConstantRowUnpacker }
-define_table_method! { custom_attribute_table, CustomAttributeRowUnpacker }
-define_table_method! { field_marshal_table, FieldMarshalRowUnpacker }
-define_table_method! { decl_security_table, DeclSecurityRowUnpacker }
-define_table_method! { class_layout_table, ClassLayoutRowUnpacker }
-define_table_method! { field_layout_table, FieldLayoutRowUnpacker }
-define_table_method! { stand_alone_sig_table, StandAloneSigRowUnpacker }
-define_table_method! { event_map_table, EventMapRowUnpacker }
-define_table_method! { event_table, EventRowUnpacker }
-define_table_method! { property_map_table, PropertyMapRowUnpacker }
-define_table_method! { property_table, PropertyRowUnpacker }
-define_table_method! { method_semantics_table, MethodSemanticsRowUnpacker }
-define_table_method! { method_impl_table, MethodImplRowUnpacker }
-define_table_method! { module_ref_table, ModuleRefRowUnpacker }
-define_table_method! { type_spec_table, TypeSpecRowUnpacker }
-define_table_method! { impl_map_table, ImplMapRowUnpacker }
-define_table_method! { field_rva_table, FieldRVARowUnpacker }
-define_table_method! { assembly_table, AssemblyRowUnpacker }
-define_table_method! { assembly_processor_table, AssemblyProcessorRowUnpacker }
-define_table_method! { assembly_os_table, AssemblyOSRowUnpacker }
-define_table_method! { assembly_ref_table, AssemblyRefRowUnpacker }
-define_table_method! { assembly_ref_processor_table, AssemblyRefProcessorRowUnpacker }
-define_table_method! { assembly_ref_os_table, AssemblyRefOSRowUnpacker }
-define_table_method! { file_table, FileRowUnpacker }
-define_table_method! { exported_type_table, ExportedTypeRowUnpacker }
-define_table_method! { manifest_resource_table, ManifestResourceRowUnpacker }
-define_table_method! { nested_class_table, NestedClassRowUnpacker }
-define_table_method! { generic_param_table, GenericParamRowUnpacker }
-define_table_method! { method_spec_table, MethodSpecRowUnpacker }
-define_table_method! { generic_param_constraint_table, GenericParamConstraintRowUnpacker }
+define_table_method! { module_table, Module }
+define_table_method! { type_ref_table, TypeRef }
+define_table_method! { type_def_table, TypeDef }
+define_table_method! { field_table, Field }
+define_table_method! { method_def_table, MethodDef }
+define_table_method! { param_table, Param }
+define_table_method! { interface_impl_table, InterfaceImpl }
+define_table_method! { member_ref_table, MemberRef }
+define_table_method! { constant_table, Constant }
+define_table_method! { custom_attribute_table, CustomAttribute }
+define_table_method! { field_marshal_table, FieldMarshal }
+define_table_method! { decl_security_table, DeclSecurity }
+define_table_method! { class_layout_table, ClassLayout }
+define_table_method! { field_layout_table, FieldLayout }
+define_table_method! { stand_alone_sig_table, StandAloneSig }
+define_table_method! { event_map_table, EventMap }
+define_table_method! { event_table, Event }
+define_table_method! { property_map_table, PropertyMap }
+define_table_method! { property_table, Property }
+define_table_method! { method_semantics_table, MethodSemantics }
+define_table_method! { method_impl_table, MethodImpl }
+define_table_method! { module_ref_table, ModuleRef }
+define_table_method! { type_spec_table, TypeSpec }
+define_table_method! { impl_map_table, ImplMap }
+define_table_method! { field_rva_table, FieldRVA }
+define_table_method! { assembly_table, Assembly }
+define_table_method! { assembly_processor_table, AssemblyProcessor }
+define_table_method! { assembly_os_table, AssemblyOS }
+define_table_method! { assembly_ref_table, AssemblyRef }
+define_table_method! { assembly_ref_processor_table, AssemblyRefProcessor }
+define_table_method! { assembly_ref_os_table, AssemblyRefOS }
+define_table_method! { file_table, File }
+define_table_method! { exported_type_table, ExportedType }
+define_table_method! { manifest_resource_table, ManifestResource }
+define_table_method! { nested_class_table, NestedClass }
+define_table_method! { generic_param_table, GenericParam }
+define_table_method! { method_spec_table, MethodSpec }
+define_table_method! { generic_param_constraint_table, GenericParamConstraint }
 
 impl<T> TypedMetadataIndex for UnpackedValue<T>
 where
@@ -2915,7 +2976,7 @@ impl TypedMetadataIndex for MetadataGuidIndex {
     }
 }
 
-impl<Unpacker: RowUnpacker> TypedMetadataIndex
+impl<Unpacker: MetadataTableTag> TypedMetadataIndex
     for MetadataTableIndex<Unpacker>
 {
     type Output<'a: 'b, 'b> = MetadataRowUnpacker<'b, Unpacker>;
@@ -2939,7 +3000,7 @@ impl<Unpacker> Clone for MetadataTableIndexRange<Unpacker> {
 }
 impl<Unpacker> Copy for MetadataTableIndexRange<Unpacker> {}
 
-impl<Unpacker: RowUnpacker> std::fmt::Display
+impl<Unpacker: MetadataTableTag> std::fmt::Display
     for MetadataTableIndexRange<Unpacker>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -3527,48 +3588,44 @@ impl From<MetadataCodedIndexKind> for MetadataColumnType {
 impl MetadataTableKind {
     fn column_types(self) -> &'static [MetadataColumnType] {
         match self {
-            Self::Module => ModuleRowUnpacker::COLUMNS,
-            Self::TypeRef => TypeRefRowUnpacker::COLUMNS,
-            Self::TypeDef => TypeDefRowUnpacker::COLUMNS,
-            Self::Field => FieldRowUnpacker::COLUMNS,
-            Self::MethodDef => MethodDefRowUnpacker::COLUMNS,
-            Self::Param => ParamRowUnpacker::COLUMNS,
-            Self::InterfaceImpl => InterfaceImplRowUnpacker::COLUMNS,
-            Self::MemberRef => MemberRefRowUnpacker::COLUMNS,
-            Self::Constant => ConstantRowUnpacker::COLUMNS,
-            Self::CustomAttribute => CustomAttributeRowUnpacker::COLUMNS,
-            Self::FieldMarshal => FieldMarshalRowUnpacker::COLUMNS,
-            Self::DeclSecurity => DeclSecurityRowUnpacker::COLUMNS,
-            Self::ClassLayout => ClassLayoutRowUnpacker::COLUMNS,
-            Self::FieldLayout => FieldLayoutRowUnpacker::COLUMNS,
-            Self::StandAloneSig => StandAloneSigRowUnpacker::COLUMNS,
-            Self::EventMap => EventMapRowUnpacker::COLUMNS,
-            Self::Event => EventRowUnpacker::COLUMNS,
-            Self::PropertyMap => PropertyMapRowUnpacker::COLUMNS,
-            Self::Property => PropertyRowUnpacker::COLUMNS,
-            Self::MethodSemantics => MethodSemanticsRowUnpacker::COLUMNS,
-            Self::MethodImpl => MethodImplRowUnpacker::COLUMNS,
-            Self::ModuleRef => ModuleRefRowUnpacker::COLUMNS,
-            Self::TypeSpec => TypeSpecRowUnpacker::COLUMNS,
-            Self::ImplMap => ImplMapRowUnpacker::COLUMNS,
-            Self::FieldRVA => FieldRVARowUnpacker::COLUMNS,
-            Self::Assembly => AssemblyRowUnpacker::COLUMNS,
-            Self::AssemblyProcessor => AssemblyProcessorRowUnpacker::COLUMNS,
-            Self::AssemblyOS => AssemblyOSRowUnpacker::COLUMNS,
-            Self::AssemblyRef => AssemblyRefRowUnpacker::COLUMNS,
-            Self::AssemblyRefProcessor => {
-                AssemblyRefProcessorRowUnpacker::COLUMNS
-            }
-            Self::AssemblyRefOS => AssemblyRefOSRowUnpacker::COLUMNS,
-            Self::File => FileRowUnpacker::COLUMNS,
-            Self::ExportedType => ExportedTypeRowUnpacker::COLUMNS,
-            Self::ManifestResource => ManifestResourceRowUnpacker::COLUMNS,
-            Self::NestedClass => NestedClassRowUnpacker::COLUMNS,
-            Self::GenericParam => GenericParamRowUnpacker::COLUMNS,
-            Self::MethodSpec => MethodSpecRowUnpacker::COLUMNS,
-            Self::GenericParamConstraint => {
-                GenericParamConstraintRowUnpacker::COLUMNS
-            }
+            Self::Module => Module::COLUMNS,
+            Self::TypeRef => TypeRef::COLUMNS,
+            Self::TypeDef => TypeDef::COLUMNS,
+            Self::Field => Field::COLUMNS,
+            Self::MethodDef => MethodDef::COLUMNS,
+            Self::Param => Param::COLUMNS,
+            Self::InterfaceImpl => InterfaceImpl::COLUMNS,
+            Self::MemberRef => MemberRef::COLUMNS,
+            Self::Constant => Constant::COLUMNS,
+            Self::CustomAttribute => CustomAttribute::COLUMNS,
+            Self::FieldMarshal => FieldMarshal::COLUMNS,
+            Self::DeclSecurity => DeclSecurity::COLUMNS,
+            Self::ClassLayout => ClassLayout::COLUMNS,
+            Self::FieldLayout => FieldLayout::COLUMNS,
+            Self::StandAloneSig => StandAloneSig::COLUMNS,
+            Self::EventMap => EventMap::COLUMNS,
+            Self::Event => Event::COLUMNS,
+            Self::PropertyMap => PropertyMap::COLUMNS,
+            Self::Property => Property::COLUMNS,
+            Self::MethodSemantics => MethodSemantics::COLUMNS,
+            Self::MethodImpl => MethodImpl::COLUMNS,
+            Self::ModuleRef => ModuleRef::COLUMNS,
+            Self::TypeSpec => TypeSpec::COLUMNS,
+            Self::ImplMap => ImplMap::COLUMNS,
+            Self::FieldRVA => FieldRVA::COLUMNS,
+            Self::Assembly => Assembly::COLUMNS,
+            Self::AssemblyProcessor => AssemblyProcessor::COLUMNS,
+            Self::AssemblyOS => AssemblyOS::COLUMNS,
+            Self::AssemblyRef => AssemblyRef::COLUMNS,
+            Self::AssemblyRefProcessor => AssemblyRefProcessor::COLUMNS,
+            Self::AssemblyRefOS => AssemblyRefOS::COLUMNS,
+            Self::File => File::COLUMNS,
+            Self::ExportedType => ExportedType::COLUMNS,
+            Self::ManifestResource => ManifestResource::COLUMNS,
+            Self::NestedClass => NestedClass::COLUMNS,
+            Self::GenericParam => GenericParam::COLUMNS,
+            Self::MethodSpec => MethodSpec::COLUMNS,
+            Self::GenericParamConstraint => GenericParamConstraint::COLUMNS,
         }
     }
 }
@@ -3585,7 +3642,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         indices: MetadataTableIndexRange<Unpacker>,
     ) -> Result<(), Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
         let MetadataTableIndexRange { start, end, .. } = indices;
@@ -3606,7 +3663,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     ) -> impl Iterator<Item = MetadataRowUnpacker<'b, Unpacker>> + 'b
     where
         'a: 'b,
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
         let bytes_per_row = self.table_sizes.bytes_per_row[Unpacker::KIND];
@@ -3634,7 +3691,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         indices: impl Borrow<MetadataTableIndexRange<Unpacker>>,
     ) -> Result<Range<Pointer>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let indices = indices.borrow();
         self.address_range_from_untyped(indices.start..indices.end)
@@ -3645,7 +3702,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         indices: Range<usize>,
     ) -> Result<Range<Pointer>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let kind = Unpacker::KIND;
         let num_rows = self.table_sizes.num_rows[kind];
@@ -3669,7 +3726,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         index: MetadataTableIndex<Unpacker>,
     ) -> Result<MetadataRowUnpacker<'a, Unpacker>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         self.get_row(index.index)
     }
@@ -3679,7 +3736,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         index: usize,
     ) -> Result<MetadataRowUnpacker<'a, Unpacker>, Error>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let kind = Unpacker::KIND;
         let num_rows = self.table_sizes.num_rows[kind];
@@ -3721,7 +3778,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
 impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
     fn get_field_bytes(&self, column: usize) -> ByteRange<'a>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let fields = Unpacker::COLUMNS;
 
@@ -3742,7 +3799,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
         column: usize,
     ) -> UnpackedValue<Range<usize>>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         let begin_bytes = self.get_field_bytes(column);
         let end_index = self
@@ -3774,7 +3831,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
         column: usize,
     ) -> UnpackedValue<MetadataTableIndexRange<Column>>
     where
-        Unpacker: RowUnpacker,
+        Unpacker: MetadataTableTag,
     {
         self.get_untyped_index_range(column)
             .map(|Range { start, end }| MetadataTableIndexRange {
@@ -3785,7 +3842,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Module> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3845,7 +3902,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, TypeRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3869,8 +3926,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
 
     fn resolution_scope_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<CodedResolutionScope>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataCodedIndex<ResolutionScope>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
@@ -3897,13 +3953,13 @@ impl<'a> MetadataRowUnpacker<'a, TypeRefRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        field_table: &MetadataTableUnpacker<FieldRowUnpacker>,
-        method_def_table: &MetadataTableUnpacker<MethodDefRowUnpacker>,
-        param_table: &MetadataTableUnpacker<ParamRowUnpacker>,
+        field_table: &MetadataTableUnpacker<Field>,
+        method_def_table: &MetadataTableUnpacker<MethodDef>,
+        param_table: &MetadataTableUnpacker<Param>,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
         let type_name = self.type_name()?.value;
@@ -4006,40 +4062,31 @@ impl<'a> MetadataRowUnpacker<'a, TypeDefRowUnpacker> {
 
     fn field_indices(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<FieldRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<Field>>, Error> {
         Ok(self.get_index_range(4))
     }
 
     fn iter_fields(
         &self,
-    ) -> Result<
-        impl Iterator<Item = MetadataRowUnpacker<FieldRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Field>>, Error> {
         self.tables.iter_range(self.field_indices()?)
     }
 
     fn method_indices(
         &self,
-    ) -> Result<
-        UnpackedValue<MetadataTableIndexRange<MethodDefRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<MethodDef>>, Error> {
         Ok(self.get_index_range(5))
     }
 
     fn iter_methods(
         &self,
-    ) -> Result<
-        impl Iterator<Item = MetadataRowUnpacker<MethodDefRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<MethodDef>>, Error>
+    {
         self.tables.iter_range(self.method_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Field> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4087,13 +4134,13 @@ impl<'a> MetadataRowUnpacker<'a, FieldRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, MethodDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
         type_name: &str,
         type_namespace: &str,
-        param_table: &MetadataTableUnpacker<ParamRowUnpacker>,
+        param_table: &MetadataTableUnpacker<Param>,
     ) -> Result<(), Error> {
         annotator.value(self.rva()?).name("rva");
         annotator.value(self.impl_flags()?).name("impl_flags");
@@ -4172,22 +4219,18 @@ impl<'a> MetadataRowUnpacker<'a, MethodDefRowUnpacker> {
 
     fn param_indices(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<ParamRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<Param>>, Error> {
         Ok(self.get_index_range(5))
     }
 
     fn iter_params(
         &self,
-    ) -> Result<
-        impl Iterator<Item = MetadataRowUnpacker<ParamRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Param>>, Error> {
         self.tables.iter_range(self.param_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Param> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4224,7 +4267,7 @@ impl<'a> MetadataRowUnpacker<'a, ParamRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4240,14 +4283,11 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
 
     fn class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 
@@ -4257,7 +4297,7 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImplRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, MemberRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4305,7 +4345,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRefRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Constant> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4340,7 +4380,7 @@ impl<'a> MetadataRowUnpacker<'a, ConstantRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4375,7 +4415,7 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttributeRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldMarshalRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4400,7 +4440,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshalRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4438,7 +4478,7 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurityRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ClassLayoutRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, ClassLayout> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4464,19 +4504,16 @@ impl<'a> MetadataRowUnpacker<'a, ClassLayoutRowUnpacker> {
 
     fn class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldLayoutRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, FieldLayout> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4496,19 +4533,16 @@ impl<'a> MetadataRowUnpacker<'a, FieldLayoutRowUnpacker> {
 
     fn field_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<FieldRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<Field>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn field(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, FieldRowUnpacker>, Error> {
+    fn field(&self) -> Result<MetadataRowUnpacker<'a, Field>, Error> {
         self.tables.get(self.field_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, StandAloneSig> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4532,7 +4566,7 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSigRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, EventMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4548,35 +4582,28 @@ impl<'a> MetadataRowUnpacker<'a, EventMapRowUnpacker> {
 
     fn class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 
     fn event_indices(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<EventRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<Event>>, Error> {
         Ok(self.get_index_range(1))
     }
 
     pub fn iter_events(
         &self,
-    ) -> Result<
-        impl Iterator<Item = MetadataRowUnpacker<EventRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Event>>, Error> {
         self.tables.iter_range(self.event_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, EventRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Event> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4615,7 +4642,7 @@ impl<'a> MetadataRowUnpacker<'a, EventRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, PropertyMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4631,37 +4658,29 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMapRowUnpacker> {
 
     fn class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 
     fn property_indices(
         &self,
-    ) -> Result<
-        UnpackedValue<MetadataTableIndexRange<PropertyRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<UnpackedValue<MetadataTableIndexRange<Property>>, Error> {
         Ok(self.get_index_range(1))
     }
 
     pub fn iter_properties(
         &self,
-    ) -> Result<
-        impl Iterator<Item = MetadataRowUnpacker<PropertyRowUnpacker>>,
-        Error,
-    > {
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Property>>, Error>
+    {
         self.tables.iter_range(self.property_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Property> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4705,7 +4724,7 @@ impl<'a> MetadataRowUnpacker<'a, PropertyRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4726,14 +4745,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
 
     fn method_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<MethodDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<MethodDef>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn method(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, MethodDefRowUnpacker>, Error> {
+    fn method(&self) -> Result<MetadataRowUnpacker<'a, MethodDef>, Error> {
         self.tables.get(self.method_index()?)
     }
 
@@ -4743,7 +4759,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemanticsRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4764,14 +4780,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
 
     fn class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 
@@ -4788,7 +4801,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodImplRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ModuleRefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, ModuleRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4814,7 +4827,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRefRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, TypeSpec> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4838,7 +4851,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpecRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, ImplMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4882,19 +4895,16 @@ impl<'a> MetadataRowUnpacker<'a, ImplMapRowUnpacker> {
 
     fn import_scope_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<ModuleRefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<ModuleRef>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
-    fn import_scope(
-        &self,
-    ) -> Result<MetadataRowUnpacker<ModuleRefRowUnpacker>, Error> {
+    fn import_scope(&self) -> Result<MetadataRowUnpacker<ModuleRef>, Error> {
         self.tables.get(self.import_scope_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldRVARowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4914,17 +4924,16 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVARowUnpacker> {
 
     fn field_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<FieldRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<Field>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn field(&self) -> Result<MetadataRowUnpacker<FieldRowUnpacker>, Error> {
+    fn field(&self) -> Result<MetadataRowUnpacker<Field>, Error> {
         self.tables.get(self.field_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, Assembly> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5001,7 +5010,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5107,7 +5116,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRefRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ManifestResourceRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5164,7 +5173,7 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResourceRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, NestedClassRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, NestedClass> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5183,32 +5192,28 @@ impl<'a> MetadataRowUnpacker<'a, NestedClassRowUnpacker> {
 
     fn nested_class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn nested_class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    fn nested_class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.nested_class_index()?)
     }
 
     fn enclosing_class_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDefRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
     fn enclosing_class(
         &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDefRowUnpacker>, Error> {
+    ) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.enclosing_class_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, GenericParamRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, GenericParam> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5251,7 +5256,7 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5284,7 +5289,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpecRowUnpacker> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, GenericParamConstraintRowUnpacker> {
+impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -5300,14 +5305,13 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraintRowUnpacker> {
 
     fn generic_param_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<GenericParamRowUnpacker>>, Error>
-    {
+    ) -> Result<UnpackedValue<MetadataTableIndex<GenericParam>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
     fn generic_param(
         &self,
-    ) -> Result<MetadataRowUnpacker<GenericParamRowUnpacker>, Error> {
+    ) -> Result<MetadataRowUnpacker<GenericParam>, Error> {
         self.tables.get(self.generic_param_index()?)
     }
 
