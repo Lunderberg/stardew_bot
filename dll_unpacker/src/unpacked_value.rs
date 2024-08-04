@@ -67,3 +67,17 @@ where
         Ok(UnpackedValue::new(bytes.into(), bytes.unpack()?))
     }
 }
+
+impl<T> UnpackedValue<Option<T>> {
+    pub fn transpose(self) -> Option<UnpackedValue<T>> {
+        let loc = self.loc();
+        self.value().map(|value| UnpackedValue::new(loc, value))
+    }
+}
+
+impl<T, E> UnpackedValue<Result<T, E>> {
+    pub fn transpose(self) -> Result<UnpackedValue<T>, E> {
+        let loc = self.loc();
+        self.value().map(|value| UnpackedValue::new(loc, value))
+    }
+}

@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use thiserror::Error;
 
-use crate::dll_unpacker::MetadataTableKind;
+use crate::dll_unpacker::{MetadataTableKind, RelativeVirtualAddress};
 
 #[derive(Error)]
 pub enum Error {
@@ -48,6 +48,8 @@ pub enum Error {
     IncorrectNumberOfDataDirectories(u32),
     #[error("Invalid data directory {0}, should be in range [0,16)")]
     InvalidDataDirectoryIndex(u32),
+    #[error("The CLR runtime header was not found")]
+    MissingClrRuntimeHeader,
     #[error("InvalidSectionHeader")]
     InvalidSectionHeader,
     #[error("InvalidUTF8")]
@@ -57,8 +59,12 @@ pub enum Error {
         num_sections: usize,
         i_section: usize,
     },
-    #[error("Virtual address 0x{0:x} was not found in any section")]
-    InvalidVirtualAddress(u32),
+
+    #[error("Virtual address {0} was not found in any section")]
+    InvalidVirtualAddress(RelativeVirtualAddress),
+
+    #[error("Virtual address was null, when non-null address expected")]
+    UnexpectedNullVirtualAddress,
 
     #[error("IncorrectMetadataSignature")]
     IncorrectMetadataSignature,

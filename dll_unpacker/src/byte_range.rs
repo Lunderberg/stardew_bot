@@ -1,7 +1,7 @@
 use memory_reader::Pointer;
 use std::ops::Range;
 
-use crate::{dll_unpacker::VirtualRange, Error, UnpackedValue};
+use crate::{Error, UnpackedValue};
 
 #[derive(Clone, Copy)]
 pub struct ByteRange<'a> {
@@ -103,19 +103,6 @@ impl<'a> ByteRange<'a> {
         let value = std::str::from_utf8(&self.bytes[start..start + size])?;
         let loc = self.address_range(start..start + size);
         Ok(UnpackedValue::new(loc, value))
-    }
-
-    pub(crate) fn get_virtual_range(
-        &self,
-        loc: impl NormalizeOffset,
-    ) -> Result<UnpackedValue<VirtualRange>, Error> {
-        let start = loc.as_offset(self.start);
-        let rva = self.get_u32(start)?.value;
-        let size = self.get_u32(start + 4)?.value;
-        Ok(UnpackedValue::new(
-            self.address_range(start..start + 8),
-            VirtualRange { rva, size },
-        ))
     }
 
     pub(crate) fn subrange(&self, range: Range<impl NormalizeOffset>) -> Self {

@@ -68,6 +68,17 @@ pub struct TuiExplorerBuilder {
     annotations: Vec<Annotation>,
 }
 
+fn stardew_valley_dll(
+    reader: &MemoryReader,
+) -> Result<&MemoryMapRegion, Error> {
+    reader
+        .find_region(|reg| reg.short_name() == "Stardew Valley.dll")
+        .ok_or(memory_reader::Error::MissingMemoryMapSection(
+            "Stardew Valley.dll".to_string(),
+        ))
+        .map_err(Into::into)
+}
+
 impl TuiExplorerBuilder {
     pub fn new() -> Result<Self, Error> {
         let pid = stardew_valley_pid()?;
@@ -123,12 +134,7 @@ impl TuiExplorerBuilder {
     }
 
     fn stardew_valley_dll(&self) -> Result<&MemoryMapRegion, Error> {
-        self.reader
-            .find_region(|reg| reg.short_name() == "Stardew Valley.dll")
-            .ok_or(memory_reader::Error::MissingMemoryMapSection(
-                "Stardew Valley.dll".to_string(),
-            ))
-            .map_err(Into::into)
+        stardew_valley_dll(&self.reader)
     }
 
     pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
@@ -272,16 +278,79 @@ impl TuiExplorer {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
-        let stardew_dll_regions: Vec<_> = self
-            .reader
-            .regions
-            .iter()
-            .filter(|region| {
-                region.short_name() == "Stardew Valley.dll"
-                    || region.short_name() == "StardewValley.Gamedata.dll"
-            })
-            .map(|region| region.address_range())
-            .collect();
+        // let stardew_dll_regions: Vec<_> = self
+        //     .reader
+        //     .regions
+        //     .iter()
+        //     .filter(|region| {
+        //         region.short_name() == "Stardew Valley.dll"
+        //             || region.short_name() == "StardewValley.Gamedata.dll"
+        //     })
+        //     .map(|region| region.address_range())
+        //     .collect();
+
+        let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
+            let region = stardew_valley_dll(&self.reader)?.read()?;
+
+            // TODO: Make a single-step way to unpack down to the
+            // metadata tables.
+            let dll_info = dll_unpacker::Unpacker::new(&region);
+
+            let physical_metadata = dll_info.physical_metadata()?;
+            let metadata_tables = physical_metadata.metadata_tables()?;
+
+            let pe_sections = dll_info.iter_sections()?.map(
+                |section| -> (String, Range<Pointer>) {
+                    let name = section.header.name().unwrap().value();
+                    (name.into(), section.bytes.into())
+                },
+            );
+
+            let data_dirs = dll_info.iter_data_directories()?.map(
+                |(kind, bytes)| -> (_, Range<Pointer>) {
+                    (format!("{kind:?}"), bytes.into())
+                },
+            );
+
+            let metadata = [
+                ("Metadata tables".to_string(), metadata_tables.ptr_range()),
+                (
+                    "Physical metadata".to_string(),
+                    physical_metadata.ptr_range(),
+                ),
+            ];
+
+            std::iter::empty()
+                .chain(pe_sections)
+                .chain(data_dirs)
+                .chain(metadata)
+                // .inspect(|(name, range)| {
+                //         self.running_log.add_log(format!(
+                //             "Section {name} is at {} + {}",
+                //             range.start,
+                //             range.end - range.start
+                //         ));
+                // })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect()
+
+            // let game_info_class = metadata_tables
+            //     .type_def_table()?
+            //     .iter_rows()
+            //     .find(|type_def| {
+            //         type_def
+            //             .name()
+            //             .map(|name| name.value() == "Game1")
+            //             .unwrap_or(false)
+            //     })
+            //     .expect(
+            //         "Could not find 'Game1' class (top-level Stardew info)",
+            //     );
+
+            // vec![game_info_class.ptr_range()]
+        };
 
         self.reader
             .regions
@@ -299,13 +368,16 @@ impl TuiExplorer {
                     .iter_as::<MemoryValue<Pointer>>()
                     .rev()
             })
-            .filter(|mem_pointer| {
-                stardew_dll_regions
-                    .iter()
-                    .any(|range| range.contains(&mem_pointer.value))
+            .filter_map(|mem_pointer| {
+                stardew_dll_regions.iter().find_map(move |(name, range)| {
+                    range.contains(&mem_pointer.value).then({
+                        let mem_pointer = mem_pointer.clone();
+                        move || (name, mem_pointer)
+                    })
+                })
             })
-            .map(|mem_pointer| mem_pointer.value)
-            // .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
+            .filter(|(name, _)| name.as_str() == ".text")
+            .map(|(_, mem_pointer)| mem_pointer.value)
             .counts()
             .into_iter()
             .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
@@ -315,8 +387,7 @@ impl TuiExplorer {
                 self.running_log.add_log(format!("Ptr to {addr}: {counts}"))
             });
 
-        let num_ptr_to_sd_dll = self
-            .reader
+        self.reader
             .regions
             .iter()
             .filter(|region| {
@@ -330,20 +401,20 @@ impl TuiExplorer {
                     .unwrap()
                     .into_iter()
                     .iter_as::<MemoryValue<Pointer>>()
-                    .rev()
             })
-            .filter(|mem_pointer| {
+            .filter_map(|mem_pointer| {
                 stardew_dll_regions
                     .iter()
-                    .any(|range| range.contains(&mem_pointer.value))
+                    .find(|(_, range)| range.contains(&mem_pointer.value))
+                    .map(|(name, _)| name)
             })
-            .map(|mem_pointer| mem_pointer.value)
-            .map(|address| -> Pointer { (address.as_usize() >> 2 << 2).into() })
             .counts()
-            .len();
-
-        self.running_log
-            .add_log(format!("Num ptr: {num_ptr_to_sd_dll}"));
+            .into_iter()
+            .sorted_by_key(|(_, counts)| *counts)
+            .for_each(|(name, counts)| {
+                self.running_log
+                    .add_log(format!("Num ptr to {name}: {counts}"));
+            });
 
         while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;

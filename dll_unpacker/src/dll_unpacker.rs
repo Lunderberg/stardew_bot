@@ -88,9 +88,16 @@ pub enum MagicValue {
     PE32plus,
 }
 
+/// A virtual address, relative to the start of the file.  Can be
+/// converted to an actual address using
+/// `Unpacker.virtual_address_to_raw`.
+#[derive(Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct RelativeVirtualAddress(usize);
+
+#[derive(Copy, Clone)]
 pub struct VirtualRange {
-    pub(crate) rva: u32,
-    pub(crate) size: u32,
+    pub(crate) rva: RelativeVirtualAddress,
+    pub(crate) size: usize,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,12 +124,18 @@ pub struct SectionHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
+pub struct Section<'a> {
+    pub header: SectionHeaderUnpacker<'a>,
+    pub bytes: ByteRange<'a>,
+}
+
 pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
 pub struct PhysicalMetadataUnpacker<'a> {
     bytes: ByteRange<'a>,
+    dll_unpacker: &'a Unpacker<'a>,
 }
 
 pub struct StreamHeader<'a> {
@@ -155,6 +168,7 @@ pub struct MetadataTablesHeaderUnpacker<'a> {
 
 pub struct MetadataTables<'a> {
     bytes: ByteRange<'a>,
+    dll_unpacker: &'a Unpacker<'a>,
     table_sizes: MetadataTableSizes,
     heaps: MetadataMap<MetadataHeapKind, ByteRange<'a>>,
 }
@@ -552,6 +566,7 @@ pub struct MetadataTableSizes {
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     /// The bytes that represent this table
     bytes: ByteRange<'a>,
+    dll_unpacker: &'a Unpacker<'a>,
     tables: &'a MetadataTables<'a>,
     table_sizes: &'a MetadataTableSizes,
     row_unpacker: PhantomData<RowUnpacker>,
@@ -602,6 +617,8 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// the next row (e.g. the Field and Method columns of the TypeDef
     /// table).
     next_row_bytes: Option<ByteRange<'a>>,
+
+    dll_unpacker: &'a Unpacker<'a>,
 
     tables: &'a MetadataTables<'a>,
 
@@ -1151,6 +1168,50 @@ where
     }
 }
 
+impl<'a> UnpackBytes<'a> for Option<RelativeVirtualAddress> {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        let addr: u32 = bytes.unpack()?;
+        if addr == 0 {
+            Ok(None)
+        } else {
+            Ok(Some(RelativeVirtualAddress(addr as usize)))
+        }
+    }
+}
+
+impl<'a> UnpackBytes<'a> for RelativeVirtualAddress {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack().and_then(|opt_rva: Option<Self>| {
+            assert!(opt_rva.is_some());
+            opt_rva.ok_or(Error::UnexpectedNullVirtualAddress)
+        })
+    }
+}
+
+impl<'a> UnpackBytes<'a> for Option<VirtualRange> {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        assert!(bytes.len() == 8);
+        // let rva: usize = bytes.subrange(0..4).unpack::<u32>()? as usize;
+        // let rva = RelativeVirtualAddress(rva);
+        // let size: usize = bytes.subrange(4..8).unpack::<u32>()? as usize;
+        // Ok(Some(VirtualRange { rva, size }))
+
+        let opt_rva: Option<RelativeVirtualAddress> =
+            bytes.subrange(0..4).unpack()?;
+        let size: usize = bytes.subrange(4..8).unpack::<u32>()? as usize;
+        Ok(opt_rva.map(|rva| VirtualRange { rva, size }))
+    }
+}
+
+impl<'a> UnpackBytes<'a> for VirtualRange {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        assert!(bytes.len() == 8);
+        let rva = bytes.subrange(0..4).unpack()?;
+        let size = bytes.subrange(4..8).unpack()?;
+        Ok(VirtualRange { rva, size })
+    }
+}
+
 impl<Key, Value> MetadataMap<Key, Value> {
     fn init(func: impl Fn() -> Value) -> Self {
         Self {
@@ -1182,7 +1243,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.generic_param_table()?.bytes.start)
+        Ok(metadata_tables.method_def_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -1208,9 +1269,16 @@ impl<'a> Unpacker<'a> {
         annotator
             .group(self.section_header_bytes()?)
             .name("Section headers");
-        for i_section in 0..pe_header.num_sections()?.value as usize {
-            self.section_header(i_section)?
-                .collect_annotations(annotator)?;
+
+        for section in self.iter_sections()? {
+            annotator.group(section.header.bytes).name(format!(
+                "{} PE section header",
+                section.header.name()?.value
+            ));
+            annotator
+                .group(section.bytes)
+                .name(format!("{} PE section", section.header.name()?.value));
+            section.header.collect_annotations(annotator)?;
         }
 
         self.physical_metadata()?.collect_annotations(annotator)?;
@@ -1335,13 +1403,33 @@ impl<'a> Unpacker<'a> {
         Ok(iter)
     }
 
-    fn virtual_address_to_raw(&self, addr: u32) -> Result<Pointer, Error> {
+    pub fn iter_sections(
+        &self,
+    ) -> Result<impl Iterator<Item = Section>, Error> {
+        let file_bytes = self.bytes;
+
+        let iter = self.iter_section_header()?.map(move |header| {
+            let offset_range = header.raw_range().unwrap();
+            let start = offset_range.start as usize;
+            let end = offset_range.end as usize;
+
+            let bytes = file_bytes.subrange(start..end);
+
+            Section { header, bytes }
+        });
+
+        Ok(iter)
+    }
+
+    fn virtual_address_to_raw(
+        &self,
+        addr: RelativeVirtualAddress,
+    ) -> Result<Pointer, Error> {
         self.iter_section_header()?
             .find_map(|section| {
                 let virtual_range = section.virtual_range().ok()?;
                 if virtual_range.contains(&addr) {
-                    let addr_within_section =
-                        (addr - virtual_range.start) as usize;
+                    let addr_within_section = addr - virtual_range.start;
                     let raw_section_addr =
                         section.raw_address().ok()?.value as usize;
 
@@ -1357,13 +1445,47 @@ impl<'a> Unpacker<'a> {
             .ok_or(Error::InvalidVirtualAddress(addr))
     }
 
+    fn virtual_range_to_raw(
+        &self,
+        range: VirtualRange,
+    ) -> Result<Range<Pointer>, Error> {
+        let start: Pointer = self.virtual_address_to_raw(range.rva)?;
+        let size = range.size as usize;
+        Ok(start..start + size)
+    }
+
+    pub fn iter_data_directories(
+        &self,
+    ) -> Result<impl Iterator<Item = (DataDirectoryKind, ByteRange)>, Error>
+    {
+        let optional_header = self.optional_header()?;
+        let iter = DataDirectoryKind::iter()
+            .filter_map(move |data_dir_kind| {
+                let virtual_range = optional_header
+                    .data_directory(data_dir_kind)
+                    .unwrap()
+                    .value()?;
+                if virtual_range.size > 0 {
+                    let raw_range =
+                        self.virtual_range_to_raw(virtual_range).unwrap();
+                    Some((data_dir_kind, self.bytes.subrange(raw_range)))
+                } else {
+                    None
+                }
+            })
+            .filter(|(_, bytes)| bytes.len() > 0);
+
+        Ok(iter)
+    }
+
     pub fn clr_runtime_header(
         &self,
     ) -> Result<ClrRuntimeHeaderUnpacker, Error> {
         let optional_header = self.optional_header()?;
         let data_dir = optional_header
             .data_directory(DataDirectoryKind::ClrRuntimeHeader)?
-            .value;
+            .value
+            .ok_or(Error::MissingClrRuntimeHeader)?;
 
         let addr = self.virtual_address_to_raw(data_dir.rva)?;
 
@@ -1372,13 +1494,18 @@ impl<'a> Unpacker<'a> {
         Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 
-    pub fn physical_metadata(&self) -> Result<PhysicalMetadataUnpacker, Error> {
+    pub fn physical_metadata<'b>(
+        &'b self,
+    ) -> Result<PhysicalMetadataUnpacker<'b>, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value;
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
-        Ok(PhysicalMetadataUnpacker { bytes })
+        Ok(PhysicalMetadataUnpacker {
+            bytes,
+            dll_unpacker: &self,
+        })
     }
 }
 
@@ -1598,7 +1725,9 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         for i_data_dir in 0..num_data_directories.value {
             let data_dir_kind: DataDirectoryKind = i_data_dir.try_into()?;
             let data_dir = self.data_directory(data_dir_kind)?;
-            annotator.value(data_dir).name(format!("{data_dir_kind:?}"));
+            annotator
+                .opt_value(data_dir)
+                .name(format!("{data_dir_kind:?}"));
         }
 
         Ok(())
@@ -1804,14 +1933,15 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     pub fn data_directory(
         &self,
         dir: DataDirectoryKind,
-    ) -> Result<UnpackedValue<VirtualRange>, Error> {
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
         let base = match self.magic_value {
             MagicValue::PE32 => 96,
             MagicValue::PE32plus => 112,
         };
         let dir_size = 8;
+        let start = base + dir.index() * dir_size;
 
-        self.bytes.get_virtual_range(base + dir.index() * dir_size)
+        self.bytes.subrange(start..start + dir_size).unpack()
     }
 }
 
@@ -1828,6 +1958,20 @@ impl MagicValue {
 impl std::fmt::Display for VirtualRange {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "RVA {}\n{} bytes", self.rva, self.size)
+    }
+}
+
+impl std::fmt::Display for RelativeVirtualAddress {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "0x{:x}", self.0)
+    }
+}
+
+impl std::ops::Sub<RelativeVirtualAddress> for RelativeVirtualAddress {
+    type Output = usize;
+
+    fn sub(self, rhs: RelativeVirtualAddress) -> Self::Output {
+        self.0 - rhs.0
     }
 }
 
@@ -1851,6 +1995,28 @@ impl DataDirectoryKind {
             Self::ClrRuntimeHeader => 14,
             Self::Reserved15 => 15,
         }
+    }
+
+    fn iter() -> impl Iterator<Item = Self> {
+        [
+            Self::ExportTable,
+            Self::ImportTable,
+            Self::ResourceTable,
+            Self::ExceptionTable,
+            Self::CertificateTable,
+            Self::BaseRelocationTable,
+            Self::Debug,
+            Self::Architecture,
+            Self::GlobalPtr,
+            Self::TLSTable,
+            Self::LoadConfigTable,
+            Self::BoundImportTable,
+            Self::ImportAddressTable,
+            Self::DelayImportDescriptor,
+            Self::ClrRuntimeHeader,
+            Self::Reserved15,
+        ]
+        .into_iter()
     }
 }
 
@@ -1926,18 +2092,27 @@ impl<'a> SectionHeaderUnpacker<'a> {
         Ok(UnpackedValue::new(self.bytes.address_range(0..8), value))
     }
 
-    pub fn virtual_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(8)
+    pub fn virtual_size(&self) -> Result<UnpackedValue<usize>, Error> {
+        Ok(self.bytes.get_u32(8)?.map(|val| val as usize))
     }
 
-    pub fn virtual_address(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(12)
+    pub fn virtual_address(
+        &self,
+    ) -> Result<UnpackedValue<RelativeVirtualAddress>, Error> {
+        Ok(self
+            .bytes
+            .get_u32(12)?
+            .map(|value| RelativeVirtualAddress(value as usize)))
     }
 
-    pub fn virtual_range(&self) -> Result<Range<u32>, Error> {
+    pub fn virtual_range(
+        &self,
+    ) -> Result<Range<RelativeVirtualAddress>, Error> {
         let start = self.virtual_address()?.value;
         let size = self.virtual_size()?.value;
-        Ok(start..start + size)
+        let end = RelativeVirtualAddress(start.0 + size);
+
+        Ok(start..end)
     }
 
     pub fn raw_size(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -2046,17 +2221,19 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
             .name("entry_point_token");
         annotator.value(self.resources()?).name("resources");
         annotator
-            .value(self.strong_name_signature()?)
+            .opt_value(self.strong_name_signature()?)
             .name("strong_name_signature");
         annotator
-            .value(self.code_manager_table()?)
+            .opt_value(self.code_manager_table()?)
             .name("code_manager_table");
-        annotator.value(self.vtable_fixups()?).name("vtable_fixups");
         annotator
-            .value(self.export_address_table_jumps()?)
+            .opt_value(self.vtable_fixups()?)
+            .name("vtable_fixups");
+        annotator
+            .opt_value(self.export_address_table_jumps()?)
             .name("export_address_table_jumps");
         annotator
-            .value(self.managed_native_header()?)
+            .opt_value(self.managed_native_header()?)
             .name("managed_native_header");
 
         Ok(())
@@ -2075,7 +2252,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     }
 
     fn metadata_range(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(8)
+        self.bytes.subrange(8..16).unpack()
     }
 
     fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
@@ -2087,37 +2264,45 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     }
 
     fn resources(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(24)
+        self.bytes.subrange(24..32).unpack()
     }
 
     fn strong_name_signature(
         &self,
-    ) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(32)
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
+        self.bytes.subrange(32..40).unpack()
     }
 
-    fn code_manager_table(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(40)
+    fn code_manager_table(
+        &self,
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
+        self.bytes.subrange(40..48).unpack()
     }
 
-    fn vtable_fixups(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(48)
+    fn vtable_fixups(
+        &self,
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
+        self.bytes.subrange(48..56).unpack()
     }
 
     fn export_address_table_jumps(
         &self,
-    ) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(56)
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
+        self.bytes.subrange(56..64).unpack()
     }
 
     fn managed_native_header(
         &self,
-    ) -> Result<UnpackedValue<VirtualRange>, Error> {
-        self.bytes.get_virtual_range(64)
+    ) -> Result<UnpackedValue<Option<VirtualRange>>, Error> {
+        self.bytes.subrange(64..72).unpack()
     }
 }
 
 impl<'a> PhysicalMetadataUnpacker<'a> {
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.bytes.into()
+    }
+
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2321,6 +2506,7 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
 
         Ok(MetadataTables {
             bytes,
+            dll_unpacker: self.dll_unpacker,
             table_sizes,
             heaps,
         })
@@ -2546,6 +2732,10 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
 }
 
 impl<'a> MetadataTables<'a> {
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.bytes.into()
+    }
+
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2708,6 +2898,7 @@ impl<'a> MetadataTables<'a> {
         Ok(MetadataTableUnpacker {
             bytes,
             tables: &self,
+            dll_unpacker: self.dll_unpacker,
             table_sizes: &self.table_sizes,
             row_unpacker: PhantomData,
         })
@@ -3395,28 +3586,32 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
 
     pub fn iter_rows<'b>(
         &'b self,
-    ) -> impl Iterator<Item = MetadataRowUnpacker<'b, Unpacker>> + 'b
+    ) -> impl Iterator<Item = MetadataRowUnpacker<'a, Unpacker>> + 'a
     where
         'a: 'b,
         Unpacker: MetadataTableTag,
     {
         let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
         let bytes_per_row = self.table_sizes.bytes_per_row[Unpacker::KIND];
+        let dll_unpacker = self.dll_unpacker;
+        let tables = self.tables;
+        let table_sizes = self.table_sizes;
+        let table_bytes = self.bytes;
         (0..num_rows).map(move |i_row| {
-            let bytes = self
-                .bytes
+            let bytes = table_bytes
                 .subrange(i_row * bytes_per_row..(i_row + 1) * bytes_per_row);
             let next_row_bytes = (i_row + 1 < num_rows).then(|| {
-                self.bytes.subrange(
+                table_bytes.subrange(
                     (i_row + 1) * bytes_per_row..(i_row + 2) * bytes_per_row,
                 )
             });
             MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
-                tables: self.tables,
-                table_sizes: self.table_sizes,
-                row_unpacker: self.row_unpacker,
+                dll_unpacker,
+                tables,
+                table_sizes,
+                row_unpacker: PhantomData,
             }
         })
     }
@@ -3497,6 +3692,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             Ok(MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
+                dll_unpacker: self.dll_unpacker,
                 tables: self.tables,
                 table_sizes: self.table_sizes,
                 row_unpacker: self.row_unpacker,
@@ -3512,6 +3708,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
 }
 
 impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.bytes.into()
+    }
+
     fn get_field_bytes(&self, column: usize) -> ByteRange<'a>
     where
         Unpacker: MetadataTableTag,
@@ -3890,11 +4090,20 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         type_namespace: &str,
         param_table: &MetadataTableUnpacker<Param>,
     ) -> Result<(), Error> {
-        annotator.value(self.rva()?).name("rva");
+        let name = self.name()?.value;
+
+        let rva_ann = annotator.opt_value(self.rva()?).name("rva");
+
+        if let Some(address) = self.address()? {
+            rva_ann.append_value(address);
+            annotator
+                .range(address..address + 1)
+                .name(format!("Method '{name}' Def"));
+        }
+
         annotator.value(self.impl_flags()?).name("impl_flags");
         annotator.value(self.flags()?).name("flags");
 
-        let name = self.name()?.value;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -3935,8 +4144,17 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         Ok(())
     }
 
-    fn rva(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn rva(
+        &self,
+    ) -> Result<UnpackedValue<Option<RelativeVirtualAddress>>, Error> {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn address(&self) -> Result<Option<Pointer>, Error> {
+        self.rva()?
+            .value()
+            .map(|rva| self.dll_unpacker.virtual_address_to_raw(rva))
+            .transpose()
     }
 
     fn impl_flags(&self) -> Result<UnpackedValue<u16>, Error> {
@@ -4738,17 +4956,33 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.rva()?).name("RVA");
+        annotator
+            .value(self.rva()?)
+            .name("RVA")
+            .append_value(self.address()?);
+
+        let name = self.field()?.name()?.value;
+
         annotator
             .value(self.field_index()?)
             .name("Field")
-            .append_value(self.field()?.name()?.value);
+            .append_value(name);
+
+        let address = self.address()?;
+        annotator
+            .range(address..address + 1)
+            .name(format!("Field '{name}' default value"));
 
         Ok(())
     }
 
-    fn rva(&self) -> Result<UnpackedValue<u32>, Error> {
+    fn rva(&self) -> Result<UnpackedValue<RelativeVirtualAddress>, Error> {
         self.get_field_bytes(0).unpack()
+    }
+
+    fn address(&self) -> Result<Pointer, Error> {
+        self.dll_unpacker
+            .virtual_address_to_raw(self.rva()?.value())
     }
 
     fn field_index(
