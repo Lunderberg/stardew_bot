@@ -906,6 +906,15 @@ impl<'a> MetadataHasConstant<'a> {
     }
 }
 
+impl<'a> MetadataHasFieldMarshal<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataHasFieldMarshal::Field(row) => row.name(),
+            MetadataHasFieldMarshal::Param(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1369,7 +1378,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.custom_attribute_table()?.bytes.start)
+        Ok(metadata_tables.field_marshal_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -3170,11 +3179,14 @@ impl std::fmt::Display for MetadataTableKind {
 }
 
 impl MetadataTableKind {
+    #[allow(dead_code)]
     const TYPE_DEF_OR_REF: [Self; 3] =
         [Self::TypeDef, Self::TypeRef, Self::TypeSpec];
 
+    #[allow(dead_code)]
     const HAS_CONSTANT: [Self; 3] = [Self::Field, Self::Param, Self::Property];
 
+    #[allow(dead_code)]
     const HAS_CUSTOM_ATTRIBUTE: [Self; 22] = [
         Self::MethodDef,
         Self::Field,
@@ -3240,6 +3252,7 @@ impl MetadataTableKind {
         None,
     ];
 
+    #[allow(dead_code)]
     const RESOLUTION_SCOPE: [Self; 4] = [
         Self::Module,
         Self::ModuleRef,
@@ -4548,7 +4561,10 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.parent_index()?).name("Parent");
+        annotator
+            .value(self.parent_index()?)
+            .name("Parent")
+            .append_value(self.parent()?.name()?.value);
         annotator
             .value(self.native_type_index()?)
             .name("Native type");
@@ -4556,9 +4572,14 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
         Ok(())
     }
 
-    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(0)
-            .as_coded_index(MetadataTableKind::HAS_FIELD_MARSHAL)
+    fn parent_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<HasFieldMarshal>>, Error> {
+        self.get_field_bytes(0).unpack()
+    }
+
+    fn parent(&self) -> Result<MetadataHasFieldMarshal, Error> {
+        self.tables.get(self.parent_index()?)
     }
 
     fn native_type_index(
