@@ -880,7 +880,7 @@ impl<'a> MetadataTypeDefOrRef<'a> {
             MetadataTypeDefOrRef::TypeDef(row) => row.name(),
             MetadataTypeDefOrRef::TypeRef(row) => row.name(),
             MetadataTypeDefOrRef::TypeSpec(row) => Ok(UnpackedValue::new(
-                row.bytes.subrange(0..0).as_range(),
+                row.bytes.subrange(0..0).into(),
                 "TypeSpec (anon)",
             )),
         }
@@ -924,7 +924,7 @@ impl<'a> MetadataMemberRefParent<'a> {
             MetadataMemberRefParent::ModuleRef(row) => row.name(),
             MetadataMemberRefParent::MethodDef(row) => row.name(),
             MetadataMemberRefParent::TypeSpec(row) => Ok(UnpackedValue::new(
-                row.bytes.subrange(0..0).as_range(),
+                row.bytes.subrange(0..0).into(),
                 "TypeSpec (anon)",
             )),
         }
@@ -1000,7 +1000,7 @@ macro_rules! from_bytes_prim_uint {
                 // unpacking.
                 let value =
                     $prim::from_le_bytes(bytes.bytes.try_into().unwrap());
-                Ok(UnpackedValue::new(bytes.as_range(), value))
+                Ok(UnpackedValue::new(bytes.into(), value))
             }
         }
     };
@@ -1421,7 +1421,7 @@ impl<'a> PEHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.group(&self.bytes).name("PE Header");
+        annotator.group(self.bytes).name("PE Header");
 
         annotator
             .range(self.pe_signature()?.loc())
@@ -1566,7 +1566,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.group(&self.bytes).name("Optional PE Header");
+        annotator.group(self.bytes).name("Optional PE Header");
 
         annotator.value(self.magic_value()?).name("Magic value");
         annotator
@@ -2062,7 +2062,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.group(&self.bytes).name("CLR Runtime Header");
+        annotator.group(self.bytes).name("CLR Runtime Header");
 
         annotator.value(self.header_size()?).name("header_size");
         annotator
@@ -2156,7 +2156,7 @@ impl<'a> PhysicalMetadataUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.group(&self.bytes).name("CLR Metadata");
+        annotator.group(self.bytes).name("CLR Metadata");
 
         annotator
             .range(self.metadata_signature()?.loc())
@@ -2593,7 +2593,7 @@ impl<'a> MetadataTables<'a> {
                 let bytes =
                     self.bytes.subrange(row_start..row_start + bytes_per_row);
                 annotator
-                    .range(bytes.as_range())
+                    .range(bytes.into())
                     .name(format!("{}[{}]", table_kind, i_row));
             }
         }
@@ -3904,7 +3904,7 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
             .name("signature_index");
 
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name(format!("'{type_name}.{name}' signature"));
 
         Ok(())
@@ -3955,7 +3955,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
             .value(self.signature_index()?)
             .name("signature_index");
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name(format!("'{type_name}.{name}' signature"));
 
         let param_indices = self.param_indices()?;
@@ -4125,7 +4125,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
             .name("signature_index");
 
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name(format!("MemberRef {name}"));
 
         Ok(())
@@ -4172,9 +4172,7 @@ impl<'a> MetadataRowUnpacker<'a, Constant> {
             .append_value(self.parent()?.name()?.value);
 
         annotator.value(self.value_index()?).name("Value");
-        annotator
-            .range(self.value()?.as_range())
-            .name("Constant value");
+        annotator.range(self.value()?.into()).name("Constant value");
 
         Ok(())
     }
@@ -4216,7 +4214,7 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
 
         annotator.value(self.value_index()?).name("Value");
         annotator
-            .range(self.value()?.as_range())
+            .range(self.value()?.into())
             .name("CustomAttribute value");
 
         Ok(())
@@ -4301,7 +4299,7 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
             .value(self.permission_set_index()?)
             .name("Permission set");
         annotator
-            .range(self.permission_set()?.as_range())
+            .range(self.permission_set()?.into())
             .name("DeclSecurity permission set");
 
         Ok(())
@@ -4403,7 +4401,7 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSig> {
     ) -> Result<(), Error> {
         annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name("StandAloneSig signature");
 
         Ok(())
@@ -4558,7 +4556,7 @@ impl<'a> MetadataRowUnpacker<'a, Property> {
 
         annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name("Property signature");
 
         Ok(())
@@ -4715,7 +4713,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpec> {
     ) -> Result<(), Error> {
         annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.signature()?.as_range())
+            .range(self.signature()?.into())
             .name("TypeSpec signature");
 
         Ok(())
@@ -4848,7 +4846,7 @@ impl<'a> MetadataRowUnpacker<'a, Assembly> {
 
         annotator.value(self.public_key_index()?).name("Public key");
         annotator
-            .range(self.public_key()?.as_range())
+            .range(self.public_key()?.into())
             .name(format!("Public key, '{name}' assembly"));
 
         Ok(())
@@ -4933,12 +4931,12 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
             .value(self.public_key_or_token_index()?)
             .name("Public key/token");
         annotator
-            .range(self.public_key_or_token()?.as_range())
+            .range(self.public_key_or_token()?.into())
             .name(format!("Public key/token, '{name}' AssemblyRef"));
 
         annotator.value(self.hash_value_index()?).name("Hash value");
         annotator
-            .range(self.hash_value()?.as_range())
+            .range(self.hash_value()?.into())
             .name(format!("HashValue, '{name}' AssemblyRef"));
 
         Ok(())
@@ -5172,7 +5170,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
             .value(self.instantiation_index()?)
             .name("Instantiation");
         annotator
-            .range(self.instantiation()?.as_range())
+            .range(self.instantiation()?.into())
             .name("MethodSpec instantiation");
 
         Ok(())

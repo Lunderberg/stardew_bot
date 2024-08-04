@@ -138,21 +138,11 @@ impl<'a> ByteRange<'a> {
         let end = range.end.as_ptr(self.start);
         start..end
     }
+}
 
-    pub(crate) fn as_range(&self) -> Range<Pointer> {
+impl<'a> Into<Range<Pointer>> for ByteRange<'a> {
+    fn into(self) -> std::ops::Range<Pointer> {
         self.start..self.start + self.bytes.len()
-    }
-}
-
-impl<'a> Into<std::ops::Range<Pointer>> for &ByteRange<'a> {
-    fn into(self) -> std::ops::Range<Pointer> {
-        self.as_range()
-    }
-}
-
-impl<'a> Into<std::ops::Range<Pointer>> for ByteRange<'a> {
-    fn into(self) -> std::ops::Range<Pointer> {
-        self.as_range()
     }
 }
 
