@@ -5386,7 +5386,7 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
         }
 
         annotator
-            .value(self.implementation_index()?)
+            .opt_value(self.implementation_index()?)
             .name("Implementation");
 
         Ok(())
@@ -5410,18 +5410,25 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
 
     fn implementation_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        // TODO: When switching from `usize` to typed indices, this
-        // field may require special handling.  ECMA-335 (section
-        // II.22.24) explicitly calls it out as optional, and that an
-        // index of zero refers to a location within the current file.
+    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<Implementation>>>, Error>
+    {
+        // TODO: When implementing a method to find the location of an
+        // implementation, `None` values may require special handling.
+        // ECMA-335 (section II.22.24) explicitly calls it this index
+        // as optional, and that an index of zero refers to a location
+        // within the current file.
         //
         // If it references the current file, `offset` is the number
         // of bytes relative to the `Resources` entry of the CLR
         // header. (`dll_unpacker.clr_runtime_header()?.resource()`,
         // adjusted by `dll_unpacker.virtual_address_to_raw`)
-        self.get_field_bytes(3)
-            .as_coded_index(MetadataTableKind::IMPLEMENTATION)
+        self.get_field_bytes(3).unpack()
+    }
+
+    pub fn implementation(
+        &self,
+    ) -> Result<Option<MetadataImplementation>, Error> {
+        self.tables.get(self.implementation_index()?)
     }
 }
 
