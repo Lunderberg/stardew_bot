@@ -186,7 +186,7 @@ pub struct HeapSizes {
     blob_stream_uses_u32_addr: bool,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MetadataTableKind {
     Module,
     TypeRef,
@@ -700,6 +700,45 @@ decl_metadata_table_tag! { GenericParamConstraint, [GenericParam, TypeDefOrRef] 
 
 pub trait CodedIndex {
     const OPTIONS: &'static [Option<MetadataTableKind>];
+
+    fn num_table_bits() -> usize {
+        Self::OPTIONS.len().next_power_of_two().ilog2() as usize
+    }
+
+    fn table_index(raw_index: usize) -> usize {
+        let table_mask = (1 << Self::num_table_bits()) - 1;
+        raw_index & table_mask
+    }
+
+    fn table_kind(raw_index: usize) -> Result<MetadataTableKind, Error> {
+        let table_index = Self::table_index(raw_index);
+        let table_kind = Self::OPTIONS
+            .get(table_index)
+            .ok_or(Error::InvalidCodedIndex {
+                table_index,
+                num_tables: Self::OPTIONS.len(),
+            })?
+            .ok_or(Error::CodedIndexRefersToReservedTableIndex)?;
+
+        Ok(table_kind)
+    }
+
+    fn row_index(raw_index: usize) -> Option<usize> {
+        let row_index = raw_index >> Self::num_table_bits();
+        if row_index == 0 {
+            None
+        } else {
+            // TODO: Return `row_index-1` instead of `row_index`.
+            //
+            // Since `row_index==0` represents a NULL value, all
+            // non-zero rows have an offset of one, so `row_index==1`
+            // is the first row of a table.  Currently, this is
+            // applied as part of the `get_row()` method, but it would
+            // be cleaner to apply it here.  That way, all `usize`
+            // instances represent valid zero-indexed Rust indices.
+            Some(row_index)
+        }
+    }
 }
 
 macro_rules! decl_coded_index_type {
@@ -829,6 +868,19 @@ impl<'a> MetadataResolutionScope<'a> {
             MetadataResolutionScope::ModuleRef(row) => row.name(),
             MetadataResolutionScope::AssemblyRef(row) => row.name(),
             MetadataResolutionScope::TypeRef(row) => row.name(),
+        }
+    }
+}
+
+impl<'a> MetadataTypeDefOrRef<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataTypeDefOrRef::TypeDef(row) => row.name(),
+            MetadataTypeDefOrRef::TypeRef(row) => row.name(),
+            MetadataTypeDefOrRef::TypeSpec(row) => Ok(UnpackedValue::new(
+                row.bytes.subrange(0..0).as_range(),
+                "(TypeSpec)",
+            )),
         }
     }
 }
@@ -975,34 +1027,39 @@ impl<Unpacker> MetadataTableIndex<Unpacker> {
     }
 }
 
+impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
+    fn new(kind: MetadataTableKind, index: usize) -> Self
+    where
+        CodedIndexType: CodedIndex,
+    {
+        debug_assert!(
+            CodedIndexType::OPTIONS.contains(&Some(kind)),
+            "Valid options for this CodedIndexType are {:?}, \
+                       and do not include {kind}",
+            CodedIndexType::OPTIONS.iter().flatten().collect::<Vec<_>>()
+        );
+        Self {
+            index,
+            kind,
+            _phantom: PhantomData,
+        }
+    }
+}
+
 impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
     for Option<MetadataCodedIndex<CodedIndexType>>
 where
     CodedIndexType: CodedIndex,
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        let num_tables = CodedIndexType::OPTIONS.len();
-        let table_bits = num_tables.next_power_of_two().ilog2() as usize;
+        bytes.unpack()?.try_map(|raw_index| {
+            let table_kind = CodedIndexType::table_kind(raw_index)?;
+            let Some(row_index) = CodedIndexType::row_index(raw_index) else {
+                return Ok(None);
+            };
 
-        let (loc, raw_index): (_, usize) = bytes.unpack()?.into();
-
-        let table_mask = (1 << table_bits) - 1;
-        let table_index = raw_index & table_mask;
-        let index = raw_index >> table_bits;
-
-        let opt_coded_index = CodedIndexType::OPTIONS
-            .get(table_index)
-            .ok_or(Error::InvalidCodedIndex {
-                table_index,
-                num_tables,
-            })?
-            .map(|kind| MetadataCodedIndex {
-                index,
-                kind,
-                _phantom: PhantomData,
-            });
-
-        Ok(UnpackedValue::new(loc, opt_coded_index))
+            Ok(Some(MetadataCodedIndex::new(table_kind, row_index)))
+        })
     }
 }
 
@@ -1012,8 +1069,12 @@ where
     CodedIndexType: CodedIndex,
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        bytes.unpack()?.try_map(|opt_coded_index: Option<Self>| {
-            opt_coded_index.ok_or(Error::CodedIndexRefersToReservedTableIndex)
+        bytes.unpack()?.try_map(|raw_index| {
+            let table_kind = CodedIndexType::table_kind(raw_index)?;
+            let row_index = CodedIndexType::row_index(raw_index).ok_or(
+                Error::InvalidMetadataTableIndexZero { kind: table_kind },
+            )?;
+            Ok(MetadataCodedIndex::new(table_kind, row_index))
         })
     }
 }
@@ -1282,7 +1343,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.type_ref_table()?.bytes.end())
+        Ok(metadata_tables.type_def_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -3741,7 +3802,14 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         let kind = Unpacker::KIND;
         let num_rows = self.table_sizes.num_rows[kind];
 
-        assert!(index > 0);
+        // There's an offset between the one-indexed CLI indices
+        // (where zero represents a null value) and the usual
+        // zero-indexed `usize` used by Rust (with `Option<usize>` to
+        // represent a nullable index).
+        //
+        // TODO: Move the handling of this offset into the conversion
+        // from CLI index to Rust `usize`.
+        assert!(index > 0, "Index of zero into table {}", Unpacker::KIND);
 
         if index == 0 {
             panic!(
@@ -3962,19 +4030,26 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         param_table: &MetadataTableUnpacker<Param>,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
-        let type_name = self.type_name()?.value;
+        let type_name = self.name()?.value;
         annotator
-            .value(self.type_name_index()?)
+            .value(self.name_index()?)
             .name("Type name")
             .append_value(type_name);
 
-        let type_namespace = self.type_namespace()?.value;
+        let type_namespace = self.namespace()?.value;
         annotator
-            .value(self.type_namespace_index()?)
+            .value(self.namespace_index()?)
             .name("Type namespace")
             .append_value(type_namespace);
 
-        annotator.value(self.extends()?).name("extends");
+        annotator
+            .opt_value(self.extends_index()?)
+            .name("extends")
+            .append_value(if let Some(base_class) = self.extends()? {
+                base_class.name()?.value
+            } else {
+                "(none)"
+            });
         let field_indices = self.field_indices()?;
         annotator.value(field_indices).name("Fields");
 
@@ -4035,29 +4110,36 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn type_name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn type_name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.type_name_index()?)
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        self.tables.get(self.name_index()?)
     }
 
-    fn type_namespace_index(
+    fn namespace_index(
         &self,
     ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn type_namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.type_namespace_index()?)
+    fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        self.tables.get(self.namespace_index()?)
     }
 
-    fn extends(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(3)
-            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
+    fn extends_index(
+        &self,
+    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<TypeDefOrRef>>>, Error>
+    {
+        self.get_field_bytes(3).unpack()
+    }
+
+    fn extends(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
+        self.extends_index()?
+            .value
+            .map(|index| self.tables.get(index))
+            .transpose()
     }
 
     fn field_indices(
@@ -4275,7 +4357,7 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.type_name()?.value);
+            .append_value(self.class()?.name()?.value);
         annotator.value(self.interface()?).name("Interface");
 
         Ok(())
@@ -4489,7 +4571,7 @@ impl<'a> MetadataRowUnpacker<'a, ClassLayout> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.type_name()?.value);
+            .append_value(self.class()?.name()?.value);
 
         Ok(())
     }
@@ -4574,7 +4656,7 @@ impl<'a> MetadataRowUnpacker<'a, EventMap> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.type_name()?.value);
+            .append_value(self.class()?.name()?.value);
         annotator.value(self.event_indices()?).name("Events");
 
         Ok(())
@@ -4650,7 +4732,7 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMap> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.type_name()?.value);
+            .append_value(self.class()?.name()?.value);
         annotator.value(self.property_indices()?).name("Properties");
 
         Ok(())
@@ -4767,7 +4849,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.type_name()?.value);
+            .append_value(self.class()?.name()?.value);
         annotator
             .value(self.method_body_index()?)
             .name("Method body");
@@ -5181,11 +5263,11 @@ impl<'a> MetadataRowUnpacker<'a, NestedClass> {
         annotator
             .value(self.nested_class_index()?)
             .name("Nested class")
-            .append_value(self.nested_class()?.type_name()?.value);
+            .append_value(self.nested_class()?.name()?.value);
         annotator
             .value(self.enclosing_class_index()?)
             .name("Enclosing class")
-            .append_value(self.enclosing_class()?.type_name()?.value);
+            .append_value(self.enclosing_class()?.name()?.value);
 
         Ok(())
     }
