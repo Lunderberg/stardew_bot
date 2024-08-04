@@ -958,6 +958,15 @@ impl<'a> MetadataMethodDefOrRef<'a> {
     }
 }
 
+impl<'a> MetadataMemberForwarded<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataMemberForwarded::Field(row) => row.name(),
+            MetadataMemberForwarded::MethodDef(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1421,7 +1430,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.method_spec_table()?.bytes.start)
+        Ok(metadata_tables.impl_map_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -5095,8 +5104,9 @@ impl<'a> MetadataRowUnpacker<'a, ImplMap> {
     ) -> Result<(), Error> {
         annotator.value(self.mapping_flags()?).name("Mapping flags");
         annotator
-            .value(self.member_forwarded()?)
-            .name("Member forwarded");
+            .value(self.member_forwarded_index()?)
+            .name("Member forwarded")
+            .append_value(self.member_forwarded()?.name()?.value);
 
         annotator
             .value(self.import_name_index()?)
@@ -5115,9 +5125,14 @@ impl<'a> MetadataRowUnpacker<'a, ImplMap> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn member_forwarded(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(1)
-            .as_coded_index(MetadataTableKind::MEMBER_FORWARDED)
+    fn member_forwarded_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<MemberForwarded>>, Error> {
+        self.get_field_bytes(1).unpack()
+    }
+
+    fn member_forwarded(&self) -> Result<MetadataMemberForwarded, Error> {
+        self.tables.get(self.member_forwarded_index()?)
     }
 
     fn import_name_index(
