@@ -896,6 +896,16 @@ impl<'a> MetadataTypeDefOrRef<'a> {
     }
 }
 
+impl<'a> MetadataHasConstant<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataHasConstant::Field(row) => row.name(),
+            MetadataHasConstant::Param(row) => row.name(),
+            MetadataHasConstant::Property(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1359,7 +1369,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.method_spec_table()?.bytes.end())
+        Ok(metadata_tables.constant_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4455,7 +4465,10 @@ impl<'a> MetadataRowUnpacker<'a, Constant> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.type_value()?).name("Type value");
-        annotator.value(self.parent_index()?).name("Parent");
+        annotator
+            .value(self.parent_index()?)
+            .name("Parent")
+            .append_value(self.parent()?.name()?.value);
 
         annotator.value(self.value_index()?).name("Value");
         annotator
@@ -4469,10 +4482,15 @@ impl<'a> MetadataRowUnpacker<'a, Constant> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        // Skip get_field_bytes(1), which is a padding byte.
-        self.get_field_bytes(2)
-            .as_coded_index(MetadataTableKind::HAS_CONSTANT)
+    fn parent_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<HasConstant>>, Error> {
+        // Skip `get_field_bytes(1)`, which is a padding byte.
+        self.get_field_bytes(2).unpack()
+    }
+
+    fn parent(&self) -> Result<MetadataHasConstant, Error> {
+        self.tables.get(self.parent_index()?)
     }
 
     fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
