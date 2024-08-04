@@ -11,5 +11,8 @@ pub use unpacked_value::UnpackedValue;
 mod dll_unpacker;
 pub use dll_unpacker::Unpacker;
 
+pub(crate) mod portable_executable;
+pub use portable_executable::Section;
+
 mod annotator;
 pub use annotator::{Annotation, Annotator};
