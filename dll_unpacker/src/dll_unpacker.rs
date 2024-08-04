@@ -940,6 +940,15 @@ impl<'a> MetadataMemberRefParent<'a> {
     }
 }
 
+impl<'a> MetadataHasSemantics<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataHasSemantics::Event(row) => row.name(),
+            MetadataHasSemantics::Property(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1403,7 +1412,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.member_ref_table()?.bytes.start)
+        Ok(metadata_tables.method_semantics_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4935,7 +4944,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
             .value(self.method_index()?)
             .name("Method")
             .append_value(self.method()?.name()?.value);
-        annotator.value(self.association()?).name("Association");
+        annotator
+            .value(self.association_index()?)
+            .name("Association")
+            .append_value(self.association()?.name()?.value);
 
         Ok(())
     }
@@ -4954,9 +4966,14 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
         self.tables.get(self.method_index()?)
     }
 
-    fn association(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(2)
-            .as_coded_index(MetadataTableKind::HAS_SEMANTICS)
+    fn association_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<HasSemantics>>, Error> {
+        self.get_field_bytes(2).unpack()
+    }
+
+    fn association(&self) -> Result<MetadataHasSemantics, Error> {
+        self.tables.get(self.association_index()?)
     }
 }
 
