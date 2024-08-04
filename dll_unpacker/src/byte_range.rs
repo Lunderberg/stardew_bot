@@ -167,14 +167,14 @@ impl<'a, T: NormalizeOffset> std::ops::Index<Range<T>> for ByteRange<'a> {
 
 macro_rules! from_bytes_prim_uint {
     ($prim:ident) => {
-        impl<'a> UnpackBytes<'a> for UnpackedValue<$prim> {
+        impl<'a> UnpackBytes<'a> for $prim {
             fn unpack(bytes: ByteRange) -> Result<Self, Error> {
                 // Unwrapping instead of returning an error, because a
                 // failure here means there's an inconsistency in the
                 // unpacking.
                 let value =
                     $prim::from_le_bytes(bytes.bytes.try_into().unwrap());
-                Ok(UnpackedValue::new(bytes.into(), value))
+                Ok(value)
             }
         }
     };

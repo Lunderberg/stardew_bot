@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, ops::Range};
 
+use crate::{ByteRange, Error, UnpackBytes};
 use memory_reader::Pointer;
 
 #[derive(Clone, Copy)]
@@ -55,5 +56,14 @@ impl<T> Into<(Range<Pointer>, T)> for UnpackedValue<T> {
 impl<T> Borrow<T> for UnpackedValue<T> {
     fn borrow(&self) -> &T {
         &self.value
+    }
+}
+
+impl<'a, T> UnpackBytes<'a> for UnpackedValue<T>
+where
+    T: UnpackBytes<'a>,
+{
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        Ok(UnpackedValue::new(bytes.into(), bytes.unpack()?))
     }
 }
