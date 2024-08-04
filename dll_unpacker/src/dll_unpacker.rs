@@ -915,6 +915,16 @@ impl<'a> MetadataHasFieldMarshal<'a> {
     }
 }
 
+impl<'a> MetadataHasDeclSecurity<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataHasDeclSecurity::TypeDef(row) => row.name(),
+            MetadataHasDeclSecurity::MethodDef(row) => row.name(),
+            MetadataHasDeclSecurity::Assembly(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1378,7 +1388,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.field_marshal_table()?.bytes.start)
+        Ok(metadata_tables.decl_security_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -3220,6 +3230,7 @@ impl MetadataTableKind {
     #[allow(dead_code)]
     const HAS_FIELD_MARSHAL: [Self; 2] = [Self::Field, Self::Param];
 
+    #[allow(dead_code)]
     const HAS_DECL_SECURITY: [Self; 3] =
         [Self::TypeDef, Self::MethodDef, Self::Assembly];
 
@@ -4595,7 +4606,10 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.action()?).name("Action");
-        annotator.value(self.parent_index()?).name("Parent");
+        annotator
+            .value(self.parent_index()?)
+            .name("Parent")
+            .append_value(self.parent()?.name()?.value);
 
         annotator
             .value(self.permission_set_index()?)
@@ -4611,9 +4625,14 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(1)
-            .as_coded_index(MetadataTableKind::HAS_DECL_SECURITY)
+    fn parent_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<HasDeclSecurity>>, Error> {
+        self.get_field_bytes(1).unpack()
+    }
+
+    fn parent(&self) -> Result<MetadataHasDeclSecurity, Error> {
+        self.tables.get(self.parent_index()?)
     }
 
     fn permission_set_index(
