@@ -886,13 +886,13 @@ impl<'a> MetadataTypeDefOrRef<'a> {
 }
 
 trait UnpackMetadataFromBytes<'a>: Sized {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error>;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
 
 macro_rules! from_bytes_prim_uint {
     ($prim:ident) => {
-        impl<'a> UnpackMetadataFromBytes<'a> for $prim {
-            fn unpack(bytes: ByteRange) -> Result<UnpackedValue<Self>, Error> {
+        impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<$prim> {
+            fn unpack(bytes: ByteRange) -> Result<Self, Error> {
                 // Unwrapping instead of returning an error, because a
                 // failure here means there's an inconsistency in the
                 // unpacking.
@@ -910,12 +910,16 @@ from_bytes_prim_uint! {u32}
 from_bytes_prim_uint! {u64}
 from_bytes_prim_uint! {u128}
 
-impl<'a> UnpackMetadataFromBytes<'a> for usize {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
+impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<usize> {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         if bytes.len() == 2 {
-            Ok(bytes.unpack()?.map(|val: u16| val as usize))
+            Ok(bytes
+                .unpack::<UnpackedValue<_>>()?
+                .map(|val: u16| val as usize))
         } else if bytes.len() == 4 {
-            Ok(bytes.unpack()?.map(|val: u32| val as usize))
+            Ok(bytes
+                .unpack::<UnpackedValue<_>>()?
+                .map(|val: u32| val as usize))
         } else {
             panic!("Heap index is either u16 or u32");
         }
@@ -924,11 +928,9 @@ impl<'a> UnpackMetadataFromBytes<'a> for usize {
 
 macro_rules! heap_index_impl {
     ($index_type:ident, $name:ident) => {
-        impl<'a> UnpackMetadataFromBytes<'a> for $index_type {
-            fn unpack(
-                bytes: ByteRange<'a>,
-            ) -> Result<UnpackedValue<Self>, Error> {
-                Ok(bytes.unpack()?.map(Self))
+        impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<$index_type> {
+            fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+                Ok(bytes.unpack::<UnpackedValue<_>>()?.map($index_type))
             }
         }
 
@@ -943,9 +945,9 @@ macro_rules! heap_index_impl {
 heap_index_impl! { MetadataStringIndex, String }
 heap_index_impl! { MetadataBlobIndex, Blob }
 
-impl<'a> UnpackMetadataFromBytes<'a> for MetadataGuidIndex {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        bytes.unpack()?.try_map(|index: usize| {
+impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<MetadataGuidIndex> {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack::<UnpackedValue<_>>()?.try_map(|index: usize| {
             // Unlike indices into the #Strings or #Blob heaps, which
             // are zero-indexed, indices into the #GUID heap are
             // one-indexed.  An index of zero is used to represent a
@@ -956,15 +958,17 @@ impl<'a> UnpackMetadataFromBytes<'a> for MetadataGuidIndex {
             if index == 0 {
                 Err(Error::InvalidGuidIndexZero)
             } else {
-                Ok(Self(index - 1))
+                Ok(MetadataGuidIndex(index - 1))
             }
         })
     }
 }
 
-impl<'a> UnpackMetadataFromBytes<'a> for Option<MetadataGuidIndex> {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        Ok(bytes.unpack()?.map(|index: usize| {
+impl<'a> UnpackMetadataFromBytes<'a>
+    for UnpackedValue<Option<MetadataGuidIndex>>
+{
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        Ok(bytes.unpack::<UnpackedValue<_>>()?.map(|index: usize| {
             if index == 0 {
                 None
             } else {
@@ -981,16 +985,16 @@ impl std::fmt::Display for MetadataGuidIndex {
 }
 
 impl<'a, Unpacker: MetadataTableTag> UnpackMetadataFromBytes<'a>
-    for MetadataTableIndex<Unpacker>
+    for UnpackedValue<MetadataTableIndex<Unpacker>>
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        bytes.unpack()?.try_map(|index| {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack::<UnpackedValue<_>>()?.try_map(|index| {
             if index == 0 {
                 Err(Error::InvalidMetadataTableIndexZero {
                     kind: Unpacker::KIND,
                 })
             } else {
-                Ok(Self {
+                Ok(MetadataTableIndex {
                     index,
                     _phantom: PhantomData,
                 })
@@ -1047,12 +1051,12 @@ impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
 }
 
 impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
-    for Option<MetadataCodedIndex<CodedIndexType>>
+    for UnpackedValue<Option<MetadataCodedIndex<CodedIndexType>>>
 where
     CodedIndexType: CodedIndex,
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        bytes.unpack()?.try_map(|raw_index| {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack::<UnpackedValue<_>>()?.try_map(|raw_index| {
             let table_kind = CodedIndexType::table_kind(raw_index)?;
             let Some(row_index) = CodedIndexType::row_index(raw_index) else {
                 return Ok(None);
@@ -1064,12 +1068,12 @@ where
 }
 
 impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
-    for MetadataCodedIndex<CodedIndexType>
+    for UnpackedValue<MetadataCodedIndex<CodedIndexType>>
 where
     CodedIndexType: CodedIndex,
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<UnpackedValue<Self>, Error> {
-        bytes.unpack()?.try_map(|raw_index| {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack::<UnpackedValue<_>>()?.try_map(|raw_index| {
             let table_kind = CodedIndexType::table_kind(raw_index)?;
             let row_index = CodedIndexType::row_index(raw_index).ok_or(
                 Error::InvalidMetadataTableIndexZero { kind: table_kind },
@@ -1166,7 +1170,7 @@ impl<'a> ByteRange<'a> {
         self.bytes.len()
     }
 
-    fn unpack<T>(&self) -> Result<UnpackedValue<T>, Error>
+    fn unpack<T>(&self) -> Result<T, Error>
     where
         T: UnpackMetadataFromBytes<'a>,
     {
@@ -1223,7 +1227,8 @@ impl<'a> ByteRange<'a> {
     {
         let table_bits = N.next_power_of_two().ilog2() as usize;
 
-        let (loc, value): (Range<Pointer>, usize) = self.unpack()?.into();
+        let (loc, value): (Range<Pointer>, usize) =
+            self.unpack::<UnpackedValue<_>>()?.into();
 
         let table_mask = (1 << table_bits) - 1;
         let table_index = value & table_mask;
@@ -3877,7 +3882,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
                 let range = begin_bytes.start - self.bytes.start
                     ..begin_bytes.end() - self.bytes.start;
                 let end_bytes = next_row.subrange(range);
-                end_bytes.unpack().unwrap().value()
+                end_bytes.unpack::<UnpackedValue<_>>().unwrap().value()
             })
             .unwrap_or_else(|| {
                 let MetadataColumnType::Index(MetadataIndexKind::Table(
@@ -3889,7 +3894,8 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
                 self.table_sizes.num_rows[table_kind]
             });
 
-        let (loc, begin_index) = begin_bytes.unpack().unwrap().into();
+        let (loc, begin_index) =
+            begin_bytes.unpack::<UnpackedValue<_>>().unwrap().into();
 
         UnpackedValue::new(loc, begin_index..end_index)
     }
