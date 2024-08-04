@@ -2,8 +2,9 @@ use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
 
+use crate::UnpackedValue;
 use crate::{Annotation as _, Annotator, Error};
-use crate::{ByteRange, UnpackedValue};
+use crate::{ByteRange, UnpackBytes};
 
 pub struct Unpacker<'a> {
     bytes: ByteRange<'a>,
@@ -565,16 +566,8 @@ pub trait TypedMetadataIndex {
     ) -> Result<Self::Output<'a, 'b>, Error>;
 }
 
-#[derive(Clone, Copy)]
-pub struct MetadataStringIndex(usize);
-
-#[derive(Clone, Copy)]
-pub struct MetadataBlobIndex(usize);
-
-#[derive(Clone, Copy)]
-pub struct MetadataGuidIndex(usize);
-
 /// Typed index into a specific metadata type
+#[derive(Clone, Copy)]
 pub struct MetadataTableIndex<Unpacker> {
     index: usize,
     _phantom: PhantomData<Unpacker>,
@@ -585,6 +578,7 @@ pub struct MetadataTableIndex<Unpacker> {
 /// When #![feature(step_trait)] is stabilized
 /// (https://github.com/rust-lang/rust/issues/42168), this will be
 /// replaced with `Range<MetadataTableIndex<Unpacker>>`.
+#[derive(Clone, Copy)]
 pub struct MetadataTableIndexRange<Unpacker> {
     start: usize,
     end: usize,
@@ -615,7 +609,7 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
-pub trait MetadataTableTag {
+pub trait MetadataTableTag: Copy {
     const KIND: MetadataTableKind;
 
     const COLUMNS: &'static [MetadataColumnType];
@@ -623,6 +617,7 @@ pub trait MetadataTableTag {
 
 macro_rules! decl_metadata_table_tag{
     ($table_name:ident, $fields:tt) => {
+        #[derive(Clone, Copy)]
         pub struct $table_name;
 
         impl MetadataTableTag for $table_name {
@@ -987,32 +982,7 @@ impl<'a> MetadataTypeOrMethodDef<'a> {
     }
 }
 
-pub(crate) trait UnpackMetadataFromBytes<'a>: Sized {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
-}
-
-macro_rules! from_bytes_prim_uint {
-    ($prim:ident) => {
-        impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<$prim> {
-            fn unpack(bytes: ByteRange) -> Result<Self, Error> {
-                // Unwrapping instead of returning an error, because a
-                // failure here means there's an inconsistency in the
-                // unpacking.
-                let value =
-                    $prim::from_le_bytes(bytes.bytes.try_into().unwrap());
-                Ok(UnpackedValue::new(bytes.into(), value))
-            }
-        }
-    };
-}
-
-from_bytes_prim_uint! {u8}
-from_bytes_prim_uint! {u16}
-from_bytes_prim_uint! {u32}
-from_bytes_prim_uint! {u64}
-from_bytes_prim_uint! {u128}
-
-impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<usize> {
+impl<'a> UnpackBytes<'a> for UnpackedValue<usize> {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         if bytes.len() == 2 {
             Ok(bytes
@@ -1028,13 +998,10 @@ impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<usize> {
     }
 }
 
-macro_rules! heap_index_impl {
+macro_rules! define_core_heap_index {
     ($index_type:ident, $name:ident) => {
-        impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<$index_type> {
-            fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-                Ok(bytes.unpack::<UnpackedValue<_>>()?.map($index_type))
-            }
-        }
+        #[derive(Clone, Copy)]
+        pub struct $index_type(usize);
 
         impl std::fmt::Display for $index_type {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -1044,10 +1011,28 @@ macro_rules! heap_index_impl {
     };
 }
 
-heap_index_impl! { MetadataStringIndex, String }
-heap_index_impl! { MetadataBlobIndex, Blob }
+macro_rules! impl_unpack_heap_index {
+    ($index_type:ident, $name:ident) => {
+        impl<'a> UnpackBytes<'a> for UnpackedValue<$index_type> {
+            fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+                Ok(bytes.unpack::<UnpackedValue<_>>()?.map($index_type))
+            }
+        }
+    };
+}
 
-impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<MetadataGuidIndex> {
+macro_rules! decl_heap_index {
+    ($index_type:ident, $name:ident) => {
+        define_core_heap_index! {$index_type, $name}
+        impl_unpack_heap_index! {$index_type, $name}
+    };
+}
+
+decl_heap_index! { MetadataStringIndex, String }
+decl_heap_index! { MetadataBlobIndex, Blob }
+define_core_heap_index! { MetadataGuidIndex, GUID }
+
+impl<'a> UnpackBytes<'a> for UnpackedValue<MetadataGuidIndex> {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         bytes.unpack::<UnpackedValue<_>>()?.try_map(|index: usize| {
             // Unlike indices into the #Strings or #Blob heaps, which
@@ -1066,9 +1051,7 @@ impl<'a> UnpackMetadataFromBytes<'a> for UnpackedValue<MetadataGuidIndex> {
     }
 }
 
-impl<'a> UnpackMetadataFromBytes<'a>
-    for UnpackedValue<Option<MetadataGuidIndex>>
-{
+impl<'a> UnpackBytes<'a> for UnpackedValue<Option<MetadataGuidIndex>> {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         Ok(bytes.unpack::<UnpackedValue<_>>()?.map(|index: usize| {
             if index == 0 {
@@ -1080,13 +1063,7 @@ impl<'a> UnpackMetadataFromBytes<'a>
     }
 }
 
-impl std::fmt::Display for MetadataGuidIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "GUID[{}]", self.0)
-    }
-}
-
-impl<'a, Unpacker: MetadataTableTag> UnpackMetadataFromBytes<'a>
+impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
     for UnpackedValue<MetadataTableIndex<Unpacker>>
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
@@ -1112,17 +1089,6 @@ impl<Unpacker: MetadataTableTag> std::fmt::Display
         write!(f, "{}[{}]", Unpacker::KIND, self.index)
     }
 }
-
-impl<Unpacker> Clone for MetadataTableIndex<Unpacker> {
-    fn clone(&self) -> Self {
-        Self {
-            index: self.index,
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<Unpacker> Copy for MetadataTableIndex<Unpacker> {}
 
 impl<Unpacker> MetadataTableIndex<Unpacker> {
     fn new(index: usize) -> Self {
@@ -1152,7 +1118,7 @@ impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
     }
 }
 
-impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
+impl<'a, CodedIndexType> UnpackBytes<'a>
     for UnpackedValue<Option<MetadataCodedIndex<CodedIndexType>>>
 where
     CodedIndexType: CodedIndex,
@@ -1169,7 +1135,7 @@ where
     }
 }
 
-impl<'a, CodedIndexType> UnpackMetadataFromBytes<'a>
+impl<'a, CodedIndexType> UnpackBytes<'a>
     for UnpackedValue<MetadataCodedIndex<CodedIndexType>>
 where
     CodedIndexType: CodedIndex,
@@ -2922,17 +2888,6 @@ impl<Unpacker: MetadataTableTag> TypedMetadataIndex
         tables.get_table()?.get_row(self.index)
     }
 }
-
-impl<Unpacker> Clone for MetadataTableIndexRange<Unpacker> {
-    fn clone(&self) -> Self {
-        Self {
-            start: self.start,
-            end: self.end,
-            _phantom: PhantomData,
-        }
-    }
-}
-impl<Unpacker> Copy for MetadataTableIndexRange<Unpacker> {}
 
 impl<Unpacker: MetadataTableTag> std::fmt::Display
     for MetadataTableIndexRange<Unpacker>

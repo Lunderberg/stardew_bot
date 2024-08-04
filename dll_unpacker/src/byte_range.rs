@@ -1,15 +1,16 @@
 use memory_reader::Pointer;
 use std::ops::Range;
 
-use crate::{
-    dll_unpacker::{UnpackMetadataFromBytes, VirtualRange},
-    Error, UnpackedValue,
-};
+use crate::{dll_unpacker::VirtualRange, Error, UnpackedValue};
 
 #[derive(Clone, Copy)]
 pub struct ByteRange<'a> {
     pub(crate) start: Pointer,
     pub(crate) bytes: &'a [u8],
+}
+
+pub(crate) trait UnpackBytes<'a>: Sized {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
 
 pub(crate) trait NormalizeOffset: Copy {
@@ -42,7 +43,7 @@ impl<'a> ByteRange<'a> {
 
     pub(crate) fn unpack<T>(&self) -> Result<T, Error>
     where
-        T: UnpackMetadataFromBytes<'a>,
+        T: UnpackBytes<'a>,
     {
         T::unpack(*self)
     }
@@ -163,3 +164,24 @@ impl<'a, T: NormalizeOffset> std::ops::Index<Range<T>> for ByteRange<'a> {
         &self.bytes[start..end]
     }
 }
+
+macro_rules! from_bytes_prim_uint {
+    ($prim:ident) => {
+        impl<'a> UnpackBytes<'a> for UnpackedValue<$prim> {
+            fn unpack(bytes: ByteRange) -> Result<Self, Error> {
+                // Unwrapping instead of returning an error, because a
+                // failure here means there's an inconsistency in the
+                // unpacking.
+                let value =
+                    $prim::from_le_bytes(bytes.bytes.try_into().unwrap());
+                Ok(UnpackedValue::new(bytes.into(), value))
+            }
+        }
+    };
+}
+
+from_bytes_prim_uint! {u8}
+from_bytes_prim_uint! {u16}
+from_bytes_prim_uint! {u32}
+from_bytes_prim_uint! {u64}
+from_bytes_prim_uint! {u128}
