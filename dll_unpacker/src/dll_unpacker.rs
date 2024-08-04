@@ -577,12 +577,6 @@ pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
-/// Index into an arbitrary metadata table
-pub struct MetadataIndex {
-    table: MetadataTableKind,
-    index: usize,
-}
-
 pub trait TypedMetadataIndex {
     type Output<'a: 'b, 'b>;
 
@@ -1344,37 +1338,6 @@ impl<'a> ByteRange<'a> {
             self.bytes[byte_range.clone()].try_into().unwrap(),
         );
         Ok(UnpackedValue::new(self.address_range(byte_range), value))
-    }
-
-    fn as_coded_index<const N: usize, Kind>(
-        &self,
-        table_options: [Kind; N],
-    ) -> Result<UnpackedValue<MetadataIndex>, Error>
-    where
-        Kind: Copy,
-        Kind: Into<Option<MetadataTableKind>>,
-    {
-        let table_bits = N.next_power_of_two().ilog2() as usize;
-
-        let (loc, value): (Range<Pointer>, usize) =
-            self.unpack::<UnpackedValue<_>>()?.into();
-
-        let table_mask = (1 << table_bits) - 1;
-        let table_index = value & table_mask;
-
-        let table = if table_index < N {
-            table_options[table_index]
-                .into()
-                .ok_or(Error::CodedIndexRefersToReservedTableIndex)
-        } else {
-            Err(Error::InvalidCodedIndex {
-                table_index,
-                num_tables: N,
-            })
-        }?;
-        let index = value >> table_bits;
-
-        Ok(UnpackedValue::new(loc, MetadataIndex { table, index }))
     }
 
     fn get_null_terminated(
@@ -3278,93 +3241,6 @@ impl std::fmt::Display for MetadataTableKind {
 }
 
 impl MetadataTableKind {
-    #[allow(dead_code)]
-    const TYPE_DEF_OR_REF: [Self; 3] =
-        [Self::TypeDef, Self::TypeRef, Self::TypeSpec];
-
-    #[allow(dead_code)]
-    const HAS_CONSTANT: [Self; 3] = [Self::Field, Self::Param, Self::Property];
-
-    #[allow(dead_code)]
-    const HAS_CUSTOM_ATTRIBUTE: [Self; 22] = [
-        Self::MethodDef,
-        Self::Field,
-        Self::TypeRef,
-        Self::TypeDef,
-        Self::Param,
-        Self::InterfaceImpl,
-        Self::MemberRef,
-        Self::Module,
-        // This option is listed as "Permission" in II.24.2.6 of
-        // ECMA-335, but no such metadata table exists.  It looks like
-        // it might be a holdover from an earlier draft.  For now,
-        // assuming that it refers to the "DeclSecurity" table, which
-        // handles object permissions.
-        Self::DeclSecurity,
-        Self::Property,
-        Self::Event,
-        Self::StandAloneSig,
-        Self::ModuleRef,
-        Self::TypeSpec,
-        Self::Assembly,
-        Self::AssemblyRef,
-        Self::File,
-        Self::ExportedType,
-        Self::ManifestResource,
-        Self::GenericParam,
-        Self::GenericParamConstraint,
-        Self::MethodSpec,
-    ];
-
-    #[allow(dead_code)]
-    const HAS_FIELD_MARSHAL: [Self; 2] = [Self::Field, Self::Param];
-
-    #[allow(dead_code)]
-    const HAS_DECL_SECURITY: [Self; 3] =
-        [Self::TypeDef, Self::MethodDef, Self::Assembly];
-
-    #[allow(dead_code)]
-    const MEMBER_REF_PARENT: [Self; 5] = [
-        Self::TypeDef,
-        Self::TypeRef,
-        Self::ModuleRef,
-        Self::MethodDef,
-        Self::TypeSpec,
-    ];
-
-    #[allow(dead_code)]
-    const HAS_SEMANTICS: [Self; 2] = [Self::Event, Self::Property];
-
-    #[allow(dead_code)]
-    const METHOD_DEF_OR_REF: [Self; 2] = [Self::MethodDef, Self::MemberRef];
-
-    #[allow(dead_code)]
-    const MEMBER_FORWARDED: [Self; 2] = [Self::Field, Self::MethodDef];
-
-    #[allow(dead_code)]
-    const IMPLEMENTATION: [Self; 3] =
-        [Self::File, Self::AssemblyRef, Self::ExportedType];
-
-    #[allow(dead_code)]
-    const CUSTOM_ATTRIBUTE_TYPE: [Option<Self>; 5] = [
-        None,
-        None,
-        Some(Self::MethodDef),
-        Some(Self::MemberRef),
-        None,
-    ];
-
-    #[allow(dead_code)]
-    const RESOLUTION_SCOPE: [Self; 4] = [
-        Self::Module,
-        Self::ModuleRef,
-        Self::AssemblyRef,
-        Self::TypeRef,
-    ];
-
-    #[allow(dead_code)]
-    const TYPE_OR_METHOD_DEF: [Self; 2] = [Self::TypeDef, Self::MethodDef];
-
     fn from_bit_index(bit: u8) -> Result<Self, Error> {
         match bit {
             0x00 => Ok(Self::Module),
@@ -3676,88 +3552,20 @@ impl<Value> std::ops::IndexMut<MetadataCodedIndexKind>
 
 impl MetadataCodedIndexKind {
     fn table_options(self) -> &'static [Option<MetadataTableKind>] {
-        type Table = MetadataTableKind;
         match self {
-            Self::TypeDefOrRef => &[
-                Some(Table::TypeDef),
-                Some(Table::TypeRef),
-                Some(Table::TypeSpec),
-            ],
-            Self::HasConstant => &[
-                Some(Table::Field),
-                Some(Table::Param),
-                Some(Table::Property),
-            ],
-            Self::HasCustomAttribute => &[
-                Some(Table::MethodDef),
-                Some(Table::Field),
-                Some(Table::TypeRef),
-                Some(Table::TypeDef),
-                Some(Table::Param),
-                Some(Table::InterfaceImpl),
-                Some(Table::MemberRef),
-                Some(Table::Module),
-                // This option is listed as "Permission" in II.24.2.6 of
-                // ECMA-335, but no such metadata table exists.  It looks like
-                // it might be a holdover from an earlier draft.  For now,
-                // assuming that it refers to the "DeclSecurity" table, which
-                // handles object permissions.
-                Some(Table::DeclSecurity),
-                Some(Table::Property),
-                Some(Table::Event),
-                Some(Table::StandAloneSig),
-                Some(Table::ModuleRef),
-                Some(Table::TypeSpec),
-                Some(Table::Assembly),
-                Some(Table::AssemblyRef),
-                Some(Table::File),
-                Some(Table::ExportedType),
-                Some(Table::ManifestResource),
-                Some(Table::GenericParam),
-                Some(Table::GenericParamConstraint),
-                Some(Table::MethodSpec),
-            ],
-            Self::HasFieldMarshal => &[Some(Table::Field), Some(Table::Param)],
-            Self::HasDeclSecurity => &[
-                Some(Table::TypeDef),
-                Some(Table::MethodDef),
-                Some(Table::Assembly),
-            ],
-            Self::MemberRefParent => &[
-                Some(Table::TypeDef),
-                Some(Table::TypeRef),
-                Some(Table::ModuleRef),
-                Some(Table::MethodDef),
-                Some(Table::TypeSpec),
-            ],
-            Self::HasSemantics => &[Some(Table::Event), Some(Table::Property)],
-            Self::MethodDefOrRef => {
-                &[Some(Table::MethodDef), Some(Table::MemberRef)]
-            }
-            Self::MemberForwarded => {
-                &[Some(Table::Field), Some(Table::MethodDef)]
-            }
-            Self::Implementation => &[
-                Some(Table::File),
-                Some(Table::AssemblyRef),
-                Some(Table::ExportedType),
-            ],
-            Self::CustomAttributeType => &[
-                None,
-                None,
-                Some(Table::MethodDef),
-                Some(Table::MemberRef),
-                None,
-            ],
-            Self::ResolutionScope => &[
-                Some(Table::Module),
-                Some(Table::ModuleRef),
-                Some(Table::AssemblyRef),
-                Some(Table::TypeRef),
-            ],
-            Self::TypeOrMethodDef => {
-                &[Some(Table::TypeDef), Some(Table::MethodDef)]
-            }
+            Self::TypeDefOrRef => TypeDefOrRef::OPTIONS,
+            Self::HasConstant => HasConstant::OPTIONS,
+            Self::HasCustomAttribute => HasCustomAttribute::OPTIONS,
+            Self::HasFieldMarshal => HasFieldMarshal::OPTIONS,
+            Self::HasDeclSecurity => HasDeclSecurity::OPTIONS,
+            Self::MemberRefParent => MemberRefParent::OPTIONS,
+            Self::HasSemantics => HasSemantics::OPTIONS,
+            Self::MethodDefOrRef => MethodDefOrRef::OPTIONS,
+            Self::MemberForwarded => MemberForwarded::OPTIONS,
+            Self::Implementation => Implementation::OPTIONS,
+            Self::CustomAttributeType => CustomAttributeType::OPTIONS,
+            Self::ResolutionScope => ResolutionScope::OPTIONS,
+            Self::TypeOrMethodDef => TypeOrMethodDef::OPTIONS,
         }
     }
 
@@ -3829,12 +3637,6 @@ impl MetadataTableKind {
             Self::MethodSpec => MethodSpec::COLUMNS,
             Self::GenericParamConstraint => GenericParamConstraint::COLUMNS,
         }
-    }
-}
-
-impl std::fmt::Display for MetadataIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}[{}]", self.table, self.index - 1)
     }
 }
 
