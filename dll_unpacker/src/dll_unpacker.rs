@@ -1369,7 +1369,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.constant_table()?.bytes.start)
+        Ok(metadata_tables.custom_attribute_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4518,9 +4518,15 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
         Ok(())
     }
 
-    fn parent_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(0)
-            .as_coded_index(MetadataTableKind::HAS_CUSTOM_ATTRIBUTE)
+    fn parent_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<HasCustomAttribute>>, Error>
+    {
+        self.get_field_bytes(0).unpack()
+    }
+
+    pub fn parent(&self) -> Result<MetadataHasCustomAttribute, Error> {
+        self.tables.get(self.parent_index()?)
     }
 
     fn type_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
