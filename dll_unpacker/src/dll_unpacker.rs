@@ -696,15 +696,13 @@ pub trait CodedIndex {
         if row_index == 0 {
             None
         } else {
-            // TODO: Return `row_index-1` instead of `row_index`.
-            //
             // Since `row_index==0` represents a NULL value, all
             // non-zero rows have an offset of one, so `row_index==1`
             // is the first row of a table.  Currently, this is
             // applied as part of the `get_row()` method, but it would
             // be cleaner to apply it here.  That way, all `usize`
             // instances represent valid zero-indexed Rust indices.
-            Some(row_index)
+            Some(row_index - 1)
         }
     }
 }
@@ -1060,20 +1058,28 @@ impl<'a> UnpackBytes<'a> for Option<MetadataGuidIndex> {
 }
 
 impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
+    for Option<MetadataTableIndex<Unpacker>>
+{
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        bytes.unpack().map(|index: usize| {
+            if index == 0 {
+                None
+            } else {
+                Some(MetadataTableIndex::new(index - 1))
+            }
+        })
+    }
+}
+
+impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
     for MetadataTableIndex<Unpacker>
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        let index: usize = bytes.unpack()?;
-        if index == 0 {
-            Err(Error::InvalidMetadataTableIndexZero {
+        bytes.unpack().and_then(|opt_index: Option<Self>| {
+            opt_index.ok_or(Error::InvalidMetadataTableIndexZero {
                 kind: Unpacker::KIND,
             })
-        } else {
-            Ok(MetadataTableIndex {
-                index,
-                _phantom: PhantomData,
-            })
-        }
+        })
     }
 }
 
@@ -3475,23 +3481,17 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         // zero-indexed `usize` used by Rust (with `Option<usize>` to
         // represent a nullable index).
         //
-        // TODO: Move the handling of this offset into the conversion
-        // from CLI index to Rust `usize`.
-        assert!(index > 0, "Index of zero into table {}", Unpacker::KIND);
+        // This offset is already applied prior to this point, during
+        // the unpacking of CLI indices.
 
-        if index == 0 {
-            panic!(
-                "Index of zero indicates an absent optional field, \
-                 not yet handled."
-            )
-        } else if index <= num_rows {
+        if index < num_rows {
             let bytes_per_row = self.table_sizes.bytes_per_row[kind];
             let bytes = self
                 .bytes
-                .subrange((index - 1) * bytes_per_row..index * bytes_per_row);
+                .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
             let next_row_bytes = (index + 1 < num_rows).then(|| {
                 self.bytes.subrange(
-                    index * bytes_per_row..(index + 1) * bytes_per_row,
+                    (index + 1) * bytes_per_row..(index + 2) * bytes_per_row,
                 )
             });
             Ok(MetadataRowUnpacker {
