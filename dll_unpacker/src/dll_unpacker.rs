@@ -4548,11 +4548,10 @@ impl<'a> MetadataRowUnpacker<'a, Property> {
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("Flags");
 
-        let name = self.name()?.value;
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(name);
+            .append_value(self.name()?.value);
 
         annotator.value(self.signature_index()?).name("Signature");
         annotator
@@ -4685,14 +4684,10 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRef> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(self.name()?.value);
 
         Ok(())
     }
@@ -4836,13 +4831,10 @@ impl<'a> MetadataRowUnpacker<'a, Assembly> {
         annotator.value(self.flags()?).name("Flags");
 
         let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(name);
 
         annotator.value(self.public_key_index()?).name("Public key");
         annotator
@@ -4910,22 +4902,15 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
         annotator.value(self.flags()?).name("Flags");
 
         let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(name);
 
-        let culture = self.culture()?.value;
-        {
-            let index = self.culture_index()?;
-            annotator
-                .range(index.loc())
-                .name("culture")
-                .value(format!("{}\n{}", index.value, culture));
-        }
+        annotator
+            .value(self.culture_index()?)
+            .name("culture")
+            .append_value(self.culture()?.value);
 
         annotator
             .value(self.public_key_or_token_index()?)
@@ -5009,14 +4994,10 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
         annotator.value(self.offset()?).name("Offset");
         annotator.value(self.flags()?).name("Flags");
 
-        let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(self.name()?.value);
 
         annotator
             .opt_value(self.implementation_index()?)
@@ -5117,14 +5098,10 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
             .name("Owner index")
             .append_value(self.owner()?.name()?.value);
 
-        let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(self.name()?.value);
 
         Ok(())
     }
