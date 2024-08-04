@@ -925,6 +925,21 @@ impl<'a> MetadataHasDeclSecurity<'a> {
     }
 }
 
+impl<'a> MetadataMemberRefParent<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataMemberRefParent::TypeDef(row) => row.name(),
+            MetadataMemberRefParent::TypeRef(row) => row.name(),
+            MetadataMemberRefParent::ModuleRef(row) => row.name(),
+            MetadataMemberRefParent::MethodDef(row) => row.name(),
+            MetadataMemberRefParent::TypeSpec(row) => Ok(UnpackedValue::new(
+                row.bytes.subrange(0..0).as_range(),
+                "TypeSpec (anon)",
+            )),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1388,7 +1403,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.decl_security_table()?.bytes.start)
+        Ok(metadata_tables.member_ref_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -3234,6 +3249,7 @@ impl MetadataTableKind {
     const HAS_DECL_SECURITY: [Self; 3] =
         [Self::TypeDef, Self::MethodDef, Self::Assembly];
 
+    #[allow(dead_code)]
     const MEMBER_REF_PARENT: [Self; 5] = [
         Self::TypeDef,
         Self::TypeRef,
@@ -4440,7 +4456,10 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.class_index()?).name("class_index");
+        annotator
+            .value(self.class_index()?)
+            .name("class_index")
+            .append_value(self.class()?.name()?.value);
 
         let name = self.name()?.value;
         annotator
@@ -4459,9 +4478,14 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
         Ok(())
     }
 
-    fn class_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(0)
-            .as_coded_index(MetadataTableKind::MEMBER_REF_PARENT)
+    fn class_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<MemberRefParent>>, Error> {
+        self.get_field_bytes(0).unpack()
+    }
+
+    fn class(&self) -> Result<MetadataMemberRefParent, Error> {
+        self.tables.get(self.class_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
