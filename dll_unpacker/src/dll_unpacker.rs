@@ -949,6 +949,15 @@ impl<'a> MetadataHasSemantics<'a> {
     }
 }
 
+impl<'a> MetadataMethodDefOrRef<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataMethodDefOrRef::MethodDef(row) => row.name(),
+            MetadataMethodDefOrRef::MemberRef(row) => row.name(),
+        }
+    }
+}
+
 trait UnpackMetadataFromBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
@@ -1412,7 +1421,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.method_semantics_table()?.bytes.start)
+        Ok(metadata_tables.method_spec_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4988,10 +4997,12 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
             .append_value(self.class()?.name()?.value);
         annotator
             .value(self.method_body_index()?)
-            .name("Method body");
+            .name("Method body")
+            .append_value(self.method_body()?.name()?.value);
         annotator
             .value(self.method_declaration_index()?)
-            .name("Method declaration");
+            .name("Method declaration")
+            .append_value(self.method_declaration()?.name()?.value);
 
         Ok(())
     }
@@ -5006,16 +5017,24 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
         self.tables.get(self.class_index()?)
     }
 
-    fn method_body_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(1)
-            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    fn method_body_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
+        self.get_field_bytes(1).unpack()
+    }
+
+    fn method_body(&self) -> Result<MetadataMethodDefOrRef, Error> {
+        self.tables.get(self.method_body_index()?)
     }
 
     fn method_declaration_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(2)
-            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
+        self.get_field_bytes(2).unpack()
+    }
+
+    fn method_declaration(&self) -> Result<MetadataMethodDefOrRef, Error> {
+        self.tables.get(self.method_declaration_index()?)
     }
 }
 
@@ -5479,7 +5498,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.method_index()?).name("Method");
+        annotator
+            .value(self.method_index()?)
+            .name("Method")
+            .append_value(self.method()?.name()?.value);
 
         annotator
             .value(self.instantiation_index()?)
@@ -5491,9 +5513,14 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
         Ok(())
     }
 
-    fn method_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(0)
-            .as_coded_index(MetadataTableKind::METHOD_DEF_OR_REF)
+    fn method_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
+        self.get_field_bytes(0).unpack()
+    }
+
+    fn method(&self) -> Result<MetadataMethodDefOrRef, Error> {
+        self.tables.get(self.method_index()?)
     }
 
     fn instantiation_index(
