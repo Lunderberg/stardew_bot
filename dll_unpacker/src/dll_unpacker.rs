@@ -784,6 +784,17 @@ macro_rules! decl_coded_index_type {
                 })
             }
         }
+
+        impl TypedMetadataIndex for Option<MetadataCodedIndex<$tag>> {
+            type Output<'a:'b, 'b> = Option<$row_unpacker<'b>>;
+
+            fn access<'a: 'b, 'b>(
+                self,
+                tables: &'b MetadataTables<'a>,
+            ) -> Result<Self::Output<'a, 'b>, Error> {
+                self.map(|index| tables.get(index)).transpose()
+            }
+        }
     };
 }
 
@@ -879,7 +890,7 @@ impl<'a> MetadataTypeDefOrRef<'a> {
             MetadataTypeDefOrRef::TypeRef(row) => row.name(),
             MetadataTypeDefOrRef::TypeSpec(row) => Ok(UnpackedValue::new(
                 row.bytes.subrange(0..0).as_range(),
-                "(TypeSpec)",
+                "TypeSpec (anon)",
             )),
         }
     }
@@ -1348,7 +1359,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.type_def_table()?.bytes.end())
+        Ok(metadata_tables.method_spec_table()?.bytes.end())
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -4142,10 +4153,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     }
 
     fn extends(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
-        self.extends_index()?
-            .value
-            .map(|index| self.tables.get(index))
-            .transpose()
+        self.tables.get(self.extends_index()?)
     }
 
     fn field_indices(
@@ -4364,7 +4372,10 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
             .value(self.class_index()?)
             .name("Class")
             .append_value(self.class()?.name()?.value);
-        annotator.value(self.interface()?).name("Interface");
+        annotator
+            .value(self.interface_index()?)
+            .name("Interface")
+            .append_value(self.interface()?.name()?.value);
 
         Ok(())
     }
@@ -4379,9 +4390,14 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
         self.tables.get(self.class_index()?)
     }
 
-    fn interface(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(1)
-            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
+    fn interface_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+        self.get_field_bytes(1).unpack()
+    }
+
+    fn interface(&self) -> Result<MetadataTypeDefOrRef, Error> {
+        self.tables.get(self.interface_index()?)
     }
 }
 
@@ -4698,16 +4714,19 @@ impl<'a> MetadataRowUnpacker<'a, Event> {
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("Flags");
 
-        let name = self.name()?.value;
-        {
-            let index = self.name_index()?;
-            annotator
-                .range(index.loc())
-                .name("name")
-                .value(format!("{}\n{}", index.value, name));
-        }
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(self.name()?.value);
 
-        annotator.value(self.event_type()?).name("Event type");
+        annotator
+            .opt_value(self.event_type_index()?)
+            .name("Event type")
+            .append_value(if let Some(event) = self.event_type()? {
+                event.name()?.value
+            } else {
+                "(none)"
+            });
 
         Ok(())
     }
@@ -4724,9 +4743,15 @@ impl<'a> MetadataRowUnpacker<'a, Event> {
         self.tables.get(self.name_index()?)
     }
 
-    fn event_type(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(2)
-            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
+    fn event_type_index(
+        &self,
+    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<TypeDefOrRef>>>, Error>
+    {
+        self.get_field_bytes(2).unpack()
+    }
+
+    fn event_type(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
+        self.tables.get(self.event_type_index()?)
     }
 }
 
@@ -5386,7 +5411,10 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
             .value(self.generic_param_index()?)
             .name("Generic param")
             .append_value(self.generic_param()?.name()?.value);
-        annotator.value(self.constraint_index()?).name("Constraint");
+        annotator
+            .value(self.constraint_index()?)
+            .name("Constraint")
+            .append_value(self.constraint()?.name()?.value);
 
         Ok(())
     }
@@ -5403,8 +5431,13 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
         self.tables.get(self.generic_param_index()?)
     }
 
-    fn constraint_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(1)
-            .as_coded_index(MetadataTableKind::TYPE_DEF_OR_REF)
+    fn constraint_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+        self.get_field_bytes(1).unpack()
+    }
+
+    fn constraint(&self) -> Result<MetadataTypeDefOrRef, Error> {
+        self.tables.get(self.constraint_index()?)
     }
 }
