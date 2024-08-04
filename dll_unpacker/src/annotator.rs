@@ -2,7 +2,7 @@ use std::{fmt::Display, ops::Range};
 
 use memory_reader::Pointer;
 
-use crate::dll_unpacker::UnpackedValue;
+use crate::UnpackedValue;
 
 pub trait Annotator {
     fn range(&mut self, range: Range<Pointer>) -> &mut impl Annotation;
