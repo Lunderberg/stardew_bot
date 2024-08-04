@@ -875,7 +875,7 @@ decl_coded_index_type! {
 }
 decl_coded_index_type! {
     TypeOrMethodDef, MetadataTypeOrMethodDef,
-    [Module, ModuleRef, AssemblyRef, TypeRef],
+    [TypeDef, MethodDef],
 }
 
 // The CustomAttributeType implements the `CustomAttributeType`
@@ -898,17 +898,6 @@ impl CodedIndex for CustomAttributeType {
 impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}[{}]", self.kind, self.index)
-    }
-}
-
-impl<'a> MetadataResolutionScope<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        match self {
-            MetadataResolutionScope::Module(row) => row.name(),
-            MetadataResolutionScope::ModuleRef(row) => row.name(),
-            MetadataResolutionScope::AssemblyRef(row) => row.name(),
-            MetadataResolutionScope::TypeRef(row) => row.name(),
-        }
     }
 }
 
@@ -1001,6 +990,26 @@ impl<'a> MetadataCustomAttributeType<'a> {
         match self {
             MetadataCustomAttributeType::MethodDef(row) => row.name(),
             MetadataCustomAttributeType::MemberRef(row) => row.name(),
+        }
+    }
+}
+
+impl<'a> MetadataResolutionScope<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataResolutionScope::Module(row) => row.name(),
+            MetadataResolutionScope::ModuleRef(row) => row.name(),
+            MetadataResolutionScope::AssemblyRef(row) => row.name(),
+            MetadataResolutionScope::TypeRef(row) => row.name(),
+        }
+    }
+}
+
+impl<'a> MetadataTypeOrMethodDef<'a> {
+    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+        match self {
+            MetadataTypeOrMethodDef::TypeDef(row) => row.name(),
+            MetadataTypeOrMethodDef::MethodDef(row) => row.name(),
         }
     }
 }
@@ -1468,7 +1477,7 @@ impl<'a> Unpacker<'a> {
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.physical_metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.custom_attribute_table()?.bytes.start)
+        Ok(metadata_tables.generic_param_table()?.bytes.start)
     }
 
     pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
@@ -5527,7 +5536,10 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
     ) -> Result<(), Error> {
         annotator.value(self.number()?).name("Param number");
         annotator.value(self.flags()?).name("Flags");
-        annotator.value(self.owner_index()?).name("Owner index");
+        annotator
+            .value(self.owner_index()?)
+            .name("Owner index")
+            .append_value(self.owner()?.name()?.value);
 
         let name = self.name()?.value;
         {
@@ -5549,9 +5561,14 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn owner_index(&self) -> Result<UnpackedValue<MetadataIndex>, Error> {
-        self.get_field_bytes(2)
-            .as_coded_index(MetadataTableKind::TYPE_OR_METHOD_DEF)
+    fn owner_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeOrMethodDef>>, Error> {
+        self.get_field_bytes(2).unpack()
+    }
+
+    fn owner(&self) -> Result<MetadataTypeOrMethodDef, Error> {
+        self.tables.get(self.owner_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
