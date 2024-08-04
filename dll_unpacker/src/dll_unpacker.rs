@@ -868,7 +868,7 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
 }
 
 impl<'a> MetadataTypeDefOrRef<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataTypeDefOrRef::TypeDef(row) => row.name(),
             MetadataTypeDefOrRef::TypeRef(row) => row.name(),
@@ -881,7 +881,7 @@ impl<'a> MetadataTypeDefOrRef<'a> {
 }
 
 impl<'a> MetadataHasConstant<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataHasConstant::Field(row) => row.name(),
             MetadataHasConstant::Param(row) => row.name(),
@@ -891,7 +891,7 @@ impl<'a> MetadataHasConstant<'a> {
 }
 
 impl<'a> MetadataHasFieldMarshal<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataHasFieldMarshal::Field(row) => row.name(),
             MetadataHasFieldMarshal::Param(row) => row.name(),
@@ -900,7 +900,7 @@ impl<'a> MetadataHasFieldMarshal<'a> {
 }
 
 impl<'a> MetadataHasDeclSecurity<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataHasDeclSecurity::TypeDef(row) => row.name(),
             MetadataHasDeclSecurity::MethodDef(row) => row.name(),
@@ -910,7 +910,7 @@ impl<'a> MetadataHasDeclSecurity<'a> {
 }
 
 impl<'a> MetadataMemberRefParent<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataMemberRefParent::TypeDef(row) => row.name(),
             MetadataMemberRefParent::TypeRef(row) => row.name(),
@@ -925,7 +925,7 @@ impl<'a> MetadataMemberRefParent<'a> {
 }
 
 impl<'a> MetadataHasSemantics<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataHasSemantics::Event(row) => row.name(),
             MetadataHasSemantics::Property(row) => row.name(),
@@ -934,7 +934,7 @@ impl<'a> MetadataHasSemantics<'a> {
 }
 
 impl<'a> MetadataMethodDefOrRef<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataMethodDefOrRef::MethodDef(row) => row.name(),
             MetadataMethodDefOrRef::MemberRef(row) => row.name(),
@@ -943,7 +943,7 @@ impl<'a> MetadataMethodDefOrRef<'a> {
 }
 
 impl<'a> MetadataMemberForwarded<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataMemberForwarded::Field(row) => row.name(),
             MetadataMemberForwarded::MethodDef(row) => row.name(),
@@ -952,7 +952,7 @@ impl<'a> MetadataMemberForwarded<'a> {
 }
 
 impl<'a> MetadataCustomAttributeType<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataCustomAttributeType::MethodDef(row) => row.name(),
             MetadataCustomAttributeType::MemberRef(row) => row.name(),
@@ -961,7 +961,7 @@ impl<'a> MetadataCustomAttributeType<'a> {
 }
 
 impl<'a> MetadataResolutionScope<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataResolutionScope::Module(row) => row.name(),
             MetadataResolutionScope::ModuleRef(row) => row.name(),
@@ -972,7 +972,7 @@ impl<'a> MetadataResolutionScope<'a> {
 }
 
 impl<'a> MetadataTypeOrMethodDef<'a> {
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
             MetadataTypeOrMethodDef::TypeDef(row) => row.name(),
             MetadataTypeOrMethodDef::MethodDef(row) => row.name(),
@@ -3675,7 +3675,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRef> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -3783,7 +3783,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -3867,7 +3867,7 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -3951,7 +3951,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         self.get_field_bytes(3).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -4010,7 +4010,7 @@ impl<'a> MetadataRowUnpacker<'a, Param> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 }
@@ -4094,7 +4094,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -4436,7 +4436,7 @@ impl<'a> MetadataRowUnpacker<'a, Event> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -4518,7 +4518,7 @@ impl<'a> MetadataRowUnpacker<'a, Property> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -4645,7 +4645,7 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRef> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 }
@@ -4831,7 +4831,7 @@ impl<'a> MetadataRowUnpacker<'a, Assembly> {
         self.get_field_bytes(7).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 }
@@ -4910,7 +4910,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
         self.get_field_bytes(6).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -4967,7 +4967,7 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 
@@ -5077,7 +5077,7 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
         self.get_field_bytes(3).unpack()
     }
 
-    fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         self.tables.get(self.name_index()?)
     }
 }
