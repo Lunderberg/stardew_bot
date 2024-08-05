@@ -10,6 +10,8 @@ pub use unpacked_value::UnpackedValue;
 
 pub(crate) mod relative_virtual_address;
 
+pub(crate) mod enum_map;
+
 mod dll_unpacker;
 pub use dll_unpacker::Unpacker;
 

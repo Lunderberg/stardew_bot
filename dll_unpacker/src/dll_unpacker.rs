@@ -3,6 +3,7 @@ use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 use memory_reader::{MemoryRegion, Pointer};
 
 use crate::dos_header::DosHeaderUnpacker;
+use crate::enum_map::{EnumKey, EnumMap};
 use crate::portable_executable::{
     DataDirectoryKind, OptionalHeaderUnpacker, PEHeaderUnpacker,
     SectionHeaderUnpacker,
@@ -42,14 +43,6 @@ pub struct StreamHeader<'a> {
     pub bytes: ByteRange<'a>,
 }
 
-pub trait EnumKey: Sized {
-    const N: usize;
-
-    fn as_index(self) -> usize;
-
-    fn iter_keys() -> impl Iterator<Item = Self>;
-}
-
 pub struct MetadataTablesHeaderUnpacker<'a> {
     /// The entire contents of the #~ stream of the metadata.  While
     /// most of the unpacker types only have access to bytes that they
@@ -62,7 +55,7 @@ pub struct MetadataTables<'a> {
     bytes: ByteRange<'a>,
     dll_unpacker: Unpacker<'a>,
     table_sizes: MetadataTableSizes,
-    heaps: MetadataMap<MetadataHeapKind, ByteRange<'a>>,
+    heaps: EnumMap<MetadataHeapKind, ByteRange<'a>>,
 }
 
 #[derive(Clone, Copy)]
@@ -439,20 +432,11 @@ macro_rules! fields{
     };
 }
 
-#[derive(Clone)]
-pub struct MetadataMap<Key, Value> {
-    // Once `generic_const_exprs` is available, the size can be
-    // determined from `<Key as EnumKey>::N` For now, setting it to
-    // the size required for `MetadataIndexKind`..
-    values: [Value; 3 + 38 + 13],
-    _phantom: PhantomData<Key>,
-}
-
 pub struct MetadataTableSizes {
-    num_rows: MetadataMap<MetadataTableKind, usize>,
-    index_size: MetadataMap<MetadataIndexKind, usize>,
-    bytes_per_row: MetadataMap<MetadataTableKind, usize>,
-    table_offsets: MetadataMap<MetadataTableKind, usize>,
+    num_rows: EnumMap<MetadataTableKind, usize>,
+    index_size: EnumMap<MetadataIndexKind, usize>,
+    bytes_per_row: EnumMap<MetadataTableKind, usize>,
+    table_offsets: EnumMap<MetadataTableKind, usize>,
 }
 
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
@@ -1054,24 +1038,6 @@ where
     }
 }
 
-impl<Key, Value> MetadataMap<Key, Value> {
-    fn init(func: impl Fn() -> Value) -> Self {
-        Self {
-            values: std::array::from_fn(|_| func()),
-            _phantom: PhantomData,
-        }
-    }
-}
-
-impl<Key, Value: Default> Default for MetadataMap<Key, Value> {
-    fn default() -> Self {
-        Self {
-            values: std::array::from_fn(|_| Default::default()),
-            _phantom: PhantomData,
-        }
-    }
-}
-
 impl<'a> Unpacker<'a> {
     pub fn new(region: &'a MemoryRegion) -> Unpacker {
         Self {
@@ -1557,7 +1523,7 @@ impl<'a> MetadataUnpacker<'a> {
 
     pub fn metadata_heaps(
         &self,
-    ) -> Result<MetadataMap<MetadataHeapKind, ByteRange<'a>>, Error> {
+    ) -> Result<EnumMap<MetadataHeapKind, ByteRange<'a>>, Error> {
         let mut string_stream = None;
         let mut blob_stream = None;
         let mut guid_stream = None;
@@ -1577,7 +1543,7 @@ impl<'a> MetadataUnpacker<'a> {
             }
         }
 
-        let mut heaps = MetadataMap::init(|| ByteRange {
+        let mut heaps = EnumMap::init(|| ByteRange {
             start: Pointer::null(),
             bytes: &[],
         });
@@ -1724,8 +1690,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
 
     pub fn metadata_table_sizes(&self) -> Result<MetadataTableSizes, Error> {
         let heap_sizes = {
-            let mut heap_sizes =
-                MetadataMap::<MetadataHeapKind, bool>::default();
+            let mut heap_sizes = EnumMap::<MetadataHeapKind, bool>::default();
             let raw_heap_sizes = self.heap_sizes()?.value;
             heap_sizes[MetadataHeapKind::String] =
                 raw_heap_sizes.string_stream_uses_u32_addr;
@@ -1737,8 +1702,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
         };
 
         let num_rows = {
-            let mut num_rows =
-                MetadataMap::<MetadataTableKind, usize>::default();
+            let mut num_rows = EnumMap::<MetadataTableKind, usize>::default();
             for res in self.iter_num_rows()? {
                 let (num_table_rows, kind) = res?;
                 num_rows[kind] = num_table_rows.value as usize;
@@ -1747,8 +1711,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
         };
 
         let index_size = {
-            let mut index_size =
-                MetadataMap::<MetadataIndexKind, usize>::default();
+            let mut index_size = EnumMap::<MetadataIndexKind, usize>::default();
             for heap_kind in MetadataHeapKind::iter_keys() {
                 index_size[heap_kind] =
                     if heap_sizes[heap_kind] { 4 } else { 2 };
@@ -1780,8 +1743,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
         };
 
         let row_size = {
-            let mut row_size =
-                MetadataMap::<MetadataTableKind, usize>::default();
+            let mut row_size = EnumMap::<MetadataTableKind, usize>::default();
             for table_kind in MetadataTableKind::iter_keys() {
                 row_size[table_kind] = table_kind
                     .column_types()
@@ -1799,7 +1761,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
 
         let table_offsets = {
             let mut table_offsets =
-                MetadataMap::<MetadataTableKind, usize>::default();
+                EnumMap::<MetadataTableKind, usize>::default();
 
             let mut curr_offset = 0;
             for res in self.iter_num_rows()? {
@@ -2491,80 +2453,21 @@ impl EnumKey for MetadataIndexKind {
     }
 }
 
-impl<Key, Value> std::ops::Index<Key> for MetadataMap<Key, Value>
-where
-    Key: EnumKey,
-{
-    type Output = Value;
-
-    fn index(&self, key: Key) -> &Self::Output {
-        &self.values[key.as_index()]
+impl From<MetadataHeapKind> for MetadataIndexKind {
+    fn from(value: MetadataHeapKind) -> Self {
+        Self::Heap(value)
     }
 }
 
-impl<Key, Value> std::ops::IndexMut<Key> for MetadataMap<Key, Value>
-where
-    Key: EnumKey,
-{
-    fn index_mut(&mut self, key: Key) -> &mut Self::Output {
-        &mut self.values[key.as_index()]
+impl From<MetadataTableKind> for MetadataIndexKind {
+    fn from(value: MetadataTableKind) -> Self {
+        Self::Table(value)
     }
 }
 
-impl<Value> std::ops::Index<MetadataHeapKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    type Output = Value;
-
-    fn index(&self, index: MetadataHeapKind) -> &Self::Output {
-        &self[MetadataIndexKind::Heap(index)]
-    }
-}
-
-impl<Value> std::ops::IndexMut<MetadataHeapKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    fn index_mut(&mut self, index: MetadataHeapKind) -> &mut Self::Output {
-        &mut self[MetadataIndexKind::Heap(index)]
-    }
-}
-
-impl<Value> std::ops::Index<MetadataTableKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    type Output = Value;
-
-    fn index(&self, index: MetadataTableKind) -> &Self::Output {
-        &self[MetadataIndexKind::Table(index)]
-    }
-}
-
-impl<Value> std::ops::IndexMut<MetadataTableKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    fn index_mut(&mut self, index: MetadataTableKind) -> &mut Self::Output {
-        &mut self[MetadataIndexKind::Table(index)]
-    }
-}
-
-impl<Value> std::ops::Index<MetadataCodedIndexKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    type Output = Value;
-
-    fn index(&self, index: MetadataCodedIndexKind) -> &Self::Output {
-        &self[MetadataIndexKind::CodedIndex(index)]
-    }
-}
-
-impl<Value> std::ops::IndexMut<MetadataCodedIndexKind>
-    for MetadataMap<MetadataIndexKind, Value>
-{
-    fn index_mut(
-        &mut self,
-        index: MetadataCodedIndexKind,
-    ) -> &mut Self::Output {
-        &mut self[MetadataIndexKind::CodedIndex(index)]
+impl From<MetadataCodedIndexKind> for MetadataIndexKind {
+    fn from(value: MetadataCodedIndexKind) -> Self {
+        Self::CodedIndex(value)
     }
 }
 
