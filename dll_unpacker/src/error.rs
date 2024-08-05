@@ -2,7 +2,8 @@ use std::ops::Range;
 
 use thiserror::Error;
 
-use crate::dll_unpacker::{MetadataTableKind, RelativeVirtualAddress};
+use crate::dll_unpacker::MetadataTableKind;
+use crate::relative_virtual_address::RelativeVirtualAddress;
 
 #[derive(Error)]
 pub enum Error {

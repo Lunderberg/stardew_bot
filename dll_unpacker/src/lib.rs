@@ -8,6 +8,8 @@ pub(crate) use byte_range::UnpackBytes;
 mod unpacked_value;
 pub use unpacked_value::UnpackedValue;
 
+pub(crate) mod relative_virtual_address;
+
 mod dll_unpacker;
 pub use dll_unpacker::Unpacker;
 

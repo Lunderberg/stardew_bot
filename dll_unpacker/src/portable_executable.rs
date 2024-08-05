@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use memory_reader::Pointer;
 
-use crate::dll_unpacker::{RelativeVirtualAddress, VirtualRange};
+use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
 use crate::Annotation as _;
 use crate::{Annotator, ByteRange, Error, UnpackedValue};
 
