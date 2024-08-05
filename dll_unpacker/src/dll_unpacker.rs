@@ -31,7 +31,7 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
-pub struct PhysicalMetadataUnpacker<'a> {
+pub struct MetadataUnpacker<'a> {
     bytes: ByteRange<'a>,
     dll_unpacker: &'a Unpacker<'a>,
 }
@@ -1145,7 +1145,7 @@ impl<'a> Unpacker<'a> {
     }
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
-        let metadata = self.physical_metadata()?;
+        let metadata = self.metadata()?;
         let metadata_tables = metadata.metadata_tables()?;
         Ok(metadata_tables.method_def_table()?.bytes.start)
     }
@@ -1166,7 +1166,7 @@ impl<'a> Unpacker<'a> {
             section.collect_annotations(annotator)?;
         }
 
-        self.physical_metadata()?.collect_annotations(annotator)?;
+        self.metadata()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -1269,15 +1269,13 @@ impl<'a> Unpacker<'a> {
         Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 
-    pub fn physical_metadata<'b>(
-        &'b self,
-    ) -> Result<PhysicalMetadataUnpacker<'b>, Error> {
+    pub fn metadata<'b>(&'b self) -> Result<MetadataUnpacker<'b>, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value;
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
-        Ok(PhysicalMetadataUnpacker {
+        Ok(MetadataUnpacker {
             bytes,
             dll_unpacker: &self,
         })
@@ -1483,7 +1481,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     }
 }
 
-impl<'a> PhysicalMetadataUnpacker<'a> {
+impl<'a> MetadataUnpacker<'a> {
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.bytes.into()
     }

@@ -296,7 +296,7 @@ impl TuiExplorer {
             // metadata tables.
             let dll_info = dll_unpacker::Unpacker::new(&region);
 
-            let physical_metadata = dll_info.physical_metadata()?;
+            let physical_metadata = dll_info.metadata()?;
             let metadata_tables = physical_metadata.metadata_tables()?;
 
             let pe_sections = dll_info.iter_section_header()?.map(
