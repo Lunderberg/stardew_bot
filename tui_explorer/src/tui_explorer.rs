@@ -292,12 +292,9 @@ impl TuiExplorer {
         let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
             let region = stardew_valley_dll(&self.reader)?.read()?;
 
-            // TODO: Make a single-step way to unpack down to the
-            // metadata tables.
             let dll_info = dll_unpacker::Unpacker::new(&region);
-
-            let physical_metadata = dll_info.metadata()?;
-            let metadata_tables = physical_metadata.metadata_tables()?;
+            let metadata = dll_info.metadata()?;
+            let metadata_tables = dll_info.metadata_tables()?;
 
             let pe_sections = dll_info.iter_section_header()?.map(
                 |section| -> (String, Range<Pointer>) {
@@ -313,17 +310,20 @@ impl TuiExplorer {
                 },
             );
 
-            let metadata = [
-                ("Metadata tables".to_string(), metadata_tables.ptr_range()),
-                (
-                    "Physical metadata".to_string(),
-                    physical_metadata.ptr_range(),
-                ),
-            ];
+            let streams = metadata.iter_stream_header()?.filter_map(
+                |stream| -> Option<(String, Range<Pointer>)> {
+                    let stream = stream.ok()?;
+                    Some((stream.name.value().into(), stream.bytes.into()))
+                },
+            );
+
+            let metadata =
+                [("Metadata tables".to_string(), metadata_tables.ptr_range())];
 
             std::iter::empty()
                 .chain(pe_sections)
                 .chain(data_dirs)
+                .chain(streams)
                 .chain(metadata)
                 // .inspect(|(name, range)| {
                 //         self.running_log.add_log(format!(

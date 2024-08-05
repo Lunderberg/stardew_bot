@@ -11,6 +11,7 @@ use crate::UnpackedValue;
 use crate::{Annotation as _, Annotator, Error};
 use crate::{ByteRange, UnpackBytes};
 
+#[derive(Copy, Clone)]
 pub struct Unpacker<'a> {
     bytes: ByteRange<'a>,
 }
@@ -31,21 +32,25 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
+#[derive(Copy, Clone)]
 pub struct MetadataUnpacker<'a> {
     bytes: ByteRange<'a>,
-    dll_unpacker: &'a Unpacker<'a>,
+    dll_unpacker: Unpacker<'a>,
 }
 
 pub struct StreamHeader<'a> {
     /// The offset of the stream, in bytes, relative to the start of
     /// the metadata.
-    offset: UnpackedValue<u32>,
+    pub offset: UnpackedValue<u32>,
 
     /// The size of the stream, in bytes.
-    size: UnpackedValue<u32>,
+    pub size: UnpackedValue<u32>,
 
     /// The name of the metadata section.  Max of 32 ASCII characters.
-    name: UnpackedValue<&'a str>,
+    pub name: UnpackedValue<&'a str>,
+
+    /// The contents of the stream
+    pub bytes: ByteRange<'a>,
 }
 
 pub trait EnumKey: Sized {
@@ -66,7 +71,7 @@ pub struct MetadataTablesHeaderUnpacker<'a> {
 
 pub struct MetadataTables<'a> {
     bytes: ByteRange<'a>,
-    dll_unpacker: &'a Unpacker<'a>,
+    dll_unpacker: Unpacker<'a>,
     table_sizes: MetadataTableSizes,
     heaps: MetadataMap<MetadataHeapKind, ByteRange<'a>>,
 }
@@ -464,9 +469,7 @@ pub struct MetadataTableSizes {
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     /// The bytes that represent this table
     bytes: ByteRange<'a>,
-    dll_unpacker: &'a Unpacker<'a>,
     tables: &'a MetadataTables<'a>,
-    table_sizes: &'a MetadataTableSizes,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -516,11 +519,7 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// table).
     next_row_bytes: Option<ByteRange<'a>>,
 
-    dll_unpacker: &'a Unpacker<'a>,
-
     tables: &'a MetadataTables<'a>,
-
-    table_sizes: &'a MetadataTableSizes,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -1269,7 +1268,7 @@ impl<'a> Unpacker<'a> {
         Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 
-    pub fn metadata<'b>(&'b self) -> Result<MetadataUnpacker<'b>, Error> {
+    pub fn metadata(self) -> Result<MetadataUnpacker<'a>, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value;
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
@@ -1277,8 +1276,12 @@ impl<'a> Unpacker<'a> {
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
         Ok(MetadataUnpacker {
             bytes,
-            dll_unpacker: &self,
+            dll_unpacker: self,
         })
+    }
+
+    pub fn metadata_tables(self) -> Result<MetadataTables<'a>, Error> {
+        self.metadata()?.metadata_tables()
     }
 }
 
@@ -1505,19 +1508,9 @@ impl<'a> MetadataUnpacker<'a> {
         annotator.value(self.flags()?).name("flags");
         annotator.value(self.num_streams()?).name("num_streams");
 
-        self.iter_stream_header()?.try_for_each(
-            |stream_header| -> Result<_, Error> {
-                let header = stream_header?;
-                header.collect_annotations(annotator)?;
-                let start = self.bytes.start + (header.offset.value as usize);
-                let size = header.size.value as usize;
-                annotator
-                    .group(start..start + size)
-                    .name(format!("{} Stream", header.name.value));
-
-                Ok(())
-            },
-        )?;
+        self.iter_stream_header()?.try_for_each(|stream_header| {
+            stream_header?.collect_annotations(annotator)
+        })?;
 
         self.metadata_tables_header()?
             .collect_annotations(annotator)?;
@@ -1614,12 +1607,19 @@ impl<'a> MetadataUnpacker<'a> {
                 UnpackedValue::new(loc, value)
             };
 
+            let stream = {
+                let start = stream_offset.value as usize;
+                let size = stream_size.value as usize;
+                self.bytes.subrange(start..start + size)
+            };
+
             curr_offset += 8 + padded_name_len;
 
             Ok(StreamHeader {
                 offset: stream_offset,
                 size: stream_size,
                 name: stream_name,
+                bytes: stream,
             })
         });
 
@@ -1628,7 +1628,7 @@ impl<'a> MetadataUnpacker<'a> {
 
     pub fn metadata_tables_header(
         &self,
-    ) -> Result<MetadataTablesHeaderUnpacker, Error> {
+    ) -> Result<MetadataTablesHeaderUnpacker<'a>, Error> {
         let header = self
             .iter_stream_header()?
             .filter_map(|res_header| res_header.ok())
@@ -1680,7 +1680,7 @@ impl<'a> MetadataUnpacker<'a> {
         Ok(heaps)
     }
 
-    pub fn metadata_tables(&self) -> Result<MetadataTables, Error> {
+    pub fn metadata_tables(self) -> Result<MetadataTables<'a>, Error> {
         let heaps = self.metadata_heaps()?;
         let header = self.metadata_tables_header()?;
 
@@ -1708,6 +1708,10 @@ impl<'a> StreamHeader<'a> {
         annotator.range(self.offset.loc()).name("Stream Offset");
         annotator.range(self.size.loc()).name("Stream Size");
         annotator.range(self.name.loc()).name("Stream Name");
+
+        annotator
+            .group(self.bytes)
+            .name(format!("{} Stream", self.name.value()));
 
         Ok(())
     }
@@ -2081,8 +2085,6 @@ impl<'a> MetadataTables<'a> {
         Ok(MetadataTableUnpacker {
             bytes,
             tables: &self,
-            dll_unpacker: self.dll_unpacker,
-            table_sizes: &self.table_sizes,
             row_unpacker: PhantomData,
         })
     }
@@ -2753,7 +2755,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     where
         Unpacker: MetadataTableTag,
     {
-        let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
+        let num_rows = self.tables.table_sizes.num_rows[Unpacker::KIND];
         let MetadataTableIndexRange { start, end, .. } = indices;
 
         if end <= num_rows {
@@ -2774,11 +2776,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         'a: 'b,
         Unpacker: MetadataTableTag,
     {
-        let num_rows = self.table_sizes.num_rows[Unpacker::KIND];
-        let bytes_per_row = self.table_sizes.bytes_per_row[Unpacker::KIND];
-        let dll_unpacker = self.dll_unpacker;
+        let num_rows = self.tables.table_sizes.num_rows[Unpacker::KIND];
+        let bytes_per_row =
+            self.tables.table_sizes.bytes_per_row[Unpacker::KIND];
         let tables = self.tables;
-        let table_sizes = self.table_sizes;
         let table_bytes = self.bytes;
         (0..num_rows).map(move |i_row| {
             let bytes = table_bytes
@@ -2791,9 +2792,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
-                dll_unpacker,
                 tables,
-                table_sizes,
                 row_unpacker: PhantomData,
             }
         })
@@ -2818,8 +2817,8 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: MetadataTableTag,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.table_sizes.num_rows[kind];
-        let bytes_per_row = self.table_sizes.bytes_per_row[kind];
+        let num_rows = self.tables.table_sizes.num_rows[kind];
+        let bytes_per_row = self.tables.table_sizes.bytes_per_row[kind];
 
         if indices.end <= num_rows {
             Ok(self.bytes.address_range(
@@ -2852,7 +2851,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         Unpacker: MetadataTableTag,
     {
         let kind = Unpacker::KIND;
-        let num_rows = self.table_sizes.num_rows[kind];
+        let num_rows = self.tables.table_sizes.num_rows[kind];
 
         // There's an offset between the one-indexed CLI indices
         // (where zero represents a null value) and the usual
@@ -2863,7 +2862,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         // the unpacking of CLI indices.
 
         if index < num_rows {
-            let bytes_per_row = self.table_sizes.bytes_per_row[kind];
+            let bytes_per_row = self.tables.table_sizes.bytes_per_row[kind];
             let bytes = self
                 .bytes
                 .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
@@ -2875,9 +2874,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             Ok(MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
-                dll_unpacker: self.dll_unpacker,
                 tables: self.tables,
-                table_sizes: self.table_sizes,
                 row_unpacker: self.row_unpacker,
             })
         } else {
@@ -2905,10 +2902,10 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
             .iter()
             .take(column)
             .cloned()
-            .map(|field| self.table_sizes.column_size(field))
+            .map(|field| self.tables.table_sizes.column_size(field))
             .sum();
 
-        let size = self.table_sizes.column_size(fields[column]);
+        let size = self.tables.table_sizes.column_size(fields[column]);
 
         self.bytes.subrange(offset..offset + size)
     }
@@ -2937,7 +2934,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
                 else {
                     panic!("Only simple indices are used as ranges")
                 };
-                self.table_sizes.num_rows[table_kind]
+                self.tables.table_sizes.num_rows[table_kind]
             });
 
         let (loc, begin_index) =
@@ -3137,9 +3134,10 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
                 .value
                 .start;
             let param_end = if method_range.end
-                == self.table_sizes.num_rows[MetadataTableKind::MethodDef]
+                == self.tables.table_sizes.num_rows
+                    [MetadataTableKind::MethodDef]
             {
-                self.table_sizes.num_rows[MetadataTableKind::Param]
+                self.tables.table_sizes.num_rows[MetadataTableKind::Param]
             } else {
                 method_def_table
                     .get_row(method_range.end)?
@@ -3336,7 +3334,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
     fn address(&self) -> Result<Option<Pointer>, Error> {
         self.rva()?
             .value()
-            .map(|rva| self.dll_unpacker.virtual_address_to_raw(rva))
+            .map(|rva| self.tables.dll_unpacker.virtual_address_to_raw(rva))
             .transpose()
     }
 
@@ -4164,7 +4162,8 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
     }
 
     fn address(&self) -> Result<Pointer, Error> {
-        self.dll_unpacker
+        self.tables
+            .dll_unpacker
             .virtual_address_to_raw(self.rva()?.value())
     }
 
