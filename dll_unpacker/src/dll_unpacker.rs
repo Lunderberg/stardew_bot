@@ -24,7 +24,14 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
 
 #[derive(Copy, Clone)]
 pub struct MetadataUnpacker<'a> {
+    /// The bytes owned by the Metadata stream, as determined from the
+    /// CLR runtime header.
     bytes: ByteRange<'a>,
+
+    /// The DLL that contains the metadata stream.  Used to decode
+    /// Relative Virtual Address (RVA) fields into actual pointers
+    /// within the DLL, and to unpack metadata fields with RVAs that
+    /// point outside the metadata table.
     dll_unpacker: Unpacker<'a>,
 }
 
@@ -1362,10 +1369,6 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
 }
 
 impl<'a> MetadataUnpacker<'a> {
-    pub fn ptr_range(&self) -> Range<Pointer> {
-        self.bytes.into()
-    }
-
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -1455,7 +1458,7 @@ impl<'a> MetadataUnpacker<'a> {
 
     pub fn iter_stream_header(
         &self,
-    ) -> Result<impl Iterator<Item = Result<StreamHeader, Error>> + '_, Error>
+    ) -> Result<impl Iterator<Item = Result<StreamHeader<'a>, Error>> + '_, Error>
     {
         let num_streams = self.num_streams()?.value;
 
@@ -1479,7 +1482,9 @@ impl<'a> MetadataUnpacker<'a> {
                     .bytes
                     .address_range(name_start..name_start + padded_name_len);
                 let value = std::str::from_utf8(
-                    &self.bytes[name_start..name_start + name_len],
+                    self.bytes
+                        .subrange(name_start..name_start + name_len)
+                        .bytes,
                 )?;
                 UnpackedValue::new(loc, value)
             };
@@ -1503,56 +1508,33 @@ impl<'a> MetadataUnpacker<'a> {
         Ok(iter)
     }
 
+    fn find_stream(&self, name: &'static str) -> Result<ByteRange<'a>, Error> {
+        for res_header in self.iter_stream_header()? {
+            let stream = res_header?;
+            if stream.name.value() == name {
+                return Ok(stream.bytes);
+            }
+        }
+        Err(Error::MissingStream(name))
+    }
+
     pub fn metadata_tables_header(
         &self,
     ) -> Result<MetadataTablesHeaderUnpacker<'a>, Error> {
-        let header = self
-            .iter_stream_header()?
-            .filter_map(|res_header| res_header.ok())
-            .find(|header| header.name.value == "#~")
-            .ok_or(Error::MissingStream("#~"))?;
-
-        let bytes = {
-            let offset = header.offset.value as usize;
-            let size = header.size.value as usize;
-            self.bytes.subrange(offset..offset + size)
-        };
-
+        let bytes = self.find_stream("#~")?;
         Ok(MetadataTablesHeaderUnpacker { bytes })
     }
 
     pub fn metadata_heaps(
         &self,
     ) -> Result<EnumMap<MetadataHeapKind, ByteRange<'a>>, Error> {
-        let mut string_stream = None;
-        let mut blob_stream = None;
-        let mut guid_stream = None;
-
-        for res in self.iter_stream_header()? {
-            let header = res?;
-            let offset = header.offset.value as usize;
-            let size = header.size.value as usize;
-            let bytes = self.bytes.subrange(offset..offset + size);
-
-            if header.name.value == "#Strings" {
-                string_stream = Some(bytes);
-            } else if header.name.value == "#Blob" {
-                blob_stream = Some(bytes);
-            } else if header.name.value == "#GUID" {
-                guid_stream = Some(bytes);
-            }
-        }
-
         let mut heaps = EnumMap::init(|| ByteRange {
             start: Pointer::null(),
             bytes: &[],
         });
-        heaps[MetadataHeapKind::String] =
-            string_stream.ok_or(Error::MissingStream("#Strings"))?;
-        heaps[MetadataHeapKind::Blob] =
-            blob_stream.ok_or(Error::MissingStream("#Blob"))?;
-        heaps[MetadataHeapKind::GUID] =
-            guid_stream.ok_or(Error::MissingStream("#GUID"))?;
+        heaps[MetadataHeapKind::String] = self.find_stream("#Strings")?;
+        heaps[MetadataHeapKind::Blob] = self.find_stream("#Blob")?;
+        heaps[MetadataHeapKind::GUID] = self.find_stream("#GUID")?;
 
         Ok(heaps)
     }
