@@ -59,6 +59,10 @@ impl InfoFormatter for FormatStringPointerWithLength {
         let len =
             usize::from_ne_bytes(region.bytes_at_pointer(len_location)?.value);
 
+        if len > 1024 * 1024 {
+            return None;
+        }
+
         let last_char = pointer + len - 1;
         if !region.contains(last_char) {
             return None;
