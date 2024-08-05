@@ -106,11 +106,7 @@ pub enum DataDirectoryKind {
 
 pub struct SectionHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
-}
-
-pub struct Section<'a> {
-    pub header: SectionHeaderUnpacker<'a>,
-    pub bytes: ByteRange<'a>,
+    file_start: Pointer,
 }
 
 impl<'a> PEHeaderUnpacker<'a> {
@@ -182,18 +178,33 @@ impl<'a> PEHeaderUnpacker<'a> {
         self.bytes.get_u16(20)
     }
 
-    pub fn optional_header_range(&self) -> Result<Range<Pointer>, Error> {
-        let optional_header_size = self.optional_header_size()?.value as usize;
-        let start = self.bytes.end();
-        Ok(start..start + optional_header_size)
-    }
-
     pub fn characteristics(
         &self,
     ) -> Result<UnpackedValue<PEHeaderCharacteristics>, Error> {
         self.bytes
             .get_u16(22)
             .map(|unpacked| unpacked.map(PEHeaderCharacteristics::new))
+    }
+
+    pub fn optional_header_range(&self) -> Result<Range<Pointer>, Error> {
+        let optional_header_size = self.optional_header_size()?.value as usize;
+        let start = self.bytes.end();
+        Ok(start..start + optional_header_size)
+    }
+
+    pub fn iter_section_headers(
+        &self,
+    ) -> Result<impl Iterator<Item = Range<Pointer>>, Error> {
+        let num_sections = self.num_sections()?.value() as usize;
+        let section_header_base = self.optional_header_range()?.end;
+
+        let iter = (0..num_sections)
+            .map(move |i_section| {
+                section_header_base + i_section * SectionHeaderUnpacker::SIZE
+            })
+            .map(|start| start..start + SectionHeaderUnpacker::SIZE);
+
+        Ok(iter)
     }
 }
 
@@ -579,18 +590,52 @@ impl std::fmt::Display for MagicValue {
 }
 
 impl<'a> SectionHeaderUnpacker<'a> {
-    pub(crate) fn new(bytes: ByteRange<'a>) -> Self {
-        Self { bytes }
+    const SIZE: usize = 40;
+
+    pub(crate) fn new(bytes: ByteRange<'a>, file_start: Pointer) -> Self {
+        Self { bytes, file_start }
     }
 
-    pub fn ptr_range(&self) -> Range<Pointer> {
+    pub fn header_range(&self) -> Range<Pointer> {
         self.bytes.into()
+    }
+
+    pub fn section_range(&self) -> Result<Range<Pointer>, Error> {
+        let file_offset = self.raw_address()?.value as usize;
+        let size = self.raw_size()?.value as usize;
+
+        let start = self.file_start + file_offset;
+        Ok(start..start + size)
+    }
+
+    pub fn map_address(
+        &self,
+        rva: RelativeVirtualAddress,
+    ) -> Result<Option<Pointer>, Error> {
+        let virtual_start = self.virtual_address()?.value;
+        let virtual_size = self.virtual_size()?.value;
+        let virtual_end = virtual_start + virtual_size;
+
+        if virtual_start <= rva && rva < virtual_end {
+            let section_offset = rva - virtual_start;
+            let section_start = self.raw_address()?.value as usize;
+
+            Ok(Some(self.file_start + section_start + section_offset))
+        } else {
+            Ok(None)
+        }
     }
 
     pub(crate) fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
+        let name = self.name()?.value;
+
+        annotator
+            .group(self.bytes)
+            .name(format!("{name} PE section header"));
+
         annotator.value(self.name()?).name("name");
         annotator.value(self.virtual_size()?).name("virtual_size");
         annotator

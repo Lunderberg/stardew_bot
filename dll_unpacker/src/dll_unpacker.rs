@@ -2,13 +2,14 @@ use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
 
+use crate::dos_header::DosHeaderUnpacker;
 use crate::portable_executable::{
     DataDirectoryKind, OptionalHeaderUnpacker, PEHeaderUnpacker,
     SectionHeaderUnpacker,
 };
+use crate::UnpackedValue;
 use crate::{Annotation as _, Annotator, Error};
 use crate::{ByteRange, UnpackBytes};
-use crate::{Section, UnpackedValue};
 
 pub struct Unpacker<'a> {
     bytes: ByteRange<'a>,
@@ -1149,39 +1150,20 @@ impl<'a> Unpacker<'a> {
         Ok(metadata_tables.method_def_table()?.bytes.start)
     }
 
-    pub fn address_range(&self, byte_range: Range<usize>) -> Range<Pointer> {
-        let start = self.bytes.start;
-        start + byte_range.start..start + byte_range.end
-    }
-
     pub fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.range(self.dos_header()?.loc()).name("DOS header");
-        annotator.value(self.lfanew()?).name("lfanew");
-        annotator.range(self.dos_stub()?.loc()).name("DOS stub");
-
-        let pe_header = self.pe_header()?;
-        pe_header.collect_annotations(annotator)?;
-
+        self.dos_header()?.collect_annotations(annotator)?;
+        self.pe_header()?.collect_annotations(annotator)?;
         self.optional_header()?.collect_annotations(annotator)?;
-
         self.clr_runtime_header()?.collect_annotations(annotator)?;
 
-        annotator
-            .group(self.section_header_bytes()?)
-            .name("Section headers");
-
-        for section in self.iter_sections()? {
-            annotator.group(section.header.ptr_range()).name(format!(
-                "{} PE section header",
-                section.header.name()?.value
-            ));
+        for section in self.iter_section_header()? {
             annotator
-                .group(section.bytes)
-                .name(format!("{} PE section", section.header.name()?.value));
-            section.header.collect_annotations(annotator)?;
+                .group(section.section_range()?)
+                .name(format!("{} PE section", section.name()?.value));
+            section.collect_annotations(annotator)?;
         }
 
         self.physical_metadata()?.collect_annotations(annotator)?;
@@ -1189,53 +1171,14 @@ impl<'a> Unpacker<'a> {
         Ok(())
     }
 
-    pub fn dos_header(&self) -> Result<UnpackedValue<()>, Error> {
-        let dos_header = [
-            /*  0-8  */ 0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00,
-            /*  8-16 */ 0x04, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0x00, 0x00,
-            /* 16-24 */ 0xB8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            /* 24-32 */ 0x40, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            /* 32-40 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            /* 40-48 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            /* 48-56 */ 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-            /* 56-60 */ 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        let byte_range = 0..60;
-        if dos_header == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
-        } else {
-            Err(Error::IncorrectDOSHeader)
-        }
-    }
-
-    pub fn dos_stub(&self) -> Result<UnpackedValue<()>, Error> {
-        let dos_stub = [
-            /* 64- 72 */ 0x0E, 0x1F, 0xBA, 0x0E, 0x00, 0xB4, 0x09, 0xCD,
-            /* 72- 80 */ 0x21, 0xB8, 0x01, 0x4C, 0xCD, 0x21, 0x54, 0x68,
-            /* 80- 88 */ 0x69, 0x73, 0x20, 0x70, 0x72, 0x6F, 0x67, 0x72,
-            /* 88- 96 */ 0x61, 0x6D, 0x20, 0x63, 0x61, 0x6E, 0x6E, 0x6F,
-            /* 96-102 */ 0x74, 0x20, 0x62, 0x65, 0x20, 0x72, 0x75, 0x6E,
-            /*102-110 */ 0x20, 0x69, 0x6E, 0x20, 0x44, 0x4F, 0x53, 0x20,
-            /*110-118 */ 0x6D, 0x6F, 0x64, 0x65, 0x2E, 0x0D, 0x0D, 0x0A,
-            /*118-128 */ 0x24, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        ];
-
-        let byte_range = 64..128;
-        if dos_stub == self.bytes[byte_range.clone()] {
-            Ok(UnpackedValue::new(self.bytes.address_range(byte_range), ()))
-        } else {
-            Err(Error::IncorrectDOSHeader)
-        }
-    }
-
-    pub fn lfanew(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(60)
+    pub fn dos_header(&self) -> Result<DosHeaderUnpacker, Error> {
+        let bytes = self.bytes.subrange(0..DosHeaderUnpacker::SIZE);
+        Ok(DosHeaderUnpacker::new(bytes))
     }
 
     pub fn pe_header(&self) -> Result<PEHeaderUnpacker, Error> {
-        let lfanew = self.lfanew()?.value as usize;
-        let bytes = self.bytes.subrange(lfanew..lfanew + 24);
+        let dos_header = self.dos_header()?;
+        let bytes = self.bytes.subrange(dos_header.pe_header_range()?);
         Ok(PEHeaderUnpacker::new(bytes))
     }
 
@@ -1243,39 +1186,6 @@ impl<'a> Unpacker<'a> {
         let pe_header = self.pe_header()?;
         let bytes = self.bytes.subrange(pe_header.optional_header_range()?);
         OptionalHeaderUnpacker::new(bytes)
-    }
-
-    pub fn section_header_bytes(&self) -> Result<ByteRange, Error> {
-        let pe_header = self.pe_header()?;
-        let num_sections = pe_header.num_sections()?.value as usize;
-
-        let section_header_size = 40;
-
-        let start = pe_header.optional_header_range()?.end;
-        let size = num_sections * section_header_size;
-        let bytes = self.bytes.subrange(start..start + size);
-        Ok(bytes)
-    }
-
-    pub fn section_header(
-        &self,
-        i_section: usize,
-    ) -> Result<SectionHeaderUnpacker, Error> {
-        let section_header_size = 40;
-        let section_headers = self.section_header_bytes()?;
-        let num_sections = section_headers.len() / section_header_size;
-
-        if i_section >= num_sections {
-            return Err(Error::InvalidSectionNumber {
-                num_sections,
-                i_section,
-            });
-        }
-
-        let start = i_section * section_header_size;
-        let end = (i_section + 1) * section_header_size;
-        let bytes = section_headers.subrange(start..end);
-        Ok(SectionHeaderUnpacker::new(bytes))
     }
 
     pub fn iter_section_header(
@@ -1288,6 +1198,8 @@ impl<'a> Unpacker<'a> {
 
         let section_header_size = 40;
 
+        let file_start = self.bytes.start;
+
         let iter = (0..num_sections)
             .map(move |i_section| {
                 section_header_base + i_section * section_header_size
@@ -1295,26 +1207,8 @@ impl<'a> Unpacker<'a> {
             .map(move |start| {
                 let bytes =
                     self.bytes.subrange(start..start + section_header_size);
-                SectionHeaderUnpacker::new(bytes)
+                SectionHeaderUnpacker::new(bytes, file_start)
             });
-
-        Ok(iter)
-    }
-
-    pub fn iter_sections(
-        &self,
-    ) -> Result<impl Iterator<Item = Section>, Error> {
-        let file_bytes = self.bytes;
-
-        let iter = self.iter_section_header()?.map(move |header| {
-            let offset_range = header.raw_range().unwrap();
-            let start = offset_range.start as usize;
-            let end = offset_range.end as usize;
-
-            let bytes = file_bytes.subrange(start..end);
-
-            Section { header, bytes }
-        });
 
         Ok(iter)
     }
@@ -1324,22 +1218,7 @@ impl<'a> Unpacker<'a> {
         addr: RelativeVirtualAddress,
     ) -> Result<Pointer, Error> {
         self.iter_section_header()?
-            .find_map(|section| {
-                let virtual_range = section.virtual_range().ok()?;
-                if virtual_range.contains(&addr) {
-                    let addr_within_section = addr - virtual_range.start;
-                    let raw_section_addr =
-                        section.raw_address().ok()?.value as usize;
-
-                    Some(
-                        self.bytes.start
-                            + raw_section_addr
-                            + addr_within_section,
-                    )
-                } else {
-                    None
-                }
-            })
+            .find_map(|section| section.map_address(addr).ok()?)
             .ok_or(Error::InvalidVirtualAddress(addr))
     }
 
@@ -1363,13 +1242,11 @@ impl<'a> Unpacker<'a> {
                     .data_directory(data_dir_kind)
                     .unwrap()
                     .value()?;
-                if virtual_range.size > 0 {
-                    let raw_range =
-                        self.virtual_range_to_raw(virtual_range).unwrap();
-                    Some((data_dir_kind, self.bytes.subrange(raw_range)))
-                } else {
-                    None
-                }
+
+                let raw_range =
+                    self.virtual_range_to_raw(virtual_range).unwrap();
+
+                Some((data_dir_kind, self.bytes.subrange(raw_range)))
             })
             .filter(|(_, bytes)| bytes.len() > 0);
 

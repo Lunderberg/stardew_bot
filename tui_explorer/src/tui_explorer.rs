@@ -299,10 +299,11 @@ impl TuiExplorer {
             let physical_metadata = dll_info.physical_metadata()?;
             let metadata_tables = physical_metadata.metadata_tables()?;
 
-            let pe_sections = dll_info.iter_sections()?.map(
+            let pe_sections = dll_info.iter_section_header()?.map(
                 |section| -> (String, Range<Pointer>) {
-                    let name = section.header.name().unwrap().value();
-                    (name.into(), section.bytes.into())
+                    let name = section.name().unwrap().value();
+                    let range = section.section_range().unwrap();
+                    (name.into(), range)
                 },
             );
 
