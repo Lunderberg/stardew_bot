@@ -12,6 +12,8 @@ pub(crate) mod relative_virtual_address;
 
 pub(crate) mod enum_map;
 
+pub(crate) mod intermediate_language;
+
 mod dll_unpacker;
 pub use dll_unpacker::Unpacker;
 

@@ -125,6 +125,13 @@ pub enum Error {
          requires a valid table index."
     )]
     InvalidMetadataTableIndexZero { kind: MetadataTableKind },
+
+    #[error(
+        "First two bits of CIL Method header must be 0x2 or 0x3, \
+         indicating a tiny header or fat header, respectively.  \
+         However, instead found 0x{0:x}."
+    )]
+    InvalidCILMethodHeader(u8),
 }
 
 impl std::fmt::Debug for Error {

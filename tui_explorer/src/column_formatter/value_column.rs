@@ -60,9 +60,9 @@ fn formatted_cell<Column: ByteFormatter>(
                 .find(|(_, ann)| ann.range.contains(&byte_loc))
                 .map(|(i_ann, _)| {
                     if (i_ann + annotation_slice_start) % 2 == 0 {
-                        Color::Indexed(235)
+                        Color::Rgb(150, 50, 30)
                     } else {
-                        Color::Indexed(240)
+                        Color::Rgb(20, 20, 70)
                     }
                 });
 

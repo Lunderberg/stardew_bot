@@ -4,6 +4,7 @@ use memory_reader::{MemoryRegion, Pointer};
 
 use crate::dos_header::DosHeaderUnpacker;
 use crate::enum_map::{EnumKey, EnumMap};
+use crate::intermediate_language::CILMethod;
 use crate::portable_executable::{
     DataDirectoryKind, OptionalHeaderUnpacker, PEHeaderUnpacker,
     SectionHeaderUnpacker,
@@ -1057,8 +1058,15 @@ impl<'a> Unpacker<'a> {
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
         let metadata = self.metadata()?;
+        // Ok(metadata.bytes.start)
+
+        // let metadata_tables = metadata.metadata_tables()?;
+        //Ok(metadata_tables.method_def_table()?.bytes.start)
+
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.method_def_table()?.bytes.start)
+        let table = metadata_tables.method_def_table()?;
+        let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
+        Ok(start_at)
     }
 
     pub fn collect_annotations(
@@ -1564,9 +1572,9 @@ impl<'a> StreamHeader<'a> {
             .group(self.offset.loc().start..self.name.loc().end)
             .name("CLR Stream Header");
 
-        annotator.range(self.offset.loc()).name("Stream Offset");
-        annotator.range(self.size.loc()).name("Stream Size");
-        annotator.range(self.name.loc()).name("Stream Name");
+        annotator.value(self.offset).name("Stream Offset");
+        annotator.value(self.size).name("Stream Size");
+        annotator.value(self.name).name("Stream Name");
 
         annotator
             .group(self.bytes)
@@ -2565,11 +2573,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         }
     }
 
-    pub fn iter_rows<'b>(
-        &'b self,
-    ) -> impl Iterator<Item = MetadataRowUnpacker<'a, Unpacker>> + 'a
+    pub fn iter_rows(
+        self,
+    ) -> impl Iterator<Item = MetadataRowUnpacker<'a, Unpacker>>
     where
-        'a: 'b,
         Unpacker: MetadataTableTag,
     {
         let num_rows = self.tables.table_sizes.num_rows[Unpacker::KIND];
@@ -3003,9 +3010,9 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         Ok(self.get_index_range(5))
     }
 
-    fn iter_methods(
+    pub fn iter_methods(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<MethodDef>>, Error>
+    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<'a, MethodDef>>, Error>
     {
         self.tables.iter_range(self.method_indices()?)
     }
@@ -3071,11 +3078,13 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
 
         let rva_ann = annotator.opt_value(self.rva()?).name("rva");
 
-        if let Some(address) = self.address()? {
-            rva_ann.append_value(address);
+        if let Some(cil_method) = self.cil_method()? {
+            let method_range = cil_method.method_range()?;
+            rva_ann.append_value(method_range.start);
             annotator
-                .range(address..address + 1)
+                .range(method_range)
                 .name(format!("Method '{name}' Def"));
+            cil_method.collect_annotations(annotator)?;
         }
 
         annotator.value(self.impl_flags()?).name("impl_flags");
@@ -3132,6 +3141,12 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
             .value()
             .map(|rva| self.tables.dll_unpacker.virtual_address_to_raw(rva))
             .transpose()
+    }
+
+    pub fn cil_method(&self) -> Result<Option<CILMethod<'a>>, Error> {
+        Ok(self.address()?.map(|addr| {
+            CILMethod::new(self.tables.dll_unpacker.bytes.subrange(addr..))
+        }))
     }
 
     fn impl_flags(&self) -> Result<UnpackedValue<u16>, Error> {

@@ -51,6 +51,10 @@ impl Pointer {
         self.is_aligned(alignment).then_some(self)
     }
 
+    pub fn next_multiple_of(self, alignment: usize) -> Self {
+        self.address.next_multiple_of(alignment).into()
+    }
+
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
         let mut process_io =
             unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }?;

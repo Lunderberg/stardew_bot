@@ -1,5 +1,5 @@
 use memory_reader::Pointer;
-use std::ops::Range;
+use std::ops::{Range, RangeFrom, RangeTo};
 
 use crate::{Error, UnpackedValue};
 
@@ -33,6 +33,58 @@ impl NormalizeOffset for Pointer {
 
     fn as_ptr(self, _start: Pointer) -> Pointer {
         self
+    }
+}
+
+pub(crate) trait NormalizeRange {
+    fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize>;
+    fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer>;
+}
+impl<T> NormalizeRange for Range<T>
+where
+    T: NormalizeOffset,
+{
+    fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize> {
+        let start = self.start.as_offset(buf_range.start);
+        let end = self.end.as_offset(buf_range.start);
+        start..end
+    }
+
+    fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer> {
+        let start = self.start.as_ptr(buf_range.start);
+        let end = self.end.as_ptr(buf_range.start);
+        start..end
+    }
+}
+
+impl<T> NormalizeRange for RangeFrom<T>
+where
+    T: NormalizeOffset,
+{
+    fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize> {
+        let start = self.start.as_offset(buf_range.start);
+        let end = buf_range.end - buf_range.start;
+        start..end
+    }
+
+    fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer> {
+        let start = self.start.as_ptr(buf_range.start);
+        start..buf_range.end
+    }
+}
+
+impl<T> NormalizeRange for RangeTo<T>
+where
+    T: NormalizeOffset,
+{
+    fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize> {
+        let end = self.end.as_offset(buf_range.start);
+        0..end
+    }
+
+    fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer> {
+        let end = self.end.as_ptr(buf_range.start);
+        buf_range.start..end
     }
 }
 
@@ -105,12 +157,11 @@ impl<'a> ByteRange<'a> {
         Ok(UnpackedValue::new(loc, value))
     }
 
-    pub(crate) fn subrange(&self, range: Range<impl NormalizeOffset>) -> Self {
-        let start = range.start.as_offset(self.start);
-        let end = range.end.as_offset(self.start);
+    pub(crate) fn subrange(&self, range: impl NormalizeRange) -> Self {
+        let range = range.as_offset(self.start..self.end());
         Self {
-            start: self.start + start,
-            bytes: &self.bytes[start..end],
+            start: self.start + range.start,
+            bytes: &self.bytes[range],
         }
     }
 
@@ -120,11 +171,9 @@ impl<'a> ByteRange<'a> {
 
     pub(crate) fn address_range(
         &self,
-        range: Range<impl NormalizeOffset>,
+        range: impl NormalizeRange,
     ) -> Range<Pointer> {
-        let start = range.start.as_ptr(self.start);
-        let end = range.end.as_ptr(self.start);
-        start..end
+        range.as_ptr(self.start..self.end())
     }
 }
 

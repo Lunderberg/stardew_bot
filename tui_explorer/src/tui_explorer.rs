@@ -179,7 +179,9 @@ impl TuiExplorerBuilder {
 
         let mut annotations = annotator.annotations;
 
-        annotations.sort_by_key(|ann| (ann.highlight_range, ann.range.start));
+        annotations.sort_by_key(|ann| {
+            (ann.highlight_range, ann.range.end, ann.range.start)
+        });
 
         return Ok(Self {
             annotations,
@@ -320,37 +322,71 @@ impl TuiExplorer {
             let metadata =
                 [("Metadata tables".to_string(), metadata_tables.ptr_range())];
 
+            let method_defs = metadata_tables
+                .method_def_table()?
+                .iter_rows()
+                .filter_map(|method_def| method_def.cil_method().ok().flatten())
+                .filter_map(|cil_method| cil_method.method_range().ok())
+                .peekable()
+                .batching(|iter| {
+                    let mut range = iter.next()?;
+                    while let Some(next) =
+                        iter.next_if(|peek| peek.start - range.end < 4)
+                    {
+                        range = range.start..next.end;
+                    }
+                    Some(range)
+                })
+                .map(|range| ("CIL method".to_string(), range));
+
+            let game_obj_methods = metadata_tables
+                .type_def_table()?
+                .iter_rows()
+                .find(|type_def| {
+                    type_def
+                        .name()
+                        .map(|name| name.value() == "Game1")
+                        .unwrap_or(false)
+                })
+                .expect("Could not find 'Game1' class (top-level Stardew info)")
+                .iter_methods()?
+                // .enumerate()
+                // .inspect(|(i, method_def)| {
+                //     if *i < 5 {
+                //         self.running_log.add_log(format!(
+                //             "Game1.{}",
+                //             method_def.name().unwrap().value()
+                //         ));
+                //     }
+                // })
+                // .map(|(_, method_def)| method_def)
+                // .collect::<Vec<_>>()
+                // .into_iter()
+                .filter_map(|method_def| method_def.cil_method().ok().flatten())
+                .filter_map(|cil_method| cil_method.method_range().ok())
+                .peekable()
+                .batching(|iter| {
+                    let mut range = iter.next()?;
+                    while let Some(next) =
+                        iter.next_if(|peek| peek.start - range.end < 4)
+                    {
+                        range = range.start..next.end;
+                    }
+                    Some(range)
+                })
+                .map(|range| ("Game1 methods".to_string(), range));
+
             std::iter::empty()
                 .chain(pe_sections)
                 .chain(data_dirs)
                 .chain(streams)
                 .chain(metadata)
-                // .inspect(|(name, range)| {
-                //         self.running_log.add_log(format!(
-                //             "Section {name} is at {} + {}",
-                //             range.start,
-                //             range.end - range.start
-                //         ));
-                // })
+                .chain(method_defs)
+                .chain(game_obj_methods)
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()
                 .collect()
-
-            // let game_info_class = metadata_tables
-            //     .type_def_table()?
-            //     .iter_rows()
-            //     .find(|type_def| {
-            //         type_def
-            //             .name()
-            //             .map(|name| name.value() == "Game1")
-            //             .unwrap_or(false)
-            //     })
-            //     .expect(
-            //         "Could not find 'Game1' class (top-level Stardew info)",
-            //     );
-
-            // vec![game_info_class.ptr_range()]
         };
 
         self.reader
@@ -370,22 +406,29 @@ impl TuiExplorer {
                     .rev()
             })
             .filter_map(|mem_pointer| {
-                stardew_dll_regions.iter().find_map(move |(name, range)| {
-                    range.contains(&mem_pointer.value).then({
-                        let mem_pointer = mem_pointer.clone();
-                        move || (name, mem_pointer)
-                    })
-                })
+                stardew_dll_regions
+                    .iter()
+                    .find(|(_, range)| range.contains(&mem_pointer.value))
+                    .map(|(name, _)| (name, mem_pointer))
             })
-            .filter(|(name, _)| name.as_str() == ".text")
-            .map(|(_, mem_pointer)| mem_pointer.value)
-            .counts()
+            // .filter(|(name, _)| name.as_str() == ".text")
+            // .filter(|(name, _)| name.as_str() == "Metadata tables")
+            .filter(|(name, _)| name.as_str() == "Game1 methods")
+            .map(|(_, mem_pointer)| -> (Pointer, Pointer) {
+                (mem_pointer.value, mem_pointer.location)
+            })
+            .into_group_map()
             .into_iter()
-            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .sorted_by_key(|(_, sources)| std::cmp::Reverse(sources.len()))
             .take(100)
             .rev()
-            .for_each(|(addr, counts)| {
-                self.running_log.add_log(format!("Ptr to {addr}: {counts}"))
+            .for_each(|(addr, sources)| {
+                let num_sources = sources.len();
+                sources.iter().take(5).for_each(|source| {
+                    self.running_log.add_log(format!("Pointer from {source}"));
+                });
+                self.running_log
+                    .add_log(format!("Ptr to {addr}: {num_sources}"));
             });
 
         self.reader
