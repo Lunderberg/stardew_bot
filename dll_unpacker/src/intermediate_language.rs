@@ -57,6 +57,11 @@ impl<'a> CILMethod<'a> {
         Ok(UnpackedValue::new(bytes, header))
     }
 
+    /// The address range for the IL of method's definition.
+    pub fn body_range(&self) -> Result<Range<Pointer>, Error> {
+        Ok(self.header()?.value().body_range())
+    }
+
     fn iter_data_sections(
         &self,
     ) -> Result<impl Iterator<Item = ByteRange> + '_, Error> {

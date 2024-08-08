@@ -2,9 +2,28 @@ use memory_reader::{MemoryReader, MemoryRegion, Pointer, Symbol};
 
 use crate::InfoFormatter;
 
+pub struct FormatSymbolContainingCursor(pub Vec<Symbol>);
 pub struct FormatRegionPointedTo;
 pub struct FormatPointerOffset;
 pub struct FormatSymbolPointedTo(pub Vec<Symbol>);
+
+impl InfoFormatter for FormatSymbolContainingCursor {
+    fn name(&self) -> &'static str {
+        "Symbol"
+    }
+
+    fn format(
+        &self,
+        _reader: &MemoryReader,
+        _region: &MemoryRegion,
+        location: Pointer,
+    ) -> Option<String> {
+        self.0
+            .iter()
+            .find(|symbol| symbol.location.contains(&location))
+            .map(|symbol| symbol.name.clone())
+    }
+}
 
 impl InfoFormatter for FormatRegionPointedTo {
     fn name(&self) -> &'static str {

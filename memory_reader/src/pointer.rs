@@ -181,6 +181,15 @@ impl From<[u8; 8]> for Pointer {
     }
 }
 
+impl TryFrom<&[u8]> for Pointer {
+    type Error = std::array::TryFromSliceError;
+
+    fn try_from(bytes: &[u8]) -> std::result::Result<Self, Self::Error> {
+        let address = usize::from_ne_bytes(bytes.try_into()?);
+        Ok(Self { address })
+    }
+}
+
 impl IterConversion<usize> for Pointer {
     fn convert_next<Iter: Iterator<Item = usize>>(
         iter: &mut Iter,

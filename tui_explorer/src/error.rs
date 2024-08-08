@@ -32,6 +32,9 @@ pub enum Error {
 
     #[error("Could not find MemoryRegion containing pointer {0}")]
     PointerNotFound(Pointer),
+
+    #[error("Could not find pointer to .NET Module")]
+    ModulePointerNodeFound,
 }
 
 impl std::fmt::Debug for Error {

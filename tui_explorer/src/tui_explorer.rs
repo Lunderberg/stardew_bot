@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::ops::Range;
 
 use crate::{
@@ -109,6 +110,7 @@ impl TuiExplorerBuilder {
                 Box::new(FormatDecValue::<u64>::new()),
                 Box::new(FormatNullTerminatedString),
                 Box::new(FormatUTF16String),
+                Box::new(FormatSymbolContainingCursor(self.symbols.clone())),
                 Box::new(FormatSpacer),
                 Box::new(FormatRegionPointedTo),
                 Box::new(FormatSymbolPointedTo(self.symbols.clone())),
@@ -291,6 +293,86 @@ impl TuiExplorer {
         //     .map(|region| region.address_range())
         //     .collect();
 
+        // Pointers to IL method definitions in the loaded DLL.
+        let dll_method_def: HashSet<Pointer> = {
+            let dll_region = stardew_valley_dll(&self.reader)?.read()?;
+
+            let dll_info = dll_unpacker::Unpacker::new(&dll_region);
+            dll_info
+                .metadata_tables()?
+                .method_def_table()?
+                .iter_rows()
+                .filter_map(|method_def| method_def.cil_method().ok().flatten())
+                .filter_map(|cil_method| cil_method.body_range().ok())
+                .map(|method_body| method_body.start)
+                .collect()
+        };
+
+        self.running_log.add_log(format!(
+            "Found {} method definitions in Stardew Valley.dll",
+            dll_method_def.len()
+        ));
+
+        let potential_module_ptr = self
+            .reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.is_readable
+                    && region.is_writable
+                    && !region.is_shared_memory
+            })
+            .flat_map(|region| {
+                region
+                    .read()
+                    .unwrap()
+                    .into_iter_as_pointers()
+                    .map(|mem_value| mem_value.value)
+                    .tuple_windows()
+            })
+            .filter(|(_, il_ptr)| dll_method_def.contains(il_ptr))
+            .map(|(module_ptr, _)| module_ptr)
+            .filter(|module_ptr| {
+                self.reader
+                    .regions
+                    .iter()
+                    .map(|region| region.address_range())
+                    .any(|range| range.contains(module_ptr))
+            })
+            .counts();
+
+        self.running_log.add_log(format!(
+            "Found {} potential pointers to the Module",
+            potential_module_ptr.len()
+        ));
+
+        // The pattern-matching above is pretty reliable at finding
+        // the most common location.  With about 17k methods in
+        // StardewValley.dll, there were 243 unique pairs of
+        // `(pointer, pointer_to_module_def)`, one of which occurred
+        // over 500 times.  No other pair occurred more than 3 times.
+        //
+        // I suppose I could further filter the `module_ptr` by values
+        // that point to a pointer, which itself points to
+        // `libcoreclr.so`, but that doesn't seem necessary at the
+        // moment.
+        let module_ptr = potential_module_ptr
+            .iter()
+            .max_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .map(|(value, _)| value)
+            .ok_or(Error::ModulePointerNodeFound)?;
+
+        potential_module_ptr
+            .into_iter()
+            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .take(5)
+            .rev()
+            .for_each(|(addr, counts)| {
+                self.running_log.add_log(format!(
+                    "Found {counts} candidates pointing to {addr}"
+                ));
+            });
+
         let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
             let region = stardew_valley_dll(&self.reader)?.read()?;
 
@@ -377,12 +459,12 @@ impl TuiExplorer {
                 .map(|range| ("Game1 methods".to_string(), range));
 
             std::iter::empty()
-                .chain(pe_sections)
-                .chain(data_dirs)
-                .chain(streams)
-                .chain(metadata)
-                .chain(method_defs)
-                .chain(game_obj_methods)
+                // .chain(pe_sections)
+                // .chain(data_dirs)
+                // .chain(streams)
+                // .chain(metadata)
+                // .chain(method_defs)
+                // .chain(game_obj_methods)
                 .collect::<Vec<_>>()
                 .into_iter()
                 .rev()

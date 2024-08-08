@@ -23,22 +23,51 @@ impl Symbol {
     pub fn iter_symbols(
         region: &MemoryMapRegion,
     ) -> impl Iterator<Item = Symbol> {
-        let region_address = region.mmap_start_address();
+        let start_of_file = region.mmap_start_address();
         region
             .name
             .clone()
             .into_iter()
             .map(|path| -> PathBuf { path.into() })
-            .filter(|path| path.exists())
             .flat_map(|path| {
-                FileSymbol::collect_symbols(path.clone()).into_iter()
+                // Technically, I should be determining the path to
+                // the .dbg file based on the contents of the
+                // .gnu_debuglink section (from command line, `readelf
+                // --string-dump=.gnu_debuglink $FILENAME`).  But this
+                // is good enough for now.
+                let dbg_path = path.file_name().map(|file_name| {
+                    let mut file_name = file_name.to_owned();
+                    file_name.push(".dbg");
+                    path.with_file_name(file_name)
+                });
+                [Some(path), dbg_path]
             })
+            .flatten()
+            // Remove paths that don't exist.  Note: For
+            // `libcoreclr.so`, the official route debug symbols is
+            // really convoluted, and requires installing nuget, using
+            // to install `dotnet-symbol`, then using it to download
+            // the debug symbols.  Much easier is to just determine
+            // the URL in bash.
+            //
+            //     BUILD_ID=$(readelf --notes libcoreclr.so | grep Build | awk '{print $3;}')
+            //     URL=http://msdl.microsoft.com/download/symbols/_.debug/elf-buildid-sym-${BUILD_ID}/_.debug
+            //     wget $URL -O libcoreclr.so.dbg
+            .filter(|path| path.exists())
+            .flat_map(|path| FileSymbol::collect_symbols(path.clone()))
             .flatten()
             .map(move |file_symbol| {
                 let FileSymbol { name, location } = file_symbol;
-                let location = (region_address + location.start)
-                    ..(region_address + location.end);
+                let location = (start_of_file + location.start)
+                    ..(start_of_file + location.end);
                 Symbol { name, location }
+            })
+            .map(|symbol| {
+                let name = match cpp_demangle::Symbol::new(&symbol.name) {
+                    Ok(demangled) => format!("{demangled}"),
+                    Err(_) => symbol.name,
+                };
+                Symbol { name, ..symbol }
             })
     }
 }
