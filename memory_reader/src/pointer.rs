@@ -27,6 +27,8 @@ impl std::cmp::Ord for Pointer {
 }
 
 impl Pointer {
+    pub const SIZE: usize = std::mem::size_of::<Self>();
+
     pub fn new(address: impl Into<Self>) -> Self {
         address.into()
     }
@@ -55,13 +57,23 @@ impl Pointer {
         self.address.next_multiple_of(alignment).into()
     }
 
+    pub fn read_byte_array<const N: usize>(&self, pid: u32) -> Result<[u8; N]> {
+        let mut buffer = [0u8; N];
+        self.read_exact(pid, &mut buffer)?;
+        Ok(buffer)
+    }
+
     pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
+        let mut buffer = vec![0u8; num_bytes];
+        self.read_exact(pid, &mut buffer)?;
+        Ok(buffer)
+    }
+
+    fn read_exact(&self, pid: u32, buffer: &mut [u8]) -> Result<()> {
         let mut process_io =
             unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }?;
 
-        let mut buffer = vec![0u8; num_bytes];
-
-        process_io.read_exact(&mut buffer).map_err(|err| {
+        process_io.read_exact(buffer).map_err(|err| {
             let err_string = format!("{}", err);
             if err_string.contains("Operation not permitted") {
                 Error::MemoryReadInsufficientPermission
@@ -72,7 +84,7 @@ impl Pointer {
             }
         })?;
 
-        Ok(buffer)
+        Ok(())
     }
 
     #[inline]

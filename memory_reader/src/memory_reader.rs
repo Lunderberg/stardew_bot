@@ -39,6 +39,21 @@ impl MemoryReader {
         .collect()
     }
 
+    pub fn read_byte_array<const N: usize>(
+        &self,
+        pointer: Pointer,
+    ) -> Result<[u8; N]> {
+        pointer.read_byte_array(self.pid)
+    }
+
+    pub fn read_bytes(
+        &self,
+        pointer: Pointer,
+        num_bytes: usize,
+    ) -> Result<Vec<u8>> {
+        pointer.read_bytes(self.pid, num_bytes)
+    }
+
     pub fn find_region(
         &self,
         mut filter: impl FnMut(&MemoryMapRegion) -> bool,

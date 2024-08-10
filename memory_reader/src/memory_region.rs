@@ -136,16 +136,32 @@ impl MemoryRegion {
     pub fn into_iter_as_pointers(
         self,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> {
-        let num_ptr = self.bytes.len() / Self::POINTER_SIZE;
         let start = self.start;
+        self.into_iter_as_pointers_from(start)
+    }
+
+    pub fn into_iter_as_pointers_from(
+        self,
+        after_address: Pointer,
+    ) -> impl Iterator<Item = MemoryValue<Pointer>> {
+        let start = self.start;
+        let offset = after_address - start;
+
+        let num_ptr = (self.bytes.len() - offset) / Self::POINTER_SIZE;
+
+        // println!("Region start: {start}");
+        // println!("Iterate from: {after_address}");
+        // println!("Num ptr: {num_ptr}");
+
         let bytes = self.bytes;
         (0..num_ptr).map(move |i| {
-            let loc = start + i * Self::POINTER_SIZE;
+            let pointer_start = offset + i * Self::POINTER_SIZE;
+
             let value: Pointer = bytes
-                [i * Self::POINTER_SIZE..(i + 1) * Self::POINTER_SIZE]
+                [pointer_start..pointer_start + Self::POINTER_SIZE]
                 .try_into()
                 .unwrap();
-            MemoryValue::new(loc, value)
+            MemoryValue::new(start + pointer_start, value)
         })
     }
 
