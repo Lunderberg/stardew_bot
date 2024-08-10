@@ -82,6 +82,13 @@ impl MemoryTable {
             return;
         };
         let text = input_window.text();
+        let text = text.as_str();
+
+        let (opt_relative_dir, text) = match text.chars().next() {
+            Some('+') => (Some(true), &text[1..]),
+            Some('-') => (Some(false), &text[1..]),
+            _ => (None, text),
+        };
 
         let res_address = if text.starts_with("0x") {
             usize::from_str_radix(text.strip_prefix("0x").unwrap(), 16)
@@ -96,9 +103,16 @@ impl MemoryTable {
             }
         };
 
-        // Bit of a hack, should have distinct syntax for a location
-        // relative to the current MemoryRegion and a global address.
-        let address: Pointer = if address < 0x100000 {
+        let address: Pointer = if let Some(relative_dir) = opt_relative_dir {
+            let current_loc = self.selected_value().location;
+            if relative_dir {
+                current_loc + address
+            } else {
+                current_loc - address
+            }
+        } else if address < 0x100000 {
+            // Bit of a hack, should have distinct syntax for a location
+            // relative to the current MemoryRegion and a global address.
             current_region_start + address
         } else {
             address.into()
