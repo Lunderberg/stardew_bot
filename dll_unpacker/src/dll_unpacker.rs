@@ -500,6 +500,9 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// table).
     next_row_bytes: Option<ByteRange<'a>>,
 
+    /// The typed index that refers to this row.
+    index: MetadataTableIndex<RowUnpacker>,
+
     tables: &'a MetadataTables<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
@@ -648,6 +651,24 @@ macro_rules! decl_core_coded_index_type {
                 self.map(|index| tables.get(index)).transpose()
             }
         }
+
+        $(
+            impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
+                for MetadataCodedIndex<$tag> {
+                    fn eq(&self, other: &MetadataTableIndex<$table_type>) -> bool {
+                        self.kind == <$table_type as MetadataTableTag>::KIND
+                            && self.index == other.index
+                    }
+                }
+
+            impl std::cmp::PartialEq<MetadataCodedIndex<$tag>>
+                for MetadataTableIndex<$table_type> {
+                    fn eq(&self, other: &MetadataCodedIndex<$tag>) -> bool {
+                        other.kind == <$table_type as MetadataTableTag>::KIND
+                            && self.index == other.index
+                    }
+                }
+        )+
     };
 }
 
@@ -992,6 +1013,12 @@ impl<Unpacker> MetadataTableIndex<Unpacker> {
             index,
             _phantom: PhantomData,
         }
+    }
+}
+
+impl<Unpacker> Into<usize> for MetadataTableIndex<Unpacker> {
+    fn into(self) -> usize {
+        self.index
     }
 }
 
@@ -2596,9 +2623,17 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                 bytes,
                 next_row_bytes,
                 tables,
+                index: MetadataTableIndex::new(i_row),
                 row_unpacker: PhantomData,
             }
         })
+    }
+
+    pub fn num_rows(&self) -> usize
+    where
+        Unpacker: MetadataTableTag,
+    {
+        self.tables.table_sizes.num_rows[Unpacker::KIND]
     }
 
     pub fn address_range(
@@ -2677,6 +2712,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
             Ok(MetadataRowUnpacker {
                 bytes,
                 next_row_bytes,
+                index: MetadataTableIndex::new(index),
                 tables: self.tables,
                 row_unpacker: self.row_unpacker,
             })
@@ -2690,15 +2726,21 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     }
 }
 
-impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
+impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker>
+where
+    Unpacker: MetadataTableTag,
+{
+    #[inline]
+    pub fn index(&self) -> MetadataTableIndex<Unpacker> {
+        self.index
+    }
+
+    #[inline]
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.bytes.into()
     }
 
-    fn get_field_bytes(&self, column: usize) -> ByteRange<'a>
-    where
-        Unpacker: MetadataTableTag,
-    {
+    fn get_field_bytes(&self, column: usize) -> ByteRange<'a> {
         let fields = Unpacker::COLUMNS;
 
         let offset: usize = fields
@@ -2716,10 +2758,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
     fn get_untyped_index_range(
         &self,
         column: usize,
-    ) -> UnpackedValue<Range<usize>>
-    where
-        Unpacker: MetadataTableTag,
-    {
+    ) -> UnpackedValue<Range<usize>> {
         let begin_bytes = self.get_field_bytes(column);
         let end_index = self
             .next_row_bytes
@@ -2749,10 +2788,7 @@ impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker> {
     fn get_index_range<Column>(
         &self,
         column: usize,
-    ) -> UnpackedValue<MetadataTableIndexRange<Column>>
-    where
-        Unpacker: MetadataTableTag,
-    {
+    ) -> UnpackedValue<MetadataTableIndexRange<Column>> {
         self.get_untyped_index_range(column)
             .map(|Range { start, end }| MetadataTableIndexRange {
                 start,
