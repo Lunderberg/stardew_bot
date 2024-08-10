@@ -1073,6 +1073,18 @@ where
     }
 }
 
+impl<TableType> std::cmp::PartialEq for MetadataTableIndex<TableType> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index
+    }
+}
+impl<TableType> std::cmp::Eq for MetadataTableIndex<TableType> {}
+impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+    }
+}
+
 impl<'a> Unpacker<'a> {
     pub fn new(region: &'a MemoryRegion) -> Unpacker {
         Self {
