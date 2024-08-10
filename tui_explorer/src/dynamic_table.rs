@@ -213,10 +213,20 @@ where
         }
 
         if let Some(selected) = state.selected() {
-            *state.offset_mut() = state
-                .offset()
-                .min(selected)
-                .max((selected + 1).saturating_sub(rows_area.height as usize));
+            *state.offset_mut() = {
+                let padding = 2;
+                let height = rows_area.height as usize;
+
+                let offset = state.offset();
+
+                offset
+                    // Move the view window upward to contain selection
+                    .min(selected.saturating_sub(padding))
+                    // Move the view window downward to contain selection
+                    .max((selected + padding + 1).saturating_sub(height))
+                    // But not so far that it would show empty rows at the bottom
+                    .min(self.num_rows.saturating_sub(height))
+            };
 
             let row_area = Rect::new(
                 rows_area.x,
