@@ -777,6 +777,8 @@ impl CodedIndex for CustomAttributeType {
     ];
 }
 
+pub struct MethodDefFlags(u16);
+
 impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}[{}]", self.kind, self.index)
@@ -3201,7 +3203,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+    pub fn flags(&self) -> Result<UnpackedValue<MethodDefFlags>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3233,6 +3235,24 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         &self,
     ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Param>>, Error> {
         self.tables.iter_range(self.param_indices()?)
+    }
+}
+
+impl MethodDefFlags {
+    pub fn is_virtual(self) -> bool {
+        self.0 & 0x0040 > 0
+    }
+}
+
+impl<'a> UnpackBytes<'a> for MethodDefFlags {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        Ok(Self(bytes.unpack()?))
+    }
+}
+
+impl std::fmt::Display for MethodDefFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }
 
