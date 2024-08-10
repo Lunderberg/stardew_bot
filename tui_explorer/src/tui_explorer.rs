@@ -6,7 +6,7 @@ use crate::{
 };
 use crate::{Error, SigintHandler};
 use itertools::Itertools as _;
-use memory_reader::{extensions::*, MemoryValue};
+use memory_reader::extensions::*;
 use memory_reader::{MemoryMapRegion, Pointer};
 
 use memory_reader::{MemoryReader, Symbol};
@@ -405,19 +405,19 @@ impl TuiExplorer {
             .take(512)
             .tuple_windows()
             .map(|(a, b, c, d)| {
-                let pNext: Pointer = a.value;
-                let pTable: Pointer = b.value;
-                let dwCount = c.value.as_usize() & ((1 << 32) - 1);
-                let supportedFlags: usize = d.value.as_usize();
+                let p_next: Pointer = a.value;
+                let p_table: Pointer = b.value;
+                let dw_count = c.value.as_usize() & ((1 << 32) - 1);
+                let supported_flags: usize = d.value.as_usize();
 
-                (pNext, pTable, dwCount, supportedFlags)
+                (p_next, p_table, dw_count, supported_flags)
             })
-            .find(|(pNext, _, dwCount, supportedFlags)| {
-                *pNext == Pointer::null()
-                    && *dwCount == num_type_defs + 1
-                    && *supportedFlags < 8
+            .find(|(p_next, _, dw_count, supported_flags)| {
+                *p_next == Pointer::null()
+                    && *dw_count == num_type_defs + 1
+                    && *supported_flags < 8
             })
-            .map(|(_, pTable, _, supportedFlags)| (pTable, supportedFlags))
+            .map(|(_, p_table, _, supported_flags)| (p_table, supported_flags))
             .ok_or(Error::PointerToMethodTableTableNotFound)?;
 
         self.running_log
@@ -467,6 +467,9 @@ impl TuiExplorer {
                 let method_table = method_tables[untyped_index + 1];
                 (method_table, type_def)
             })
+            .filter(|(method_table, _)| {
+                self.reader.find_containing_region(*method_table).is_some()
+            })
             .collect();
 
         self.reader
@@ -479,264 +482,80 @@ impl TuiExplorer {
             })
             .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
             .filter_map(|mem_value| {
+                // The GC may use the low bits of the MethodTable*
+                // pointer to mark objects.  When finding objects that
+                // are point to the method table, these bits should be
+                // masked out.
+                let ptr_mask: usize = if Pointer::SIZE == 8 { !7 } else { !3 };
+                let ptr: Pointer =
+                    (mem_value.value.as_usize() & ptr_mask).into();
                 metadata_index_lookup
-                    .get(&mem_value.value)
+                    .get(&ptr)
                     .map(|type_def| (type_def, mem_value.location))
             })
-            .map(|(type_def, _ptr_location)| type_def.index())
-            .counts()
-            .into_iter()
-            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
-            .take(10)
-            .rev()
-            .for_each(|(index, counts)| {
-                self.running_log
-                    .add_log(format!("{index} has {counts} pointers to it"));
-            });
+            .map(|(type_def, ptr_location)| (type_def.index(), ptr_location))
+            .filter(|(_, ptr)| {
+                // Each .NET Object starts with a pointer to the
+                // MethodTable, but just looking for pointer-aligned
+                // memory with the correct value would also find
+                // anything else that holds a `MethodTable*`, or stack
+                // frames that accept a `MethodTable*` argument.
+                //
+                // Just before the `this` pointer of a .NET object is
+                // the `ObjHeader`.  This is 4 bytes of flags, with
+                // another 4 bytes of padding on 64-bit systems.  That
+                // 4 bytes of padding
+                let Ok(preceding): Result<[_; Pointer::SIZE], _> =
+                    self.reader.read_byte_array(*ptr - Pointer::SIZE)
+                else {
+                    return false;
+                };
 
-        self.reader
-            .find_containing_region(ptr_to_table_of_method_tables)
-            .ok_or(Error::MethodTableTableNotFound)?
-            .read()?
-            .into_iter_as_pointers_from(ptr_to_table_of_method_tables)
-            .take(num_type_defs + 1)
-            .map(|mem_value| mem_value.value)
-            .map(|pointer| -> Pointer {
-                (pointer.as_usize() & !supported_flags).into()
-            })
-            .enumerate()
-            .filter(|(_, pointer)| !pointer.is_null())
-            .map(|(i, pointer)| {
-                let metadata_token = u16::from_le_bytes(
-                    self.reader.read_byte_array(pointer + 10).unwrap(),
+                let has_valid_align_pad = Pointer::SIZE == 4
+                    || (preceding[0] == 0
+                        && preceding[1] == 0
+                        && preceding[2] == 0
+                        && preceding[3] == 0);
+
+                let sigblock = u32::from_le_bytes(
+                    preceding[Pointer::SIZE - 4..].try_into().unwrap(),
                 );
-                let num_virtuals = u16::from_le_bytes(
-                    self.reader.read_byte_array(pointer + 12).unwrap(),
-                );
-                let num_interfaces = u16::from_le_bytes(
-                    self.reader.read_byte_array(pointer + 14).unwrap(),
-                );
-                (i, pointer, metadata_token, num_virtuals, num_interfaces)
-            })
-            .filter(|(_, _, _, num_virtuals, num_interfaces)| {
-                *num_virtuals > 0 || *num_interfaces > 0
-            })
-            // .filter(|(_, _, num_virtuals, num_interfaces)| {
-            //     *num_virtuals == 27 && *num_interfaces == 4
-            // })
-            .take(10)
-            .for_each(
-                |(i, pointer, metadata_token, num_virtuals, num_interfaces)| {
-                    self.running_log.add_log(format!(
-                        "mdtoken[{metadata_token}]: \
-                         {num_virtuals}/{num_interfaces} virtuals/interfaces \
-                         at MethodTable[{i}] ({pointer})"
-                    ));
-                },
-            );
+                let is_unused = sigblock & 0x80000000 > 0;
 
-        metadata_tables
-            .type_def_table()?
-            .iter_rows()
-            .map(|type_def| {
-                let num_interfaces = metadata_tables
-                    .interface_impl_table()
-                    .unwrap()
-                    .iter_rows()
-                    .filter(|interface_impl| {
-                        interface_impl.class_index().unwrap().value()
-                            == type_def.index()
-                    })
-                    .count();
+                let is_reserved_for_gc = sigblock & 0x40000000 > 0;
 
-                let num_virtual = type_def
-                    .iter_methods()
-                    .unwrap()
-                    .filter(|method_def| {
-                        method_def.flags().unwrap().value().is_virtual()
-                    })
-                    .count();
+                let is_finalized = sigblock & 0x20000000 > 0;
 
-                (type_def, num_virtual, num_interfaces)
-            })
-             // .filter(|(_, num_virtual, num_interfaces)| *num_virtual>0 ||  *num_interfaces>0)
-            // .filter(|(_, num_virtuals, num_interfaces)| {
-            //     *num_virtuals == 27 && *num_interfaces == 4
-            // })
-            .take(10)
-            .try_for_each(|(type_def, num_virtual, num_interfaces)| -> Result<_, Error> {
-                self.running_log.add_log(format!(
-                    "{}: {}, with {num_virtual}/{num_interfaces} virtual/interfaces",
-                    type_def.index(),
-                    type_def.name().unwrap().value()
-                ));
-
-                Ok(())
-            })?;
-
-        let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
-            let metadata = dll_info.metadata()?;
-
-            let pe_sections = dll_info.iter_section_header()?.map(
-                |section| -> (String, Range<Pointer>) {
-                    let name = section.name().unwrap().value();
-                    let range = section.section_range().unwrap();
-                    (name.into(), range)
-                },
-            );
-
-            let data_dirs = dll_info.iter_data_directories()?.map(
-                |(kind, bytes)| -> (_, Range<Pointer>) {
-                    (format!("{kind:?}"), bytes.into())
-                },
-            );
-
-            let streams = metadata.iter_stream_header()?.filter_map(
-                |stream| -> Option<(String, Range<Pointer>)> {
-                    let stream = stream.ok()?;
-                    Some((stream.name.value().into(), stream.bytes.into()))
-                },
-            );
-
-            let metadata =
-                [("Metadata tables".to_string(), metadata_tables.ptr_range())];
-
-            let method_defs = metadata_tables
-                .method_def_table()?
-                .iter_rows()
-                .filter_map(|method_def| method_def.cil_method().ok().flatten())
-                .filter_map(|cil_method| cil_method.method_range().ok())
-                .peekable()
-                .batching(|iter| {
-                    let mut range = iter.next()?;
-                    while let Some(next) =
-                        iter.next_if(|peek| peek.start - range.end < 4)
-                    {
-                        range = range.start..next.end;
-                    }
-                    Some(range)
-                })
-                .map(|range| ("CIL method".to_string(), range));
-
-            let game_obj_methods = metadata_tables
-                .type_def_table()?
-                .iter_rows()
-                .find(|type_def| {
-                    type_def
-                        .name()
-                        .map(|name| name.value() == "Game1")
-                        .unwrap_or(false)
-                })
-                .expect("Could not find 'Game1' class (top-level Stardew info)")
-                .iter_methods()?
-                // .enumerate()
-                // .inspect(|(i, method_def)| {
-                //     if *i < 5 {
-                //         self.running_log.add_log(format!(
-                //             "Game1.{}",
-                //             method_def.name().unwrap().value()
-                //         ));
-                //     }
-                // })
-                // .map(|(_, method_def)| method_def)
-                // .collect::<Vec<_>>()
-                // .into_iter()
-                .filter_map(|method_def| method_def.cil_method().ok().flatten())
-                .filter_map(|cil_method| cil_method.method_range().ok())
-                .peekable()
-                .batching(|iter| {
-                    let mut range = iter.next()?;
-                    while let Some(next) =
-                        iter.next_if(|peek| peek.start - range.end < 4)
-                    {
-                        range = range.start..next.end;
-                    }
-                    Some(range)
-                })
-                .map(|range| ("Game1 methods".to_string(), range));
-
-            std::iter::empty()
-                // .chain(pe_sections)
-                // .chain(data_dirs)
-                // .chain(streams)
-                // .chain(metadata)
-                // .chain(method_defs)
-                // .chain(game_obj_methods)
-                .collect::<Vec<_>>()
-                .into_iter()
-                .rev()
-                .collect()
-        };
-
-        self.reader
-            .regions
-            .iter()
-            .filter(|region| {
-                region.is_readable
-                    && region.is_writable
-                    && !region.is_shared_memory
-            })
-            .flat_map(|region| {
-                region
-                    .read()
-                    .unwrap()
-                    .into_iter()
-                    .iter_as::<MemoryValue<Pointer>>()
-                    .rev()
-            })
-            .filter_map(|mem_pointer| {
-                stardew_dll_regions
-                    .iter()
-                    .find(|(_, range)| range.contains(&mem_pointer.value))
-                    .map(|(name, _)| (name, mem_pointer))
-            })
-            // .filter(|(name, _)| name.as_str() == ".text")
-            // .filter(|(name, _)| name.as_str() == "Metadata tables")
-            .filter(|(name, _)| name.as_str() == "Game1 methods")
-            .map(|(_, mem_pointer)| -> (Pointer, Pointer) {
-                (mem_pointer.value, mem_pointer.location)
+                has_valid_align_pad
+                    && !is_unused
+                    && !is_reserved_for_gc
+                    && !is_finalized
             })
             .into_group_map()
             .into_iter()
-            .sorted_by_key(|(_, sources)| std::cmp::Reverse(sources.len()))
-            .take(100)
-            .rev()
-            .for_each(|(addr, sources)| {
-                let num_sources = sources.len();
-                sources.iter().take(5).for_each(|source| {
-                    self.running_log.add_log(format!("Pointer from {source}"));
-                });
-                self.running_log
-                    .add_log(format!("Ptr to {addr}: {num_sources}"));
-            });
-
-        self.reader
-            .regions
-            .iter()
-            .filter(|region| {
-                region.is_readable
-                    && region.is_writable
-                    && !region.is_shared_memory
+            .sorted_by_key(|(_, ptr_locations)| {
+                std::cmp::Reverse(ptr_locations.len())
             })
-            .flat_map(|region| {
-                region
-                    .read()
+            .filter(|(index, _)| {
+                let name = metadata_tables
+                    .get(*index)
                     .unwrap()
-                    .into_iter()
-                    .iter_as::<MemoryValue<Pointer>>()
+                    .name()
+                    .unwrap()
+                    .value();
+                name == "Game1"
             })
-            .filter_map(|mem_pointer| {
-                stardew_dll_regions
-                    .iter()
-                    .find(|(_, range)| range.contains(&mem_pointer.value))
-                    .map(|(name, _)| name)
-            })
-            .counts()
-            .into_iter()
-            .sorted_by_key(|(_, counts)| *counts)
-            .for_each(|(name, counts)| {
-                self.running_log
-                    .add_log(format!("Num ptr to {name}: {counts}"));
+            .for_each(|(index, ptr_locations)| {
+                let name =
+                    metadata_tables.get(index).unwrap().name().unwrap().value();
+                let count = ptr_locations.len();
+
+                ptr_locations.iter().take(10).for_each(|ptr| {
+                    self.running_log.add_log(format!("    Pointer at {ptr}"))
+                });
+                self.running_log.add_log(format!(
+                    "{index} ({name}) has {count} pointers to it"
+                ));
             });
 
         while !handler.received() && !self.should_exit {

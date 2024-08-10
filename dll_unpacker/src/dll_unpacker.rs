@@ -1101,13 +1101,13 @@ impl<'a> Unpacker<'a> {
         let metadata = self.metadata()?;
         // Ok(metadata.bytes.start)
 
-        // let metadata_tables = metadata.metadata_tables()?;
-        //Ok(metadata_tables.method_def_table()?.bytes.start)
-
         let metadata_tables = metadata.metadata_tables()?;
-        let table = metadata_tables.method_def_table()?;
-        let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
-        Ok(start_at)
+        Ok(metadata_tables.field_layout_table()?.bytes.start)
+
+        // let metadata_tables = metadata.metadata_tables()?;
+        // let table = metadata_tables.method_def_table()?;
+        // let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
+        // Ok(start_at)
     }
 
     pub fn collect_annotations(
@@ -3114,6 +3114,34 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
     fn signature(&self) -> Result<ByteRange, Error> {
         self.tables.get(self.signature_index()?)
     }
+
+    pub fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
+        // TODO: Generalize this to apply to Method/Param tables as well.
+        let field_index = self.index().index;
+        let type_def_table = self.tables.type_def_table()?;
+
+        let mut index_range = 0..type_def_table.num_rows();
+
+        while index_range.len() > 1 {
+            let midpoint: usize =
+                index_range.start + (index_range.end - index_range.start) / 2;
+            debug_assert!(midpoint != index_range.start);
+            debug_assert!(midpoint != index_range.end);
+
+            let midpoint_field_index: usize = type_def_table
+                .get_row(midpoint)?
+                .field_indices()?
+                .value()
+                .start;
+            if midpoint_field_index <= field_index {
+                index_range = index_range.start..midpoint_field_index;
+            } else {
+                index_range = midpoint_field_index..index_range.end;
+            }
+        }
+
+        type_def_table.get_row(index_range.start)
+    }
 }
 
 impl<'a> MetadataRowUnpacker<'a, MethodDef> {
@@ -3597,11 +3625,14 @@ impl<'a> MetadataRowUnpacker<'a, FieldLayout> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
+        let class_name = self.field()?.class()?.name()?.value;
+        let field_name = self.field()?.name()?.value;
+
         annotator.value(self.offset()?).name("Offset");
         annotator
             .value(self.field_index()?)
             .name("Field")
-            .append_value(self.field()?.name()?.value);
+            .append_value(format!("{class_name}.{field_name}"));
 
         Ok(())
     }
