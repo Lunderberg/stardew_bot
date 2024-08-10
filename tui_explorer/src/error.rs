@@ -35,6 +35,12 @@ pub enum Error {
 
     #[error("Could not find pointer to .NET Module")]
     ModulePointerNodeFound,
+
+    #[error("Could not find pointer to table of method tables")]
+    PointerToMethodTableTableNotFound,
+
+    #[error("Could not find table of method tables")]
+    MethodTableTableNotFound,
 }
 
 impl std::fmt::Debug for Error {

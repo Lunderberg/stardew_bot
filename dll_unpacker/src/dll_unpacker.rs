@@ -3310,13 +3310,13 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
         Ok(())
     }
 
-    fn class_index(
+    pub fn class_index(
         &self,
     ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
+    pub fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         self.tables.get(self.class_index()?)
     }
 

@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use crate::{
@@ -293,20 +293,18 @@ impl TuiExplorer {
         //     .map(|region| region.address_range())
         //     .collect();
 
-        // Pointers to IL method definitions in the loaded DLL.
-        let dll_method_def: HashSet<Pointer> = {
-            let dll_region = stardew_valley_dll(&self.reader)?.read()?;
+        let dll_region = stardew_valley_dll(&self.reader)?.read()?;
+        let dll_info = dll_unpacker::Unpacker::new(&dll_region);
+        let metadata_tables = dll_info.metadata_tables()?;
 
-            let dll_info = dll_unpacker::Unpacker::new(&dll_region);
-            dll_info
-                .metadata_tables()?
-                .method_def_table()?
-                .iter_rows()
-                .filter_map(|method_def| method_def.cil_method().ok().flatten())
-                .filter_map(|cil_method| cil_method.body_range().ok())
-                .map(|method_body| method_body.start)
-                .collect()
-        };
+        // Pointers to IL method definitions in the loaded DLL.
+        let dll_method_def: HashSet<Pointer> = metadata_tables
+            .method_def_table()?
+            .iter_rows()
+            .filter_map(|method_def| method_def.cil_method().ok().flatten())
+            .filter_map(|cil_method| cil_method.body_range().ok())
+            .map(|method_body| method_body.start)
+            .collect();
 
         self.running_log.add_log(format!(
             "Found {} method definitions in Stardew Valley.dll",
@@ -341,11 +339,6 @@ impl TuiExplorer {
             })
             .counts();
 
-        self.running_log.add_log(format!(
-            "Found {} potential pointers to the Module",
-            potential_module_ptr.len()
-        ));
-
         // The pattern-matching above is pretty reliable at finding
         // the most common location.  With about 17k methods in
         // StardewValley.dll, there were 243 unique pairs of
@@ -357,28 +350,232 @@ impl TuiExplorer {
         // `libcoreclr.so`, but that doesn't seem necessary at the
         // moment.
         let module_ptr = potential_module_ptr
-            .iter()
-            .max_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .into_iter()
+            .max_by_key(|(_, counts)| *counts)
             .map(|(value, _)| value)
             .ok_or(Error::ModulePointerNodeFound)?;
 
-        potential_module_ptr
+        self.running_log
+            .add_log(format!("Found module pointer at {module_ptr}"));
+
+        // The exact layout of the Module class varies.  The goal is
+        // to find the `m_TypeDefToMethodTableMap` member,
+        //
+        // struct LookupMap {
+        //     pNext: Pointer,
+        //     pTable: Pointer,
+        //     dwCount: i32,
+        //     supportedFlags: u64,
+        // }
+        //
+        // * The `pNext` pointer is used to point to the next
+        //   `LookupMap`.  Since the total number of classes in the
+        //   DLL is known from the metadata, they are all stored in a
+        //   single allocation, and this pointer will always be NULL.
+        //
+        // * The `dwCount` is the number of elements in the lookup
+        //   table.  This will be equal to
+        //   `table_sizes.num_rows[MetadataTableKind::TypeDef] + 1`.
+        //   Presumably, the extra element is to allow metadata
+        //   indices (which use zero to indicate an absent value) to
+        //   be used directly as lookup indices.
+        //
+        //   This may need to be changed for dynamic modules.
+        //
+        // * The `supportedFlags` is a bitmask, with flags stored of
+        //   the low bits of `pTable`.  The exact value depends on the
+        //   version, but it can still be used to identify the
+        //   `LookupMap` as only the low bits can be set.  And we need
+        //   the value anyways in order to know which bits to remove
+        //   from `pTable`.
+
+        let num_type_defs = metadata_tables.type_def_table()?.num_rows();
+
+        let (ptr_to_table_of_method_tables, supported_flags) = self
+            .reader
+            .regions
+            .iter()
+            .find(|region| region.address_range().contains(&module_ptr))
+            .unwrap()
+            .read()?
+            .into_iter_as_pointers_from(module_ptr)
+            // If I haven't found it after 4 kB, then something else
+            // is wrong.  Should be at byte 648 relative to the module
+            // pointer, but may be different in each .NET version.
+            .take(512)
+            .tuple_windows()
+            .map(|(a, b, c, d)| {
+                let pNext: Pointer = a.value;
+                let pTable: Pointer = b.value;
+                let dwCount = c.value.as_usize() & ((1 << 32) - 1);
+                let supportedFlags: usize = d.value.as_usize();
+
+                (pNext, pTable, dwCount, supportedFlags)
+            })
+            .find(|(pNext, _, dwCount, supportedFlags)| {
+                *pNext == Pointer::null()
+                    && *dwCount == num_type_defs + 1
+                    && *supportedFlags < 8
+            })
+            .map(|(_, pTable, _, supportedFlags)| (pTable, supportedFlags))
+            .ok_or(Error::PointerToMethodTableTableNotFound)?;
+
+        self.running_log
+            .add_log(format!("Method table: {ptr_to_table_of_method_tables}"));
+
+        let method_tables: Vec<Pointer> = self
+            .reader
+            .read_bytes(
+                ptr_to_table_of_method_tables,
+                (num_type_defs + 1) * Pointer::SIZE,
+            )?
             .into_iter()
-            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
-            .take(5)
-            .rev()
-            .for_each(|(addr, counts)| {
-                self.running_log.add_log(format!(
-                    "Found {counts} candidates pointing to {addr}"
-                ));
+            .iter_as::<[u8; Pointer::SIZE]>()
+            .map(|arr| -> Pointer {
+                let value = usize::from_ne_bytes(arr);
+                let value = value & !supported_flags;
+                value.into()
+            })
+            .collect();
+
+        metadata_tables
+            .type_def_table()?
+            .iter_rows()
+            .filter(|type_def| {
+                type_def
+                    .name()
+                    .ok()
+                    .map(|name| name.value())
+                    .map(|name| name == "Game1" || name.contains("Player"))
+                    .unwrap_or(false)
+            })
+            .for_each(|type_def| {
+                let name = type_def.name().unwrap().value();
+                let index = type_def.index();
+                let untyped_index: usize = index.into();
+                let method_table = method_tables[untyped_index + 1];
+                self.running_log
+                    .add_log(format!("{index}: {name} @ {method_table}"));
             });
 
-        let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
-            let region = stardew_valley_dll(&self.reader)?.read()?;
+        let metadata_index_lookup: HashMap<_, _> = metadata_tables
+            .type_def_table()?
+            .iter_rows()
+            .map(|type_def| {
+                let index = type_def.index();
+                let untyped_index: usize = index.into();
+                let method_table = method_tables[untyped_index + 1];
+                (method_table, type_def)
+            })
+            .collect();
 
-            let dll_info = dll_unpacker::Unpacker::new(&region);
+        self.reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.is_readable
+                    && region.is_writable
+                    && !region.is_shared_memory
+            })
+            .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
+            .filter_map(|mem_value| {
+                metadata_index_lookup
+                    .get(&mem_value.value)
+                    .map(|type_def| (type_def, mem_value.location))
+            })
+            .map(|(type_def, _ptr_location)| type_def.index())
+            .counts()
+            .into_iter()
+            .sorted_by_key(|(_, counts)| std::cmp::Reverse(*counts))
+            .take(10)
+            .rev()
+            .for_each(|(index, counts)| {
+                self.running_log
+                    .add_log(format!("{index} has {counts} pointers to it"));
+            });
+
+        self.reader
+            .find_containing_region(ptr_to_table_of_method_tables)
+            .ok_or(Error::MethodTableTableNotFound)?
+            .read()?
+            .into_iter_as_pointers_from(ptr_to_table_of_method_tables)
+            .take(num_type_defs + 1)
+            .map(|mem_value| mem_value.value)
+            .map(|pointer| -> Pointer {
+                (pointer.as_usize() & !supported_flags).into()
+            })
+            .enumerate()
+            .filter(|(_, pointer)| !pointer.is_null())
+            .map(|(i, pointer)| {
+                let metadata_token = u16::from_le_bytes(
+                    self.reader.read_byte_array(pointer + 10).unwrap(),
+                );
+                let num_virtuals = u16::from_le_bytes(
+                    self.reader.read_byte_array(pointer + 12).unwrap(),
+                );
+                let num_interfaces = u16::from_le_bytes(
+                    self.reader.read_byte_array(pointer + 14).unwrap(),
+                );
+                (i, pointer, metadata_token, num_virtuals, num_interfaces)
+            })
+            .filter(|(_, _, _, num_virtuals, num_interfaces)| {
+                *num_virtuals > 0 || *num_interfaces > 0
+            })
+            // .filter(|(_, _, num_virtuals, num_interfaces)| {
+            //     *num_virtuals == 27 && *num_interfaces == 4
+            // })
+            .take(10)
+            .for_each(
+                |(i, pointer, metadata_token, num_virtuals, num_interfaces)| {
+                    self.running_log.add_log(format!(
+                        "mdtoken[{metadata_token}]: \
+                         {num_virtuals}/{num_interfaces} virtuals/interfaces \
+                         at MethodTable[{i}] ({pointer})"
+                    ));
+                },
+            );
+
+        metadata_tables
+            .type_def_table()?
+            .iter_rows()
+            .map(|type_def| {
+                let num_interfaces = metadata_tables
+                    .interface_impl_table()
+                    .unwrap()
+                    .iter_rows()
+                    .filter(|interface_impl| {
+                        interface_impl.class_index().unwrap().value()
+                            == type_def.index()
+                    })
+                    .count();
+
+                let num_virtual = type_def
+                    .iter_methods()
+                    .unwrap()
+                    .filter(|method_def| {
+                        method_def.flags().unwrap().value().is_virtual()
+                    })
+                    .count();
+
+                (type_def, num_virtual, num_interfaces)
+            })
+             // .filter(|(_, num_virtual, num_interfaces)| *num_virtual>0 ||  *num_interfaces>0)
+            // .filter(|(_, num_virtuals, num_interfaces)| {
+            //     *num_virtuals == 27 && *num_interfaces == 4
+            // })
+            .take(10)
+            .try_for_each(|(type_def, num_virtual, num_interfaces)| -> Result<_, Error> {
+                self.running_log.add_log(format!(
+                    "{}: {}, with {num_virtual}/{num_interfaces} virtual/interfaces",
+                    type_def.index(),
+                    type_def.name().unwrap().value()
+                ));
+
+                Ok(())
+            })?;
+
+        let stardew_dll_regions: Vec<(String, Range<Pointer>)> = {
             let metadata = dll_info.metadata()?;
-            let metadata_tables = dll_info.metadata_tables()?;
 
             let pe_sections = dll_info.iter_section_header()?.map(
                 |section| -> (String, Range<Pointer>) {
