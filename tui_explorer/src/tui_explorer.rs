@@ -1,17 +1,20 @@
 use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
-use crate::{
-    extensions::*, ColumnFormatter, InfoFormatter, KeyBindingMatch, KeySequence,
-};
-use crate::{Error, SigintHandler};
 use itertools::Itertools as _;
-use memory_reader::extensions::*;
-use memory_reader::{MemoryMapRegion, Pointer};
-
-use memory_reader::{MemoryReader, Symbol};
 use ratatui::style::Stylize as _;
+
+use memory_reader::extensions::*;
+use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
 use stardew_utils::stardew_valley_pid;
+
+use dll_unpacker::Annotator;
+
+use crate::extensions::*;
+use crate::{
+    ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
+    SigintHandler,
+};
 
 use super::{
     DetailView, MemoryTable, RunningLog, StackFrameTable, TerminalContext,
@@ -79,6 +82,42 @@ fn stardew_valley_dll(
             "Stardew Valley.dll".to_string(),
         ))
         .map_err(Into::into)
+}
+
+impl dll_unpacker::Annotation for Annotation {
+    fn name(&mut self, name: impl Into<String>) -> &mut Self {
+        self.name = name.into();
+        self
+    }
+
+    fn current_value(&self) -> &str {
+        self.value.as_str()
+    }
+
+    fn value(&mut self, value: impl std::fmt::Display) -> &mut Self {
+        self.value = format!("{value}");
+        self
+    }
+
+    fn disable_highlight(&mut self) -> &mut Self {
+        self.highlight_range = false;
+        self
+    }
+}
+
+impl Annotator for TuiExplorerBuilder {
+    fn range(
+        &mut self,
+        range: Range<Pointer>,
+    ) -> &mut impl dll_unpacker::Annotation {
+        self.annotations.push(Annotation {
+            range,
+            name: String::default(),
+            value: String::default(),
+            highlight_range: true,
+        });
+        self.annotations.last_mut().unwrap()
+    }
 }
 
 impl TuiExplorerBuilder {
@@ -171,62 +210,13 @@ impl TuiExplorerBuilder {
         })
     }
 
-    pub fn initialize_annotations(self) -> Result<Self, Error> {
+    pub fn initialize_annotations(mut self) -> Result<Self, Error> {
         let region = self.stardew_valley_dll()?.read()?;
         let dll_info = dll_unpacker::Unpacker::new(&region);
 
-        let mut annotator = DLLAnnotator {
-            annotations: Vec::new(),
-        };
+        dll_info.collect_annotations(&mut self)?;
 
-        dll_info.collect_annotations(&mut annotator)?;
-
-        let annotations = annotator.annotations;
-
-        return Ok(Self {
-            annotations,
-            ..self
-        });
-
-        struct DLLAnnotator {
-            annotations: Vec<Annotation>,
-        }
-
-        impl dll_unpacker::Annotator for DLLAnnotator {
-            fn range(
-                &mut self,
-                range: Range<Pointer>,
-            ) -> &mut impl dll_unpacker::Annotation {
-                self.annotations.push(Annotation {
-                    range,
-                    name: String::default(),
-                    value: String::default(),
-                    highlight_range: true,
-                });
-                self.annotations.last_mut().unwrap()
-            }
-        }
-
-        impl dll_unpacker::Annotation for Annotation {
-            fn name(&mut self, name: impl Into<String>) -> &mut Self {
-                self.name = name.into();
-                self
-            }
-
-            fn current_value(&self) -> &str {
-                self.value.as_str()
-            }
-
-            fn value(&mut self, value: impl std::fmt::Display) -> &mut Self {
-                self.value = format!("{value}");
-                self
-            }
-
-            fn disable_highlight(&mut self) -> &mut Self {
-                self.highlight_range = false;
-                self
-            }
-        }
+        Ok(self)
     }
 
     pub fn search_based_on_annotations(mut self) -> Result<Self, Error> {
