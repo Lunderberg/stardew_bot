@@ -67,6 +67,7 @@ pub struct TuiExplorerBuilder {
     column_formatters: Vec<Box<dyn ColumnFormatter>>,
     initial_pointer: Pointer,
     annotations: Vec<Annotation>,
+    running_log: RunningLog,
 }
 
 fn stardew_valley_dll(
@@ -91,6 +92,7 @@ impl TuiExplorerBuilder {
             column_formatters: Vec::new(),
             initial_pointer: Pointer::null(),
             annotations: Vec::new(),
+            running_log: RunningLog::new(100),
         })
     }
 
@@ -179,11 +181,7 @@ impl TuiExplorerBuilder {
 
         dll_info.collect_annotations(&mut annotator)?;
 
-        let mut annotations = annotator.annotations;
-
-        annotations.sort_by_key(|ann| {
-            (ann.highlight_range, ann.range.end, ann.range.start)
-        });
+        let annotations = annotator.annotations;
 
         return Ok(Self {
             annotations,
@@ -231,68 +229,7 @@ impl TuiExplorerBuilder {
         }
     }
 
-    pub fn build(self) -> Result<TuiExplorer, Error> {
-        let reader = MemoryReader::new(self.pid)?;
-        let stack_memory = reader.stack()?.read()?;
-
-        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
-
-        let detail_view = DetailView::new(self.detail_formatters);
-
-        let memory_table = MemoryTable::new(
-            &self.reader,
-            self.initial_pointer,
-            self.column_formatters,
-        )?;
-
-        let mut out = TuiExplorer {
-            stack_frame_table,
-            running_log: RunningLog::new(100),
-            memory_table,
-            annotations: self.annotations,
-            _symbols: self.symbols,
-            detail_view,
-            _pid: self.pid,
-            reader,
-            should_exit: false,
-            selected_region: SelectableRegion::MemoryTable,
-            keystrokes: KeySequence::default(),
-        };
-        out.update_details();
-
-        Ok(out)
-    }
-}
-
-impl TuiExplorer {
-    pub fn new() -> Result<Self, Error> {
-        TuiExplorerBuilder::new()?
-            .init_symbols()
-            .default_detail_formatters()
-            .default_column_formatters()
-            .initialize_view_to_stardew_dll()?
-            //.initialize_view_to_stack()?
-            .initialize_annotations()?
-            .build()
-    }
-
-    pub fn run(&mut self) -> Result<(), Error> {
-        use crossterm::event;
-
-        let mut context = TerminalContext::new()?;
-        let handler = SigintHandler::new();
-
-        // let stardew_dll_regions: Vec<_> = self
-        //     .reader
-        //     .regions
-        //     .iter()
-        //     .filter(|region| {
-        //         region.short_name() == "Stardew Valley.dll"
-        //             || region.short_name() == "StardewValley.Gamedata.dll"
-        //     })
-        //     .map(|region| region.address_range())
-        //     .collect();
-
+    pub fn search_based_on_annotations(mut self) -> Result<Self, Error> {
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
         let dll_info = dll_unpacker::Unpacker::new(&dll_region);
         let metadata_tables = dll_info.metadata_tables()?;
@@ -557,6 +494,68 @@ impl TuiExplorer {
                     "{index} ({name}) has {count} pointers to it"
                 ));
             });
+        Ok(self)
+    }
+
+    pub fn build(self) -> Result<TuiExplorer, Error> {
+        let annotations = {
+            let mut arr = self.annotations;
+            arr.sort_by_key(|ann| {
+                (ann.highlight_range, ann.range.end, ann.range.start)
+            });
+            arr
+        };
+
+        let reader = MemoryReader::new(self.pid)?;
+        let stack_memory = reader.stack()?.read()?;
+
+        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
+
+        let detail_view = DetailView::new(self.detail_formatters);
+
+        let memory_table = MemoryTable::new(
+            &self.reader,
+            self.initial_pointer,
+            self.column_formatters,
+        )?;
+
+        let mut out = TuiExplorer {
+            stack_frame_table,
+            running_log: self.running_log,
+            memory_table,
+            annotations,
+            _symbols: self.symbols,
+            detail_view,
+            _pid: self.pid,
+            reader,
+            should_exit: false,
+            selected_region: SelectableRegion::MemoryTable,
+            keystrokes: KeySequence::default(),
+        };
+        out.update_details();
+
+        Ok(out)
+    }
+}
+
+impl TuiExplorer {
+    pub fn new() -> Result<Self, Error> {
+        TuiExplorerBuilder::new()?
+            .init_symbols()
+            .default_detail_formatters()
+            .default_column_formatters()
+            .initialize_view_to_stardew_dll()?
+            //.initialize_view_to_stack()?
+            .initialize_annotations()?
+            .search_based_on_annotations()?
+            .build()
+    }
+
+    pub fn run(&mut self) -> Result<(), Error> {
+        use crossterm::event;
+
+        let mut context = TerminalContext::new()?;
+        let handler = SigintHandler::new();
 
         while !handler.received() && !self.should_exit {
             context.draw(|frame| self.draw(frame))?;
