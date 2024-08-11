@@ -8,8 +8,6 @@ use memory_reader::extensions::*;
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
 use stardew_utils::stardew_valley_pid;
 
-use dll_unpacker::Annotator;
-
 use crate::extensions::*;
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -105,7 +103,7 @@ impl dll_unpacker::Annotation for Annotation {
     }
 }
 
-impl Annotator for TuiExplorerBuilder {
+impl dll_unpacker::Annotator for TuiExplorerBuilder {
     fn range(
         &mut self,
         range: Range<Pointer>,
@@ -220,6 +218,8 @@ impl TuiExplorerBuilder {
     }
 
     pub fn search_based_on_annotations(mut self) -> Result<Self, Error> {
+        use dll_unpacker::{Annotation, Annotator};
+
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
         let dll_info = dll_unpacker::Unpacker::new(&dll_region);
         let metadata_tables = dll_info.metadata_tables()?;
@@ -238,7 +238,7 @@ impl TuiExplorerBuilder {
             dll_method_def.len()
         ));
 
-        let potential_module_ptr = self
+        let module_ptr = self
             .reader
             .regions
             .iter()
@@ -255,28 +255,22 @@ impl TuiExplorerBuilder {
                     .map(|mem_value| mem_value.value)
                     .tuple_windows()
             })
-            .filter(|(_, il_ptr)| dll_method_def.contains(il_ptr))
-            .map(|(module_ptr, _)| module_ptr)
-            .filter(|module_ptr| {
-                self.reader
-                    .regions
-                    .iter()
-                    .map(|region| region.address_range())
-                    .any(|range| range.contains(module_ptr))
+            .filter(|(module_ptr, il_ptr)| {
+                // The pattern-matching above is pretty reliable at finding
+                // the most common location.  With about 17k methods in
+                // StardewValley.dll, there were 243 unique pairs of
+                // `(module_ptr, il_ptr)`, one of which occurred
+                // over 500 times.  No other pair occurred more than 3 times.
+                //
+                // I suppose I could further filter the `module_ptr` by values
+                // that point to a pointer, which itself points to
+                // `libcoreclr.so`, but that doesn't seem necessary at the
+                // moment.
+                dll_method_def.contains(il_ptr)
+                    && self.reader.find_containing_region(*module_ptr).is_some()
             })
-            .counts();
-
-        // The pattern-matching above is pretty reliable at finding
-        // the most common location.  With about 17k methods in
-        // StardewValley.dll, there were 243 unique pairs of
-        // `(pointer, pointer_to_module_def)`, one of which occurred
-        // over 500 times.  No other pair occurred more than 3 times.
-        //
-        // I suppose I could further filter the `module_ptr` by values
-        // that point to a pointer, which itself points to
-        // `libcoreclr.so`, but that doesn't seem necessary at the
-        // moment.
-        let module_ptr = potential_module_ptr
+            .map(|(module_ptr, _)| module_ptr)
+            .counts()
             .into_iter()
             .max_by_key(|(_, counts)| *counts)
             .map(|(value, _)| value)
@@ -365,6 +359,32 @@ impl TuiExplorerBuilder {
             })
             .collect();
 
+        self.range(
+            ptr_to_table_of_method_tables
+                ..ptr_to_table_of_method_tables
+                    + (num_type_defs + 1) * Pointer::SIZE,
+        )
+        .name("TypeDefToMethodDef table");
+
+        metadata_tables
+            .type_def_table()?
+            .iter_rows()
+            .for_each(|type_def| {
+                let name = type_def.name().unwrap().value();
+                let index = type_def.index();
+                let untyped_index: usize = index.into();
+                let method_table = method_tables[untyped_index + 1];
+                self.range(
+                    ptr_to_table_of_method_tables
+                        + (untyped_index + 1) * Pointer::SIZE
+                        ..ptr_to_table_of_method_tables
+                            + (untyped_index + 2) * Pointer::SIZE,
+                )
+                .name(format!("Ptr to {name} MethodTable"));
+                self.range(method_table..method_table + 56)
+                    .name(format!("MethodTable, {name}"));
+            });
+
         metadata_tables
             .type_def_table()?
             .iter_rows()
@@ -416,11 +436,10 @@ impl TuiExplorerBuilder {
                 let ptr_mask: usize = if Pointer::SIZE == 8 { !7 } else { !3 };
                 let ptr: Pointer =
                     (mem_value.value.as_usize() & ptr_mask).into();
-                metadata_index_lookup
-                    .get(&ptr)
-                    .map(|type_def| (type_def, mem_value.location))
+                let type_def = metadata_index_lookup.get(&ptr)?;
+
+                Some((type_def.index(), mem_value.location))
             })
-            .map(|(type_def, ptr_location)| (type_def.index(), ptr_location))
             .filter(|(_, ptr)| {
                 // Each .NET Object starts with a pointer to the
                 // MethodTable, but just looking for pointer-aligned
