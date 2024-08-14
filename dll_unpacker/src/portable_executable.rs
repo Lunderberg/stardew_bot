@@ -4,7 +4,60 @@ use memory_reader::Pointer;
 
 use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
 use crate::Annotation as _;
+use crate::DLLUnpacker;
 use crate::{Annotator, ByteRange, Error, UnpackedValue};
+
+/// Top-level methods for the DLLUnpacker, related to the unwrapping
+/// of the PE format.
+impl<'a> DLLUnpacker<'a> {
+    pub(crate) fn pe_header(&self) -> Result<PEHeaderUnpacker, Error> {
+        let dos_header = self.dos_header()?;
+        let bytes = self.bytes.subrange(dos_header.pe_header_range()?);
+        Ok(PEHeaderUnpacker::new(bytes))
+    }
+
+    pub(crate) fn optional_header(
+        &self,
+    ) -> Result<OptionalHeaderUnpacker, Error> {
+        let pe_header = self.pe_header()?;
+        let bytes = self.bytes.subrange(pe_header.optional_header_range()?);
+        OptionalHeaderUnpacker::new(bytes)
+    }
+
+    pub(crate) fn iter_section_header(
+        &self,
+    ) -> Result<impl Iterator<Item = SectionHeaderUnpacker>, Error> {
+        let pe_header = self.pe_header()?;
+        let num_sections = pe_header.num_sections()?.value as usize;
+
+        let section_header_base = pe_header.optional_header_range()?.end;
+
+        let section_header_size = 40;
+
+        let file_start = self.bytes.start;
+
+        let iter = (0..num_sections)
+            .map(move |i_section| {
+                section_header_base + i_section * section_header_size
+            })
+            .map(move |start| {
+                let bytes =
+                    self.bytes.subrange(start..start + section_header_size);
+                SectionHeaderUnpacker::new(bytes, file_start)
+            });
+
+        Ok(iter)
+    }
+
+    pub(crate) fn virtual_address_to_raw(
+        &self,
+        addr: RelativeVirtualAddress,
+    ) -> Result<Pointer, Error> {
+        self.iter_section_header()?
+            .find_map(|section| section.map_address(addr).ok()?)
+            .ok_or(Error::InvalidVirtualAddress(addr))
+    }
+}
 
 pub struct PEHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
@@ -585,6 +638,55 @@ impl std::fmt::Display for MagicValue {
         match self {
             MagicValue::PE32 => write!(f, "PE32"),
             MagicValue::PE32plus => write!(f, "PE32+"),
+        }
+    }
+}
+
+impl DataDirectoryKind {
+    pub(crate) fn index(self) -> usize {
+        match self {
+            Self::ExportTable => 0,
+            Self::ImportTable => 1,
+            Self::ResourceTable => 2,
+            Self::ExceptionTable => 3,
+            Self::CertificateTable => 4,
+            Self::BaseRelocationTable => 5,
+            Self::Debug => 6,
+            Self::Architecture => 7,
+            Self::GlobalPtr => 8,
+            Self::TLSTable => 9,
+            Self::LoadConfigTable => 10,
+            Self::BoundImportTable => 11,
+            Self::ImportAddressTable => 12,
+            Self::DelayImportDescriptor => 13,
+            Self::ClrRuntimeHeader => 14,
+            Self::Reserved15 => 15,
+        }
+    }
+}
+
+impl TryFrom<u32> for DataDirectoryKind {
+    type Error = Error;
+
+    fn try_from(value: u32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::ExportTable),
+            1 => Ok(Self::ImportTable),
+            2 => Ok(Self::ResourceTable),
+            3 => Ok(Self::ExceptionTable),
+            4 => Ok(Self::CertificateTable),
+            5 => Ok(Self::BaseRelocationTable),
+            6 => Ok(Self::Debug),
+            7 => Ok(Self::Architecture),
+            8 => Ok(Self::GlobalPtr),
+            9 => Ok(Self::TLSTable),
+            10 => Ok(Self::LoadConfigTable),
+            11 => Ok(Self::BoundImportTable),
+            12 => Ok(Self::ImportAddressTable),
+            13 => Ok(Self::DelayImportDescriptor),
+            14 => Ok(Self::ClrRuntimeHeader),
+            15 => Ok(Self::Reserved15),
+            other => Err(Error::InvalidDataDirectoryIndex(other)),
         }
     }
 }

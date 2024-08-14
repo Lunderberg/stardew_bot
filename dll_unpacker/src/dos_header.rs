@@ -3,13 +3,23 @@ use std::ops::Range;
 use memory_reader::Pointer;
 
 use crate::Annotation as _;
+use crate::DLLUnpacker;
 use crate::{Annotator, ByteRange, Error, UnpackedValue};
 
-pub struct DosHeaderUnpacker<'a> {
+/// Top-level methods for the DLLUnpacker, related to the unwrapping
+/// of the DOS headers.
+impl<'a> DLLUnpacker<'a> {
+    pub(crate) fn dos_header(&self) -> Result<DosHeader, Error> {
+        let bytes = self.bytes.subrange(0..DosHeader::SIZE);
+        Ok(DosHeader::new(bytes))
+    }
+}
+
+pub struct DosHeader<'a> {
     bytes: ByteRange<'a>,
 }
 
-impl<'a> DosHeaderUnpacker<'a> {
+impl<'a> DosHeader<'a> {
     pub const SIZE: usize = 128;
 
     pub fn new(bytes: ByteRange<'a>) -> Self {

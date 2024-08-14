@@ -2,21 +2,17 @@ use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
 
-use crate::dos_header::DosHeaderUnpacker;
 use crate::enum_map::{EnumKey, EnumMap};
 use crate::intermediate_language::CILMethod;
-use crate::portable_executable::{
-    DataDirectoryKind, OptionalHeaderUnpacker, PEHeaderUnpacker,
-    SectionHeaderUnpacker,
-};
+use crate::portable_executable::DataDirectoryKind;
 use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
 use crate::UnpackedValue;
 use crate::{Annotation as _, Annotator, Error};
 use crate::{ByteRange, UnpackBytes};
 
 #[derive(Copy, Clone)]
-pub struct Unpacker<'a> {
-    bytes: ByteRange<'a>,
+pub struct DLLUnpacker<'a> {
+    pub(crate) bytes: ByteRange<'a>,
 }
 
 pub struct ClrRuntimeHeaderUnpacker<'a> {
@@ -33,7 +29,7 @@ pub struct RawCLRMetadata<'a> {
     /// Relative Virtual Address (RVA) fields into actual pointers
     /// within the DLL, and to unpack metadata fields with RVAs that
     /// point outside the metadata table.
-    dll_unpacker: Unpacker<'a>,
+    dll_unpacker: DLLUnpacker<'a>,
 }
 
 pub struct StreamHeader<'a> {
@@ -51,7 +47,7 @@ pub struct StreamHeader<'a> {
     pub bytes: ByteRange<'a>,
 }
 
-pub struct MetadataTablesHeaderUnpacker<'a> {
+pub struct MetadataTableHeader<'a> {
     /// The entire contents of the #~ stream of the metadata.  While
     /// most of the unpacker types only have access to bytes that they
     /// directly contain, the size of the header for metadata tables
@@ -61,7 +57,7 @@ pub struct MetadataTablesHeaderUnpacker<'a> {
 
 pub struct Metadata<'a> {
     bytes: ByteRange<'a>,
-    dll_unpacker: Unpacker<'a>,
+    dll_unpacker: DLLUnpacker<'a>,
     table_sizes: MetadataTableSizes,
     heaps: EnumMap<MetadataHeapKind, ByteRange<'a>>,
 }
@@ -1091,8 +1087,8 @@ impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
     }
 }
 
-impl<'a> Unpacker<'a> {
-    pub fn new(region: &'a MemoryRegion) -> Unpacker {
+impl<'a> DLLUnpacker<'a> {
+    pub fn new(region: &'a MemoryRegion) -> DLLUnpacker {
         Self {
             bytes: ByteRange {
                 start: region.start(),
@@ -1135,88 +1131,6 @@ impl<'a> Unpacker<'a> {
         Ok(())
     }
 
-    pub fn dos_header(&self) -> Result<DosHeaderUnpacker, Error> {
-        let bytes = self.bytes.subrange(0..DosHeaderUnpacker::SIZE);
-        Ok(DosHeaderUnpacker::new(bytes))
-    }
-
-    pub fn pe_header(&self) -> Result<PEHeaderUnpacker, Error> {
-        let dos_header = self.dos_header()?;
-        let bytes = self.bytes.subrange(dos_header.pe_header_range()?);
-        Ok(PEHeaderUnpacker::new(bytes))
-    }
-
-    pub fn optional_header(&self) -> Result<OptionalHeaderUnpacker, Error> {
-        let pe_header = self.pe_header()?;
-        let bytes = self.bytes.subrange(pe_header.optional_header_range()?);
-        OptionalHeaderUnpacker::new(bytes)
-    }
-
-    pub fn iter_section_header(
-        &self,
-    ) -> Result<impl Iterator<Item = SectionHeaderUnpacker>, Error> {
-        let pe_header = self.pe_header()?;
-        let num_sections = pe_header.num_sections()?.value as usize;
-
-        let section_header_base = pe_header.optional_header_range()?.end;
-
-        let section_header_size = 40;
-
-        let file_start = self.bytes.start;
-
-        let iter = (0..num_sections)
-            .map(move |i_section| {
-                section_header_base + i_section * section_header_size
-            })
-            .map(move |start| {
-                let bytes =
-                    self.bytes.subrange(start..start + section_header_size);
-                SectionHeaderUnpacker::new(bytes, file_start)
-            });
-
-        Ok(iter)
-    }
-
-    fn virtual_address_to_raw(
-        &self,
-        addr: RelativeVirtualAddress,
-    ) -> Result<Pointer, Error> {
-        self.iter_section_header()?
-            .find_map(|section| section.map_address(addr).ok()?)
-            .ok_or(Error::InvalidVirtualAddress(addr))
-    }
-
-    fn virtual_range_to_raw(
-        &self,
-        range: VirtualRange,
-    ) -> Result<Range<Pointer>, Error> {
-        let start: Pointer = self.virtual_address_to_raw(range.rva)?;
-        let size = range.size as usize;
-        Ok(start..start + size)
-    }
-
-    pub fn iter_data_directories(
-        &self,
-    ) -> Result<impl Iterator<Item = (DataDirectoryKind, ByteRange)>, Error>
-    {
-        let optional_header = self.optional_header()?;
-        let iter = DataDirectoryKind::iter()
-            .filter_map(move |data_dir_kind| {
-                let virtual_range = optional_header
-                    .data_directory(data_dir_kind)
-                    .unwrap()
-                    .value()?;
-
-                let raw_range =
-                    self.virtual_range_to_raw(virtual_range).unwrap();
-
-                Some((data_dir_kind, self.bytes.subrange(raw_range)))
-            })
-            .filter(|(_, bytes)| bytes.len() > 0);
-
-        Ok(iter)
-    }
-
     pub fn clr_runtime_header(
         &self,
     ) -> Result<ClrRuntimeHeaderUnpacker, Error> {
@@ -1247,77 +1161,6 @@ impl<'a> Unpacker<'a> {
 
     pub fn metadata(self) -> Result<Metadata<'a>, Error> {
         self.raw_metadata()?.metadata_tables()
-    }
-}
-
-impl DataDirectoryKind {
-    pub(crate) fn index(self) -> usize {
-        match self {
-            Self::ExportTable => 0,
-            Self::ImportTable => 1,
-            Self::ResourceTable => 2,
-            Self::ExceptionTable => 3,
-            Self::CertificateTable => 4,
-            Self::BaseRelocationTable => 5,
-            Self::Debug => 6,
-            Self::Architecture => 7,
-            Self::GlobalPtr => 8,
-            Self::TLSTable => 9,
-            Self::LoadConfigTable => 10,
-            Self::BoundImportTable => 11,
-            Self::ImportAddressTable => 12,
-            Self::DelayImportDescriptor => 13,
-            Self::ClrRuntimeHeader => 14,
-            Self::Reserved15 => 15,
-        }
-    }
-
-    fn iter() -> impl Iterator<Item = Self> {
-        [
-            Self::ExportTable,
-            Self::ImportTable,
-            Self::ResourceTable,
-            Self::ExceptionTable,
-            Self::CertificateTable,
-            Self::BaseRelocationTable,
-            Self::Debug,
-            Self::Architecture,
-            Self::GlobalPtr,
-            Self::TLSTable,
-            Self::LoadConfigTable,
-            Self::BoundImportTable,
-            Self::ImportAddressTable,
-            Self::DelayImportDescriptor,
-            Self::ClrRuntimeHeader,
-            Self::Reserved15,
-        ]
-        .into_iter()
-    }
-}
-
-impl TryFrom<u32> for DataDirectoryKind {
-    type Error = Error;
-
-    fn try_from(value: u32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::ExportTable),
-            1 => Ok(Self::ImportTable),
-            2 => Ok(Self::ResourceTable),
-            3 => Ok(Self::ExceptionTable),
-            4 => Ok(Self::CertificateTable),
-            5 => Ok(Self::BaseRelocationTable),
-            6 => Ok(Self::Debug),
-            7 => Ok(Self::Architecture),
-            8 => Ok(Self::GlobalPtr),
-            9 => Ok(Self::TLSTable),
-            10 => Ok(Self::LoadConfigTable),
-            11 => Ok(Self::BoundImportTable),
-            12 => Ok(Self::ImportAddressTable),
-            13 => Ok(Self::DelayImportDescriptor),
-            14 => Ok(Self::ClrRuntimeHeader),
-            15 => Ok(Self::Reserved15),
-            other => Err(Error::InvalidDataDirectoryIndex(other)),
-        }
     }
 }
 
@@ -1573,9 +1416,9 @@ impl<'a> RawCLRMetadata<'a> {
 
     pub fn metadata_tables_header(
         &self,
-    ) -> Result<MetadataTablesHeaderUnpacker<'a>, Error> {
+    ) -> Result<MetadataTableHeader<'a>, Error> {
         let bytes = self.find_stream("#~")?;
-        Ok(MetadataTablesHeaderUnpacker { bytes })
+        Ok(MetadataTableHeader { bytes })
     }
 
     pub fn metadata_heaps(
@@ -1629,7 +1472,7 @@ impl<'a> StreamHeader<'a> {
     }
 }
 
-impl<'a> MetadataTablesHeaderUnpacker<'a> {
+impl<'a> MetadataTableHeader<'a> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
