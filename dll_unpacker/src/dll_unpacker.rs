@@ -2797,8 +2797,11 @@ where
                 self.tables.table_sizes.num_rows[table_kind]
             });
 
-        let (loc, begin_index) =
+        let (loc, begin_index): (_, usize) =
             begin_bytes.unpack::<UnpackedValue<_>>().unwrap().into();
+
+        let begin_index = begin_index - 1;
+        let end_index = end_index - 1;
 
         UnpackedValue::new(loc, begin_index..end_index)
     }
