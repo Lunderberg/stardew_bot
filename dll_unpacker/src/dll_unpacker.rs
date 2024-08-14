@@ -777,6 +777,10 @@ impl CodedIndex for CustomAttributeType {
     ];
 }
 
+#[derive(Clone, Copy)]
+pub struct FieldFlags(u16);
+
+#[derive(Clone, Copy)]
 pub struct MethodDefFlags(u16);
 
 impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
@@ -3009,7 +3013,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         Ok(())
     }
 
-    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
+    pub fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
@@ -3068,6 +3072,28 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     }
 }
 
+impl FieldFlags {
+    pub fn is_static(self) -> bool {
+        self.0 & 0x0010 > 0
+    }
+
+    pub fn is_compile_time_constant(self) -> bool {
+        self.0 & 0x0040 > 0
+    }
+}
+
+impl<'a> UnpackBytes<'a> for FieldFlags {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        Ok(Self(bytes.unpack()?))
+    }
+}
+
+impl std::fmt::Display for FieldFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 impl<'a> MetadataRowUnpacker<'a, Field> {
     fn collect_annotations(
         &self,
@@ -3093,8 +3119,12 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
         Ok(())
     }
 
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
+    pub fn flags(&self) -> Result<UnpackedValue<FieldFlags>, Error> {
         self.get_field_bytes(0).unpack()
+    }
+
+    pub fn is_static(&self) -> Result<bool, Error> {
+        Ok(self.flags()?.value().is_static())
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -3235,6 +3265,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         self.get_field_bytes(2).unpack()
     }
 
+    pub fn is_static(&self) -> Result<bool, Error> {
+        Ok(self.flags()?.value().is_static())
+    }
+
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
         self.get_field_bytes(3).unpack()
     }
@@ -3267,6 +3301,10 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
 }
 
 impl MethodDefFlags {
+    pub fn is_static(self) -> bool {
+        self.0 & 0x0010 > 0
+    }
+
     pub fn is_virtual(self) -> bool {
         self.0 & 0x0040 > 0
     }
