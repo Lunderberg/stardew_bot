@@ -54,6 +54,32 @@ impl MemoryMapRegion {
             .unwrap_or("[anon]")
     }
 
+    pub fn permissions_str(&self) -> &'static str {
+        match (
+            self.is_readable,
+            self.is_writable,
+            self.is_executable,
+            self.is_shared_memory,
+        ) {
+            (true, true, true, true) => "rwxs",
+            (true, true, true, false) => "rwxp",
+            (true, true, false, true) => "rw-s",
+            (true, true, false, false) => "rw-p",
+            (true, false, true, true) => "r-xs",
+            (true, false, true, false) => "r-xp",
+            (true, false, false, true) => "r--s",
+            (true, false, false, false) => "r--p",
+            (false, true, true, true) => "-wxs",
+            (false, true, true, false) => "-wxp",
+            (false, true, false, true) => "-w-s",
+            (false, true, false, false) => "-w-p",
+            (false, false, true, true) => "--xs",
+            (false, false, true, false) => "--xp",
+            (false, false, false, true) => "---s",
+            (false, false, false, false) => "---p",
+        }
+    }
+
     pub fn size_bytes(&self) -> usize {
         self.end - self.start
     }

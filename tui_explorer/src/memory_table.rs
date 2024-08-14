@@ -421,6 +421,7 @@ impl ViewFrame {
 
     fn title(&self) -> String {
         let region_name = self.region.name();
+        let permissions = self.region.permissions_str();
 
         let selected = self.selected_value().location;
         let entry_point = self.entry_point;
@@ -437,7 +438,7 @@ impl ViewFrame {
         let entry_point = entry_point - prefix;
 
         format!(
-            "{region_name} (offset {prefix}) \
+            "{region_name} {permissions} (offset {prefix}) \
              @ {selected:#x} \
              ({entry_point:#x} {sign} 0x{offset:x})"
         )

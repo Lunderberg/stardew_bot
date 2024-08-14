@@ -65,6 +65,10 @@ impl MemoryRegion {
         self.source.short_name()
     }
 
+    pub fn permissions_str(&self) -> &'static str {
+        self.source.permissions_str()
+    }
+
     pub fn bytes_at_offset<const N: usize>(
         &self,
         byte_offset: usize,
