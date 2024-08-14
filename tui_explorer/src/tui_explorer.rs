@@ -222,7 +222,7 @@ impl TuiExplorerBuilder {
 
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
         let dll_info = dll_unpacker::Unpacker::new(&dll_region);
-        let metadata_tables = dll_info.metadata_tables()?;
+        let metadata_tables = dll_info.metadata()?;
 
         // Pointers to IL method definitions in the loaded DLL.
         let dll_method_def: HashSet<Pointer> = metadata_tables

@@ -24,7 +24,7 @@ pub struct ClrRuntimeHeaderUnpacker<'a> {
 }
 
 #[derive(Copy, Clone)]
-pub struct MetadataUnpacker<'a> {
+pub struct RawCLRMetadata<'a> {
     /// The bytes owned by the Metadata stream, as determined from the
     /// CLR runtime header.
     bytes: ByteRange<'a>,
@@ -59,7 +59,7 @@ pub struct MetadataTablesHeaderUnpacker<'a> {
     bytes: ByteRange<'a>,
 }
 
-pub struct MetadataTables<'a> {
+pub struct Metadata<'a> {
     bytes: ByteRange<'a>,
     dll_unpacker: Unpacker<'a>,
     table_sizes: MetadataTableSizes,
@@ -450,7 +450,7 @@ pub struct MetadataTableSizes {
 pub struct MetadataTableUnpacker<'a, RowUnpacker> {
     /// The bytes that represent this table
     bytes: ByteRange<'a>,
-    tables: &'a MetadataTables<'a>,
+    tables: &'a Metadata<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -459,7 +459,7 @@ pub trait TypedMetadataIndex {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error>;
 }
 
@@ -503,7 +503,7 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     /// The typed index that refers to this row.
     index: MetadataTableIndex<RowUnpacker>,
 
-    tables: &'a MetadataTables<'a>,
+    tables: &'a Metadata<'a>,
     row_unpacker: PhantomData<RowUnpacker>,
 }
 
@@ -623,7 +623,7 @@ macro_rules! decl_core_coded_index_type {
 
             fn access<'a: 'b, 'b>(
                 self,
-                tables: &'b MetadataTables<'a>,
+                tables: &'b Metadata<'a>,
             ) -> Result<Self::Output<'a, 'b>, Error> {
                 Ok(match self.kind {
                     $(
@@ -646,7 +646,7 @@ macro_rules! decl_core_coded_index_type {
 
             fn access<'a: 'b, 'b>(
                 self,
-                tables: &'b MetadataTables<'a>,
+                tables: &'b Metadata<'a>,
             ) -> Result<Self::Output<'a, 'b>, Error> {
                 self.map(|index| tables.get(index)).transpose()
             }
@@ -1102,7 +1102,7 @@ impl<'a> Unpacker<'a> {
     }
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
-        let metadata = self.metadata()?;
+        let metadata = self.raw_metadata()?;
         // Ok(metadata.bytes.start)
 
         let metadata_tables = metadata.metadata_tables()?;
@@ -1130,7 +1130,7 @@ impl<'a> Unpacker<'a> {
             section.collect_annotations(annotator)?;
         }
 
-        self.metadata()?.collect_annotations(annotator)?;
+        self.raw_metadata()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -1233,20 +1233,20 @@ impl<'a> Unpacker<'a> {
         Ok(ClrRuntimeHeaderUnpacker { bytes })
     }
 
-    pub fn metadata(self) -> Result<MetadataUnpacker<'a>, Error> {
+    pub fn raw_metadata(self) -> Result<RawCLRMetadata<'a>, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value;
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
-        Ok(MetadataUnpacker {
+        Ok(RawCLRMetadata {
             bytes,
             dll_unpacker: self,
         })
     }
 
-    pub fn metadata_tables(self) -> Result<MetadataTables<'a>, Error> {
-        self.metadata()?.metadata_tables()
+    pub fn metadata(self) -> Result<Metadata<'a>, Error> {
+        self.raw_metadata()?.metadata_tables()
     }
 }
 
@@ -1421,7 +1421,7 @@ impl<'a> ClrRuntimeHeaderUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataUnpacker<'a> {
+impl<'a> RawCLRMetadata<'a> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -1592,14 +1592,14 @@ impl<'a> MetadataUnpacker<'a> {
         Ok(heaps)
     }
 
-    pub fn metadata_tables(self) -> Result<MetadataTables<'a>, Error> {
+    pub fn metadata_tables(self) -> Result<Metadata<'a>, Error> {
         let heaps = self.metadata_heaps()?;
         let header = self.metadata_tables_header()?;
 
         let table_sizes = header.metadata_table_sizes()?;
         let bytes = header.tables_after_header()?;
 
-        Ok(MetadataTables {
+        Ok(Metadata {
             bytes,
             dll_unpacker: self.dll_unpacker,
             table_sizes,
@@ -1826,7 +1826,7 @@ impl<'a> MetadataTablesHeaderUnpacker<'a> {
     }
 }
 
-impl<'a> MetadataTables<'a> {
+impl<'a> Metadata<'a> {
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.bytes.into()
     }
@@ -2031,7 +2031,7 @@ impl<'a> MetadataTables<'a> {
 
 macro_rules! define_table_method {
     ($method_name:ident,$unpacker_name:ident) => {
-        impl<'a> MetadataTables<'a> {
+        impl<'a> Metadata<'a> {
             pub fn $method_name<'b>(
                 &'b self,
             ) -> Result<MetadataTableUnpacker<'b, $unpacker_name>, Error> {
@@ -2087,7 +2087,7 @@ where
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
         self.value().access(tables)
     }
@@ -2098,7 +2098,7 @@ impl TypedMetadataIndex for MetadataStringIndex {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<UnpackedValue<&'a str>, Error> {
         let bytes = tables.heaps[MetadataHeapKind::String];
         bytes.get_null_terminated(self.0)
@@ -2110,7 +2110,7 @@ impl TypedMetadataIndex for MetadataBlobIndex {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<ByteRange<'a>, Error> {
         let blob_heap = tables.heaps[MetadataHeapKind::Blob];
         let index = self.0;
@@ -2150,7 +2150,7 @@ impl TypedMetadataIndex for MetadataGuidIndex {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
         let index = self.0;
         let guid_size = 16;
@@ -2167,7 +2167,7 @@ impl<Unpacker: MetadataTableTag> TypedMetadataIndex
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b MetadataTables<'a>,
+        tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
         tables.get_table()?.get_row(self.index)
     }
