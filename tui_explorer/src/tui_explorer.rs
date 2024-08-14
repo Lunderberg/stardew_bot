@@ -385,6 +385,112 @@ impl TuiExplorerBuilder {
                     .name(format!("MethodTable, {name}"));
             });
 
+        method_tables
+            .iter()
+            .map(|method_table_ptr| {
+                if method_table_ptr.is_null() {
+                    return Ok(None);
+                }
+                let ee_class_ptr: Pointer =
+                    self.reader.read_byte_array(*method_table_ptr + 40)?.into();
+                if ee_class_ptr.as_usize() & 1 > 0 {
+                    return Err(
+                        Error::MethodTableTableReferencedNonCanonicalMethodTable
+                    );
+                }
+
+                Ok(Some((method_table_ptr, ee_class_ptr)))
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .skip(1)
+            .zip(metadata_tables.type_def_table()?.iter_rows())
+            .filter_map(|(opt_ptrs, metadata_type_def)| {
+                opt_ptrs.map(|ptrs| (ptrs, metadata_type_def))
+            })
+            .try_for_each(
+                |((method_table_ptr, ee_class_ptr), metadata_type_def)| {
+                    let class_name = metadata_type_def.name()?.value();
+                    self.range(ee_class_ptr..ee_class_ptr + 56)
+                        .name(format!("EEClass for {class_name}"));
+
+                    let num_instance_fields = metadata_type_def
+                        .iter_fields()?
+                        .filter(|field| !field.is_static().unwrap())
+                        .count();
+
+                    let field_desc_ptr: Pointer =
+                        self.reader.read_byte_array(ee_class_ptr + 24)?.into();
+
+                    if !field_desc_ptr.is_null() {
+                        self.group(
+                            field_desc_ptr
+                                ..field_desc_ptr
+                                    + num_instance_fields * 16,
+                        )
+                        .name(format!("Fields of {class_name}"));
+
+                        let all_field_desc_bytes = self.reader.read_bytes(
+                            field_desc_ptr,
+                            num_instance_fields * 16,
+                        )?;
+
+                        metadata_type_def
+                            .iter_fields()?
+                            .filter(|field| !field.is_static().unwrap())
+                            .enumerate()
+                            .for_each(|(i_field, field)| {
+                                let field_name = field.name().unwrap().value();
+                                let field_desc_start =
+                                    field_desc_ptr + i_field * 16;
+                                self.range(
+                                    field_desc_start..field_desc_start + 16,
+                                )
+                                .name(format!(
+                                    "FieldDesc {field_name}"
+                                ));
+
+                                let this_field_desc_bytes =
+                                    &all_field_desc_bytes
+                                        [i_field * 16..(i_field + 1) * 16];
+
+                                let unpacked_method_table_ptr: Pointer =
+                                    this_field_desc_bytes[0..8]
+                                        .try_into()
+                                        .unwrap();
+
+                                let field_metadata_token = u32::from_le_bytes([
+                                    this_field_desc_bytes[8],
+                                    this_field_desc_bytes[9],
+                                    this_field_desc_bytes[10],
+                                    0,
+                                ])
+                                    as usize;
+
+                                self.range(
+                                    field_desc_start + 8..field_desc_start + 11,
+                                )
+                                .name("Field metadata token")
+                                .value(field_metadata_token).disable_highlight();
+
+                                let expected_field_index: usize =
+                                    field.index().into();
+                                assert!(expected_field_index == field_metadata_token-1,
+                                        "Expected {class_name}.{field_name}, index = {}, \
+                                         but found metadata token {field_metadata_token}",
+                                        field.index());
+
+                                assert!(
+                                    unpacked_method_table_ptr
+                                        == *method_table_ptr
+                                );
+                            });
+                    }
+
+                    Ok::<_, Error>(())
+                },
+            )?;
+
         metadata_tables
             .type_def_table()?
             .iter_rows()
@@ -396,14 +502,31 @@ impl TuiExplorerBuilder {
                     .map(|name| name == "Game1" || name.contains("Player"))
                     .unwrap_or(false)
             })
-            .for_each(|type_def| {
-                let name = type_def.name().unwrap().value();
+            .try_for_each(|type_def| {
+                let name = type_def.name()?.value();
                 let index = type_def.index();
                 let untyped_index: usize = index.into();
                 let method_table = method_tables[untyped_index + 1];
                 self.running_log
                     .add_log(format!("{index}: {name} @ {method_table}"));
-            });
+
+                let num_fields = type_def
+                    .iter_fields()?
+                    .filter(|field| !field.flags().unwrap().value().is_static())
+                    .count();
+                let num_methods = type_def
+                    .iter_methods()?
+                    .filter(|method| {
+                        !method.flags().unwrap().value().is_static()
+                    })
+                    .count();
+                self.running_log
+                    .add_log(format!("{name} has {num_fields} fields"));
+                self.running_log
+                    .add_log(format!("{name} has {num_methods} methods"));
+
+                Ok::<_, Error>(())
+            })?;
 
         let metadata_index_lookup: HashMap<_, _> = metadata_tables
             .type_def_table()?

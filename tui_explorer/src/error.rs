@@ -41,6 +41,9 @@ pub enum Error {
 
     #[error("Could not find table of method tables")]
     MethodTableTableNotFound,
+
+    #[error("Module class should only have pointers to canonical MethodTable")]
+    MethodTableTableReferencedNonCanonicalMethodTable,
 }
 
 impl std::fmt::Debug for Error {
