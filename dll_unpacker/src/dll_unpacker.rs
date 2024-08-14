@@ -3055,7 +3055,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
         Ok(self.get_index_range(4))
     }
 
-    fn iter_fields(
+    pub fn iter_fields(
         &self,
     ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Field>>, Error> {
         self.tables.iter_range(self.field_indices()?)
@@ -3296,7 +3296,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
         Ok(self.get_index_range(5))
     }
 
-    fn iter_params(
+    pub fn iter_params(
         &self,
     ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Param>>, Error> {
         self.tables.iter_range(self.param_indices()?)
