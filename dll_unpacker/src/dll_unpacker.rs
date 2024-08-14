@@ -3148,7 +3148,9 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
         self.tables.get(self.signature_index()?)
     }
 
-    pub fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
+    pub fn find_owning_class(
+        &self,
+    ) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
         // TODO: Generalize this to apply to Method/Param tables as well.
         let field_index = self.index().index;
         let type_def_table = self.tables.type_def_table()?;
@@ -3666,7 +3668,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldLayout> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let class_name = self.field()?.class()?.name()?.value;
+        let class_name = self.field()?.find_owning_class()?.name()?.value;
         let field_name = self.field()?.name()?.value;
 
         annotator.value(self.offset()?).name("Offset");
