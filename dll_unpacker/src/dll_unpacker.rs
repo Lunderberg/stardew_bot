@@ -183,6 +183,12 @@ pub struct MetadataTableIndex<TableTag> {
     _phantom: PhantomData<TableTag>,
 }
 
+#[derive(Clone, Copy)]
+pub struct MetadataHeapIndex<HeapTag> {
+    index: usize,
+    _phantom: PhantomData<HeapTag>,
+}
+
 /// Typed index into a specific metadata type
 ///
 /// When #![feature(step_trait)] is stabilized
@@ -712,43 +718,42 @@ impl<'a> UnpackBytes<'a> for usize {
     }
 }
 
-macro_rules! define_core_heap_index {
-    ($index_type:ident, $name:ident) => {
-        #[derive(Clone, Copy)]
-        pub struct $index_type(usize);
+pub struct Blob;
+pub struct GUID;
 
-        impl std::fmt::Display for $index_type {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{}[{}]", stringify!($name), self.0)
+macro_rules! impl_display_heap_indices{
+    ( $( $name:ident ),* $(,)? ) => {
+        $(
+            impl std::fmt::Display for MetadataHeapIndex<$name> {
+                fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+                    write!(f, "{}[{}]", stringify!($name), self.index)
+                }
             }
-        }
+        )*
     };
 }
 
-macro_rules! impl_unpack_heap_index {
-    ($index_type:ident, $name:ident) => {
-        impl<'a> UnpackBytes<'a> for $index_type {
-            fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-                bytes.unpack().map($index_type)
+macro_rules! impl_unpack_heap_indices {
+    ( $( $name:ident ),* $(,)? ) => {
+        $(
+            impl<'a> UnpackBytes<'a> for MetadataHeapIndex<$name> {
+                fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+                    bytes.unpack().map(|index| MetadataHeapIndex {
+                        index,
+                        _phantom: PhantomData,
+                    })
+                }
             }
-        }
+        )*
     };
 }
 
-macro_rules! decl_heap_index {
-    ($index_type:ident, $name:ident) => {
-        define_core_heap_index! {$index_type, $name}
-        impl_unpack_heap_index! {$index_type, $name}
-    };
-}
+impl_display_heap_indices! {String, Blob, GUID}
+impl_unpack_heap_indices! {String, Blob}
 
-decl_heap_index! { MetadataStringIndex, String }
-decl_heap_index! { MetadataBlobIndex, Blob }
-define_core_heap_index! { MetadataGuidIndex, GUID }
-
-impl<'a> UnpackBytes<'a> for MetadataGuidIndex {
+impl<'a> UnpackBytes<'a> for Option<MetadataHeapIndex<GUID>> {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().and_then(|index: usize| {
+        bytes.unpack().map(|index: usize| {
             // Unlike indices into the #Strings or #Blob heaps, which
             // are zero-indexed, indices into the #GUID heap are
             // one-indexed.  An index of zero is used to represent a
@@ -756,24 +761,26 @@ impl<'a> UnpackBytes<'a> for MetadataGuidIndex {
             //
             // Converting the indices when unpacking avoids having a
             // Rust `usize` that cannot be used as an index.
+
             if index == 0 {
-                Err(Error::InvalidGuidIndexZero)
+                None
             } else {
-                Ok(MetadataGuidIndex(index - 1))
+                Some(MetadataHeapIndex {
+                    index: index - 1,
+                    _phantom: PhantomData,
+                })
             }
         })
     }
 }
 
-impl<'a> UnpackBytes<'a> for Option<MetadataGuidIndex> {
+impl<'a> UnpackBytes<'a> for MetadataHeapIndex<GUID> {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().map(|index: usize| {
-            if index == 0 {
-                None
-            } else {
-                Some(MetadataGuidIndex(index - 1))
-            }
-        })
+        bytes
+            .unpack()
+            .and_then(|index: Option<MetadataHeapIndex<GUID>>| {
+                index.ok_or(Error::InvalidGuidIndexZero)
+            })
     }
 }
 
@@ -1736,7 +1743,7 @@ where
     }
 }
 
-impl TypedMetadataIndex for MetadataStringIndex {
+impl TypedMetadataIndex for MetadataHeapIndex<String> {
     type Output<'a: 'b, 'b> = UnpackedValue<&'a str>;
 
     fn access<'a: 'b, 'b>(
@@ -1744,11 +1751,11 @@ impl TypedMetadataIndex for MetadataStringIndex {
         tables: &'b Metadata<'a>,
     ) -> Result<UnpackedValue<&'a str>, Error> {
         let bytes = tables.heaps[MetadataHeapKind::String];
-        bytes.get_null_terminated(self.0)
+        bytes.get_null_terminated(self.index)
     }
 }
 
-impl TypedMetadataIndex for MetadataBlobIndex {
+impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
     type Output<'a: 'b, 'b> = ByteRange<'a>;
 
     fn access<'a: 'b, 'b>(
@@ -1756,7 +1763,7 @@ impl TypedMetadataIndex for MetadataBlobIndex {
         tables: &'b Metadata<'a>,
     ) -> Result<ByteRange<'a>, Error> {
         let blob_heap = tables.heaps[MetadataHeapKind::Blob];
-        let index = self.0;
+        let index = self.index;
 
         let byte: u8 = blob_heap[index];
 
@@ -1788,14 +1795,14 @@ impl TypedMetadataIndex for MetadataBlobIndex {
     }
 }
 
-impl TypedMetadataIndex for MetadataGuidIndex {
+impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
     type Output<'a: 'b, 'b> = UnpackedValue<u128>;
 
     fn access<'a: 'b, 'b>(
         self,
         tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
-        let index = self.0;
+        let index = self.index;
         let guid_size = 16;
         tables.heaps[MetadataHeapKind::GUID]
             .subrange(index * guid_size..(index + 1) * guid_size)
@@ -2448,7 +2455,7 @@ impl<'a> MetadataRow<'a, Module> {
 
     pub fn name_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -2458,7 +2465,7 @@ impl<'a> MetadataRow<'a, Module> {
 
     pub fn module_id_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataGuidIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<GUID>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -2468,13 +2475,13 @@ impl<'a> MetadataRow<'a, Module> {
 
     pub fn enc_id(
         &self,
-    ) -> Result<UnpackedValue<Option<MetadataGuidIndex>>, Error> {
+    ) -> Result<UnpackedValue<Option<MetadataHeapIndex<GUID>>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
     pub fn enc_base_id(
         &self,
-    ) -> Result<UnpackedValue<Option<MetadataGuidIndex>>, Error> {
+    ) -> Result<UnpackedValue<Option<MetadataHeapIndex<GUID>>>, Error> {
         self.get_field_bytes(4).unpack()
     }
 }
@@ -2511,7 +2518,9 @@ impl<'a> MetadataRow<'a, TypeRef> {
         self.metadata.get(self.resolution_scope_index()?)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -2521,7 +2530,7 @@ impl<'a> MetadataRow<'a, TypeRef> {
 
     fn namespace_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -2620,7 +2629,9 @@ impl<'a> MetadataRow<'a, TypeDef> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -2630,7 +2641,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
 
     fn namespace_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -2729,7 +2740,9 @@ impl<'a> MetadataRow<'a, Field> {
         Ok(self.flags()?.value().is_static())
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -2739,7 +2752,7 @@ impl<'a> MetadataRow<'a, Field> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -2871,7 +2884,9 @@ impl<'a> MetadataRow<'a, MethodDef> {
         Ok(self.flags()?.value().is_static())
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
@@ -2881,7 +2896,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(4).unpack()
     }
 
@@ -2952,7 +2967,9 @@ impl<'a> MetadataRow<'a, Param> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3036,7 +3053,9 @@ impl<'a> MetadataRow<'a, MemberRef> {
         self.metadata.get(self.class_index()?)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -3046,7 +3065,7 @@ impl<'a> MetadataRow<'a, MemberRef> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3087,7 +3106,9 @@ impl<'a> MetadataRow<'a, Constant> {
         self.metadata.get(self.parent_index()?)
     }
 
-    fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    fn value_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
@@ -3137,7 +3158,9 @@ impl<'a> MetadataRow<'a, CustomAttribute> {
         self.metadata.get(self.attribute_type_index()?)
     }
 
-    fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    fn value_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3174,7 +3197,7 @@ impl<'a> MetadataRow<'a, FieldMarshal> {
 
     fn native_type_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 }
@@ -3216,7 +3239,7 @@ impl<'a> MetadataRow<'a, DeclSecurity> {
 
     fn permission_set_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3307,7 +3330,7 @@ impl<'a> MetadataRow<'a, StandAloneSig> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
@@ -3381,7 +3404,9 @@ impl<'a> MetadataRow<'a, Event> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -3462,7 +3487,9 @@ impl<'a> MetadataRow<'a, Property> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
@@ -3472,7 +3499,7 @@ impl<'a> MetadataRow<'a, Property> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3589,7 +3616,9 @@ impl<'a> MetadataRow<'a, ModuleRef> {
         Ok(())
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
@@ -3613,7 +3642,7 @@ impl<'a> MetadataRow<'a, TypeSpec> {
 
     fn signature_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(0).unpack()
     }
 
@@ -3662,7 +3691,7 @@ impl<'a> MetadataRow<'a, ImplMap> {
 
     fn import_name_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -3784,7 +3813,7 @@ impl<'a> MetadataRow<'a, Assembly> {
 
     fn public_key_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(6).unpack()
     }
 
@@ -3792,7 +3821,9 @@ impl<'a> MetadataRow<'a, Assembly> {
         self.metadata.get(self.public_key_index()?)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(7).unpack()
     }
 
@@ -3863,7 +3894,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
 
     fn public_key_or_token_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(5).unpack()
     }
 
@@ -3871,7 +3902,9 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         self.metadata.get(self.public_key_or_token_index()?)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(6).unpack()
     }
 
@@ -3881,7 +3914,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
 
     fn culture_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(7).unpack()
     }
 
@@ -3891,7 +3924,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
 
     fn hash_value_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(8).unpack()
     }
 
@@ -3928,7 +3961,9 @@ impl<'a> MetadataRow<'a, ManifestResource> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(2).unpack()
     }
 
@@ -4036,7 +4071,9 @@ impl<'a> MetadataRow<'a, GenericParam> {
         self.metadata.get(self.owner_index()?)
     }
 
-    fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
+    fn name_index(
+        &self,
+    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
         self.get_field_bytes(3).unpack()
     }
 
@@ -4077,7 +4114,7 @@ impl<'a> MetadataRow<'a, MethodSpec> {
 
     fn instantiation_index(
         &self,
-    ) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
+    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
         self.get_field_bytes(1).unpack()
     }
 
