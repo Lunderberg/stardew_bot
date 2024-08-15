@@ -8,5 +8,6 @@ edition = "2021"
 [dependencies]
 itertools = "*"
 thiserror = "*"
+derive_more = {version = "*", features=["full"]}
 
 memory_reader = { path = "../memory_reader" }

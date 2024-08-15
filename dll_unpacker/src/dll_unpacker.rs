@@ -1,3 +1,4 @@
+use derive_more::From;
 use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
@@ -135,14 +136,14 @@ pub enum MetadataCodedIndexKind {
     TypeOrMethodDef,
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, From)]
 pub enum MetadataIndexKind {
     Heap(MetadataHeapKind),
     Table(MetadataTableKind),
     CodedIndex(MetadataCodedIndexKind),
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, From)]
 pub enum MetadataColumnType {
     Index(MetadataIndexKind),
     FixedSize(usize),
@@ -2331,24 +2332,6 @@ impl EnumKey for MetadataIndexKind {
     }
 }
 
-impl From<MetadataHeapKind> for MetadataIndexKind {
-    fn from(value: MetadataHeapKind) -> Self {
-        Self::Heap(value)
-    }
-}
-
-impl From<MetadataTableKind> for MetadataIndexKind {
-    fn from(value: MetadataTableKind) -> Self {
-        Self::Table(value)
-    }
-}
-
-impl From<MetadataCodedIndexKind> for MetadataIndexKind {
-    fn from(value: MetadataCodedIndexKind) -> Self {
-        Self::CodedIndex(value)
-    }
-}
-
 impl MetadataCodedIndexKind {
     fn table_options(self) -> &'static [Option<MetadataTableKind>] {
         match self {
@@ -2370,27 +2353,6 @@ impl MetadataCodedIndexKind {
 
     fn table_bits(self) -> usize {
         self.table_options().len().next_power_of_two().ilog2() as usize
-    }
-}
-
-impl From<usize> for MetadataColumnType {
-    fn from(value: usize) -> Self {
-        Self::FixedSize(value)
-    }
-}
-impl From<MetadataHeapKind> for MetadataColumnType {
-    fn from(value: MetadataHeapKind) -> Self {
-        Self::Index(MetadataIndexKind::Heap(value))
-    }
-}
-impl From<MetadataTableKind> for MetadataColumnType {
-    fn from(value: MetadataTableKind) -> Self {
-        Self::Index(MetadataIndexKind::Table(value))
-    }
-}
-impl From<MetadataCodedIndexKind> for MetadataColumnType {
-    fn from(value: MetadataCodedIndexKind) -> Self {
-        Self::Index(MetadataIndexKind::CodedIndex(value))
     }
 }
 
