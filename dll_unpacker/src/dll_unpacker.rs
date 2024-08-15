@@ -16,7 +16,7 @@ pub struct DLLUnpacker<'a> {
     pub(crate) bytes: ByteRange<'a>,
 }
 
-pub struct ClrRuntimeHeaderUnpacker<'a> {
+pub struct ClrRuntimeHeader<'a> {
     bytes: ByteRange<'a>,
 }
 
@@ -444,11 +444,15 @@ pub struct MetadataTableSizes {
     table_offsets: EnumMap<MetadataTableKind, usize>,
 }
 
-pub struct MetadataTableUnpacker<'a, RowUnpacker> {
-    /// The bytes that represent this table
+pub struct MetadataTable<'a, TableTag> {
+    /// The bytes that represent this table.
     bytes: ByteRange<'a>,
-    tables: &'a Metadata<'a>,
-    row_unpacker: PhantomData<RowUnpacker>,
+
+    /// The CLR metadata that contains this table.
+    metadata: &'a Metadata<'a>,
+
+    /// A compile-time tag indicating which table this is.
+    _phantom: PhantomData<TableTag>,
 }
 
 pub trait TypedMetadataIndex {
@@ -462,9 +466,9 @@ pub trait TypedMetadataIndex {
 
 /// Typed index into a specific metadata type
 #[derive(Clone, Copy)]
-pub struct MetadataTableIndex<Unpacker> {
+pub struct MetadataTableIndex<TableTag> {
     index: usize,
-    _phantom: PhantomData<Unpacker>,
+    _phantom: PhantomData<TableTag>,
 }
 
 /// Typed index into a specific metadata type
@@ -473,10 +477,10 @@ pub struct MetadataTableIndex<Unpacker> {
 /// (https://github.com/rust-lang/rust/issues/42168), this will be
 /// replaced with `Range<MetadataTableIndex<Unpacker>>`.
 #[derive(Clone, Copy)]
-pub struct MetadataTableIndexRange<Unpacker> {
+pub struct MetadataTableIndexRange<TableTag> {
     start: usize,
     end: usize,
-    _phantom: PhantomData<Unpacker>,
+    _phantom: PhantomData<TableTag>,
 }
 
 #[derive(Clone, Copy)]
@@ -486,7 +490,7 @@ pub struct MetadataCodedIndex<CodedIndexType> {
     _phantom: PhantomData<CodedIndexType>,
 }
 
-pub struct MetadataRowUnpacker<'a, RowUnpacker> {
+pub struct MetadataRow<'a, TableTag> {
     /// The bytes that are directly owned by this row of the table.
     bytes: ByteRange<'a>,
 
@@ -498,10 +502,10 @@ pub struct MetadataRowUnpacker<'a, RowUnpacker> {
     next_row_bytes: Option<ByteRange<'a>>,
 
     /// The typed index that refers to this row.
-    index: MetadataTableIndex<RowUnpacker>,
+    index: MetadataTableIndex<TableTag>,
 
-    tables: &'a Metadata<'a>,
-    row_unpacker: PhantomData<RowUnpacker>,
+    /// The metadata object that contains this row.
+    metadata: &'a Metadata<'a>,
 }
 
 pub trait MetadataTableTag: Copy {
@@ -604,19 +608,19 @@ pub trait CodedIndex {
 
 macro_rules! decl_core_coded_index_type {
     ($tag:ident,
-     $row_unpacker:ident,
+     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
         pub struct $tag;
 
-        pub enum $row_unpacker<'a> {
+        pub enum $row_enum<'a> {
             $(
-                $table_type(MetadataRowUnpacker<'a, $table_type>),
+                $table_type(MetadataRow<'a, $table_type>),
             )*
         }
 
         impl TypedMetadataIndex for MetadataCodedIndex<$tag> {
-            type Output<'a: 'b, 'b> = $row_unpacker<'b>;
+            type Output<'a: 'b, 'b> = $row_enum<'b>;
 
             fn access<'a: 'b, 'b>(
                 self,
@@ -624,7 +628,7 @@ macro_rules! decl_core_coded_index_type {
             ) -> Result<Self::Output<'a, 'b>, Error> {
                 Ok(match self.kind {
                     $(
-                        MetadataTableKind::$table_type => $row_unpacker::$table_type(
+                        MetadataTableKind::$table_type => $row_enum::$table_type(
                             tables.get(MetadataTableIndex::new(self.index))?,
                         ),
                     )*
@@ -639,7 +643,7 @@ macro_rules! decl_core_coded_index_type {
         }
 
         impl TypedMetadataIndex for Option<MetadataCodedIndex<$tag>> {
-            type Output<'a:'b, 'b> = Option<$row_unpacker<'b>>;
+            type Output<'a:'b, 'b> = Option<$row_enum<'b>>;
 
             fn access<'a: 'b, 'b>(
                 self,
@@ -671,7 +675,7 @@ macro_rules! decl_core_coded_index_type {
 
 macro_rules! impl_coded_index {
     ($tag:ident,
-     $row_unpacker:ident,
+     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
         impl CodedIndex for $tag {
@@ -686,11 +690,11 @@ macro_rules! impl_coded_index {
 
 macro_rules! decl_coded_index_type {
     ($tag:ident,
-     $row_unpacker:ident,
+     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
-        decl_core_coded_index_type!{ $tag, $row_unpacker, [ $($table_type),+ ] }
-        impl_coded_index!{ $tag, $row_unpacker, [ $($table_type),+ ] }
+        decl_core_coded_index_type!{ $tag, $row_enum, [ $($table_type),+ ] }
+        impl_coded_index!{ $tag, $row_enum, [ $($table_type),+ ] }
     };
 }
 
@@ -976,8 +980,8 @@ impl<'a> UnpackBytes<'a> for Option<MetadataGuidIndex> {
     }
 }
 
-impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
-    for Option<MetadataTableIndex<Unpacker>>
+impl<'a, TableTag: MetadataTableTag> UnpackBytes<'a>
+    for Option<MetadataTableIndex<TableTag>>
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         bytes.unpack().map(|index: usize| {
@@ -990,27 +994,27 @@ impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
     }
 }
 
-impl<'a, Unpacker: MetadataTableTag> UnpackBytes<'a>
-    for MetadataTableIndex<Unpacker>
+impl<'a, TableTag: MetadataTableTag> UnpackBytes<'a>
+    for MetadataTableIndex<TableTag>
 {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
         bytes.unpack().and_then(|opt_index: Option<Self>| {
             opt_index.ok_or(Error::InvalidMetadataTableIndexZero {
-                kind: Unpacker::KIND,
+                kind: TableTag::KIND,
             })
         })
     }
 }
 
-impl<Unpacker: MetadataTableTag> std::fmt::Display
-    for MetadataTableIndex<Unpacker>
+impl<TableTag: MetadataTableTag> std::fmt::Display
+    for MetadataTableIndex<TableTag>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}[{}]", Unpacker::KIND, self.index)
+        write!(f, "{}[{}]", TableTag::KIND, self.index)
     }
 }
 
-impl<Unpacker> MetadataTableIndex<Unpacker> {
+impl<TableTag> MetadataTableIndex<TableTag> {
     fn new(index: usize) -> Self {
         Self {
             index,
@@ -1019,7 +1023,7 @@ impl<Unpacker> MetadataTableIndex<Unpacker> {
     }
 }
 
-impl<Unpacker> Into<usize> for MetadataTableIndex<Unpacker> {
+impl<TableTag> Into<usize> for MetadataTableIndex<TableTag> {
     fn into(self) -> usize {
         self.index
     }
@@ -1132,9 +1136,7 @@ impl<'a> DLLUnpacker<'a> {
         Ok(())
     }
 
-    pub fn clr_runtime_header(
-        &self,
-    ) -> Result<ClrRuntimeHeaderUnpacker, Error> {
+    pub fn clr_runtime_header(&self) -> Result<ClrRuntimeHeader, Error> {
         let optional_header = self.optional_header()?;
         let data_dir = optional_header
             .data_directory(DataDirectoryKind::ClrRuntimeHeader)?
@@ -1145,7 +1147,7 @@ impl<'a> DLLUnpacker<'a> {
 
         let size = data_dir.size as usize;
         let bytes = self.bytes.subrange(addr..addr + size);
-        Ok(ClrRuntimeHeaderUnpacker { bytes })
+        Ok(ClrRuntimeHeader { bytes })
     }
 
     pub fn raw_metadata(self) -> Result<RawCLRMetadata<'a>, Error> {
@@ -1165,7 +1167,7 @@ impl<'a> DLLUnpacker<'a> {
     }
 }
 
-impl<'a> ClrRuntimeHeaderUnpacker<'a> {
+impl<'a> ClrRuntimeHeader<'a> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -1820,13 +1822,13 @@ impl<'a> Metadata<'a> {
         Ok(())
     }
 
-    fn get_table<'b, Unpacker>(
+    fn get_table<'b, TableTag>(
         &'b self,
-    ) -> Result<MetadataTableUnpacker<'b, Unpacker>, Error>
+    ) -> Result<MetadataTable<'b, TableTag>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        let table_kind = Unpacker::KIND;
+        let table_kind = TableTag::KIND;
 
         let offset = self.table_sizes.table_offsets[table_kind];
         let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
@@ -1834,10 +1836,10 @@ impl<'a> Metadata<'a> {
         let size = bytes_per_row * num_rows;
         let bytes = self.bytes.subrange(offset..offset + size);
 
-        Ok(MetadataTableUnpacker {
+        Ok(MetadataTable {
             bytes,
-            tables: &self,
-            row_unpacker: PhantomData,
+            metadata: &self,
+            _phantom: PhantomData,
         })
     }
 
@@ -1851,12 +1853,12 @@ impl<'a> Metadata<'a> {
         index.access(self)
     }
 
-    fn iter_range<Unpacker>(
+    fn iter_range<TableTag>(
         &self,
-        indices: impl Borrow<MetadataTableIndexRange<Unpacker>>,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Unpacker>>, Error>
+        indices: impl Borrow<MetadataTableIndexRange<TableTag>>,
+    ) -> Result<impl Iterator<Item = MetadataRow<TableTag>>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
         let indices = indices.borrow();
         let table = self.get_table()?;
@@ -1874,11 +1876,11 @@ impl<'a> Metadata<'a> {
 }
 
 macro_rules! define_table_method {
-    ($method_name:ident,$unpacker_name:ident) => {
+    ($method_name:ident,$tag:ident) => {
         impl<'a> Metadata<'a> {
             pub fn $method_name<'b>(
                 &'b self,
-            ) -> Result<MetadataTableUnpacker<'b, $unpacker_name>, Error> {
+            ) -> Result<MetadataTable<'b, $tag>, Error> {
                 self.get_table()
             }
         }
@@ -2004,10 +2006,10 @@ impl TypedMetadataIndex for MetadataGuidIndex {
     }
 }
 
-impl<Unpacker: MetadataTableTag> TypedMetadataIndex
-    for MetadataTableIndex<Unpacker>
+impl<TableTag: MetadataTableTag> TypedMetadataIndex
+    for MetadataTableIndex<TableTag>
 {
-    type Output<'a: 'b, 'b> = MetadataRowUnpacker<'b, Unpacker>;
+    type Output<'a: 'b, 'b> = MetadataRow<'b, TableTag>;
 
     fn access<'a: 'b, 'b>(
         self,
@@ -2017,25 +2019,25 @@ impl<Unpacker: MetadataTableTag> TypedMetadataIndex
     }
 }
 
-impl<Unpacker: MetadataTableTag> std::fmt::Display
-    for MetadataTableIndexRange<Unpacker>
+impl<TableTag: MetadataTableTag> std::fmt::Display
+    for MetadataTableIndexRange<TableTag>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}[{}..{}]", Unpacker::KIND, self.start, self.end)
+        write!(f, "{}[{}..{}]", TableTag::KIND, self.start, self.end)
     }
 }
 
 mod _impl_typed_index_range_iter {
     use super::*;
-    pub struct MetadataTableIndexIterRange<Unpacker> {
+    pub struct MetadataTableIndexIterRange<TableTag> {
         index: usize,
         end: usize,
-        _phantom: PhantomData<Unpacker>,
+        _phantom: PhantomData<TableTag>,
     }
-    impl<Unpacker> IntoIterator for MetadataTableIndexRange<Unpacker> {
-        type Item = MetadataTableIndex<Unpacker>;
+    impl<TableTag> IntoIterator for MetadataTableIndexRange<TableTag> {
+        type Item = MetadataTableIndex<TableTag>;
 
-        type IntoIter = MetadataTableIndexIterRange<Unpacker>;
+        type IntoIter = MetadataTableIndexIterRange<TableTag>;
 
         fn into_iter(self) -> Self::IntoIter {
             MetadataTableIndexIterRange {
@@ -2046,8 +2048,8 @@ mod _impl_typed_index_range_iter {
         }
     }
 
-    impl<Unpacker> Iterator for MetadataTableIndexIterRange<Unpacker> {
-        type Item = MetadataTableIndex<Unpacker>;
+    impl<TableTag> Iterator for MetadataTableIndexIterRange<TableTag> {
+        type Item = MetadataTableIndex<TableTag>;
 
         fn next(&mut self) -> Option<Self::Item> {
             if self.index < self.end {
@@ -2401,38 +2403,36 @@ impl MetadataTableKind {
     }
 }
 
-impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
+impl<'a, TableTag> MetadataTable<'a, TableTag> {
     fn validate_index_range(
         &self,
-        indices: MetadataTableIndexRange<Unpacker>,
+        indices: MetadataTableIndexRange<TableTag>,
     ) -> Result<(), Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        let num_rows = self.tables.table_sizes.num_rows[Unpacker::KIND];
+        let num_rows = self.metadata.table_sizes.num_rows[TableTag::KIND];
         let MetadataTableIndexRange { start, end, .. } = indices;
 
         if end <= num_rows {
             Ok(())
         } else {
             Err(Error::InvalidMetadataTableIndexRange {
-                kind: Unpacker::KIND,
+                kind: TableTag::KIND,
                 indices: start..end,
                 num_rows,
             })
         }
     }
 
-    pub fn iter_rows(
-        self,
-    ) -> impl Iterator<Item = MetadataRowUnpacker<'a, Unpacker>>
+    pub fn iter_rows(self) -> impl Iterator<Item = MetadataRow<'a, TableTag>>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        let num_rows = self.tables.table_sizes.num_rows[Unpacker::KIND];
+        let num_rows = self.metadata.table_sizes.num_rows[TableTag::KIND];
         let bytes_per_row =
-            self.tables.table_sizes.bytes_per_row[Unpacker::KIND];
-        let tables = self.tables;
+            self.metadata.table_sizes.bytes_per_row[TableTag::KIND];
+        let tables = self.metadata;
         let table_bytes = self.bytes;
         (0..num_rows).map(move |i_row| {
             let bytes = table_bytes
@@ -2442,29 +2442,28 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                     (i_row + 1) * bytes_per_row..(i_row + 2) * bytes_per_row,
                 )
             });
-            MetadataRowUnpacker {
+            MetadataRow {
                 bytes,
                 next_row_bytes,
-                tables,
+                metadata: tables,
                 index: MetadataTableIndex::new(i_row),
-                row_unpacker: PhantomData,
             }
         })
     }
 
     pub fn num_rows(&self) -> usize
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        self.tables.table_sizes.num_rows[Unpacker::KIND]
+        self.metadata.table_sizes.num_rows[TableTag::KIND]
     }
 
     pub fn address_range(
         &self,
-        indices: impl Borrow<MetadataTableIndexRange<Unpacker>>,
+        indices: impl Borrow<MetadataTableIndexRange<TableTag>>,
     ) -> Result<Range<Pointer>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
         let indices = indices.borrow();
         self.address_range_from_untyped(indices.start..indices.end)
@@ -2475,11 +2474,11 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         indices: Range<usize>,
     ) -> Result<Range<Pointer>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        let kind = Unpacker::KIND;
-        let num_rows = self.tables.table_sizes.num_rows[kind];
-        let bytes_per_row = self.tables.table_sizes.bytes_per_row[kind];
+        let kind = TableTag::KIND;
+        let num_rows = self.metadata.table_sizes.num_rows[kind];
+        let bytes_per_row = self.metadata.table_sizes.bytes_per_row[kind];
 
         if indices.end <= num_rows {
             Ok(self.bytes.address_range(
@@ -2496,10 +2495,10 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
 
     pub fn get<'b>(
         &'b self,
-        index: MetadataTableIndex<Unpacker>,
-    ) -> Result<MetadataRowUnpacker<'a, Unpacker>, Error>
+        index: MetadataTableIndex<TableTag>,
+    ) -> Result<MetadataRow<'a, TableTag>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
         self.get_row(index.index)
     }
@@ -2507,12 +2506,12 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     pub fn get_row<'b>(
         &'b self,
         index: usize,
-    ) -> Result<MetadataRowUnpacker<'a, Unpacker>, Error>
+    ) -> Result<MetadataRow<'a, TableTag>, Error>
     where
-        Unpacker: MetadataTableTag,
+        TableTag: MetadataTableTag,
     {
-        let kind = Unpacker::KIND;
-        let num_rows = self.tables.table_sizes.num_rows[kind];
+        let kind = TableTag::KIND;
+        let num_rows = self.metadata.table_sizes.num_rows[kind];
 
         // There's an offset between the one-indexed CLI indices
         // (where zero represents a null value) and the usual
@@ -2523,7 +2522,7 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
         // the unpacking of CLI indices.
 
         if index < num_rows {
-            let bytes_per_row = self.tables.table_sizes.bytes_per_row[kind];
+            let bytes_per_row = self.metadata.table_sizes.bytes_per_row[kind];
             let bytes = self
                 .bytes
                 .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
@@ -2532,12 +2531,11 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
                     (index + 1) * bytes_per_row..(index + 2) * bytes_per_row,
                 )
             });
-            Ok(MetadataRowUnpacker {
+            Ok(MetadataRow {
                 bytes,
                 next_row_bytes,
                 index: MetadataTableIndex::new(index),
-                tables: self.tables,
-                row_unpacker: self.row_unpacker,
+                metadata: self.metadata,
             })
         } else {
             Err(Error::InvalidMetadataTableIndex {
@@ -2549,12 +2547,12 @@ impl<'a, Unpacker> MetadataTableUnpacker<'a, Unpacker> {
     }
 }
 
-impl<'a, Unpacker> MetadataRowUnpacker<'a, Unpacker>
+impl<'a, TableTag> MetadataRow<'a, TableTag>
 where
-    Unpacker: MetadataTableTag,
+    TableTag: MetadataTableTag,
 {
     #[inline]
-    pub fn index(&self) -> MetadataTableIndex<Unpacker> {
+    pub fn index(&self) -> MetadataTableIndex<TableTag> {
         self.index
     }
 
@@ -2564,16 +2562,16 @@ where
     }
 
     fn get_field_bytes(&self, column: usize) -> ByteRange<'a> {
-        let fields = Unpacker::COLUMNS;
+        let fields = TableTag::COLUMNS;
 
         let offset: usize = fields
             .iter()
             .take(column)
             .cloned()
-            .map(|field| self.tables.table_sizes.column_size(field))
+            .map(|field| self.metadata.table_sizes.column_size(field))
             .sum();
 
-        let size = self.tables.table_sizes.column_size(fields[column]);
+        let size = self.metadata.table_sizes.column_size(fields[column]);
 
         self.bytes.subrange(offset..offset + size)
     }
@@ -2595,11 +2593,11 @@ where
             .unwrap_or_else(|| {
                 let MetadataColumnType::Index(MetadataIndexKind::Table(
                     table_kind,
-                )) = Unpacker::COLUMNS[column]
+                )) = TableTag::COLUMNS[column]
                 else {
                     panic!("Only simple indices are used as ranges")
                 };
-                self.tables.table_sizes.num_rows[table_kind]
+                self.metadata.table_sizes.num_rows[table_kind]
             });
 
         let (loc, begin_index): (_, usize) =
@@ -2624,7 +2622,7 @@ where
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Module> {
+impl<'a> MetadataRow<'a, Module> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2658,7 +2656,7 @@ impl<'a> MetadataRowUnpacker<'a, Module> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     pub fn module_id_index(
@@ -2668,7 +2666,7 @@ impl<'a> MetadataRowUnpacker<'a, Module> {
     }
 
     pub fn module_id(&self) -> Result<UnpackedValue<u128>, Error> {
-        self.tables.get(self.module_id_index()?)
+        self.metadata.get(self.module_id_index()?)
     }
 
     pub fn enc_id(
@@ -2684,7 +2682,7 @@ impl<'a> MetadataRowUnpacker<'a, Module> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeRef> {
+impl<'a> MetadataRow<'a, TypeRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2713,7 +2711,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRef> {
     }
 
     fn resolution_scope(&self) -> Result<MetadataResolutionScope, Error> {
-        self.tables.get(self.resolution_scope_index()?)
+        self.metadata.get(self.resolution_scope_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -2721,7 +2719,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeRef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn namespace_index(
@@ -2731,17 +2729,17 @@ impl<'a> MetadataRowUnpacker<'a, TypeRef> {
     }
 
     fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.namespace_index()?)
+        self.metadata.get(self.namespace_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeDef> {
+impl<'a> MetadataRow<'a, TypeDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        field_table: &MetadataTableUnpacker<Field>,
-        method_def_table: &MetadataTableUnpacker<MethodDef>,
-        param_table: &MetadataTableUnpacker<Param>,
+        field_table: &MetadataTable<Field>,
+        method_def_table: &MetadataTable<MethodDef>,
+        param_table: &MetadataTable<Param>,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
         let type_name = self.name()?.value;
@@ -2799,10 +2797,10 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
                 .value
                 .start;
             let param_end = if method_range.end
-                == self.tables.table_sizes.num_rows
+                == self.metadata.table_sizes.num_rows
                     [MetadataTableKind::MethodDef]
             {
-                self.tables.table_sizes.num_rows[MetadataTableKind::Param]
+                self.metadata.table_sizes.num_rows[MetadataTableKind::Param]
             } else {
                 method_def_table
                     .get_row(method_range.end)?
@@ -2830,7 +2828,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn namespace_index(
@@ -2840,7 +2838,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     }
 
     fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.namespace_index()?)
+        self.metadata.get(self.namespace_index()?)
     }
 
     fn extends_index(
@@ -2851,7 +2849,7 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
     }
 
     fn extends(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
-        self.tables.get(self.extends_index()?)
+        self.metadata.get(self.extends_index()?)
     }
 
     fn field_indices(
@@ -2862,8 +2860,8 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
 
     pub fn iter_fields(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Field>>, Error> {
-        self.tables.iter_range(self.field_indices()?)
+    ) -> Result<impl Iterator<Item = MetadataRow<Field>>, Error> {
+        self.metadata.iter_range(self.field_indices()?)
     }
 
     fn method_indices(
@@ -2874,9 +2872,8 @@ impl<'a> MetadataRowUnpacker<'a, TypeDef> {
 
     pub fn iter_methods(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<'a, MethodDef>>, Error>
-    {
-        self.tables.iter_range(self.method_indices()?)
+    ) -> Result<impl Iterator<Item = MetadataRow<'a, MethodDef>>, Error> {
+        self.metadata.iter_range(self.method_indices()?)
     }
 }
 
@@ -2902,7 +2899,7 @@ impl std::fmt::Display for FieldFlags {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Field> {
+impl<'a> MetadataRow<'a, Field> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -2940,7 +2937,7 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn signature_index(
@@ -2950,15 +2947,13 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 
-    pub fn find_owning_class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
+    pub fn find_owning_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
         // TODO: Generalize this to apply to Method/Param tables as well.
         let field_index = self.index().index;
-        let type_def_table = self.tables.type_def_table()?;
+        let type_def_table = self.metadata.type_def_table()?;
 
         let mut index_range = 0..type_def_table.num_rows();
 
@@ -2984,13 +2979,13 @@ impl<'a> MetadataRowUnpacker<'a, Field> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodDef> {
+impl<'a> MetadataRow<'a, MethodDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
         type_name: &str,
         type_namespace: &str,
-        param_table: &MetadataTableUnpacker<Param>,
+        param_table: &MetadataTable<Param>,
     ) -> Result<(), Error> {
         let name = self.name()?.value;
 
@@ -3057,13 +3052,13 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
     fn address(&self) -> Result<Option<Pointer>, Error> {
         self.rva()?
             .value()
-            .map(|rva| self.tables.dll_unpacker.virtual_address_to_raw(rva))
+            .map(|rva| self.metadata.dll_unpacker.virtual_address_to_raw(rva))
             .transpose()
     }
 
     pub fn cil_method(&self) -> Result<Option<CILMethod<'a>>, Error> {
         Ok(self.address()?.map(|addr| {
-            CILMethod::new(self.tables.dll_unpacker.bytes.subrange(addr..))
+            CILMethod::new(self.metadata.dll_unpacker.bytes.subrange(addr..))
         }))
     }
 
@@ -3084,7 +3079,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn signature_index(
@@ -3094,7 +3089,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 
     fn param_indices(
@@ -3105,8 +3100,8 @@ impl<'a> MetadataRowUnpacker<'a, MethodDef> {
 
     pub fn iter_params(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Param>>, Error> {
-        self.tables.iter_range(self.param_indices()?)
+    ) -> Result<impl Iterator<Item = MetadataRow<Param>>, Error> {
+        self.metadata.iter_range(self.param_indices()?)
     }
 }
 
@@ -3132,7 +3127,7 @@ impl std::fmt::Display for MethodDefFlags {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Param> {
+impl<'a> MetadataRow<'a, Param> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3165,11 +3160,11 @@ impl<'a> MetadataRowUnpacker<'a, Param> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
+impl<'a> MetadataRow<'a, InterfaceImpl> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3192,8 +3187,8 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
         self.get_field_bytes(0).unpack()
     }
 
-    pub fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.class_index()?)
+    pub fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.class_index()?)
     }
 
     fn interface_index(
@@ -3203,11 +3198,11 @@ impl<'a> MetadataRowUnpacker<'a, InterfaceImpl> {
     }
 
     fn interface(&self) -> Result<MetadataTypeDefOrRef, Error> {
-        self.tables.get(self.interface_index()?)
+        self.metadata.get(self.interface_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MemberRef> {
+impl<'a> MetadataRow<'a, MemberRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3241,7 +3236,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
     }
 
     fn class(&self) -> Result<MetadataMemberRefParent, Error> {
-        self.tables.get(self.class_index()?)
+        self.metadata.get(self.class_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -3249,7 +3244,7 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn signature_index(
@@ -3259,11 +3254,11 @@ impl<'a> MetadataRowUnpacker<'a, MemberRef> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Constant> {
+impl<'a> MetadataRow<'a, Constant> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3292,7 +3287,7 @@ impl<'a> MetadataRowUnpacker<'a, Constant> {
     }
 
     fn parent(&self) -> Result<MetadataHasConstant, Error> {
-        self.tables.get(self.parent_index()?)
+        self.metadata.get(self.parent_index()?)
     }
 
     fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
@@ -3300,11 +3295,11 @@ impl<'a> MetadataRowUnpacker<'a, Constant> {
     }
 
     fn value(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.value_index()?)
+        self.metadata.get(self.value_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
+impl<'a> MetadataRow<'a, CustomAttribute> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3331,7 +3326,7 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
     }
 
     pub fn parent(&self) -> Result<MetadataHasCustomAttribute, Error> {
-        self.tables.get(self.parent_index()?)
+        self.metadata.get(self.parent_index()?)
     }
 
     fn attribute_type_index(
@@ -3342,7 +3337,7 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
     }
 
     fn attribute_type(&self) -> Result<MetadataCustomAttributeType, Error> {
-        self.tables.get(self.attribute_type_index()?)
+        self.metadata.get(self.attribute_type_index()?)
     }
 
     fn value_index(&self) -> Result<UnpackedValue<MetadataBlobIndex>, Error> {
@@ -3350,11 +3345,11 @@ impl<'a> MetadataRowUnpacker<'a, CustomAttribute> {
     }
 
     fn value(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.value_index()?)
+        self.metadata.get(self.value_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
+impl<'a> MetadataRow<'a, FieldMarshal> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3377,7 +3372,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
     }
 
     fn parent(&self) -> Result<MetadataHasFieldMarshal, Error> {
-        self.tables.get(self.parent_index()?)
+        self.metadata.get(self.parent_index()?)
     }
 
     fn native_type_index(
@@ -3387,7 +3382,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldMarshal> {
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
+impl<'a> MetadataRow<'a, DeclSecurity> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3419,7 +3414,7 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
     }
 
     fn parent(&self) -> Result<MetadataHasDeclSecurity, Error> {
-        self.tables.get(self.parent_index()?)
+        self.metadata.get(self.parent_index()?)
     }
 
     fn permission_set_index(
@@ -3429,11 +3424,11 @@ impl<'a> MetadataRowUnpacker<'a, DeclSecurity> {
     }
 
     fn permission_set(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.permission_set_index()?)
+        self.metadata.get(self.permission_set_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ClassLayout> {
+impl<'a> MetadataRow<'a, ClassLayout> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3463,12 +3458,12 @@ impl<'a> MetadataRowUnpacker<'a, ClassLayout> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.class_index()?)
+    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.class_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldLayout> {
+impl<'a> MetadataRow<'a, FieldLayout> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3495,12 +3490,12 @@ impl<'a> MetadataRowUnpacker<'a, FieldLayout> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn field(&self) -> Result<MetadataRowUnpacker<'a, Field>, Error> {
-        self.tables.get(self.field_index()?)
+    fn field(&self) -> Result<MetadataRow<'a, Field>, Error> {
+        self.metadata.get(self.field_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, StandAloneSig> {
+impl<'a> MetadataRow<'a, StandAloneSig> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3520,11 +3515,11 @@ impl<'a> MetadataRowUnpacker<'a, StandAloneSig> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, EventMap> {
+impl<'a> MetadataRow<'a, EventMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3544,8 +3539,8 @@ impl<'a> MetadataRowUnpacker<'a, EventMap> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.class_index()?)
+    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.class_index()?)
     }
 
     fn event_indices(
@@ -3556,12 +3551,12 @@ impl<'a> MetadataRowUnpacker<'a, EventMap> {
 
     pub fn iter_events(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Event>>, Error> {
-        self.tables.iter_range(self.event_indices()?)
+    ) -> Result<impl Iterator<Item = MetadataRow<Event>>, Error> {
+        self.metadata.iter_range(self.event_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Event> {
+impl<'a> MetadataRow<'a, Event> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3594,7 +3589,7 @@ impl<'a> MetadataRowUnpacker<'a, Event> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn event_type_index(
@@ -3605,11 +3600,11 @@ impl<'a> MetadataRowUnpacker<'a, Event> {
     }
 
     fn event_type(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
-        self.tables.get(self.event_type_index()?)
+        self.metadata.get(self.event_type_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, PropertyMap> {
+impl<'a> MetadataRow<'a, PropertyMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3629,8 +3624,8 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMap> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.class_index()?)
+    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.class_index()?)
     }
 
     fn property_indices(
@@ -3641,13 +3636,12 @@ impl<'a> MetadataRowUnpacker<'a, PropertyMap> {
 
     pub fn iter_properties(
         &self,
-    ) -> Result<impl Iterator<Item = MetadataRowUnpacker<Property>>, Error>
-    {
-        self.tables.iter_range(self.property_indices()?)
+    ) -> Result<impl Iterator<Item = MetadataRow<Property>>, Error> {
+        self.metadata.iter_range(self.property_indices()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Property> {
+impl<'a> MetadataRow<'a, Property> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3676,7 +3670,7 @@ impl<'a> MetadataRowUnpacker<'a, Property> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn signature_index(
@@ -3686,11 +3680,11 @@ impl<'a> MetadataRowUnpacker<'a, Property> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
+impl<'a> MetadataRow<'a, MethodSemantics> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3718,8 +3712,8 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn method(&self) -> Result<MetadataRowUnpacker<'a, MethodDef>, Error> {
-        self.tables.get(self.method_index()?)
+    fn method(&self) -> Result<MetadataRow<'a, MethodDef>, Error> {
+        self.metadata.get(self.method_index()?)
     }
 
     fn association_index(
@@ -3729,11 +3723,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodSemantics> {
     }
 
     fn association(&self) -> Result<MetadataHasSemantics, Error> {
-        self.tables.get(self.association_index()?)
+        self.metadata.get(self.association_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
+impl<'a> MetadataRow<'a, MethodImpl> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3760,8 +3754,8 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.class_index()?)
+    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.class_index()?)
     }
 
     fn method_body_index(
@@ -3771,7 +3765,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
     }
 
     fn method_body(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.tables.get(self.method_body_index()?)
+        self.metadata.get(self.method_body_index()?)
     }
 
     fn method_declaration_index(
@@ -3781,11 +3775,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodImpl> {
     }
 
     fn method_declaration(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.tables.get(self.method_declaration_index()?)
+        self.metadata.get(self.method_declaration_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ModuleRef> {
+impl<'a> MetadataRow<'a, ModuleRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3803,11 +3797,11 @@ impl<'a> MetadataRowUnpacker<'a, ModuleRef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, TypeSpec> {
+impl<'a> MetadataRow<'a, TypeSpec> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3827,11 +3821,11 @@ impl<'a> MetadataRowUnpacker<'a, TypeSpec> {
     }
 
     fn signature(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.signature_index()?)
+        self.metadata.get(self.signature_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ImplMap> {
+impl<'a> MetadataRow<'a, ImplMap> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3866,7 +3860,7 @@ impl<'a> MetadataRowUnpacker<'a, ImplMap> {
     }
 
     fn member_forwarded(&self) -> Result<MetadataMemberForwarded, Error> {
-        self.tables.get(self.member_forwarded_index()?)
+        self.metadata.get(self.member_forwarded_index()?)
     }
 
     fn import_name_index(
@@ -3876,7 +3870,7 @@ impl<'a> MetadataRowUnpacker<'a, ImplMap> {
     }
 
     fn import_name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.import_name_index()?)
+        self.metadata.get(self.import_name_index()?)
     }
 
     fn import_scope_index(
@@ -3885,12 +3879,12 @@ impl<'a> MetadataRowUnpacker<'a, ImplMap> {
         self.get_field_bytes(3).unpack()
     }
 
-    fn import_scope(&self) -> Result<MetadataRowUnpacker<ModuleRef>, Error> {
-        self.tables.get(self.import_scope_index()?)
+    fn import_scope(&self) -> Result<MetadataRow<ModuleRef>, Error> {
+        self.metadata.get(self.import_scope_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
+impl<'a> MetadataRow<'a, FieldRVA> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3920,7 +3914,7 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
     }
 
     fn address(&self) -> Result<Pointer, Error> {
-        self.tables
+        self.metadata
             .dll_unpacker
             .virtual_address_to_raw(self.rva()?.value())
     }
@@ -3931,12 +3925,12 @@ impl<'a> MetadataRowUnpacker<'a, FieldRVA> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn field(&self) -> Result<MetadataRowUnpacker<Field>, Error> {
-        self.tables.get(self.field_index()?)
+    fn field(&self) -> Result<MetadataRow<Field>, Error> {
+        self.metadata.get(self.field_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, Assembly> {
+impl<'a> MetadataRow<'a, Assembly> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -3998,7 +3992,7 @@ impl<'a> MetadataRowUnpacker<'a, Assembly> {
     }
 
     fn public_key(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.public_key_index()?)
+        self.metadata.get(self.public_key_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -4006,11 +4000,11 @@ impl<'a> MetadataRowUnpacker<'a, Assembly> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
+impl<'a> MetadataRow<'a, AssemblyRef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4077,7 +4071,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
     }
 
     fn public_key_or_token(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.public_key_or_token_index()?)
+        self.metadata.get(self.public_key_or_token_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -4085,7 +4079,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn culture_index(
@@ -4095,7 +4089,7 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
     }
 
     fn culture(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.culture_index()?)
+        self.metadata.get(self.culture_index()?)
     }
 
     fn hash_value_index(
@@ -4105,11 +4099,11 @@ impl<'a> MetadataRowUnpacker<'a, AssemblyRef> {
     }
 
     fn hash_value(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.hash_value_index()?)
+        self.metadata.get(self.hash_value_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
+impl<'a> MetadataRow<'a, ManifestResource> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4142,7 +4136,7 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 
     fn implementation_index(
@@ -4165,11 +4159,11 @@ impl<'a> MetadataRowUnpacker<'a, ManifestResource> {
     pub fn implementation(
         &self,
     ) -> Result<Option<MetadataImplementation>, Error> {
-        self.tables.get(self.implementation_index()?)
+        self.metadata.get(self.implementation_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, NestedClass> {
+impl<'a> MetadataRow<'a, NestedClass> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4192,8 +4186,8 @@ impl<'a> MetadataRowUnpacker<'a, NestedClass> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn nested_class(&self) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.nested_class_index()?)
+    fn nested_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.nested_class_index()?)
     }
 
     fn enclosing_class_index(
@@ -4202,14 +4196,12 @@ impl<'a> MetadataRowUnpacker<'a, NestedClass> {
         self.get_field_bytes(1).unpack()
     }
 
-    fn enclosing_class(
-        &self,
-    ) -> Result<MetadataRowUnpacker<'a, TypeDef>, Error> {
-        self.tables.get(self.enclosing_class_index()?)
+    fn enclosing_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        self.metadata.get(self.enclosing_class_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, GenericParam> {
+impl<'a> MetadataRow<'a, GenericParam> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4244,7 +4236,7 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
     }
 
     fn owner(&self) -> Result<MetadataTypeOrMethodDef, Error> {
-        self.tables.get(self.owner_index()?)
+        self.metadata.get(self.owner_index()?)
     }
 
     fn name_index(&self) -> Result<UnpackedValue<MetadataStringIndex>, Error> {
@@ -4252,11 +4244,11 @@ impl<'a> MetadataRowUnpacker<'a, GenericParam> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.tables.get(self.name_index()?)
+        self.metadata.get(self.name_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
+impl<'a> MetadataRow<'a, MethodSpec> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4283,7 +4275,7 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
     }
 
     fn method(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.tables.get(self.method_index()?)
+        self.metadata.get(self.method_index()?)
     }
 
     fn instantiation_index(
@@ -4293,11 +4285,11 @@ impl<'a> MetadataRowUnpacker<'a, MethodSpec> {
     }
 
     fn instantiation(&self) -> Result<ByteRange, Error> {
-        self.tables.get(self.instantiation_index()?)
+        self.metadata.get(self.instantiation_index()?)
     }
 }
 
-impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
+impl<'a> MetadataRow<'a, GenericParamConstraint> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
@@ -4320,10 +4312,8 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
         self.get_field_bytes(0).unpack()
     }
 
-    fn generic_param(
-        &self,
-    ) -> Result<MetadataRowUnpacker<GenericParam>, Error> {
-        self.tables.get(self.generic_param_index()?)
+    fn generic_param(&self) -> Result<MetadataRow<GenericParam>, Error> {
+        self.metadata.get(self.generic_param_index()?)
     }
 
     fn constraint_index(
@@ -4333,6 +4323,6 @@ impl<'a> MetadataRowUnpacker<'a, GenericParamConstraint> {
     }
 
     fn constraint(&self) -> Result<MetadataTypeDefOrRef, Error> {
-        self.tables.get(self.constraint_index()?)
+        self.metadata.get(self.constraint_index()?)
     }
 }
