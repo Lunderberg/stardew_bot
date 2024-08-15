@@ -149,294 +149,6 @@ pub enum MetadataColumnType {
     FixedSize(usize),
 }
 
-/// Helper macro to define a static slice of `MetadataColumnType`
-/// entries.
-macro_rules! fields{
-    (field String) => {
-        MetadataColumnType::Index(MetadataIndexKind::Heap(
-            MetadataHeapKind::String,
-        ))
-    };
-
-    (field GUID) => {
-        MetadataColumnType::Index(MetadataIndexKind::Heap(
-            MetadataHeapKind::GUID,
-        ))
-    };
-    (field Blob) => {
-        MetadataColumnType::Index(MetadataIndexKind::Heap(
-            MetadataHeapKind::Blob,
-        ))
-    };
-
-    (field Module             ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Module,
-        ))
-    };
-    (field TypeRef            ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::TypeRef,
-        ))
-    };
-    (field TypeDef            ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::TypeDef,
-        ))
-    };
-    (field Field              ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Field,
-        ))
-    };
-    (field MethodDef          ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::MethodDef,
-        ))
-    };
-    (field Param              ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Param,
-        ))
-    };
-    (field InterfaceImpl      ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::InterfaceImpl,
-        ))
-    };
-    (field MemberRef          ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::MemberRef,
-        ))
-    };
-    (field Constant           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Constant,
-        ))
-    };
-    (field CustomAttribute    ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::CustomAttribute,
-        ))
-    };
-    (field FieldMarshal       ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::FieldMarshal,
-        ))
-    };
-    (field DeclSecurity       ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::DeclSecurity,
-        ))
-    };
-    (field ClassLayout        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::ClassLayout,
-        ))
-    };
-    (field FieldLayout        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::FieldLayout,
-        ))
-    };
-    (field StandAloneSig      ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::StandAloneSig,
-        ))
-    };
-    (field EventMap           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::EventMap,
-        ))
-    };
-    (field Event              ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Event,
-        ))
-    };
-    (field PropertyMap        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::PropertyMap,
-        ))
-    };
-    (field Property           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Property,
-        ))
-    };
-    (field MethodSemantics    ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::MethodSemantics,
-        ))
-    };
-    (field MethodImpl         ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::MethodImpl,
-        ))
-    };
-    (field ModuleRef          ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::ModuleRef,
-        ))
-    };
-    (field TypeSpec           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::TypeSpec,
-        ))
-    };
-    (field ImplMap            ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::ImplMap,
-        ))
-    };
-    (field FieldRVA           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::FieldRVA,
-        ))
-    };
-    (field Assembly           ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::Assembly,
-        ))
-    };
-    (field AssemblyProcessor  ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::AssemblyProcessor,
-        ))
-    };
-    (field AssemblyOS         ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::AssemblyOS,
-        ))
-    };
-    (field AssemblyRef        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::AssemblyRef,
-        ))
-    };
-    (field AssemblyRefProcessor) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::AssemblyRefProcessor,
-        ))
-    };
-    (field AssemblyRefOS      ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::AssemblyRefOS,
-        ))
-    };
-    (field File               ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::File,
-        ))
-    };
-    (field ExportedType       ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::ExportedType,
-        ))
-    };
-    (field ManifestResource   ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::ManifestResource,
-        ))
-    };
-    (field NestedClass        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::NestedClass,
-        ))
-    };
-    (field GenericParam       ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::GenericParam,
-        ))
-    };
-    (field MethodSpec         ) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::MethodSpec,
-        ))
-    };
-    (field GenericParamConstraint) => {
-        MetadataColumnType::Index(MetadataIndexKind::Table(
-            MetadataTableKind::GenericParamConstraint,
-        ))
-    };
-
-    (field TypeDefOrRef        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::TypeDefOrRef,
-        ))
-    };
-    (field HasConstant         ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::HasConstant,
-        ))
-    };
-    (field HasCustomAttribute  ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::HasCustomAttribute,
-        ))
-    };
-    (field HasFieldMarshal     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::HasFieldMarshal,
-        ))
-    };
-    (field HasDeclSecurity     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::HasDeclSecurity,
-        ))
-    };
-    (field MemberRefParent     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::MemberRefParent,
-        ))
-    };
-    (field HasSemantics        ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::HasSemantics,
-        ))
-    };
-    (field MethodDefOrRef      ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::MethodDefOrRef,
-        ))
-    };
-    (field MemberForwarded     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::MemberForwarded,
-        ))
-    };
-    (field Implementation      ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::Implementation,
-        ))
-    };
-    (field CustomAttributeType ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::CustomAttributeType,
-        ))
-    };
-    (field ResolutionScope     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::ResolutionScope,
-        ))
-    };
-    (field TypeOrMethodDef     ) => {
-        MetadataColumnType::Index(MetadataIndexKind::CodedIndex(
-            MetadataCodedIndexKind::TypeOrMethodDef,
-        ))
-    };
-
-    (field $bytes:literal) => {
-        MetadataColumnType::FixedSize($bytes)
-    };
-
-    ( $( $field:tt ),+ ) => {
-        &[
-            $( fields!{field $field} ),+
-        ]
-    };
-}
-
 pub struct MetadataTableSizes {
     num_rows: EnumMap<MetadataTableKind, usize>,
     index_size: EnumMap<MetadataIndexKind, usize>,
@@ -514,56 +226,141 @@ pub trait MetadataTableTag: Copy {
     const COLUMNS: &'static [MetadataColumnType];
 }
 
-macro_rules! decl_metadata_table_tag{
-    ($table_name:ident, $fields:tt) => {
-        #[derive(Clone, Copy)]
-        pub struct $table_name;
+mod column_type {
+    #![allow(non_upper_case_globals, dead_code)]
 
-        impl MetadataTableTag for $table_name {
-            const KIND: MetadataTableKind = MetadataTableKind::$table_name;
-            const COLUMNS: &'static [MetadataColumnType] = fields! $fields;
-        }
+    use super::{
+        MetadataCodedIndexKind, MetadataColumnType, MetadataHeapKind,
+        MetadataIndexKind, MetadataTableKind,
     };
+
+    pub(super) use super::MetadataColumnType::FixedSize;
+
+    macro_rules! heap_kinds {
+        ( $( $name:ident ),* $(,)? ) => {
+            $(
+                pub(super) const $name: MetadataColumnType =
+                    MetadataColumnType::Index(
+                        MetadataIndexKind::Heap(
+                            MetadataHeapKind::$name
+                        ),
+                    );
+            )*
+        };
+    }
+    heap_kinds! {String, GUID, Blob}
+
+    macro_rules! simple_index_kinds {
+        ( $( $name:ident ),* $(,)? ) => {
+            $(
+                pub(super) const $name: MetadataColumnType =
+                    MetadataColumnType::Index(
+                        MetadataIndexKind::Table(
+                            MetadataTableKind::$name,
+                        )
+                    );
+            )*
+        }
+    }
+    simple_index_kinds! {
+        Module, TypeRef, TypeDef, Field, MethodDef, Param,
+        InterfaceImpl, MemberRef, Constant, CustomAttribute,
+        FieldMarshal, DeclSecurity, ClassLayout, FieldLayout,
+        StandAloneSig, EventMap, Event, PropertyMap, Property,
+        MethodSemantics, MethodImpl, ModuleRef, TypeSpec,
+        ImplMap, FieldRVA, Assembly, AssemblyProcessor,
+        AssemblyOS, AssemblyRef, AssemblyRefProcessor,
+        AssemblyRefOS, File, ExportedType, ManifestResource,
+        NestedClass, GenericParam, MethodSpec,
+        GenericParamConstraint,
+    }
+
+    macro_rules! coded_index_kinds {
+        ( $( $name:ident ),* $(,)? ) => {
+            $(
+                pub(super) const $name: MetadataColumnType =
+                    MetadataColumnType::Index(
+                        MetadataIndexKind::CodedIndex(
+                            MetadataCodedIndexKind::$name,
+                        )
+                    );
+            )*
+        }
+    }
+    coded_index_kinds! {
+        TypeDefOrRef, HasConstant, HasCustomAttribute,
+        HasFieldMarshal, HasDeclSecurity, MemberRefParent,
+        HasSemantics, MethodDefOrRef, MemberForwarded,
+        Implementation, CustomAttributeType, ResolutionScope,
+        TypeOrMethodDef,
+    }
 }
 
-decl_metadata_table_tag! { Module, [2, String, GUID, GUID, GUID] }
-decl_metadata_table_tag! { TypeRef, [ResolutionScope, String, String] }
-decl_metadata_table_tag! { TypeDef, [4, String, String, TypeDefOrRef, Field, MethodDef] }
-decl_metadata_table_tag! { Field, [2, String, Blob] }
-decl_metadata_table_tag! { MethodDef, [4, 2, 2, String, Blob, Param] }
-decl_metadata_table_tag! { Param, [2, 2, String] }
-decl_metadata_table_tag! { InterfaceImpl, [TypeDef, TypeDefOrRef] }
-decl_metadata_table_tag! { MemberRef, [MemberRefParent, String, Blob] }
-decl_metadata_table_tag! { Constant, [1, 1, HasConstant, Blob] }
-decl_metadata_table_tag! { CustomAttribute, [HasCustomAttribute, CustomAttributeType, Blob] }
-decl_metadata_table_tag! { FieldMarshal, [HasFieldMarshal, Blob] }
-decl_metadata_table_tag! { DeclSecurity, [2, HasDeclSecurity, Blob] }
-decl_metadata_table_tag! { ClassLayout, [2, 4, TypeDef] }
-decl_metadata_table_tag! { FieldLayout, [4, Field] }
-decl_metadata_table_tag! { StandAloneSig, [Blob] }
-decl_metadata_table_tag! { EventMap, [TypeDef, Event] }
-decl_metadata_table_tag! { Event, [2, String, TypeDefOrRef] }
-decl_metadata_table_tag! { PropertyMap, [TypeDef, Property] }
-decl_metadata_table_tag! { Property, [2, String, Blob] }
-decl_metadata_table_tag! { MethodSemantics, [2, MethodDef, HasSemantics] }
-decl_metadata_table_tag! { MethodImpl, [TypeDef, MethodDefOrRef, MethodDefOrRef] }
-decl_metadata_table_tag! { ModuleRef, [String] }
-decl_metadata_table_tag! { TypeSpec, [Blob] }
-decl_metadata_table_tag! { ImplMap, [2, MemberForwarded, String, ModuleRef] }
-decl_metadata_table_tag! { FieldRVA, [4, Field] }
-decl_metadata_table_tag! { Assembly, [4, 2, 2, 2, 2, 4, Blob, String, String] }
-decl_metadata_table_tag! { AssemblyProcessor, [4] }
-decl_metadata_table_tag! { AssemblyOS, [4, 4, 4] }
-decl_metadata_table_tag! { AssemblyRef, [2, 2, 2, 2, 4, Blob, String, String, Blob] }
-decl_metadata_table_tag! { AssemblyRefProcessor, [4, AssemblyRef] }
-decl_metadata_table_tag! { AssemblyRefOS, [4, 4, 4, AssemblyRef] }
-decl_metadata_table_tag! { File, [4, String, Blob] }
-decl_metadata_table_tag! { ExportedType, [4, TypeDef, String, String, Implementation] }
-decl_metadata_table_tag! { ManifestResource, [4, 4, String, Implementation] }
-decl_metadata_table_tag! { NestedClass, [TypeDef, TypeDef] }
-decl_metadata_table_tag! { GenericParam, [2, 2, TypeOrMethodDef, String] }
-decl_metadata_table_tag! { MethodSpec, [MethodDefOrRef, Blob] }
-decl_metadata_table_tag! { GenericParamConstraint, [GenericParam, TypeDefOrRef] }
+macro_rules! decl_metadata_table_tag {
+    (
+        $(
+            $table_name:ident: [ $( $field:tt ),* $(,)? ]
+        ),* $(,)?
+    ) => {
+        $(
+            #[derive(Clone, Copy)]
+            pub struct $table_name;
+
+            impl MetadataTableTag for $table_name {
+                const KIND: MetadataTableKind =
+                    MetadataTableKind::$table_name;
+
+                const COLUMNS: &'static [MetadataColumnType] = &[
+                    $( decl_metadata_table_tag!(field $field) ),*
+                ];
+            }
+        )*
+    };
+
+    (field $bytes:literal) => { column_type::FixedSize($bytes) };
+    (field $name:ident) => { column_type::$name };
+}
+
+decl_metadata_table_tag! {
+    Module: [2, String, GUID, GUID, GUID],
+    TypeRef: [ResolutionScope, String, String],
+    TypeDef: [4, String, String, TypeDefOrRef, Field, MethodDef],
+    Field: [2, String, Blob],
+    MethodDef: [4, 2, 2, String, Blob, Param],
+    Param: [2, 2, String],
+    InterfaceImpl: [TypeDef, TypeDefOrRef],
+    MemberRef: [MemberRefParent, String, Blob],
+    Constant: [1, 1, HasConstant, Blob],
+    CustomAttribute: [HasCustomAttribute, CustomAttributeType, Blob],
+    FieldMarshal: [HasFieldMarshal, Blob],
+    DeclSecurity: [2, HasDeclSecurity, Blob],
+    ClassLayout: [2, 4, TypeDef],
+    FieldLayout: [4, Field],
+    StandAloneSig: [Blob],
+    EventMap: [TypeDef, Event],
+    Event: [2, String, TypeDefOrRef],
+    PropertyMap: [TypeDef, Property],
+    Property: [2, String, Blob],
+    MethodSemantics: [2, MethodDef, HasSemantics],
+    MethodImpl: [TypeDef, MethodDefOrRef, MethodDefOrRef],
+    ModuleRef: [String],
+    TypeSpec: [Blob],
+    ImplMap: [2, MemberForwarded, String, ModuleRef],
+    FieldRVA: [4, Field],
+    Assembly: [4, 2, 2, 2, 2, 4, Blob, String, String],
+    AssemblyProcessor: [4],
+    AssemblyOS: [4, 4, 4],
+    AssemblyRef: [2, 2, 2, 2, 4, Blob, String, String, Blob],
+    AssemblyRefProcessor: [4, AssemblyRef],
+    AssemblyRefOS: [4, 4, 4, AssemblyRef],
+    File: [4, String, Blob],
+    ExportedType: [4, TypeDef, String, String, Implementation],
+    ManifestResource: [4, 4, String, Implementation],
+    NestedClass: [TypeDef, TypeDef],
+    GenericParam: [2, 2, TypeOrMethodDef, String],
+    MethodSpec: [MethodDefOrRef, Blob],
+    GenericParamConstraint: [GenericParam, TypeDefOrRef],
+}
 
 pub trait CodedIndex {
     const OPTIONS: &'static [Option<MetadataTableKind>];
