@@ -9,5 +9,6 @@ edition = "2021"
 itertools = "*"
 thiserror = "*"
 derive_more = {version = "*", features=["full"]}
+paste = "*"
 
 memory_reader = { path = "../memory_reader" }

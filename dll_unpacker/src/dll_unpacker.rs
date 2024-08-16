@@ -1,4 +1,5 @@
 use derive_more::From;
+use paste::paste;
 use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{MemoryRegion, Pointer};
@@ -302,6 +303,207 @@ mod column_type {
     }
 }
 
+macro_rules! decl_metadata_table {
+    (
+        $(
+            $table_name:ident: { $(
+
+                $field_name:ident : $field_type:tt
+
+            ),* $(,)? }
+        ),* $(,)?
+    ) => {
+        $(
+            #[derive(Clone, Copy)]
+            pub struct $table_name;
+
+            impl MetadataTableTag for $table_name {
+                const KIND: MetadataTableKind =
+                    MetadataTableKind::$table_name;
+
+                const COLUMNS: &'static [MetadataColumnType] = &[
+                    $( decl_metadata_table!(column $field_type) ),*
+                ];
+            }
+
+
+            decl_metadata_table!{
+                member_accessors
+                    0usize,
+                    $table_name: {
+                        $( $field_name: $field_type, )*
+                    }
+            }
+
+        )*
+    };
+
+
+    (column u8) => { column_type::FixedSize(1) };
+    (column u16) => { column_type::FixedSize(2) };
+    (column u32) => { column_type::FixedSize(4) };
+    (column {Option<$name:ident>}) => { column_type::$name };
+    (column $name:ident) => { column_type::$name };
+
+
+    (
+        member_accessors
+            $field_index:expr,
+            $table_name:ident: { }
+    ) => { };
+
+    (
+        member_accessors
+            $field_index:expr,
+            $table_name:ident: {
+                $first_field_name:ident : $first_field_type:tt,
+                $(
+                    $rest_field_name:ident : $rest_field_type:tt,
+                )*
+            }
+    ) => {
+        decl_metadata_table!{
+            member_accessor
+                $field_index,
+                $table_name: { $first_field_name: $first_field_type }
+        }
+
+        decl_metadata_table!{
+            member_accessors
+                ($field_index + 1usize),
+                $table_name: {
+                    $(
+                        $rest_field_name: $rest_field_type,
+                    )*
+                }
+        }
+
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: u16}
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _unpacked >](
+                    &self,
+                ) -> Result<UnpackedValue<u16>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn $field_name(&self) -> Result<u16, Error> {
+                    let unpacked = self. [< $field_name _unpacked >] ()?;
+                    Ok(unpacked.value())
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: String}
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                fn [< $field_name _unpacked >](
+                    &self,
+                ) -> Result<UnpackedValue<&'a str>, Error> {
+                    let index = self. [< $field_name _index >] ()?;
+                    let index = index.value();
+                    self.metadata.get(index)
+                }
+
+                pub fn $field_name(&self) -> Result<&'a str, Error> {
+                    let unpacked = self. [< $field_name _unpacked >] ()?;
+                    Ok(unpacked.value())
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: GUID}
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<UnpackedValue<MetadataHeapIndex<GUID>>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                fn [< $field_name _unpacked >](
+                    &self,
+                ) -> Result<UnpackedValue<u128>, Error> {
+                    let index = self. [< $field_name _index >] ()?;
+                    let index = index.value();
+                    self.metadata.get(index)
+                }
+
+                pub fn $field_name(&self) -> Result<u128, Error> {
+                    let unpacked = self. [< $field_name _unpacked >] ()?;
+                    Ok(unpacked.value())
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: {Option<GUID>}}
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<UnpackedValue<Option<MetadataHeapIndex<GUID>>>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                fn [< $field_name _unpacked >](
+                    &self,
+                ) -> Result<Option<UnpackedValue<u128>>, Error> {
+                    let opt_index = self. [< $field_name _index >] ()?.value();
+
+                    let opt_guid = opt_index.map(|index| self.metadata.get(index)).transpose()?;
+                    Ok(opt_guid)
+                }
+
+                pub fn $field_name(&self) -> Result<Option<u128>, Error> {
+                    let opt_unpacked = self. [< $field_name _unpacked >] ()?;
+                    Ok(opt_unpacked.map(|unpacked| unpacked.value()))
+                }
+
+            }
+        }
+    };
+}
+
+decl_metadata_table! {
+    Module: {
+        generation: u16,
+        name: String,
+        module_id: GUID,
+        enc_id: {Option<GUID>},
+        enc_base_id: {Option<GUID>},
+    },
+}
+
 macro_rules! decl_metadata_table_tag {
     (
         $(
@@ -328,7 +530,6 @@ macro_rules! decl_metadata_table_tag {
 }
 
 decl_metadata_table_tag! {
-    Module: [2, String, GUID, GUID, GUID],
     TypeRef: [ResolutionScope, String, String],
     TypeDef: [4, String, String, TypeDefOrRef, Field, MethodDef],
     Field: [2, String, Blob],
@@ -689,7 +890,7 @@ impl<'a> MetadataCustomAttributeType<'a> {
 impl<'a> MetadataResolutionScope<'a> {
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
         match self {
-            MetadataResolutionScope::Module(row) => row.name(),
+            MetadataResolutionScope::Module(row) => row.name_unpacked(),
             MetadataResolutionScope::ModuleRef(row) => row.name(),
             MetadataResolutionScope::AssemblyRef(row) => row.name(),
             MetadataResolutionScope::TypeRef(row) => row.name(),
@@ -911,7 +1112,7 @@ impl<'a> DLLUnpacker<'a> {
         // Ok(metadata.bytes.start)
 
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.field_layout_table()?.bytes.start)
+        Ok(metadata_tables.module_table()?.bytes.start)
 
         // let metadata_tables = metadata.metadata_tables()?;
         // let table = metadata_tables.method_def_table()?;
@@ -2431,9 +2632,11 @@ impl<'a> MetadataRow<'a, Module> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.generation()?).name("generation");
+        annotator
+            .value(self.generation_unpacked()?)
+            .name("generation");
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("Name")
@@ -2441,48 +2644,14 @@ impl<'a> MetadataRow<'a, Module> {
 
         annotator.value(self.module_id_index()?).name("Module id");
         annotator
-            .value(self.module_id()?)
+            .value(self.module_id_unpacked()?)
             .name(format!("GUID, '{name}' Module"));
-        annotator.opt_value(self.enc_id()?).name("enc_id");
-        annotator.opt_value(self.enc_base_id()?).name("enc_base_id");
+        annotator.opt_value(self.enc_id_index()?).name("enc_id");
+        annotator
+            .opt_value(self.enc_base_id_index()?)
+            .name("enc_base_id");
 
         Ok(())
-    }
-
-    pub fn generation(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    pub fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    pub fn module_id_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<GUID>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    pub fn module_id(&self) -> Result<UnpackedValue<u128>, Error> {
-        self.metadata.get(self.module_id_index()?)
-    }
-
-    pub fn enc_id(
-        &self,
-    ) -> Result<UnpackedValue<Option<MetadataHeapIndex<GUID>>>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    pub fn enc_base_id(
-        &self,
-    ) -> Result<UnpackedValue<Option<MetadataHeapIndex<GUID>>>, Error> {
-        self.get_field_bytes(4).unpack()
     }
 }
 
