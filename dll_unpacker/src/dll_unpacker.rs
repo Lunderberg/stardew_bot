@@ -646,16 +646,6 @@ macro_rules! decl_core_coded_index_type {
             }
         }
 
-        impl TypedMetadataIndex for Option<MetadataCodedIndex<$tag>> {
-            type Output<'a:'b, 'b> = Option<$row_enum<'b>>;
-
-            fn access<'a: 'b, 'b>(
-                self,
-                tables: &'b Metadata<'a>,
-            ) -> Result<Self::Output<'a, 'b>, Error> {
-                self.map(|index| tables.get(index)).transpose()
-            }
-        }
 
         $(
             impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
@@ -2021,6 +2011,20 @@ impl<TableTag: MetadataTableTag> TypedMetadataIndex
         tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
         tables.get_table()?.get_row(self.index)
+    }
+}
+
+impl<T> TypedMetadataIndex for Option<T>
+where
+    T: TypedMetadataIndex,
+{
+    type Output<'a: 'b, 'b> = Option<<T as TypedMetadataIndex>::Output<'a, 'b>>;
+
+    fn access<'a: 'b, 'b>(
+        self,
+        tables: &'b Metadata<'a>,
+    ) -> Result<Self::Output<'a, 'b>, Error> {
+        self.map(|index| index.access(tables)).transpose()
     }
 }
 
