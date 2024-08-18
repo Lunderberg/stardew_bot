@@ -370,7 +370,7 @@ impl TuiExplorerBuilder {
             .type_def_table()?
             .iter_rows()
             .for_each(|type_def| {
-                let name = type_def.name().unwrap().value();
+                let name = type_def.name().unwrap();
                 let index = type_def.index();
                 let untyped_index: usize = index.into();
                 let method_table = method_tables[untyped_index + 1];
@@ -410,7 +410,7 @@ impl TuiExplorerBuilder {
             })
             .try_for_each(
                 |((method_table_ptr, ee_class_ptr), metadata_type_def)| {
-                    let class_name = metadata_type_def.name()?.value();
+                    let class_name = metadata_type_def.name()?;
                     self.range(ee_class_ptr..ee_class_ptr + 56)
                         .name(format!("EEClass for {class_name}"));
 
@@ -440,7 +440,7 @@ impl TuiExplorerBuilder {
                             .filter(|field| !field.is_static().unwrap())
                             .enumerate()
                             .for_each(|(i_field, field)| {
-                                let field_name = field.name().unwrap().value();
+                                let field_name = field.name().unwrap();
                                 let field_desc_start =
                                     field_desc_ptr + i_field * 16;
                                 self.range(
@@ -509,7 +509,7 @@ impl TuiExplorerBuilder {
                 let untyped_index: usize = index.into();
                 let method_table_ptr = method_tables[untyped_index + 1];
 
-                let is_game_obj = type_def.name()?.value() == "Game1";
+                let is_game_obj = type_def.name()? == "Game1";
 
                 if method_table_ptr.is_null() {
                     assert!(!is_game_obj);
@@ -551,7 +551,7 @@ impl TuiExplorerBuilder {
 
                         if is_game_obj {
                             println!("At offset {runtime_offset:04}, type 0x{runtime_type:x}, field {i_field} {}",
-                            _field.name().unwrap().value());
+                            _field.name().unwrap());
                         }
 
                         let is_ptr_type =
@@ -654,17 +654,11 @@ impl TuiExplorerBuilder {
                 std::cmp::Reverse(ptr_locations.len())
             })
             .filter(|(index, _)| {
-                let name = metadata_tables
-                    .get(*index)
-                    .unwrap()
-                    .name()
-                    .unwrap()
-                    .value();
+                let name = metadata_tables.get(*index).unwrap().name().unwrap();
                 name == "Game1"
             })
             .for_each(|(index, ptr_locations)| {
-                let name =
-                    metadata_tables.get(index).unwrap().name().unwrap().value();
+                let name = metadata_tables.get(index).unwrap().name().unwrap();
                 let count = ptr_locations.len();
 
                 ptr_locations
@@ -686,7 +680,7 @@ impl TuiExplorerBuilder {
                 type_def
                     .name()
                     .ok()
-                    .map(|name| name.value() == "Game1")
+                    .map(|name| name == "Game1")
                     .unwrap_or(false)
             })
             .map(|type_def| {

@@ -415,17 +415,10 @@ macro_rules! decl_metadata_table {
                     self.get_field_bytes($field_index).unpack()
                 }
 
-                fn [< $field_name _unpacked >](
-                    &self,
-                ) -> Result<UnpackedValue<&'a str>, Error> {
+                pub fn $field_name(&self) -> Result<&'a str, Error> {
                     let index = self. [< $field_name _index >] ()?;
                     let index = index.value();
                     self.metadata.get(index)
-                }
-
-                pub fn $field_name(&self) -> Result<&'a str, Error> {
-                    let unpacked = self. [< $field_name _unpacked >] ()?;
-                    Ok(unpacked.value())
                 }
 
             }
@@ -785,20 +778,17 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
 }
 
 impl<'a> MetadataTypeDefOrRef<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataTypeDefOrRef::TypeDef(row) => row.name(),
             MetadataTypeDefOrRef::TypeRef(row) => row.name(),
-            MetadataTypeDefOrRef::TypeSpec(row) => Ok(UnpackedValue::new(
-                row.bytes.subrange(0..0).into(),
-                "TypeSpec (anon)",
-            )),
+            MetadataTypeDefOrRef::TypeSpec(_) => Ok("TypeSpec (anon)"),
         }
     }
 }
 
 impl<'a> MetadataHasConstant<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataHasConstant::Field(row) => row.name(),
             MetadataHasConstant::Param(row) => row.name(),
@@ -808,7 +798,7 @@ impl<'a> MetadataHasConstant<'a> {
 }
 
 impl<'a> MetadataHasFieldMarshal<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataHasFieldMarshal::Field(row) => row.name(),
             MetadataHasFieldMarshal::Param(row) => row.name(),
@@ -817,7 +807,7 @@ impl<'a> MetadataHasFieldMarshal<'a> {
 }
 
 impl<'a> MetadataHasDeclSecurity<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataHasDeclSecurity::TypeDef(row) => row.name(),
             MetadataHasDeclSecurity::MethodDef(row) => row.name(),
@@ -827,22 +817,19 @@ impl<'a> MetadataHasDeclSecurity<'a> {
 }
 
 impl<'a> MetadataMemberRefParent<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
-            MetadataMemberRefParent::TypeDef(row) => row.name(),
             MetadataMemberRefParent::TypeRef(row) => row.name(),
+            MetadataMemberRefParent::TypeDef(row) => row.name(),
             MetadataMemberRefParent::ModuleRef(row) => row.name(),
             MetadataMemberRefParent::MethodDef(row) => row.name(),
-            MetadataMemberRefParent::TypeSpec(row) => Ok(UnpackedValue::new(
-                row.bytes.subrange(0..0).into(),
-                "TypeSpec (anon)",
-            )),
+            MetadataMemberRefParent::TypeSpec(_) => Ok("TypeSpec (anon)"),
         }
     }
 }
 
 impl<'a> MetadataHasSemantics<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataHasSemantics::Event(row) => row.name(),
             MetadataHasSemantics::Property(row) => row.name(),
@@ -851,7 +838,7 @@ impl<'a> MetadataHasSemantics<'a> {
 }
 
 impl<'a> MetadataMethodDefOrRef<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataMethodDefOrRef::MethodDef(row) => row.name(),
             MetadataMethodDefOrRef::MemberRef(row) => row.name(),
@@ -860,7 +847,7 @@ impl<'a> MetadataMethodDefOrRef<'a> {
 }
 
 impl<'a> MetadataMemberForwarded<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataMemberForwarded::Field(row) => row.name(),
             MetadataMemberForwarded::MethodDef(row) => row.name(),
@@ -869,7 +856,7 @@ impl<'a> MetadataMemberForwarded<'a> {
 }
 
 impl<'a> MetadataCustomAttributeType<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataCustomAttributeType::MethodDef(row) => row.name(),
             MetadataCustomAttributeType::MemberRef(row) => row.name(),
@@ -878,9 +865,9 @@ impl<'a> MetadataCustomAttributeType<'a> {
 }
 
 impl<'a> MetadataResolutionScope<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
-            MetadataResolutionScope::Module(row) => row.name_unpacked(),
+            MetadataResolutionScope::Module(row) => row.name(),
             MetadataResolutionScope::ModuleRef(row) => row.name(),
             MetadataResolutionScope::AssemblyRef(row) => row.name(),
             MetadataResolutionScope::TypeRef(row) => row.name(),
@@ -889,7 +876,7 @@ impl<'a> MetadataResolutionScope<'a> {
 }
 
 impl<'a> MetadataTypeOrMethodDef<'a> {
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         match self {
             MetadataTypeOrMethodDef::TypeDef(row) => row.name(),
             MetadataTypeOrMethodDef::MethodDef(row) => row.name(),
@@ -1935,14 +1922,16 @@ where
 }
 
 impl TypedMetadataIndex for MetadataHeapIndex<String> {
-    type Output<'a: 'b, 'b> = UnpackedValue<&'a str>;
+    type Output<'a: 'b, 'b> = &'a str;
 
     fn access<'a: 'b, 'b>(
         self,
         tables: &'b Metadata<'a>,
-    ) -> Result<UnpackedValue<&'a str>, Error> {
+    ) -> Result<&'a str, Error> {
         let bytes = tables.heaps[MetadataHeapKind::String];
-        bytes.get_null_terminated(self.index)
+        bytes
+            .get_null_terminated(self.index)
+            .map(|unpacked| unpacked.value())
     }
 }
 
@@ -2667,16 +2656,16 @@ impl<'a> MetadataRow<'a, TypeRef> {
         annotator
             .value(self.resolution_scope_index()?)
             .name("resolution_scope")
-            .append_value(self.resolution_scope()?.name()?.value);
+            .append_value(self.resolution_scope()?.name()?);
 
         annotator
             .value(self.name_index()?)
             .name("Type name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
         annotator
             .value(self.namespace_index()?)
             .name("Type namespace")
-            .append_value(self.namespace()?.value);
+            .append_value(self.namespace()?);
 
         Ok(())
     }
@@ -2697,7 +2686,7 @@ impl<'a> MetadataRow<'a, TypeRef> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -2707,7 +2696,7 @@ impl<'a> MetadataRow<'a, TypeRef> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    fn namespace(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.namespace_index()?)
     }
 }
@@ -2721,13 +2710,13 @@ impl<'a> MetadataRow<'a, TypeDef> {
         param_table: &MetadataTable<Param>,
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
-        let type_name = self.name()?.value;
+        let type_name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("Type name")
             .append_value(type_name);
 
-        let type_namespace = self.namespace()?.value;
+        let type_namespace = self.namespace()?;
         annotator
             .value(self.namespace_index()?)
             .name("Type namespace")
@@ -2737,7 +2726,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
             .opt_value(self.extends_index()?)
             .name("extends")
             .append_value(if let Some(base_class) = self.extends()? {
-                base_class.name()?.value
+                base_class.name()?
             } else {
                 "(none)"
             });
@@ -2808,7 +2797,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -2818,7 +2807,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn namespace(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    fn namespace(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.namespace_index()?)
     }
 
@@ -2889,7 +2878,7 @@ impl<'a> MetadataRow<'a, Field> {
     ) -> Result<(), Error> {
         annotator.value(self.flags()?).name("flags");
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -2919,7 +2908,7 @@ impl<'a> MetadataRow<'a, Field> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -2970,7 +2959,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
         type_namespace: &str,
         param_table: &MetadataTable<Param>,
     ) -> Result<(), Error> {
-        let name = self.name()?.value;
+        let name = self.name()?;
 
         let rva_ann = annotator.opt_value(self.rva()?).name("rva");
 
@@ -3006,7 +2995,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
             .name("Param names")
             .value(
                 self.iter_params()?
-                    .map(|param| param.name().map(|unpacked| unpacked.value()))
+                    .map(|param| param.name())
                     .collect::<Result<String, Error>>()?,
             );
 
@@ -3063,7 +3052,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
         self.get_field_bytes(3).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -3123,7 +3112,7 @@ impl<'a> MetadataRow<'a, Param> {
         annotator.value(self.flags()?).name("flags");
         annotator.value(self.sequence()?).name("sequence");
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -3146,7 +3135,7 @@ impl<'a> MetadataRow<'a, Param> {
         self.get_field_bytes(2).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 }
@@ -3159,11 +3148,11 @@ impl<'a> MetadataRow<'a, InterfaceImpl> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
         annotator
             .value(self.interface_index()?)
             .name("Interface")
-            .append_value(self.interface()?.name()?.value);
+            .append_value(self.interface()?.name()?);
 
         Ok(())
     }
@@ -3197,9 +3186,9 @@ impl<'a> MetadataRow<'a, MemberRef> {
         annotator
             .value(self.class_index()?)
             .name("class_index")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -3232,7 +3221,7 @@ impl<'a> MetadataRow<'a, MemberRef> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -3256,7 +3245,7 @@ impl<'a> MetadataRow<'a, Constant> {
         annotator
             .value(self.parent_index()?)
             .name("Parent")
-            .append_value(self.parent()?.name()?.value);
+            .append_value(self.parent()?.name()?);
 
         annotator.value(self.value_index()?).name("Value");
         annotator.range(self.value()?.into()).name("Constant value");
@@ -3299,7 +3288,7 @@ impl<'a> MetadataRow<'a, CustomAttribute> {
         annotator
             .value(self.attribute_type_index()?)
             .name("Type")
-            .append_value(self.attribute_type()?.name()?.value);
+            .append_value(self.attribute_type()?.name()?);
 
         annotator.value(self.value_index()?).name("Value");
         annotator
@@ -3350,7 +3339,7 @@ impl<'a> MetadataRow<'a, FieldMarshal> {
         annotator
             .value(self.parent_index()?)
             .name("Parent")
-            .append_value(self.parent()?.name()?.value);
+            .append_value(self.parent()?.name()?);
         annotator
             .value(self.native_type_index()?)
             .name("Native type");
@@ -3384,7 +3373,7 @@ impl<'a> MetadataRow<'a, DeclSecurity> {
         annotator
             .value(self.parent_index()?)
             .name("Parent")
-            .append_value(self.parent()?.name()?.value);
+            .append_value(self.parent()?.name()?);
 
         annotator
             .value(self.permission_set_index()?)
@@ -3432,7 +3421,7 @@ impl<'a> MetadataRow<'a, ClassLayout> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
 
         Ok(())
     }
@@ -3461,8 +3450,8 @@ impl<'a> MetadataRow<'a, FieldLayout> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let class_name = self.field()?.find_owning_class()?.name()?.value;
-        let field_name = self.field()?.name()?.value;
+        let class_name = self.field()?.find_owning_class()?.name()?;
+        let field_name = self.field()?.name()?;
 
         annotator.value(self.offset()?).name("Offset");
         annotator
@@ -3520,7 +3509,7 @@ impl<'a> MetadataRow<'a, EventMap> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
         annotator.value(self.event_indices()?).name("Events");
 
         Ok(())
@@ -3559,13 +3548,13 @@ impl<'a> MetadataRow<'a, Event> {
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
 
         annotator
             .opt_value(self.event_type_index()?)
             .name("Event type")
             .append_value(if let Some(event) = self.event_type()? {
-                event.name()?.value
+                event.name()?
             } else {
                 "(none)"
             });
@@ -3583,7 +3572,7 @@ impl<'a> MetadataRow<'a, Event> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -3607,7 +3596,7 @@ impl<'a> MetadataRow<'a, PropertyMap> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
         annotator.value(self.property_indices()?).name("Properties");
 
         Ok(())
@@ -3646,7 +3635,7 @@ impl<'a> MetadataRow<'a, Property> {
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
 
         annotator.value(self.signature_index()?).name("Signature");
         annotator
@@ -3666,7 +3655,7 @@ impl<'a> MetadataRow<'a, Property> {
         self.get_field_bytes(1).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -3690,11 +3679,11 @@ impl<'a> MetadataRow<'a, MethodSemantics> {
         annotator
             .value(self.method_index()?)
             .name("Method")
-            .append_value(self.method()?.name()?.value);
+            .append_value(self.method()?.name()?);
         annotator
             .value(self.association_index()?)
             .name("Association")
-            .append_value(self.association()?.name()?.value);
+            .append_value(self.association()?.name()?);
 
         Ok(())
     }
@@ -3732,15 +3721,15 @@ impl<'a> MetadataRow<'a, MethodImpl> {
         annotator
             .value(self.class_index()?)
             .name("Class")
-            .append_value(self.class()?.name()?.value);
+            .append_value(self.class()?.name()?);
         annotator
             .value(self.method_body_index()?)
             .name("Method body")
-            .append_value(self.method_body()?.name()?.value);
+            .append_value(self.method_body()?.name()?);
         annotator
             .value(self.method_declaration_index()?)
             .name("Method declaration")
-            .append_value(self.method_declaration()?.name()?.value);
+            .append_value(self.method_declaration()?.name()?);
 
         Ok(())
     }
@@ -3784,7 +3773,7 @@ impl<'a> MetadataRow<'a, ModuleRef> {
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
 
         Ok(())
     }
@@ -3795,7 +3784,7 @@ impl<'a> MetadataRow<'a, ModuleRef> {
         self.get_field_bytes(0).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 }
@@ -3833,17 +3822,17 @@ impl<'a> MetadataRow<'a, ImplMap> {
         annotator
             .value(self.member_forwarded_index()?)
             .name("Member forwarded")
-            .append_value(self.member_forwarded()?.name()?.value);
+            .append_value(self.member_forwarded()?.name()?);
 
         annotator
             .value(self.import_name_index()?)
             .name("Import name")
-            .append_value(self.import_name()?.value);
+            .append_value(self.import_name()?);
 
         annotator
             .value(self.import_scope_index()?)
             .name("Import scope")
-            .append_value(self.import_scope()?.name()?.value);
+            .append_value(self.import_scope()?.name()?);
 
         Ok(())
     }
@@ -3868,7 +3857,7 @@ impl<'a> MetadataRow<'a, ImplMap> {
         self.get_field_bytes(2).unpack()
     }
 
-    fn import_name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    fn import_name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.import_name_index()?)
     }
 
@@ -3893,7 +3882,7 @@ impl<'a> MetadataRow<'a, FieldRVA> {
             .name("RVA")
             .append_value(self.address()?);
 
-        let name = self.field()?.name()?.value;
+        let name = self.field()?.name()?;
 
         annotator
             .value(self.field_index()?)
@@ -3946,7 +3935,7 @@ impl<'a> MetadataRow<'a, Assembly> {
 
         annotator.value(self.flags()?).name("Flags");
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -4000,7 +3989,7 @@ impl<'a> MetadataRow<'a, Assembly> {
         self.get_field_bytes(7).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 }
@@ -4019,7 +4008,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
 
         annotator.value(self.flags()?).name("Flags");
 
-        let name = self.name()?.value;
+        let name = self.name()?;
         annotator
             .value(self.name_index()?)
             .name("name")
@@ -4028,7 +4017,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         annotator
             .value(self.culture_index()?)
             .name("culture")
-            .append_value(self.culture()?.value);
+            .append_value(self.culture()?);
 
         annotator
             .value(self.public_key_or_token_index()?)
@@ -4081,7 +4070,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         self.get_field_bytes(6).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -4091,7 +4080,7 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         self.get_field_bytes(7).unpack()
     }
 
-    fn culture(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    fn culture(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.culture_index()?)
     }
 
@@ -4117,7 +4106,7 @@ impl<'a> MetadataRow<'a, ManifestResource> {
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
 
         annotator
             .opt_value(self.implementation_index()?)
@@ -4140,7 +4129,7 @@ impl<'a> MetadataRow<'a, ManifestResource> {
         self.get_field_bytes(2).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 
@@ -4176,11 +4165,11 @@ impl<'a> MetadataRow<'a, NestedClass> {
         annotator
             .value(self.nested_class_index()?)
             .name("Nested class")
-            .append_value(self.nested_class()?.name()?.value);
+            .append_value(self.nested_class()?.name()?);
         annotator
             .value(self.enclosing_class_index()?)
             .name("Enclosing class")
-            .append_value(self.enclosing_class()?.name()?.value);
+            .append_value(self.enclosing_class()?.name()?);
 
         Ok(())
     }
@@ -4216,12 +4205,12 @@ impl<'a> MetadataRow<'a, GenericParam> {
         annotator
             .value(self.owner_index()?)
             .name("Owner index")
-            .append_value(self.owner()?.name()?.value);
+            .append_value(self.owner()?.name()?);
 
         annotator
             .value(self.name_index()?)
             .name("name")
-            .append_value(self.name()?.value);
+            .append_value(self.name()?);
 
         Ok(())
     }
@@ -4250,7 +4239,7 @@ impl<'a> MetadataRow<'a, GenericParam> {
         self.get_field_bytes(3).unpack()
     }
 
-    pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
+    pub fn name(&self) -> Result<&'a str, Error> {
         self.metadata.get(self.name_index()?)
     }
 }
@@ -4263,7 +4252,7 @@ impl<'a> MetadataRow<'a, MethodSpec> {
         annotator
             .value(self.method_index()?)
             .name("Method")
-            .append_value(self.method()?.name()?.value);
+            .append_value(self.method()?.name()?);
 
         annotator
             .value(self.instantiation_index()?)
@@ -4304,11 +4293,11 @@ impl<'a> MetadataRow<'a, GenericParamConstraint> {
         annotator
             .value(self.generic_param_index()?)
             .name("Generic param")
-            .append_value(self.generic_param()?.name()?.value);
+            .append_value(self.generic_param()?.name()?);
         annotator
             .value(self.constraint_index()?)
             .name("Constraint")
-            .append_value(self.constraint()?.name()?.value);
+            .append_value(self.constraint()?.name()?);
 
         Ok(())
     }
