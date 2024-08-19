@@ -168,6 +168,10 @@ pub struct MetadataTable<'a, TableTag> {
     _phantom: PhantomData<TableTag>,
 }
 
+pub trait MetadataColumnValue {
+    const SIZE: usize;
+}
+
 pub trait TypedMetadataIndex {
     type Output<'a: 'b, 'b>;
 
@@ -303,6 +307,25 @@ mod column_type {
     }
 }
 
+impl MetadataColumnValue for u8 {
+    const SIZE: usize = 1;
+}
+impl MetadataColumnValue for u16 {
+    const SIZE: usize = 2;
+}
+impl MetadataColumnValue for u32 {
+    const SIZE: usize = 4;
+}
+impl MetadataColumnValue for FieldFlags {
+    const SIZE: usize = 2;
+}
+impl MetadataColumnValue for RelativeVirtualAddress {
+    const SIZE: usize = 4;
+}
+impl MetadataColumnValue for MethodDefFlags {
+    const SIZE: usize = 2;
+}
+
 macro_rules! decl_metadata_table {
     (
         $(
@@ -339,10 +362,22 @@ macro_rules! decl_metadata_table {
     };
 
 
-    (column u8) => { column_type::FixedSize(1) };
-    (column u16) => { column_type::FixedSize(2) };
-    (column u32) => { column_type::FixedSize(4) };
+    (column {value $name:ident}) => {
+        column_type::FixedSize(
+            <$name as MetadataColumnValue>::SIZE
+        )
+    };
+    (column {value Option<$name:ident>}) => {
+        column_type::FixedSize(
+            <$name as MetadataColumnValue>::SIZE
+        )
+    };
     (column {Option<$name:ident>}) => { column_type::$name };
+    (column {heap $name:ident}) => { column_type::$name };
+    (column {range $name:ident $plural:ident}) => { column_type::$name };
+    (column {index $name:ident}) => { column_type::$name };
+    (column {coded_index $name:ident}) => { column_type::$name };
+    (column {coded_index Option<$name:ident>}) => { column_type::$name };
     (column $name:ident) => { column_type::$name };
 
 
@@ -383,17 +418,17 @@ macro_rules! decl_metadata_table {
     (
         member_accessor
             $field_index: expr,
-            $table_name:ident: {$field_name:ident: u16}
+            $table_name:ident: {$field_name:ident: {value $field_type:ident}}
     ) => {
         paste!{
             impl<'a> MetadataRow<'a, $table_name> {
                 fn [< $field_name _unpacked >](
                     &self,
-                ) -> Result<UnpackedValue<u16>, Error> {
+                ) -> Result<UnpackedValue<$field_type>, Error> {
                     self.get_field_bytes($field_index).unpack()
                 }
 
-                pub fn $field_name(&self) -> Result<u16, Error> {
+                pub fn $field_name(&self) -> Result<$field_type, Error> {
                     let unpacked = self. [< $field_name _unpacked >] ()?;
                     Ok(unpacked.value())
                 }
@@ -405,17 +440,48 @@ macro_rules! decl_metadata_table {
     (
         member_accessor
             $field_index: expr,
-            $table_name:ident: {$field_name:ident: String}
+            $table_name:ident: {
+                $field_name:ident: {
+                    value Option<$field_type:ident>
+                }
+            }
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _unpacked >](
+                    &self,
+                ) -> Result<UnpackedValue<Option<$field_type>>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn $field_name(&self) -> Result<Option<$field_type>, Error> {
+                    let unpacked = self. [< $field_name _unpacked >] ()?;
+                    Ok(unpacked.value())
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: {heap $heap_type:ident}}
     ) => {
         paste!{
             impl<'a> MetadataRow<'a, $table_name> {
                 fn [< $field_name _index >](
                     &self,
-                ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
+                ) -> Result<UnpackedValue<MetadataHeapIndex<$heap_type>>, Error> {
                     self.get_field_bytes($field_index).unpack()
                 }
 
-                pub fn $field_name(&self) -> Result<&'a str, Error> {
+                pub fn $field_name<'b>(
+                    &'b self,
+                ) -> Result<
+                    <MetadataHeapIndex<$heap_type> as TypedMetadataIndex>::Output<'a,'b>,
+                    Error,
+                > {
                     let index = self. [< $field_name _index >] ()?;
                     let index = index.value();
                     self.metadata.get(index)
@@ -485,81 +551,383 @@ macro_rules! decl_metadata_table {
             }
         }
     };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {$field_name:ident: {coded_index $coded_type:ident}}
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<UnpackedValue<MetadataCodedIndex<$coded_type>>, Error> {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn $field_name<'b>(&'b self) -> Result<
+                    <
+                        MetadataCodedIndex<$coded_type> as TypedMetadataIndex
+                    >::Output<'a,'b>,
+                    Error,
+                > {
+                    let index = self. [< $field_name _index >] ()?;
+                    self.metadata.get(index)
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {
+                $field_name:ident: {
+                    coded_index Option<$coded_type:ident>
+                }
+            }
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<
+                        UnpackedValue<Option<MetadataCodedIndex<$coded_type>>>,
+                        Error,
+                > {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn $field_name<'b>(
+                    &'b self
+                ) -> Result<
+                    Option<
+                        <
+                            MetadataCodedIndex<$coded_type>
+                            as TypedMetadataIndex
+                        >::Output<'a,'b>
+                    >,
+                    Error,
+                > {
+                    let opt_index = self. [< $field_name _index >] ()?.value();
+                    opt_index
+                        .map(|index| self.metadata.get(index))
+                        .transpose()
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {
+                $field_name:ident: {
+                    index $field_type:ident
+                }
+            }
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _index >](
+                    &self,
+                ) -> Result<
+                        UnpackedValue<MetadataTableIndex<$field_type>>,
+                        Error,
+                > {
+                    self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn $field_name<'b>(
+                    &'b self
+                ) -> Result<
+                    <
+                        MetadataTableIndex<$field_type> as TypedMetadataIndex
+                    >::Output<'a,'b>,
+                    Error,
+                > {
+                    let index = self. [< $field_name _index >] ()?.value();
+                    self.metadata.get(index)
+                }
+
+            }
+        }
+    };
+
+    (
+        member_accessor
+            $field_index: expr,
+            $table_name:ident: {
+                $field_name:ident: {
+                    range
+                    $field_type:ident
+                    $plural_field_name:ident
+                }
+            }
+    ) => {
+        paste!{
+            impl<'a> MetadataRow<'a, $table_name> {
+                fn [< $field_name _indices >](
+                    &self,
+                ) -> Result<
+                        UnpackedValue<MetadataTableIndexRange<$field_type>>,
+                        Error,
+                > {
+                    Ok(self.get_index_range($field_index))
+                }
+
+                pub fn [< iter_ $plural_field_name >]<'b>(&'b self) -> Result<
+                    impl Iterator<Item=MetadataRow<$field_type>>,
+                    Error,
+                > {
+                    let indices = self. [< $field_name _indices >] ()?;
+                    self.metadata.iter_range(indices)
+                }
+
+            }
+        }
+    };
 }
 
 decl_metadata_table! {
     Module: {
-        generation: u16,
-        name: String,
+        generation: {value u16},
+        name: {heap String},
         module_id: GUID,
         enc_id: {Option<GUID>},
         enc_base_id: {Option<GUID>},
     },
-}
 
-macro_rules! decl_metadata_table_tag {
-    (
-        $(
-            $table_name:ident: [ $( $field:tt ),* $(,)? ]
-        ),* $(,)?
-    ) => {
-        $(
-            #[derive(Clone, Copy)]
-            pub struct $table_name;
+    TypeRef: {
+        resolution_scope: {coded_index ResolutionScope},
+        name: {heap String},
+        namespace: {heap String},
+    },
 
-            impl MetadataTableTag for $table_name {
-                const KIND: MetadataTableKind =
-                    MetadataTableKind::$table_name;
+    TypeDef: {
+        flags: {value u32},
+        name: {heap String},
+        namespace: {heap String},
+        extends: {coded_index Option<TypeDefOrRef>},
+        field: {range Field fields},
+        method: {range MethodDef methods},
+    },
 
-                const COLUMNS: &'static [MetadataColumnType] = &[
-                    $( decl_metadata_table_tag!(field $field) ),*
-                ];
-            }
-        )*
-    };
+    Field: {
+        flags: {value FieldFlags},
+        name: {heap String},
+        signature: {heap Blob},
+    },
 
-    (field $bytes:literal) => { column_type::FixedSize($bytes) };
-    (field $name:ident) => { column_type::$name };
-}
+    MethodDef: {
+        rva: {value Option<RelativeVirtualAddress>},
+        impl_flags: {value u16},
+        flags: {value MethodDefFlags},
+        name: {heap String},
+        signature: {heap Blob},
+        param: {range Param params},
+    },
 
-decl_metadata_table_tag! {
-    TypeRef: [ResolutionScope, String, String],
-    TypeDef: [4, String, String, TypeDefOrRef, Field, MethodDef],
-    Field: [2, String, Blob],
-    MethodDef: [4, 2, 2, String, Blob, Param],
-    Param: [2, 2, String],
-    InterfaceImpl: [TypeDef, TypeDefOrRef],
-    MemberRef: [MemberRefParent, String, Blob],
-    Constant: [1, 1, HasConstant, Blob],
-    CustomAttribute: [HasCustomAttribute, CustomAttributeType, Blob],
-    FieldMarshal: [HasFieldMarshal, Blob],
-    DeclSecurity: [2, HasDeclSecurity, Blob],
-    ClassLayout: [2, 4, TypeDef],
-    FieldLayout: [4, Field],
-    StandAloneSig: [Blob],
-    EventMap: [TypeDef, Event],
-    Event: [2, String, TypeDefOrRef],
-    PropertyMap: [TypeDef, Property],
-    Property: [2, String, Blob],
-    MethodSemantics: [2, MethodDef, HasSemantics],
-    MethodImpl: [TypeDef, MethodDefOrRef, MethodDefOrRef],
-    ModuleRef: [String],
-    TypeSpec: [Blob],
-    ImplMap: [2, MemberForwarded, String, ModuleRef],
-    FieldRVA: [4, Field],
-    Assembly: [4, 2, 2, 2, 2, 4, Blob, String, String],
-    AssemblyProcessor: [4],
-    AssemblyOS: [4, 4, 4],
-    AssemblyRef: [2, 2, 2, 2, 4, Blob, String, String, Blob],
-    AssemblyRefProcessor: [4, AssemblyRef],
-    AssemblyRefOS: [4, 4, 4, AssemblyRef],
-    File: [4, String, Blob],
-    ExportedType: [4, TypeDef, String, String, Implementation],
-    ManifestResource: [4, 4, String, Implementation],
-    NestedClass: [TypeDef, TypeDef],
-    GenericParam: [2, 2, TypeOrMethodDef, String],
-    MethodSpec: [MethodDefOrRef, Blob],
-    GenericParamConstraint: [GenericParam, TypeDefOrRef],
+    Param: {
+        flags: {value u16},
+        sequence: {value u16},
+        name: {heap String},
+    },
+
+    InterfaceImpl: {
+        class: {index TypeDef},
+        interface: {coded_index TypeDefOrRef},
+    },
+
+    MemberRef: {
+        class: {coded_index MemberRefParent},
+        name: {heap String},
+        signature: {heap Blob},
+    },
+
+    Constant: {
+        type_value: {value u8},
+        _unused: {value u8},
+        parent: {coded_index HasConstant},
+        value: {heap Blob},
+    },
+
+    CustomAttribute: {
+        parent: {coded_index HasCustomAttribute},
+        attribute_type: {coded_index CustomAttributeType},
+        value: {heap Blob},
+    },
+
+    FieldMarshal: {
+        parent: {coded_index HasFieldMarshal},
+        native_type: {heap Blob},
+    },
+
+    DeclSecurity: {
+        action: {value u16},
+        parent: {coded_index HasDeclSecurity},
+        permission_set: {heap Blob},
+    },
+
+    ClassLayout: {
+        alignment: {value u16},
+        size: {value u32},
+        class: {index TypeDef},
+    },
+
+    FieldLayout: {
+        offset: {value u32},
+        field: {index Field},
+    },
+
+    StandAloneSig: {
+        signature: {heap Blob},
+    },
+
+    EventMap: {
+        class: {index TypeDef},
+        event: {range Event events},
+    },
+
+    Event: {
+        flags: {value u16},
+        name: {heap String},
+        event_type: {coded_index Option<TypeDefOrRef>},
+    },
+
+    PropertyMap: {
+        class: {index TypeDef},
+        property: {range Property properties},
+    },
+
+    Property: {
+        flags: {value u16},
+        name: {heap String},
+        signature: {heap Blob},
+    },
+
+    MethodSemantics: {
+        semantics: {value u16},
+        method: {index MethodDef},
+        association: {coded_index HasSemantics},
+    },
+
+    MethodImpl: {
+        class: {index TypeDef},
+        method_body: {coded_index MethodDefOrRef},
+        method_declaration: {coded_index MethodDefOrRef},
+    },
+
+    ModuleRef: {
+        name: {heap String},
+    },
+
+    TypeSpec: {
+        signature: {heap Blob},
+    },
+
+    ImplMap: {
+        flags: {value u16},
+        member_forwarded: {coded_index MemberForwarded},
+        import_name: {heap String},
+        import_scope: {index ModuleRef},
+    },
+
+    FieldRVA: {
+        rva: {value RelativeVirtualAddress},
+        field: {index Field},
+    },
+
+    Assembly: {
+        hash_algorithm_id: {value u32},
+        major_version: {value u16},
+        minor_version: {value u16},
+        build_number: {value u16},
+        revision_number: {value u16},
+        flags: {value u32},
+        public_key: {heap Blob},
+        name: {heap String},
+        culture: {heap String},
+    },
+
+    AssemblyProcessor: {
+        processor: {value u32},
+    },
+
+    AssemblyOS: {
+        platform_id: {value u32},
+        major_version: {value u32},
+        minor_version: {value u32},
+    },
+
+    AssemblyRef: {
+        major_version: {value u16},
+        minor_version: {value u16},
+        build_number: {value u16},
+        revision_number: {value u16},
+        flags: {value u32},
+        public_key_or_token: {heap Blob},
+        name: {heap String},
+        culture: {heap String},
+        hash_value: {heap Blob},
+    },
+
+    AssemblyRefProcessor: {
+        processor: {value u32},
+        assembly_ref: {index AssemblyRef},
+    },
+
+    AssemblyRefOS: {
+        platform_id: {value u32},
+        major_version: {value u32},
+        minor_version: {value u32},
+        assembly_ref: {index AssemblyRef},
+    },
+
+    File: {
+        flags: {value u32},
+        name: {heap String},
+        hash_value: {heap Blob},
+    },
+
+    ExportedType: {
+        flags: {value u32},
+        type_def_id: {index TypeDef},
+        name: {heap String},
+        namespace: {heap String},
+        implementation: {coded_index Implementation},
+    },
+
+    ManifestResource: {
+        offset: {value u32},
+        flags: {value u32},
+        name: {heap String},
+        implementation: {coded_index Option<Implementation>},
+    },
+
+    NestedClass: {
+        nested_class: {index TypeDef},
+        enclosing_class: {index TypeDef},
+    },
+
+    GenericParam: {
+        number: {value u16},
+        flags: {value u16},
+        owner: {coded_index TypeOrMethodDef},
+        name: {heap String},
+    },
+
+    MethodSpec: {
+        method: {coded_index MethodDefOrRef},
+        instantiation: {heap Blob},
+    },
+
+    GenericParamConstraint: {
+        generic_param: {index GenericParam},
+        constraint: {coded_index TypeDefOrRef},
+    },
 }
 
 pub trait CodedIndex {
@@ -2670,36 +3038,6 @@ impl<'a> MetadataRow<'a, TypeRef> {
 
         Ok(())
     }
-
-    fn resolution_scope_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<ResolutionScope>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn resolution_scope(&self) -> Result<MetadataResolutionScope, Error> {
-        self.metadata.get(self.resolution_scope_index()?)
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn namespace_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn namespace(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.namespace_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, TypeDef> {
@@ -2710,7 +3048,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
         method_def_table: &MetadataTable<MethodDef>,
         param_table: &MetadataTable<Param>,
     ) -> Result<(), Error> {
-        annotator.value(self.flags()?).name("flags");
+        annotator.value(self.flags_unpacked()?).name("flags");
         let type_name = self.name()?;
         annotator
             .value(self.name_index()?)
@@ -2787,65 +3125,6 @@ impl<'a> MetadataRow<'a, TypeDef> {
 
         Ok(())
     }
-
-    pub fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn namespace_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn namespace(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.namespace_index()?)
-    }
-
-    fn extends_index(
-        &self,
-    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<TypeDefOrRef>>>, Error>
-    {
-        self.get_field_bytes(3).unpack()
-    }
-
-    fn extends(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
-        self.metadata.get(self.extends_index()?)
-    }
-
-    fn field_indices(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<Field>>, Error> {
-        Ok(self.get_index_range(4))
-    }
-
-    pub fn iter_fields(
-        &self,
-    ) -> Result<impl Iterator<Item = MetadataRow<Field>>, Error> {
-        self.metadata.iter_range(self.field_indices()?)
-    }
-
-    fn method_indices(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<MethodDef>>, Error> {
-        Ok(self.get_index_range(5))
-    }
-
-    pub fn iter_methods(
-        &self,
-    ) -> Result<impl Iterator<Item = MetadataRow<'a, MethodDef>>, Error> {
-        self.metadata.iter_range(self.method_indices()?)
-    }
 }
 
 impl FieldFlags {
@@ -2877,7 +3156,7 @@ impl<'a> MetadataRow<'a, Field> {
         type_name: &str,
         _type_namespace: &str,
     ) -> Result<(), Error> {
-        annotator.value(self.flags()?).name("flags");
+        annotator.value(self.flags_unpacked()?).name("flags");
 
         let name = self.name()?;
         annotator
@@ -2895,32 +3174,8 @@ impl<'a> MetadataRow<'a, Field> {
         Ok(())
     }
 
-    pub fn flags(&self) -> Result<UnpackedValue<FieldFlags>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
     pub fn is_static(&self) -> Result<bool, Error> {
-        Ok(self.flags()?.value().is_static())
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
+        Ok(self.flags()?.is_static())
     }
 
     pub fn find_owning_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
@@ -2962,7 +3217,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
     ) -> Result<(), Error> {
         let name = self.name()?;
 
-        let rva_ann = annotator.opt_value(self.rva()?).name("rva");
+        let rva_ann = annotator.opt_value(self.rva_unpacked()?).name("rva");
 
         if let Some(cil_method) = self.cil_method()? {
             let method_range = cil_method.method_range()?;
@@ -2973,8 +3228,10 @@ impl<'a> MetadataRow<'a, MethodDef> {
             cil_method.collect_annotations(annotator)?;
         }
 
-        annotator.value(self.impl_flags()?).name("impl_flags");
-        annotator.value(self.flags()?).name("flags");
+        annotator
+            .value(self.impl_flags_unpacked()?)
+            .name("impl_flags");
+        annotator.value(self.flags_unpacked()?).name("flags");
 
         annotator
             .value(self.name_index()?)
@@ -3016,15 +3273,8 @@ impl<'a> MetadataRow<'a, MethodDef> {
         Ok(())
     }
 
-    fn rva(
-        &self,
-    ) -> Result<UnpackedValue<Option<RelativeVirtualAddress>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
     fn address(&self) -> Result<Option<Pointer>, Error> {
         self.rva()?
-            .value()
             .map(|rva| self.metadata.dll_unpacker.virtual_address_to_raw(rva))
             .transpose()
     }
@@ -3035,48 +3285,8 @@ impl<'a> MetadataRow<'a, MethodDef> {
         }))
     }
 
-    fn impl_flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn flags(&self) -> Result<UnpackedValue<MethodDefFlags>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
     pub fn is_static(&self) -> Result<bool, Error> {
-        Ok(self.flags()?.value().is_static())
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(4).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
-    }
-
-    fn param_indices(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<Param>>, Error> {
-        Ok(self.get_index_range(5))
-    }
-
-    pub fn iter_params(
-        &self,
-    ) -> Result<impl Iterator<Item = MetadataRow<Param>>, Error> {
-        self.metadata.iter_range(self.param_indices()?)
+        Ok(self.flags()?.is_static())
     }
 }
 
@@ -3110,8 +3320,8 @@ impl<'a> MetadataRow<'a, Param> {
         _type_namespace: &str,
         _method_name: &str,
     ) -> Result<(), Error> {
-        annotator.value(self.flags()?).name("flags");
-        annotator.value(self.sequence()?).name("sequence");
+        annotator.value(self.flags_unpacked()?).name("flags");
+        annotator.value(self.sequence_unpacked()?).name("sequence");
 
         let name = self.name()?;
         annotator
@@ -3120,24 +3330,6 @@ impl<'a> MetadataRow<'a, Param> {
             .append_value(name);
 
         Ok(())
-    }
-
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn sequence(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
     }
 }
 
@@ -3156,26 +3348,6 @@ impl<'a> MetadataRow<'a, InterfaceImpl> {
             .append_value(self.interface()?.name()?);
 
         Ok(())
-    }
-
-    pub fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    pub fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.class_index()?)
-    }
-
-    fn interface_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeDefOrRef>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn interface(&self) -> Result<MetadataTypeDefOrRef, Error> {
-        self.metadata.get(self.interface_index()?)
     }
 }
 
@@ -3205,36 +3377,6 @@ impl<'a> MetadataRow<'a, MemberRef> {
 
         Ok(())
     }
-
-    fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<MemberRefParent>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn class(&self) -> Result<MetadataMemberRefParent, Error> {
-        self.metadata.get(self.class_index()?)
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, Constant> {
@@ -3242,7 +3384,9 @@ impl<'a> MetadataRow<'a, Constant> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.type_value()?).name("Type value");
+        annotator
+            .value(self.type_value_unpacked()?)
+            .name("Type value");
         annotator
             .value(self.parent_index()?)
             .name("Parent")
@@ -3252,31 +3396,6 @@ impl<'a> MetadataRow<'a, Constant> {
         annotator.range(self.value()?.into()).name("Constant value");
 
         Ok(())
-    }
-
-    fn type_value(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn parent_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<HasConstant>>, Error> {
-        // Skip `get_field_bytes(1)`, which is a padding byte.
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn parent(&self) -> Result<MetadataHasConstant, Error> {
-        self.metadata.get(self.parent_index()?)
-    }
-
-    fn value_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    fn value(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.value_index()?)
     }
 }
 
@@ -3298,38 +3417,6 @@ impl<'a> MetadataRow<'a, CustomAttribute> {
 
         Ok(())
     }
-
-    fn parent_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<HasCustomAttribute>>, Error>
-    {
-        self.get_field_bytes(0).unpack()
-    }
-
-    pub fn parent(&self) -> Result<MetadataHasCustomAttribute, Error> {
-        self.metadata.get(self.parent_index()?)
-    }
-
-    fn attribute_type_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<CustomAttributeType>>, Error>
-    {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn attribute_type(&self) -> Result<MetadataCustomAttributeType, Error> {
-        self.metadata.get(self.attribute_type_index()?)
-    }
-
-    fn value_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn value(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.value_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, FieldMarshal> {
@@ -3347,22 +3434,6 @@ impl<'a> MetadataRow<'a, FieldMarshal> {
 
         Ok(())
     }
-
-    fn parent_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<HasFieldMarshal>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn parent(&self) -> Result<MetadataHasFieldMarshal, Error> {
-        self.metadata.get(self.parent_index()?)
-    }
-
-    fn native_type_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
 }
 
 impl<'a> MetadataRow<'a, DeclSecurity> {
@@ -3370,7 +3441,7 @@ impl<'a> MetadataRow<'a, DeclSecurity> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.action()?).name("Action");
+        annotator.value(self.action_unpacked()?).name("Action");
         annotator
             .value(self.parent_index()?)
             .name("Parent")
@@ -3385,30 +3456,6 @@ impl<'a> MetadataRow<'a, DeclSecurity> {
 
         Ok(())
     }
-
-    fn action(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn parent_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<HasDeclSecurity>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn parent(&self) -> Result<MetadataHasDeclSecurity, Error> {
-        self.metadata.get(self.parent_index()?)
-    }
-
-    fn permission_set_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn permission_set(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.permission_set_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, ClassLayout> {
@@ -3416,8 +3463,10 @@ impl<'a> MetadataRow<'a, ClassLayout> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.alignment()?).name("Alignment");
-        annotator.value(self.size()?).name("Size (bytes)");
+        annotator
+            .value(self.alignment_unpacked()?)
+            .name("Alignment");
+        annotator.value(self.size_unpacked()?).name("Size (bytes)");
 
         annotator
             .value(self.class_index()?)
@@ -3425,24 +3474,6 @@ impl<'a> MetadataRow<'a, ClassLayout> {
             .append_value(self.class()?.name()?);
 
         Ok(())
-    }
-
-    fn alignment(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.class_index()?)
     }
 }
 
@@ -3454,27 +3485,13 @@ impl<'a> MetadataRow<'a, FieldLayout> {
         let class_name = self.field()?.find_owning_class()?.name()?;
         let field_name = self.field()?.name()?;
 
-        annotator.value(self.offset()?).name("Offset");
+        annotator.value(self.offset_unpacked()?).name("Offset");
         annotator
             .value(self.field_index()?)
             .name("Field")
             .append_value(format!("{class_name}.{field_name}"));
 
         Ok(())
-    }
-
-    fn offset(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn field_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<Field>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn field(&self) -> Result<MetadataRow<'a, Field>, Error> {
-        self.metadata.get(self.field_index()?)
     }
 }
 
@@ -3489,16 +3506,6 @@ impl<'a> MetadataRow<'a, StandAloneSig> {
             .name("StandAloneSig signature");
 
         Ok(())
-    }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
     }
 }
 
@@ -3515,28 +3522,6 @@ impl<'a> MetadataRow<'a, EventMap> {
 
         Ok(())
     }
-
-    fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.class_index()?)
-    }
-
-    fn event_indices(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<Event>>, Error> {
-        Ok(self.get_index_range(1))
-    }
-
-    pub fn iter_events(
-        &self,
-    ) -> Result<impl Iterator<Item = MetadataRow<Event>>, Error> {
-        self.metadata.iter_range(self.event_indices()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, Event> {
@@ -3544,7 +3529,7 @@ impl<'a> MetadataRow<'a, Event> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.flags_unpacked()?).name("Flags");
 
         annotator
             .value(self.name_index()?)
@@ -3562,31 +3547,6 @@ impl<'a> MetadataRow<'a, Event> {
 
         Ok(())
     }
-
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn event_type_index(
-        &self,
-    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<TypeDefOrRef>>>, Error>
-    {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn event_type(&self) -> Result<Option<MetadataTypeDefOrRef>, Error> {
-        self.metadata.get(self.event_type_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, PropertyMap> {
@@ -3602,28 +3562,6 @@ impl<'a> MetadataRow<'a, PropertyMap> {
 
         Ok(())
     }
-
-    fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.class_index()?)
-    }
-
-    fn property_indices(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndexRange<Property>>, Error> {
-        Ok(self.get_index_range(1))
-    }
-
-    pub fn iter_properties(
-        &self,
-    ) -> Result<impl Iterator<Item = MetadataRow<Property>>, Error> {
-        self.metadata.iter_range(self.property_indices()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, Property> {
@@ -3631,7 +3569,7 @@ impl<'a> MetadataRow<'a, Property> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.flags_unpacked()?).name("Flags");
 
         annotator
             .value(self.name_index()?)
@@ -3645,30 +3583,6 @@ impl<'a> MetadataRow<'a, Property> {
 
         Ok(())
     }
-
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, MethodSemantics> {
@@ -3676,7 +3590,9 @@ impl<'a> MetadataRow<'a, MethodSemantics> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.semantics()?).name("Semantics");
+        annotator
+            .value(self.semantics_unpacked()?)
+            .name("Semantics");
         annotator
             .value(self.method_index()?)
             .name("Method")
@@ -3687,30 +3603,6 @@ impl<'a> MetadataRow<'a, MethodSemantics> {
             .append_value(self.association()?.name()?);
 
         Ok(())
-    }
-
-    fn semantics(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn method_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<MethodDef>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn method(&self) -> Result<MetadataRow<'a, MethodDef>, Error> {
-        self.metadata.get(self.method_index()?)
-    }
-
-    fn association_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<HasSemantics>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn association(&self) -> Result<MetadataHasSemantics, Error> {
-        self.metadata.get(self.association_index()?)
     }
 }
 
@@ -3734,36 +3626,6 @@ impl<'a> MetadataRow<'a, MethodImpl> {
 
         Ok(())
     }
-
-    fn class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.class_index()?)
-    }
-
-    fn method_body_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn method_body(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.metadata.get(self.method_body_index()?)
-    }
-
-    fn method_declaration_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn method_declaration(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.metadata.get(self.method_declaration_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, ModuleRef> {
@@ -3777,16 +3639,6 @@ impl<'a> MetadataRow<'a, ModuleRef> {
             .append_value(self.name()?);
 
         Ok(())
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
     }
 }
 
@@ -3802,16 +3654,6 @@ impl<'a> MetadataRow<'a, TypeSpec> {
 
         Ok(())
     }
-
-    fn signature_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn signature(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.signature_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, ImplMap> {
@@ -3819,7 +3661,9 @@ impl<'a> MetadataRow<'a, ImplMap> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.mapping_flags()?).name("Mapping flags");
+        annotator
+            .value(self.flags_unpacked()?)
+            .name("Mapping flags");
         annotator
             .value(self.member_forwarded_index()?)
             .name("Member forwarded")
@@ -3837,40 +3681,6 @@ impl<'a> MetadataRow<'a, ImplMap> {
 
         Ok(())
     }
-
-    fn mapping_flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn member_forwarded_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<MemberForwarded>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn member_forwarded(&self) -> Result<MetadataMemberForwarded, Error> {
-        self.metadata.get(self.member_forwarded_index()?)
-    }
-
-    fn import_name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn import_name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.import_name_index()?)
-    }
-
-    fn import_scope_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<ModuleRef>>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    fn import_scope(&self) -> Result<MetadataRow<ModuleRef>, Error> {
-        self.metadata.get(self.import_scope_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, FieldRVA> {
@@ -3879,7 +3689,7 @@ impl<'a> MetadataRow<'a, FieldRVA> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
-            .value(self.rva()?)
+            .value(self.rva_unpacked()?)
             .name("RVA")
             .append_value(self.address()?);
 
@@ -3898,24 +3708,10 @@ impl<'a> MetadataRow<'a, FieldRVA> {
         Ok(())
     }
 
-    fn rva(&self) -> Result<UnpackedValue<RelativeVirtualAddress>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
     fn address(&self) -> Result<Pointer, Error> {
         self.metadata
             .dll_unpacker
-            .virtual_address_to_raw(self.rva()?.value())
-    }
-
-    fn field_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<Field>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn field(&self) -> Result<MetadataRow<Field>, Error> {
-        self.metadata.get(self.field_index()?)
+            .virtual_address_to_raw(self.rva()?)
     }
 }
 
@@ -3925,16 +3721,22 @@ impl<'a> MetadataRow<'a, Assembly> {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator
-            .value(self.hash_algorithm_id()?)
+            .value(self.hash_algorithm_id_unpacked()?)
             .name("Hash algorithm");
-        annotator.value(self.major_version()?).name("Major version");
-        annotator.value(self.minor_version()?).name("Minor version");
-        annotator.value(self.build_number()?).name("Build number");
         annotator
-            .value(self.revision_number()?)
+            .value(self.major_version_unpacked()?)
+            .name("Major version");
+        annotator
+            .value(self.minor_version_unpacked()?)
+            .name("Minor version");
+        annotator
+            .value(self.build_number_unpacked()?)
+            .name("Build number");
+        annotator
+            .value(self.revision_number_unpacked()?)
             .name("Revision number");
 
-        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.flags_unpacked()?).name("Flags");
 
         let name = self.name()?;
         annotator
@@ -3947,51 +3749,12 @@ impl<'a> MetadataRow<'a, Assembly> {
             .range(self.public_key()?.into())
             .name(format!("Public key, '{name}' assembly"));
 
+        annotator
+            .value(self.culture_index()?)
+            .name("Culture")
+            .append_value(self.culture()?);
+
         Ok(())
-    }
-
-    fn hash_algorithm_id(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn build_number(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    fn revision_number(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(4).unpack()
-    }
-
-    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(5).unpack()
-    }
-
-    fn public_key_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(6).unpack()
-    }
-
-    fn public_key(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.public_key_index()?)
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(7).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
     }
 }
 
@@ -4000,14 +3763,20 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.major_version()?).name("Major version");
-        annotator.value(self.minor_version()?).name("Minor version");
-        annotator.value(self.build_number()?).name("Build number");
         annotator
-            .value(self.revision_number()?)
+            .value(self.major_version_unpacked()?)
+            .name("Major version");
+        annotator
+            .value(self.minor_version_unpacked()?)
+            .name("Minor version");
+        annotator
+            .value(self.build_number_unpacked()?)
+            .name("Build number");
+        annotator
+            .value(self.revision_number_unpacked()?)
             .name("Revision number");
 
-        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.flags_unpacked()?).name("Flags");
 
         let name = self.name()?;
         annotator
@@ -4034,66 +3803,6 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
 
         Ok(())
     }
-
-    fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn build_number(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn revision_number(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(4).unpack()
-    }
-
-    fn public_key_or_token_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(5).unpack()
-    }
-
-    fn public_key_or_token(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.public_key_or_token_index()?)
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(6).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn culture_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(7).unpack()
-    }
-
-    fn culture(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.culture_index()?)
-    }
-
-    fn hash_value_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(8).unpack()
-    }
-
-    fn hash_value(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.hash_value_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, ManifestResource> {
@@ -4101,8 +3810,8 @@ impl<'a> MetadataRow<'a, ManifestResource> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.offset()?).name("Offset");
-        annotator.value(self.flags()?).name("Flags");
+        annotator.value(self.offset_unpacked()?).name("Offset");
+        annotator.value(self.flags_unpacked()?).name("Flags");
 
         annotator
             .value(self.name_index()?)
@@ -4114,47 +3823,6 @@ impl<'a> MetadataRow<'a, ManifestResource> {
             .name("Implementation");
 
         Ok(())
-    }
-
-    fn offset(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
-    }
-
-    fn implementation_index(
-        &self,
-    ) -> Result<UnpackedValue<Option<MetadataCodedIndex<Implementation>>>, Error>
-    {
-        // TODO: When implementing a method to find the location of an
-        // implementation, `None` values may require special handling.
-        // ECMA-335 (section II.22.24) explicitly calls it this index
-        // as optional, and that an index of zero refers to a location
-        // within the current file.
-        //
-        // If it references the current file, `offset` is the number
-        // of bytes relative to the `Resources` entry of the CLR
-        // header. (`dll_unpacker.clr_runtime_header()?.resource()`,
-        // adjusted by `dll_unpacker.virtual_address_to_raw`)
-        self.get_field_bytes(3).unpack()
-    }
-
-    pub fn implementation(
-        &self,
-    ) -> Result<Option<MetadataImplementation>, Error> {
-        self.metadata.get(self.implementation_index()?)
     }
 }
 
@@ -4174,26 +3842,6 @@ impl<'a> MetadataRow<'a, NestedClass> {
 
         Ok(())
     }
-
-    fn nested_class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn nested_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.nested_class_index()?)
-    }
-
-    fn enclosing_class_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<TypeDef>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn enclosing_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
-        self.metadata.get(self.enclosing_class_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, GenericParam> {
@@ -4201,8 +3849,10 @@ impl<'a> MetadataRow<'a, GenericParam> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.number()?).name("Param number");
-        annotator.value(self.flags()?).name("Flags");
+        annotator
+            .value(self.number_unpacked()?)
+            .name("Param number");
+        annotator.value(self.flags_unpacked()?).name("Flags");
         annotator
             .value(self.owner_index()?)
             .name("Owner index")
@@ -4214,34 +3864,6 @@ impl<'a> MetadataRow<'a, GenericParam> {
             .append_value(self.name()?);
 
         Ok(())
-    }
-
-    fn number(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn owner_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeOrMethodDef>>, Error> {
-        self.get_field_bytes(2).unpack()
-    }
-
-    fn owner(&self) -> Result<MetadataTypeOrMethodDef, Error> {
-        self.metadata.get(self.owner_index()?)
-    }
-
-    fn name_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<String>>, Error> {
-        self.get_field_bytes(3).unpack()
-    }
-
-    pub fn name(&self) -> Result<&'a str, Error> {
-        self.metadata.get(self.name_index()?)
     }
 }
 
@@ -4264,26 +3886,6 @@ impl<'a> MetadataRow<'a, MethodSpec> {
 
         Ok(())
     }
-
-    fn method_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<MethodDefOrRef>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn method(&self) -> Result<MetadataMethodDefOrRef, Error> {
-        self.metadata.get(self.method_index()?)
-    }
-
-    fn instantiation_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataHeapIndex<Blob>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn instantiation(&self) -> Result<ByteRange, Error> {
-        self.metadata.get(self.instantiation_index()?)
-    }
 }
 
 impl<'a> MetadataRow<'a, GenericParamConstraint> {
@@ -4301,25 +3903,5 @@ impl<'a> MetadataRow<'a, GenericParamConstraint> {
             .append_value(self.constraint()?.name()?);
 
         Ok(())
-    }
-
-    fn generic_param_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataTableIndex<GenericParam>>, Error> {
-        self.get_field_bytes(0).unpack()
-    }
-
-    fn generic_param(&self) -> Result<MetadataRow<GenericParam>, Error> {
-        self.metadata.get(self.generic_param_index()?)
-    }
-
-    fn constraint_index(
-        &self,
-    ) -> Result<UnpackedValue<MetadataCodedIndex<TypeDefOrRef>>, Error> {
-        self.get_field_bytes(1).unpack()
-    }
-
-    fn constraint(&self) -> Result<MetadataTypeDefOrRef, Error> {
-        self.metadata.get(self.constraint_index()?)
     }
 }
