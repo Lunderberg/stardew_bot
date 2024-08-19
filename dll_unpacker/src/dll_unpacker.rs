@@ -605,64 +605,66 @@ pub trait CodedIndex {
 
 macro_rules! decl_core_coded_index_type {
     ($tag:ident,
-     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
-        pub struct $tag;
+        paste!{
+            pub struct $tag;
 
-        pub enum $row_enum<'a> {
-            $(
-                $table_type(MetadataRow<'a, $table_type>),
-            )*
-        }
-
-        impl TypedMetadataIndex for MetadataCodedIndex<$tag> {
-            type Output<'a: 'b, 'b> = $row_enum<'b>;
-
-            fn access<'a: 'b, 'b>(
-                self,
-                tables: &'b Metadata<'a>,
-            ) -> Result<Self::Output<'a, 'b>, Error> {
-                Ok(match self.kind {
-                    $(
-                        MetadataTableKind::$table_type => $row_enum::$table_type(
-                            tables.get(MetadataTableIndex::new(self.index))?,
-                        ),
-                    )*
-
-                    _ => panic!(
-                        "Shouldn't be possible for {} to contain {}",
-                        stringify!{$tag},
-                        self.kind,
-                    ),
-                })
+            pub enum [< Metadata $tag >] <'a> {
+                $(
+                    $table_type(MetadataRow<'a, $table_type>),
+                )*
             }
+
+            impl TypedMetadataIndex for MetadataCodedIndex<$tag> {
+                type Output<'a: 'b, 'b> = [< Metadata $tag >]<'b>;
+
+                fn access<'a: 'b, 'b>(
+                    self,
+                    tables: &'b Metadata<'a>,
+                ) -> Result<Self::Output<'a, 'b>, Error> {
+                    Ok(match self.kind {
+                        $(
+                            MetadataTableKind::$table_type => [< Metadata $tag >]::$table_type(
+                                tables.get(MetadataTableIndex::new(self.index))?,
+                            ),
+                        )*
+
+                            _ => panic!(
+                                "Shouldn't be possible for {} to contain {}",
+                                stringify!{$tag},
+                                self.kind,
+                            ),
+                    })
+                }
+            }
+
+
+
+            $(
+                impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
+                    for MetadataCodedIndex<$tag> {
+                        fn eq(&self, other: &MetadataTableIndex<$table_type>) -> bool {
+                            self.kind == <$table_type as MetadataTableTag>::KIND
+                                && self.index == other.index
+                        }
+                    }
+
+                impl std::cmp::PartialEq<MetadataCodedIndex<$tag>>
+                    for MetadataTableIndex<$table_type> {
+                        fn eq(&self, other: &MetadataCodedIndex<$tag>) -> bool {
+                            other.kind == <$table_type as MetadataTableTag>::KIND
+                                && self.index == other.index
+                        }
+                    }
+            )+
+
         }
-
-
-        $(
-            impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
-                for MetadataCodedIndex<$tag> {
-                    fn eq(&self, other: &MetadataTableIndex<$table_type>) -> bool {
-                        self.kind == <$table_type as MetadataTableTag>::KIND
-                            && self.index == other.index
-                    }
-                }
-
-            impl std::cmp::PartialEq<MetadataCodedIndex<$tag>>
-                for MetadataTableIndex<$table_type> {
-                    fn eq(&self, other: &MetadataCodedIndex<$tag>) -> bool {
-                        other.kind == <$table_type as MetadataTableTag>::KIND
-                            && self.index == other.index
-                    }
-                }
-        )+
     };
 }
 
 macro_rules! impl_coded_index {
     ($tag:ident,
-     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
         impl CodedIndex for $tag {
@@ -677,24 +679,23 @@ macro_rules! impl_coded_index {
 
 macro_rules! decl_coded_index_type {
     ($tag:ident,
-     $row_enum:ident,
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
-        decl_core_coded_index_type!{ $tag, $row_enum, [ $($table_type),+ ] }
-        impl_coded_index!{ $tag, $row_enum, [ $($table_type),+ ] }
+        decl_core_coded_index_type!{ $tag, [ $($table_type),+ ] }
+        impl_coded_index!{ $tag, [ $($table_type),+ ] }
     };
 }
 
 decl_coded_index_type! {
-    TypeDefOrRef, MetadataTypeDefOrRef,
+    TypeDefOrRef,
     [TypeDef, TypeRef, TypeSpec],
 }
 decl_coded_index_type! {
-    HasConstant, MetadataHasConstant,
+    HasConstant,
     [Field, Param, Property],
 }
 decl_coded_index_type! {
-    HasCustomAttribute, MetadataHasCustomAttribute,
+    HasCustomAttribute,
     [
         MethodDef, Field, TypeRef, TypeDef,
         Param, InterfaceImpl, MemberRef, Module,
@@ -711,40 +712,40 @@ decl_coded_index_type! {
     ],
 }
 decl_coded_index_type! {
-    HasFieldMarshal, MetadataHasFieldMarshal,
+    HasFieldMarshal,
     [Field, Param],
 }
 decl_coded_index_type! {
-    HasDeclSecurity, MetadataHasDeclSecurity,
+    HasDeclSecurity,
     [TypeDef, MethodDef, Assembly],
 }
 decl_coded_index_type! {
-    MemberRefParent, MetadataMemberRefParent,
+    MemberRefParent,
     [TypeDef, TypeRef, ModuleRef,
      MethodDef, TypeSpec],
 }
 decl_coded_index_type! {
-    HasSemantics, MetadataHasSemantics,
+    HasSemantics,
     [Event, Property],
 }
 decl_coded_index_type! {
-    MethodDefOrRef, MetadataMethodDefOrRef,
+    MethodDefOrRef,
     [MethodDef, MemberRef],
 }
 decl_coded_index_type! {
-    MemberForwarded, MetadataMemberForwarded,
+    MemberForwarded,
     [Field, MethodDef],
 }
 decl_coded_index_type! {
-    Implementation, MetadataImplementation,
+    Implementation,
     [File, AssemblyRef, ExportedType],
 }
 decl_coded_index_type! {
-    ResolutionScope, MetadataResolutionScope,
+    ResolutionScope,
     [Module, ModuleRef, AssemblyRef, TypeRef]
 }
 decl_coded_index_type! {
-    TypeOrMethodDef, MetadataTypeOrMethodDef,
+    TypeOrMethodDef,
     [TypeDef, MethodDef],
 }
 
@@ -753,7 +754,7 @@ decl_coded_index_type! {
 // values in the table-type encoding, represented by `None` values in
 // `OPTIONS`, and these `None` values would not be generated by the
 // `decl_coded_index_type` macro.
-decl_core_coded_index_type! { CustomAttributeType, MetadataCustomAttributeType, [MethodDef, MemberRef] }
+decl_core_coded_index_type! { CustomAttributeType, [MethodDef, MemberRef] }
 
 impl CodedIndex for CustomAttributeType {
     const OPTIONS: &'static [Option<MetadataTableKind>] = &[
