@@ -23,3 +23,5 @@ pub(crate) mod portable_executable;
 
 mod annotator;
 pub use annotator::{Annotation, Annotator};
+
+mod collect_dll_annotations;
