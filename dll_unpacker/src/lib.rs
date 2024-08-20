@@ -14,8 +14,8 @@ pub(crate) mod enum_map;
 
 pub(crate) mod intermediate_language;
 
-mod dll_unpacker;
-pub use dll_unpacker::DLLUnpacker;
+pub mod dll_unpacker;
+pub use dll_unpacker::{DLLUnpacker, Metadata};
 
 pub(crate) mod dos_header;
 

@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 use itertools::Itertools as _;
@@ -178,6 +178,23 @@ impl TuiExplorerBuilder {
         stardew_valley_dll(&self.reader)
     }
 
+    pub fn initialize_view_to_annotation(
+        self,
+        name: &str,
+    ) -> Result<Self, Error> {
+        let initial_pointer = self
+            .annotations
+            .iter()
+            .find(|ann| ann.name == name)
+            .map(|ann| ann.range.start)
+            .ok_or(Error::AnnotationNotFound)?;
+
+        Ok(Self {
+            initial_pointer,
+            ..self
+        })
+    }
+
     pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
         let region = self.stardew_valley_dll()?.read()?;
         let dll_info = dll_unpacker::DLLUnpacker::new(&region);
@@ -222,177 +239,54 @@ impl TuiExplorerBuilder {
 
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
         let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
-        let metadata_tables = dll_info.metadata()?;
+        let metadata = dll_info.metadata()?;
 
-        // Pointers to IL method definitions in the loaded DLL.
-        let dll_method_def: HashSet<Pointer> = metadata_tables
-            .method_def_table()?
-            .iter_rows()
-            .filter_map(|method_def| method_def.cil_method().ok().flatten())
-            .filter_map(|cil_method| cil_method.body_range().ok())
-            .map(|method_body| method_body.start)
-            .collect();
+        let module_ptr =
+            dotnet_debugger::find_module_pointer(&self.reader, &metadata)?;
 
         self.running_log.add_log(format!(
-            "Found {} method definitions in Stardew Valley.dll",
-            dll_method_def.len()
+            "Found module pointer at {module_ptr} for {}",
+            dll_region.name()
         ));
 
-        let module_ptr = self
-            .reader
-            .regions
+        let method_table_lookup = dotnet_debugger::find_method_table_lookup(
+            &self.reader,
+            &metadata,
+            module_ptr,
+        )?;
+
+        self.running_log.add_log(format!(
+            "Method table: {}",
+            method_table_lookup.ptr_within_module
+        ));
+
+        self.range(method_table_lookup.location.clone())
+            .name("TypeDefToMethodDef table");
+
+        metadata.type_def_table()?.iter_rows().for_each(|type_def| {
+            let name = type_def.name().unwrap();
+            let index = type_def.index();
+            self.range({
+                let ptr =
+                    method_table_lookup.location_of_method_table_pointer(index);
+                ptr..ptr + Pointer::SIZE
+            })
+            .name(format!("Ptr to {name} MethodTable"));
+
+            self.range(method_table_lookup[index].clone())
+                .name(format!("MethodTable, {name}"));
+        });
+
+        method_table_lookup
+            .method_tables
             .iter()
-            .filter(|region| {
-                region.is_readable
-                    && region.is_writable
-                    && !region.is_shared_memory
-            })
-            .flat_map(|region| {
-                region
-                    .read()
-                    .unwrap()
-                    .into_iter_as_pointers()
-                    .map(|mem_value| mem_value.value)
-                    .tuple_windows()
-            })
-            .filter(|(module_ptr, il_ptr)| {
-                // The pattern-matching above is pretty reliable at finding
-                // the most common location.  With about 17k methods in
-                // StardewValley.dll, there were 243 unique pairs of
-                // `(module_ptr, il_ptr)`, one of which occurred
-                // over 500 times.  No other pair occurred more than 3 times.
-                //
-                // I suppose I could further filter the `module_ptr` by values
-                // that point to a pointer, which itself points to
-                // `libcoreclr.so`, but that doesn't seem necessary at the
-                // moment.
-                dll_method_def.contains(il_ptr)
-                    && self.reader.find_containing_region(*module_ptr).is_some()
-            })
-            .map(|(module_ptr, _)| module_ptr)
-            .counts()
-            .into_iter()
-            .max_by_key(|(_, counts)| *counts)
-            .map(|(value, _)| value)
-            .ok_or(Error::ModulePointerNodeFound)?;
-
-        self.running_log
-            .add_log(format!("Found module pointer at {module_ptr}"));
-
-        // The exact layout of the Module class varies.  The goal is
-        // to find the `m_TypeDefToMethodTableMap` member,
-        //
-        // struct LookupMap {
-        //     pNext: Pointer,
-        //     pTable: Pointer,
-        //     dwCount: i32,
-        //     supportedFlags: u64,
-        // }
-        //
-        // * The `pNext` pointer is used to point to the next
-        //   `LookupMap`.  Since the total number of classes in the
-        //   DLL is known from the metadata, they are all stored in a
-        //   single allocation, and this pointer will always be NULL.
-        //
-        // * The `dwCount` is the number of elements in the lookup
-        //   table.  This will be equal to
-        //   `table_sizes.num_rows[MetadataTableKind::TypeDef] + 1`.
-        //   Presumably, the extra element is to allow metadata
-        //   indices (which use zero to indicate an absent value) to
-        //   be used directly as lookup indices.
-        //
-        //   This may need to be changed for dynamic modules.
-        //
-        // * The `supportedFlags` is a bitmask, with flags stored of
-        //   the low bits of `pTable`.  The exact value depends on the
-        //   version, but it can still be used to identify the
-        //   `LookupMap` as only the low bits can be set.  And we need
-        //   the value anyways in order to know which bits to remove
-        //   from `pTable`.
-
-        let num_type_defs = metadata_tables.type_def_table()?.num_rows();
-
-        let (ptr_to_table_of_method_tables, supported_flags) = self
-            .reader
-            .regions
-            .iter()
-            .find(|region| region.address_range().contains(&module_ptr))
-            .unwrap()
-            .read()?
-            .into_iter_as_pointers_from(module_ptr)
-            // If I haven't found it after 4 kB, then something else
-            // is wrong.  Should be at byte 648 relative to the module
-            // pointer, but may be different in each .NET version.
-            .take(512)
-            .tuple_windows()
-            .map(|(a, b, c, d)| {
-                let p_next: Pointer = a.value;
-                let p_table: Pointer = b.value;
-                let dw_count = c.value.as_usize() & ((1 << 32) - 1);
-                let supported_flags: usize = d.value.as_usize();
-
-                (p_next, p_table, dw_count, supported_flags)
-            })
-            .find(|(p_next, _, dw_count, supported_flags)| {
-                *p_next == Pointer::null()
-                    && *dw_count == num_type_defs + 1
-                    && *supported_flags < 8
-            })
-            .map(|(_, p_table, _, supported_flags)| (p_table, supported_flags))
-            .ok_or(Error::PointerToMethodTableTableNotFound)?;
-
-        self.running_log
-            .add_log(format!("Method table: {ptr_to_table_of_method_tables}"));
-
-        let method_tables: Vec<Pointer> = self
-            .reader
-            .read_bytes(
-                ptr_to_table_of_method_tables,
-                (num_type_defs + 1) * Pointer::SIZE,
-            )?
-            .into_iter()
-            .iter_as::<[u8; Pointer::SIZE]>()
-            .map(|arr| -> Pointer {
-                let value = usize::from_ne_bytes(arr);
-                let value = value & !supported_flags;
-                value.into()
-            })
-            .collect();
-
-        self.range(
-            ptr_to_table_of_method_tables
-                ..ptr_to_table_of_method_tables
-                    + (num_type_defs + 1) * Pointer::SIZE,
-        )
-        .name("TypeDefToMethodDef table");
-
-        metadata_tables
-            .type_def_table()?
-            .iter_rows()
-            .for_each(|type_def| {
-                let name = type_def.name().unwrap();
-                let index = type_def.index();
-                let untyped_index: usize = index.into();
-                let method_table = method_tables[untyped_index + 1];
-                self.range(
-                    ptr_to_table_of_method_tables
-                        + (untyped_index + 1) * Pointer::SIZE
-                        ..ptr_to_table_of_method_tables
-                            + (untyped_index + 2) * Pointer::SIZE,
-                )
-                .name(format!("Ptr to {name} MethodTable"));
-                self.range(method_table..method_table + 56)
-                    .name(format!("MethodTable, {name}"));
-            });
-
-        method_tables
-            .iter()
+            .map(|method_table_range| method_table_range.start)
             .map(|method_table_ptr| {
                 if method_table_ptr.is_null() {
                     return Ok(None);
                 }
                 let ee_class_ptr: Pointer =
-                    self.reader.read_byte_array(*method_table_ptr + 40)?.into();
+                    self.reader.read_byte_array(method_table_ptr + 40)?.into();
                 if ee_class_ptr.as_usize() & 1 > 0 {
                     return Err(
                         Error::MethodTableTableReferencedNonCanonicalMethodTable
@@ -404,7 +298,7 @@ impl TuiExplorerBuilder {
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .skip(1)
-            .zip(metadata_tables.type_def_table()?.iter_rows())
+            .zip(metadata.type_def_table()?.iter_rows())
             .filter_map(|(opt_ptrs, metadata_type_def)| {
                 opt_ptrs.map(|ptrs| (ptrs, metadata_type_def))
             })
@@ -461,7 +355,7 @@ impl TuiExplorerBuilder {
 
                                 assert!(
                                     unpacked_method_table_ptr
-                                        == *method_table_ptr
+                                        == method_table_ptr
                                 );
 
                                 let field_metadata_token = u32::from_le_bytes([
@@ -501,13 +395,11 @@ impl TuiExplorerBuilder {
                 },
             )?;
 
-        let object_ptr_offsets: HashMap<Pointer, Vec<usize>> = metadata_tables
+        let object_ptr_offsets: HashMap<Pointer, Vec<usize>> = metadata
             .type_def_table()?
             .iter_rows()
             .map(|type_def| -> Result<Option<_>, Error> {
-                let index = type_def.index();
-                let untyped_index: usize = index.into();
-                let method_table_ptr = method_tables[untyped_index + 1];
+                let method_table_ptr = method_table_lookup[type_def.index()].start;
 
                 let is_game_obj = type_def.name()? == "Game1";
 
@@ -576,13 +468,11 @@ impl TuiExplorerBuilder {
             .filter_map(|opt_res| opt_res.transpose())
             .collect::<Result<_, Error>>()?;
 
-        let metadata_index_lookup: HashMap<_, _> = metadata_tables
+        let metadata_index_lookup: HashMap<_, _> = metadata
             .type_def_table()?
             .iter_rows()
             .map(|type_def| {
-                let index = type_def.index();
-                let untyped_index: usize = index.into();
-                let method_table = method_tables[untyped_index + 1];
+                let method_table = method_table_lookup[type_def.index()].start;
                 (method_table, type_def)
             })
             .filter(|(method_table, _)| {
@@ -654,11 +544,11 @@ impl TuiExplorerBuilder {
                 std::cmp::Reverse(ptr_locations.len())
             })
             .filter(|(index, _)| {
-                let name = metadata_tables.get(*index).unwrap().name().unwrap();
+                let name = metadata.get(*index).unwrap().name().unwrap();
                 name == "Game1"
             })
             .for_each(|(index, ptr_locations)| {
-                let name = metadata_tables.get(index).unwrap().name().unwrap();
+                let name = metadata.get(index).unwrap().name().unwrap();
                 let count = ptr_locations.len();
 
                 ptr_locations
@@ -673,7 +563,7 @@ impl TuiExplorerBuilder {
                 ));
             });
 
-        let game_obj_method_table = metadata_tables
+        let game_obj_method_table = metadata
             .type_def_table()?
             .iter_rows()
             .find(|type_def| {
@@ -683,12 +573,7 @@ impl TuiExplorerBuilder {
                     .map(|name| name == "Game1")
                     .unwrap_or(false)
             })
-            .map(|type_def| {
-                let index = type_def.index();
-                let untyped_index: usize = index.into();
-                let method_table = method_tables[untyped_index + 1];
-                method_table
-            })
+            .map(|type_def| method_table_lookup[type_def.index()].start)
             .expect("Game1 method table not found");
 
         self.reader
@@ -823,10 +708,11 @@ impl TuiExplorer {
             .init_symbols()
             .default_detail_formatters()
             .default_column_formatters()
-            .initialize_view_to_stardew_dll()?
-            //.initialize_view_to_stack()?
             .initialize_annotations()?
             .search_based_on_annotations()?
+            .initialize_view_to_annotation("TypeDefToMethodDef table")?
+            // .initialize_view_to_stardew_dll()?
+            //.initialize_view_to_stack()?
             .build()
     }
 

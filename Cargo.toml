@@ -5,6 +5,7 @@ members = [
   "tui_explorer",
   "dll_unpacker",
   "stardew_utils",
+  "dotnet_debugger",
 ]
 resolver = "2"
 

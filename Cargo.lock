@@ -414,6 +414,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "dotnet_debugger"
+version = "0.1.0"
+dependencies = [
+ "dll_unpacker",
+ "itertools 0.10.5",
+ "memory_reader",
+ "thiserror",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1189,6 +1199,7 @@ dependencies = [
  "criterion",
  "crossterm",
  "dll_unpacker",
+ "dotnet_debugger",
  "itertools 0.13.0",
  "memory_reader",
  "ratatui",

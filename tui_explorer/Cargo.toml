@@ -18,6 +18,7 @@ chrono = "*"
 dll_unpacker = { path = "../dll_unpacker" }
 memory_reader = { path = "../memory_reader" }
 stardew_utils = { path = "../stardew_utils" }
+dotnet_debugger = { path = "../dotnet_debugger" }
 
 [[bench]]
 name = "benchmarks"
