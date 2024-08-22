@@ -8,6 +8,7 @@ edition = "2021"
 [dependencies]
 thiserror = "*"
 itertools = "*"
+paste = "*"
 
 memory_reader = { path = "../memory_reader" }
 dll_unpacker = { path = "../dll_unpacker" }

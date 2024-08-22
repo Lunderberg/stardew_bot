@@ -2,8 +2,7 @@ mod error;
 pub use error::Error;
 
 mod byte_range;
-pub use byte_range::ByteRange;
-pub(crate) use byte_range::UnpackBytes;
+pub use byte_range::*;
 
 mod unpacked_value;
 pub use unpacked_value::UnpackedValue;
@@ -11,6 +10,7 @@ pub use unpacked_value::UnpackedValue;
 pub(crate) mod relative_virtual_address;
 
 pub(crate) mod enum_map;
+pub use enum_map::*;
 
 pub(crate) mod intermediate_language;
 

@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 use std::ops::Range;
 
-use itertools::Itertools as _;
 use ratatui::style::Stylize as _;
 
-use memory_reader::extensions::*;
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
 use stardew_utils::stardew_valley_pid;
 
@@ -103,18 +101,23 @@ impl dll_unpacker::Annotation for Annotation {
     }
 }
 
+impl From<Range<Pointer>> for Annotation {
+    fn from(range: Range<Pointer>) -> Self {
+        Annotation {
+            range,
+            name: String::default(),
+            value: String::default(),
+            highlight_range: true,
+        }
+    }
+}
+
 impl dll_unpacker::Annotator for TuiExplorerBuilder {
     fn range(
         &mut self,
         range: Range<Pointer>,
     ) -> &mut impl dll_unpacker::Annotation {
-        self.annotations.push(Annotation {
-            range,
-            name: String::default(),
-            value: String::default(),
-            highlight_range: true,
-        });
-        self.annotations.last_mut().unwrap()
+        self.annotations.range(range)
     }
 }
 
@@ -241,6 +244,14 @@ impl TuiExplorerBuilder {
         let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
         let metadata = dll_info.metadata()?;
 
+        metadata
+            .iter_table_locations()
+            .filter(|(_, range)| range.start != range.end)
+            .for_each(|(kind, range)| {
+                self.running_log
+                    .add_log(format!("{kind} table: {}", range.start));
+            });
+
         let module_ptr =
             dotnet_debugger::find_module_pointer(&self.reader, &metadata)?;
 
@@ -249,33 +260,66 @@ impl TuiExplorerBuilder {
             dll_region.name()
         ));
 
-        let method_table_lookup = dotnet_debugger::find_method_table_lookup(
-            &self.reader,
-            &metadata,
-            module_ptr,
-        )?;
+        let (location_of_ptr_to_lookup, method_table_lookup) =
+            dotnet_debugger::find_method_table_lookup(
+                &self.reader,
+                &metadata,
+                module_ptr,
+            )?;
 
-        self.running_log.add_log(format!(
-            "Method table: {}",
-            method_table_lookup.ptr_within_module
-        ));
+        self.running_log
+            .add_log(format!("Method table: {}", location_of_ptr_to_lookup));
 
         self.range(method_table_lookup.location.clone())
             .name("TypeDefToMethodDef table");
 
-        metadata.type_def_table()?.iter_rows().for_each(|type_def| {
-            let name = type_def.name().unwrap();
-            let index = type_def.index();
-            self.range({
-                let ptr =
-                    method_table_lookup.location_of_method_table_pointer(index);
-                ptr..ptr + Pointer::SIZE
-            })
-            .name(format!("Ptr to {name} MethodTable"));
+        let type_def_table = metadata.type_def_table()?;
 
-            self.range(method_table_lookup[index].clone())
-                .name(format!("MethodTable, {name}"));
-        });
+        method_table_lookup.iter_tables(&self.reader).try_for_each(
+            |table| -> Result<_, Error> {
+                let table = table?;
+
+                let type_def = type_def_table.get(table.token())?;
+                let name = type_def.name()?;
+                self.annotations
+                    .range(table.ptr_range())
+                    .name(format!("MethodTable, {name}"));
+
+                self.annotations
+                    .range({
+                        let ptr = method_table_lookup
+                            .location_of_method_table_pointer(table.token());
+                        ptr..ptr + Pointer::SIZE
+                    })
+                    .name(format!("Ptr to {name} MethodTable"));
+
+                table.collect_annotations(&mut self.annotations)?;
+                let ee_class = table.get_ee_class(&self.reader)?;
+
+                self.annotations
+                    .range(ee_class.ptr_range())
+                    .name(format!("EEClass, {name}"));
+                ee_class.collect_annotations(&mut self.annotations)?;
+
+                table
+                    .get_field_descriptions(&self.reader)?
+                    .iter()
+                    .flatten()
+                    .enumerate()
+                    .try_for_each(|(i, field)| {
+                        assert!(
+                            field.method_table() == table.ptr_range().start,
+                            "Field {i} of class {name} \
+                             (index = {}) \
+                             did not point back to MethodTable",
+                            table.token()
+                        );
+                        field.collect_annotations(&mut self.annotations)
+                    })?;
+
+                Ok(())
+            },
+        )?;
 
         method_table_lookup
             .method_tables
@@ -293,7 +337,7 @@ impl TuiExplorerBuilder {
                     );
                 }
 
-                Ok(Some((method_table_ptr, ee_class_ptr)))
+                Ok(Some(ee_class_ptr))
             })
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
@@ -302,98 +346,38 @@ impl TuiExplorerBuilder {
             .filter_map(|(opt_ptrs, metadata_type_def)| {
                 opt_ptrs.map(|ptrs| (ptrs, metadata_type_def))
             })
-            .try_for_each(
-                |((method_table_ptr, ee_class_ptr), metadata_type_def)| {
-                    let class_name = metadata_type_def.name()?;
-                    self.range(ee_class_ptr..ee_class_ptr + 56)
-                        .name(format!("EEClass for {class_name}"));
+            .try_for_each(|(ee_class_ptr, metadata_type_def)| {
+                let class_name = metadata_type_def.name()?;
+                let num_instance_fields = metadata_type_def
+                    .iter_fields()?
+                    .filter(|field| !field.is_static().unwrap())
+                    .count();
 
-                    let num_instance_fields = metadata_type_def
+                let field_desc_ptr: Pointer =
+                    self.reader.read_byte_array(ee_class_ptr + 24)?.into();
+
+                if !field_desc_ptr.is_null() {
+                    self.group(
+                        field_desc_ptr
+                            ..field_desc_ptr + num_instance_fields * 16,
+                    )
+                    .name(format!("Fields of {class_name}"));
+
+                    metadata_type_def
                         .iter_fields()?
                         .filter(|field| !field.is_static().unwrap())
-                        .count();
+                        .enumerate()
+                        .for_each(|(i_field, field)| {
+                            let field_name = field.name().unwrap();
+                            let field_desc_start =
+                                field_desc_ptr + i_field * 16;
+                            self.range(field_desc_start..field_desc_start + 16)
+                                .name(format!("FieldDesc {field_name}"));
+                        });
+                }
 
-                    let field_desc_ptr: Pointer =
-                        self.reader.read_byte_array(ee_class_ptr + 24)?.into();
-
-                    if !field_desc_ptr.is_null() {
-                        self.group(
-                            field_desc_ptr
-                                ..field_desc_ptr
-                                    + num_instance_fields * 16,
-                        )
-                        .name(format!("Fields of {class_name}"));
-
-                        let all_field_desc_bytes = self.reader.read_bytes(
-                            field_desc_ptr,
-                            num_instance_fields * 16,
-                        )?;
-
-                        metadata_type_def
-                            .iter_fields()?
-                            .filter(|field| !field.is_static().unwrap())
-                            .enumerate()
-                            .for_each(|(i_field, field)| {
-                                let field_name = field.name().unwrap();
-                                let field_desc_start =
-                                    field_desc_ptr + i_field * 16;
-                                self.range(
-                                    field_desc_start..field_desc_start + 16,
-                                )
-                                .name(format!(
-                                    "FieldDesc {field_name}"
-                                ));
-
-                                let this_field_desc_bytes =
-                                    &all_field_desc_bytes
-                                        [i_field * 16..(i_field + 1) * 16];
-
-                                let unpacked_method_table_ptr: Pointer =
-                                    this_field_desc_bytes[0..8]
-                                        .try_into()
-                                        .unwrap();
-
-                                assert!(
-                                    unpacked_method_table_ptr
-                                        == method_table_ptr
-                                );
-
-                                let field_metadata_token = u32::from_le_bytes([
-                                    this_field_desc_bytes[8],
-                                    this_field_desc_bytes[9],
-                                    this_field_desc_bytes[10],
-                                    0,
-                                ])
-                                    as usize;
-
-                                self.range(
-                                    field_desc_start + 8..field_desc_start + 11,
-                                )
-                                .name("Field metadata token")
-                                .value(field_metadata_token)
-                                    .disable_highlight();
-
-                                let expected_field_index: usize =
-                                    field.index().into();
-                                assert!(expected_field_index == field_metadata_token-1,
-                                        "Expected {class_name}.{field_name}, index = {}, \
-                                         but found metadata token {field_metadata_token}",
-                                        field.index());
-
-
-                                let last_dword = u32::from_le_bytes(this_field_desc_bytes[12..16].try_into().unwrap()) as usize;
-                                let runtime_type = last_dword >> 27;
-                                let runtime_offset = last_dword & 0x07ffffff;
-                                self.range(field_desc_start+12..field_desc_start+16)
-                                    .name("Field type/offset")
-                                    .value(format!("Type {runtime_type}\nOffset {runtime_offset}"))
-                                    .disable_highlight();
-                            });
-                    }
-
-                    Ok::<_, Error>(())
-                },
-            )?;
+                Ok::<_, Error>(())
+            })?;
 
         let object_ptr_offsets: HashMap<Pointer, Vec<usize>> = metadata
             .type_def_table()?
@@ -467,101 +451,6 @@ impl TuiExplorerBuilder {
             })
             .filter_map(|opt_res| opt_res.transpose())
             .collect::<Result<_, Error>>()?;
-
-        let metadata_index_lookup: HashMap<_, _> = metadata
-            .type_def_table()?
-            .iter_rows()
-            .map(|type_def| {
-                let method_table = method_table_lookup[type_def.index()].start;
-                (method_table, type_def)
-            })
-            .filter(|(method_table, _)| {
-                self.reader.find_containing_region(*method_table).is_some()
-            })
-            .collect();
-
-        self.reader
-            .regions
-            .iter()
-            .filter(|region| {
-                region.is_readable
-                    && region.is_writable
-                    && !region.is_shared_memory
-            })
-            .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
-            .filter_map(|mem_value| {
-                // The GC may use the low bits of the MethodTable*
-                // pointer to mark objects.  When finding objects that
-                // are point to the method table, these bits should be
-                // masked out.
-                let ptr_mask: usize = if Pointer::SIZE == 8 { !7 } else { !3 };
-                let ptr: Pointer =
-                    (mem_value.value.as_usize() & ptr_mask).into();
-                let type_def = metadata_index_lookup.get(&ptr)?;
-
-                Some((type_def.index(), mem_value.location))
-            })
-            .filter(|(_, ptr)| {
-                // Each .NET Object starts with a pointer to the
-                // MethodTable, but just looking for pointer-aligned
-                // memory with the correct value would also find
-                // anything else that holds a `MethodTable*`, or stack
-                // frames that accept a `MethodTable*` argument.
-                //
-                // Just before the `this` pointer of a .NET object is
-                // the `ObjHeader`.  This is 4 bytes of flags, with
-                // another 4 bytes of padding on 64-bit systems.  That
-                // 4 bytes of padding
-                let Ok(preceding): Result<[_; Pointer::SIZE], _> =
-                    self.reader.read_byte_array(*ptr - Pointer::SIZE)
-                else {
-                    return false;
-                };
-
-                let has_valid_align_pad = Pointer::SIZE == 4
-                    || (preceding[0] == 0
-                        && preceding[1] == 0
-                        && preceding[2] == 0
-                        && preceding[3] == 0);
-
-                let sigblock = u32::from_le_bytes(
-                    preceding[Pointer::SIZE - 4..].try_into().unwrap(),
-                );
-                let is_unused = sigblock & 0x80000000 > 0;
-
-                let is_reserved_for_gc = sigblock & 0x40000000 > 0;
-
-                let is_finalized = sigblock & 0x20000000 > 0;
-
-                has_valid_align_pad
-                    && !is_unused
-                    && !is_reserved_for_gc
-                    && !is_finalized
-            })
-            .into_group_map()
-            .into_iter()
-            .sorted_by_key(|(_, ptr_locations)| {
-                std::cmp::Reverse(ptr_locations.len())
-            })
-            .filter(|(index, _)| {
-                let name = metadata.get(*index).unwrap().name().unwrap();
-                name == "Game1"
-            })
-            .for_each(|(index, ptr_locations)| {
-                let name = metadata.get(index).unwrap().name().unwrap();
-                let count = ptr_locations.len();
-
-                ptr_locations
-                    .iter()
-                    // .take(10)
-                    .for_each(|ptr| {
-                        self.running_log
-                            .add_log(format!("    Pointer at {ptr}"))
-                    });
-                self.running_log.add_log(format!(
-                    "{index} ({name}) has {count} pointers to it"
-                ));
-            });
 
         let game_obj_method_table = metadata
             .type_def_table()?

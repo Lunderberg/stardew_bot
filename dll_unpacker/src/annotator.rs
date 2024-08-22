@@ -49,3 +49,14 @@ pub trait Annotation: Sized {
         self.value(value)
     }
 }
+
+impl<T> Annotator for Vec<T>
+where
+    T: Annotation,
+    T: From<Range<Pointer>>,
+{
+    fn range(&mut self, range: Range<Pointer>) -> &mut impl Annotation {
+        self.push(range.into());
+        self.last_mut().unwrap()
+    }
+}

@@ -1,12 +1,11 @@
-use std::{collections::HashSet, ops::Range};
+use std::collections::HashSet;
 
-use dll_unpacker::dll_unpacker::{MetadataTableIndex, TypeDef};
 use dll_unpacker::Metadata;
 use itertools::Itertools as _;
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::Error;
+use crate::{Error, MethodTable, MethodTableLookup};
 
 pub fn find_module_pointer<'a>(
     reader: &MemoryReader,
@@ -57,36 +56,11 @@ pub fn find_module_pointer<'a>(
         .ok_or(Error::ModulePointerNotFound)
 }
 
-pub struct MethodTableLookup {
-    pub ptr_within_module: Pointer,
-    pub location: Range<Pointer>,
-    pub method_tables: Vec<Range<Pointer>>,
-}
-
-impl MethodTableLookup {
-    pub fn location_of_method_table_pointer(
-        &self,
-        index: MetadataTableIndex<TypeDef>,
-    ) -> Pointer {
-        let index: usize = index.into();
-        self.location.start + index * Pointer::SIZE
-    }
-}
-
-impl std::ops::Index<MetadataTableIndex<TypeDef>> for MethodTableLookup {
-    type Output = Range<Pointer>;
-
-    fn index(&self, index: MetadataTableIndex<TypeDef>) -> &Self::Output {
-        let index: usize = index.into();
-        &self.method_tables[index + 1]
-    }
-}
-
 pub fn find_method_table_lookup<'a>(
     reader: &MemoryReader,
     metadata: &Metadata<'a>,
     module_ptr: Pointer,
-) -> Result<MethodTableLookup, Error> {
+) -> Result<(Pointer, MethodTableLookup), Error> {
     // The exact layout of the Module class varies.  The goal is
     // to find the `m_TypeDefToMethodTableMap` member,
     //
@@ -153,8 +127,6 @@ pub fn find_method_table_lookup<'a>(
         ptr_to_table_of_method_tables..ptr_to_table_of_method_tables + nbytes
     };
 
-    let method_table_size = 64;
-
     let method_tables = reader
         .read_bytes(location.start, location.end - location.start)?
         .into_iter()
@@ -164,12 +136,14 @@ pub fn find_method_table_lookup<'a>(
             let value = value & !supported_flags;
             value.into()
         })
-        .map(|ptr| ptr..ptr + method_table_size)
+        .map(|ptr| ptr..ptr + MethodTable::SIZE)
         .collect();
 
-    Ok(MethodTableLookup {
-        ptr_within_module: ptr_to_table_of_method_tables,
-        location,
-        method_tables,
-    })
+    Ok((
+        ptr_to_table_of_method_tables,
+        MethodTableLookup {
+            location,
+            method_tables,
+        },
+    ))
 }

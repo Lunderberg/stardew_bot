@@ -1366,7 +1366,7 @@ impl<TableTag: MetadataTableTag> std::fmt::Display
 }
 
 impl<TableTag> MetadataTableIndex<TableTag> {
-    fn new(index: usize) -> Self {
+    pub fn new(index: usize) -> Self {
         Self {
             index,
             _phantom: PhantomData,
@@ -1891,25 +1891,37 @@ impl<'a> Metadata<'a> {
         self.bytes.into()
     }
 
+    pub fn iter_table_locations(
+        &self,
+    ) -> impl Iterator<Item = (MetadataTableKind, Range<Pointer>)> + '_ {
+        MetadataTableKind::iter_keys().map(|kind| {
+            let bytes = self.get_table_bytes(kind);
+            let location: Range<Pointer> = bytes.into();
+            (kind, location)
+        })
+    }
+
     fn get_table<'b, TableTag>(
         &'b self,
     ) -> Result<MetadataTable<'b, TableTag>, Error>
     where
         TableTag: MetadataTableTag,
     {
-        let table_kind = TableTag::KIND;
-
-        let offset = self.table_sizes.table_offsets[table_kind];
-        let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
-        let num_rows = self.table_sizes.num_rows[table_kind];
-        let size = bytes_per_row * num_rows;
-        let bytes = self.bytes.subrange(offset..offset + size);
+        let bytes = self.get_table_bytes(TableTag::KIND);
 
         Ok(MetadataTable {
             bytes,
             metadata: &self,
             _phantom: PhantomData,
         })
+    }
+
+    fn get_table_bytes(&self, table_kind: MetadataTableKind) -> ByteRange<'a> {
+        let offset = self.table_sizes.table_offsets[table_kind];
+        let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
+        let num_rows = self.table_sizes.num_rows[table_kind];
+        let size = bytes_per_row * num_rows;
+        self.bytes.subrange(offset..offset + size)
     }
 
     pub fn get<'b, Index>(

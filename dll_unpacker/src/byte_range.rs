@@ -9,11 +9,11 @@ pub struct ByteRange<'a> {
     pub(crate) bytes: &'a [u8],
 }
 
-pub(crate) trait UnpackBytes<'a>: Sized {
+pub trait UnpackBytes<'a>: Sized {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
 }
 
-pub(crate) trait NormalizeOffset: Copy {
+pub trait NormalizeOffset: Copy {
     fn as_offset(self, start: Pointer) -> usize;
     fn as_ptr(self, start: Pointer) -> Pointer;
 }
@@ -36,7 +36,7 @@ impl NormalizeOffset for Pointer {
     }
 }
 
-pub(crate) trait NormalizeRange {
+pub trait NormalizeRange {
     fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize>;
     fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer>;
 }
@@ -89,11 +89,15 @@ where
 }
 
 impl<'a> ByteRange<'a> {
-    pub(crate) fn len(&self) -> usize {
+    pub fn new(start: Pointer, bytes: &'a [u8]) -> Self {
+        Self { start, bytes }
+    }
+
+    pub fn len(&self) -> usize {
         self.bytes.len()
     }
 
-    pub(crate) fn unpack<T>(&self) -> Result<T, Error>
+    pub fn unpack<T>(&self) -> Result<T, Error>
     where
         T: UnpackBytes<'a>,
     {
@@ -157,7 +161,7 @@ impl<'a> ByteRange<'a> {
         Ok(UnpackedValue::new(loc, value))
     }
 
-    pub(crate) fn subrange(&self, range: impl NormalizeRange) -> Self {
+    pub fn subrange(&self, range: impl NormalizeRange) -> Self {
         let range = range.as_offset(self.start..self.end());
         Self {
             start: self.start + range.start,
@@ -221,3 +225,17 @@ from_bytes_prim_uint! {u16}
 from_bytes_prim_uint! {u32}
 from_bytes_prim_uint! {u64}
 from_bytes_prim_uint! {u128}
+
+impl<'a> UnpackBytes<'a> for bool {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        let byte: u8 = bytes.unpack()?;
+        Ok(byte > 0)
+    }
+}
+
+impl<'a> UnpackBytes<'a> for Pointer {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+        let arr: [u8; Pointer::SIZE] = bytes.bytes.try_into().unwrap();
+        Ok(arr.into())
+    }
+}

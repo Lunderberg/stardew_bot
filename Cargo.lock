@@ -420,6 +420,7 @@ dependencies = [
  "dll_unpacker",
  "itertools 0.10.5",
  "memory_reader",
+ "paste",
  "thiserror",
 ]
 
