@@ -401,6 +401,10 @@ impl<'a> EEClassPackedFields<'a> {
 }
 
 impl FieldDescriptions {
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        (&self.bytes).into()
+    }
+
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = FieldDescription<'a>> {
         let num_fields = self.bytes.len() / FieldDescription::SIZE;
         (0..num_fields).map(|i| {
@@ -453,6 +457,10 @@ impl<'a> FieldDescription<'a> {
         requires_all_token_bits : {u32,  8..12, 1..2},
         offset: {u32,  12..16, 5..32},
         runtime_type: {u32,  12..16, 0..5},
+    }
+
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.bytes.into()
     }
 
     pub fn collect_annotations(

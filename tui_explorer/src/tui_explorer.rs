@@ -273,17 +273,15 @@ impl TuiExplorerBuilder {
         self.range(method_table_lookup.location.clone())
             .name("TypeDefToMethodDef table");
 
-        let type_def_table = metadata.type_def_table()?;
-
         method_table_lookup.iter_tables(&self.reader).try_for_each(
             |table| -> Result<_, Error> {
                 let table = table?;
 
-                let type_def = type_def_table.get(table.token())?;
-                let name = type_def.name()?;
+                let class_name =
+                    metadata.type_def_table()?.get(table.token())?.name()?;
                 self.annotations
                     .range(table.ptr_range())
-                    .name(format!("MethodTable, {name}"));
+                    .name(format!("MethodTable, {class_name}"));
 
                 self.annotations
                     .range({
@@ -291,93 +289,45 @@ impl TuiExplorerBuilder {
                             .location_of_method_table_pointer(table.token());
                         ptr..ptr + Pointer::SIZE
                     })
-                    .name(format!("Ptr to {name} MethodTable"));
+                    .name(format!("Ptr to {class_name} MethodTable"));
 
                 table.collect_annotations(&mut self.annotations)?;
                 let ee_class = table.get_ee_class(&self.reader)?;
 
                 self.annotations
                     .range(ee_class.ptr_range())
-                    .name(format!("EEClass, {name}"));
+                    .name(format!("EEClass, {class_name}"));
                 ee_class.collect_annotations(&mut self.annotations)?;
 
-                table
-                    .get_field_descriptions(&self.reader)?
-                    .iter()
-                    .flatten()
-                    .enumerate()
-                    .try_for_each(|(i, field)| {
+                let fields = table.get_field_descriptions(&self.reader)?;
+
+                if let Some(fields) = &fields {
+                    self.annotations
+                        .range(fields.ptr_range())
+                        .name(format!("Fields of {class_name}"));
+                }
+
+                fields.iter().flatten().enumerate().try_for_each(
+                    |(i, field)| -> Result<_, Error> {
                         assert!(
                             field.method_table() == table.ptr_range().start,
-                            "Field {i} of class {name} \
+                            "Field {i} of class {class_name} \
                              (index = {}) \
                              did not point back to MethodTable",
                             table.token()
                         );
-                        field.collect_annotations(&mut self.annotations)
-                    })?;
+                        let field_name = metadata.get(field.token())?.name()?;
+                        self.annotations
+                            .range(field.ptr_range())
+                            .name(format!("FieldDesc {field_name}"));
+                        field.collect_annotations(&mut self.annotations)?;
+                        Ok(())
+                    },
+                )?;
 
                 Ok(())
             },
         )?;
-
-        method_table_lookup
-            .method_tables
-            .iter()
-            .map(|method_table_range| method_table_range.start)
-            .map(|method_table_ptr| {
-                if method_table_ptr.is_null() {
-                    return Ok(None);
-                }
-                let ee_class_ptr: Pointer =
-                    self.reader.read_byte_array(method_table_ptr + 40)?.into();
-                if ee_class_ptr.as_usize() & 1 > 0 {
-                    return Err(
-                        Error::MethodTableTableReferencedNonCanonicalMethodTable
-                    );
-                }
-
-                Ok(Some(ee_class_ptr))
-            })
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .skip(1)
-            .zip(metadata.type_def_table()?.iter_rows())
-            .filter_map(|(opt_ptrs, metadata_type_def)| {
-                opt_ptrs.map(|ptrs| (ptrs, metadata_type_def))
-            })
-            .try_for_each(|(ee_class_ptr, metadata_type_def)| {
-                let class_name = metadata_type_def.name()?;
-                let num_instance_fields = metadata_type_def
-                    .iter_fields()?
-                    .filter(|field| !field.is_static().unwrap())
-                    .count();
-
-                let field_desc_ptr: Pointer =
-                    self.reader.read_byte_array(ee_class_ptr + 24)?.into();
-
-                if !field_desc_ptr.is_null() {
-                    self.group(
-                        field_desc_ptr
-                            ..field_desc_ptr + num_instance_fields * 16,
-                    )
-                    .name(format!("Fields of {class_name}"));
-
-                    metadata_type_def
-                        .iter_fields()?
-                        .filter(|field| !field.is_static().unwrap())
-                        .enumerate()
-                        .for_each(|(i_field, field)| {
-                            let field_name = field.name().unwrap();
-                            let field_desc_start =
-                                field_desc_ptr + i_field * 16;
-                            self.range(field_desc_start..field_desc_start + 16)
-                                .name(format!("FieldDesc {field_name}"));
-                        });
-                }
-
-                Ok::<_, Error>(())
-            })?;
 
         let object_ptr_offsets: HashMap<Pointer, Vec<usize>> = metadata
             .type_def_table()?
