@@ -329,174 +329,33 @@ impl TuiExplorerBuilder {
             },
         )?;
 
-        let object_ptr_offsets: HashMap<Pointer, Vec<usize>> = metadata
-            .type_def_table()?
-            .iter_rows()
-            .map(|type_def| -> Result<Option<_>, Error> {
-                let method_table_ptr = method_table_lookup[type_def.index()].start;
-
-                let is_game_obj = type_def.name()? == "Game1";
-
-                if method_table_ptr.is_null() {
-                    assert!(!is_game_obj);
-                    return Ok(None);
-                }
-
-                let ee_class_ptr: Pointer =
-                    self.reader.read_byte_array(method_table_ptr + 40)?.into();
-                if ee_class_ptr.is_null() {
-                    assert!(!is_game_obj);
-                    return Ok(None);
-                }
-
-                let field_desc_ptr: Pointer =
-                    self.reader.read_byte_array(ee_class_ptr + 24)?.into();
-                if field_desc_ptr.is_null() {
-                    assert!(!is_game_obj);
-                    return Ok(None);
-                }
-
-                let ptr_locations: Vec<usize> = type_def
-                    .iter_fields()?
-                    .filter(|field| !field.is_static().unwrap())
-                    .enumerate()
-                    .filter_map(|(i_field, _field)| {
-                        let field_desc_start = field_desc_ptr + i_field * 16;
-                        let byte_arr = match self
-                            .reader
-                            .read_byte_array(field_desc_start + 12)
-                        {
-                            Ok(byte_arr) => byte_arr,
-                            Err(err) => {
-                                return Some(Err(err.into()));
-                            }
-                        };
-                        let last_dword = u32::from_le_bytes(byte_arr) as usize;
-                        let runtime_type = last_dword >> 27;
-                        let runtime_offset = last_dword & 0x07ffffff;
-
-                        if is_game_obj {
-                            println!("At offset {runtime_offset:04}, type 0x{runtime_type:x}, field {i_field} {}",
-                            _field.name().unwrap());
-                        }
-
-                        let is_ptr_type =
-                            runtime_type == 0x0f // ELEMENT_TYPE_PTR
-                            || runtime_type == 0x1c // ELEMENT_TYPE_OBJECT
-                            || runtime_type==0x12; // ELEMENT_TYPE_CLASS
-
-                        // TODO: Also use boolean fields as part of
-                        // the pattern-matching.  These use a full
-                        // byte, but can only be set to 0x00 or 0x01.
-
-                        is_ptr_type.then(|| Ok(runtime_offset))
-                    })
-                    .collect::<Result<_, Error>>()?;
-
-                if ptr_locations.is_empty() {
-                    return Ok(None);
-                }
-
-                Ok(Some((method_table_ptr, ptr_locations)))
-            })
-            .filter_map(|opt_res| opt_res.transpose())
-            .collect::<Result<_, Error>>()?;
-
-        let game_obj_method_table = metadata
+        let type_def_game_obj = metadata
             .type_def_table()?
             .iter_rows()
             .find(|type_def| {
-                type_def
-                    .name()
-                    .ok()
-                    .map(|name| name == "Game1")
-                    .unwrap_or(false)
+                type_def.name().map(|name| name == "Game1").unwrap_or(false)
             })
-            .map(|type_def| method_table_lookup[type_def.index()].start)
-            .expect("Game1 method table not found");
+            .map(|type_def| type_def.index())
+            .ok_or(Error::MethodTableNotFound("Game1"));
 
-        self.reader
-            .regions
-            .iter()
-            .filter(|region| {
-                region.is_readable
-                    && region.is_writable
-                    && !region.is_shared_memory
-            })
-            .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
-            .filter(|mem_value| {
-                // The GC may use the low bits of the MethodTable*
-                // pointer to mark objects.  When finding objects that
-                // are point to the method table, these bits should be
-                // masked out.
-                let ptr_mask: usize = if Pointer::SIZE == 8 { !7 } else { !3 };
-                let ptr: Pointer =
-                    (mem_value.value.as_usize() & ptr_mask).into();
-                ptr == game_obj_method_table
-            })
-            .map(|mem_value| mem_value.location)
-            .filter(|ptr| {
-                // Each .NET Object starts with a pointer to the
-                // MethodTable, but just looking for pointer-aligned
-                // memory with the correct value would also find
-                // anything else that holds a `MethodTable*`, or stack
-                // frames that accept a `MethodTable*` argument.
-                //
-                // Just before the `this` pointer of a .NET object is
-                // the `ObjHeader`.  This is 4 bytes of flags, with
-                // another 4 bytes of padding on 64-bit systems.  That
-                // 4 bytes of padding
-                let Ok(preceding): Result<[_; Pointer::SIZE], _> =
-                    self.reader.read_byte_array(*ptr - Pointer::SIZE)
-                else {
-                    return false;
-                };
+        let game_obj_method_table = method_table_lookup
+            .iter_tables(&self.reader)
+            .try_find(|method_table| -> Result<_, Error> {
+                let type_def = metadata.get(method_table.token())?;
+                let name = type_def.name()?;
+                Ok(name == "Game1")
+            })?
+            .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-                let has_valid_align_pad = Pointer::SIZE == 4
-                    || (preceding[0] == 0
-                        && preceding[1] == 0
-                        && preceding[2] == 0
-                        && preceding[3] == 0);
+        dotnet_debugger::find_object_instances(
+            &game_obj_method_table,
+            &self.reader,
+        )?
+        .for_each(|ptr| {
+            self.running_log
+                .add_log(format!("Top-level Game1 object {ptr}"));
+        });
 
-                let sigblock = u32::from_le_bytes(
-                    preceding[Pointer::SIZE - 4..].try_into().unwrap(),
-                );
-                let is_unused = sigblock & 0x80000000 > 0;
-
-                let is_reserved_for_gc = sigblock & 0x40000000 > 0;
-
-                let is_finalized = sigblock & 0x20000000 > 0;
-
-                has_valid_align_pad
-                    && !is_unused
-                    && !is_reserved_for_gc
-                    && !is_finalized
-            })
-            .filter(|ptr| {
-                let expected_ptr_at =
-                    object_ptr_offsets.get(&game_obj_method_table).unwrap();
-                expected_ptr_at.iter().all(|offset| {
-                    // Start from the location of the MethodTable*,
-                    // then advance to the object itself.  From there,
-                    // apply the offset to the instance.
-                    let to_read = *ptr + Pointer::SIZE + *offset;
-                    let expected_ptr: Pointer = self
-                        .reader
-                        .read_byte_array(to_read)
-                        .expect("TODO: Change this to .ok() and return false")
-                        .into();
-                    expected_ptr.is_null()
-                        || self
-                            .reader
-                            .find_containing_region(expected_ptr)
-                            .is_some()
-                })
-            })
-            .for_each(|ptr| {
-                println!("Top-level Game1 object: {ptr}");
-                self.running_log
-                    .add_log(format!("Top-level Game1 object: {ptr}"));
-            });
         Ok(self)
     }
 

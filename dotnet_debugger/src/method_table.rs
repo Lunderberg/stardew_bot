@@ -7,7 +7,7 @@ use dll_unpacker::{
 use memory_reader::{MemoryReader, Pointer};
 use paste::paste;
 
-use crate::{Error, OwnedBytes};
+use crate::{Error, OwnedBytes, RuntimeType};
 
 pub struct MethodTableLookup {
     pub location: Range<Pointer>,
@@ -59,6 +59,18 @@ impl MethodTableLookup {
                     bytes: OwnedBytes::new(location.start, bytes),
                 })
             })
+    }
+
+    pub fn get(
+        &self,
+        index: MetadataTableIndex<TypeDef>,
+        reader: &MemoryReader,
+    ) -> Result<MethodTable, Error> {
+        let byte_range = &self[index];
+        let bytes = reader
+            .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
+        let bytes = OwnedBytes::new(byte_range.start, bytes);
+        Ok(MethodTable { bytes })
     }
 }
 
@@ -189,6 +201,10 @@ impl MethodTable {
             .name("ee_class_or_canonical_table");
 
         Ok(())
+    }
+
+    pub fn has_finalizer(&self) -> bool {
+        self.flags() & 0x00100000 > 0
     }
 
     pub fn token(&self) -> MetadataTableIndex<TypeDef> {
@@ -406,13 +422,7 @@ impl FieldDescriptions {
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = FieldDescription<'a>> {
-        let num_fields = self.bytes.len() / FieldDescription::SIZE;
-        (0..num_fields).map(|i| {
-            let start = i * FieldDescription::SIZE;
-            let bytes =
-                self.bytes.subrange(start..start + FieldDescription::SIZE);
-            FieldDescription { bytes }
-        })
+        (&self).into_iter()
     }
 }
 
@@ -450,13 +460,13 @@ impl<'a> FieldDescription<'a> {
     unpack_fields! {
         method_table: {Pointer, 0..8},
         raw_token: {u32, 8..12, 8..32},
-        is_static: {u32,  8..12, 7..8},
+        raw_is_static: {u32,  8..12, 7..8},
         is_thread_local: {u32,  8..12, 6..7},
         is_rva: {u32,  8..12, 5..6},
         protection: {u32,  8..12, 2..5},
         requires_all_token_bits : {u32,  8..12, 1..2},
         offset: {u32,  12..16, 5..32},
-        runtime_type: {u32,  12..16, 0..5},
+        raw_runtime_type: {u32,  12..16, 0..5},
     }
 
     pub fn ptr_range(&self) -> Range<Pointer> {
@@ -475,7 +485,10 @@ impl<'a> FieldDescription<'a> {
             .value(self.token())
             .name("token");
 
-        annotator.value(self.is_static_unpacked()).name("is_static");
+        annotator
+            .range(self.raw_is_static_unpacked().loc())
+            .value(self.is_static())
+            .name("raw_is_static");
         annotator
             .value(self.is_thread_local_unpacked())
             .name("is_thread_local");
@@ -488,14 +501,22 @@ impl<'a> FieldDescription<'a> {
             .name("requires_all_token_bits");
         annotator.value(self.offset_unpacked()).name("offset");
         annotator
-            .value(self.runtime_type_unpacked())
-            .name("runtime_type");
+            .value(self.raw_runtime_type_unpacked())
+            .name("raw_runtime_type");
 
         Ok(())
+    }
+
+    pub fn is_static(&self) -> bool {
+        self.raw_is_static() > 0
     }
 
     pub fn token(&self) -> MetadataTableIndex<Field> {
         let index = self.raw_token() as usize;
         MetadataTableIndex::new(index - 1)
+    }
+
+    pub fn runtime_type(&self) -> Result<RuntimeType, Error> {
+        (self.raw_runtime_type() as u8).try_into()
     }
 }

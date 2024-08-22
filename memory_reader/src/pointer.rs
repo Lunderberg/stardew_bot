@@ -168,6 +168,17 @@ impl std::ops::Sub for Pointer {
     }
 }
 
+/// Frequently, flags are stored in the low bits of pointers.  This
+/// overload exists to allow them to be masked out.
+impl std::ops::BitAnd<usize> for Pointer {
+    type Output = Pointer;
+
+    fn bitand(self, mask: usize) -> Self::Output {
+        let value: usize = self.as_usize();
+        (value & mask).into()
+    }
+}
+
 impl Debug for Pointer {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "Pointer(0x{:016x})", self.address)

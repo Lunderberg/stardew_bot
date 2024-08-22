@@ -19,6 +19,9 @@ pub enum Error {
 
     #[error("Could not find pointer to table of method tables")]
     PointerToMethodTableTableNotFound,
+
+    #[error("Value 0x{0:02x} does not correspond to any runtime type")]
+    InvalidRuntimeType(u8),
 }
 
 impl std::fmt::Debug for Error {

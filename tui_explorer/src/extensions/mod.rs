@@ -19,3 +19,6 @@ pub use split_span::SplitSpan as _;
 
 mod highlight_ratatui;
 pub use highlight_ratatui::HighlightLine as _;
+
+mod try_find;
+pub use try_find::TryFind as _;
