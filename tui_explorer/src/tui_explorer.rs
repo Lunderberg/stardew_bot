@@ -253,7 +253,7 @@ impl TuiExplorerBuilder {
             });
 
         let module_ptr =
-            dotnet_debugger::find_module_pointer(&self.reader, &metadata)?;
+            dotnet_debugger::RuntimeModule::locate(&self.reader, &metadata)?;
 
         self.running_log.add_log(format!(
             "Found module pointer at {module_ptr} for {}",

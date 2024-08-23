@@ -3,6 +3,9 @@ pub use error::Error;
 
 pub(crate) mod macros;
 
+mod runtime_module;
+pub use runtime_module::*;
+
 mod memory_search;
 pub use memory_search::*;
 
