@@ -31,10 +31,11 @@ impl MethodTableLookup {
     pub fn location_of_method_table_pointer(
         &self,
         index: MetadataTableIndex<TypeDef>,
-    ) -> Pointer {
+    ) -> Range<Pointer> {
         let index: usize = index.into();
         let index = index + 1;
-        self.location.start + index * Pointer::SIZE
+        let ptr_start = self.location.start + index * Pointer::SIZE;
+        ptr_start..ptr_start + Pointer::SIZE
     }
 
     pub fn iter_tables<'a>(

@@ -260,21 +260,23 @@ impl TuiExplorerBuilder {
             dll_region.name()
         ));
 
-        let (location_of_ptr_to_lookup, method_table_lookup) =
-            dotnet_debugger::find_method_table_lookup(
-                &self.reader,
-                &metadata,
-                module_ptr,
-            )?;
+        let runtime_module = dotnet_debugger::RuntimeModule::build(
+            &self.reader,
+            &metadata,
+            module_ptr,
+        )?;
 
-        self.running_log
-            .add_log(format!("Method table: {}", location_of_ptr_to_lookup));
+        self.running_log.add_log(format!(
+            "Method table: {}",
+            runtime_module.ptr_to_table_of_method_tables
+        ));
 
-        self.range(method_table_lookup.location.clone())
+        self.range(runtime_module.method_table_lookup.location.clone())
             .name("TypeDefToMethodDef table");
 
-        method_table_lookup.iter_tables(&self.reader).try_for_each(
-            |table| -> Result<_, Error> {
+        runtime_module
+            .iter_method_tables(&self.reader)
+            .try_for_each(|table| -> Result<_, Error> {
                 let table = table?;
 
                 let class_name =
@@ -284,11 +286,11 @@ impl TuiExplorerBuilder {
                     .name(format!("MethodTable, {class_name}"));
 
                 self.annotations
-                    .range({
-                        let ptr = method_table_lookup
-                            .location_of_method_table_pointer(table.token());
-                        ptr..ptr + Pointer::SIZE
-                    })
+                    .range(
+                        runtime_module
+                            .method_table_lookup
+                            .location_of_method_table_pointer(table.token()),
+                    )
                     .name(format!("Ptr to {class_name} MethodTable"));
 
                 table.collect_annotations(&mut self.annotations)?;
@@ -326,11 +328,10 @@ impl TuiExplorerBuilder {
                 )?;
 
                 Ok(())
-            },
-        )?;
+            })?;
 
-        let game_obj_method_table = method_table_lookup
-            .iter_tables(&self.reader)
+        let game_obj_method_table = runtime_module
+            .iter_method_tables(&self.reader)
             .try_find(|method_table| -> Result<_, Error> {
                 let type_def = metadata.get(method_table.token())?;
                 let name = type_def.name()?;
