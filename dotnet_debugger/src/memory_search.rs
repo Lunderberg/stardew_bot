@@ -163,12 +163,11 @@ pub fn find_object_instances<'a>(
         .filter(|field| {
             field.runtime_type().map(|ty| ty.is_ptr()).unwrap_or(false)
         })
-        .map(|field| field.offset() as usize)
-        .map(|offset| {
+        .map(|field| {
             // The offset is recorded relative to the location after
             // the MethodTable*, but it's more convenient to have the
             // offset relative to the start of the MethodTable*.
-            offset + Pointer::SIZE
+            field.offset() + Pointer::SIZE
         })
         .sorted()
         .collect();

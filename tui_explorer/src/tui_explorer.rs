@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::ops::Range;
 
+use itertools::Itertools as _;
 use ratatui::style::Stylize as _;
 
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
@@ -329,15 +329,6 @@ impl TuiExplorerBuilder {
             },
         )?;
 
-        let type_def_game_obj = metadata
-            .type_def_table()?
-            .iter_rows()
-            .find(|type_def| {
-                type_def.name().map(|name| name == "Game1").unwrap_or(false)
-            })
-            .map(|type_def| type_def.index())
-            .ok_or(Error::MethodTableNotFound("Game1"));
-
         let game_obj_method_table = method_table_lookup
             .iter_tables(&self.reader)
             .try_find(|method_table| -> Result<_, Error> {
@@ -347,14 +338,38 @@ impl TuiExplorerBuilder {
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-        dotnet_debugger::find_object_instances(
+        let game_obj: Pointer = dotnet_debugger::find_object_instances(
             &game_obj_method_table,
             &self.reader,
         )?
-        .for_each(|ptr| {
-            self.running_log
-                .add_log(format!("Top-level Game1 object {ptr}"));
-        });
+        .exactly_one()
+        .map_err(|err| Error::UniqueGameObjectInstanceNotFound(err.count()))?;
+
+        self.running_log
+            .add_log(format!("Top-level Game1 object {game_obj}"));
+
+        self.range(game_obj..game_obj + Pointer::SIZE)
+            .name("Game object method table");
+        self.range(game_obj..game_obj + game_obj_method_table.base_size())
+            .name("Top-level game object")
+            .disable_highlight();
+
+        game_obj_method_table
+            .get_field_descriptions(&self.reader)?
+            .iter()
+            .flatten()
+            .filter(|field| !field.is_static())
+            .try_for_each(|field| -> Result<_, Error> {
+                let field_metadata = metadata.get(field.token())?;
+                let name = field_metadata.name()?;
+                let field_start = game_obj + Pointer::SIZE + field.offset();
+                let size = field.runtime_type()?.size_bytes();
+                self.range(field_start..field_start + size)
+                    .name(format!("Field {name}"));
+                Ok(())
+            })?;
+
+        self.initial_pointer = game_obj;
 
         Ok(self)
     }
@@ -407,8 +422,8 @@ impl TuiExplorer {
             .default_detail_formatters()
             .default_column_formatters()
             .initialize_annotations()?
+            // .initialize_view_to_annotation("TypeDefToMethodDef table")?
             .search_based_on_annotations()?
-            .initialize_view_to_annotation("TypeDefToMethodDef table")?
             // .initialize_view_to_stardew_dll()?
             //.initialize_view_to_stack()?
             .build()

@@ -152,7 +152,7 @@ impl MethodTable {
 
     unpack_fields! {
         flags: {u32, 0..4},
-        base_size: {u32, 4..8},
+        raw_base_size: {u32, 4..8},
         flags_2: {u16, 8..10},
         raw_token: {u16, 10..12},
         num_virtuals: {u16, 12..14},
@@ -180,7 +180,9 @@ impl MethodTable {
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
         annotator.value(self.flags_unpacked()).name("flags");
-        annotator.value(self.base_size_unpacked()).name("base_size");
+        annotator
+            .value(self.raw_base_size_unpacked())
+            .name("base_size");
         annotator.value(self.flags_2_unpacked()).name("flags2");
         annotator
             .range(self.raw_token_unpacked().loc())
@@ -203,8 +205,16 @@ impl MethodTable {
         Ok(())
     }
 
+    pub fn base_size(&self) -> usize {
+        self.raw_base_size() as usize
+    }
+
     pub fn has_finalizer(&self) -> bool {
         self.flags() & 0x00100000 > 0
+    }
+
+    pub fn has_dynamic_statics(&self) -> bool {
+        self.flags_2() & 0x0002 > 0
     }
 
     pub fn token(&self) -> MetadataTableIndex<TypeDef> {
@@ -246,6 +256,22 @@ impl MethodTable {
         } else {
             Some(Self::read(ptr, reader)?)
         })
+    }
+
+    pub fn iter_parents<'a>(
+        &self,
+        reader: &'a MemoryReader,
+    ) -> impl Iterator<Item = Result<Self, Error>> + 'a {
+        std::iter::successors(
+            self.get_parent(reader).transpose(),
+            |res_method_table: &Result<Self, Error>| -> Option<Result<Self, Error>>{
+                let method_table = res_method_table.as_ref().ok()?;
+
+                let res_parent = method_table.get_parent(reader).transpose()?;
+
+                Some(res_parent)
+            },
+        )
     }
 
     pub fn get_field_descriptions(
@@ -462,10 +488,10 @@ impl<'a> FieldDescription<'a> {
         raw_token: {u32, 8..12, 8..32},
         raw_is_static: {u32,  8..12, 7..8},
         is_thread_local: {u32,  8..12, 6..7},
-        is_rva: {u32,  8..12, 5..6},
+        raw_is_rva: {u32,  8..12, 5..6},
         protection: {u32,  8..12, 2..5},
         requires_all_token_bits : {u32,  8..12, 1..2},
-        offset: {u32,  12..16, 5..32},
+        raw_offset: {u32,  12..16, 5..32},
         raw_runtime_type: {u32,  12..16, 0..5},
     }
 
@@ -488,27 +514,39 @@ impl<'a> FieldDescription<'a> {
         annotator
             .range(self.raw_is_static_unpacked().loc())
             .value(self.is_static())
-            .name("raw_is_static");
+            .name("is_static");
         annotator
             .value(self.is_thread_local_unpacked())
             .name("is_thread_local");
-        annotator.value(self.is_rva_unpacked()).name("is_rva");
+        annotator
+            .range(self.raw_is_rva_unpacked().loc())
+            .value(self.is_rva())
+            .name("is_rva");
         annotator
             .value(self.protection_unpacked())
             .name("protection");
         annotator
             .value(self.requires_all_token_bits_unpacked())
             .name("requires_all_token_bits");
-        annotator.value(self.offset_unpacked()).name("offset");
+        annotator.value(self.raw_offset_unpacked()).name("offset");
         annotator
-            .value(self.raw_runtime_type_unpacked())
-            .name("raw_runtime_type");
+            .range(self.raw_runtime_type_unpacked().loc())
+            .value(self.runtime_type()?)
+            .name("runtime_type");
 
         Ok(())
     }
 
     pub fn is_static(&self) -> bool {
         self.raw_is_static() > 0
+    }
+
+    pub fn is_rva(&self) -> bool {
+        self.raw_is_rva() > 0
+    }
+
+    pub fn offset(&self) -> usize {
+        self.raw_offset() as usize
     }
 
     pub fn token(&self) -> MetadataTableIndex<Field> {

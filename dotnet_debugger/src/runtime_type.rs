@@ -1,7 +1,7 @@
 use crate::Error;
 
 /// Equivalent representation to CorElementType
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub enum RuntimeType {
     End,
     Void,
@@ -40,6 +40,12 @@ pub enum RuntimeType {
     Modifier,
     Sentinel,
     Pinned,
+}
+
+impl std::fmt::Display for RuntimeType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
 }
 
 impl TryFrom<u8> for RuntimeType {
@@ -90,5 +96,49 @@ impl TryFrom<u8> for RuntimeType {
 impl RuntimeType {
     pub fn is_ptr(self) -> bool {
         matches!(self, Self::Ptr | Self::Object | Self::Class)
+    }
+
+    pub fn size_bytes(self) -> usize {
+        match self {
+            // RuntimeType::End => todo!(),
+            // RuntimeType::Void => todo!(),
+            RuntimeType::Bool => 1,
+            // RuntimeType::Char => todo!(),
+            RuntimeType::I8 => 1,
+            RuntimeType::U8 => 1,
+            RuntimeType::I16 => 2,
+            RuntimeType::U16 => 2,
+            RuntimeType::I32 => 4,
+            RuntimeType::U32 => 4,
+            RuntimeType::I64 => 8,
+            RuntimeType::U64 => 8,
+            RuntimeType::F32 => 4,
+            RuntimeType::F64 => 8,
+            // RuntimeType::String => todo!(),
+            RuntimeType::Ptr => 8,
+            // RuntimeType::ByRef => todo!(),
+            // RuntimeType::ValueType => todo!(),
+            RuntimeType::Class => 8,
+            // RuntimeType::Var => todo!(),
+            // RuntimeType::Array => todo!(),
+            // RuntimeType::GenericInst => todo!(),
+            // RuntimeType::TypedByRef => todo!(),
+            // RuntimeType::NativeInt => todo!(),
+            // RuntimeType::NativeUInt => todo!(),
+            // RuntimeType::FunctionPtr => todo!(),
+            RuntimeType::Object => 8,
+            // RuntimeType::SizeArray => todo!(),
+            // RuntimeType::MethodType => todo!(),
+            // RuntimeType::RequiredCModifier => todo!(),
+            // RuntimeType::OptionalCModifier => todo!(),
+            // RuntimeType::Internal => todo!(),
+            // RuntimeType::Modifier => todo!(),
+            // RuntimeType::Sentinel => todo!(),
+            // RuntimeType::Pinned => todo!(),
+            other => {
+                println!("Encountered RuntimeType {other}");
+                1
+            }
+        }
     }
 }

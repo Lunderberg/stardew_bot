@@ -53,6 +53,12 @@ pub enum Error {
 
     #[error("Could not find method table {0}")]
     MethodTableNotFound(&'static str),
+
+    #[error(
+        "Expected to find a unique instance of Game object, \
+             but found {0} instances."
+    )]
+    UniqueGameObjectInstanceNotFound(usize),
 }
 
 impl std::fmt::Debug for Error {
