@@ -8,9 +8,9 @@ use crate::enum_map::{EnumKey, EnumMap};
 use crate::intermediate_language::CILMethod;
 use crate::portable_executable::DataDirectoryKind;
 use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
-use crate::Error;
-use crate::UnpackedValue;
 use crate::{ByteRange, UnpackBytes};
+use crate::{Error, UnpackedBlob};
+use crate::{Signature, UnpackedValue};
 
 #[derive(Copy, Clone)]
 pub struct DLLUnpacker<'a> {
@@ -182,7 +182,7 @@ pub trait TypedMetadataIndex {
 }
 
 /// Typed index into a specific metadata type
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MetadataTableIndex<TableTag> {
     index: usize,
     _phantom: PhantomData<TableTag>,
@@ -206,7 +206,7 @@ pub struct MetadataTableIndexRange<TableTag> {
     _phantom: PhantomData<TableTag>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug)]
 pub struct MetadataCodedIndex<CodedIndexType> {
     index: usize,
     kind: MetadataTableKind,
@@ -337,7 +337,7 @@ macro_rules! decl_metadata_table {
         ),* $(,)?
     ) => {
         $(
-            #[derive(Clone, Copy)]
+            #[derive(Clone, Copy, Debug)]
             pub struct $table_name;
 
             impl MetadataTableTag for $table_name {
@@ -976,6 +976,7 @@ macro_rules! decl_core_coded_index_type {
      [ $( $table_type:ident ),+ $(,)? ] $(,)?
     ) => {
         paste!{
+            #[derive(Clone, Copy, Debug)]
             pub struct $tag;
 
             pub enum [< Metadata $tag >] <'a> {
@@ -1381,7 +1382,7 @@ impl<TableTag> Into<usize> for MetadataTableIndex<TableTag> {
 }
 
 impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
-    fn new(kind: MetadataTableKind, index: usize) -> Self
+    pub(crate) fn new(kind: MetadataTableKind, index: usize) -> Self
     where
         CodedIndexType: CodedIndex,
     {
@@ -2035,42 +2036,15 @@ impl TypedMetadataIndex for MetadataHeapIndex<String> {
 }
 
 impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
-    type Output<'a: 'b, 'b> = ByteRange<'a>;
+    type Output<'a: 'b, 'b> = UnpackedBlob<'a>;
 
     fn access<'a: 'b, 'b>(
         self,
         tables: &'b Metadata<'a>,
-    ) -> Result<ByteRange<'a>, Error> {
-        let blob_heap = tables.heaps[MetadataHeapKind::Blob];
-        let index = self.index;
-
-        let byte: u8 = blob_heap[index];
-
-        let leading_ones = byte.leading_ones();
-        let (size_size, size) = match leading_ones {
-            0 => {
-                let size: usize = (byte & 0x7f).into();
-                (1, size)
-            }
-            1 => {
-                let high: usize = (byte & 0x3f).into();
-                let low: usize = blob_heap[index + 1].into();
-                (2, (high << 8) + low)
-            }
-            2 => {
-                let high: usize = (byte & 0x1f).into();
-                let mid1: usize = blob_heap[index + 1].into();
-                let mid2: usize = blob_heap[index + 2].into();
-                let low: usize = blob_heap[index + 3].into();
-                (4, (high << 24) + (mid1 << 16) + (mid2 << 8) + low)
-            }
-            _ => {
-                return Err(Error::InvalidBlobHeader { leading_ones });
-            }
-        };
-
-        let bytes = blob_heap.subrange(index..index + size_size + size);
-        Ok(bytes)
+    ) -> Result<UnpackedBlob<'a>, Error> {
+        UnpackedBlob::new(
+            tables.heaps[MetadataHeapKind::Blob].subrange(self.index..),
+        )
     }
 }
 
@@ -2772,6 +2746,16 @@ impl<'a> MetadataRow<'a, Field> {
         }
 
         type_def_table.get_row(index_range.start)
+    }
+
+    pub fn parsed_signature(&self) -> Result<Signature<'a>, Error> {
+        let bytes = self.signature()?.content();
+        Ok(Signature::new(bytes))
+    }
+
+    pub fn is_garbage_collected(&self) -> Result<bool, Error> {
+        let bytes = self.signature()?.content();
+        Signature::new(bytes).is_garbage_collected()
     }
 }
 

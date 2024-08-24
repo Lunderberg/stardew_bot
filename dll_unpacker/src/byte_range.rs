@@ -97,6 +97,10 @@ impl<'a> ByteRange<'a> {
         self.bytes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
     pub fn unpack<T>(&self) -> Result<T, Error>
     where
         T: UnpackBytes<'a>,

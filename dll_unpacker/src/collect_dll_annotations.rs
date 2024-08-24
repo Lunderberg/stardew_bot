@@ -457,7 +457,8 @@ impl<'a> MetadataRow<'a, Field> {
             .append_value(name);
         annotator
             .value(self.signature_index()?)
-            .name("signature_index");
+            .name("signature")
+            .append_value(self.parsed_signature()?);
 
         annotator
             .range(self.signature()?.into())

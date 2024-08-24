@@ -4,6 +4,7 @@ use thiserror::Error;
 
 use crate::dll_unpacker::MetadataTableKind;
 use crate::relative_virtual_address::RelativeVirtualAddress;
+use crate::signature::ElementType;
 
 #[derive(Error)]
 pub enum Error {
@@ -90,6 +91,61 @@ pub enum Error {
          but header had {leading_ones} leading ones."
     )]
     InvalidBlobHeader { leading_ones: u32 },
+
+    #[error("Reached the end of data while parsing signature.")]
+    UnexpectedEndOfMetadataSignature,
+
+    #[error(
+        "Compressed values in metadata signature (ECMA-335, section II.23.2) \
+         must start with 0, 1, or 2 leading ones, \
+         but instead found {leading_ones} leading ones."
+    )]
+    InvalidCompressedValueInMetadataSignature { leading_ones: u32 },
+
+    #[error(
+        "Value 0x{0:02x} does not correspond to any ELEMENT_TYPE \
+         (ECMA-335, section II.23.1.16)."
+    )]
+    InvalidElementType(u32),
+
+    #[error(
+        "Value 0x{0:02x} is not allowed as a table specified \
+         for a TypeDefOrRef appearing in a metadata signature \
+         (ECMA-335, section II.23.2.8)."
+    )]
+    InvalidMetadataTypeDefOrRef(u32),
+
+    #[error(
+        "Lowest 4 bits of first byte of a method signature \
+         must be 0-5 (inclusive), \
+         but instead found {0}."
+    )]
+    InvalidCallingConvention(u8),
+
+    #[error(
+        "Lowest 4 bits of first byte of a field signature \
+         must be 0x6, but instead found {0}."
+    )]
+    InvalidFieldSignature(u8),
+
+    #[error(
+        "Lowest 4 bits of first byte of a local variable signature \
+         must be 0x7, but instead found {0}."
+    )]
+    InvalidLocalVarSignature(u8),
+
+    #[error(
+        "GenericInst type must be followed by \
+         either Class or ValueType, \
+         but was instead followed by {0}"
+    )]
+    InvalidElementFollowingGenericInst(ElementType),
+
+    #[error(
+        "Lowest 4 bits of first byte of a field signature \
+         must be 0x8, but instead found {0}."
+    )]
+    InvalidPropertySignature(u8),
 
     #[error(
         "Index {index} is out of bounds for table {kind}, \
