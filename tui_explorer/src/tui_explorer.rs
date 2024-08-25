@@ -1,6 +1,6 @@
-use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
+use dotnet_debugger::RuntimeType;
 use itertools::Itertools as _;
 use ratatui::style::Stylize as _;
 
@@ -272,6 +272,16 @@ impl TuiExplorerBuilder {
             runtime_module.ptr_to_table_of_method_tables
         ));
 
+        self.running_log.add_log(format!(
+            "Base-ptr of non-GC statics: {}",
+            runtime_module.base_ptr_of_non_gc_statics
+        ));
+
+        self.running_log.add_log(format!(
+            "Base-ptr of GC statics: {}",
+            runtime_module.base_ptr_of_gc_statics
+        ));
+
         self.range(runtime_module.method_table_lookup.location.clone())
             .name("TypeDefToMethodDef table");
 
@@ -360,11 +370,23 @@ impl TuiExplorerBuilder {
             .get_field_descriptions(&self.reader)?
             .iter()
             .flatten()
-            .filter(|field| !field.is_static())
             .try_for_each(|field| -> Result<_, Error> {
                 let field_metadata = metadata.get(field.token())?;
                 let name = field_metadata.name()?;
-                let field_start = game_obj + Pointer::SIZE + field.offset();
+
+                let base = if field.is_static()
+                    && matches!(
+                        field.runtime_type()?,
+                        RuntimeType::Class | RuntimeType::ValueType
+                    ) {
+                    runtime_module.base_ptr_of_gc_statics
+                } else if field.is_static() {
+                    runtime_module.base_ptr_of_non_gc_statics
+                } else {
+                    game_obj + Pointer::SIZE
+                };
+
+                let field_start = base + field.offset();
                 let size = field.runtime_type()?.size_bytes();
                 self.range(field_start..field_start + size)
                     .name(format!("Field {name}"));
@@ -372,64 +394,6 @@ impl TuiExplorerBuilder {
             })?;
 
         self.initial_pointer = game_obj;
-
-        // let parent_map: HashMap<_,_> = metadata.type_def_table()?
-        //     .iter_rows()
-        //     .filter_map(|type_def|{
-        //         type_def.extends().unwrap().and_then(|def_or_ref|{
-        //             match def_or_ref{
-        //                 dll_unpacker::dll_unpacker::MetadataTypeDefOrRef::TypeDef(parent) => Some(parent),
-        //                 _ => None,
-        //             }
-        //         }).map(|parent| {
-        //             (type_def.index(), parent.index())
-        //         })
-        //     })
-        //     .collect();
-        // println!("Num classes which extend locals: {}", parent_map.len());
-
-        // let classes_with_static: HashSet<_> = metadata
-        //     .type_def_table()?
-        //     .iter_rows()
-        //     .filter(|type_def| {
-        //         type_def
-        //             .iter_fields()
-        //             .unwrap()
-        //             .any(|field| field.is_static().unwrap())
-        //     })
-        //     .map(|type_def| type_def.index())
-        //     .collect();
-        // println!(
-        //     "Num classes with immediate statics: {}",
-        //     classes_with_static.len()
-        // );
-
-        // let num_classes_with_static = metadata
-        //     .type_def_table()?
-        //     .iter_rows()
-        //     .filter(|type_def| {
-        //         std::iter::successors(Some(type_def.index()), |index| {
-        //             parent_map.get(index).copied()
-        //         })
-        //         .any(|index| classes_with_static.contains(&index))
-        //     })
-        //     .count();
-        // println!("Num classes with statics: {num_classes_with_static}");
-
-        // let num_static_fields = metadata
-        //     .field_table()?
-        //     .iter_rows()
-        //     .filter(|field| field.is_static().unwrap())
-        //     .count();
-        // println!("Num static fields: {num_static_fields}");
-
-        // let num_static_gc_fields = metadata
-        //     .field_table()?
-        //     .iter_rows()
-        //     .filter(|field| field.is_static().unwrap())
-        //     .filter(|field| field.is_garbage_collected().unwrap())
-        //     .count();
-        // println!("Num static GC fields: {num_static_gc_fields}");
 
         Ok(self)
     }
@@ -484,9 +448,9 @@ impl TuiExplorer {
             .initialize_annotations()?
             .search_based_on_annotations()?
             // .initialize_view_to_stardew_dll()?
-            //.initialize_view_to_stack()?
+            // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
-            .initialize_view_to_annotation("Field[100]")?
+            // .initialize_view_to_annotation("Field[100]")?
             .build()
     }
 

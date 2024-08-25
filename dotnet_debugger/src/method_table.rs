@@ -168,7 +168,14 @@ impl MethodTable {
 
         let base_size = 56;
         // EEClass stores extra data after the end of the class
-        // members.  The length of these is about 18 bytes
+        // members.  The length of these is about 44 bytes (11 fields
+        // * 4 bytes/field), but they occur after the subclass's
+        // fields.
+        //
+        // This will need to change for .NET 9.0 onward, which moves
+        // these sizes into the class definition.
+        // https://github.com/dotnet/runtime/commit/8b581cad
+        // (2024-01-24)
         let extra_size = 256;
         let bytes = reader.read_bytes(ptr, base_size + extra_size)?;
         Ok(EEClass {

@@ -125,6 +125,10 @@ impl MemoryReader {
         self.stack()?.read()
     }
 
+    pub fn is_valid_ptr(&self, ptr: Pointer) -> bool {
+        self.regions.iter().any(|region| region.contains(ptr))
+    }
+
     pub fn find_containing_region(
         &self,
         ptr: Pointer,

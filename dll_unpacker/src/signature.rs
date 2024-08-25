@@ -53,8 +53,11 @@ pub enum SignatureType {
 
     Array {
         element_type: Box<SignatureType>,
+        #[allow(dead_code)]
         rank: u32,
+        #[allow(dead_code)]
         fixed_sizes: Vec<u32>,
+        #[allow(dead_code)]
         lower_bounds: Vec<u32>,
     },
     SizeArray(Box<SignatureType>),
@@ -154,19 +157,21 @@ impl<'a> Signature<'a> {
         let element = iter.next_element_type_ignoring_custom_modifiers()?;
 
         let result = match element {
-            ElementType::String | ElementType::Object | ElementType::Class => {
-                true
-            }
+            // ElementType::String | ElementType::Object | ElementType::Class => {
+            //     true
+            // }
+            ElementType::Class => true,
+            ElementType::ValueType => true,
 
-            ElementType::ByRef
-            | ElementType::TypedByRef
-            | ElementType::Ptr
-            | ElementType::FunctionPtr => true,
+            // ElementType::ByRef
+            // | ElementType::TypedByRef
+            // | ElementType::Ptr
+            // | ElementType::FunctionPtr => true,
 
-            ElementType::GenericInst => match iter.next_element_type()? {
-                ElementType::Class => true,
-                _ => false,
-            },
+            // ElementType::GenericInst => match iter.next_element_type()? {
+            //     ElementType::Class => true,
+            //     _ => false,
+            // },
             _ => false,
             // ElementType::Var => todo!(),
             // ElementType::SizeArray => todo!(),
@@ -336,6 +341,7 @@ impl<'a> SignatureDecompressor<'a> {
         Ok(value)
     }
 
+    #[allow(dead_code)]
     fn next_signed(&mut self) -> Result<i32, Error> {
         let value = match self.next_compressed_value()? {
             CompressedValue::U8(value) => {

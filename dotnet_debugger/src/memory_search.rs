@@ -33,6 +33,13 @@ pub fn find_object_instances<'a>(
         .filter(|region| {
             region.is_readable && region.is_writable && !region.is_shared_memory
         })
+        .filter(|region| {
+            region
+                .name
+                .as_ref()
+                .map(|name| name != "[heap]")
+                .unwrap_or(true)
+        })
         .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
         .filter(move |mem_value| {
             // The GC may use the low bits of the MethodTable*
@@ -116,7 +123,14 @@ pub fn find_object_instances<'a>(
                     .try_into()
                     .unwrap();
                 expected_ptr.is_null()
-                    || reader.find_containing_region(expected_ptr).is_some()
+                    || reader
+                        .find_containing_region(expected_ptr)
+                        .map(|region| {
+                            region.is_readable
+                                && region.is_writable
+                                && !region.is_shared_memory
+                        })
+                        .unwrap_or(false)
             })
         });
 

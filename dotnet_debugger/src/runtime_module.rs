@@ -13,11 +13,25 @@ pub struct RuntimeModule {
     /// Location of the Module object
     pub location: Pointer,
 
-    /// The location of the
+    /// The location of the pointer to the MethodTableLookup.
     pub ptr_to_table_of_method_tables: Pointer,
 
     /// The lookup for the MethodTables
     pub method_table_lookup: MethodTableLookup,
+
+    /// The base pointer of static pointer to non-garbage-collected
+    /// static values.  These values are relative to the
+    /// DomainLocalModule struct, a pointer to which is in the Module.
+    ///
+    /// For .NET 9.0 onward, this will need to be updated to find
+    /// statics relative to the MethodTable.
+    /// https://github.com/dotnet/runtime/commit/eb8f54d9 (2024-06-12)
+    pub base_ptr_of_non_gc_statics: Pointer,
+
+    /// The base pointer of static pointers to garbage-collected
+    /// static values.  These values are relative to an allocation
+    /// owned by the DomainLocalModule.
+    pub base_ptr_of_gc_statics: Pointer,
 }
 
 impl RuntimeModule {
@@ -64,7 +78,7 @@ impl RuntimeModule {
                 // `libcoreclr.so`, but that doesn't seem necessary at the
                 // moment.
                 dll_method_def.contains(il_ptr)
-                    && reader.find_containing_region(*module_ptr).is_some()
+                    && reader.is_valid_ptr(*module_ptr)
             })
             .map(|(module_ptr, _)| module_ptr)
             .counts()
@@ -79,6 +93,11 @@ impl RuntimeModule {
         metadata: &Metadata,
         location: Pointer,
     ) -> Result<Self, Error> {
+        // The layout of the Module varies by .NET version, but should
+        // be less than 4kB for each.  If I don't find each pointer by
+        // then, then something else is probably wrong.
+        let bytes = reader.read_bytes(location, 4096)?;
+
         // The exact layout of the Module class varies.  The goal is
         // to find the `m_TypeDefToMethodTableMap` member,
         //
@@ -109,26 +128,22 @@ impl RuntimeModule {
         //   `LookupMap` as only the low bits can be set.  And we need
         //   the value anyways in order to know which bits to remove
         //   from `pTable`.
+        //
+        // Should be at byte 648 relative to the module
+        // pointer, but may be different in each .NET version.
 
         let num_type_defs = metadata.type_def_table()?.num_rows();
 
-        let (ptr_to_table_of_method_tables, supported_flags) = reader
-            .regions
-            .iter()
-            .find(|region| region.address_range().contains(&location))
-            .unwrap()
-            .read()?
-            .into_iter_as_pointers_from(location)
-            // If I haven't found it after 4 kB, then something else
-            // is wrong.  Should be at byte 648 relative to the module
-            // pointer, but may be different in each .NET version.
-            .take(512)
+        let (ptr_to_table_of_method_tables, supported_flags) = bytes
+            .chunks_exact(8)
             .tuple_windows()
             .map(|(a, b, c, d)| {
-                let p_next: Pointer = a.value;
-                let p_table: Pointer = b.value;
-                let dw_count = c.value.as_usize() & ((1 << 32) - 1);
-                let supported_flags: usize = d.value.as_usize();
+                let p_next: Pointer = a.try_into().unwrap();
+                let p_table: Pointer = b.try_into().unwrap();
+                let dw_count =
+                    u32::from_ne_bytes(c[..4].try_into().unwrap()) as usize;
+                let supported_flags: usize =
+                    usize::from_ne_bytes(d.try_into().unwrap());
 
                 (p_next, p_table, dw_count, supported_flags)
             })
@@ -166,10 +181,63 @@ impl RuntimeModule {
             method_tables,
         };
 
+        let base_ptr_of_non_gc_statics = bytes
+            .chunks_exact(8)
+            .tuple_windows()
+            .map(|(a, b, c, d, e)| {
+                let domain_local_module: Pointer = a.try_into().unwrap();
+                let module_index: u64 =
+                    u64::from_ne_bytes(b.try_into().unwrap());
+                let regular_statics_offsets: Pointer = c.try_into().unwrap();
+                let thread_statics_offsets: Pointer = d.try_into().unwrap();
+                let max_rid_statics_allocated =
+                    u32::from_ne_bytes(e[..4].try_into().unwrap()) as usize;
+                (
+                    domain_local_module,
+                    module_index,
+                    regular_statics_offsets,
+                    thread_statics_offsets,
+                    max_rid_statics_allocated,
+                )
+            })
+            .filter(
+                |(
+                    domain_local_module,
+                    _,
+                    regular_statics_offsets,
+                    thread_statics_offsets,
+                    max_rid_statics_allocated,
+                )| {
+                    reader.is_valid_ptr(*domain_local_module)
+                        && (regular_statics_offsets.is_null()
+                            || reader.is_valid_ptr(*regular_statics_offsets))
+                        && (thread_statics_offsets.is_null()
+                            || reader.is_valid_ptr(*thread_statics_offsets))
+                        && *max_rid_statics_allocated == num_type_defs
+                },
+            )
+            .filter(|(_, module_index, _, _, _)| {
+                // Not technically a requirement, but this is a 64-bit
+                // value that gets incremented for each module that is
+                // loaded.  It's unlikely to have several thousand
+                // DLLs loaded at once, so I might as well include
+                // this as part of the condition.
+                *module_index < 16384
+            })
+            .map(|(domain_local_module, _, _, _, _)| domain_local_module)
+            .next()
+            .expect("Could not find DomainLocalModule pointer");
+
+        let base_ptr_of_gc_statics = reader
+            .read_byte_array(base_ptr_of_non_gc_statics + 32)?
+            .into();
+
         Ok(Self {
             location,
             ptr_to_table_of_method_tables,
             method_table_lookup,
+            base_ptr_of_non_gc_statics,
+            base_ptr_of_gc_statics,
         })
     }
 
