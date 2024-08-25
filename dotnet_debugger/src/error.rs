@@ -22,6 +22,9 @@ pub enum Error {
 
     #[error("Value 0x{0:02x} does not correspond to any runtime type")]
     InvalidRuntimeType(u8),
+
+    #[error("Locating non-static field requires pointer to instance")]
+    LocationOfInstanceFieldRequiresInstance,
 }
 
 impl std::fmt::Debug for Error {

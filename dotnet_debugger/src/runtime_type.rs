@@ -1,3 +1,5 @@
+use memory_reader::Pointer;
+
 use crate::Error;
 
 /// Equivalent representation to CorElementType
@@ -115,10 +117,11 @@ impl RuntimeType {
             RuntimeType::F32 => 4,
             RuntimeType::F64 => 8,
             // RuntimeType::String => todo!(),
-            RuntimeType::Ptr => 8,
+            RuntimeType::Ptr
+            | RuntimeType::ValueType
+            | RuntimeType::Class
+            | RuntimeType::Object => Pointer::SIZE,
             // RuntimeType::ByRef => todo!(),
-            // RuntimeType::ValueType => todo!(),
-            RuntimeType::Class => 8,
             // RuntimeType::Var => todo!(),
             // RuntimeType::Array => todo!(),
             // RuntimeType::GenericInst => todo!(),
@@ -126,7 +129,7 @@ impl RuntimeType {
             // RuntimeType::NativeInt => todo!(),
             // RuntimeType::NativeUInt => todo!(),
             // RuntimeType::FunctionPtr => todo!(),
-            RuntimeType::Object => 8,
+
             // RuntimeType::SizeArray => todo!(),
             // RuntimeType::MethodType => todo!(),
             // RuntimeType::RequiredCModifier => todo!(),

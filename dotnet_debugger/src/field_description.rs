@@ -6,7 +6,7 @@ use dll_unpacker::{
 };
 use memory_reader::Pointer;
 
-use crate::{unpack_fields, Error, OwnedBytes, RuntimeType};
+use crate::{unpack_fields, Error, OwnedBytes, RuntimeModule, RuntimeType};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,
@@ -130,5 +130,32 @@ impl<'a> FieldDescription<'a> {
 
     pub fn runtime_type(&self) -> Result<RuntimeType, Error> {
         (self.raw_runtime_type() as u8).try_into()
+    }
+
+    pub fn location(
+        &self,
+        module: &RuntimeModule,
+        instance: Option<Pointer>,
+    ) -> Result<Range<Pointer>, Error> {
+        let runtime_type = self.runtime_type()?;
+        let is_instance_field = !self.is_static();
+
+        let base = if is_instance_field {
+            let instance = instance
+                .ok_or(Error::LocationOfInstanceFieldRequiresInstance)?;
+            instance + Pointer::SIZE
+        } else if matches!(
+            runtime_type,
+            RuntimeType::Class | RuntimeType::ValueType
+        ) {
+            module.base_ptr_of_gc_statics
+        } else {
+            module.base_ptr_of_non_gc_statics
+        };
+        let ptr = base + self.offset();
+
+        let size = runtime_type.size_bytes();
+
+        Ok(ptr..ptr + size)
     }
 }

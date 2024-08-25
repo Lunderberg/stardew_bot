@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use dotnet_debugger::RuntimeType;
 use itertools::Itertools as _;
 use ratatui::style::Stylize as _;
 
@@ -338,6 +337,19 @@ impl TuiExplorerBuilder {
                     },
                 )?;
 
+                fields
+                    .iter()
+                    .flatten()
+                    .filter(|field| field.is_static())
+                    .try_for_each(|field| -> Result<_, Error> {
+                        let field_name = metadata.get(field.token())?.name()?;
+                        let range = field.location(&runtime_module, None)?;
+                        self.annotations
+                            .range(range)
+                            .name(format!("{class_name}.{field_name}"));
+                        Ok(())
+                    })?;
+
                 Ok(())
             })?;
 
@@ -370,25 +382,16 @@ impl TuiExplorerBuilder {
             .get_field_descriptions(&self.reader)?
             .iter()
             .flatten()
+            .filter(|field| {
+                // Static fields across all classes in the module are
+                // already annotated.
+                !field.is_static()
+            })
             .try_for_each(|field| -> Result<_, Error> {
                 let field_metadata = metadata.get(field.token())?;
                 let name = field_metadata.name()?;
 
-                let base = if field.is_static()
-                    && matches!(
-                        field.runtime_type()?,
-                        RuntimeType::Class | RuntimeType::ValueType
-                    ) {
-                    runtime_module.base_ptr_of_gc_statics
-                } else if field.is_static() {
-                    runtime_module.base_ptr_of_non_gc_statics
-                } else {
-                    game_obj + Pointer::SIZE
-                };
-
-                let field_start = base + field.offset();
-                let size = field.runtime_type()?.size_bytes();
-                self.range(field_start..field_start + size)
+                self.range(field.location(&runtime_module, Some(game_obj))?)
                     .name(format!("Field {name}"));
                 Ok(())
             })?;
