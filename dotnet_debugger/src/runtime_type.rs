@@ -1,6 +1,6 @@
 use memory_reader::Pointer;
 
-use crate::Error;
+use crate::{Error, RuntimeValue};
 
 /// Equivalent representation to CorElementType
 #[derive(Clone, Copy, Debug)]
@@ -100,6 +100,10 @@ impl RuntimeType {
         matches!(self, Self::Ptr | Self::Object | Self::Class)
     }
 
+    pub fn parse(self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
+        RuntimeValue::parse(self, bytes)
+    }
+
     pub fn size_bytes(self) -> usize {
         match self {
             // RuntimeType::End => todo!(),
@@ -126,8 +130,9 @@ impl RuntimeType {
             // RuntimeType::Array => todo!(),
             // RuntimeType::GenericInst => todo!(),
             // RuntimeType::TypedByRef => todo!(),
-            // RuntimeType::NativeInt => todo!(),
-            // RuntimeType::NativeUInt => todo!(),
+            RuntimeType::NativeInt | RuntimeType::NativeUInt => {
+                std::mem::size_of::<usize>()
+            }
             // RuntimeType::FunctionPtr => todo!(),
 
             // RuntimeType::SizeArray => todo!(),

@@ -12,6 +12,9 @@ pub use memory_search::*;
 mod runtime_type;
 pub use runtime_type::RuntimeType;
 
+mod runtime_value;
+pub use runtime_value::RuntimeValue;
+
 mod method_table;
 pub use method_table::*;
 

@@ -132,6 +132,13 @@ impl<'a> FieldDescription<'a> {
         (self.raw_runtime_type() as u8).try_into()
     }
 
+    pub fn is_pointer(&self) -> Result<bool, Error> {
+        Ok(matches!(
+            self.runtime_type()?,
+            RuntimeType::Class | RuntimeType::ValueType
+        ))
+    }
+
     pub fn location(
         &self,
         module: &RuntimeModule,

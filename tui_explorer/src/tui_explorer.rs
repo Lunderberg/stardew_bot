@@ -343,10 +343,22 @@ impl TuiExplorerBuilder {
                     .filter(|field| field.is_static())
                     .try_for_each(|field| -> Result<_, Error> {
                         let field_name = metadata.get(field.token())?.name()?;
-                        let range = field.location(&runtime_module, None)?;
-                        self.annotations
-                            .range(range)
+                        let location = field.location(&runtime_module, None)?;
+
+                        let ann = self
+                            .annotations
+                            .range(location.clone())
                             .name(format!("{class_name}.{field_name}"));
+
+                        if !field.is_pointer()? {
+                            let bytes = self.reader.read_bytes(
+                                location.start,
+                                location.end - location.start,
+                            )?;
+                            let value = field.runtime_type()?.parse(&bytes)?;
+                            ann.value(value);
+                        }
+
                         Ok(())
                     })?;
 
@@ -388,11 +400,23 @@ impl TuiExplorerBuilder {
                 !field.is_static()
             })
             .try_for_each(|field| -> Result<_, Error> {
-                let field_metadata = metadata.get(field.token())?;
-                let name = field_metadata.name()?;
+                let field_name = metadata.get(field.token())?.name()?;
+                let location =
+                    field.location(&runtime_module, Some(game_obj))?;
 
-                self.range(field.location(&runtime_module, Some(game_obj))?)
-                    .name(format!("Field {name}"));
+                let ann = self
+                    .annotations
+                    .range(location.clone())
+                    .name(format!(" {field_name}"));
+
+                if !field.is_pointer()? {
+                    let bytes = self.reader.read_bytes(
+                        location.start,
+                        location.end - location.start,
+                    )?;
+                    let value = field.runtime_type()?.parse(&bytes)?;
+                    ann.value(value);
+                }
                 Ok(())
             })?;
 
