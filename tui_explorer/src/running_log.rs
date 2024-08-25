@@ -1,19 +1,19 @@
 use std::collections::VecDeque;
 
 use memory_reader::{MemoryReader, Pointer};
+use ratatui::widgets::StatefulWidget;
 use ratatui::{
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, List, ListState},
-    Frame,
+    widgets::{List, ListState, Widget},
 };
 
 use chrono::prelude::*;
 use regex::Regex;
 
 use crate::extended_tui::{
-    ScrollableState as _, SearchDirection, SearchWindow,
+    ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
 };
 use crate::{extensions::*, MemoryTable, StackFrameTable};
 use crate::{KeyBindingMatch, KeySequence};
@@ -156,16 +156,16 @@ impl RunningLog {
                 self.jump_to_address(reader, table, stack_frame_table)
             })
     }
+}
 
-    pub(crate) fn draw(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        border_style: Style,
-    ) {
+impl<'a> Widget for &'a mut RunningLog {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
         self.prev_draw_height = area.height as usize;
 
-        let row_generator = Self::get_row_generator(&self.items);
+        let row_generator = RunningLog::get_row_generator(&self.items);
 
         let items = (0..self.items.len())
             .map(|i| row_generator(i).pop().unwrap())
@@ -183,16 +183,6 @@ impl RunningLog {
                     line
                 }
             });
-
-        let running_log = List::new(items)
-            .block(
-                Block::default()
-                    .title("Log")
-                    .borders(Borders::ALL)
-                    .border_style(border_style),
-            )
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(">> ");
 
         let search_area_height = if self.search.is_some() {
             area.height.min(3)
@@ -215,9 +205,19 @@ impl RunningLog {
         );
 
         if let Some(search) = self.search.as_ref() {
-            search.draw(frame, search_area);
+            search.render(search_area, buf);
         }
 
-        frame.render_stateful_widget(running_log, log_area, &mut self.state);
+        let running_log = List::new(items)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ");
+
+        StatefulWidget::render(running_log, log_area, buf, &mut self.state);
+    }
+}
+
+impl<'a> WidgetWindow for &'a mut RunningLog {
+    fn title(&self) -> String {
+        "Log".to_string()
     }
 }

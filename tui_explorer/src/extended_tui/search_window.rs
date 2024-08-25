@@ -4,7 +4,6 @@ use ratatui::{
     style::{Color, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::extended_tui::ScrollableState;
@@ -277,8 +276,13 @@ impl<T> SearchWindow<T> {
         };
         desc.to_string()
     }
+}
 
-    pub(crate) fn draw(&self, frame: &mut Frame, area: Rect) {
+impl<'a, T> ratatui::widgets::Widget for &'a SearchWindow<T> {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
         let (matching_part, non_matching_part) = self.get_search_string_parts();
         let line: Line = vec![
             Span::raw(matching_part),
@@ -290,6 +294,7 @@ impl<T> SearchWindow<T> {
 
         let widget = Paragraph::new(line)
             .block(Block::default().borders(Borders::ALL).title(title));
-        frame.render_widget(widget, area);
+
+        widget.render(area, buf);
     }
 }

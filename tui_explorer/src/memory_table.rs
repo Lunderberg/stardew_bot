@@ -2,15 +2,14 @@ use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     text::Line,
-    widgets::{Block, Borders, TableState},
-    Frame,
+    widgets::{Block, Borders, StatefulWidget as _, TableState, Widget},
 };
 
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use crate::extended_tui::{
-    InputWindow, ScrollableState, SearchDirection, SearchWindow,
+    InputWindow, ScrollableState, SearchDirection, SearchWindow, WidgetWindow,
 };
 use crate::{extended_tui::DynamicTable, extensions::*};
 use crate::{
@@ -18,12 +17,16 @@ use crate::{
     NonEmptyVec, RunningLog, StackFrameTable,
 };
 
-use itertools::Itertools;
-
 pub struct MemoryTable {
     view_stack: NonEmptyVec<ViewFrame>,
     formatters: Vec<Box<dyn ColumnFormatter>>,
     jump_to_window: Option<InputWindow>,
+}
+
+pub(crate) struct DrawableMemoryTable<'a> {
+    table: &'a mut MemoryTable,
+    reader: &'a MemoryReader,
+    annotations: &'a [Annotation],
 }
 
 struct ViewFrame {
@@ -32,6 +35,13 @@ struct ViewFrame {
     table_state: TableState,
     search: Option<SearchWindow<TableState>>,
     table_height: Option<usize>,
+}
+
+struct DrawableViewFrame<'a> {
+    view: &'a mut ViewFrame,
+    reader: &'a MemoryReader,
+    annotations: &'a [Annotation],
+    formatters: &'a [Box<dyn ColumnFormatter>],
 }
 
 impl MemoryTable {
@@ -173,44 +183,6 @@ impl MemoryTable {
         self.view_stack.last_mut()
     }
 
-    pub(crate) fn draw(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        reader: &MemoryReader,
-        annotations: &[Annotation],
-        border_style: Style,
-    ) {
-        let area = if let Some(window) = self.jump_to_window.as_mut() {
-            let (top, bottom) = area.split_from_bottom(3);
-            window.draw(frame, bottom);
-            top
-        } else {
-            area
-        };
-
-        let area = self.view_stack.iter().with_position().fold(
-            area,
-            |area, (position, view)| {
-                let style = match position {
-                    itertools::Position::First | itertools::Position::Only => {
-                        border_style
-                    }
-                    _ => Style::new(),
-                };
-                view.draw_border(frame, area, style)
-            },
-        );
-
-        self.view_stack.last_mut().draw_inner(
-            frame,
-            area,
-            reader,
-            annotations,
-            &self.formatters,
-        );
-    }
-
     pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
@@ -280,6 +252,59 @@ impl MemoryTable {
                     log.add_log("Value does not point to any memory region");
                 }
             })
+    }
+
+    pub(crate) fn drawable<'a>(
+        &'a mut self,
+        reader: &'a MemoryReader,
+        annotations: &'a [Annotation],
+    ) -> DrawableMemoryTable<'a> {
+        DrawableMemoryTable {
+            table: self,
+            reader,
+            annotations,
+        }
+    }
+}
+
+impl<'a> Widget for DrawableMemoryTable<'a> {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        let area = if let Some(window) = self.table.jump_to_window.as_ref() {
+            let (top, bottom) = area.split_from_bottom(3);
+            window.render(bottom, buf);
+            top
+        } else {
+            area
+        };
+
+        let area =
+            self.table
+                .view_stack
+                .iter()
+                .skip(1)
+                .fold(area, |area, view| {
+                    let border = Block::default()
+                        .borders(Borders::ALL)
+                        .title(view.title());
+                    let inner_area = border.inner(area);
+                    border.render(area, buf);
+                    inner_area
+                });
+
+        self.table
+            .view_stack
+            .last_mut()
+            .drawable(self.reader, self.annotations, &self.table.formatters)
+            .render(area, buf);
+    }
+}
+
+impl<'a> WidgetWindow for DrawableMemoryTable<'a> {
+    fn title(&self) -> String {
+        self.table.view_stack.first().title()
     }
 }
 
@@ -446,61 +471,6 @@ impl ViewFrame {
         )
     }
 
-    fn draw_border(&self, frame: &mut Frame, area: Rect, style: Style) -> Rect {
-        let border = Block::default()
-            .borders(Borders::ALL)
-            .border_style(style)
-            .title(self.title());
-        let inner_area = border.inner(area);
-
-        frame.render_widget(border, area);
-        inner_area
-    }
-
-    fn draw_inner(
-        &mut self,
-        frame: &mut Frame,
-        inner_area: Rect,
-        reader: &MemoryReader,
-        annotations: &[Annotation],
-        formatters: &[Box<dyn ColumnFormatter>],
-    ) {
-        // Layout.split puts all excess space into the last widget,
-        // which I want to be a fixed size.  Doing the layout
-        // explicitly, at least until there are more flexible
-        // utilities.
-        //
-        // Should keep an eye on
-        // https://github.com/fdehau/tui-rs/pull/596 and
-        // https://github.com/fdehau/tui-rs/pull/519 to see if the
-        // utilites improve.
-
-        let search_area_height = if self.search.is_some() {
-            inner_area.height.min(3)
-        } else {
-            0
-        };
-
-        let (table_area, search_area) =
-            inner_area.split_from_bottom(search_area_height);
-
-        if let Some(search) = self.search.as_ref() {
-            search.draw(frame, search_area);
-        }
-
-        self.table_height = Some(table_area.height as usize);
-        let table = self
-            .generate_table(
-                reader,
-                &self.region,
-                formatters,
-                &self.search,
-                annotations,
-            )
-            .with_scrollbar(self.num_table_rows());
-        frame.render_stateful_widget(table, table_area, &mut self.table_state);
-    }
-
     fn generate_table<'a>(
         &self,
         reader: &'a MemoryReader,
@@ -560,5 +530,62 @@ impl ViewFrame {
         .highlight_symbol(">> ");
 
         table
+    }
+
+    fn drawable<'a>(
+        &'a mut self,
+        reader: &'a MemoryReader,
+        annotations: &'a [Annotation],
+        formatters: &'a [Box<dyn ColumnFormatter>],
+    ) -> DrawableViewFrame<'a> {
+        DrawableViewFrame {
+            view: self,
+            reader,
+            annotations,
+            formatters,
+        }
+    }
+}
+
+impl<'a> ratatui::widgets::Widget for DrawableViewFrame<'a> {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
+        // Layout.split puts all excess space into the last widget,
+        // which I want to be a fixed size.  Doing the layout
+        // explicitly, at least until there are more flexible
+        // utilities.
+        //
+        // Should keep an eye on
+        // https://github.com/fdehau/tui-rs/pull/596 and
+        // https://github.com/fdehau/tui-rs/pull/519 to see if the
+        // utilites improve.
+
+        let search_area_height = if self.view.search.is_some() {
+            area.height.min(3)
+        } else {
+            0
+        };
+
+        let (table_area, search_area) =
+            area.split_from_bottom(search_area_height);
+
+        if let Some(search) = self.view.search.as_ref() {
+            search.render(search_area, buf);
+        }
+
+        self.view.table_height = Some(table_area.height as usize);
+        let table = self
+            .view
+            .generate_table(
+                self.reader,
+                &self.view.region,
+                self.formatters,
+                &self.view.search,
+                self.annotations,
+            )
+            .with_scrollbar(self.view.num_table_rows());
+        table.render(table_area, buf, &mut self.view.table_state);
     }
 }

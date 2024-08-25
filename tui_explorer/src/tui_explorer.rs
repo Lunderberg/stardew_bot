@@ -4,8 +4,10 @@ use itertools::Itertools as _;
 use ratatui::style::Stylize as _;
 
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
+use ratatui::widgets::{Block, Borders};
 use stardew_utils::stardew_valley_pid;
 
+use crate::extended_tui::{DynamicLayout, WidgetWindow};
 use crate::extensions::*;
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -28,6 +30,8 @@ pub struct TuiExplorer {
     _pid: u32,
     reader: MemoryReader,
     _symbols: Vec<Symbol>,
+    // Display state
+    layout: DynamicLayout,
     // Display widgets
     stack_frame_table: StackFrameTable,
     running_log: RunningLog,
@@ -451,7 +455,7 @@ impl TuiExplorerBuilder {
             _pid: self.pid,
             reader,
             _symbols: self.symbols,
-
+            layout: DynamicLayout::new(),
             stack_frame_table,
             running_log: self.running_log,
             memory_table,
@@ -476,7 +480,7 @@ impl TuiExplorer {
             .default_column_formatters()
             .initialize_annotations()?
             .search_based_on_annotations()?
-            // .initialize_view_to_stardew_dll()?
+            .initialize_view_to_stardew_dll()?
             // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?
@@ -534,20 +538,43 @@ impl TuiExplorer {
             }
         };
 
-        self.stack_frame_table.draw(frame, stack_view, &self.reader);
-        self.memory_table.draw(
-            frame,
-            mem_view,
-            &self.reader,
-            &self.annotations,
-            get_border_style(SelectableRegion::MemoryTable),
-        );
-        self.detail_view.draw(frame, detail_view);
-        self.running_log.draw(
-            frame,
-            log_view,
-            get_border_style(SelectableRegion::Log),
-        );
+        {
+            let widget = self.stack_frame_table.drawable(&self.reader);
+            let border =
+                Block::default().borders(Borders::ALL).title(widget.title());
+            let inner_area = border.inner(stack_view);
+            frame.render_widget(border, stack_view);
+            frame.render_widget(widget, inner_area);
+        }
+        {
+            let widget =
+                self.memory_table.drawable(&self.reader, &self.annotations);
+            let border = Block::default()
+                .borders(Borders::ALL)
+                .border_style(get_border_style(SelectableRegion::MemoryTable))
+                .title(widget.title());
+            let inner_area = border.inner(mem_view);
+            frame.render_widget(border, mem_view);
+            frame.render_widget(widget, inner_area);
+        }
+        {
+            let widget = &self.detail_view;
+            let border =
+                Block::default().borders(Borders::ALL).title(widget.title());
+            let inner_area = border.inner(detail_view);
+            frame.render_widget(border, detail_view);
+            frame.render_widget(widget, inner_area);
+        }
+        {
+            let widget = &mut self.running_log;
+            let border = Block::default()
+                .title(widget.title())
+                .borders(Borders::ALL)
+                .border_style(get_border_style(SelectableRegion::Log));
+            let inner_area = border.inner(log_view);
+            frame.render_widget(border, log_view);
+            frame.render_widget(widget, inner_area);
+        }
     }
 
     fn handle_event(&mut self, event: Event) {

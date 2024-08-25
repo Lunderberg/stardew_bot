@@ -1,3 +1,9 @@
+mod tui_traits;
+pub(crate) use tui_traits::*;
+
+pub(crate) mod dynamic_layout;
+pub(crate) use dynamic_layout::DynamicLayout;
+
 pub(crate) mod dynamic_table;
 pub use dynamic_table::DynamicTable;
 

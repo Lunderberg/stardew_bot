@@ -1,7 +1,6 @@
 use ratatui::{
     layout::Rect,
     widgets::{Block, Borders, Paragraph},
-    Frame,
 };
 
 use crate::{KeyBindingMatch, KeySequence};
@@ -40,13 +39,18 @@ impl InputWindow {
     pub(crate) fn text(self) -> String {
         self.chars.into_iter().collect()
     }
+}
 
-    pub(crate) fn draw(&self, frame: &mut Frame, area: Rect) {
-        let title = self.title;
-
+impl<'a> ratatui::widgets::Widget for &'a InputWindow {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
         let widget =
             Paragraph::new(self.chars.iter().cloned().collect::<String>())
-                .block(Block::default().borders(Borders::ALL).title(title));
-        frame.render_widget(widget, area);
+                .block(
+                    Block::default().borders(Borders::ALL).title(self.title),
+                );
+        widget.render(area, buf);
     }
 }

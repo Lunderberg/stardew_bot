@@ -4,13 +4,12 @@ use itertools::Itertools as _;
 use ratatui::{
     layout::{Constraint, Layout, Rect},
     text::Text,
-    widgets::{Block, Borders},
-    Frame,
+    widgets::Widget,
 };
 
 use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
-use crate::extensions::*;
+use crate::{extended_tui::WidgetWindow, extensions::*};
 use crate::{Annotation, InfoFormatter};
 
 pub struct DetailView {
@@ -50,14 +49,13 @@ impl DetailView {
 
         self.values = from_annotations.chain(from_formatters).collect();
     }
+}
 
-    pub(crate) fn draw(&mut self, frame: &mut Frame, area: Rect) {
-        let border =
-            Block::default().borders(Borders::ALL).title("Detail View");
-        let inner_area = border.inner(area);
-        frame.render_widget(border, area);
-        let area = inner_area;
-
+impl<'a> Widget for &'a DetailView {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
         self.values
             .iter()
             .map(|(_, value)| value.chars().filter(|c| *c == '\n').count() + 1)
@@ -77,7 +75,7 @@ impl DetailView {
                 let key: Text = key.as_str().into();
 
                 if value.is_empty() {
-                    frame.render_widget(key, row_area);
+                    key.render(row_area, buf)
                 } else {
                     let value: Text = value.as_str().into();
                     let (key_area, value_area) = Layout::horizontal([
@@ -91,9 +89,15 @@ impl DetailView {
                     .collect_tuple()
                     .unwrap();
 
-                    frame.render_widget(key, key_area);
-                    frame.render_widget(value, value_area);
+                    key.render(key_area, buf);
+                    value.render(value_area, buf);
                 }
             });
+    }
+}
+
+impl<'a> WidgetWindow for &'a DetailView {
+    fn title(&self) -> String {
+        "Detail View".to_string()
     }
 }

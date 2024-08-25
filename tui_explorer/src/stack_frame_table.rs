@@ -2,13 +2,12 @@ use std::cmp::Reverse;
 
 use ratatui::{
     layout::{Constraint, Rect},
-    widgets::{Block, Borders, Cell, Table, TableState},
-    Frame,
+    widgets::{Cell, StatefulWidget, Table, TableState, Widget},
 };
 
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::extensions::*;
+use crate::{extended_tui::WidgetWindow, extensions::*};
 
 pub struct StackFrameTable {
     stack_frames: Vec<StackFrame>,
@@ -18,6 +17,11 @@ pub struct StackFrameTable {
 struct StackFrame {
     frame_pointer: MemoryValue<Pointer>,
     return_address: MemoryValue<Pointer>,
+}
+
+pub(crate) struct DrawableStackFrameTable<'a> {
+    table: &'a mut StackFrameTable,
+    reader: &'a MemoryReader,
 }
 
 impl StackFrameTable {
@@ -59,13 +63,24 @@ impl StackFrameTable {
         self.table_state.select(Some(row));
     }
 
-    pub(crate) fn draw(
-        &mut self,
-        frame: &mut Frame,
-        area: Rect,
-        reader: &MemoryReader,
-    ) {
+    pub(crate) fn drawable<'a>(
+        &'a mut self,
+        reader: &'a MemoryReader,
+    ) -> DrawableStackFrameTable<'a> {
+        DrawableStackFrameTable {
+            table: self,
+            reader,
+        }
+    }
+}
+
+impl<'a> Widget for DrawableStackFrameTable<'a> {
+    fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
+    where
+        Self: Sized,
+    {
         let table: Table = self
+            .table
             .stack_frames
             .iter()
             .rev()
@@ -73,7 +88,7 @@ impl StackFrameTable {
                 [
                     Cell::new(format!("{}", frame.frame_pointer.location)),
                     Cell::new(
-                        reader
+                        self.reader
                             .find_containing_region(frame.return_address.value)
                             .map(|reg| reg.short_name())
                             .unwrap_or(""),
@@ -84,11 +99,14 @@ impl StackFrameTable {
             .chain(std::iter::once(["Prelude"].collect_row()))
             .collect_table()
             .widths([Constraint::Min(20), Constraint::Percentage(100)])
-            .highlight_symbol(">> ")
-            .block(
-                Block::default().borders(Borders::ALL).title("Stack Frames"),
-            );
+            .highlight_symbol(">> ");
 
-        frame.render_stateful_widget(table, area, &mut self.table_state);
+        StatefulWidget::render(table, area, buf, &mut self.table.table_state);
+    }
+}
+
+impl<'a> WidgetWindow for DrawableStackFrameTable<'a> {
+    fn title(&self) -> String {
+        "Stack Frames".to_string()
     }
 }
