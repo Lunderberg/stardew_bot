@@ -220,4 +220,8 @@ impl<'a> WidgetWindow for &'a mut RunningLog {
     fn title(&self) -> String {
         "Log".to_string()
     }
+
+    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+        self.render(area, buf)
+    }
 }

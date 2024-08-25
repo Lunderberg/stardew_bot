@@ -109,4 +109,12 @@ impl<'a> WidgetWindow for DrawableStackFrameTable<'a> {
     fn title(&self) -> String {
         "Stack Frames".to_string()
     }
+
+    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+        DrawableStackFrameTable {
+            table: self.table,
+            reader: self.reader,
+        }
+        .render(area, buf)
+    }
 }

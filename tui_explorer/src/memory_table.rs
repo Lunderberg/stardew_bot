@@ -306,6 +306,15 @@ impl<'a> WidgetWindow for DrawableMemoryTable<'a> {
     fn title(&self) -> String {
         self.table.view_stack.first().title()
     }
+
+    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+        DrawableMemoryTable {
+            table: self.table,
+            reader: self.reader,
+            annotations: self.annotations,
+        }
+        .render(area, buf)
+    }
 }
 
 impl ViewFrame {

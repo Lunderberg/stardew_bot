@@ -1,10 +1,8 @@
 use std::ops::Range;
 
 use itertools::Itertools as _;
-use ratatui::style::Stylize as _;
 
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
-use ratatui::widgets::{Block, Borders};
 use stardew_utils::stardew_valley_pid;
 
 use crate::extended_tui::{DynamicLayout, WidgetWindow};
@@ -19,11 +17,7 @@ use super::{
 };
 
 use crossterm::event::Event;
-use ratatui::{
-    layout::{Constraint, Direction, Layout},
-    prelude::Style,
-    Frame,
-};
+use ratatui::Frame;
 
 pub struct TuiExplorer {
     // Application state
@@ -40,7 +34,6 @@ pub struct TuiExplorer {
     annotations: Vec<Annotation>,
     // Display state
     should_exit: bool,
-    selected_region: SelectableRegion,
     keystrokes: KeySequence,
 }
 
@@ -54,12 +47,6 @@ pub struct Annotation {
     /// highlight.  This allows hierarchical annotations while only
     /// the inner-most annotation is highlighted.
     pub highlight_range: bool,
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum SelectableRegion {
-    MemoryTable,
-    Log,
 }
 
 pub struct TuiExplorerBuilder {
@@ -451,11 +438,22 @@ impl TuiExplorerBuilder {
             self.column_formatters,
         )?;
 
+        let mut layout = DynamicLayout::new();
+        layout.split_horizontally();
+        layout.switch_to_buffer(0);
+        layout.split_vertically();
+        layout.cycle_next();
+        layout.switch_to_buffer(1);
+        layout.cycle_next();
+        layout.switch_to_buffer(3);
+        layout.split_horizontally();
+        layout.switch_to_buffer(2);
+
         let mut out = TuiExplorer {
             _pid: self.pid,
             reader,
             _symbols: self.symbols,
-            layout: DynamicLayout::new(),
+            layout,
             stack_frame_table,
             running_log: self.running_log,
             memory_table,
@@ -463,7 +461,6 @@ impl TuiExplorerBuilder {
             annotations,
 
             should_exit: false,
-            selected_region: SelectableRegion::MemoryTable,
             keystrokes: KeySequence::default(),
         };
         out.update_details();
@@ -508,90 +505,39 @@ impl TuiExplorer {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
-        let (stack_detail_column, mem_view, log_view) = Layout::default()
-            .direction(Direction::Horizontal)
-            .margin(1)
-            .constraints([
-                Constraint::Percentage(100),
-                Constraint::Min(65),
-                Constraint::Min(60),
-            ])
-            .split_tuple(frame.size());
+        let mut buffers: Vec<Box<dyn WidgetWindow>> = vec![
+            Box::new(self.stack_frame_table.drawable(&self.reader)),
+            Box::new(&self.detail_view),
+            Box::new(
+                self.memory_table.drawable(&self.reader, &self.annotations),
+            ),
+            Box::new(&mut self.running_log),
+        ];
+        let layout = self.layout.drawable(&mut buffers);
 
-        let (stack_view, detail_view) = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(0)
-            .constraints([Constraint::Min(15), Constraint::Percentage(70)])
-            .split_tuple(stack_detail_column);
-
-        let get_border_style = {
-            let normal_border_style = Style::new();
-            let selected_border_style = Style::new().light_green();
-            let selected_region = self.selected_region;
-
-            move |region: SelectableRegion| {
-                if region == selected_region {
-                    selected_border_style
-                } else {
-                    normal_border_style
-                }
-            }
-        };
-
-        {
-            let widget = self.stack_frame_table.drawable(&self.reader);
-            let border =
-                Block::default().borders(Borders::ALL).title(widget.title());
-            let inner_area = border.inner(stack_view);
-            frame.render_widget(border, stack_view);
-            frame.render_widget(widget, inner_area);
-        }
-        {
-            let widget =
-                self.memory_table.drawable(&self.reader, &self.annotations);
-            let border = Block::default()
-                .borders(Borders::ALL)
-                .border_style(get_border_style(SelectableRegion::MemoryTable))
-                .title(widget.title());
-            let inner_area = border.inner(mem_view);
-            frame.render_widget(border, mem_view);
-            frame.render_widget(widget, inner_area);
-        }
-        {
-            let widget = &self.detail_view;
-            let border =
-                Block::default().borders(Borders::ALL).title(widget.title());
-            let inner_area = border.inner(detail_view);
-            frame.render_widget(border, detail_view);
-            frame.render_widget(widget, inner_area);
-        }
-        {
-            let widget = &mut self.running_log;
-            let border = Block::default()
-                .title(widget.title())
-                .borders(Borders::ALL)
-                .border_style(get_border_style(SelectableRegion::Log));
-            let inner_area = border.inner(log_view);
-            frame.render_widget(border, log_view);
-            frame.render_widget(widget, inner_area);
-        }
+        frame.render_widget(layout, frame.size());
     }
 
     fn handle_event(&mut self, event: Event) {
-        if let Event::Key(key) = event {
-            self.keystrokes.push(key);
+        match event {
+            Event::Key(key) => {
+                self.keystrokes.push(key);
 
-            match self.apply_key_binding() {
-                KeyBindingMatch::Full => {
-                    self.update_details();
-                    self.keystrokes.clear();
-                }
-                KeyBindingMatch::Partial => {}
-                KeyBindingMatch::Mismatch => {
-                    self.running_log.add_log(format!("{:?}", self.keystrokes));
-                    self.keystrokes.clear();
+                match self.apply_key_binding() {
+                    KeyBindingMatch::Full => {
+                        self.update_details();
+                        self.keystrokes.clear();
+                    }
+                    KeyBindingMatch::Partial => {}
+                    KeyBindingMatch::Mismatch => {
+                        self.running_log
+                            .add_log(format!("{:?}", self.keystrokes));
+                        self.keystrokes.clear();
+                    }
                 }
             }
+            Event::Mouse(mouse) => self.layout.handle_mouse_event(mouse),
+            _ => {}
         }
     }
 
@@ -602,26 +548,22 @@ impl TuiExplorer {
                 self.should_exit = true;
             })
             .or_try_binding("C-x o", keystrokes, || {
-                self.selected_region = match self.selected_region {
-                    SelectableRegion::MemoryTable => SelectableRegion::Log,
-                    SelectableRegion::Log => SelectableRegion::MemoryTable,
-                };
+                self.layout.cycle_next();
             })
-            .or_else(|| match self.selected_region {
-                SelectableRegion::MemoryTable => {
-                    self.memory_table.apply_key_binding(
-                        keystrokes,
-                        &self.reader,
-                        &mut self.running_log,
-                        &mut self.stack_frame_table,
-                    )
-                }
-                SelectableRegion::Log => self.running_log.apply_key_binding(
+            .or_else(|| match self.layout.active_buffer() {
+                2 => self.memory_table.apply_key_binding(
+                    keystrokes,
+                    &self.reader,
+                    &mut self.running_log,
+                    &mut self.stack_frame_table,
+                ),
+                3 => self.running_log.apply_key_binding(
                     keystrokes,
                     &self.reader,
                     &mut self.memory_table,
                     &mut self.stack_frame_table,
                 ),
+                _ => KeyBindingMatch::Mismatch,
             })
     }
 

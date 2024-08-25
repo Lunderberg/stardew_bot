@@ -100,4 +100,8 @@ impl<'a> WidgetWindow for &'a DetailView {
     fn title(&self) -> String {
         "Detail View".to_string()
     }
+
+    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+        self.render(area, buf)
+    }
 }
