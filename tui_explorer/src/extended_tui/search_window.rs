@@ -7,8 +7,9 @@ use ratatui::{
     Frame,
 };
 
+use crate::extended_tui::ScrollableState;
 use crate::extensions::*;
-use crate::{KeyBindingMatch, KeySequence, NonEmptyVec, ScrollableState};
+use crate::{KeyBindingMatch, KeySequence, NonEmptyVec};
 
 pub struct SearchWindow<T> {
     pub stack: NonEmptyVec<SearchItem>,

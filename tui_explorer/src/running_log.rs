@@ -12,11 +12,11 @@ use ratatui::{
 use chrono::prelude::*;
 use regex::Regex;
 
-use crate::{extensions::*, MemoryTable, StackFrameTable};
-use crate::{
-    KeyBindingMatch, KeySequence, ScrollableState as _, SearchDirection,
-    SearchWindow,
+use crate::extended_tui::{
+    ScrollableState as _, SearchDirection, SearchWindow,
 };
+use crate::{extensions::*, MemoryTable, StackFrameTable};
+use crate::{KeyBindingMatch, KeySequence};
 
 pub struct RunningLog {
     max_elements: usize,

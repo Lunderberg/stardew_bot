@@ -9,11 +9,13 @@ use ratatui::{
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extensions::*, Annotation, DynamicTable, Error, InputWindow};
-use crate::{scroll_bar::ScrollableState, StackFrameTable};
+use crate::extended_tui::{
+    InputWindow, ScrollableState, SearchDirection, SearchWindow,
+};
+use crate::{extended_tui::DynamicTable, extensions::*};
 use crate::{
-    ColumnFormatter, KeyBindingMatch, KeySequence, NonEmptyVec, RunningLog,
-    SearchDirection, SearchWindow,
+    Annotation, ColumnFormatter, Error, KeyBindingMatch, KeySequence,
+    NonEmptyVec, RunningLog, StackFrameTable,
 };
 
 use itertools::Itertools;
@@ -512,7 +514,7 @@ impl ViewFrame {
         let header = formatters
             .iter()
             .map(|formatter| formatter.name())
-            .map(crate::dynamic_table::Cell::from)
+            .map(crate::extended_tui::dynamic_table::Cell::from)
             .collect();
 
         let address_width = region.as_range().suffix_hexadecimal_digits();

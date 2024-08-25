@@ -448,14 +448,16 @@ impl TuiExplorerBuilder {
         )?;
 
         let mut out = TuiExplorer {
+            _pid: self.pid,
+            reader,
+            _symbols: self.symbols,
+
             stack_frame_table,
             running_log: self.running_log,
             memory_table,
-            annotations,
-            _symbols: self.symbols,
             detail_view,
-            _pid: self.pid,
-            reader,
+            annotations,
+
             should_exit: false,
             selected_region: SelectableRegion::MemoryTable,
             keystrokes: KeySequence::default(),

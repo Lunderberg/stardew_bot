@@ -1,6 +1,6 @@
 use ratatui::widgets::StatefulWidget;
 
-use crate::WithScrollbar;
+use crate::extended_tui::WithScrollbar;
 
 pub trait WidgetWithScrollbar: Sized {
     fn with_scrollbar(self, num_rows: usize) -> WithScrollbar<Self>;

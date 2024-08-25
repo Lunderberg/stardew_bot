@@ -25,15 +25,6 @@ pub use terminal_context::*;
 mod sigint_handler;
 pub use sigint_handler::*;
 
-mod scroll_bar;
-pub(crate) use scroll_bar::*;
-
-mod search_window;
-pub use search_window::*;
-
-mod input_window;
-pub use input_window::*;
-
 mod running_log;
 pub use running_log::*;
 
@@ -46,11 +37,7 @@ pub use memory_table::*;
 mod detail_view;
 pub use detail_view::*;
 
-mod vertical_bar;
-pub use vertical_bar::*;
-
-pub(crate) mod dynamic_table;
-pub use dynamic_table::DynamicTable;
+pub(crate) mod extended_tui;
 
 pub mod column_formatter;
 pub use column_formatter::ColumnFormatter;
