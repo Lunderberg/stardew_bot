@@ -2752,11 +2752,6 @@ impl<'a> MetadataRow<'a, Field> {
         let bytes = self.signature()?.content();
         Ok(Signature::new(bytes))
     }
-
-    pub fn is_garbage_collected(&self) -> Result<bool, Error> {
-        let bytes = self.signature()?.content();
-        Signature::new(bytes).is_garbage_collected()
-    }
 }
 
 impl<'a> MetadataRow<'a, MethodDef> {

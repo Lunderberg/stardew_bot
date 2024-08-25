@@ -146,53 +146,6 @@ impl<'a> Signature<'a> {
     pub fn flags(&self) -> SignatureFlags {
         SignatureFlags(self.bytes[0])
     }
-
-    pub fn is_garbage_collected(&self) -> Result<bool, Error> {
-        let mut iter = SignatureDecompressor {
-            bytes: self.bytes.clone(),
-            verbose: false,
-            offset: 0,
-        };
-        iter.next_byte()?;
-        let element = iter.next_element_type_ignoring_custom_modifiers()?;
-
-        let result = match element {
-            // ElementType::String | ElementType::Object | ElementType::Class => {
-            //     true
-            // }
-            ElementType::Class => true,
-            ElementType::ValueType => true,
-
-            // ElementType::ByRef
-            // | ElementType::TypedByRef
-            // | ElementType::Ptr
-            // | ElementType::FunctionPtr => true,
-
-            // ElementType::GenericInst => match iter.next_element_type()? {
-            //     ElementType::Class => true,
-            //     _ => false,
-            // },
-            _ => false,
-            // ElementType::Var => todo!(),
-            // ElementType::SizeArray => todo!(),
-            // ElementType::Array => todo!(),
-            // ElementType::Prim(_) => todo!(),
-            // ElementType::ValueType => todo!(),
-
-            // ElementType::Void => todo!(),
-            // ElementType::End => todo!(),
-
-            // ElementType::MethodType => todo!(),
-            // ElementType::RequiredCustomModifier => todo!(),
-            // ElementType::OptionalCustomModifier => todo!(),
-            // ElementType::Internal => todo!(),
-            // ElementType::Modifier => todo!(),
-            // ElementType::Sentinel => todo!(),
-            // ElementType::Pinned => todo!(),
-        };
-
-        Ok(result)
-    }
 }
 
 impl SignatureFlags {
