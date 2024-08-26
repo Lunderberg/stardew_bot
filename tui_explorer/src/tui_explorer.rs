@@ -439,14 +439,14 @@ impl TuiExplorerBuilder {
         )?;
 
         let mut layout = DynamicLayout::new();
-        layout.split_horizontally();
+        layout.split_horizontally(Some(45), None);
         layout.switch_to_buffer(0);
-        layout.split_vertically();
+        layout.split_vertically(Some(15), None);
         layout.cycle_next();
         layout.switch_to_buffer(1);
         layout.cycle_next();
         layout.switch_to_buffer(3);
-        layout.split_horizontally();
+        layout.split_horizontally(Some(65), Some(60));
         layout.switch_to_buffer(2);
 
         let mut out = TuiExplorer {

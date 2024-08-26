@@ -74,11 +74,15 @@ enum NestedWindowKind {
     Horizontal {
         left_index: usize,
         right_index: usize,
+        left_width: Option<u16>,
+        right_width: Option<u16>,
     },
 
     Vertical {
         top_index: usize,
         bottom_index: usize,
+        top_height: Option<u16>,
+        bottom_height: Option<u16>,
     },
 
     /// An index into the `buffers` vector.  The `buffers` vector is
@@ -122,32 +126,30 @@ impl DynamicLayout {
             }
             Kind::Drag(MouseButton::Left) => {
                 if let Some(resize_index) = self.currently_resizing {
-                    let NestedWindow {
-                        area: split_area,
-                        kind: split_kind,
-                        ..
-                    } = self.windows[resize_index].clone();
-                    if let Some(split_area) = split_area {
-                        match split_kind {
+                    let window = &mut self.windows[resize_index];
+                    if let Some(area) = window.area {
+                        match &mut window.kind {
                             NestedWindowKind::Horizontal {
-                                left_index, ..
+                                left_width,
+                                right_width,
+                                ..
                             } => {
-                                let left_area = self.windows[left_index]
-                                    .area
-                                    .as_mut()
-                                    .unwrap();
-                                left_area.width =
-                                    mouse.column.saturating_sub(split_area.x);
+                                *left_width =
+                                    Some(mouse.column.saturating_sub(area.x));
+                                *right_width = Some(
+                                    area.right().saturating_sub(mouse.column),
+                                );
                             }
                             NestedWindowKind::Vertical {
-                                top_index, ..
+                                top_height,
+                                bottom_height,
+                                ..
                             } => {
-                                let top_area = self.windows[top_index]
-                                    .area
-                                    .as_mut()
-                                    .unwrap();
-                                top_area.height =
-                                    mouse.row.saturating_sub(split_area.y);
+                                *top_height =
+                                    Some(mouse.row.saturating_sub(area.y));
+                                *bottom_height = Some(
+                                    area.bottom().saturating_sub(mouse.row),
+                                );
                             }
 
                             _ => {}
@@ -169,13 +171,19 @@ impl DynamicLayout {
             NestedWindowKind::Horizontal {
                 left_index,
                 right_index,
+                left_width,
+                right_width,
             } => {
                 let left_columns = if area.width < 4 {
                     area.width / 2
-                } else if let Some(area_left) = self.windows[left_index].area {
-                    area_left.width.clamp(2, area.width - 2)
                 } else {
-                    area.width / 2
+                    match (left_width, right_width) {
+                        (Some(lw), Some(rw)) => lw * area.width / (lw + rw),
+                        (None, Some(rw)) => area.width.saturating_sub(rw),
+                        (Some(lw), None) => lw,
+                        (None, None) => area.width / 2,
+                    }
+                    .clamp(2, area.width - 2)
                 };
 
                 let (area_left, area_right) =
@@ -186,13 +194,19 @@ impl DynamicLayout {
             NestedWindowKind::Vertical {
                 top_index,
                 bottom_index,
+                top_height,
+                bottom_height,
             } => {
                 let top_rows = if area.height < 4 {
                     area.height / 2
-                } else if let Some(area_top) = self.windows[top_index].area {
-                    area_top.height.clamp(2, area.height - 2)
                 } else {
-                    area.height / 2
+                    match (top_height, bottom_height) {
+                        (Some(th), Some(bh)) => th * area.width / (th + bh),
+                        (None, Some(bh)) => area.width.saturating_sub(bh),
+                        (Some(th), None) => th,
+                        (None, None) => area.width / 2,
+                    }
+                    .clamp(2, area.height - 2)
                 };
 
                 let (area_top, area_bottom) = area.split_from_top(top_rows);
@@ -230,7 +244,11 @@ impl DynamicLayout {
         })
     }
 
-    pub fn split_horizontally(&mut self) {
+    pub fn split_horizontally(
+        &mut self,
+        left_width: Option<u16>,
+        right_width: Option<u16>,
+    ) {
         let NestedWindowKind::Buffer(active_buffer) =
             self.windows[self.active_window].kind
         else {
@@ -252,11 +270,17 @@ impl DynamicLayout {
         self.windows[self.active_window].kind = NestedWindowKind::Horizontal {
             left_index,
             right_index,
+            left_width,
+            right_width,
         };
         self.active_window = left_index;
     }
 
-    pub fn split_vertically(&mut self) {
+    pub fn split_vertically(
+        &mut self,
+        top_height: Option<u16>,
+        bottom_height: Option<u16>,
+    ) {
         let NestedWindowKind::Buffer(active_buffer) =
             self.windows[self.active_window].kind
         else {
@@ -278,6 +302,8 @@ impl DynamicLayout {
         self.windows[self.active_window].kind = NestedWindowKind::Vertical {
             top_index,
             bottom_index,
+            top_height,
+            bottom_height,
         };
         self.active_window = top_index;
     }
@@ -310,6 +336,7 @@ impl DynamicLayout {
                 NestedWindowKind::Horizontal {
                     left_index,
                     right_index,
+                    ..
                 } => {
                     if index == left_index {
                         index = right_index;
@@ -321,6 +348,7 @@ impl DynamicLayout {
                 NestedWindowKind::Vertical {
                     top_index,
                     bottom_index,
+                    ..
                 } => {
                     if index == top_index {
                         index = bottom_index;
@@ -411,6 +439,7 @@ impl<'a> Iterator for WindowIter<'a> {
             NestedWindowKind::Horizontal {
                 left_index,
                 right_index,
+                ..
             } => {
                 let (area_left, area_right) = [left_index, right_index]
                     .into_iter()
@@ -444,6 +473,7 @@ impl<'a> Iterator for WindowIter<'a> {
             NestedWindowKind::Vertical {
                 top_index,
                 bottom_index,
+                ..
             } => {
                 let (area_top, area_bottom) = [top_index, bottom_index]
                     .into_iter()
