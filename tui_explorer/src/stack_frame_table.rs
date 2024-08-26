@@ -106,8 +106,8 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
 }
 
 impl<'a> WidgetWindow for DrawableStackFrameTable<'a> {
-    fn title(&self) -> String {
-        "Stack Frames".to_string()
+    fn title(&self) -> std::borrow::Cow<str> {
+        "Stack Frames".into()
     }
 
     fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {

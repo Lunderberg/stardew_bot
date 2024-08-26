@@ -217,8 +217,8 @@ impl<'a> Widget for &'a mut RunningLog {
 }
 
 impl<'a> WidgetWindow for &'a mut RunningLog {
-    fn title(&self) -> String {
-        "Log".to_string()
+    fn title(&self) -> std::borrow::Cow<str> {
+        "Log".into()
     }
 
     fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {

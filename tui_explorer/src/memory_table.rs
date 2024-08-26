@@ -303,8 +303,8 @@ impl<'a> Widget for DrawableMemoryTable<'a> {
 }
 
 impl<'a> WidgetWindow for DrawableMemoryTable<'a> {
-    fn title(&self) -> String {
-        self.table.view_stack.first().title()
+    fn title(&self) -> std::borrow::Cow<str> {
+        self.table.view_stack.first().title().into()
     }
 
     fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {

@@ -97,8 +97,8 @@ impl<'a> Widget for &'a DetailView {
 }
 
 impl<'a> WidgetWindow for &'a DetailView {
-    fn title(&self) -> String {
-        "Detail View".to_string()
+    fn title(&self) -> std::borrow::Cow<str> {
+        "Detail View".into()
     }
 
     fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {

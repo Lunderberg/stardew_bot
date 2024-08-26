@@ -417,7 +417,7 @@ impl<'a, 'b> Widget for DrawableDynamicLayout<'a, Box<dyn WidgetWindow + 'b>> {
                 let border = Block::default()
                     .borders(Borders::ALL)
                     .border_style(border_style)
-                    .title(widget.title());
+                    .title(ratatui::text::Line::raw(widget.title()));
                 let inner_area = border.inner(win.area);
                 border.render(win.area, buf);
                 widget.mut_render(inner_area, buf);
