@@ -132,29 +132,22 @@ impl DynamicLayout {
                             NestedWindowKind::Horizontal {
                                 left_index, ..
                             } => {
-                                if split_area.x + 2 <= mouse.column
-                                    && mouse.column < split_area.right() - 2
-                                {
-                                    let left_area = self.windows[left_index]
-                                        .area
-                                        .as_mut()
-                                        .unwrap();
-                                    left_area.width =
-                                        mouse.column - split_area.x;
-                                }
+                                let left_area = self.windows[left_index]
+                                    .area
+                                    .as_mut()
+                                    .unwrap();
+                                left_area.width =
+                                    mouse.column.saturating_sub(split_area.x);
                             }
                             NestedWindowKind::Vertical {
                                 top_index, ..
                             } => {
-                                if split_area.y + 2 <= mouse.row
-                                    && mouse.row < split_area.bottom() - 2
-                                {
-                                    let top_area = self.windows[top_index]
-                                        .area
-                                        .as_mut()
-                                        .unwrap();
-                                    top_area.height = mouse.row - split_area.y;
-                                }
+                                let top_area = self.windows[top_index]
+                                    .area
+                                    .as_mut()
+                                    .unwrap();
+                                top_area.height =
+                                    mouse.row.saturating_sub(split_area.y);
                             }
 
                             _ => {}
@@ -177,12 +170,13 @@ impl DynamicLayout {
                 left_index,
                 right_index,
             } => {
-                let left_columns =
-                    if let Some(area_left) = self.windows[left_index].area {
-                        area_left.width
-                    } else {
-                        area.width / 2
-                    };
+                let left_columns = if area.width < 4 {
+                    area.width / 2
+                } else if let Some(area_left) = self.windows[left_index].area {
+                    area_left.width.clamp(2, area.width - 2)
+                } else {
+                    area.width / 2
+                };
 
                 let (area_left, area_right) =
                     area.split_from_left(left_columns);
@@ -193,12 +187,13 @@ impl DynamicLayout {
                 top_index,
                 bottom_index,
             } => {
-                let top_rows =
-                    if let Some(area_top) = self.windows[top_index].area {
-                        area_top.height
-                    } else {
-                        area.height / 2
-                    };
+                let top_rows = if area.height < 4 {
+                    area.height / 2
+                } else if let Some(area_top) = self.windows[top_index].area {
+                    area_top.height.clamp(2, area.height - 2)
+                } else {
+                    area.height / 2
+                };
 
                 let (area_top, area_bottom) = area.split_from_top(top_rows);
                 self.update_draw_areas(area_top, top_index);
