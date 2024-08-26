@@ -7,7 +7,10 @@ use ratatui::{
 
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extended_tui::WidgetWindow, extensions::*};
+use crate::{
+    extended_tui::{WidgetGlobals, WidgetWindow},
+    extensions::*,
+};
 
 pub struct StackFrameTable {
     stack_frames: Vec<StackFrame>,
@@ -19,7 +22,7 @@ struct StackFrame {
     return_address: MemoryValue<Pointer>,
 }
 
-pub(crate) struct DrawableStackFrameTable<'a> {
+pub struct DrawableStackFrameTable<'a> {
     table: &'a mut StackFrameTable,
     reader: &'a MemoryReader,
 }
@@ -62,16 +65,6 @@ impl StackFrameTable {
 
         self.table_state.select(Some(row));
     }
-
-    pub(crate) fn drawable<'a>(
-        &'a mut self,
-        reader: &'a MemoryReader,
-    ) -> DrawableStackFrameTable<'a> {
-        DrawableStackFrameTable {
-            table: self,
-            reader,
-        }
-    }
 }
 
 impl<'a> Widget for DrawableStackFrameTable<'a> {
@@ -105,15 +98,20 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
     }
 }
 
-impl<'a> WidgetWindow for DrawableStackFrameTable<'a> {
+impl WidgetWindow for StackFrameTable {
     fn title(&self) -> std::borrow::Cow<str> {
         "Stack Frames".into()
     }
 
-    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+    fn draw<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::prelude::Buffer,
+    ) {
         DrawableStackFrameTable {
-            table: self.table,
-            reader: self.reader,
+            table: self,
+            reader: globals.reader,
         }
         .render(area, buf)
     }

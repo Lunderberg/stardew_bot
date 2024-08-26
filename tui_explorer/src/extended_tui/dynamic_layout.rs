@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use super::WidgetWindow;
+use super::{WidgetGlobals, WidgetWindow};
 
 pub struct DynamicLayout {
     /// Index into the `windows` array.  Should reference a `Buffer`
@@ -27,6 +27,7 @@ pub struct DynamicLayout {
 pub struct DrawableDynamicLayout<'a, B> {
     layout: &'a mut DynamicLayout,
     buffers: &'a mut [B],
+    globals: WidgetGlobals<'a>,
 }
 
 #[derive(Clone)]
@@ -385,15 +386,19 @@ impl DynamicLayout {
     pub fn drawable<'a, B>(
         &'a mut self,
         buffers: &'a mut [B],
+        globals: WidgetGlobals<'a>,
     ) -> DrawableDynamicLayout<'a, B> {
         DrawableDynamicLayout {
             layout: self,
             buffers,
+            globals,
         }
     }
 }
 
-impl<'a, 'b> Widget for DrawableDynamicLayout<'a, Box<dyn WidgetWindow + 'b>> {
+impl<'a, 'b> Widget
+    for DrawableDynamicLayout<'a, Box<&mut (dyn WidgetWindow + 'b)>>
+{
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -420,7 +425,7 @@ impl<'a, 'b> Widget for DrawableDynamicLayout<'a, Box<dyn WidgetWindow + 'b>> {
                     .title(ratatui::text::Line::raw(widget.title()));
                 let inner_area = border.inner(win.area);
                 border.render(win.area, buf);
-                widget.mut_render(inner_area, buf);
+                widget.draw(self.globals, inner_area, buf);
             });
     }
 }

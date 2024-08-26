@@ -13,7 +13,8 @@ use chrono::prelude::*;
 use regex::Regex;
 
 use crate::extended_tui::{
-    ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
+    ScrollableState as _, SearchDirection, SearchWindow, WidgetGlobals,
+    WidgetWindow,
 };
 use crate::{extensions::*, MemoryTable, StackFrameTable};
 use crate::{KeyBindingMatch, KeySequence};
@@ -216,12 +217,17 @@ impl<'a> Widget for &'a mut RunningLog {
     }
 }
 
-impl<'a> WidgetWindow for &'a mut RunningLog {
+impl WidgetWindow for RunningLog {
     fn title(&self) -> std::borrow::Cow<str> {
         "Log".into()
     }
 
-    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+    fn draw<'a>(
+        &'a mut self,
+        _: WidgetGlobals<'a>,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::prelude::Buffer,
+    ) {
         self.render(area, buf)
     }
 }

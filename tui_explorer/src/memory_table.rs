@@ -9,7 +9,8 @@ use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use crate::extended_tui::{
-    InputWindow, ScrollableState, SearchDirection, SearchWindow, WidgetWindow,
+    InputWindow, ScrollableState, SearchDirection, SearchWindow, WidgetGlobals,
+    WidgetWindow,
 };
 use crate::{extended_tui::DynamicTable, extensions::*};
 use crate::{
@@ -253,18 +254,6 @@ impl MemoryTable {
                 }
             })
     }
-
-    pub(crate) fn drawable<'a>(
-        &'a mut self,
-        reader: &'a MemoryReader,
-        annotations: &'a [Annotation],
-    ) -> DrawableMemoryTable<'a> {
-        DrawableMemoryTable {
-            table: self,
-            reader,
-            annotations,
-        }
-    }
 }
 
 impl<'a> Widget for DrawableMemoryTable<'a> {
@@ -302,16 +291,21 @@ impl<'a> Widget for DrawableMemoryTable<'a> {
     }
 }
 
-impl<'a> WidgetWindow for DrawableMemoryTable<'a> {
+impl WidgetWindow for MemoryTable {
     fn title(&self) -> std::borrow::Cow<str> {
-        self.table.view_stack.first().title().into()
+        self.view_stack.first().title().into()
     }
 
-    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+    fn draw<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::prelude::Buffer,
+    ) {
         DrawableMemoryTable {
-            table: self.table,
-            reader: self.reader,
-            annotations: self.annotations,
+            table: self,
+            reader: globals.reader,
+            annotations: globals.annotations,
         }
         .render(area, buf)
     }

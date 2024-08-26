@@ -5,7 +5,7 @@ use itertools::Itertools as _;
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
 use stardew_utils::stardew_valley_pid;
 
-use crate::extended_tui::{DynamicLayout, WidgetWindow};
+use crate::extended_tui::{DynamicLayout, WidgetGlobals, WidgetWindow};
 use crate::extensions::*;
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -505,15 +505,19 @@ impl TuiExplorer {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
-        let mut buffers: Vec<Box<dyn WidgetWindow>> = vec![
-            Box::new(self.stack_frame_table.drawable(&self.reader)),
-            Box::new(&self.detail_view),
-            Box::new(
-                self.memory_table.drawable(&self.reader, &self.annotations),
-            ),
+        let mut buffers: Vec<Box<&mut dyn WidgetWindow>> = vec![
+            Box::new(&mut self.stack_frame_table),
+            Box::new(&mut self.detail_view),
+            Box::new(&mut self.memory_table),
             Box::new(&mut self.running_log),
         ];
-        let layout = self.layout.drawable(&mut buffers);
+        let layout = self.layout.drawable(
+            &mut buffers,
+            WidgetGlobals {
+                reader: &self.reader,
+                annotations: &self.annotations,
+            },
+        );
 
         frame.render_widget(layout, frame.size());
     }

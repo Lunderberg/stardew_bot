@@ -1,12 +1,27 @@
 use std::borrow::Cow;
 
-use ratatui::{buffer::Buffer, layout::Rect, widgets::Widget};
+use memory_reader::MemoryReader;
 
-pub trait WidgetWindow: Widget {
+use crate::Annotation;
+
+pub trait WidgetWindow {
     /// The title of the widget.  This is used for the title in the
     /// border, and for the widget's name when selecting which widget
     /// to display.
     fn title(&self) -> Cow<str>;
 
-    fn mut_render(&mut self, area: Rect, buf: &mut Buffer);
+    /// Draw the window.  This may be able to be simplified once
+    /// ratatui's WidgetRef trait is stabilized.
+    fn draw<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::prelude::Buffer,
+    );
+}
+
+#[derive(Clone, Copy)]
+pub(crate) struct WidgetGlobals<'a> {
+    pub(crate) reader: &'a MemoryReader,
+    pub(crate) annotations: &'a [Annotation],
 }

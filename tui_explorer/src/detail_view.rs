@@ -9,7 +9,10 @@ use ratatui::{
 
 use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
-use crate::{extended_tui::WidgetWindow, extensions::*};
+use crate::{
+    extended_tui::{WidgetGlobals, WidgetWindow},
+    extensions::*,
+};
 use crate::{Annotation, InfoFormatter};
 
 pub struct DetailView {
@@ -96,12 +99,17 @@ impl<'a> Widget for &'a DetailView {
     }
 }
 
-impl<'a> WidgetWindow for &'a DetailView {
+impl WidgetWindow for DetailView {
     fn title(&self) -> std::borrow::Cow<str> {
         "Detail View".into()
     }
 
-    fn mut_render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer) {
+    fn draw<'a>(
+        &'a mut self,
+        _: WidgetGlobals<'a>,
+        area: ratatui::layout::Rect,
+        buf: &mut ratatui::prelude::Buffer,
+    ) {
         self.render(area, buf)
     }
 }
