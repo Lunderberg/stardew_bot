@@ -211,6 +211,7 @@ impl WidgetWindow for MemoryTable {
                 self.view_stack.last_mut().apply_key_binding(
                     keystrokes,
                     globals,
+                    side_effects,
                     &self.formatters,
                 )
             })
@@ -345,17 +346,25 @@ impl ViewFrame {
         &mut self,
         keystrokes: &KeySequence,
         globals: WidgetGlobals,
+        side_effects: &mut WidgetSideEffects,
         formatters: &[Box<dyn ColumnFormatter>],
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
+                let old_selected_address = self.selected_address();
                 self.table_state
                     .apply_key_binding(
                         keystrokes,
                         self.num_table_rows(),
                         self.num_rows_shown() - 1,
                     )
-                    .then(|| self.finalize_search())
+                    .then(|| {
+                        let new_selected_address = self.selected_address();
+                        if old_selected_address != new_selected_address {
+                            side_effects.change_address(new_selected_address);
+                        }
+                        self.finalize_search()
+                    })
             })
             .or_else(|| {
                 let selected_address = self.selected_address();

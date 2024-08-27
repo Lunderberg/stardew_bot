@@ -422,6 +422,13 @@ impl TuiExplorerBuilder {
     }
 
     pub fn build(self) -> Result<TuiExplorer, Error> {
+        let reader = self.reader;
+
+        let current_region = reader
+            .find_containing_region(self.initial_pointer)
+            .ok_or(Error::PointerNotFound(self.initial_pointer))?
+            .read()?;
+
         let annotations = {
             let mut arr = self.annotations;
             arr.sort_by_key(|ann| {
@@ -430,17 +437,19 @@ impl TuiExplorerBuilder {
             arr
         };
 
-        let reader = self.reader;
+        let globals = WidgetGlobals {
+            reader: &reader,
+            current_region: &current_region,
+            annotations: &annotations,
+        };
+
         let stack_memory = reader.stack()?.read()?;
-
         let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
-
-        let detail_view = DetailView::new(self.detail_formatters);
-
-        let current_region = reader
-            .find_containing_region(self.initial_pointer)
-            .ok_or(Error::PointerNotFound(self.initial_pointer))?
-            .read()?;
+        let detail_view = {
+            let mut detail_view = DetailView::new(self.detail_formatters);
+            detail_view.update_details(globals, self.initial_pointer);
+            detail_view
+        };
 
         let memory_table = MemoryTable::new(
             &reader,
@@ -459,7 +468,7 @@ impl TuiExplorerBuilder {
         layout.split_horizontally(Some(65), Some(60));
         layout.switch_to_buffer(2);
 
-        let mut out = TuiExplorer {
+        let out = TuiExplorer {
             _pid: self.pid,
             reader,
             current_region,
@@ -474,7 +483,6 @@ impl TuiExplorerBuilder {
             should_exit: false,
             keystrokes: KeySequence::default(),
         };
-        out.update_details();
 
         Ok(out)
     }
@@ -547,7 +555,6 @@ impl TuiExplorer {
 
                 match self.apply_key_binding()? {
                     KeyBindingMatch::Full => {
-                        self.update_details();
                         self.keystrokes.clear();
                     }
                     KeyBindingMatch::Partial => {}
@@ -628,16 +635,5 @@ impl TuiExplorer {
         }
 
         Ok(result)
-    }
-
-    fn update_details(&mut self) {
-        let selection = self.memory_table.selected_value();
-
-        self.detail_view.update_details(
-            &self.reader,
-            self.memory_table.current_region(),
-            &self.annotations,
-            selection.location,
-        );
     }
 }

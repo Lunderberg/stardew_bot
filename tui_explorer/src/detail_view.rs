@@ -30,12 +30,11 @@ impl DetailView {
 
     pub(crate) fn update_details(
         &mut self,
-        reader: &MemoryReader,
-        region: &MemoryRegion,
-        annotations: &[Annotation],
+        globals: WidgetGlobals,
         pointer: Pointer,
     ) {
-        let from_annotations = annotations
+        let from_annotations = globals
+            .annotations
             .iter()
             .filter(|ann| {
                 ann.range.start < pointer + MemoryRegion::POINTER_SIZE
@@ -46,7 +45,7 @@ impl DetailView {
 
         let from_formatters = self.formatters.iter().filter_map(|formatter| {
             formatter
-                .format(reader, region, pointer)
+                .format(globals.reader, globals.current_region, pointer)
                 .map(|text| (formatter.name().to_string(), text))
         });
 
@@ -111,5 +110,30 @@ impl WidgetWindow for DetailView {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         self.render(area, buf)
+    }
+
+    fn change_address<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        address: Pointer,
+    ) {
+        let from_annotations = globals
+            .annotations
+            .iter()
+            .filter(|ann| {
+                ann.range.start < address + MemoryRegion::POINTER_SIZE
+                    && address < ann.range.end
+            })
+            .sorted_by_key(|ann| (ann.range.start, Reverse(ann.range.end)))
+            .map(|ann| (ann.name.clone(), ann.value.clone()));
+
+        let from_formatters = self.formatters.iter().filter_map(|formatter| {
+            formatter
+                .format(globals.reader, globals.current_region, address)
+                .map(|text| (formatter.name().to_string(), text))
+        });
+
+        self.values = from_annotations.chain(from_formatters).collect();
     }
 }
