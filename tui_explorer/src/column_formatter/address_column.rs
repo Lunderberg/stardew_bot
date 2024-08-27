@@ -1,5 +1,5 @@
 use memory_reader::extensions::*;
-use memory_reader::{MemoryRegion, MemoryValue, Pointer};
+use memory_reader::{MemoryRegion, MemoryValue};
 
 use crate::extended_tui::WidgetGlobals;
 use crate::ColumnFormatter;
@@ -15,12 +15,12 @@ impl ColumnFormatter for AddressColumn {
         &self,
         _globals: WidgetGlobals,
         region: &MemoryRegion,
-        _pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
         let range = region.as_range();
         let prefix = range.prefix();
         let width = range.suffix_hexadecimal_digits() as usize;
-        format!("{:#0width$x}", row.location - prefix)
+        format!("{:#0width$x}", printed_row.location - prefix)
     }
 }

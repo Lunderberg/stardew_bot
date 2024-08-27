@@ -1,4 +1,4 @@
-use memory_reader::{MemoryRegion, MemoryValue, Pointer};
+use memory_reader::{MemoryRegion, MemoryValue};
 
 use crate::{extended_tui::WidgetGlobals, ColumnFormatter};
 
@@ -13,12 +13,12 @@ impl ColumnFormatter for PointsToColumn {
         &self,
         globals: WidgetGlobals,
         _region: &MemoryRegion,
-        _pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
         globals
             .reader
-            .find_containing_region(row.value.into())
+            .find_containing_region(printed_row.value.into())
             .map(|pointed_region| pointed_region.short_name())
             .unwrap_or_default()
             .to_string()

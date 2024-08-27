@@ -402,6 +402,12 @@ impl ViewFrame {
         selected_address: Pointer,
         formatters: &'a [Box<dyn ColumnFormatter>],
     ) -> impl Fn(usize) -> Vec<String> + 'a {
+        let selected_row = region
+            .bytes_at_pointer(selected_address)
+            .unwrap_or_else(|| {
+                panic!("Row {selected_address} is outside of the memory region")
+            });
+
         move |row: usize| -> Vec<String> {
             let row: MemoryValue<[u8; 8]> = region
                 .bytes_at_offset(row * MemoryRegion::POINTER_SIZE)
@@ -411,7 +417,7 @@ impl ViewFrame {
             formatters
                 .iter()
                 .map(|formatter| {
-                    formatter.cell_text(globals, region, selected_address, &row)
+                    formatter.cell_text(globals, region, &selected_row, &row)
                 })
                 .collect()
         }
@@ -450,6 +456,11 @@ impl ViewFrame {
         search_window: &'a Option<SearchWindow<TableState>>,
     ) -> impl ratatui::widgets::StatefulWidget<State = TableState> + 'a {
         let selected_address = self.selected_address();
+        let selected_row = region
+            .bytes_at_pointer(selected_address)
+            .unwrap_or_else(|| {
+                panic!("Row {selected_address} is outside of the memory region")
+            });
 
         let header = formatters
             .iter()
@@ -461,7 +472,7 @@ impl ViewFrame {
 
         let table = DynamicTable::new(
             move |i: usize, j: usize| -> Option<Line> {
-                let row =
+                let printed_row =
                     region.bytes_at_offset(j * MemoryRegion::POINTER_SIZE)?;
 
                 let formatter = formatters.get(i)?;
@@ -469,8 +480,8 @@ impl ViewFrame {
                 let cell: Line = formatter.formatted_cell(
                     globals,
                     region,
-                    selected_address,
-                    &row,
+                    &selected_row,
+                    &printed_row,
                 );
                 let cell = if let Some(search) = search_window {
                     search.highlight_search_matches(cell)

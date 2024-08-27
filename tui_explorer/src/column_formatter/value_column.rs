@@ -35,7 +35,7 @@ impl ByteFormatter for AsciiColumn {
 
 fn formatted_cell<Column: ByteFormatter>(
     row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
-    pointer_at_cursor: Option<Pointer>,
+    pointer_at_cursor: Pointer,
     annotations: &[Annotation],
 ) -> Line<'static> {
     let row_loc = row.location..row.location + MemoryRegion::POINTER_SIZE;
@@ -66,11 +66,13 @@ fn formatted_cell<Column: ByteFormatter>(
                     }
                 });
 
-            let fg_color = pointer_at_cursor
-                .filter(|ptr| {
-                    row_loc.contains(ptr) && *ptr - row_loc.start <= i_byte
-                })
-                .map(|_| Color::LightRed);
+            let fg_color = if row_loc.contains(&pointer_at_cursor)
+                && pointer_at_cursor - row_loc.start <= i_byte
+            {
+                Some(Color::LightRed)
+            } else {
+                None
+            };
 
             let style = Style::default();
             let style = if let Some(fg) = fg_color {
@@ -106,24 +108,26 @@ impl ColumnFormatter for HexColumn {
         &self,
         _globals: WidgetGlobals,
         _region: &MemoryRegion,
-        _pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
-        cell_text::<Self>(row.value)
+        cell_text::<Self>(printed_row.value)
     }
 
     fn formatted_cell(
         &self,
         globals: WidgetGlobals,
-        region: &MemoryRegion,
-        pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _region: &MemoryRegion,
+        selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
-        let pointer_at_cursor = region
-            .bytes_at_pointer(pointed_to)
-            .map(|bytes| bytes.value.into());
+        let pointer_at_cursor = selected_row.value.into();
 
-        formatted_cell::<Self>(row, pointer_at_cursor, globals.annotations)
+        formatted_cell::<Self>(
+            printed_row,
+            pointer_at_cursor,
+            globals.annotations,
+        )
     }
 }
 
@@ -136,23 +140,25 @@ impl ColumnFormatter for AsciiColumn {
         &self,
         _globals: WidgetGlobals,
         _region: &MemoryRegion,
-        _pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
-        cell_text::<Self>(row.value)
+        cell_text::<Self>(printed_row.value)
     }
 
     fn formatted_cell(
         &self,
         globals: WidgetGlobals,
-        region: &MemoryRegion,
-        pointed_to: Pointer,
-        row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        _region: &MemoryRegion,
+        selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
+        printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
-        let pointer_at_cursor = region
-            .bytes_at_pointer(pointed_to)
-            .map(|bytes| bytes.value.into());
+        let pointer_at_cursor = selected_row.value.into();
 
-        formatted_cell::<Self>(row, pointer_at_cursor, globals.annotations)
+        formatted_cell::<Self>(
+            printed_row,
+            pointer_at_cursor,
+            globals.annotations,
+        )
     }
 }
