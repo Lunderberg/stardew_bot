@@ -190,6 +190,38 @@ impl FromStr for KeySequence {
     }
 }
 
+impl std::fmt::Display for KeySequence {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.sequence
+            .iter()
+            .try_for_each(|key| -> std::fmt::Result {
+                if key.modifiers.contains(KeyModifiers::CONTROL) {
+                    write!(f, "C-")?;
+                }
+                if key.modifiers.contains(KeyModifiers::ALT) {
+                    write!(f, "M-")?;
+                }
+                match key.code {
+                    KeyCode::Backspace => write!(f, "<backspace>"),
+                    KeyCode::Enter => write!(f, "<enter>"),
+                    KeyCode::Left => write!(f, "<left>"),
+                    KeyCode::Right => write!(f, "<right>"),
+                    KeyCode::Up => write!(f, "<up>"),
+                    KeyCode::Down => write!(f, "<down>"),
+                    KeyCode::Home => write!(f, "<home>"),
+                    KeyCode::End => write!(f, "<end>"),
+                    KeyCode::PageUp => write!(f, "<pageup>"),
+                    KeyCode::PageDown => write!(f, "<pagedown>"),
+                    KeyCode::Char(c) => write!(f, "{c}"),
+
+                    other => panic!(
+                        "KeyCode {other:?} should not appear in KeySequence"
+                    ),
+                }
+            })
+    }
+}
+
 #[cfg(test)]
 mod test {
     use super::*;

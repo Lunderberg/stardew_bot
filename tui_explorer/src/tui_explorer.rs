@@ -559,9 +559,9 @@ impl TuiExplorer {
                     }
                     KeyBindingMatch::Partial => {}
                     KeyBindingMatch::Mismatch => {
-                        self.running_log
-                            .add_log(format!("{:?}", self.keystrokes));
-                        self.keystrokes.clear();
+                        return Err(Error::UnknownKeySequence(std::mem::take(
+                            &mut self.keystrokes,
+                        )));
                     }
                 }
             }

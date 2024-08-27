@@ -273,10 +273,16 @@ impl WidgetWindow for MemoryTable {
         _side_effects: &'a mut WidgetSideEffects,
         address: Pointer,
     ) {
-        self.view_stack = NonEmptyVec::new(ViewFrame::new(
-            globals.current_region.clone(),
-            address,
-        ));
+        if self.active_view().selected_address() == address {
+            // No action needed
+        } else if self.current_region().contains(address) {
+            self.active_view_mut().select_address(address);
+        } else {
+            self.view_stack = NonEmptyVec::new(ViewFrame::new(
+                globals.current_region.clone(),
+                address,
+            ));
+        }
     }
 }
 

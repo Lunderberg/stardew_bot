@@ -7,13 +7,13 @@ use ratatui::{
     widgets::Widget,
 };
 
-use memory_reader::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::{MemoryRegion, Pointer};
 
+use crate::InfoFormatter;
 use crate::{
     extended_tui::{WidgetGlobals, WidgetWindow},
     extensions::*,
 };
-use crate::{Annotation, InfoFormatter};
 
 pub struct DetailView {
     values: Vec<(String, String)>,

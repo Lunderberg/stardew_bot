@@ -1,6 +1,8 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
+use crate::KeySequence;
+
 #[derive(Error)]
 pub enum Error {
     #[error("Path not convertible to UTF-8")]
@@ -38,6 +40,9 @@ pub enum Error {
 
     #[error("Invalid emacs-style key sequence: {0}")]
     InvalidKeyBinding(String),
+
+    #[error("No binding for '{0}'")]
+    UnknownKeySequence(KeySequence),
 
     #[error("Could not find MemoryRegion containing pointer {0}")]
     PointerNotFound(Pointer),
