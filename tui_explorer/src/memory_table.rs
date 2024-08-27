@@ -288,16 +288,18 @@ impl WidgetWindow for MemoryTable {
 
 impl ViewFrame {
     pub(crate) fn new(region: MemoryRegion, entry_point: Pointer) -> Self {
-        let mut frame = ViewFrame {
+        let entry_row = (entry_point - region.start()) / Pointer::SIZE;
+        let table_state = TableState::default()
+            .with_selected(entry_row)
+            .with_offset(entry_row.saturating_sub(5));
+
+        ViewFrame {
             region,
             entry_point,
-            table_state: TableState::default(),
+            table_state,
             search: None,
             table_height: None,
-        };
-
-        frame.select_address(entry_point);
-        frame
+        }
     }
 
     fn num_table_rows(&self) -> usize {
@@ -305,6 +307,7 @@ impl ViewFrame {
     }
 
     fn select_row(&mut self, row: usize) {
+        let row = row.clamp(0, self.num_table_rows() - 1);
         self.finalize_search();
         self.table_state.select(Some(row));
     }
@@ -329,7 +332,6 @@ impl ViewFrame {
 
     fn select_address(&mut self, address: Pointer) {
         let row = (address - self.region.start()) / MemoryRegion::POINTER_SIZE;
-        let row = row.clamp(0, self.num_table_rows() - 1);
         self.select_row(row);
     }
 
@@ -569,6 +571,7 @@ impl<'a> ratatui::widgets::Widget for DrawableViewFrame<'a> {
         }
 
         self.view.table_height = Some(table_area.height as usize);
+
         let table = self
             .view
             .generate_table(
