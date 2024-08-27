@@ -1,4 +1,4 @@
-use std::cmp::Reverse;
+use std::{cmp::Reverse, ops::Range};
 
 use ratatui::{
     layout::{Constraint, Rect},
@@ -13,6 +13,7 @@ use crate::{
 };
 
 pub struct StackFrameTable {
+    stack_region: Range<Pointer>,
     stack_frames: Vec<StackFrame>,
     table_state: TableState,
 }
@@ -48,6 +49,7 @@ impl StackFrameTable {
             })
             .collect();
         Self {
+            stack_region: stack.as_range(),
             stack_frames,
             table_state: TableState::default(),
         }
@@ -119,24 +121,13 @@ impl WidgetWindow for StackFrameTable {
     fn change_address<'a>(
         &'a mut self,
         globals: WidgetGlobals<'a>,
-        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
         address: Pointer,
     ) {
-        let Some(region) = globals.reader.find_containing_region(address)
-        else {
-            side_effects
-                .add_log(format!("Address {address} not found in any region"));
-            return;
-        };
-
-        let region = match region.read() {
-            Ok(region) => region,
-            Err(err) => {
-                side_effects.add_log(format!("Region cannot be read: {err}"));
-                return;
-            }
-        };
-
-        *self = StackFrameTable::new(globals.reader, &region);
+        if !self.stack_region.contains(&address) {
+            *self =
+                StackFrameTable::new(globals.reader, globals.current_region);
+        }
+        self.select_address(address);
     }
 }

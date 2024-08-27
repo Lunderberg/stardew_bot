@@ -269,29 +269,13 @@ impl WidgetWindow for MemoryTable {
     fn change_address<'a>(
         &'a mut self,
         globals: WidgetGlobals<'a>,
-        side_effects: &'a mut WidgetSideEffects,
+        _side_effects: &'a mut WidgetSideEffects,
         address: Pointer,
     ) {
-        let Some(region) = globals
-            .reader
-            .regions
-            .iter()
-            .find(|region| region.contains(address))
-        else {
-            side_effects
-                .add_log(format!("Address {address} not found in any region"));
-            return;
-        };
-
-        let region = match region.read() {
-            Ok(region) => region,
-            Err(err) => {
-                side_effects.add_log(format!("Region cannot be read: {err}"));
-                return;
-            }
-        };
-
-        self.view_stack = NonEmptyVec::new(ViewFrame::new(region, address));
+        self.view_stack = NonEmptyVec::new(ViewFrame::new(
+            globals.current_region.clone(),
+            address,
+        ));
     }
 }
 

@@ -2,7 +2,9 @@ use std::ops::Range;
 
 use itertools::Itertools as _;
 
-use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
+use memory_reader::{
+    MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
+};
 use stardew_utils::stardew_valley_pid;
 
 use crate::extended_tui::{
@@ -25,6 +27,7 @@ pub struct TuiExplorer {
     // Application state
     _pid: u32,
     reader: MemoryReader,
+    current_region: MemoryRegion,
     _symbols: Vec<Symbol>,
     // Display state
     layout: DynamicLayout,
@@ -427,15 +430,20 @@ impl TuiExplorerBuilder {
             arr
         };
 
-        let reader = MemoryReader::new(self.pid)?;
+        let reader = self.reader;
         let stack_memory = reader.stack()?.read()?;
 
         let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
 
         let detail_view = DetailView::new(self.detail_formatters);
 
+        let current_region = reader
+            .find_containing_region(self.initial_pointer)
+            .ok_or(Error::PointerNotFound(self.initial_pointer))?
+            .read()?;
+
         let memory_table = MemoryTable::new(
-            &self.reader,
+            &reader,
             self.initial_pointer,
             self.column_formatters,
         )?;
@@ -454,6 +462,7 @@ impl TuiExplorerBuilder {
         let mut out = TuiExplorer {
             _pid: self.pid,
             reader,
+            current_region,
             _symbols: self.symbols,
             layout,
             stack_frame_table,
@@ -517,6 +526,7 @@ impl TuiExplorer {
             &mut buffers,
             WidgetGlobals {
                 reader: &self.reader,
+                current_region: &self.current_region,
                 annotations: &self.annotations,
             },
         );
@@ -525,11 +535,17 @@ impl TuiExplorer {
     }
 
     fn handle_event(&mut self, event: Event) {
+        if let Err(err) = self.try_handle_event(event) {
+            self.running_log.add_log(format!("Error: {err}"));
+        }
+    }
+
+    fn try_handle_event(&mut self, event: Event) -> Result<(), Error> {
         match event {
             Event::Key(key) => {
                 self.keystrokes.push(key);
 
-                match self.apply_key_binding() {
+                match self.apply_key_binding()? {
                     KeyBindingMatch::Full => {
                         self.update_details();
                         self.keystrokes.clear();
@@ -545,12 +561,15 @@ impl TuiExplorer {
             Event::Mouse(mouse) => self.layout.handle_mouse_event(mouse),
             _ => {}
         }
+
+        Ok(())
     }
 
-    fn apply_key_binding(&mut self) -> KeyBindingMatch {
+    fn apply_key_binding(&mut self) -> Result<KeyBindingMatch, Error> {
         let keystrokes = &self.keystrokes;
         let globals = WidgetGlobals {
             reader: &self.reader,
+            current_region: &self.current_region,
             annotations: &self.annotations,
         };
 
@@ -583,6 +602,20 @@ impl TuiExplorer {
             });
 
         if let Some(ptr) = side_effects.change_address {
+            self.current_region = self
+                .reader
+                .find_containing_region(ptr)
+                .ok_or(Error::PointerNotFound(ptr))?
+                .read()?;
+        }
+
+        let globals = WidgetGlobals {
+            reader: &self.reader,
+            current_region: &self.current_region,
+            annotations: &self.annotations,
+        };
+
+        if let Some(ptr) = side_effects.change_address {
             buffer_list.iter_mut().for_each(|buffer| {
                 buffer.change_address(globals, &mut side_effects, ptr)
             });
@@ -594,15 +627,11 @@ impl TuiExplorer {
             self.running_log.add_log(message);
         }
 
-        result
+        Ok(result)
     }
 
     fn update_details(&mut self) {
         let selection = self.memory_table.selected_value();
-
-        // TODO: Move this to a better location?  Should the cursor be
-        // able to be moved up/down directly in the stack frames?
-        self.stack_frame_table.select_address(selection.location);
 
         self.detail_view.update_details(
             &self.reader,

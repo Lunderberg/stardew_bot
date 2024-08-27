@@ -1,6 +1,6 @@
 use std::borrow::Cow;
 
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
 use crate::{Annotation, KeyBindingMatch, KeySequence};
 
@@ -42,6 +42,7 @@ pub trait WidgetWindow {
 #[derive(Clone, Copy)]
 pub(crate) struct WidgetGlobals<'a> {
     pub(crate) reader: &'a MemoryReader,
+    pub(crate) current_region: &'a MemoryRegion,
     pub(crate) annotations: &'a [Annotation],
 }
 
