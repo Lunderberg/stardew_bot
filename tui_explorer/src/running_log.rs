@@ -1,6 +1,6 @@
 use std::collections::VecDeque;
 
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::Pointer;
 use ratatui::widgets::StatefulWidget;
 use ratatui::{
     layout::Rect,
@@ -14,9 +14,9 @@ use regex::Regex;
 
 use crate::extended_tui::{
     ScrollableState as _, SearchDirection, SearchWindow, WidgetGlobals,
-    WidgetWindow,
+    WidgetSideEffects, WidgetWindow,
 };
-use crate::{extensions::*, MemoryTable, StackFrameTable};
+use crate::extensions::*;
 use crate::{KeyBindingMatch, KeySequence};
 
 pub struct RunningLog {
@@ -68,23 +68,15 @@ impl RunningLog {
         self.search = None;
     }
 
-    fn jump_to_address(
-        &mut self,
-        reader: &MemoryReader,
-        table: &mut MemoryTable,
-        stack_frame_table: &mut StackFrameTable,
-    ) {
-        let Some(line_num) = self.state.selected() else {
-            self.add_log("Cannot jump to address, no line selected");
-            return;
-        };
+    fn highlighted_address(&self) -> Option<Pointer> {
+        let line_num = self.state.selected()?;
 
         let (_, line) = self
             .items
             .get(self.items.len() - line_num - 1)
             .expect("Invalid line num selected");
 
-        let Some(addr) = Regex::new("0x[0-9A-Fa-f]+")
+        Regex::new("0x[0-9A-Fa-f]+")
             .expect("Invalid regex")
             .find(&line)
             .map(|addr_match| addr_match.as_str())
@@ -93,12 +85,17 @@ impl RunningLog {
                     .expect("Conversion should succeed from prev regex")
             })
             .map(|addr_usize| Pointer::new(addr_usize))
-        else {
-            self.add_log("Line doesn't contain an address");
-            return;
-        };
+    }
 
-        table.jump_to_address(addr, reader, stack_frame_table, self);
+    fn jump_to_highlighted_address(
+        &mut self,
+        side_effects: &mut WidgetSideEffects,
+    ) {
+        if let Some(address) = self.highlighted_address() {
+            side_effects.change_address(address);
+        } else {
+            side_effects.add_log("Line doesn't contain an address");
+        }
     }
 
     fn get_row_generator<'a>(
@@ -108,54 +105,6 @@ impl RunningLog {
             let (timestamp, entry) = &items[items.len() - row - 1];
             vec![format!("{} {}", timestamp.format("%H:%M:%S"), entry)]
         }
-    }
-
-    pub(crate) fn apply_key_binding(
-        &mut self,
-        keystrokes: &KeySequence,
-        reader: &MemoryReader,
-        table: &mut MemoryTable,
-        stack_frame_table: &mut StackFrameTable,
-    ) -> KeyBindingMatch {
-        KeyBindingMatch::Mismatch
-            .or_else(|| {
-                self.state
-                    .apply_key_binding(
-                        keystrokes,
-                        self.items.len(),
-                        self.prev_draw_height - 3,
-                    )
-                    .then(|| self.finalize_search())
-                    .or_else(|| {
-                        if let Some(search) = self.search.as_mut() {
-                            search
-                                .apply_key_binding(
-                                    keystrokes,
-                                    self.items.len(),
-                                    Self::get_row_generator(&self.items),
-                                )
-                                .then(|| {
-                                    self.state.select(Some(
-                                        search.recommended_row_selection(),
-                                    ))
-                                })
-                                .or_try_binding("C-g", keystrokes, || {
-                                    self.cancel_search()
-                                })
-                        } else {
-                            KeyBindingMatch::Mismatch
-                        }
-                    })
-            })
-            .or_try_binding("C-s", keystrokes, || {
-                self.start_search(SearchDirection::Forward)
-            })
-            .or_try_binding("C-r", keystrokes, || {
-                self.start_search(SearchDirection::Reverse)
-            })
-            .or_try_binding("<enter>", keystrokes, || {
-                self.jump_to_address(reader, table, stack_frame_table)
-            })
     }
 }
 
@@ -229,5 +178,52 @@ impl WidgetWindow for RunningLog {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         self.render(area, buf)
+    }
+
+    fn apply_key_binding(
+        &mut self,
+        keystrokes: &KeySequence,
+        _globals: WidgetGlobals,
+        side_effects: &mut WidgetSideEffects,
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_else(|| {
+                self.state
+                    .apply_key_binding(
+                        keystrokes,
+                        self.items.len(),
+                        self.prev_draw_height - 3,
+                    )
+                    .then(|| self.finalize_search())
+                    .or_else(|| {
+                        if let Some(search) = self.search.as_mut() {
+                            search
+                                .apply_key_binding(
+                                    keystrokes,
+                                    self.items.len(),
+                                    Self::get_row_generator(&self.items),
+                                )
+                                .then(|| {
+                                    self.state.select(Some(
+                                        search.recommended_row_selection(),
+                                    ))
+                                })
+                                .or_try_binding("C-g", keystrokes, || {
+                                    self.cancel_search()
+                                })
+                        } else {
+                            KeyBindingMatch::Mismatch
+                        }
+                    })
+            })
+            .or_try_binding("C-s", keystrokes, || {
+                self.start_search(SearchDirection::Forward)
+            })
+            .or_try_binding("C-r", keystrokes, || {
+                self.start_search(SearchDirection::Reverse)
+            })
+            .or_try_binding("<enter>", keystrokes, || {
+                self.jump_to_highlighted_address(side_effects)
+            })
     }
 }

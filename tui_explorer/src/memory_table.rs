@@ -10,12 +10,11 @@ use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use crate::extended_tui::{
     InputWindow, ScrollableState, SearchDirection, SearchWindow, WidgetGlobals,
-    WidgetWindow,
+    WidgetSideEffects, WidgetWindow,
 };
 use crate::{extended_tui::DynamicTable, extensions::*};
 use crate::{
-    Annotation, ColumnFormatter, Error, KeyBindingMatch, KeySequence,
-    NonEmptyVec, RunningLog, StackFrameTable,
+    ColumnFormatter, Error, KeyBindingMatch, KeySequence, NonEmptyVec,
 };
 
 pub struct MemoryTable {
@@ -26,8 +25,7 @@ pub struct MemoryTable {
 
 pub(crate) struct DrawableMemoryTable<'a> {
     table: &'a mut MemoryTable,
-    reader: &'a MemoryReader,
-    annotations: &'a [Annotation],
+    globals: WidgetGlobals<'a>,
 }
 
 struct ViewFrame {
@@ -40,8 +38,7 @@ struct ViewFrame {
 
 struct DrawableViewFrame<'a> {
     view: &'a mut ViewFrame,
-    reader: &'a MemoryReader,
-    annotations: &'a [Annotation],
+    globals: WidgetGlobals<'a>,
     formatters: &'a [Box<dyn ColumnFormatter>],
 }
 
@@ -83,15 +80,12 @@ impl MemoryTable {
         self.jump_to_window = Some(InputWindow::new("Jump to Address"))
     }
 
-    pub(crate) fn finalize_jump_to_address(
+    fn finalize_jump_to_address(
         &mut self,
-        reader: &MemoryReader,
-        current_region_start: Pointer,
-        log: &mut RunningLog,
-        stack_frame_table: &mut StackFrameTable,
+        side_effects: &mut WidgetSideEffects,
     ) {
         let Some(input_window) = self.jump_to_window.take() else {
-            log.add_log("Finalization of jump when not in-progress");
+            side_effects.add_log("Finalization of jump when not in-progress");
             return;
         };
         let text = input_window.text();
@@ -111,7 +105,7 @@ impl MemoryTable {
         let address = match res_address {
             Ok(address) => address,
             Err(err) => {
-                log.add_log(format!("Invalid hex address: {err}"));
+                side_effects.add_log(format!("Invalid hex address: {err}"));
                 return;
             }
         };
@@ -123,45 +117,13 @@ impl MemoryTable {
             } else {
                 current_loc - address
             }
-        } else if address < 0x100000 {
-            // Bit of a hack, should have distinct syntax for a location
-            // relative to the current MemoryRegion and a global address.
-            current_region_start + address
         } else {
             address.into()
         };
 
-        // let address: Pointer = address.into();
+        let address: Pointer = address.into();
 
-        self.jump_to_address(address, reader, stack_frame_table, log);
-    }
-
-    pub(crate) fn jump_to_address(
-        &mut self,
-        address: Pointer,
-        reader: &MemoryReader,
-        stack_frame_table: &mut StackFrameTable,
-        log: &mut RunningLog,
-    ) {
-        let Some(region) = reader
-            .regions
-            .iter()
-            .find(|region| region.contains(address))
-        else {
-            log.add_log(format!("Address {address} not found in any region"));
-            return;
-        };
-
-        let region = match region.read() {
-            Ok(region) => region,
-            Err(err) => {
-                log.add_log(format!("Region cannot be read: {err}"));
-                return;
-            }
-        };
-
-        *stack_frame_table = StackFrameTable::new(reader, &region);
-        self.view_stack = NonEmptyVec::new(ViewFrame::new(region, address));
+        side_effects.change_address(address);
     }
 
     pub(crate) fn current_region(&self) -> &MemoryRegion {
@@ -182,77 +144,6 @@ impl MemoryTable {
 
     fn active_view_mut(&mut self) -> &mut ViewFrame {
         self.view_stack.last_mut()
-    }
-
-    pub(crate) fn apply_key_binding(
-        &mut self,
-        keystrokes: &KeySequence,
-        reader: &MemoryReader,
-        log: &mut RunningLog,
-        stack_frame_table: &mut StackFrameTable,
-    ) -> KeyBindingMatch {
-        KeyBindingMatch::Mismatch
-            .or_else(|| {
-                self.view_stack.last_mut().apply_key_binding(
-                    keystrokes,
-                    reader,
-                    &self.formatters,
-                )
-            })
-            .or_else(|| {
-                if let Some(window) = self.jump_to_window.as_mut() {
-                    window.apply_key_binding(keystrokes)
-                } else {
-                    KeyBindingMatch::Mismatch
-                }
-            })
-            .or_else(|| {
-                if self.jump_to_window.is_some() {
-                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
-                        self.jump_to_window = None;
-                    })
-                } else if self.view_stack.len() > 1 {
-                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
-                        self.pop_view()
-                    })
-                } else {
-                    KeyBindingMatch::Mismatch
-                }
-            })
-            .or_else(|| {
-                if self.jump_to_window.is_some() {
-                    KeyBindingMatch::try_binding("<enter>", keystrokes, || {
-                        self.finalize_jump_to_address(
-                            reader,
-                            self.view_stack.last().region.start(),
-                            log,
-                            stack_frame_table,
-                        )
-                    })
-                } else {
-                    KeyBindingMatch::Mismatch
-                }
-            })
-            .or_try_binding("M-g g", keystrokes, || {
-                self.start_jump_to_address()
-            })
-            .or_try_binding("<enter>", keystrokes, || {
-                let selection = self.selected_value();
-                let as_pointer: Pointer = selection.value.into();
-                let pointed_map_region =
-                    reader.find_containing_region(as_pointer);
-                if let Some(pointed_map_region) = pointed_map_region {
-                    let pointed_region = pointed_map_region.read();
-                    match pointed_region {
-                        Ok(region) => {
-                            self.push_view(region, as_pointer);
-                        }
-                        Err(_) => log.add_log("Error reading region"),
-                    }
-                } else {
-                    log.add_log("Value does not point to any memory region");
-                }
-            })
     }
 }
 
@@ -286,7 +177,7 @@ impl<'a> Widget for DrawableMemoryTable<'a> {
         self.table
             .view_stack
             .last_mut()
-            .drawable(self.reader, self.annotations, &self.table.formatters)
+            .drawable(self.globals, &self.table.formatters)
             .render(area, buf);
     }
 }
@@ -304,10 +195,103 @@ impl WidgetWindow for MemoryTable {
     ) {
         DrawableMemoryTable {
             table: self,
-            reader: globals.reader,
-            annotations: globals.annotations,
+            globals,
         }
         .render(area, buf)
+    }
+
+    fn apply_key_binding<'a>(
+        &mut self,
+        keystrokes: &'a KeySequence,
+        globals: WidgetGlobals<'a>,
+        side_effects: &'a mut WidgetSideEffects,
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_else(|| {
+                self.view_stack.last_mut().apply_key_binding(
+                    keystrokes,
+                    globals,
+                    &self.formatters,
+                )
+            })
+            .or_else(|| {
+                if let Some(window) = self.jump_to_window.as_mut() {
+                    window.apply_key_binding(keystrokes)
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_else(|| {
+                if self.jump_to_window.is_some() {
+                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
+                        self.jump_to_window = None;
+                    })
+                } else if self.view_stack.len() > 1 {
+                    KeyBindingMatch::try_binding("C-g", keystrokes, || {
+                        self.pop_view()
+                    })
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_else(|| {
+                if self.jump_to_window.is_some() {
+                    KeyBindingMatch::try_binding("<enter>", keystrokes, || {
+                        self.finalize_jump_to_address(side_effects)
+                    })
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
+            })
+            .or_try_binding("M-g g", keystrokes, || {
+                self.start_jump_to_address()
+            })
+            .or_try_binding("<enter>", keystrokes, || {
+                let selection = self.selected_value();
+                let as_pointer: Pointer = selection.value.into();
+                let pointed_map_region =
+                    globals.reader.find_containing_region(as_pointer);
+                if let Some(pointed_map_region) = pointed_map_region {
+                    let pointed_region = pointed_map_region.read();
+                    match pointed_region {
+                        Ok(region) => {
+                            self.push_view(region, as_pointer);
+                        }
+                        Err(_) => side_effects.add_log("Error reading region"),
+                    }
+                } else {
+                    side_effects
+                        .add_log("Value does not point to any memory region");
+                }
+            })
+    }
+
+    fn change_address<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        side_effects: &'a mut WidgetSideEffects,
+        address: Pointer,
+    ) {
+        let Some(region) = globals
+            .reader
+            .regions
+            .iter()
+            .find(|region| region.contains(address))
+        else {
+            side_effects
+                .add_log(format!("Address {address} not found in any region"));
+            return;
+        };
+
+        let region = match region.read() {
+            Ok(region) => region,
+            Err(err) => {
+                side_effects.add_log(format!("Region cannot be read: {err}"));
+                return;
+            }
+        };
+
+        self.view_stack = NonEmptyVec::new(ViewFrame::new(region, address));
     }
 }
 
@@ -376,7 +360,7 @@ impl ViewFrame {
     pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
-        reader: &MemoryReader,
+        globals: WidgetGlobals,
         formatters: &[Box<dyn ColumnFormatter>],
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
@@ -398,7 +382,7 @@ impl ViewFrame {
                             keystrokes,
                             table_size,
                             Self::get_row_generator(
-                                &reader,
+                                globals,
                                 &self.region,
                                 selected_address,
                                 formatters,
@@ -429,7 +413,7 @@ impl ViewFrame {
     }
 
     fn get_row_generator<'a>(
-        reader: &'a MemoryReader,
+        globals: WidgetGlobals<'a>,
         region: &'a MemoryRegion,
         selected_address: Pointer,
         formatters: &'a [Box<dyn ColumnFormatter>],
@@ -443,7 +427,7 @@ impl ViewFrame {
             formatters
                 .iter()
                 .map(|formatter| {
-                    formatter.cell_text(reader, region, selected_address, &row)
+                    formatter.cell_text(globals, region, selected_address, &row)
                 })
                 .collect()
         }
@@ -476,11 +460,10 @@ impl ViewFrame {
 
     fn generate_table<'a>(
         &self,
-        reader: &'a MemoryReader,
+        globals: WidgetGlobals<'a>,
         region: &'a MemoryRegion,
         formatters: &'a [Box<dyn ColumnFormatter>],
         search_window: &'a Option<SearchWindow<TableState>>,
-        annotations: &'a [Annotation],
     ) -> impl ratatui::widgets::StatefulWidget<State = TableState> + 'a {
         let selected_address = self.selected_address();
 
@@ -500,10 +483,9 @@ impl ViewFrame {
                 let formatter = formatters.get(i)?;
 
                 let cell: Line = formatter.formatted_cell(
-                    reader,
+                    globals,
                     region,
                     selected_address,
-                    annotations,
                     &row,
                 );
                 let cell = if let Some(search) = search_window {
@@ -537,14 +519,12 @@ impl ViewFrame {
 
     fn drawable<'a>(
         &'a mut self,
-        reader: &'a MemoryReader,
-        annotations: &'a [Annotation],
+        globals: WidgetGlobals<'a>,
         formatters: &'a [Box<dyn ColumnFormatter>],
     ) -> DrawableViewFrame<'a> {
         DrawableViewFrame {
             view: self,
-            reader,
-            annotations,
+            globals,
             formatters,
         }
     }
@@ -582,11 +562,10 @@ impl<'a> ratatui::widgets::Widget for DrawableViewFrame<'a> {
         let table = self
             .view
             .generate_table(
-                self.reader,
+                self.globals,
                 &self.view.region,
                 self.formatters,
                 &self.view.search,
-                self.annotations,
             )
             .with_scrollbar(self.view.num_table_rows());
         table.render(table_area, buf, &mut self.view.table_state);

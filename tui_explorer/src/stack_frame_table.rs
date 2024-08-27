@@ -115,4 +115,28 @@ impl WidgetWindow for StackFrameTable {
         }
         .render(area, buf)
     }
+
+    fn change_address<'a>(
+        &'a mut self,
+        globals: WidgetGlobals<'a>,
+        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        address: Pointer,
+    ) {
+        let Some(region) = globals.reader.find_containing_region(address)
+        else {
+            side_effects
+                .add_log(format!("Address {address} not found in any region"));
+            return;
+        };
+
+        let region = match region.read() {
+            Ok(region) => region,
+            Err(err) => {
+                side_effects.add_log(format!("Region cannot be read: {err}"));
+                return;
+            }
+        };
+
+        *self = StackFrameTable::new(globals.reader, &region);
+    }
 }

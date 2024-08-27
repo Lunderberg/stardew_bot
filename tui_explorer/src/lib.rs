@@ -40,7 +40,7 @@ pub use detail_view::*;
 pub(crate) mod extended_tui;
 
 pub mod column_formatter;
-pub use column_formatter::ColumnFormatter;
+pub(crate) use column_formatter::ColumnFormatter;
 
 pub mod info_formatter;
 pub use info_formatter::InfoFormatter;

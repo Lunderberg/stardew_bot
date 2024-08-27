@@ -1,5 +1,5 @@
 mod column_formatter_trait;
-pub use column_formatter_trait::*;
+pub(crate) use column_formatter_trait::*;
 
 mod address_column;
 pub use address_column::*;

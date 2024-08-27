@@ -5,7 +5,9 @@ use itertools::Itertools as _;
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, Symbol};
 use stardew_utils::stardew_valley_pid;
 
-use crate::extended_tui::{DynamicLayout, WidgetGlobals, WidgetWindow};
+use crate::extended_tui::{
+    DynamicLayout, WidgetGlobals, WidgetSideEffects, WidgetWindow,
+};
 use crate::extensions::*;
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -547,28 +549,52 @@ impl TuiExplorer {
 
     fn apply_key_binding(&mut self) -> KeyBindingMatch {
         let keystrokes = &self.keystrokes;
-        KeyBindingMatch::Mismatch
+        let globals = WidgetGlobals {
+            reader: &self.reader,
+            annotations: &self.annotations,
+        };
+
+        let active_buffer = self.layout.active_buffer();
+        let mut side_effects = WidgetSideEffects::default();
+
+        // TODO: Move the buffers into a separate class, to allow this
+        // to be de-duplicated between `apply_key_binding` and `draw`,
+        // without running into multiple borrows of `self`.
+        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
+            Box::new(&mut self.stack_frame_table),
+            Box::new(&mut self.detail_view),
+            Box::new(&mut self.memory_table),
+            Box::new(&mut self.running_log),
+        ];
+
+        let result = KeyBindingMatch::Mismatch
             .or_try_binding("C-c", keystrokes, || {
                 self.should_exit = true;
             })
             .or_try_binding("C-x o", keystrokes, || {
                 self.layout.cycle_next();
             })
-            .or_else(|| match self.layout.active_buffer() {
-                2 => self.memory_table.apply_key_binding(
-                    keystrokes,
-                    &self.reader,
-                    &mut self.running_log,
-                    &mut self.stack_frame_table,
-                ),
-                3 => self.running_log.apply_key_binding(
-                    keystrokes,
-                    &self.reader,
-                    &mut self.memory_table,
-                    &mut self.stack_frame_table,
-                ),
-                _ => KeyBindingMatch::Mismatch,
-            })
+            .or_else(|| {
+                buffer_list[active_buffer].apply_key_binding(
+                    &keystrokes,
+                    globals,
+                    &mut side_effects,
+                )
+            });
+
+        if let Some(ptr) = side_effects.change_address {
+            buffer_list.iter_mut().for_each(|buffer| {
+                buffer.change_address(globals, &mut side_effects, ptr)
+            });
+        }
+
+        // Process the log messages last, since handling other side
+        // effects may result in additional log messages.
+        for message in side_effects.log_messages {
+            self.running_log.add_log(message);
+        }
+
+        result
     }
 
     fn update_details(&mut self) {

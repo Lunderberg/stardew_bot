@@ -3,9 +3,9 @@ use ratatui::{
     text::{Line, Span},
 };
 
-use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
+use memory_reader::{MemoryRegion, MemoryValue, Pointer};
 
-use crate::{Annotation, ColumnFormatter};
+use crate::{extended_tui::WidgetGlobals, Annotation, ColumnFormatter};
 
 pub struct HexColumn;
 pub struct AsciiColumn;
@@ -104,7 +104,7 @@ impl ColumnFormatter for HexColumn {
 
     fn cell_text(
         &self,
-        _reader: &MemoryReader,
+        _globals: WidgetGlobals,
         _region: &MemoryRegion,
         _pointed_to: Pointer,
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -114,17 +114,16 @@ impl ColumnFormatter for HexColumn {
 
     fn formatted_cell(
         &self,
-        _reader: &MemoryReader,
+        globals: WidgetGlobals,
         region: &MemoryRegion,
         pointed_to: Pointer,
-        annotations: &[Annotation],
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
         let pointer_at_cursor = region
             .bytes_at_pointer(pointed_to)
             .map(|bytes| bytes.value.into());
 
-        formatted_cell::<Self>(row, pointer_at_cursor, annotations)
+        formatted_cell::<Self>(row, pointer_at_cursor, globals.annotations)
     }
 }
 
@@ -135,7 +134,7 @@ impl ColumnFormatter for AsciiColumn {
 
     fn cell_text(
         &self,
-        _reader: &MemoryReader,
+        _globals: WidgetGlobals,
         _region: &MemoryRegion,
         _pointed_to: Pointer,
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -145,16 +144,15 @@ impl ColumnFormatter for AsciiColumn {
 
     fn formatted_cell(
         &self,
-        _reader: &MemoryReader,
+        globals: WidgetGlobals,
         region: &MemoryRegion,
         pointed_to: Pointer,
-        annotations: &[Annotation],
         row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> Line {
         let pointer_at_cursor = region
             .bytes_at_pointer(pointed_to)
             .map(|bytes| bytes.value.into());
 
-        formatted_cell::<Self>(row, pointer_at_cursor, annotations)
+        formatted_cell::<Self>(row, pointer_at_cursor, globals.annotations)
     }
 }
