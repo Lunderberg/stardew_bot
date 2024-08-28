@@ -447,10 +447,10 @@ impl DynamicLayout {
                 self.start_buffer_selection()
             })
             .or_try_binding("C-x 2", keystrokes, || {
-                self.split_horizontally(None, None)
+                self.split_vertically(None, None)
             })
             .or_try_binding("C-x 3", keystrokes, || {
-                self.split_vertically(None, None)
+                self.split_horizontally(None, None)
             })
             .or_try_binding("C-x 0", keystrokes, || self.close_current_window())
             .or_try_binding("C-x 1", keystrokes, || {
