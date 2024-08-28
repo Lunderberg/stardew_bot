@@ -7,6 +7,9 @@ pub(crate) use dynamic_layout::DynamicLayout;
 pub(crate) mod dynamic_table;
 pub use dynamic_table::DynamicTable;
 
+mod buffer_selection;
+pub(crate) use buffer_selection::*;
+
 mod scroll_bar;
 pub use scroll_bar::*;
 

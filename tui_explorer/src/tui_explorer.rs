@@ -580,7 +580,6 @@ impl TuiExplorer {
             annotations: &self.annotations,
         };
 
-        let active_buffer = self.layout.active_buffer();
         let mut side_effects = WidgetSideEffects::default();
 
         // TODO: Move the buffers into a separate class, to allow this
@@ -601,10 +600,14 @@ impl TuiExplorer {
                 self.layout.cycle_next();
             })
             .or_else(|| {
-                buffer_list[active_buffer].apply_key_binding(
+                // The layout will forward the key bindings to either
+                // the active window, or to a buffer selection window
+                // if present.
+                self.layout.apply_key_binding(
                     &keystrokes,
                     globals,
                     &mut side_effects,
+                    &mut buffer_list,
                 )
             });
 

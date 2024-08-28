@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use itertools::Itertools as _;
 
 use crate::Error;
 
@@ -192,9 +193,15 @@ impl FromStr for KeySequence {
 
 impl std::fmt::Display for KeySequence {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        self.sequence
-            .iter()
-            .try_for_each(|key| -> std::fmt::Result {
+        self.sequence.iter().with_position().try_for_each(
+            |(position, key)| -> std::fmt::Result {
+                match position {
+                    itertools::Position::Middle | itertools::Position::Last => {
+                        write!(f, " ")?;
+                    }
+                    _ => {}
+                }
+
                 if key.modifiers.contains(KeyModifiers::CONTROL) {
                     write!(f, "C-")?;
                 }
@@ -218,7 +225,8 @@ impl std::fmt::Display for KeySequence {
                         "KeyCode {other:?} should not appear in KeySequence"
                     ),
                 }
-            })
+            },
+        )
     }
 }
 

@@ -1,4 +1,4 @@
-use crate::extensions::*;
+use crate::{extensions::*, KeyBindingMatch, KeySequence};
 use crossterm::event::{MouseButton, MouseEvent};
 use itertools::Itertools as _;
 use ratatui::{
@@ -7,7 +7,7 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use super::{WidgetGlobals, WidgetWindow};
+use super::{BufferSelection, WidgetGlobals, WidgetSideEffects, WidgetWindow};
 
 pub struct DynamicLayout {
     /// Index into the `windows` array.  Should reference a `Buffer`
@@ -30,7 +30,6 @@ pub struct DrawableDynamicLayout<'a, B> {
     globals: WidgetGlobals<'a>,
 }
 
-#[derive(Clone)]
 struct NestedWindow {
     kind: NestedWindowKind,
     parent: Option<usize>,
@@ -69,7 +68,6 @@ struct WindowIter<'a> {
     stack: Vec<usize>,
 }
 
-#[derive(Clone)]
 enum NestedWindowKind {
     /// An index into the `windows` vector.  Used for nested windows
     Horizontal {
@@ -90,6 +88,9 @@ enum NestedWindowKind {
     /// not owned by the `DynamicLayout`, but is provided to the
     /// layout when drawing.
     Buffer(usize),
+
+    /// A window that currently is selecting a new buffer to display.
+    BufferSelection(BufferSelection),
 }
 
 impl DynamicLayout {
@@ -202,10 +203,10 @@ impl DynamicLayout {
                     area.height / 2
                 } else {
                     match (top_height, bottom_height) {
-                        (Some(th), Some(bh)) => th * area.width / (th + bh),
-                        (None, Some(bh)) => area.width.saturating_sub(bh),
+                        (Some(th), Some(bh)) => th * area.height / (th + bh),
+                        (None, Some(bh)) => area.height.saturating_sub(bh),
                         (Some(th), None) => th,
-                        (None, None) => area.width / 2,
+                        (None, None) => area.height / 2,
                     }
                     .clamp(2, area.height - 2)
                 };
@@ -214,7 +215,7 @@ impl DynamicLayout {
                 self.update_draw_areas(area_top, top_index);
                 self.update_draw_areas(area_bottom, bottom_index);
             }
-            NestedWindowKind::Buffer(_) => {}
+            _ => {}
         }
     }
 
@@ -256,17 +257,19 @@ impl DynamicLayout {
             panic!("Internal error, active window should point to Buffer")
         };
 
-        let child = NestedWindow {
+        let left_index = self.windows.len();
+        self.windows.push(NestedWindow {
             kind: NestedWindowKind::Buffer(active_buffer),
             parent: Some(self.active_window),
             area: None,
-        };
-
-        let left_index = self.windows.len();
-        self.windows.push(child.clone());
+        });
 
         let right_index = self.windows.len();
-        self.windows.push(child);
+        self.windows.push(NestedWindow {
+            kind: NestedWindowKind::Buffer(active_buffer),
+            parent: Some(self.active_window),
+            area: None,
+        });
 
         self.windows[self.active_window].kind = NestedWindowKind::Horizontal {
             left_index,
@@ -288,17 +291,19 @@ impl DynamicLayout {
             panic!("Internal error, active window should point to Buffer")
         };
 
-        let child = NestedWindow {
+        let top_index = self.windows.len();
+        self.windows.push(NestedWindow {
             kind: NestedWindowKind::Buffer(active_buffer),
             parent: Some(self.active_window),
             area: None,
-        };
-
-        let top_index = self.windows.len();
-        self.windows.push(child.clone());
+        });
 
         let bottom_index = self.windows.len();
-        self.windows.push(child);
+        self.windows.push(NestedWindow {
+            kind: NestedWindowKind::Buffer(active_buffer),
+            parent: Some(self.active_window),
+            area: None,
+        });
 
         self.windows[self.active_window].kind = NestedWindowKind::Vertical {
             top_index,
@@ -307,6 +312,37 @@ impl DynamicLayout {
             bottom_height,
         };
         self.active_window = top_index;
+    }
+
+    pub fn close_current_window(&mut self) {
+        let current = self.active_window;
+        let Some(parent) = self.windows[current].parent else {
+            return;
+        };
+        let sibling = match self.windows[parent].kind {
+            NestedWindowKind::Horizontal {
+                left_index,
+                right_index,
+                ..
+            } => left_index + right_index - current,
+            NestedWindowKind::Vertical {
+                top_index,
+                bottom_index,
+                ..
+            } => top_index + bottom_index - current,
+            _ => panic!("Window parent cannot be a leaf node"),
+        };
+
+        self.windows[sibling].parent = self.windows[parent].parent;
+
+        self.windows.swap(sibling, parent);
+        self.active_window = parent;
+    }
+
+    pub fn close_all_other_windows(&mut self) {
+        self.windows.swap(self.active_window, 0);
+        self.windows.shrink_to(1);
+        self.active_window = 0;
     }
 
     pub fn switch_to_buffer(&mut self, index: usize) {
@@ -319,13 +355,17 @@ impl DynamicLayout {
         *buffer_index = index;
     }
 
-    pub fn active_buffer(&self) -> usize {
-        match self.windows[self.active_window].kind {
-            NestedWindowKind::Buffer(buffer_index) => buffer_index,
-            _ => panic!(
-                "Internal error, active window should point to leaf node"
-            ),
-        }
+    pub fn start_buffer_selection(&mut self) {
+        let prev_buffer_index = match self.windows[self.active_window].kind {
+            NestedWindowKind::Buffer(index) => index,
+            NestedWindowKind::BufferSelection(_) => {
+                return;
+            }
+            _ => panic!("Internal error, active window must be leaf node."),
+        };
+        let selection_window = BufferSelection::new(prev_buffer_index);
+        self.windows[self.active_window].kind =
+            NestedWindowKind::BufferSelection(selection_window);
     }
 
     pub fn cycle_next(&mut self) {
@@ -358,7 +398,7 @@ impl DynamicLayout {
                         index = parent;
                     }
                 }
-                NestedWindowKind::Buffer(_) => {
+                _ => {
                     panic!("Parent must be a branch node, not a leaf.")
                 }
             }
@@ -374,7 +414,7 @@ impl DynamicLayout {
                 NestedWindowKind::Vertical { top_index, .. } => {
                     index = top_index;
                 }
-                NestedWindowKind::Buffer(_) => {
+                _ => {
                     break;
                 }
             }
@@ -394,10 +434,54 @@ impl DynamicLayout {
             globals,
         }
     }
+
+    pub(crate) fn apply_key_binding<'a, 'b>(
+        &'a mut self,
+        keystrokes: &KeySequence,
+        globals: WidgetGlobals,
+        side_effects: &mut WidgetSideEffects,
+        buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_try_bindings(["C-x b", "C-x C-b"], keystrokes, || {
+                self.start_buffer_selection()
+            })
+            .or_try_binding("C-x 2", keystrokes, || {
+                self.split_horizontally(None, None)
+            })
+            .or_try_binding("C-x 3", keystrokes, || {
+                self.split_vertically(None, None)
+            })
+            .or_try_binding("C-x 0", keystrokes, || self.close_current_window())
+            .or_try_binding("C-x 1", keystrokes, || {
+                self.close_all_other_windows()
+            })
+            .or_else(|| {
+                let window_kind = &mut self.windows[self.active_window].kind;
+                match window_kind {
+                    NestedWindowKind::Buffer(buffer_index) => buffers
+                        [*buffer_index]
+                        .apply_key_binding(keystrokes, globals, side_effects),
+                    NestedWindowKind::BufferSelection(selector) => {
+                        let res = selector.drawable(buffers).apply_key_binding(
+                            keystrokes,
+                            globals,
+                            side_effects,
+                        );
+                        if let Some(buffer_index) = selector.selected_buffer() {
+                            *window_kind =
+                                NestedWindowKind::Buffer(buffer_index);
+                        }
+                        res
+                    }
+                    _ => panic!("Active window must be leaf node"),
+                }
+            })
+    }
 }
 
 impl<'a, 'b> Widget
-    for DrawableDynamicLayout<'a, Box<&mut (dyn WidgetWindow + 'b)>>
+    for DrawableDynamicLayout<'a, Box<&'b mut (dyn WidgetWindow)>>
 {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
@@ -409,9 +493,21 @@ impl<'a, 'b> Widget
 
         self.layout
             .iter()
-            .filter(|win| win.buffer_index.is_some())
+            .collect::<Vec<_>>()
+            .into_iter()
             .for_each(|win| {
-                let widget = &mut self.buffers[win.buffer_index.unwrap()];
+                let widget: &mut dyn WidgetWindow =
+                    match &mut self.layout.windows[win.window_index].kind {
+                        NestedWindowKind::Buffer(buffer_index) => {
+                            *self.buffers[*buffer_index]
+                        }
+                        NestedWindowKind::BufferSelection(selector) => {
+                            &mut selector.drawable(self.buffers)
+                        }
+                        _ => {
+                            return;
+                        }
+                    };
 
                 let border_style = if win.window_index == active_window {
                     Style::new().light_green()
@@ -419,10 +515,12 @@ impl<'a, 'b> Widget
                     Style::new()
                 };
 
+                let title = widget.title();
+
                 let border = Block::default()
                     .borders(Borders::ALL)
                     .border_style(border_style)
-                    .title(ratatui::text::Line::raw(widget.title()));
+                    .title(ratatui::text::Line::raw(title));
                 let inner_area = border.inner(win.area);
                 border.render(win.area, buf);
                 widget.draw(self.globals, inner_area, buf);
@@ -513,6 +611,12 @@ impl<'a> Iterator for WindowIter<'a> {
                 area,
                 window_index,
                 buffer_index: Some(buffer_index),
+                divider_area: None,
+            },
+            NestedWindowKind::BufferSelection(_) => WindowArea {
+                area,
+                window_index,
+                buffer_index: None,
                 divider_area: None,
             },
         };
