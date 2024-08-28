@@ -132,7 +132,7 @@ impl<'a, 'b> WidgetWindow for DrawableBufferSelection<'a, 'b> {
 
         let area = if let Some(search) = self.selector.search.as_ref() {
             let search_area_height = area.height.min(3);
-            let (search_area, area) =
+            let (area, search_area) =
                 area.split_from_bottom(search_area_height);
             search.render(search_area, buf);
             area
