@@ -1,4 +1,4 @@
-use std::borrow::Cow;
+use std::borrow::{Borrow, Cow};
 use std::fmt::Debug;
 
 use ratatui::prelude::*;
@@ -7,29 +7,44 @@ use regex::Regex;
 use crate::extensions::*;
 
 pub trait HighlightLine {
+    fn style_regex_ref(
+        self,
+        regex: impl Borrow<Regex>,
+        style: impl Into<Style>,
+    ) -> Self;
+
     fn style_regex<R>(self, regex: R, style: impl Into<Style>) -> Self
     where
+        Self: Sized,
         R: TryInto<Regex>,
-        R::Error: Debug;
+        R::Error: Debug,
+    {
+        let regex = regex.try_into().expect("Invalid regex");
+        self.style_regex_ref(&regex, style)
+    }
 
     fn style_substring(self, substring: &str, style: impl Into<Style>) -> Self
     where
         Self: Sized,
     {
-        self.style_regex(regex::escape(substring).as_str(), style)
+        if substring.is_empty() {
+            self
+        } else {
+            self.style_regex(regex::escape(substring).as_str(), style)
+        }
     }
 }
 
 impl<'a> HighlightLine for Line<'a> {
-    fn style_regex<R>(self, regex: R, style: impl Into<Style>) -> Self
-    where
-        R: TryInto<Regex>,
-        R::Error: Debug,
-    {
+    fn style_regex_ref(
+        self,
+        regex: impl Borrow<Regex>,
+        style: impl Into<Style>,
+    ) -> Self {
         let text: String =
             self.spans.iter().map(|span| span.content.clone()).collect();
 
-        let regex: Regex = regex.try_into().expect("Invalid regex");
+        let regex = regex.borrow();
         let style: Style = style.into();
 
         let mut iter_match_range = regex
@@ -97,17 +112,6 @@ impl<'a> HighlightLine for Line<'a> {
             spans,
             alignment: self.alignment,
             ..Default::default()
-        }
-    }
-
-    fn style_substring(self, substring: &str, style: impl Into<Style>) -> Self
-    where
-        Self: Sized,
-    {
-        if substring.is_empty() {
-            self
-        } else {
-            self.style_regex(regex::escape(substring).as_str(), style)
         }
     }
 }

@@ -1,13 +1,14 @@
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
-    widgets::{List, ListState, StatefulWidget, Widget},
+    style::{Color, Modifier, Style},
+    text::Line,
+    widgets::{Block, Borders, List, ListState, StatefulWidget, Widget},
 };
+use regex::RegexBuilder;
 
 use super::{
-    ScrollableState as _, SearchDirection, SearchWindow, WidgetGlobals,
-    WidgetSideEffects, WidgetWindow,
+    ScrollableState as _, WidgetGlobals, WidgetSideEffects, WidgetWindow,
 };
 use crate::extensions::*;
 
@@ -18,7 +19,11 @@ pub(crate) struct BufferSelection {
     list_state: ListState,
     selected_buffer: Option<usize>,
     prev_draw_height: usize,
-    search: Option<SearchWindow<ListState>>,
+    filter_string: String,
+
+    /// The index of the currently selected buffer.  If the filter is
+    /// empty, will be the same as `list_state.selected()`.
+    currently_highlighted_buffer: usize,
 }
 
 pub(crate) struct DrawableBufferSelection<'a, 'b> {
@@ -35,7 +40,8 @@ impl BufferSelection {
             list_state,
             selected_buffer: None,
             prev_draw_height: 1,
-            search: None,
+            filter_string: Default::default(),
+            currently_highlighted_buffer: prev_buffer_index,
         }
     }
 
@@ -51,21 +57,6 @@ impl BufferSelection {
             selector: self,
             buffers,
         }
-    }
-
-    fn start_search(&mut self, direction: SearchDirection) {
-        self.search =
-            Some(SearchWindow::new(direction, self.list_state.clone()));
-    }
-
-    fn cancel_search(&mut self) {
-        if let Some(search) = self.search.take() {
-            self.list_state = search.pre_search_state;
-        }
-    }
-
-    fn finalize_search(&mut self) {
-        self.search = None;
     }
 }
 
@@ -86,65 +77,94 @@ impl<'a, 'b> WidgetWindow for DrawableBufferSelection<'a, 'b> {
                     Some(self.selector.prev_buffer_index);
             })
             .or_else(|| {
-                self.selector
-                    .list_state
-                    .apply_key_binding(
-                        keystrokes,
-                        self.buffers.len(),
-                        self.selector.prev_draw_height - 3,
-                    )
-                    .then(|| self.selector.finalize_search())
-                    .or_else(|| {
-                        if let Some(search) = self.selector.search.as_mut() {
-                            search
-                                .apply_key_binding(
-                                    keystrokes,
-                                    self.buffers.len(),
-                                    |i| vec![self.buffers[i].title().into()],
-                                )
-                                .then(|| {
-                                    self.selector.list_state.select(Some(
-                                        search.recommended_row_selection(),
-                                    ))
-                                })
-                                .or_try_binding("C-g", keystrokes, || {
-                                    self.selector.cancel_search()
-                                })
-                        } else {
-                            KeyBindingMatch::Mismatch
-                        }
-                    })
-            })
-            .or_try_binding("C-s", keystrokes, || {
-                self.selector.start_search(SearchDirection::Forward)
-            })
-            .or_try_binding("C-r", keystrokes, || {
-                self.selector.start_search(SearchDirection::Reverse)
+                self.selector.list_state.apply_key_binding(
+                    keystrokes,
+                    self.buffers.len(),
+                    self.selector.prev_draw_height - 3,
+                )
             })
             .or_try_binding("<enter>", keystrokes, || {
                 self.selector.selected_buffer =
-                    self.selector.list_state.selected();
+                    Some(self.selector.currently_highlighted_buffer);
+            })
+            .or_try_binding("<backspace>", keystrokes, || {
+                self.selector.filter_string.pop();
+            })
+            .or_else(|| {
+                if let Some(c) = keystrokes.as_char() {
+                    self.selector.filter_string.push(c);
+                    KeyBindingMatch::Full
+                } else {
+                    KeyBindingMatch::Mismatch
+                }
             })
     }
 
     fn draw(&mut self, _globals: WidgetGlobals, area: Rect, buf: &mut Buffer) {
-        self.selector.prev_draw_height = area.height as usize;
+        let area = {
+            let filter_height = area.height.min(3);
+            let (area, filter_area) = area.split_from_bottom(filter_height);
+            let widget: Line = self.selector.filter_string.as_str().into();
+            let border = Block::default()
+                .borders(Borders::ALL)
+                .title("Filter string");
+            widget.render(border.inner(filter_area), buf);
+            border.render(filter_area, buf);
 
-        let area = if let Some(search) = self.selector.search.as_ref() {
-            let search_area_height = area.height.min(3);
-            let (area, search_area) =
-                area.split_from_bottom(search_area_height);
-            search.render(search_area, buf);
-            area
-        } else {
             area
         };
+
+        // Save the height for use in <pageup> and <pagedown> key
+        // bindings.
+        self.selector.prev_draw_height = area.height as usize;
+
+        // Set up the filter.  Since
+        // `self.selector.currently_highlighted_buffer` will need to
+        // be mutably borrowed, must be careful not to borrow
+        // `self.selector` anywhere.
+        let filter_components: Vec<_> = {
+            let filter_string = self.selector.filter_string.as_str();
+            let is_case_sensitive =
+                filter_string.chars().any(char::is_uppercase);
+            (!filter_string.is_empty())
+                .then(|| filter_string.split_whitespace())
+                .into_iter()
+                .flatten()
+                .map(|filter| {
+                    RegexBuilder::new(regex::escape(filter).as_str())
+                        .case_insensitive(!is_case_sensitive)
+                        .build()
+                        .unwrap()
+                })
+                .collect()
+        };
+
+        let highlighted_list_entry = self.selector.list_state.selected();
 
         let items = self
             .buffers
             .iter()
             .map(|buffer| buffer.title())
-            .map(ratatui::text::Line::raw);
+            .enumerate()
+            .filter(|(_, title)| {
+                filter_components.iter().all(|regex| regex.is_match(title))
+            })
+            .enumerate()
+            .inspect(|(i_display, (i_buffer, _))| {
+                if Some(*i_display) == highlighted_list_entry {
+                    self.selector.currently_highlighted_buffer = *i_buffer;
+                }
+            })
+            .map(|(_, (_, title))| title)
+            .map(Line::raw)
+            .map(|line| {
+                filter_components.iter().fold(line, |line, regex| {
+                    line.style_regex_ref(
+                        regex,
+                        Style::default().fg(Color::LightRed),
+                    )
+                })
+            });
 
         let buffer_list = List::new(items)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
