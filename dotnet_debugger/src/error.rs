@@ -22,6 +22,9 @@ pub enum Error {
     #[error("Could not find pointer to table of method tables")]
     PointerToMethodTableTableNotFound,
 
+    #[error("Could not find instance of object")]
+    NoObjectInstanceFound,
+
     #[error("Value 0x{0:02x} does not correspond to any element type")]
     InvalidRuntimeType(u8),
 

@@ -1,7 +1,5 @@
 use std::ops::Range;
 
-use itertools::Itertools as _;
-
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
 };
@@ -247,12 +245,11 @@ impl TuiExplorerBuilder {
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-        let game_obj: Pointer = dotnet_debugger::find_object_instances(
-            &game_obj_method_table,
-            &self.reader,
-        )?
-        .exactly_one()
-        .map_err(|err| Error::UniqueGameObjectInstanceNotFound(err.count()))?;
+        let game_obj: Pointer =
+            dotnet_debugger::find_most_likely_object_instance(
+                &game_obj_method_table,
+                &self.reader,
+            )?;
 
         self.initial_pointer = game_obj;
 
@@ -405,12 +402,11 @@ impl TuiExplorerBuilder {
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-        let game_obj: Pointer = dotnet_debugger::find_object_instances(
-            &game_obj_method_table,
-            &self.reader,
-        )?
-        .exactly_one()
-        .map_err(|err| Error::UniqueGameObjectInstanceNotFound(err.count()))?;
+        let game_obj: Pointer =
+            dotnet_debugger::find_most_likely_object_instance(
+                &game_obj_method_table,
+                &self.reader,
+            )?;
 
         self.running_log
             .add_log(format!("Top-level Game1 object {game_obj}"));
@@ -527,11 +523,11 @@ impl TuiExplorer {
     pub fn new() -> Result<Self, Error> {
         TuiExplorerBuilder::new()?
             .init_symbols()
+            .initialize_view_to_stardew_dll()?
             .default_detail_formatters()
             .default_column_formatters()
             .initialize_annotations()?
             .search_based_on_annotations()?
-            .initialize_view_to_stardew_dll()?
             // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?
@@ -577,7 +573,7 @@ impl TuiExplorer {
         frame.render_widget(layout, frame.size());
     }
 
-    fn handle_event(&mut self, event: Event) {
+    pub fn handle_event(&mut self, event: Event) {
         if let Err(err) = self.try_handle_event(event) {
             self.running_log.add_log(format!("Error: {err}"));
         }

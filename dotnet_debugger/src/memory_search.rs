@@ -3,10 +3,63 @@ use memory_reader::{MemoryReader, Pointer};
 
 use crate::{Error, MethodTable};
 
+/// Returns an iterator of pointers that would be valid objects to the
+/// specified type.
+///
+/// Currently, this uses the following heuristics:
+///
+/// 1. The object has a pointer to `method_table`.  This pointer may
+///    have the lowest bit set if located during a garbage-collection
+///    step.
+///
+/// 2. The 32-bit header preceding the object has valid contents.
+///
+/// 3. On 64-bit machines, the additional 32-bit padding preceding the
+///    header is filled with zero.
+///
+/// 4. For each field that may contain a pointer, the bytes that would
+///    correspond to that field contain either a valid pointer or
+///    NULL.
 pub fn find_object_instances<'a>(
     method_table: &MethodTable,
     reader: &'a MemoryReader,
 ) -> Result<impl Iterator<Item = Pointer> + 'a, Error> {
+    let iter = iter_possible_object_instances(method_table, reader)?
+        .map(|(ptr, _)| ptr);
+
+    Ok(iter)
+}
+
+/// Find a most likely pointer to an object of a known type.
+///
+/// In many cases, it is useful to find a representative object of a
+/// type.  For example, if all objects of a type hold a reference to a
+/// shared resource, or if there should only exist a single instance
+/// of the type.
+///
+/// In `find_object_instances`, valid objects are identified by the
+/// presence of either a valid pointer or NULL at offsets that must
+/// contain a pointer.  Since any pointer-sized object that is
+/// zero-initialized will have the same bit pattern as NULL, this is
+/// likely to have false positives.
+///
+/// This method tracks the number of pointer fields that contain a
+/// non-null pointer, and returns the object that has the most
+/// non-null pointers.
+pub fn find_most_likely_object_instance(
+    method_table: &MethodTable,
+    reader: &MemoryReader,
+) -> Result<Pointer, Error> {
+    iter_possible_object_instances(method_table, reader)?
+        .max_by_key(|(_, non_null_ptr_count)| *non_null_ptr_count)
+        .map(|(ptr, _)| ptr)
+        .ok_or(Error::NoObjectInstanceFound)
+}
+
+fn iter_possible_object_instances<'a>(
+    method_table: &MethodTable,
+    reader: &'a MemoryReader,
+) -> Result<impl Iterator<Item = (Pointer, usize)> + 'a, Error> {
     let search_ptr = method_table.ptr_range().start;
     let has_finalizer = method_table.has_finalizer();
 
@@ -103,35 +156,45 @@ pub fn find_object_instances<'a>(
                 && !is_reserved_for_gc
                 && (requires_finalizer == has_finalizer)
         })
-        .filter(move |ptr| {
+        .filter_map(move |ptr| -> Option<(Pointer, usize)> {
             if offsets_of_pointers.is_empty() {
-                return true;
+                return Some((ptr, 0));
             }
 
             let min_offset = *offsets_of_pointers.first().unwrap();
             let max_offset =
                 offsets_of_pointers.last().unwrap() + Pointer::SIZE;
-            let Ok(bytes) =
-                reader.read_bytes(*ptr + min_offset, max_offset - min_offset)
-            else {
-                return false;
-            };
+            let bytes = reader
+                .read_bytes(ptr + min_offset, max_offset - min_offset)
+                .ok()?;
 
-            offsets_of_pointers.iter().all(|offset| {
-                let expected_ptr: Pointer = bytes
-                    [offset - min_offset..offset - min_offset + Pointer::SIZE]
-                    .try_into()
-                    .unwrap();
-                expected_ptr.is_null()
-                    || reader
+            let num_non_null_pointers = offsets_of_pointers
+                .iter()
+                .map(|offset| {
+                    let range = offset - min_offset
+                        ..offset - min_offset + Pointer::SIZE;
+                    bytes[range].try_into().unwrap()
+                })
+                .map(|expected_ptr: Pointer| -> Option<usize> {
+                    if expected_ptr.is_null() {
+                        Some(0)
+                    } else if reader
                         .find_containing_region(expected_ptr)
                         .map(|region| {
                             region.is_readable
                                 && region.is_writable
                                 && !region.is_shared_memory
                         })
-                        .unwrap_or(false)
-            })
+                        .is_some()
+                    {
+                        Some(1)
+                    } else {
+                        None
+                    }
+                })
+                .sum::<Option<usize>>()?;
+
+            Some((ptr, num_non_null_pointers))
         });
 
     Ok(iter)
