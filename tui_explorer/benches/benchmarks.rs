@@ -73,7 +73,7 @@ fn bench_initialization(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_render_full_tui_initialzied_to_stardew_dll<M: Measurement>(
+fn bench_render_full_tui_initialized_to_stardew_dll<M: Measurement>(
     group: &mut BenchmarkGroup<M>,
     name: &str,
 ) -> Result<(), Error> {
@@ -246,7 +246,7 @@ fn bench_per_frame(c: &mut Criterion) {
     //     .sampling_mode(criterion::SamplingMode::Flat)
     //     .measurement_time(std::time::Duration::from_secs(10));
 
-    bench_render_full_tui_initialzied_to_stardew_dll(
+    bench_render_full_tui_initialized_to_stardew_dll(
         &mut group,
         "render_full_tui_at_stardew_dll",
     )

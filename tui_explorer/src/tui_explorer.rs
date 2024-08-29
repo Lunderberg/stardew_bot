@@ -643,11 +643,13 @@ impl TuiExplorer {
             });
 
         if let Some(ptr) = side_effects.change_address {
-            self.current_region = self
-                .reader
-                .find_containing_region(ptr)
-                .ok_or(Error::PointerNotFound(ptr))?
-                .read()?;
+            if !self.current_region.contains(ptr) {
+                self.current_region = self
+                    .reader
+                    .find_containing_region(ptr)
+                    .ok_or(Error::PointerNotFound(ptr))?
+                    .read()?;
+            }
         }
 
         let globals = WidgetGlobals {
