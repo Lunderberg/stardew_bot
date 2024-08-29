@@ -224,6 +224,41 @@ impl TuiExplorerBuilder {
         })
     }
 
+    pub fn initialize_view_to_game_obj(mut self) -> Result<Self, Error> {
+        let dll_region = stardew_valley_dll(&self.reader)?.read()?;
+        let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
+        let metadata = dll_info.metadata()?;
+
+        let module_ptr =
+            dotnet_debugger::RuntimeModule::locate(&self.reader, &metadata)?;
+
+        let runtime_module = dotnet_debugger::RuntimeModule::build(
+            &self.reader,
+            &metadata,
+            module_ptr,
+        )?;
+
+        let game_obj_method_table = runtime_module
+            .iter_method_tables(&self.reader)
+            .try_find(|method_table| -> Result<_, Error> {
+                let type_def = metadata.get(method_table.token())?;
+                let name = type_def.name()?;
+                Ok(name == "Game1")
+            })?
+            .ok_or(Error::MethodTableNotFound("Game1"))?;
+
+        let game_obj: Pointer = dotnet_debugger::find_object_instances(
+            &game_obj_method_table,
+            &self.reader,
+        )?
+        .exactly_one()
+        .map_err(|err| Error::UniqueGameObjectInstanceNotFound(err.count()))?;
+
+        self.initial_pointer = game_obj;
+
+        Ok(self)
+    }
+
     pub fn initialize_annotations(mut self) -> Result<Self, Error> {
         let region = self.stardew_valley_dll()?.read()?;
         let dll_info = dll_unpacker::DLLUnpacker::new(&region);
