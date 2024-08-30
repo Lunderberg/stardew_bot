@@ -37,6 +37,9 @@ pub use memory_table::*;
 mod detail_view;
 pub use detail_view::*;
 
+mod object_explorer;
+pub use object_explorer::*;
+
 pub(crate) mod extended_tui;
 
 pub mod column_formatter;

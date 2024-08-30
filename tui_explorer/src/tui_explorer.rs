@@ -8,7 +8,7 @@ use stardew_utils::stardew_valley_pid;
 use crate::extended_tui::{
     DynamicLayout, WidgetGlobals, WidgetSideEffects, WidgetWindow,
 };
-use crate::extensions::*;
+use crate::{extensions::*, ObjectExplorer};
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
     SigintHandler,
@@ -34,6 +34,7 @@ pub struct TuiExplorer {
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
+    object_explorer: ObjectExplorer,
     annotations: Vec<Annotation>,
     // Display state
     should_exit: bool,
@@ -61,6 +62,8 @@ pub struct TuiExplorerBuilder {
     initial_pointer: Pointer,
     annotations: Vec<Annotation>,
     running_log: RunningLog,
+    layout: DynamicLayout,
+    top_object: Option<Pointer>,
 }
 
 fn stardew_valley_dll(
@@ -127,7 +130,29 @@ impl TuiExplorerBuilder {
             initial_pointer: Pointer::null(),
             annotations: Vec::new(),
             running_log: RunningLog::new(100),
+            layout: DynamicLayout::new(),
+            top_object: None,
         })
+    }
+
+    pub fn layout_memory_table(mut self) -> Self {
+        self.layout.close_all_other_windows();
+        self.layout.split_horizontally(Some(45), None);
+        self.layout.switch_to_buffer(0);
+        self.layout.split_vertically(Some(15), None);
+        self.layout.cycle_next();
+        self.layout.switch_to_buffer(1);
+        self.layout.cycle_next();
+        self.layout.switch_to_buffer(3);
+        self.layout.split_horizontally(Some(65), Some(60));
+        self.layout.switch_to_buffer(2);
+        self
+    }
+
+    pub fn layout_object_explorer(mut self) -> Self {
+        self.layout.close_all_other_windows();
+        self.layout.switch_to_buffer(4);
+        self
     }
 
     pub fn init_symbols(self) -> Self {
@@ -230,11 +255,8 @@ impl TuiExplorerBuilder {
         let module_ptr =
             dotnet_debugger::RuntimeModule::locate(&self.reader, &metadata)?;
 
-        let runtime_module = dotnet_debugger::RuntimeModule::build(
-            &self.reader,
-            &metadata,
-            module_ptr,
-        )?;
+        let runtime_module =
+            dotnet_debugger::RuntimeModule::build(&self.reader, module_ptr)?;
 
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.reader)
@@ -252,6 +274,7 @@ impl TuiExplorerBuilder {
             )?;
 
         self.initial_pointer = game_obj;
+        self.top_object = Some(game_obj);
 
         Ok(self)
     }
@@ -288,11 +311,8 @@ impl TuiExplorerBuilder {
             dll_region.name()
         ));
 
-        let runtime_module = dotnet_debugger::RuntimeModule::build(
-            &self.reader,
-            &metadata,
-            module_ptr,
-        )?;
+        let runtime_module =
+            dotnet_debugger::RuntimeModule::build(&self.reader, module_ptr)?;
 
         self.running_log.add_log(format!(
             "Method table: {}",
@@ -488,27 +508,17 @@ impl TuiExplorerBuilder {
             self.column_formatters,
         )?;
 
-        let mut layout = DynamicLayout::new();
-        layout.split_horizontally(Some(45), None);
-        layout.switch_to_buffer(0);
-        layout.split_vertically(Some(15), None);
-        layout.cycle_next();
-        layout.switch_to_buffer(1);
-        layout.cycle_next();
-        layout.switch_to_buffer(3);
-        layout.split_horizontally(Some(65), Some(60));
-        layout.switch_to_buffer(2);
-
         let out = TuiExplorer {
             _pid: self.pid,
             reader,
             current_region,
             _symbols: self.symbols,
-            layout,
+            layout: self.layout,
             stack_frame_table,
             running_log: self.running_log,
             memory_table,
             detail_view,
+            object_explorer: ObjectExplorer::new(self.top_object),
             annotations,
 
             should_exit: false,
@@ -522,6 +532,8 @@ impl TuiExplorerBuilder {
 impl TuiExplorer {
     pub fn new() -> Result<Self, Error> {
         TuiExplorerBuilder::new()?
+            // .layout_memory_table()
+            .layout_object_explorer()
             .init_symbols()
             .initialize_view_to_stardew_dll()?
             .default_detail_formatters()
@@ -531,6 +543,7 @@ impl TuiExplorer {
             // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?
+            .initialize_view_to_game_obj()?
             .build()
     }
 
@@ -560,6 +573,7 @@ impl TuiExplorer {
             Box::new(&mut self.detail_view),
             Box::new(&mut self.memory_table),
             Box::new(&mut self.running_log),
+            Box::new(&mut self.object_explorer),
         ];
         let layout = self.layout.drawable(
             &mut buffers,
@@ -621,6 +635,7 @@ impl TuiExplorer {
             Box::new(&mut self.detail_view),
             Box::new(&mut self.memory_table),
             Box::new(&mut self.running_log),
+            Box::new(&mut self.object_explorer),
         ];
 
         let result = KeyBindingMatch::Mismatch

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use dll_unpacker::Metadata;
 use itertools::Itertools as _;
-use memory_reader::extensions::*;
+use memory_reader::{extensions::*, MemoryRegion};
 use memory_reader::{MemoryReader, Pointer};
 
 use crate::{Error, MethodTable, MethodTableLookup};
@@ -12,6 +12,9 @@ use crate::{Error, MethodTable, MethodTableLookup};
 pub struct RuntimeModule {
     /// Location of the Module object
     pub location: Pointer,
+
+    /// The DLL corresponding to this Module.
+    pub dll_region: MemoryRegion,
 
     /// The location of the pointer to the MethodTableLookup.
     pub ptr_to_table_of_method_tables: Pointer,
@@ -90,9 +93,44 @@ impl RuntimeModule {
 
     pub fn build(
         reader: &MemoryReader,
-        metadata: &Metadata,
         location: Pointer,
     ) -> Result<Self, Error> {
+        let image_ptr = {
+            let pe_file_ptr: Pointer =
+                reader.read_byte_array(location + 16)?.into();
+            let pe_image_ptr: Pointer =
+                reader.read_byte_array(pe_file_ptr + 8)?.into();
+            let pe_image_layout_ptr: Pointer = (0..3)
+                .map(|i| pe_image_ptr + 96 + Pointer::SIZE * i)
+                .map(|ptr| -> Result<Pointer, _> {
+                    reader.read_byte_array(ptr).map(Into::into)
+                })
+                .find(|res| match res {
+                    Ok(ptr) => !ptr.is_null(),
+                    Err(_) => true,
+                })
+                .ok_or(Error::DLLPointerNotFoundFromModule)??;
+            let image_ptr: Pointer =
+                reader.read_byte_array(pe_image_layout_ptr + 8)?.into();
+
+            image_ptr
+        };
+
+        // TODO: Allow a caller to pass ownership of an existing DLL
+        // region.
+        let dll_region = reader
+            .find_region(|region| {
+                region.is_readable
+                    && !region.is_writable
+                    && !region.is_executable
+                    && region.is_shared_memory
+                    && region.contains(image_ptr)
+            })
+            .ok_or(Error::DLLPointerNotFoundFromModule)?
+            .read()?;
+        let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
+        let metadata = dll_info.metadata()?;
+
         // The layout of the Module varies by .NET version, but should
         // be less than 4kB for each.  If I don't find each pointer by
         // then, then something else is probably wrong.
@@ -234,6 +272,7 @@ impl RuntimeModule {
 
         Ok(Self {
             location,
+            dll_region,
             ptr_to_table_of_method_tables,
             method_table_lookup,
             base_ptr_of_non_gc_statics,
@@ -246,5 +285,14 @@ impl RuntimeModule {
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {
         self.method_table_lookup.iter_tables(reader)
+    }
+
+    pub fn metadata(&self) -> Result<Metadata, Error> {
+        // TODO: Cache the information from the header (offset to CLR
+        // metadata, heaps, ans MetadataTableSizes) so that it can be
+        // quickly reconstructed.
+        let dll_info = dll_unpacker::DLLUnpacker::new(&self.dll_region);
+        let metadata = dll_info.metadata()?;
+        Ok(metadata)
     }
 }

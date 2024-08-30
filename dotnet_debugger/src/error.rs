@@ -25,6 +25,9 @@ pub enum Error {
     #[error("Could not find instance of object")]
     NoObjectInstanceFound,
 
+    #[error("Could not locate the DLL, starting from the Module")]
+    DLLPointerNotFoundFromModule,
+
     #[error("Value 0x{0:02x} does not correspond to any element type")]
     InvalidRuntimeType(u8),
 
