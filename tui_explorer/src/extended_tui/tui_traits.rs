@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use memory_reader::{MemoryReader, MemoryRegion, Pointer};
 
-use crate::{Annotation, KeyBindingMatch, KeySequence};
+use crate::{Annotation, Error, KeyBindingMatch, KeySequence};
 
 pub trait WidgetWindow {
     /// The title of the widget.  This is used for the title in the
@@ -19,6 +19,14 @@ pub trait WidgetWindow {
         _side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
+    }
+
+    fn periodic_update<'a>(
+        &mut self,
+        _globals: WidgetGlobals<'a>,
+        _side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 
     fn change_address<'a>(

@@ -152,6 +152,8 @@ impl TuiExplorerBuilder {
 
     pub fn layout_object_explorer(mut self) -> Self {
         self.layout.close_all_other_windows();
+        self.layout.switch_to_buffer(3);
+        self.layout.split_horizontally(None, Some(60));
         self.layout.switch_to_buffer(4);
         self
     }
@@ -563,6 +565,7 @@ impl TuiExplorer {
                 let event_received = event::read()?;
                 self.handle_event(event_received);
             }
+            self.periodic_update();
         }
         Ok(())
     }
@@ -657,13 +660,60 @@ impl TuiExplorer {
                 )
             });
 
+        self.apply_side_effects(side_effects);
+
+        Ok(result)
+    }
+
+    pub fn periodic_update(&mut self) {
+        let globals = WidgetGlobals {
+            reader: &self.reader,
+            current_region: &self.current_region,
+            annotations: &self.annotations,
+        };
+
+        // TODO: Move the buffers into a separate class, to allow this
+        // to be de-duplicated between `apply_key_binding`, `update`, and `draw`,
+        // without running into multiple borrows of `self`.
+        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
+            Box::new(&mut self.stack_frame_table),
+            Box::new(&mut self.detail_view),
+            Box::new(&mut self.memory_table),
+            Box::new(&mut self.running_log),
+            Box::new(&mut self.object_explorer),
+        ];
+
+        let mut side_effects = WidgetSideEffects::default();
+
+        let res = buffer_list.iter_mut().try_for_each(|buffer| {
+            buffer.periodic_update(globals, &mut side_effects)
+        });
+
+        if let Err(err) = res {
+            self.running_log.add_log(format!("Error: {err}"));
+        }
+
+        self.apply_side_effects(side_effects);
+    }
+
+    fn apply_side_effects(&mut self, mut side_effects: WidgetSideEffects) {
         if let Some(ptr) = side_effects.change_address {
             if !self.current_region.contains(ptr) {
-                self.current_region = self
+                let new_region = self
                     .reader
                     .find_containing_region(ptr)
-                    .ok_or(Error::PointerNotFound(ptr))?
-                    .read()?;
+                    .ok_or(Error::PointerNotFound(ptr))
+                    .and_then(|region| region.read().map_err(Into::into));
+
+                match new_region {
+                    Ok(region) => {
+                        self.current_region = region;
+                    }
+                    Err(err) => {
+                        self.running_log.add_log(format!("Error: {err}"));
+                        return;
+                    }
+                }
             }
         }
 
@@ -672,6 +722,17 @@ impl TuiExplorer {
             current_region: &self.current_region,
             annotations: &self.annotations,
         };
+
+        // TODO: Move the buffers into a separate class, to allow this
+        // to be de-duplicated between `apply_key_binding` and `draw`,
+        // without running into multiple borrows of `self`.
+        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
+            Box::new(&mut self.stack_frame_table),
+            Box::new(&mut self.detail_view),
+            Box::new(&mut self.memory_table),
+            Box::new(&mut self.running_log),
+            Box::new(&mut self.object_explorer),
+        ];
 
         if let Some(ptr) = side_effects.change_address {
             buffer_list.iter_mut().for_each(|buffer| {
@@ -684,7 +745,5 @@ impl TuiExplorer {
         for message in side_effects.log_messages {
             self.running_log.add_log(message);
         }
-
-        Ok(result)
     }
 }

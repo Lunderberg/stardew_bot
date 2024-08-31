@@ -177,6 +177,7 @@ impl FromStr for KeySequence {
                                 "left>" => Some(KeyCode::Left),
                                 "right>" => Some(KeyCode::Right),
                                 "backspace>" => Some(KeyCode::Backspace),
+                                "tab>" => Some(KeyCode::Tab),
                                 "" => Some(KeyCode::Char('<')),
                                 _ => None,
                             }
@@ -219,6 +220,7 @@ impl std::fmt::Display for KeySequence {
                     KeyCode::End => write!(f, "<end>"),
                     KeyCode::PageUp => write!(f, "<pageup>"),
                     KeyCode::PageDown => write!(f, "<pagedown>"),
+                    KeyCode::Tab => write!(f, "<tab>"),
                     KeyCode::Char(c) => write!(f, "{c}"),
 
                     other => panic!(

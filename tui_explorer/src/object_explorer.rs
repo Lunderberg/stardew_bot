@@ -1,19 +1,242 @@
-use dotnet_debugger::{PersistentState, RuntimeObject, TypedPointer};
-use ratatui::{text::Line, widgets::Widget as _};
+use dotnet_debugger::{
+    CachedReader, PersistentState, RuntimeObject, TypedPointer,
+};
+use memory_reader::Pointer;
+use ratatui::{
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{List, ListState, StatefulWidget},
+};
 
-use crate::{extended_tui::WidgetWindow, Error};
+use crate::{
+    extended_tui::{ScrollableState as _, WidgetWindow},
+    Error, KeyBindingMatch,
+};
 
 pub struct ObjectExplorer {
     state: PersistentState,
-    top_object: Option<TypedPointer<RuntimeObject>>,
+    object_tree: Option<ObjectTreeNode>,
+    list_state: ListState,
+    prev_draw_height: usize,
 }
+
+enum ObjectTreeNode {
+    UnknownObject {
+        ptr: TypedPointer<RuntimeObject>,
+        should_read: bool,
+    },
+    Value(String),
+    Object {
+        display_expanded: bool,
+        obj: RuntimeObject,
+        class_name: String,
+        fields: Vec<ObjectTreeField>,
+    },
+}
+
+struct ObjectTreeField {
+    field_name: String,
+    obj: ObjectTreeNode,
+}
+
+#[derive(Clone, Copy)]
+struct Indent(usize);
 
 impl ObjectExplorer {
     pub fn new(top_object: Option<TypedPointer<RuntimeObject>>) -> Self {
+        let object_tree = top_object.map(|ptr| ObjectTreeNode::UnknownObject {
+            ptr,
+            should_read: true,
+        });
         ObjectExplorer {
             state: PersistentState::new(),
-            top_object,
+            object_tree,
+            list_state: ListState::default().with_selected(Some(0)),
+            prev_draw_height: 1,
         }
+    }
+
+    fn toggle_expansion(&mut self) {
+        let selected = self
+            .list_state
+            .selected()
+            .expect("ObjectExplorer should always have a selected line.");
+
+        let Some(object_tree) = &mut self.object_tree else {
+            return;
+        };
+
+        let node = object_tree
+            .node_at_line(selected)
+            .expect("The selected line should always point to a node.");
+
+        match node {
+            ObjectTreeNode::UnknownObject { should_read, .. } => {
+                *should_read = !*should_read;
+            }
+            ObjectTreeNode::Object {
+                display_expanded, ..
+            } => {
+                *display_expanded = !*display_expanded;
+            }
+            ObjectTreeNode::Value(_) => todo!(),
+        }
+    }
+}
+
+impl std::fmt::Display for Indent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{: >indent$}", "", indent = self.0)
+    }
+}
+impl std::ops::Add<usize> for Indent {
+    type Output = Indent;
+
+    fn add(self, rhs: usize) -> Self::Output {
+        Self(self.0 + rhs)
+    }
+}
+
+impl ObjectTreeNode {
+    fn expand_marked(
+        &mut self,
+        reader: &mut CachedReader,
+    ) -> Result<(), Error> {
+        match self {
+            ObjectTreeNode::UnknownObject {
+                ptr,
+                should_read: true,
+            } => {
+                let obj = reader.object(*ptr)?;
+                let class_name = reader.class_name(&obj)?;
+                let fields = reader
+                    .iter_fields(&obj)?
+                    .into_iter()
+                    .map(|field_name| {
+                        //TODO: Actually read the field's value
+                        ObjectTreeField {
+                            field_name,
+                            obj: ObjectTreeNode::UnknownObject {
+                                ptr: Pointer::null().into(),
+                                should_read: false,
+                            },
+                        }
+                    })
+                    .collect();
+
+                *self = ObjectTreeNode::Object {
+                    obj,
+                    class_name,
+                    fields,
+                    display_expanded: true,
+                };
+            }
+            ObjectTreeNode::Object { fields, .. } => fields
+                .iter_mut()
+                .try_for_each(|field| field.obj.expand_marked(reader))?,
+            _ => {}
+        }
+
+        Ok(())
+    }
+
+    fn num_lines(&self) -> usize {
+        match self {
+            ObjectTreeNode::Object {
+                display_expanded: true,
+                fields,
+                ..
+            } => {
+                2 + fields
+                    .iter()
+                    .map(|field| field.obj.num_lines())
+                    .sum::<usize>()
+            }
+            _ => 1,
+        }
+    }
+
+    fn node_at_line<'a>(
+        &'a mut self,
+        mut i_line: usize,
+    ) -> Option<&'a mut Self> {
+        let num_lines = self.num_lines();
+        if i_line >= num_lines {
+            return None;
+        }
+        if i_line == 0 {
+            Some(self)
+        } else if i_line + 1 < num_lines {
+            let Self::Object {
+                display_expanded: true,
+                fields,
+                ..
+            } = self
+            else {
+                panic!(
+                    "This conditional should only be reached \
+                     if this is a multi-line object."
+                )
+            };
+
+            i_line -= 1;
+            for field in fields {
+                let field_lines = field.obj.num_lines();
+                if i_line < field_lines {
+                    return field.obj.node_at_line(i_line);
+                }
+                i_line -= field_lines;
+            }
+
+            panic!(
+                "This should be unreachable, \
+                 should have found a field containing the line."
+            );
+        } else if i_line < num_lines {
+            Some(self)
+        } else {
+            None
+        }
+    }
+
+    fn iter_lines(
+        &self,
+        indent: Indent,
+        field_name: &str,
+    ) -> impl Iterator<Item = String> + '_ {
+        let iter: Box<dyn Iterator<Item = String>> = match self {
+            ObjectTreeNode::UnknownObject { ptr, .. } => {
+                let iter = [format!("{indent}Object {field_name} = {ptr};")]
+                    .into_iter();
+                Box::new(iter)
+            }
+            ObjectTreeNode::Value(_) => {
+                let iter = [format!("{indent}Value {field_name} = (TODO);")]
+                    .into_iter();
+                Box::new(iter)
+            }
+            ObjectTreeNode::Object {
+                display_expanded: false,
+                class_name,
+                ..
+            } => {
+                let iter = [format!("{indent}{class_name}")].into_iter();
+                Box::new(iter)
+            }
+            ObjectTreeNode::Object {
+                class_name, fields, ..
+            } => {
+                let iter = std::iter::empty::<String>()
+                    .chain([format!("{indent}class {class_name} {{").into()])
+                    .chain(fields.iter().flat_map(move |field| {
+                        field.obj.iter_lines(indent + 4, &field.field_name)
+                    }))
+                    .chain([format!("{indent}}}")]);
+                Box::new(iter)
+            }
+        };
+
+        iter
     }
 }
 
@@ -22,36 +245,55 @@ impl WidgetWindow for ObjectExplorer {
         "ObjectExplorer".into()
     }
 
+    fn apply_key_binding<'a>(
+        &'a mut self,
+        keystrokes: &'a crate::KeySequence,
+        _globals: crate::extended_tui::WidgetGlobals<'a>,
+        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+    ) -> KeyBindingMatch {
+        KeyBindingMatch::Mismatch
+            .or_else(|| {
+                self.list_state.apply_key_binding(
+                    keystrokes,
+                    self.object_tree
+                        .as_ref()
+                        .map(|obj| obj.num_lines())
+                        .unwrap_or(1),
+                    self.prev_draw_height,
+                )
+            })
+            .or_try_binding("<tab>", keystrokes, || self.toggle_expansion())
+    }
+
+    fn periodic_update<'a>(
+        &mut self,
+        globals: crate::extended_tui::WidgetGlobals<'a>,
+        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+    ) -> Result<(), Error> {
+        if let Some(obj) = &mut self.object_tree {
+            let mut reader = self.state.cached_reader(globals.reader);
+            obj.expand_marked(&mut reader)?;
+        }
+        Ok(())
+    }
+
     fn draw<'a>(
         &'a mut self,
-        globals: crate::extended_tui::WidgetGlobals<'a>,
+        _globals: crate::extended_tui::WidgetGlobals<'a>,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
-        let Some(object_ptr) = self.top_object else {
-            return;
-        };
+        self.prev_draw_height = area.height as usize;
 
-        let res = || -> Result<_, Error> {
-            let mut reader = self.state.cached_reader(globals.reader);
+        let lines = self
+            .object_tree
+            .iter()
+            .flat_map(|node| node.iter_lines(Indent(0), "_"))
+            .map(|text| Line::raw(text));
 
-            let top_object = reader.object(object_ptr)?;
+        let widget = List::new(lines)
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
-            let class_name: Line = reader.class_name(&top_object)?.into();
-
-            let widget: ratatui::widgets::List = std::iter::once(class_name)
-                .chain(
-                    reader
-                        .iter_fields(&top_object)?
-                        .into_iter()
-                        .map(Into::into),
-                )
-                .collect();
-
-            widget.render(area, buf);
-            Ok(())
-        }();
-
-        res.unwrap()
+        StatefulWidget::render(widget, area, buf, &mut self.list_state);
     }
 }
