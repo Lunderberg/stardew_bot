@@ -41,16 +41,18 @@ impl MemoryReader {
 
     pub fn read_byte_array<const N: usize>(
         &self,
-        pointer: Pointer,
+        pointer: impl Into<Pointer>,
     ) -> Result<[u8; N]> {
+        let pointer: Pointer = pointer.into();
         pointer.read_byte_array(self.pid)
     }
 
     pub fn read_bytes(
         &self,
-        pointer: Pointer,
+        pointer: impl Into<Pointer>,
         num_bytes: usize,
     ) -> Result<Vec<u8>> {
+        let pointer: Pointer = pointer.into();
         pointer.read_bytes(self.pid, num_bytes)
     }
 

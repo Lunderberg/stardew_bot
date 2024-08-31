@@ -2,13 +2,13 @@ use std::collections::HashMap;
 
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::{extensions::*, RuntimeModule};
+use crate::{extensions::*, RuntimeModule, TypedPointer};
 use crate::{Error, MethodTable, RuntimeObject};
 
 #[derive(Default)]
 pub struct PersistentState {
-    method_tables: HashMap<Pointer, MethodTable>,
-    runtime_modules: HashMap<Pointer, RuntimeModule>,
+    method_tables: HashMap<TypedPointer<MethodTable>, MethodTable>,
+    runtime_modules: HashMap<TypedPointer<RuntimeModule>, RuntimeModule>,
 }
 
 pub struct CachedReader<'a> {
@@ -47,12 +47,12 @@ impl<'a> CachedReader<'a> {
         let method_table = state
             .method_tables
             .entry(method_table_ptr)
-            .or_try_insert(|ptr| MethodTable::read(*ptr, reader))?;
+            .or_try_insert(|ptr| ptr.read(reader))?;
 
         let module = state
             .runtime_modules
             .entry(method_table.module())
-            .or_try_insert(|ptr| RuntimeModule::read(*ptr, reader))?;
+            .or_try_insert(|ptr| ptr.read(reader))?;
         let metadata = module.metadata()?;
 
         let name = metadata.get(method_table.token())?.name()?;
@@ -70,12 +70,12 @@ impl<'a> CachedReader<'a> {
         let method_table = state
             .method_tables
             .entry(method_table_ptr)
-            .or_try_insert(|ptr| MethodTable::read(*ptr, reader))?;
+            .or_try_insert(|ptr| ptr.read(reader))?;
 
         let module = state
             .runtime_modules
             .entry(method_table.module())
-            .or_try_insert(|ptr| RuntimeModule::read(*ptr, reader))?;
+            .or_try_insert(|ptr| ptr.read(reader))?;
         let metadata = module.metadata()?;
 
         method_table

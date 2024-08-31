@@ -3,6 +3,9 @@ pub use error::Error;
 
 pub(crate) mod macros;
 
+mod typed_pointer;
+pub use typed_pointer::*;
+
 mod runtime_module;
 pub use runtime_module::*;
 

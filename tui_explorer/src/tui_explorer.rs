@@ -255,8 +255,7 @@ impl TuiExplorerBuilder {
         let module_ptr =
             dotnet_debugger::RuntimeModule::locate(&metadata, &self.reader)?;
 
-        let runtime_module =
-            dotnet_debugger::RuntimeModule::read(module_ptr, &self.reader)?;
+        let runtime_module = module_ptr.read(&self.reader)?;
 
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.reader)
@@ -311,8 +310,7 @@ impl TuiExplorerBuilder {
             dll_region.name()
         ));
 
-        let runtime_module =
-            dotnet_debugger::RuntimeModule::read(module_ptr, &self.reader)?;
+        let runtime_module = module_ptr.read(&self.reader)?;
 
         self.running_log.add_log(format!(
             "Method table: {}",

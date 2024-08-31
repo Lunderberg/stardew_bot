@@ -1,17 +1,20 @@
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::Error;
+use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
 
 pub struct RuntimeObject {
-    location: Pointer,
-    method_table: Pointer,
+    location: TypedPointer<RuntimeObject>,
+    method_table: TypedPointer<MethodTable>,
 }
 
 impl RuntimeObject {
-    pub fn new(location: Pointer, method_table: Pointer) -> Self {
+    pub fn new(
+        location: TypedPointer<RuntimeObject>,
+        method_table: TypedPointer<MethodTable>,
+    ) -> Self {
         Self {
-            location,
-            method_table,
+            location: location.into(),
+            method_table: method_table.into(),
         }
     }
 
@@ -19,11 +22,20 @@ impl RuntimeObject {
         location: Pointer,
         reader: &MemoryReader,
     ) -> Result<Self, Error> {
-        let method_table = reader.read_byte_array(location)?.into();
-        Ok(Self::new(location, method_table))
+        let method_table: Pointer = reader.read_byte_array(location)?.into();
+        Ok(Self::new(location.into(), method_table.into()))
     }
 
-    pub fn method_table(&self) -> Pointer {
+    pub fn method_table(&self) -> TypedPointer<MethodTable> {
         self.method_table
+    }
+}
+
+impl ReadTypedPointer for RuntimeObject {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        RuntimeObject::read(ptr, reader)
     }
 }

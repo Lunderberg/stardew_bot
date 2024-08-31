@@ -6,7 +6,10 @@ use dll_unpacker::{
 };
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
-use crate::{unpack_fields, Error, FieldDescription, FieldDescriptions};
+use crate::{
+    unpack_fields, Error, FieldDescription, FieldDescriptions,
+    ReadTypedPointer, RuntimeModule, TypedPointer,
+};
 
 pub struct MethodTableLookup {
     pub location: Range<Pointer>,
@@ -85,8 +88,8 @@ impl MethodTable {
         raw_token: {u16, 10..12},
         num_virtuals: {u16, 12..14},
         num_interfaces: {u16, 14..16},
-        parent_method_table: {Pointer, 16..24},
-        module: {Pointer, 24..32},
+        parent_method_table: {TypedPointer<MethodTable>, 16..24},
+        module: {TypedPointer<RuntimeModule>, 24..32},
         writable_data: {Pointer, 32..40},
         ee_class_or_canonical_table: {Pointer, 40..48},
 
@@ -150,10 +153,10 @@ impl MethodTable {
         MetadataTableIndex::new(index - 1)
     }
 
-    pub fn get_ee_class(
+    pub fn ee_class_ptr(
         &self,
         reader: &MemoryReader,
-    ) -> Result<EEClass, Error> {
+    ) -> Result<TypedPointer<EEClass>, Error> {
         let ptr = self.ee_class_or_canonical_table();
         let is_ee_class = ptr.as_usize() & 3usize == 0;
 
@@ -164,21 +167,16 @@ impl MethodTable {
             reader.read_byte_array(canonical_method_table + 40)?.into()
         };
 
-        let base_size = 56;
-        // EEClass stores extra data after the end of the class
-        // members.  The length of these is about 44 bytes (11 fields
-        // * 4 bytes/field), but they occur after the subclass's
-        // fields.
-        //
-        // This will need to change for .NET 9.0 onward, which moves
-        // these sizes into the class definition.
-        // https://github.com/dotnet/runtime/commit/8b581cad
-        // (2024-01-24)
-        let extra_size = 256;
-        let bytes = reader.read_bytes(ptr, base_size + extra_size)?;
-        Ok(EEClass {
-            bytes: OwnedBytes::new(ptr, bytes),
-        })
+        Ok(ptr.into())
+    }
+
+    pub fn get_ee_class(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<EEClass, Error> {
+        let ptr = self.ee_class_ptr(reader)?;
+        let ee_class = ptr.read(reader)?;
+        Ok(ee_class)
     }
 
     pub fn get_parent(
@@ -186,11 +184,13 @@ impl MethodTable {
         reader: &MemoryReader,
     ) -> Result<Option<Self>, Error> {
         let ptr = self.parent_method_table();
-        Ok(if ptr.is_null() {
+        let parent = if ptr.is_null() {
             None
         } else {
-            Some(Self::read(ptr, reader)?)
-        })
+            Some(ptr.read(reader)?)
+        };
+
+        Ok(parent)
     }
 
     pub fn iter_parents<'a>(
@@ -251,7 +251,37 @@ impl MethodTable {
     }
 }
 
+impl ReadTypedPointer for MethodTable {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        MethodTable::read(ptr, reader)
+    }
+}
+
 impl EEClass {
+    pub fn read(
+        location: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        let base_size = 56;
+        // EEClass stores extra data after the end of the class
+        // members.  The length of these is about 44 bytes (11 fields
+        // * 4 bytes/field), but they occur after the subclass's
+        // fields.
+        //
+        // This will need to change for .NET 9.0 onward, which moves
+        // these sizes into the class definition.
+        // https://github.com/dotnet/runtime/commit/8b581cad
+        // (2024-01-24)
+        let extra_size = 256;
+        let bytes = reader.read_bytes(location, base_size + extra_size)?;
+        Ok(Self {
+            bytes: OwnedBytes::new(location, bytes),
+        })
+    }
+
     pub fn ptr_range(&self) -> Range<Pointer> {
         let start = self.bytes.start();
         let size = self.fixed_class_fields() as usize + 44;
@@ -314,6 +344,15 @@ impl EEClass {
         let offset = self.fixed_class_fields() as usize;
         let bytes = self.bytes.subrange(offset..offset + 44);
         EEClassPackedFields { bytes }
+    }
+}
+
+impl ReadTypedPointer for EEClass {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        EEClass::read(ptr, reader)
     }
 }
 

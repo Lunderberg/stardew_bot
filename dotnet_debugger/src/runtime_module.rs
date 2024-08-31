@@ -5,7 +5,9 @@ use itertools::Itertools as _;
 use memory_reader::{extensions::*, MemoryRegion};
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::{Error, MethodTable, MethodTableLookup};
+use crate::{
+    Error, MethodTable, MethodTableLookup, ReadTypedPointer, TypedPointer,
+};
 
 /// Contains locations of key structures within the runtime
 /// representation of a single CLR DLL.
@@ -43,7 +45,7 @@ impl RuntimeModule {
     pub fn locate(
         metadata: &Metadata,
         reader: &MemoryReader,
-    ) -> Result<Pointer, Error> {
+    ) -> Result<TypedPointer<Self>, Error> {
         // Pointers to IL method definitions in the loaded DLL.
         let dll_method_def: HashSet<Pointer> = metadata
             .method_def_table()?
@@ -53,7 +55,7 @@ impl RuntimeModule {
             .map(|method_body| method_body.start)
             .collect();
 
-        reader
+        let ptr = reader
             .regions
             .iter()
             .filter(|region| {
@@ -88,7 +90,9 @@ impl RuntimeModule {
             .into_iter()
             .max_by_key(|(_, counts)| *counts)
             .map(|(value, _)| value)
-            .ok_or(Error::ModulePointerNotFound)
+            .ok_or(Error::ModulePointerNotFound)?;
+
+        Ok(ptr.into())
     }
 
     pub fn read(
@@ -294,5 +298,14 @@ impl RuntimeModule {
         let dll_info = dll_unpacker::DLLUnpacker::new(&self.dll_region);
         let metadata = dll_info.metadata()?;
         Ok(metadata)
+    }
+}
+
+impl ReadTypedPointer for RuntimeModule {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        RuntimeModule::read(ptr, reader)
     }
 }
