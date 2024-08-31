@@ -41,8 +41,8 @@ impl RuntimeModule {
     /// Given the unpacked Metadata from a DLL, attempt to locate its
     /// runtime representation.
     pub fn locate(
-        reader: &MemoryReader,
         metadata: &Metadata,
+        reader: &MemoryReader,
     ) -> Result<Pointer, Error> {
         // Pointers to IL method definitions in the loaded DLL.
         let dll_method_def: HashSet<Pointer> = metadata
@@ -91,9 +91,9 @@ impl RuntimeModule {
             .ok_or(Error::ModulePointerNotFound)
     }
 
-    pub fn build(
-        reader: &MemoryReader,
+    pub fn read(
         location: Pointer,
+        reader: &MemoryReader,
     ) -> Result<Self, Error> {
         let image_ptr = {
             let pe_file_ptr: Pointer =

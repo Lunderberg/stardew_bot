@@ -52,7 +52,7 @@ impl<'a> CachedReader<'a> {
         let module = state
             .runtime_modules
             .entry(method_table.module())
-            .or_try_insert(|ptr| RuntimeModule::build(reader, *ptr))?;
+            .or_try_insert(|ptr| RuntimeModule::read(*ptr, reader))?;
         let metadata = module.metadata()?;
 
         let name = metadata.get(method_table.token())?.name()?;
@@ -75,7 +75,7 @@ impl<'a> CachedReader<'a> {
         let module = state
             .runtime_modules
             .entry(method_table.module())
-            .or_try_insert(|ptr| RuntimeModule::build(reader, *ptr))?;
+            .or_try_insert(|ptr| RuntimeModule::read(*ptr, reader))?;
         let metadata = module.metadata()?;
 
         method_table
