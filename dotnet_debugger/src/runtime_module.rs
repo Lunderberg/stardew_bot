@@ -1,13 +1,12 @@
 use std::collections::HashSet;
+use std::ops::Range;
 
-use dll_unpacker::Metadata;
+use dll_unpacker::{Metadata, MetadataTableIndex, TypeDef};
 use itertools::Itertools as _;
-use memory_reader::{extensions::*, MemoryRegion};
+use memory_reader::{extensions::*, MemoryRegion, OwnedBytes};
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::{
-    Error, MethodTable, MethodTableLookup, ReadTypedPointer, TypedPointer,
-};
+use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
 
 /// Contains locations of key structures within the runtime
 /// representation of a single CLR DLL.
@@ -37,6 +36,11 @@ pub struct RuntimeModule {
     /// static values.  These values are relative to an allocation
     /// owned by the DomainLocalModule.
     pub base_ptr_of_gc_statics: Pointer,
+}
+
+pub struct MethodTableLookup {
+    pub location: Range<Pointer>,
+    pub method_tables: Vec<Range<Pointer>>,
 }
 
 impl RuntimeModule {
@@ -307,5 +311,55 @@ impl ReadTypedPointer for RuntimeModule {
         reader: &MemoryReader,
     ) -> Result<Self, Error> {
         RuntimeModule::read(ptr, reader)
+    }
+}
+
+impl MethodTableLookup {
+    pub fn location_of_method_table_pointer(
+        &self,
+        index: MetadataTableIndex<TypeDef>,
+    ) -> Range<Pointer> {
+        let index: usize = index.into();
+        let index = index + 1;
+        let ptr_start = self.location.start + index * Pointer::SIZE;
+        ptr_start..ptr_start + Pointer::SIZE
+    }
+
+    pub fn iter_tables<'a>(
+        &'a self,
+        reader: &'a MemoryReader,
+    ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {
+        self.method_tables
+            .iter()
+            .cloned()
+            .filter(|ptr| !ptr.start.is_null())
+            .map(move |location| {
+                let nbytes = location.end - location.start;
+                let bytes = reader.read_bytes(location.start, nbytes)?;
+                Ok(MethodTable {
+                    bytes: OwnedBytes::new(location.start, bytes),
+                })
+            })
+    }
+
+    pub fn get(
+        &self,
+        index: MetadataTableIndex<TypeDef>,
+        reader: &MemoryReader,
+    ) -> Result<MethodTable, Error> {
+        let byte_range = &self[index];
+        let bytes = reader
+            .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
+        let bytes = OwnedBytes::new(byte_range.start, bytes);
+        Ok(MethodTable { bytes })
+    }
+}
+
+impl std::ops::Index<MetadataTableIndex<TypeDef>> for MethodTableLookup {
+    type Output = Range<Pointer>;
+
+    fn index(&self, index: MetadataTableIndex<TypeDef>) -> &Self::Output {
+        let index: usize = index.into();
+        &self.method_tables[index + 1]
     }
 }

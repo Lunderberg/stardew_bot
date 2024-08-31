@@ -1,16 +1,15 @@
-use dotnet_debugger::{PersistentState, RuntimeObject};
-use memory_reader::Pointer;
+use dotnet_debugger::{PersistentState, RuntimeObject, TypedPointer};
 use ratatui::{text::Line, widgets::Widget as _};
 
 use crate::{extended_tui::WidgetWindow, Error};
 
 pub struct ObjectExplorer {
     state: PersistentState,
-    top_object: Option<Pointer>,
+    top_object: Option<TypedPointer<RuntimeObject>>,
 }
 
 impl ObjectExplorer {
-    pub fn new(top_object: Option<Pointer>) -> Self {
+    pub fn new(top_object: Option<TypedPointer<RuntimeObject>>) -> Self {
         ObjectExplorer {
             state: PersistentState::new(),
             top_object,
@@ -29,14 +28,14 @@ impl WidgetWindow for ObjectExplorer {
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
-        let Some(location) = self.top_object else {
+        let Some(object_ptr) = self.top_object else {
             return;
         };
 
         let res = || -> Result<_, Error> {
             let mut reader = self.state.cached_reader(globals.reader);
 
-            let top_object = reader.object(location)?;
+            let top_object = reader.object(object_ptr)?;
 
             let class_name: Line = reader.class_name(&top_object)?.into();
 

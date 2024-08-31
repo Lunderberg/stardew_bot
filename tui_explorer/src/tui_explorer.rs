@@ -1,5 +1,6 @@
 use std::ops::Range;
 
+use dotnet_debugger::{RuntimeObject, TypedPointer};
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
 };
@@ -63,7 +64,7 @@ pub struct TuiExplorerBuilder {
     annotations: Vec<Annotation>,
     running_log: RunningLog,
     layout: DynamicLayout,
-    top_object: Option<Pointer>,
+    top_object: Option<TypedPointer<RuntimeObject>>,
 }
 
 fn stardew_valley_dll(
@@ -266,13 +267,13 @@ impl TuiExplorerBuilder {
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-        let game_obj: Pointer =
+        let game_obj: TypedPointer<RuntimeObject> =
             dotnet_debugger::find_most_likely_object_instance(
                 &game_obj_method_table,
                 &self.reader,
             )?;
 
-        self.initial_pointer = game_obj;
+        self.initial_pointer = game_obj.into();
         self.top_object = Some(game_obj);
 
         Ok(self)
@@ -424,7 +425,8 @@ impl TuiExplorerBuilder {
             dotnet_debugger::find_most_likely_object_instance(
                 &game_obj_method_table,
                 &self.reader,
-            )?;
+            )?
+            .into();
 
         self.running_log
             .add_log(format!("Top-level Game1 object {game_obj}"));

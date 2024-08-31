@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::{Error, MethodTable};
+use crate::{Error, MethodTable, RuntimeObject, TypedPointer};
 
 /// Returns an iterator of pointers that would be valid objects to the
 /// specified type.
@@ -23,7 +23,7 @@ use crate::{Error, MethodTable};
 pub fn find_object_instances<'a>(
     method_table: &MethodTable,
     reader: &'a MemoryReader,
-) -> Result<impl Iterator<Item = Pointer> + 'a, Error> {
+) -> Result<impl Iterator<Item = TypedPointer<RuntimeObject>> + 'a, Error> {
     let iter = iter_possible_object_instances(method_table, reader)?
         .map(|(ptr, _)| ptr);
 
@@ -49,7 +49,7 @@ pub fn find_object_instances<'a>(
 pub fn find_most_likely_object_instance(
     method_table: &MethodTable,
     reader: &MemoryReader,
-) -> Result<Pointer, Error> {
+) -> Result<TypedPointer<RuntimeObject>, Error> {
     iter_possible_object_instances(method_table, reader)?
         .max_by_key(|(_, non_null_ptr_count)| *non_null_ptr_count)
         .map(|(ptr, _)| ptr)
@@ -59,7 +59,10 @@ pub fn find_most_likely_object_instance(
 fn iter_possible_object_instances<'a>(
     method_table: &MethodTable,
     reader: &'a MemoryReader,
-) -> Result<impl Iterator<Item = (Pointer, usize)> + 'a, Error> {
+) -> Result<
+    impl Iterator<Item = (TypedPointer<RuntimeObject>, usize)> + 'a,
+    Error,
+> {
     let search_ptr = method_table.ptr_range().start;
     let has_finalizer = method_table.has_finalizer();
 
@@ -156,46 +159,48 @@ fn iter_possible_object_instances<'a>(
                 && !is_reserved_for_gc
                 && (requires_finalizer == has_finalizer)
         })
-        .filter_map(move |ptr| -> Option<(Pointer, usize)> {
-            if offsets_of_pointers.is_empty() {
-                return Some((ptr, 0));
-            }
+        .filter_map(
+            move |ptr| -> Option<(TypedPointer<RuntimeObject>, usize)> {
+                if offsets_of_pointers.is_empty() {
+                    return Some((ptr.into(), 0));
+                }
 
-            let min_offset = *offsets_of_pointers.first().unwrap();
-            let max_offset =
-                offsets_of_pointers.last().unwrap() + Pointer::SIZE;
-            let bytes = reader
-                .read_bytes(ptr + min_offset, max_offset - min_offset)
-                .ok()?;
+                let min_offset = *offsets_of_pointers.first().unwrap();
+                let max_offset =
+                    offsets_of_pointers.last().unwrap() + Pointer::SIZE;
+                let bytes = reader
+                    .read_bytes(ptr + min_offset, max_offset - min_offset)
+                    .ok()?;
 
-            let num_non_null_pointers = offsets_of_pointers
-                .iter()
-                .map(|offset| {
-                    let range = offset - min_offset
-                        ..offset - min_offset + Pointer::SIZE;
-                    bytes[range].try_into().unwrap()
-                })
-                .map(|expected_ptr: Pointer| -> Option<usize> {
-                    if expected_ptr.is_null() {
-                        Some(0)
-                    } else if reader
-                        .find_containing_region(expected_ptr)
-                        .map(|region| {
-                            region.is_readable
-                                && region.is_writable
-                                && !region.is_shared_memory
-                        })
-                        .is_some()
-                    {
-                        Some(1)
-                    } else {
-                        None
-                    }
-                })
-                .sum::<Option<usize>>()?;
+                let num_non_null_pointers = offsets_of_pointers
+                    .iter()
+                    .map(|offset| {
+                        let range = offset - min_offset
+                            ..offset - min_offset + Pointer::SIZE;
+                        bytes[range].try_into().unwrap()
+                    })
+                    .map(|expected_ptr: Pointer| -> Option<usize> {
+                        if expected_ptr.is_null() {
+                            Some(0)
+                        } else if reader
+                            .find_containing_region(expected_ptr)
+                            .map(|region| {
+                                region.is_readable
+                                    && region.is_writable
+                                    && !region.is_shared_memory
+                            })
+                            .is_some()
+                        {
+                            Some(1)
+                        } else {
+                            None
+                        }
+                    })
+                    .sum::<Option<usize>>()?;
 
-            Some((ptr, num_non_null_pointers))
-        });
+                Some((ptr.into(), num_non_null_pointers))
+            },
+        );
 
     Ok(iter)
 }

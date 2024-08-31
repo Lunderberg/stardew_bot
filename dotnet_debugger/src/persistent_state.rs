@@ -1,19 +1,23 @@
 use std::collections::HashMap;
 
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::MemoryReader;
 
-use crate::{extensions::*, RuntimeModule, TypedPointer};
 use crate::{Error, MethodTable, RuntimeObject};
+use crate::{ReadTypedPointer, RuntimeModule, TypedPointer};
 
 #[derive(Default)]
 pub struct PersistentState {
-    method_tables: HashMap<TypedPointer<MethodTable>, MethodTable>,
-    runtime_modules: HashMap<TypedPointer<RuntimeModule>, RuntimeModule>,
+    method_tables: LookupCache<MethodTable>,
+    runtime_modules: LookupCache<RuntimeModule>,
 }
 
 pub struct CachedReader<'a> {
     state: &'a mut PersistentState,
     reader: &'a MemoryReader,
+}
+
+struct LookupCache<T> {
+    cache: HashMap<TypedPointer<T>, T>,
 }
 
 impl PersistentState {
@@ -35,9 +39,9 @@ impl PersistentState {
 impl<'a> CachedReader<'a> {
     pub fn object(
         &mut self,
-        location: Pointer,
+        location: TypedPointer<RuntimeObject>,
     ) -> Result<RuntimeObject, Error> {
-        RuntimeObject::read(location, self.reader)
+        location.read(self.reader)
     }
 
     pub fn class_name(&mut self, obj: &RuntimeObject) -> Result<String, Error> {
@@ -46,13 +50,11 @@ impl<'a> CachedReader<'a> {
 
         let method_table = state
             .method_tables
-            .entry(method_table_ptr)
-            .or_try_insert(|ptr| ptr.read(reader))?;
+            .cached_or_read(method_table_ptr, reader)?;
 
         let module = state
             .runtime_modules
-            .entry(method_table.module())
-            .or_try_insert(|ptr| ptr.read(reader))?;
+            .cached_or_read(method_table.module(), reader)?;
         let metadata = module.metadata()?;
 
         let name = metadata.get(method_table.token())?.name()?;
@@ -69,13 +71,11 @@ impl<'a> CachedReader<'a> {
 
         let method_table = state
             .method_tables
-            .entry(method_table_ptr)
-            .or_try_insert(|ptr| ptr.read(reader))?;
+            .cached_or_read(method_table_ptr, reader)?;
 
         let module = state
             .runtime_modules
-            .entry(method_table.module())
-            .or_try_insert(|ptr| ptr.read(reader))?;
+            .cached_or_read(method_table.module(), reader)?;
         let metadata = module.metadata()?;
 
         method_table
@@ -86,5 +86,44 @@ impl<'a> CachedReader<'a> {
                 Ok(metadata.get(field.token())?.name()?.to_string())
             })
             .collect()
+    }
+}
+
+impl<T> LookupCache<T> {
+    pub fn cached_or_read<'a>(
+        &'a mut self,
+        ptr: TypedPointer<T>,
+        reader: &MemoryReader,
+    ) -> Result<&'a mut T, Error>
+    where
+        T: ReadTypedPointer,
+    {
+        use std::collections::hash_map::Entry;
+        match self.cache.entry(ptr) {
+            Entry::Occupied(value) => Ok(value.into_mut()),
+            Entry::Vacant(vacant) => Ok(vacant.insert(ptr.read(reader)?)),
+        }
+    }
+}
+
+impl<T> std::ops::Deref for LookupCache<T> {
+    type Target = HashMap<TypedPointer<T>, T>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
+impl<T> std::ops::DerefMut for LookupCache<T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cache
+    }
+}
+
+impl<T> Default for LookupCache<T> {
+    fn default() -> Self {
+        Self {
+            cache: Default::default(),
+        }
     }
 }

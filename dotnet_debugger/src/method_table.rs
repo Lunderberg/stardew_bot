@@ -11,11 +11,6 @@ use crate::{
     ReadTypedPointer, RuntimeModule, TypedPointer,
 };
 
-pub struct MethodTableLookup {
-    pub location: Range<Pointer>,
-    pub method_tables: Vec<Range<Pointer>>,
-}
-
 pub struct MethodTable {
     pub bytes: OwnedBytes,
 }
@@ -26,56 +21,6 @@ pub struct EEClass {
 
 pub struct EEClassPackedFields<'a> {
     pub bytes: ByteRange<'a>,
-}
-
-impl MethodTableLookup {
-    pub fn location_of_method_table_pointer(
-        &self,
-        index: MetadataTableIndex<TypeDef>,
-    ) -> Range<Pointer> {
-        let index: usize = index.into();
-        let index = index + 1;
-        let ptr_start = self.location.start + index * Pointer::SIZE;
-        ptr_start..ptr_start + Pointer::SIZE
-    }
-
-    pub fn iter_tables<'a>(
-        &'a self,
-        reader: &'a MemoryReader,
-    ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {
-        self.method_tables
-            .iter()
-            .cloned()
-            .filter(|ptr| !ptr.start.is_null())
-            .map(move |location| {
-                let nbytes = location.end - location.start;
-                let bytes = reader.read_bytes(location.start, nbytes)?;
-                Ok(MethodTable {
-                    bytes: OwnedBytes::new(location.start, bytes),
-                })
-            })
-    }
-
-    pub fn get(
-        &self,
-        index: MetadataTableIndex<TypeDef>,
-        reader: &MemoryReader,
-    ) -> Result<MethodTable, Error> {
-        let byte_range = &self[index];
-        let bytes = reader
-            .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
-        let bytes = OwnedBytes::new(byte_range.start, bytes);
-        Ok(MethodTable { bytes })
-    }
-}
-
-impl std::ops::Index<MetadataTableIndex<TypeDef>> for MethodTableLookup {
-    type Output = Range<Pointer>;
-
-    fn index(&self, index: MetadataTableIndex<TypeDef>) -> &Self::Output {
-        let index: usize = index.into();
-        &self.method_tables[index + 1]
-    }
 }
 
 impl MethodTable {
