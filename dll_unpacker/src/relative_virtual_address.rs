@@ -1,4 +1,6 @@
-use crate::{ByteRange, Error, UnpackBytes};
+use crate::Error;
+
+use memory_reader::{ByteRange, UnpackBytes, UnpackOptBytes};
 
 /// A virtual address, relative to the start of the file.  Can be
 /// converted to an actual address using
@@ -18,8 +20,9 @@ impl RelativeVirtualAddress {
     }
 }
 
-impl<'a> UnpackBytes<'a> for Option<RelativeVirtualAddress> {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+impl<'a> UnpackOptBytes<'a> for RelativeVirtualAddress {
+    type Error = Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
         let addr: u32 = bytes.unpack()?;
         if addr == 0 {
             Ok(None)
@@ -30,7 +33,8 @@ impl<'a> UnpackBytes<'a> for Option<RelativeVirtualAddress> {
 }
 
 impl<'a> UnpackBytes<'a> for RelativeVirtualAddress {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         bytes.unpack().and_then(|opt_rva: Option<Self>| {
             assert!(opt_rva.is_some());
             opt_rva.ok_or(Error::UnexpectedNullVirtualAddress)
@@ -38,8 +42,9 @@ impl<'a> UnpackBytes<'a> for RelativeVirtualAddress {
     }
 }
 
-impl<'a> UnpackBytes<'a> for Option<VirtualRange> {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+impl<'a> UnpackOptBytes<'a> for VirtualRange {
+    type Error = Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
         assert!(bytes.len() == 8);
 
         let opt_rva: Option<RelativeVirtualAddress> =
@@ -50,7 +55,8 @@ impl<'a> UnpackBytes<'a> for Option<VirtualRange> {
 }
 
 impl<'a> UnpackBytes<'a> for VirtualRange {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         assert!(bytes.len() == 8);
         let rva = bytes.subrange(0..4).unpack()?;
         let size = bytes.subrange(4..8).unpack()?;

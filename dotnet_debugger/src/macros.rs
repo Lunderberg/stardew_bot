@@ -6,7 +6,7 @@ macro_rules! unpack_fields{
         ::paste::paste!{
             pub fn [< $name _unpacked >](
                 &self,
-            ) -> ::dll_unpacker::UnpackedValue<$ty> {
+            ) -> ::memory_reader::UnpackedValue<$ty> {
                 self.bytes.subrange($byte_range).unpack().unwrap()
             }
 
@@ -34,10 +34,10 @@ macro_rules! unpack_fields{
 
             pub fn [< $name _unpacked >](
                 &self,
-            ) -> ::dll_unpacker::UnpackedValue<$ty> {
+            ) -> ::memory_reader::UnpackedValue<$ty> {
                 self.bytes
                     .subrange($byte_range)
-                    .unpack::<::dll_unpacker::UnpackedValue<$ty>>()
+                    .unpack::<::memory_reader::UnpackedValue<$ty>>()
                     .unwrap()
                     .map( Self::[< $name _unpack_bits >] )
             }

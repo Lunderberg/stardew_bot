@@ -1,7 +1,6 @@
-use memory_reader::Pointer;
 use std::ops::{Range, RangeFrom, RangeTo};
 
-use crate::{Error, UnpackedValue};
+use crate::{Error, Pointer, UnpackedValue};
 
 #[derive(Clone, Copy)]
 pub struct ByteRange<'a> {
@@ -10,7 +9,13 @@ pub struct ByteRange<'a> {
 }
 
 pub trait UnpackBytes<'a>: Sized {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error>;
+    type Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error>;
+}
+
+pub trait UnpackOptBytes<'a>: Sized {
+    type Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error>;
 }
 
 pub trait NormalizeOffset: Copy {
@@ -88,9 +93,34 @@ where
     }
 }
 
+impl<'a, T> UnpackBytes<'a> for Option<T>
+where
+    T: UnpackOptBytes<'a>,
+{
+    type Error = <T as UnpackOptBytes<'a>>::Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
+        <T as UnpackOptBytes<'a>>::unpack_opt(bytes)
+    }
+}
+
 impl<'a> ByteRange<'a> {
     pub fn new(start: Pointer, bytes: &'a [u8]) -> Self {
         Self { start, bytes }
+    }
+
+    pub fn null() -> Self {
+        Self {
+            start: Pointer::null(),
+            bytes: &[],
+        }
+    }
+
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.start..self.start + self.bytes.len()
+    }
+
+    pub fn bytes(&self) -> &'a [u8] {
+        self.bytes
     }
 
     pub fn len(&self) -> usize {
@@ -101,14 +131,14 @@ impl<'a> ByteRange<'a> {
         self.bytes.is_empty()
     }
 
-    pub fn unpack<T>(&self) -> Result<T, Error>
+    pub fn unpack<T>(&self) -> Result<T, T::Error>
     where
         T: UnpackBytes<'a>,
     {
         T::unpack(*self)
     }
 
-    pub(crate) fn get_u8(
+    pub fn get_u8(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<u8>, Error> {
@@ -118,7 +148,7 @@ impl<'a> ByteRange<'a> {
         Ok(UnpackedValue::new(ptr..ptr + 1, value))
     }
 
-    pub(crate) fn get_u16(
+    pub fn get_u16(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<u16>, Error> {
@@ -127,7 +157,7 @@ impl<'a> ByteRange<'a> {
         self.subrange(byte_range).unpack()
     }
 
-    pub(crate) fn get_u32(
+    pub fn get_u32(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<u32>, Error> {
@@ -136,7 +166,7 @@ impl<'a> ByteRange<'a> {
         self.subrange(byte_range).unpack()
     }
 
-    pub(crate) fn get_u64(
+    pub fn get_u64(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<u64>, Error> {
@@ -148,7 +178,7 @@ impl<'a> ByteRange<'a> {
         Ok(UnpackedValue::new(self.address_range(byte_range), value))
     }
 
-    pub(crate) fn get_null_terminated(
+    pub fn get_null_terminated(
         &self,
         loc: impl NormalizeOffset,
     ) -> Result<UnpackedValue<&'a str>, Error> {
@@ -173,21 +203,28 @@ impl<'a> ByteRange<'a> {
         }
     }
 
-    pub(crate) fn end(&self) -> Pointer {
+    pub fn start(&self) -> Pointer {
+        self.start
+    }
+
+    pub fn end(&self) -> Pointer {
         self.start + self.bytes.len()
     }
 
-    pub(crate) fn address_range(
-        &self,
-        range: impl NormalizeRange,
-    ) -> Range<Pointer> {
+    pub fn address_range(&self, range: impl NormalizeRange) -> Range<Pointer> {
         range.as_ptr(self.start..self.end())
     }
 }
 
 impl<'a> Into<Range<Pointer>> for ByteRange<'a> {
     fn into(self) -> std::ops::Range<Pointer> {
-        self.start..self.start + self.bytes.len()
+        self.ptr_range()
+    }
+}
+
+impl<'a> Into<&'a [u8]> for ByteRange<'a> {
+    fn into(self) -> &'a [u8] {
+        self.bytes
     }
 }
 
@@ -212,7 +249,8 @@ impl<'a, T: NormalizeOffset> std::ops::Index<Range<T>> for ByteRange<'a> {
 macro_rules! from_bytes_prim_uint {
     ($prim:ident) => {
         impl<'a> UnpackBytes<'a> for $prim {
-            fn unpack(bytes: ByteRange) -> Result<Self, Error> {
+            type Error = Error;
+            fn unpack(bytes: ByteRange) -> Result<Self, Self::Error> {
                 // Unwrapping instead of returning an error, because a
                 // failure here means there's an inconsistency in the
                 // unpacking.
@@ -231,15 +269,30 @@ from_bytes_prim_uint! {u64}
 from_bytes_prim_uint! {u128}
 
 impl<'a> UnpackBytes<'a> for bool {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         let byte: u8 = bytes.unpack()?;
         Ok(byte > 0)
     }
 }
 
 impl<'a> UnpackBytes<'a> for Pointer {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         let arr: [u8; Pointer::SIZE] = bytes.bytes.try_into().unwrap();
         Ok(arr.into())
+    }
+}
+
+impl<'a> UnpackBytes<'a> for usize {
+    type Error = Error;
+    fn unpack(bytes: ByteRange) -> Result<Self, Self::Error> {
+        if bytes.len() == 2 {
+            Ok(bytes.unpack::<u16>()? as usize)
+        } else if bytes.len() == 4 {
+            Ok(bytes.unpack::<u32>()? as usize)
+        } else {
+            panic!("Heap index is either u16 or u32");
+        }
     }
 }

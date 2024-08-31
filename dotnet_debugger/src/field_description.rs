@@ -2,11 +2,11 @@ use std::ops::Range;
 
 use dll_unpacker::{
     dll_unpacker::{Field, MetadataTableIndex},
-    Annotation as _, Annotator, ByteRange,
+    Annotation as _, Annotator,
 };
-use memory_reader::Pointer;
+use memory_reader::{ByteRange, OwnedBytes, Pointer};
 
-use crate::{unpack_fields, Error, OwnedBytes, RuntimeModule, RuntimeType};
+use crate::{unpack_fields, Error, RuntimeModule, RuntimeType};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,

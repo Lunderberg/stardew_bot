@@ -1,7 +1,6 @@
 use std::ops::Range;
 
-use dll_unpacker::{ByteRange, NormalizeRange};
-use memory_reader::Pointer;
+use crate::{ByteRange, NormalizeRange, Pointer};
 
 #[derive(Clone)]
 pub struct OwnedBytes {

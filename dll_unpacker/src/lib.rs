@@ -1,12 +1,6 @@
 mod error;
 pub use error::Error;
 
-mod byte_range;
-pub use byte_range::*;
-
-mod unpacked_value;
-pub use unpacked_value::UnpackedValue;
-
 pub(crate) mod relative_virtual_address;
 
 pub(crate) mod enum_map;

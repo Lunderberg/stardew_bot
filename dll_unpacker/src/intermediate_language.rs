@@ -1,9 +1,9 @@
 use std::ops::Range;
 
-use memory_reader::Pointer;
+use memory_reader::{ByteRange, Pointer, UnpackedValue};
 
 use crate::Annotation as _;
-use crate::{Annotator, ByteRange, Error, UnpackedValue};
+use crate::{Annotator, Error};
 
 pub struct CILMethod<'a> {
     bytes: ByteRange<'a>,
@@ -152,7 +152,7 @@ impl<'a> CILMethodHeader<'a> {
             CILMethodHeader::Tiny(header) => header.bytes,
             CILMethodHeader::Fat(header) => header.bytes,
         }
-        .start;
+        .start();
         let start = header_start + self.header_size();
         let size = self.body_size();
         start..start + size

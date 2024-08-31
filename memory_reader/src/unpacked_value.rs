@@ -1,7 +1,6 @@
 use std::{borrow::Borrow, ops::Range};
 
-use crate::{ByteRange, Error, UnpackBytes};
-use memory_reader::Pointer;
+use crate::{ByteRange, Pointer, UnpackBytes};
 
 #[derive(Clone, Copy)]
 pub struct UnpackedValue<T> {
@@ -63,7 +62,8 @@ impl<'a, T> UnpackBytes<'a> for UnpackedValue<T>
 where
     T: UnpackBytes<'a>,
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = <T as UnpackBytes<'a>>::Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         Ok(UnpackedValue::new(bytes.into(), bytes.unpack()?))
     }
 }

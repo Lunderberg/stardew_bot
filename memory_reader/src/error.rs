@@ -8,12 +8,19 @@ pub type Result<T> = std::result::Result<T, Error>;
 pub enum Error {
     #[error("/proc/{0}/maps not found")]
     MemoryMapNotFound(u32),
+
     #[error("Stack memory map not found")]
     StackNotFound,
+
     #[error("Path not convertible to UTF-8")]
     InvalidUTF8InPath,
+
+    #[error("InvalidUTF8")]
+    InvalidUTF8(#[from] std::str::Utf8Error),
+
     #[error("Could not find memory map {0}")]
     MissingMemoryMapSection(String),
+
     #[error(
         "No permissions to read memory.  \
          Consider temporarily disabling ptrace_scope protections \
@@ -28,11 +35,13 @@ pub enum Error {
         start: Pointer,
         end: Pointer,
     },
+
     #[error("Error {err} reading process memory.")]
     MemoryReadOther {
         #[source]
         err: std::io::Error,
     },
+
     #[error("Error {err} reading process memory")]
     ProcessVM {
         #[from]

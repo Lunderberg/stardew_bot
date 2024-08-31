@@ -8,6 +8,15 @@ use crate::signature::ElementType;
 
 #[derive(Error)]
 pub enum Error {
+    #[error("memory_reader::Error{{ {err} }}")]
+    MemoryReader {
+        #[from]
+        err: memory_reader::Error,
+    },
+
+    #[error("InvalidUTF8")]
+    InvalidUTF8(#[from] std::str::Utf8Error),
+
     #[error("IncorrectDOSHeader")]
     IncorrectDOSHeader,
     #[error("IncorrectDOSStub")]
@@ -54,8 +63,7 @@ pub enum Error {
     MissingClrRuntimeHeader,
     #[error("InvalidSectionHeader")]
     InvalidSectionHeader,
-    #[error("InvalidUTF8")]
-    InvalidUTF8(#[from] std::str::Utf8Error),
+
     #[error("Cannot access section {i_section}, only {num_sections} sections present.")]
     InvalidSectionNumber {
         num_sections: usize,

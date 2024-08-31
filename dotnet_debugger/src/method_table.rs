@@ -2,13 +2,11 @@ use std::ops::Range;
 
 use dll_unpacker::{
     dll_unpacker::{MetadataTableIndex, TypeDef},
-    Annotation, Annotator, ByteRange,
+    Annotation, Annotator,
 };
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
-use crate::{
-    unpack_fields, Error, FieldDescription, FieldDescriptions, OwnedBytes,
-};
+use crate::{unpack_fields, Error, FieldDescription, FieldDescriptions};
 
 pub struct MethodTableLookup {
     pub location: Range<Pointer>,

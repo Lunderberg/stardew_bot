@@ -1,11 +1,11 @@
 use std::ops::Range;
 
-use memory_reader::Pointer;
+use memory_reader::{ByteRange, Pointer, UnpackedValue};
 
 use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
 use crate::Annotation as _;
 use crate::DLLUnpacker;
-use crate::{Annotator, ByteRange, Error, UnpackedValue};
+use crate::{Annotator, Error};
 
 /// Top-level methods for the DLLUnpacker, related to the unwrapping
 /// of the PE format.
@@ -28,13 +28,13 @@ impl<'a> DLLUnpacker<'a> {
         &self,
     ) -> Result<impl Iterator<Item = SectionHeaderUnpacker>, Error> {
         let pe_header = self.pe_header()?;
-        let num_sections = pe_header.num_sections()?.value as usize;
+        let num_sections = pe_header.num_sections()?.value() as usize;
 
         let section_header_base = pe_header.optional_header_range()?.end;
 
         let section_header_size = 40;
 
-        let file_start = self.bytes.start;
+        let file_start = self.bytes.start();
 
         let iter = (0..num_sections)
             .map(move |i_section| {
@@ -208,39 +208,39 @@ impl<'a> PEHeaderUnpacker<'a> {
     }
 
     pub fn machine_type(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(4)
+        self.bytes.get_u16(4).map_err(Into::into)
     }
 
     pub fn num_sections(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(6)
+        self.bytes.get_u16(6).map_err(Into::into)
     }
 
     pub fn creation_timestamp(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(8)
+        self.bytes.get_u32(8).map_err(Into::into)
     }
 
     pub fn symbol_table_pointer(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(12)
+        self.bytes.get_u32(12).map_err(Into::into)
     }
 
     pub fn num_symbols(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(16)
+        self.bytes.get_u32(16).map_err(Into::into)
     }
 
     pub fn optional_header_size(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(20)
+        self.bytes.get_u16(20).map_err(Into::into)
     }
 
     pub fn characteristics(
         &self,
     ) -> Result<UnpackedValue<PEHeaderCharacteristics>, Error> {
-        self.bytes
-            .get_u16(22)
-            .map(|unpacked| unpacked.map(PEHeaderCharacteristics::new))
+        let unpacked = self.bytes.get_u16(22)?;
+        Ok(unpacked.map(PEHeaderCharacteristics::new))
     }
 
     pub fn optional_header_range(&self) -> Result<Range<Pointer>, Error> {
-        let optional_header_size = self.optional_header_size()?.value as usize;
+        let optional_header_size =
+            self.optional_header_size()?.value() as usize;
         let start = self.bytes.end();
         Ok(start..start + optional_header_size)
     }
@@ -329,7 +329,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
             bytes,
             magic_value: MagicValue::PE32,
         };
-        out.magic_value = out.magic_value()?.value;
+        out.magic_value = out.magic_value()?.value();
         Ok(out)
     }
 
@@ -400,7 +400,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
             .value(num_data_directories)
             .name("Num data directories");
 
-        for i_data_dir in 0..num_data_directories.value {
+        for i_data_dir in 0..num_data_directories.value() {
             let data_dir_kind: DataDirectoryKind = i_data_dir.try_into()?;
             let data_dir = self.data_directory(data_dir_kind)?;
             annotator
@@ -412,9 +412,8 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     }
 
     pub fn magic_value(&self) -> Result<UnpackedValue<MagicValue>, Error> {
-        self.bytes
-            .get_u16(0)
-            .and_then(|unpacked| unpacked.try_map(MagicValue::new))
+        let unpacked = self.bytes.get_u16(0)?;
+        unpacked.try_map(MagicValue::new)
     }
 
     fn get_size(
@@ -423,11 +422,12 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         pe32_plus_offset: usize,
     ) -> Result<UnpackedValue<u64>, Error> {
         match self.magic_value {
-            MagicValue::PE32 => self
-                .bytes
-                .get_u32(pe32_offset)
-                .map(|unpacked| unpacked.map(|value| value as u64)),
-            MagicValue::PE32plus => self.bytes.get_u64(pe32_plus_offset),
+            MagicValue::PE32 => {
+                Ok(self.bytes.get_u32(pe32_offset)?.map(|value| value as u64))
+            }
+            MagicValue::PE32plus => {
+                self.bytes.get_u64(pe32_plus_offset).map_err(Into::into)
+            }
         }
     }
 
@@ -440,41 +440,44 @@ impl<'a> OptionalHeaderUnpacker<'a> {
             MagicValue::PE32 => self.bytes.get_u32(pe32_offset),
             MagicValue::PE32plus => self.bytes.get_u32(pe32_plus_offset),
         }
+        .map_err(Into::into)
     }
 
     pub fn linker_major_version(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(2)
+        self.bytes.get_u8(2).map_err(Into::into)
     }
 
     pub fn linker_minor_version(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(3)
+        self.bytes.get_u8(3).map_err(Into::into)
     }
 
     pub fn code_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(4)
+        self.bytes.get_u32(4).map_err(Into::into)
     }
 
     pub fn initialized_data_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(8)
+        self.bytes.get_u32(8).map_err(Into::into)
     }
 
     pub fn uninitialized_data_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(12)
+        self.bytes.get_u32(12).map_err(Into::into)
     }
 
     pub fn rva_entry_point(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(16)
+        self.bytes.get_u32(16).map_err(Into::into)
     }
 
     pub fn rva_code_section(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(20)
+        self.bytes.get_u32(20).map_err(Into::into)
     }
 
     pub fn rva_data_section(
         &self,
     ) -> Option<Result<UnpackedValue<u32>, Error>> {
         match self.magic_value {
-            MagicValue::PE32 => Some(self.bytes.get_u32(24)),
+            MagicValue::PE32 => {
+                Some(self.bytes.get_u32(24).map_err(Into::into))
+            }
             MagicValue::PE32plus => None,
         }
     }
@@ -484,70 +487,76 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     }
 
     pub fn section_alignment(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(32)
+        self.bytes.get_u32(32).map_err(Into::into)
     }
 
     pub fn file_alignment(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(36)
+        self.bytes.get_u32(36).map_err(Into::into)
     }
 
     pub fn os_major(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(40)?;
-        if unpacked.value == 4 || unpacked.value == 5 {
+        let value = unpacked.value();
+        if value == 4 || value == 5 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectOSMajor(unpacked.value))
+            Err(Error::IncorrectOSMajor(value))
         }
     }
 
     pub fn os_minor(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(42)?;
-        if unpacked.value == 0 {
+        let value = unpacked.value();
+        if value == 0 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectOSMinor(unpacked.value))
+            Err(Error::IncorrectOSMinor(value))
         }
     }
 
     pub fn user_major(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(44)?;
-        if unpacked.value == 0 {
+        let value = unpacked.value();
+        if value == 0 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectUserMajor(unpacked.value))
+            Err(Error::IncorrectUserMajor(value))
         }
     }
 
     pub fn user_minor(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(46)?;
-        if unpacked.value == 0 {
+        let value = unpacked.value();
+        if value == 0 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectUserMinor(unpacked.value))
+            Err(Error::IncorrectUserMinor(value))
         }
     }
 
     pub fn subsys_major(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(48)?;
-        if unpacked.value == 4 || unpacked.value == 5 {
+        let value = unpacked.value();
+        if value == 4 || value == 5 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectSubsysMajor(unpacked.value))
+            Err(Error::IncorrectSubsysMajor(value))
         }
     }
 
     pub fn subsys_minor(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(50)?;
-        if unpacked.value == 0 {
+        let value = unpacked.value();
+        if value == 0 {
             Ok(unpacked)
         } else {
-            Err(Error::IncorrectSubsysMinor(unpacked.value))
+            Err(Error::IncorrectSubsysMinor(value))
         }
     }
 
     pub fn reserved_value(&self) -> Result<UnpackedValue<u32>, Error> {
         let unpacked = self.bytes.get_u32(52)?;
-        if unpacked.value == 0 {
+        if unpacked.value() == 0 {
             Ok(unpacked)
         } else {
             Err(Error::InvalidReservedValue)
@@ -555,16 +564,16 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     }
 
     pub fn image_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(56)
+        self.bytes.get_u32(56).map_err(Into::into)
     }
 
     pub fn header_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(60)
+        self.bytes.get_u32(60).map_err(Into::into)
     }
 
     pub fn file_checksum(&self) -> Result<UnpackedValue<u32>, Error> {
         let unpacked = self.bytes.get_u32(64)?;
-        if unpacked.value == 0 {
+        if unpacked.value() == 0 {
             Ok(unpacked)
         } else {
             Err(Error::InvalidFileChecksum)
@@ -572,12 +581,12 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     }
 
     pub fn sub_system(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(68)
+        self.bytes.get_u16(68).map_err(Into::into)
     }
 
     pub fn dll_flags(&self) -> Result<UnpackedValue<u16>, Error> {
         let unpacked = self.bytes.get_u16(70)?;
-        if unpacked.value & 0x100f == 0 {
+        if unpacked.value() & 0x100f == 0 {
             Ok(unpacked)
         } else {
             Err(Error::InvalidDLLFlag)
@@ -703,8 +712,8 @@ impl<'a> SectionHeaderUnpacker<'a> {
     }
 
     pub fn section_range(&self) -> Result<Range<Pointer>, Error> {
-        let file_offset = self.raw_address()?.value as usize;
-        let size = self.raw_size()?.value as usize;
+        let file_offset = self.raw_address()?.value() as usize;
+        let size = self.raw_size()?.value() as usize;
 
         let start = self.file_start + file_offset;
         Ok(start..start + size)
@@ -714,13 +723,13 @@ impl<'a> SectionHeaderUnpacker<'a> {
         &self,
         rva: RelativeVirtualAddress,
     ) -> Result<Option<Pointer>, Error> {
-        let virtual_start = self.virtual_address()?.value;
-        let virtual_size = self.virtual_size()?.value;
+        let virtual_start = self.virtual_address()?.value();
+        let virtual_size = self.virtual_size()?.value();
         let virtual_end = virtual_start + virtual_size;
 
         if virtual_start <= rva && rva < virtual_end {
             let section_offset = rva - virtual_start;
-            let section_start = self.raw_address()?.value as usize;
+            let section_start = self.raw_address()?.value() as usize;
 
             Ok(Some(self.file_start + section_start + section_offset))
         } else {
@@ -732,7 +741,7 @@ impl<'a> SectionHeaderUnpacker<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        let name = self.name()?.value;
+        let name = self.name()?.value();
 
         annotator
             .group(self.bytes)
@@ -765,7 +774,7 @@ impl<'a> SectionHeaderUnpacker<'a> {
     }
 
     pub fn name(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        let value = std::str::from_utf8(self.bytes.subrange(0..8).bytes)?
+        let value = std::str::from_utf8(self.bytes.subrange(0..8).bytes())?
             .trim_end_matches('\0');
         Ok(UnpackedValue::new(self.bytes.address_range(0..8), value))
     }
@@ -786,92 +795,88 @@ impl<'a> SectionHeaderUnpacker<'a> {
     pub fn virtual_range(
         &self,
     ) -> Result<Range<RelativeVirtualAddress>, Error> {
-        let start = self.virtual_address()?.value;
-        let size = self.virtual_size()?.value;
+        let start = self.virtual_address()?.value();
+        let size = self.virtual_size()?.value();
         let end = start + size;
 
         Ok(start..end)
     }
 
     pub fn raw_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(16)
+        self.bytes.get_u32(16).map_err(Into::into)
     }
 
     pub fn raw_address(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(20)
+        self.bytes.get_u32(20).map_err(Into::into)
     }
 
     pub fn raw_range(&self) -> Result<Range<u32>, Error> {
-        let start = self.raw_address()?.value;
-        let size = self.raw_size()?.value;
+        let start = self.raw_address()?.value();
+        let size = self.raw_size()?.value();
         Ok(start..start + size)
     }
 
     pub fn ptr_relocations(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(24).and_then(|unpacked| {
-            if unpacked.value == 0 {
-                Ok(unpacked)
-            } else {
-                Err(Error::InvalidSectionHeader)
-            }
-        })
+        let unpacked = self.bytes.get_u32(24)?;
+        if unpacked.value() == 0 {
+            Ok(unpacked)
+        } else {
+            Err(Error::InvalidSectionHeader)
+        }
     }
 
     pub fn ptr_line_numbers(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(28).and_then(|unpacked| {
-            if unpacked.value == 0 {
-                Ok(unpacked)
-            } else {
-                Err(Error::InvalidSectionHeader)
-            }
-        })
+        let unpacked = self.bytes.get_u32(28)?;
+        if unpacked.value() == 0 {
+            Ok(unpacked)
+        } else {
+            Err(Error::InvalidSectionHeader)
+        }
     }
 
     pub fn num_relocations(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(32).and_then(|unpacked| {
-            if unpacked.value == 0 {
-                Ok(unpacked)
-            } else {
-                Err(Error::InvalidSectionHeader)
-            }
-        })
+        let unpacked = self.bytes.get_u16(32)?;
+        if unpacked.value() == 0 {
+            Ok(unpacked)
+        } else {
+            Err(Error::InvalidSectionHeader)
+        }
     }
 
     pub fn num_line_numbers(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(34).and_then(|unpacked| {
-            if unpacked.value == 0 {
-                Ok(unpacked)
-            } else {
-                Err(Error::InvalidSectionHeader)
-            }
-        })
+        let unpacked = self.bytes.get_u16(34)?;
+        if unpacked.value() == 0 {
+            Ok(unpacked)
+        } else {
+            Err(Error::InvalidSectionHeader)
+        }
     }
 
     pub fn characteristics(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(36)
+        self.bytes.get_u32(36).map_err(Into::into)
     }
 
     pub fn contains_code(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x20 != 0)
+        Ok(self.characteristics()?.value() & 0x20 != 0)
     }
 
     pub fn contains_initialized_data(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x40 != 0)
+        Ok(self.characteristics()?.value() & 0x40 != 0)
     }
 
     pub fn contains_uninitialized_data(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x80 != 0)
+        Ok(self.characteristics()?.value() & 0x80 != 0)
     }
 
     pub fn is_executable(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x20000000 != 0)
+        Ok(self.characteristics()?.value() & 0x20000000 != 0)
     }
 
     pub fn is_readable(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x40000000 != 0)
+        Ok(self.characteristics()?.value() & 0x40000000 != 0)
     }
 
     pub fn is_writable(&self) -> Result<bool, Error> {
-        Ok(self.characteristics()?.value & 0x80000000 != 0)
+        Ok(self.characteristics()?.value() & 0x80000000 != 0)
     }
 }

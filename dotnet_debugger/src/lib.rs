@@ -21,9 +21,6 @@ pub use method_table::*;
 mod field_description;
 pub use field_description::*;
 
-mod owned_bytes;
-pub use owned_bytes::*;
-
 mod runtime_object;
 pub use runtime_object::*;
 

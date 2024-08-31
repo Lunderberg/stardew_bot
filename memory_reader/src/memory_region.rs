@@ -1,6 +1,7 @@
 use itertools::Itertools as _;
 
 use crate::extensions::*;
+use crate::ByteRange;
 use crate::MemoryReader;
 
 use super::{CollectBytes as _, MemoryMapRegion, MemoryValue, Pointer};
@@ -301,5 +302,14 @@ impl Index<RangeInclusive<Pointer>> for MemoryRegion {
         let start = *index.start() - self.start;
         let end = *index.end() - self.start;
         &self[start..=end]
+    }
+}
+
+impl<'a> Into<ByteRange<'a>> for &'a MemoryRegion {
+    fn into(self) -> ByteRange<'a> {
+        ByteRange {
+            start: self.start,
+            bytes: &self.bytes,
+        }
     }
 }

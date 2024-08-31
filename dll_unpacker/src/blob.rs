@@ -1,8 +1,8 @@
 use std::ops::Range;
 
-use memory_reader::Pointer;
+use memory_reader::{ByteRange, Pointer};
 
-use crate::{ByteRange, Error};
+use crate::Error;
 
 // TODO: Move all the type tags into a common namespace, so that I
 // don't need to prefix the actual objects.  While objects with a

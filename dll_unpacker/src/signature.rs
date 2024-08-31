@@ -1,8 +1,8 @@
 use itertools::Itertools as _;
 
-use crate::{
-    ByteRange, Error, MetadataCodedIndex, MetadataTableKind, TypeDefOrRef,
-};
+use memory_reader::ByteRange;
+
+use crate::{Error, MetadataCodedIndex, MetadataTableKind, TypeDefOrRef};
 
 /// A CLR signature, as defined in ECMA-335, section II.23.2.
 ///
@@ -270,7 +270,7 @@ impl<'a> SignatureDecompressor<'a> {
                 self.offset,
                 self.bytes
                     .subrange(..encoded_length)
-                    .bytes
+                    .bytes()
                     .iter()
                     .map(|byte| format!("0x{byte:02x}"))
                     .join(", "),

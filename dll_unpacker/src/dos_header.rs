@@ -1,10 +1,9 @@
 use std::ops::Range;
 
-use memory_reader::Pointer;
+use memory_reader::{ByteRange, Pointer, UnpackedValue};
 
 use crate::Annotation as _;
-use crate::DLLUnpacker;
-use crate::{Annotator, ByteRange, Error, UnpackedValue};
+use crate::{Annotator, DLLUnpacker, Error};
 
 /// Top-level methods for the DLLUnpacker, related to the unwrapping
 /// of the DOS headers.
@@ -80,12 +79,12 @@ impl<'a> DosHeader<'a> {
     }
 
     pub fn lfanew(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(60)
+        self.bytes.get_u32(60).map_err(Into::into)
     }
 
     pub fn pe_header_range(&self) -> Result<Range<Pointer>, Error> {
-        let lfanew = self.lfanew()?.value as usize;
-        let start = self.bytes.start + lfanew;
+        let lfanew = self.lfanew()?.value() as usize;
+        let start = self.bytes.start() + lfanew;
         Ok(start..start + 24)
     }
 }

@@ -2,15 +2,15 @@ use derive_more::From;
 use paste::paste;
 use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
-use memory_reader::{MemoryRegion, Pointer};
+use memory_reader::{
+    ByteRange, Pointer, UnpackBytes, UnpackOptBytes, UnpackedValue,
+};
 
 use crate::enum_map::{EnumKey, EnumMap};
 use crate::intermediate_language::CILMethod;
 use crate::portable_executable::DataDirectoryKind;
 use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
-use crate::{ByteRange, UnpackBytes};
-use crate::{Error, UnpackedBlob};
-use crate::{Signature, UnpackedValue};
+use crate::{Error, Signature, UnpackedBlob};
 
 #[derive(Copy, Clone)]
 pub struct DLLUnpacker<'a> {
@@ -425,7 +425,7 @@ macro_rules! decl_metadata_table {
                 pub(crate) fn [< $field_name _unpacked >](
                     &self,
                 ) -> Result<UnpackedValue<$field_type>, Error> {
-                    self.get_field_bytes($field_index).unpack()
+                    Ok(self.get_field_bytes($field_index).unpack()?)
                 }
 
                 pub fn $field_name(&self) -> Result<$field_type, Error> {
@@ -1254,18 +1254,6 @@ impl<'a> MetadataTypeOrMethodDef<'a> {
     }
 }
 
-impl<'a> UnpackBytes<'a> for usize {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        if bytes.len() == 2 {
-            Ok(bytes.unpack::<u16>()? as usize)
-        } else if bytes.len() == 4 {
-            Ok(bytes.unpack::<u32>()? as usize)
-        } else {
-            panic!("Heap index is either u16 or u32");
-        }
-    }
-}
-
 pub struct Blob;
 pub struct GUID;
 
@@ -1285,8 +1273,10 @@ macro_rules! impl_unpack_heap_indices {
     ( $( $name:ident ),* $(,)? ) => {
         $(
             impl<'a> UnpackBytes<'a> for MetadataHeapIndex<$name> {
-                fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-                    bytes.unpack().map(|index| MetadataHeapIndex {
+                type Error = Error;
+                fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
+                    let index = bytes.unpack()?;
+                    Ok(MetadataHeapIndex {
                         index,
                         _phantom: PhantomData,
                     })
@@ -1299,31 +1289,35 @@ macro_rules! impl_unpack_heap_indices {
 impl_display_heap_indices! {String, Blob, GUID}
 impl_unpack_heap_indices! {String, Blob}
 
-impl<'a> UnpackBytes<'a> for Option<MetadataHeapIndex<GUID>> {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().map(|index: usize| {
-            // Unlike indices into the #Strings or #Blob heaps, which
-            // are zero-indexed, indices into the #GUID heap are
-            // one-indexed.  An index of zero is used to represent a
-            // null GUID.
-            //
-            // Converting the indices when unpacking avoids having a
-            // Rust `usize` that cannot be used as an index.
+impl<'a> UnpackOptBytes<'a> for MetadataHeapIndex<GUID> {
+    type Error = Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
+        let index: usize = bytes.unpack()?;
 
-            if index == 0 {
-                None
-            } else {
-                Some(MetadataHeapIndex {
-                    index: index - 1,
-                    _phantom: PhantomData,
-                })
-            }
-        })
+        // Unlike indices into the #Strings or #Blob heaps, which
+        // are zero-indexed, indices into the #GUID heap are
+        // one-indexed.  An index of zero is used to represent a
+        // null GUID.
+        //
+        // Converting the indices when unpacking avoids having a
+        // Rust `usize` that cannot be used as an index.
+
+        let typed_index = if index == 0 {
+            None
+        } else {
+            Some(MetadataHeapIndex {
+                index: index - 1,
+                _phantom: PhantomData,
+            })
+        };
+
+        Ok(typed_index)
     }
 }
 
 impl<'a> UnpackBytes<'a> for MetadataHeapIndex<GUID> {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         bytes
             .unpack()
             .and_then(|index: Option<MetadataHeapIndex<GUID>>| {
@@ -1332,24 +1326,26 @@ impl<'a> UnpackBytes<'a> for MetadataHeapIndex<GUID> {
     }
 }
 
-impl<'a, TableTag: MetadataTableTag> UnpackBytes<'a>
-    for Option<MetadataTableIndex<TableTag>>
+impl<'a, TableTag: MetadataTableTag> UnpackOptBytes<'a>
+    for MetadataTableIndex<TableTag>
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().map(|index: usize| {
-            if index == 0 {
-                None
-            } else {
-                Some(MetadataTableIndex::new(index - 1))
-            }
-        })
+    type Error = Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
+        let index: usize = bytes.unpack()?;
+        let typed_index = if index == 0 {
+            None
+        } else {
+            Some(MetadataTableIndex::new(index - 1))
+        };
+        Ok(typed_index)
     }
 }
 
 impl<'a, TableTag: MetadataTableTag> UnpackBytes<'a>
     for MetadataTableIndex<TableTag>
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         bytes.unpack().and_then(|opt_index: Option<Self>| {
             opt_index.ok_or(Error::InvalidMetadataTableIndexZero {
                 kind: TableTag::KIND,
@@ -1400,20 +1396,20 @@ impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
     }
 }
 
-impl<'a, CodedIndexType> UnpackBytes<'a>
-    for Option<MetadataCodedIndex<CodedIndexType>>
+impl<'a, CodedIndexType> UnpackOptBytes<'a>
+    for MetadataCodedIndex<CodedIndexType>
 where
     CodedIndexType: CodedIndex,
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().and_then(|raw_index| {
-            let table_kind = CodedIndexType::table_kind(raw_index)?;
-            let Some(row_index) = CodedIndexType::row_index(raw_index) else {
-                return Ok(None);
-            };
+    type Error = Error;
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
+        let raw_index = bytes.unpack()?;
+        let table_kind = CodedIndexType::table_kind(raw_index)?;
+        let Some(row_index) = CodedIndexType::row_index(raw_index) else {
+            return Ok(None);
+        };
 
-            Ok(Some(MetadataCodedIndex::new(table_kind, row_index)))
-        })
+        Ok(Some(MetadataCodedIndex::new(table_kind, row_index)))
     }
 }
 
@@ -1421,14 +1417,13 @@ impl<'a, CodedIndexType> UnpackBytes<'a> for MetadataCodedIndex<CodedIndexType>
 where
     CodedIndexType: CodedIndex,
 {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
-        bytes.unpack().and_then(|raw_index| {
-            let table_kind = CodedIndexType::table_kind(raw_index)?;
-            let row_index = CodedIndexType::row_index(raw_index).ok_or(
-                Error::InvalidMetadataTableIndexZero { kind: table_kind },
-            )?;
-            Ok(MetadataCodedIndex::new(table_kind, row_index))
-        })
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
+        let raw_index = bytes.unpack()?;
+        let table_kind = CodedIndexType::table_kind(raw_index)?;
+        let row_index = CodedIndexType::row_index(raw_index)
+            .ok_or(Error::InvalidMetadataTableIndexZero { kind: table_kind })?;
+        Ok(MetadataCodedIndex::new(table_kind, row_index))
     }
 }
 
@@ -1445,12 +1440,9 @@ impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
 }
 
 impl<'a> DLLUnpacker<'a> {
-    pub fn new(region: &'a MemoryRegion) -> DLLUnpacker {
+    pub fn new(bytes: impl Into<ByteRange<'a>>) -> Self {
         Self {
-            bytes: ByteRange {
-                start: region.start(),
-                bytes: region.data(),
-            },
+            bytes: bytes.into(),
         }
     }
 
@@ -1459,7 +1451,7 @@ impl<'a> DLLUnpacker<'a> {
         // Ok(metadata.bytes.start)
 
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.module_table()?.bytes.start)
+        Ok(metadata_tables.module_table()?.bytes.start())
 
         // let metadata_tables = metadata.metadata_tables()?;
         // let table = metadata_tables.method_def_table()?;
@@ -1471,7 +1463,7 @@ impl<'a> DLLUnpacker<'a> {
         let optional_header = self.optional_header()?;
         let data_dir = optional_header
             .data_directory(DataDirectoryKind::ClrRuntimeHeader)?
-            .value
+            .value()
             .ok_or(Error::MissingClrRuntimeHeader)?;
 
         let addr = self.virtual_address_to_raw(data_dir.rva)?;
@@ -1483,7 +1475,7 @@ impl<'a> DLLUnpacker<'a> {
 
     pub fn raw_metadata(self) -> Result<RawCLRMetadata<'a>, Error> {
         let clr_runtime_header = self.clr_runtime_header()?;
-        let metadata_range = clr_runtime_header.metadata_range()?.value;
+        let metadata_range = clr_runtime_header.metadata_range()?.value();
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
@@ -1500,15 +1492,15 @@ impl<'a> DLLUnpacker<'a> {
 
 impl<'a> ClrRuntimeHeader<'a> {
     pub fn header_size(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(0)
+        self.bytes.get_u32(0).map_err(Into::into)
     }
 
     pub fn major_runtime_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(4)
+        self.bytes.get_u16(4).map_err(Into::into)
     }
 
     pub fn minor_runtime_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(6)
+        self.bytes.get_u16(6).map_err(Into::into)
     }
 
     pub fn metadata_range(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
@@ -1516,11 +1508,11 @@ impl<'a> ClrRuntimeHeader<'a> {
     }
 
     pub fn flags(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(16)
+        self.bytes.get_u32(16).map_err(Into::into)
     }
 
     pub fn entry_point_token(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(20)
+        self.bytes.get_u32(20).map_err(Into::into)
     }
 
     pub fn resources(&self) -> Result<UnpackedValue<VirtualRange>, Error> {
@@ -1571,34 +1563,36 @@ impl<'a> RawCLRMetadata<'a> {
     }
 
     pub fn major_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(4)
+        self.bytes.get_u16(4).map_err(Into::into)
     }
 
     pub fn minor_version(&self) -> Result<UnpackedValue<u16>, Error> {
-        self.bytes.get_u16(6)
+        self.bytes.get_u16(6).map_err(Into::into)
     }
 
     pub fn reserved(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(8)
+        self.bytes.get_u32(8).map_err(Into::into)
     }
 
     pub fn version_str_len(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(12)
+        self.bytes.get_u32(12).map_err(Into::into)
     }
 
     fn padded_version_str_len(&self) -> Result<usize, Error> {
-        let len = self.version_str_len()?.value as usize;
+        let len = self.version_str_len()?.value() as usize;
         Ok(len.div_ceil(4) * 4)
     }
 
     pub fn version_str(&self) -> Result<UnpackedValue<&'a str>, Error> {
-        let len = self.version_str_len()?.value as usize;
+        let len = self.version_str_len()?.value() as usize;
         let start = 16;
 
         let padded_len = self.padded_version_str_len()?;
-        let value =
-            std::str::from_utf8(self.bytes.subrange(start..start + len).bytes)?
-                .trim_end_matches('\0');
+        let value = std::str::from_utf8(
+            self.bytes.subrange(start..start + len).into(),
+        )?
+        .trim_end_matches('\0');
+
         Ok(UnpackedValue::new(
             self.bytes.address_range(start..start + padded_len),
             value,
@@ -1607,19 +1601,19 @@ impl<'a> RawCLRMetadata<'a> {
 
     pub fn flags(&self) -> Result<UnpackedValue<u16>, Error> {
         let start = 16 + self.padded_version_str_len()?;
-        self.bytes.get_u16(start)
+        self.bytes.get_u16(start).map_err(Into::into)
     }
 
     pub fn num_streams(&self) -> Result<UnpackedValue<u16>, Error> {
         let start = 18 + self.padded_version_str_len()?;
-        self.bytes.get_u16(start)
+        self.bytes.get_u16(start).map_err(Into::into)
     }
 
     pub fn iter_stream_header(
         &self,
     ) -> Result<impl Iterator<Item = Result<StreamHeader<'a>, Error>> + '_, Error>
     {
-        let num_streams = self.num_streams()?.value;
+        let num_streams = self.num_streams()?.value();
 
         let mut curr_offset = 20 + self.padded_version_str_len()?;
 
@@ -1643,14 +1637,14 @@ impl<'a> RawCLRMetadata<'a> {
                 let value = std::str::from_utf8(
                     self.bytes
                         .subrange(name_start..name_start + name_len)
-                        .bytes,
+                        .into(),
                 )?;
                 UnpackedValue::new(loc, value)
             };
 
             let stream = {
-                let start = stream_offset.value as usize;
-                let size = stream_size.value as usize;
+                let start = stream_offset.value() as usize;
+                let size = stream_size.value() as usize;
                 self.bytes.subrange(start..start + size)
             };
 
@@ -1687,10 +1681,7 @@ impl<'a> RawCLRMetadata<'a> {
     pub fn metadata_heaps(
         &self,
     ) -> Result<EnumMap<MetadataHeapKind, ByteRange<'a>>, Error> {
-        let mut heaps = EnumMap::init(|| ByteRange {
-            start: Pointer::null(),
-            bytes: &[],
-        });
+        let mut heaps = EnumMap::init(ByteRange::null);
         heaps[MetadataHeapKind::String] = self.find_stream("#Strings")?;
         heaps[MetadataHeapKind::Blob] = self.find_stream("#Blob")?;
         heaps[MetadataHeapKind::GUID] = self.find_stream("#GUID")?;
@@ -1716,15 +1707,15 @@ impl<'a> RawCLRMetadata<'a> {
 
 impl<'a> MetadataTableHeader<'a> {
     pub fn reserved_0(&self) -> Result<UnpackedValue<u32>, Error> {
-        self.bytes.get_u32(0)
+        self.bytes.get_u32(0).map_err(Into::into)
     }
 
     pub fn major_version(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(4)
+        self.bytes.get_u8(4).map_err(Into::into)
     }
 
     pub fn minor_version(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(5)
+        self.bytes.get_u8(5).map_err(Into::into)
     }
 
     pub fn heap_sizes(&self) -> Result<UnpackedValue<HeapSizes>, Error> {
@@ -1739,19 +1730,19 @@ impl<'a> MetadataTableHeader<'a> {
     }
 
     pub fn reserved_1(&self) -> Result<UnpackedValue<u8>, Error> {
-        self.bytes.get_u8(7)
+        self.bytes.get_u8(7).map_err(Into::into)
     }
 
     /// Bitfield indicating which tables are present.
     pub fn valid_table_bitfield(&self) -> Result<UnpackedValue<u64>, Error> {
-        self.bytes.get_u64(8)
+        self.bytes.get_u64(8).map_err(Into::into)
     }
 
     /// Bitfield indicating which tables are sorted.  Should have
     /// exactly 14 entries, matching the tables listed in section
     /// II.22 of ECMA-335.
     pub fn sorted_table_bitfield(&self) -> Result<UnpackedValue<u64>, Error> {
-        self.bytes.get_u64(16)
+        self.bytes.get_u64(16).map_err(Into::into)
     }
 
     pub fn iter_num_rows(
@@ -1762,21 +1753,21 @@ impl<'a> MetadataTableHeader<'a> {
             > + '_,
         Error,
     > {
-        let bitfield = self.valid_table_bitfield()?.value;
+        let bitfield = self.valid_table_bitfield()?.value();
 
         let iter = (0..64)
             .filter(move |i_bit| bitfield & (1 << i_bit) > 0)
-            .scan(24, |offset, i_bit| {
+            .scan(24, |offset, i_bit| -> Option<Result<_, Error>> {
                 let row_offset = *offset;
                 *offset += 4;
 
                 let num_rows = match self.bytes.get_u32(row_offset) {
                     Ok(val) => val,
-                    Err(err) => return Some(Err(err)),
+                    Err(err) => return Some(Err(err.into())),
                 };
                 let kind = match MetadataTableKind::from_bit_index(i_bit) {
                     Ok(val) => val,
-                    Err(err) => return Some(Err(err)),
+                    Err(err) => return Some(Err(err.into())),
                 };
                 Some(Ok((num_rows, kind)))
             });
@@ -1787,7 +1778,7 @@ impl<'a> MetadataTableHeader<'a> {
     pub fn metadata_table_sizes(&self) -> Result<MetadataTableSizes, Error> {
         let heap_sizes = {
             let mut heap_sizes = EnumMap::<MetadataHeapKind, bool>::default();
-            let raw_heap_sizes = self.heap_sizes()?.value;
+            let raw_heap_sizes = self.heap_sizes()?.value();
             heap_sizes[MetadataHeapKind::String] =
                 raw_heap_sizes.string_stream_uses_u32_addr;
             heap_sizes[MetadataHeapKind::GUID] =
@@ -1801,7 +1792,7 @@ impl<'a> MetadataTableHeader<'a> {
             let mut num_rows = EnumMap::<MetadataTableKind, usize>::default();
             for res in self.iter_num_rows()? {
                 let (num_table_rows, kind) = res?;
-                num_rows[kind] = num_table_rows.value as usize;
+                num_rows[kind] = num_table_rows.value() as usize;
             }
             num_rows
         };
@@ -1862,7 +1853,7 @@ impl<'a> MetadataTableHeader<'a> {
             let mut curr_offset = 0;
             for res in self.iter_num_rows()? {
                 let (num_rows, kind) = res?;
-                let num_rows = num_rows.value as usize;
+                let num_rows = num_rows.value() as usize;
                 table_offsets[kind] = curr_offset;
                 curr_offset += num_rows * row_size[kind];
             }
@@ -1880,7 +1871,7 @@ impl<'a> MetadataTableHeader<'a> {
 
     fn tables_after_header(&self) -> Result<ByteRange<'a>, Error> {
         let num_tables =
-            self.valid_table_bitfield()?.value.count_ones() as usize;
+            self.valid_table_bitfield()?.value().count_ones() as usize;
         let header_size = 24 + 4 * num_tables;
         let bytes = self.bytes.subrange(header_size..self.bytes.len());
         Ok(bytes)
@@ -2029,9 +2020,7 @@ impl TypedMetadataIndex for MetadataHeapIndex<String> {
         tables: &'b Metadata<'a>,
     ) -> Result<&'a str, Error> {
         let bytes = tables.heaps[MetadataHeapKind::String];
-        bytes
-            .get_null_terminated(self.index)
-            .map(|unpacked| unpacked.value())
+        Ok(bytes.get_null_terminated(self.index)?.value())
     }
 }
 
@@ -2057,9 +2046,10 @@ impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
     ) -> Result<Self::Output<'a, 'b>, Error> {
         let index = self.index;
         let guid_size = 16;
-        tables.heaps[MetadataHeapKind::GUID]
+        let value = tables.heaps[MetadataHeapKind::GUID]
             .subrange(index * guid_size..(index + 1) * guid_size)
-            .unpack()
+            .unpack()?;
+        Ok(value)
     }
 }
 
@@ -2656,9 +2646,11 @@ where
             .next_row_bytes
             .as_ref()
             .map(|next_row| {
-                let range = begin_bytes.start - self.bytes.start
-                    ..begin_bytes.end() - self.bytes.start;
-                let end_bytes = next_row.subrange(range);
+                let field_range: Range<Pointer> = begin_bytes.into();
+                let row_range: Range<Pointer> = self.bytes.into();
+                let offset_range = field_range.start - row_range.start
+                    ..field_range.end - row_range.start;
+                let end_bytes = next_row.subrange(offset_range);
                 end_bytes.unpack::<UnpackedValue<_>>().unwrap().value()
             })
             .unwrap_or_else(|| {
@@ -2704,7 +2696,8 @@ impl FieldFlags {
 }
 
 impl<'a> UnpackBytes<'a> for FieldFlags {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         Ok(Self(bytes.unpack()?))
     }
 }
@@ -2783,7 +2776,8 @@ impl MethodDefFlags {
 }
 
 impl<'a> UnpackBytes<'a> for MethodDefFlags {
-    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Error> {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         Ok(Self(bytes.unpack()?))
     }
 }

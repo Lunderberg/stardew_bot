@@ -23,7 +23,7 @@ impl<'a> DLLUnpacker<'a> {
         for section in self.iter_section_header()? {
             annotator
                 .group(section.section_range()?)
-                .name(format!("{} PE section", section.name()?.value));
+                .name(format!("{} PE section", section.name()?.value()));
             section.collect_annotations(annotator)?;
         }
 
@@ -410,11 +410,11 @@ impl<'a> MetadataRow<'a, TypeDef> {
         })?;
 
         {
-            let method_range = method_indices.value;
+            let method_range = method_indices.value();
             let param_start = method_def_table
                 .get_row(method_range.start)?
                 .param_indices()?
-                .value
+                .value()
                 .start;
             let param_end = if method_range.end
                 == self.metadata.table_sizes.num_rows
@@ -425,7 +425,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
                 method_def_table
                     .get_row(method_range.end)?
                     .param_indices()?
-                    .value
+                    .value()
                     .end
             };
             annotator

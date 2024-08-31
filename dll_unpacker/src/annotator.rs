@@ -1,8 +1,6 @@
 use std::{fmt::Display, ops::Range};
 
-use memory_reader::Pointer;
-
-use crate::UnpackedValue;
+use memory_reader::{Pointer, UnpackedValue};
 
 pub trait Annotator {
     fn range(&mut self, range: Range<Pointer>) -> &mut impl Annotation;
