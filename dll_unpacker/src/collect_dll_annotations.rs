@@ -3,12 +3,11 @@ use crate::dll_unpacker::{
     CustomAttribute, DeclSecurity, Event, EventMap, Field, FieldLayout,
     FieldMarshal, FieldRVA, GenericParam, GenericParamConstraint, ImplMap,
     InterfaceImpl, ManifestResource, MemberRef, Metadata, MetadataRow,
-    MetadataTable, MetadataTableHeader, MetadataTableKind, MethodDef,
-    MethodImpl, MethodSemantics, MethodSpec, Module, ModuleRef, NestedClass,
-    Param, Property, PropertyMap, RawCLRMetadata, StandAloneSig, StreamHeader,
-    TypeDef, TypeRef, TypeSpec,
+    MetadataTable, MetadataTableHeader, MethodDef, MethodImpl, MethodSemantics,
+    MethodSpec, Module, ModuleRef, NestedClass, Param, Property, PropertyMap,
+    RawCLRMetadata, StandAloneSig, StreamHeader, TypeDef, TypeRef, TypeSpec,
 };
-use crate::{enum_map::EnumKey, Annotation, Annotator, DLLUnpacker, Error};
+use crate::{Annotation, Annotator, DLLUnpacker, Error};
 
 impl<'a> DLLUnpacker<'a> {
     pub fn collect_annotations(
@@ -160,32 +159,25 @@ impl<'a> Metadata<'a> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        for table_kind in MetadataTableKind::iter_keys() {
-            let table_start = self.table_sizes.table_offsets[table_kind];
-            let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
-            let num_rows = self.table_sizes.num_rows[table_kind];
-            for i_row in 0..num_rows {
-                let row_start = table_start + i_row * bytes_per_row;
-                let bytes =
-                    self.bytes.subrange(row_start..row_start + bytes_per_row);
+        self.iter_untyped_rows()
+            .for_each(|(table_kind, i_row, ptr_range)| {
                 annotator
-                    .range(bytes.into())
+                    .range(ptr_range)
                     .name(format!("{}[{}]", table_kind, i_row));
-            }
-        }
+            });
 
-        self.module_table()?
+        self.module_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.type_ref_table()?
+        self.type_ref_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        let field_table = self.field_table()?;
-        let method_table = self.method_def_table()?;
-        let param_table = self.param_table()?;
-        self.type_def_table()?.iter_rows().try_for_each(|row| {
+        let field_table = self.field_table();
+        let method_table = self.method_def_table();
+        let param_table = self.param_table();
+        self.type_def_table().iter_rows().try_for_each(|row| {
             row.collect_annotations(
                 annotator,
                 &field_table,
@@ -194,107 +186,107 @@ impl<'a> Metadata<'a> {
             )
         })?;
 
-        self.interface_impl_table()?
+        self.interface_impl_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.member_ref_table()?
+        self.member_ref_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.constant_table()?
+        self.constant_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.custom_attribute_table()?
+        self.custom_attribute_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.field_marshal_table()?
+        self.field_marshal_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.decl_security_table()?
+        self.decl_security_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.class_layout_table()?
+        self.class_layout_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.field_layout_table()?
+        self.field_layout_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.stand_alone_sig_table()?
+        self.stand_alone_sig_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.event_map_table()?
+        self.event_map_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.event_table()?
+        self.event_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.property_map_table()?
+        self.property_map_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.property_table()?
+        self.property_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.method_semantics_table()?
+        self.method_semantics_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.method_impl_table()?
+        self.method_impl_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.module_ref_table()?
+        self.module_ref_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.type_spec_table()?
+        self.type_spec_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.impl_map_table()?
+        self.impl_map_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.field_rva_table()?
+        self.field_rva_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.assembly_table()?
+        self.assembly_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.assembly_ref_table()?
+        self.assembly_ref_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.manifest_resource_table()?
+        self.manifest_resource_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.nested_class_table()?
+        self.nested_class_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.generic_param_table()?
+        self.generic_param_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.method_spec_table()?
+        self.method_spec_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        self.generic_param_constraint_table()?
+        self.generic_param_constraint_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
@@ -382,7 +374,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
             } else {
                 "(none)"
             });
-        let field_indices = self.field_indices()?;
+        let field_indices = self.field_indices();
         annotator.value(field_indices).name("Fields");
 
         annotator
@@ -393,7 +385,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
             field.collect_annotations(annotator, type_name, type_namespace)
         })?;
 
-        let method_indices = self.method_indices()?;
+        let method_indices = self.method_indices();
         annotator.value(method_indices).name("method_indices");
 
         annotator
@@ -409,32 +401,30 @@ impl<'a> MetadataRow<'a, TypeDef> {
             )
         })?;
 
-        {
-            let method_range = method_indices.value();
-            let param_start = method_def_table
-                .get_row(method_range.start)?
-                .param_indices()?
-                .value()
-                .start;
-            let param_end = if method_range.end
-                == self.metadata.table_sizes.num_rows
-                    [MetadataTableKind::MethodDef]
-            {
-                self.metadata.table_sizes.num_rows[MetadataTableKind::Param]
-            } else {
-                method_def_table
-                    .get_row(method_range.end)?
-                    .param_indices()?
-                    .value()
-                    .end
-            };
-            annotator
-                .group(
-                    self.metadata
-                        .param_table()?
-                        .address_range_from_untyped(param_start..param_end)?,
-                )
-                .name(format!("Class '{type_name}'"));
+        if self.num_methods() > 0 {
+            let start = self.iter_methods()?.find_map(|method| {
+                method
+                    .iter_params()
+                    .unwrap()
+                    .next()
+                    .map(|param| param.ptr_range().start)
+            });
+            if let Some(start) = start {
+                let end = self
+                    .iter_methods()?
+                    .rev()
+                    .find_map(|method| {
+                        method
+                            .iter_params()
+                            .unwrap()
+                            .last()
+                            .map(|param| param.ptr_range().end)
+                    })
+                    .unwrap();
+                annotator
+                    .group(start..end)
+                    .name(format!("Class '{type_name}'"));
+            }
         }
 
         Ok(())
@@ -506,7 +496,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
             .range(self.signature()?.into())
             .name(format!("'{type_name}.{name}' signature"));
 
-        let param_indices = self.param_indices()?;
+        let param_indices = self.param_indices();
         annotator.value(param_indices).name("param_indices");
 
         annotator
@@ -741,7 +731,7 @@ impl<'a> MetadataRow<'a, EventMap> {
             .value(self.class_index()?)
             .name("Class")
             .append_value(self.class()?.name()?);
-        annotator.value(self.event_indices()?).name("Events");
+        annotator.value(self.event_indices()).name("Events");
 
         Ok(())
     }
@@ -781,7 +771,7 @@ impl<'a> MetadataRow<'a, PropertyMap> {
             .value(self.class_index()?)
             .name("Class")
             .append_value(self.class()?.name()?);
-        annotator.value(self.property_indices()?).name("Properties");
+        annotator.value(self.property_indices()).name("Properties");
 
         Ok(())
     }

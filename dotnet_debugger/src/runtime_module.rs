@@ -52,7 +52,7 @@ impl RuntimeModule {
     ) -> Result<TypedPointer<Self>, Error> {
         // Pointers to IL method definitions in the loaded DLL.
         let dll_method_def: HashSet<Pointer> = metadata
-            .method_def_table()?
+            .method_def_table()
             .iter_rows()
             .filter_map(|method_def| method_def.cil_method().ok().flatten())
             .filter_map(|cil_method| cil_method.body_range().ok())
@@ -178,7 +178,7 @@ impl RuntimeModule {
         // Should be at byte 648 relative to the module
         // pointer, but may be different in each .NET version.
 
-        let num_type_defs = metadata.type_def_table()?.num_rows();
+        let num_type_defs = metadata.type_def_table().num_rows();
 
         let (ptr_to_table_of_method_tables, supported_flags) = bytes
             .chunks_exact(8)

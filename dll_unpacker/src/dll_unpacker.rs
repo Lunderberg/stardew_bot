@@ -58,9 +58,9 @@ pub struct MetadataTableHeader<'a> {
 }
 
 pub struct Metadata<'a> {
-    pub(crate) bytes: ByteRange<'a>,
+    bytes: ByteRange<'a>,
     dll_unpacker: DLLUnpacker<'a>,
-    pub(crate) table_sizes: MetadataTableSizes,
+    table_sizes: MetadataTableSizes,
     heaps: EnumMap<MetadataHeapKind, ByteRange<'a>>,
 }
 
@@ -671,18 +671,25 @@ macro_rules! decl_metadata_table {
             impl<'a> MetadataRow<'a, $table_name> {
                 pub(crate) fn [< $field_name _indices >](
                     &self,
-                ) -> Result<
-                        UnpackedValue<MetadataTableIndexRange<$field_type>>,
-                        Error,
-                > {
-                    Ok(self.get_index_range($field_index))
+                ) -> UnpackedValue<MetadataTableIndexRange<$field_type>> {
+                    self.get_index_range($field_index)
+                }
+
+                pub fn [< num_ $plural_field_name >](
+                    &self,
+                ) -> usize {
+                    let index_range = self
+                        .get_untyped_index_range($field_index)
+                        .value();
+
+                    index_range.end - index_range.start
                 }
 
                 pub fn [< iter_ $plural_field_name >]<'b>(&'b self) -> Result<
-                    impl Iterator<Item=MetadataRow<$field_type>>,
+                    impl DoubleEndedIterator<Item=MetadataRow<$field_type>>,
                     Error,
                 > {
-                    let indices = self. [< $field_name _indices >] ()?;
+                    let indices = self. [< $field_name _indices >] ();
                     self.metadata.iter_range(indices)
                 }
 
@@ -1451,10 +1458,10 @@ impl<'a> DLLUnpacker<'a> {
         // Ok(metadata.bytes.start)
 
         let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.module_table()?.bytes.start())
+        Ok(metadata_tables.module_table().bytes.start())
 
         // let metadata_tables = metadata.metadata_tables()?;
-        // let table = metadata_tables.method_def_table()?;
+        // let table = metadata_tables.method_def_table();
         // let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
         // Ok(start_at)
     }
@@ -1893,19 +1900,17 @@ impl<'a> Metadata<'a> {
         })
     }
 
-    fn get_table<'b, TableTag>(
-        &'b self,
-    ) -> Result<MetadataTable<'b, TableTag>, Error>
+    fn get_table<'b, TableTag>(&'b self) -> MetadataTable<'b, TableTag>
     where
         TableTag: MetadataTableTag,
     {
         let bytes = self.get_table_bytes(TableTag::KIND);
 
-        Ok(MetadataTable {
+        MetadataTable {
             bytes,
             metadata: &self,
             _phantom: PhantomData,
-        })
+        }
     }
 
     fn get_table_bytes(&self, table_kind: MetadataTableKind) -> ByteRange<'a> {
@@ -1929,12 +1934,12 @@ impl<'a> Metadata<'a> {
     fn iter_range<TableTag>(
         &self,
         indices: impl Borrow<MetadataTableIndexRange<TableTag>>,
-    ) -> Result<impl Iterator<Item = MetadataRow<TableTag>>, Error>
+    ) -> Result<impl DoubleEndedIterator<Item = MetadataRow<TableTag>>, Error>
     where
         TableTag: MetadataTableTag,
     {
         let indices = indices.borrow();
-        let table = self.get_table()?;
+        let table = self.get_table();
         table.validate_index_range(*indices)?;
 
         let iter = (indices.start..indices.end).map(move |index| {
@@ -1946,14 +1951,29 @@ impl<'a> Metadata<'a> {
         });
         Ok(iter)
     }
+
+    pub(crate) fn iter_untyped_rows(
+        &self,
+    ) -> impl Iterator<Item = (MetadataTableKind, usize, Range<Pointer>)> + '_
+    {
+        let ptr_to_tables = self.bytes.start();
+        MetadataTableKind::iter_keys().flat_map(move |table_kind| {
+            let ptr_to_table =
+                ptr_to_tables + self.table_sizes.table_offsets[table_kind];
+            let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
+            let num_rows = self.table_sizes.num_rows[table_kind];
+            (0..num_rows).map(move |i_row| {
+                let ptr_to_row = ptr_to_table + i_row * bytes_per_row;
+                (table_kind, i_row, ptr_to_row..ptr_to_row + bytes_per_row)
+            })
+        })
+    }
 }
 
 macro_rules! define_table_method {
     ($method_name:ident,$tag:ident) => {
         impl<'a> Metadata<'a> {
-            pub fn $method_name<'b>(
-                &'b self,
-            ) -> Result<MetadataTable<'b, $tag>, Error> {
+            pub fn $method_name<'b>(&'b self) -> MetadataTable<'b, $tag> {
                 self.get_table()
             }
         }
@@ -2062,7 +2082,7 @@ impl<TableTag: MetadataTableTag> TypedMetadataIndex
         self,
         tables: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
-        tables.get_table()?.get_row(self.index)
+        tables.get_table().get_row(self.index)
     }
 }
 
@@ -2486,7 +2506,11 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         }
     }
 
-    pub fn iter_rows(self) -> impl Iterator<Item = MetadataRow<'a, TableTag>>
+    pub fn iter_rows(
+        self,
+    ) -> impl Iterator<Item = MetadataRow<'a, TableTag>>
+           + DoubleEndedIterator
+           + ExactSizeIterator
     where
         TableTag: MetadataTableTag,
     {
@@ -2716,7 +2740,7 @@ impl<'a> MetadataRow<'a, Field> {
     pub fn find_owning_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
         // TODO: Generalize this to apply to Method/Param tables as well.
         let field_index = self.index().index;
-        let type_def_table = self.metadata.type_def_table()?;
+        let type_def_table = self.metadata.type_def_table();
 
         let mut index_range = 0..type_def_table.num_rows();
 
@@ -2728,7 +2752,7 @@ impl<'a> MetadataRow<'a, Field> {
 
             let midpoint_field_index: usize = type_def_table
                 .get_row(midpoint)?
-                .field_indices()?
+                .field_indices()
                 .value()
                 .start;
             if midpoint_field_index <= field_index {

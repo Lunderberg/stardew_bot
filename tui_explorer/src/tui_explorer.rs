@@ -338,8 +338,7 @@ impl TuiExplorerBuilder {
             .try_for_each(|table| -> Result<_, Error> {
                 let table = table?;
 
-                let class_name =
-                    metadata.type_def_table()?.get(table.token())?.name()?;
+                let class_name = metadata.get(table.token())?.name()?;
                 self.annotations
                     .range(table.ptr_range())
                     .name(format!("MethodTable, {class_name}"));
