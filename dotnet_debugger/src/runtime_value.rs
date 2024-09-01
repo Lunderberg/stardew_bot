@@ -148,6 +148,7 @@ impl std::fmt::Display for RuntimeValue {
             RuntimeValue::NativeInt(val) => write!(f, "{val}"),
             RuntimeValue::F32(val) => write!(f, "{val}"),
             RuntimeValue::F64(val) => write!(f, "{val}"),
+            RuntimeValue::Object(val) if val.is_null() => write!(f, "null"),
             RuntimeValue::Object(val) => write!(f, "{val}"),
         }
     }
