@@ -106,6 +106,8 @@ impl RuntimeModule {
         location: Pointer,
         reader: &MemoryReader,
     ) -> Result<Self, Error> {
+        // TODO: Allow a caller to pass ownership of an existing DLL
+        // region.
         let image_ptr = {
             let pe_file_ptr: Pointer =
                 reader.read_byte_array(location + 16)?.into();
@@ -121,23 +123,26 @@ impl RuntimeModule {
                     Err(_) => true,
                 })
                 .ok_or(Error::DLLPointerNotFoundFromModule)??;
+
+            // In most cases, the pointers at offsets 8/24/32 will all
+            // let the DLL region be found.  However, the PE pointers
+            // at offset 8 and 24 may point to a memmap that only
+            // contains the start of the file.
             let image_ptr: Pointer =
-                reader.read_byte_array(pe_image_layout_ptr + 8)?.into();
+                reader.read_byte_array(pe_image_layout_ptr + 32)?.into();
 
             image_ptr
         };
 
-        // TODO: Allow a caller to pass ownership of an existing DLL
-        // region.
         let dll_region = reader
-            .find_region(|region| {
-                region.is_readable
-                    && !region.is_writable
-                    && !region.is_executable
-                    && region.is_shared_memory
-                    && region.contains(image_ptr)
+            .regions
+            .iter()
+            .filter(|region| region.contains(image_ptr))
+            .filter(|region| {
+                region.contains(image_ptr) && region.file_offset() == 0
             })
-            .ok_or(Error::DLLPointerNotFoundFromModule)?
+            .max_by_key(|region| region.size_bytes())
+            .ok_or(Error::RegionForDLLNotFound(image_ptr))?
             .read()?;
 
         let metadata_layout =

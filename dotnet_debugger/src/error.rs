@@ -1,3 +1,4 @@
+use memory_reader::Pointer;
 use thiserror::Error;
 
 use crate::RuntimeType;
@@ -27,6 +28,9 @@ pub enum Error {
 
     #[error("Could not locate the DLL, starting from the Module")]
     DLLPointerNotFoundFromModule,
+
+    #[error("Could not read the CLR DLL at {0}")]
+    RegionForDLLNotFound(Pointer),
 
     #[error("Value 0x{0:02x} does not correspond to any element type")]
     InvalidRuntimeType(u8),

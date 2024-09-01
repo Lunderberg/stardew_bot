@@ -92,6 +92,10 @@ impl MemoryMapRegion {
         self.start..self.end
     }
 
+    pub fn file_offset(&self) -> usize {
+        self.file_offset
+    }
+
     pub fn contains(&self, ptr: Pointer) -> bool {
         (self.start <= ptr) && (ptr < self.end)
     }
