@@ -378,7 +378,13 @@ impl WidgetWindow for ObjectExplorer {
             .map(|text| Line::raw(text));
 
         let widget = List::new(lines)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
+            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .with_scrollbar(
+                self.object_tree
+                    .as_ref()
+                    .map(|tree| tree.num_lines())
+                    .unwrap_or(1),
+            );
 
         StatefulWidget::render(widget, area, buf, &mut self.list_state);
 

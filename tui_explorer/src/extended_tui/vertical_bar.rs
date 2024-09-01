@@ -18,14 +18,12 @@ impl Default for VerticalBar {
 
 impl VerticalBar {
     pub fn bar_top_ratio(mut self, ratio: f64) -> Self {
-        assert!((0.0..=1.0).contains(&ratio), "Ratio must be on range [0,1]");
-        self.bar_top_ratio = ratio;
+        self.bar_top_ratio = ratio.clamp(0.0, 1.0);
         self
     }
 
     pub fn bar_bottom_ratio(mut self, ratio: f64) -> Self {
-        assert!((0.0..=1.0).contains(&ratio), "Ratio must be on range [0,1]");
-        self.bar_bottom_ratio = ratio;
+        self.bar_bottom_ratio = ratio.clamp(0.0, 1.0);
         self
     }
 
