@@ -45,6 +45,9 @@ pub struct StreamHeader<'a> {
     /// The name of the metadata section.  Max of 32 ASCII characters.
     pub name: UnpackedValue<&'a str>,
 
+    /// The location of the stream
+    ptr_range: Range<Pointer>,
+
     /// The contents of the stream
     pub bytes: ByteRange<'a>,
 }
@@ -60,8 +63,7 @@ pub struct MetadataTableHeader<'a> {
 pub struct Metadata<'a> {
     bytes: ByteRange<'a>,
     dll_unpacker: DLLUnpacker<'a>,
-    table_sizes: MetadataTableSizes,
-    heaps: EnumMap<MetadataHeapKind, ByteRange<'a>>,
+    layout: MetadataLayout,
 }
 
 #[derive(Clone, Copy)]
@@ -150,11 +152,13 @@ pub enum MetadataColumnType {
     FixedSize(usize),
 }
 
-pub struct MetadataTableSizes {
-    pub(crate) num_rows: EnumMap<MetadataTableKind, usize>,
-    pub(crate) index_size: EnumMap<MetadataIndexKind, usize>,
-    pub(crate) bytes_per_row: EnumMap<MetadataTableKind, usize>,
-    pub(crate) table_offsets: EnumMap<MetadataTableKind, usize>,
+pub struct MetadataLayout {
+    num_rows: EnumMap<MetadataTableKind, usize>,
+    index_size: EnumMap<MetadataIndexKind, usize>,
+    bytes_per_row: EnumMap<MetadataTableKind, usize>,
+    table_offsets: EnumMap<MetadataTableKind, usize>,
+    heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
+    tables_location: Range<Pointer>,
 }
 
 pub struct MetadataTable<'a, TableTag> {
@@ -1446,6 +1450,19 @@ impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
     }
 }
 
+impl Default for MetadataLayout {
+    fn default() -> Self {
+        Self {
+            num_rows: Default::default(),
+            index_size: Default::default(),
+            bytes_per_row: Default::default(),
+            table_offsets: Default::default(),
+            heap_locations: EnumMap::init(|| Pointer::null()..Pointer::null()),
+            tables_location: Pointer::null()..Pointer::null(),
+        }
+    }
+}
+
 impl<'a> DLLUnpacker<'a> {
     pub fn new(bytes: impl Into<ByteRange<'a>>) -> Self {
         Self {
@@ -1492,8 +1509,23 @@ impl<'a> DLLUnpacker<'a> {
         })
     }
 
+    pub fn metadata_layout(&self) -> Result<MetadataLayout, Error> {
+        let raw_metadata = self.raw_metadata()?;
+        let heap_locations = raw_metadata.metadata_heap_locations()?;
+
+        let header = raw_metadata.metadata_tables_header()?;
+        let layout = header.metadata_table_sizes(heap_locations)?;
+
+        Ok(layout)
+    }
+
     pub fn metadata(self) -> Result<Metadata<'a>, Error> {
-        self.raw_metadata()?.metadata_tables()
+        let layout = self.metadata_layout()?;
+        Ok(Metadata {
+            bytes: self.bytes.subrange(layout.tables_location.clone()),
+            layout,
+            dll_unpacker: self,
+        })
     }
 }
 
@@ -1649,11 +1681,13 @@ impl<'a> RawCLRMetadata<'a> {
                 UnpackedValue::new(loc, value)
             };
 
-            let stream = {
+            let ptr_range = {
                 let start = stream_offset.value() as usize;
                 let size = stream_size.value() as usize;
-                self.bytes.subrange(start..start + size)
+                self.bytes.address_range(start..start + size)
             };
+
+            let stream = self.bytes.subrange(ptr_range.clone());
 
             curr_offset += 8 + padded_name_len;
 
@@ -1662,6 +1696,7 @@ impl<'a> RawCLRMetadata<'a> {
                 size: stream_size,
                 name: stream_name,
                 bytes: stream,
+                ptr_range,
             })
         });
 
@@ -1685,29 +1720,44 @@ impl<'a> RawCLRMetadata<'a> {
         Ok(MetadataTableHeader { bytes })
     }
 
-    pub fn metadata_heaps(
+    fn get_stream_location(
         &self,
-    ) -> Result<EnumMap<MetadataHeapKind, ByteRange<'a>>, Error> {
-        let mut heaps = EnumMap::init(ByteRange::null);
-        heaps[MetadataHeapKind::String] = self.find_stream("#Strings")?;
-        heaps[MetadataHeapKind::Blob] = self.find_stream("#Blob")?;
-        heaps[MetadataHeapKind::GUID] = self.find_stream("#GUID")?;
+        name: &'static str,
+    ) -> Result<Range<Pointer>, Error> {
+        for res_header in self.iter_stream_header()? {
+            let stream = res_header?;
+            if stream.name.value() == name {
+                return Ok(stream.ptr_range);
+            }
+        }
+        Err(Error::MissingStream(name))
+    }
+
+    fn metadata_heap_locations(
+        &self,
+    ) -> Result<EnumMap<MetadataHeapKind, Range<Pointer>>, Error> {
+        let mut heaps = EnumMap::init(|| Pointer::null()..Pointer::null());
+        heaps[MetadataHeapKind::String] =
+            self.get_stream_location("#Strings")?;
+        heaps[MetadataHeapKind::Blob] = self.get_stream_location("#Blob")?;
+        heaps[MetadataHeapKind::GUID] = self.get_stream_location("#GUID")?;
 
         Ok(heaps)
     }
 
     pub fn metadata_tables(self) -> Result<Metadata<'a>, Error> {
-        let heaps = self.metadata_heaps()?;
         let header = self.metadata_tables_header()?;
 
-        let table_sizes = header.metadata_table_sizes()?;
+        let heap_locations = self.metadata_heap_locations()?;
+
+        let layout = header.metadata_table_sizes(heap_locations)?;
+
         let bytes = header.tables_after_header()?;
 
         Ok(Metadata {
             bytes,
             dll_unpacker: self.dll_unpacker,
-            table_sizes,
-            heaps,
+            layout,
         })
     }
 }
@@ -1782,7 +1832,10 @@ impl<'a> MetadataTableHeader<'a> {
         Ok(iter)
     }
 
-    pub fn metadata_table_sizes(&self) -> Result<MetadataTableSizes, Error> {
+    pub fn metadata_table_sizes(
+        &self,
+        heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
+    ) -> Result<MetadataLayout, Error> {
         let heap_sizes = {
             let mut heap_sizes = EnumMap::<MetadataHeapKind, bool>::default();
             let raw_heap_sizes = self.heap_sizes()?.value();
@@ -1836,7 +1889,7 @@ impl<'a> MetadataTableHeader<'a> {
             index_size
         };
 
-        let row_size = {
+        let bytes_per_row = {
             let mut row_size = EnumMap::<MetadataTableKind, usize>::default();
             for table_kind in MetadataTableKind::iter_keys() {
                 row_size[table_kind] = table_kind
@@ -1862,26 +1915,36 @@ impl<'a> MetadataTableHeader<'a> {
                 let (num_rows, kind) = res?;
                 let num_rows = num_rows.value() as usize;
                 table_offsets[kind] = curr_offset;
-                curr_offset += num_rows * row_size[kind];
+                curr_offset += num_rows * bytes_per_row[kind];
             }
 
             table_offsets
         };
 
-        Ok(MetadataTableSizes {
+        let tables_location = self.tables_location()?;
+
+        Ok(MetadataLayout {
             num_rows,
             index_size,
-            bytes_per_row: row_size,
+            bytes_per_row,
             table_offsets,
+            heap_locations,
+            tables_location,
         })
     }
 
-    fn tables_after_header(&self) -> Result<ByteRange<'a>, Error> {
+    fn tables_location(&self) -> Result<Range<Pointer>, Error> {
         let num_tables =
             self.valid_table_bitfield()?.value().count_ones() as usize;
         let header_size = 24 + 4 * num_tables;
-        let bytes = self.bytes.subrange(header_size..self.bytes.len());
-        Ok(bytes)
+        let location = self.bytes.address_range(header_size..);
+
+        Ok(location)
+    }
+
+    fn tables_after_header(&self) -> Result<ByteRange<'a>, Error> {
+        let location = self.tables_location()?;
+        Ok(self.bytes.subrange(location))
     }
 }
 
@@ -1914,9 +1977,9 @@ impl<'a> Metadata<'a> {
     }
 
     fn get_table_bytes(&self, table_kind: MetadataTableKind) -> ByteRange<'a> {
-        let offset = self.table_sizes.table_offsets[table_kind];
-        let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
-        let num_rows = self.table_sizes.num_rows[table_kind];
+        let offset = self.layout.table_offsets[table_kind];
+        let bytes_per_row = self.layout.bytes_per_row[table_kind];
+        let num_rows = self.layout.num_rows[table_kind];
         let size = bytes_per_row * num_rows;
         self.bytes.subrange(offset..offset + size)
     }
@@ -1959,9 +2022,9 @@ impl<'a> Metadata<'a> {
         let ptr_to_tables = self.bytes.start();
         MetadataTableKind::iter_keys().flat_map(move |table_kind| {
             let ptr_to_table =
-                ptr_to_tables + self.table_sizes.table_offsets[table_kind];
-            let bytes_per_row = self.table_sizes.bytes_per_row[table_kind];
-            let num_rows = self.table_sizes.num_rows[table_kind];
+                ptr_to_tables + self.layout.table_offsets[table_kind];
+            let bytes_per_row = self.layout.bytes_per_row[table_kind];
+            let num_rows = self.layout.num_rows[table_kind];
             (0..num_rows).map(move |i_row| {
                 let ptr_to_row = ptr_to_table + i_row * bytes_per_row;
                 (table_kind, i_row, ptr_to_row..ptr_to_row + bytes_per_row)
@@ -2037,9 +2100,11 @@ impl TypedMetadataIndex for MetadataHeapIndex<String> {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<&'a str, Error> {
-        let bytes = tables.heaps[MetadataHeapKind::String];
+        let heap_location =
+            metadata.layout.heap_locations[MetadataHeapKind::String].clone();
+        let bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
         Ok(bytes.get_null_terminated(self.index)?.value())
     }
 }
@@ -2049,11 +2114,12 @@ impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<UnpackedBlob<'a>, Error> {
-        UnpackedBlob::new(
-            tables.heaps[MetadataHeapKind::Blob].subrange(self.index..),
-        )
+        let heap_location =
+            metadata.layout.heap_locations[MetadataHeapKind::Blob].clone();
+        let heap_bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
+        UnpackedBlob::new(heap_bytes.subrange(self.index..))
     }
 }
 
@@ -2062,11 +2128,15 @@ impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
         let index = self.index;
         let guid_size = 16;
-        let value = tables.heaps[MetadataHeapKind::GUID]
+
+        let heap_location =
+            metadata.layout.heap_locations[MetadataHeapKind::GUID].clone();
+        let heap_bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
+        let value = heap_bytes
             .subrange(index * guid_size..(index + 1) * guid_size)
             .unpack()?;
         Ok(value)
@@ -2228,7 +2298,7 @@ impl MetadataTableKind {
     }
 }
 
-impl MetadataTableSizes {
+impl MetadataLayout {
     fn column_size(&self, column_type: MetadataColumnType) -> usize {
         match column_type {
             MetadataColumnType::Index(index) => self.index_size[index],
@@ -2492,7 +2562,7 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
     where
         TableTag: MetadataTableTag,
     {
-        let num_rows = self.metadata.table_sizes.num_rows[TableTag::KIND];
+        let num_rows = self.metadata.layout.num_rows[TableTag::KIND];
         let MetadataTableIndexRange { start, end, .. } = indices;
 
         if end <= num_rows {
@@ -2514,9 +2584,8 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
     where
         TableTag: MetadataTableTag,
     {
-        let num_rows = self.metadata.table_sizes.num_rows[TableTag::KIND];
-        let bytes_per_row =
-            self.metadata.table_sizes.bytes_per_row[TableTag::KIND];
+        let num_rows = self.metadata.layout.num_rows[TableTag::KIND];
+        let bytes_per_row = self.metadata.layout.bytes_per_row[TableTag::KIND];
         let tables = self.metadata;
         let table_bytes = self.bytes;
         (0..num_rows).map(move |i_row| {
@@ -2540,7 +2609,7 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
     where
         TableTag: MetadataTableTag,
     {
-        self.metadata.table_sizes.num_rows[TableTag::KIND]
+        self.metadata.layout.num_rows[TableTag::KIND]
     }
 
     pub fn address_range(
@@ -2562,8 +2631,8 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         TableTag: MetadataTableTag,
     {
         let kind = TableTag::KIND;
-        let num_rows = self.metadata.table_sizes.num_rows[kind];
-        let bytes_per_row = self.metadata.table_sizes.bytes_per_row[kind];
+        let num_rows = self.metadata.layout.num_rows[kind];
+        let bytes_per_row = self.metadata.layout.bytes_per_row[kind];
 
         if indices.end <= num_rows {
             Ok(self.bytes.address_range(
@@ -2596,7 +2665,7 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         TableTag: MetadataTableTag,
     {
         let kind = TableTag::KIND;
-        let num_rows = self.metadata.table_sizes.num_rows[kind];
+        let num_rows = self.metadata.layout.num_rows[kind];
 
         // There's an offset between the one-indexed CLI indices
         // (where zero represents a null value) and the usual
@@ -2607,7 +2676,7 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         // the unpacking of CLI indices.
 
         if index < num_rows {
-            let bytes_per_row = self.metadata.table_sizes.bytes_per_row[kind];
+            let bytes_per_row = self.metadata.layout.bytes_per_row[kind];
             let bytes = self
                 .bytes
                 .subrange(index * bytes_per_row..(index + 1) * bytes_per_row);
@@ -2653,10 +2722,10 @@ where
             .iter()
             .take(column)
             .cloned()
-            .map(|field| self.metadata.table_sizes.column_size(field))
+            .map(|field| self.metadata.layout.column_size(field))
             .sum();
 
-        let size = self.metadata.table_sizes.column_size(fields[column]);
+        let size = self.metadata.layout.column_size(fields[column]);
 
         self.bytes.subrange(offset..offset + size)
     }
@@ -2684,7 +2753,7 @@ where
                 else {
                     panic!("Only simple indices are used as ranges")
                 };
-                self.metadata.table_sizes.num_rows[table_kind]
+                self.metadata.layout.num_rows[table_kind]
             });
 
         let (loc, begin_index): (_, usize) =
