@@ -57,9 +57,8 @@ pub struct MetadataTableHeader<'a> {
 }
 
 pub struct Metadata<'a> {
-    bytes: ByteRange<'a>,
-    dll_unpacker: DLLUnpacker<'a>,
     layout: MetadataLayout,
+    dll_bytes: ByteRange<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -149,13 +148,59 @@ pub enum MetadataColumnType {
 }
 
 pub struct MetadataLayout {
-    num_rows: EnumMap<MetadataTableKind, usize>,
-    index_size: EnumMap<MetadataIndexKind, usize>,
-    bytes_per_row: EnumMap<MetadataTableKind, usize>,
-    table_offsets: EnumMap<MetadataTableKind, usize>,
-    heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
-    tables_location: Range<Pointer>,
+    /// The relocations to be used for any RVA fields (e.g. the RVA
+    /// field of the MethodDef table).  These fields point to
+    /// locations within the DLL, but not necessarily within the
+    /// metadata section.  These relocations are determined from the
+    /// PE section headers of the DLL.
     rva_relocations: Vec<VirtualAddressRelocation>,
+
+    /// The location of each metadata heap.  Variable-sized fields,
+    /// such as strings and type signatures, are stored as references
+    /// into these heaps.
+    heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
+
+    /// Number of rows in each MetadataTable.  This is determined from
+    /// the variable-sized header at the start of the #~ metadata
+    /// stream.
+    num_rows: EnumMap<MetadataTableKind, usize>,
+
+    /// The location of all metadata tables.  This is the #~ stream in
+    /// the metadata, excluding the variable-sized header.
+    tables_location: Range<Pointer>,
+
+    /// Location of each metadata table, relative to the start of the
+    table_offsets: EnumMap<MetadataTableKind, usize>,
+
+    /// Number of bytes (either 2 or 4) used to specify indices in the
+    /// metadata.
+    ///
+    /// * #GUID heap: Offset relative to the start of the #GUID heap,
+    ///   index specifies the number of 128-bit GUIDs to advancePoints
+    ///   to a 128-bit GUID.  Size of the index depends on the number
+    ///   of GUIDs present.
+    ///
+    /// * All other heaps: Offset relative to the start of the
+    ///   corresponding heap, in bytes.  Size of the index depends on
+    ///   the size of the pointed-to heap, in bytes.
+    ///
+    /// * Simple table indices: Point to a row within a specific
+    ///   table.  Size depends on the number of rows in the pointed-to
+    ///   table.
+    ///
+    ///   Index is one-indexed, with a value of zero used to indicate
+    ///   an absent value.
+    ///
+    /// * Coded table index: Point to a row within a set of allowed
+    ///   tables.  Size depends on the number of allowed tables and
+    ///   the maximum number of rows across tables in that set.
+    index_size: EnumMap<MetadataIndexKind, usize>,
+
+    /// Number of bytes for each row in a metadata table.  Depends on
+    /// the columns present in that metadata, including both
+    /// fixed-width fields of those columns (e.g. flags), and the size
+    /// of variable-width fields (as stored in `index_size`).
+    bytes_per_row: EnumMap<MetadataTableKind, usize>,
 }
 
 impl MetadataLayout {
@@ -1514,9 +1559,8 @@ impl<'a> DLLUnpacker<'a> {
     pub fn metadata(self) -> Result<Metadata<'a>, Error> {
         let layout = self.metadata_layout()?;
         Ok(Metadata {
-            bytes: self.bytes.subrange(layout.tables_location.clone()),
             layout,
-            dll_unpacker: self,
+            dll_bytes: self.bytes,
         })
     }
 }
@@ -1923,7 +1967,7 @@ impl<'a> MetadataTableHeader<'a> {
 
 impl<'a> Metadata<'a> {
     pub fn ptr_range(&self) -> Range<Pointer> {
-        self.bytes.into()
+        self.layout.tables_location.clone()
     }
 
     pub fn iter_table_locations(
@@ -1954,7 +1998,12 @@ impl<'a> Metadata<'a> {
         let bytes_per_row = self.layout.bytes_per_row[table_kind];
         let num_rows = self.layout.num_rows[table_kind];
         let size = bytes_per_row * num_rows;
-        self.bytes.subrange(offset..offset + size)
+
+        let bytes_all_tables =
+            self.dll_bytes.subrange(self.layout.tables_location.clone());
+        let bytes_this_table = bytes_all_tables.subrange(offset..offset + size);
+
+        bytes_this_table
     }
 
     pub fn get<'b, Index>(
@@ -1992,17 +2041,16 @@ impl<'a> Metadata<'a> {
         &self,
     ) -> impl Iterator<Item = (MetadataTableKind, usize, Range<Pointer>)> + '_
     {
-        let ptr_to_tables = self.bytes.start();
-        MetadataTableKind::iter_keys().flat_map(move |table_kind| {
-            let ptr_to_table =
-                ptr_to_tables + self.layout.table_offsets[table_kind];
-            let bytes_per_row = self.layout.bytes_per_row[table_kind];
-            let num_rows = self.layout.num_rows[table_kind];
-            (0..num_rows).map(move |i_row| {
-                let ptr_to_row = ptr_to_table + i_row * bytes_per_row;
-                (table_kind, i_row, ptr_to_row..ptr_to_row + bytes_per_row)
+        self.iter_table_locations()
+            .flat_map(|(table_kind, table_range)| {
+                let ptr_to_table = table_range.start;
+                let bytes_per_row = self.layout.bytes_per_row[table_kind];
+                let num_rows = self.layout.num_rows[table_kind];
+                (0..num_rows).map(move |i_row| {
+                    let ptr_to_row = ptr_to_table + i_row * bytes_per_row;
+                    (table_kind, i_row, ptr_to_row..ptr_to_row + bytes_per_row)
+                })
             })
-        })
     }
 }
 
@@ -2077,7 +2125,7 @@ impl TypedMetadataIndex for MetadataHeapIndex<String> {
     ) -> Result<&'a str, Error> {
         let heap_location =
             metadata.layout.heap_locations[MetadataHeapKind::String].clone();
-        let bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
+        let bytes = metadata.dll_bytes.subrange(heap_location);
         Ok(bytes.get_null_terminated(self.index)?.value())
     }
 }
@@ -2091,7 +2139,7 @@ impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
     ) -> Result<UnpackedBlob<'a>, Error> {
         let heap_location =
             metadata.layout.heap_locations[MetadataHeapKind::Blob].clone();
-        let heap_bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
+        let heap_bytes = metadata.dll_bytes.subrange(heap_location);
         UnpackedBlob::new(heap_bytes.subrange(self.index..))
     }
 }
@@ -2108,7 +2156,7 @@ impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
 
         let heap_location =
             metadata.layout.heap_locations[MetadataHeapKind::GUID].clone();
-        let heap_bytes = metadata.dll_unpacker.bytes.subrange(heap_location);
+        let heap_bytes = metadata.dll_bytes.subrange(heap_location);
         let value = heap_bytes
             .subrange(index * guid_size..(index + 1) * guid_size)
             .unpack()?;
@@ -2822,7 +2870,7 @@ impl<'a> MetadataRow<'a, MethodDef> {
 
     pub fn cil_method(&self) -> Result<Option<CILMethod<'a>>, Error> {
         Ok(self.address()?.map(|addr| {
-            CILMethod::new(self.metadata.dll_unpacker.bytes.subrange(addr..))
+            CILMethod::new(self.metadata.dll_bytes.subrange(addr..))
         }))
     }
 
@@ -2856,8 +2904,6 @@ impl std::fmt::Display for MethodDefFlags {
 
 impl<'a> MetadataRow<'a, FieldRVA> {
     pub fn address(&self) -> Result<Pointer, Error> {
-        self.metadata
-            .dll_unpacker
-            .virtual_address_to_raw(self.rva()?)
+        self.metadata.layout.virtual_address_to_raw(self.rva()?)
     }
 }
