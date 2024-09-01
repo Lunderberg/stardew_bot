@@ -64,6 +64,12 @@ pub enum Error {
              but found {0} instances."
     )]
     UniqueGameObjectInstanceNotFound(usize),
+
+    #[error("Not implemented yet: {0}")]
+    NotImplementedYet(String),
+
+    #[error("Cannot expand NULL field")]
+    CannotExpandNullField,
 }
 
 impl std::fmt::Debug for Error {

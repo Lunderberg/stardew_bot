@@ -1,5 +1,8 @@
+use std::ops::Range;
+
 use dotnet_debugger::{
-    CachedReader, PersistentState, RuntimeObject, TypedPointer,
+    CachedReader, PersistentState, RuntimeObject, RuntimeType, RuntimeValue,
+    TypedPointer,
 };
 use memory_reader::Pointer;
 use ratatui::{
@@ -8,6 +11,7 @@ use ratatui::{
     widgets::{List, ListState, StatefulWidget},
 };
 
+use crate::extensions::*;
 use crate::{
     extended_tui::{ScrollableState as _, WidgetWindow},
     Error, KeyBindingMatch,
@@ -21,11 +25,15 @@ pub struct ObjectExplorer {
 }
 
 enum ObjectTreeNode {
-    UnknownObject {
-        ptr: TypedPointer<RuntimeObject>,
+    NewValue {
+        runtime_type: RuntimeType,
+        location: Range<Pointer>,
         should_read: bool,
     },
-    Value(String),
+    Value {
+        value: RuntimeValue,
+        should_attempt_expand: bool,
+    },
     Object {
         display_expanded: bool,
         obj: RuntimeObject,
@@ -36,6 +44,7 @@ enum ObjectTreeNode {
 
 struct ObjectTreeField {
     field_name: String,
+    field_type: String,
     obj: ObjectTreeNode,
 }
 
@@ -44,9 +53,19 @@ struct Indent(usize);
 
 impl ObjectExplorer {
     pub fn new(top_object: Option<TypedPointer<RuntimeObject>>) -> Self {
-        let object_tree = top_object.map(|ptr| ObjectTreeNode::UnknownObject {
-            ptr,
-            should_read: true,
+        let object_tree = top_object.map(|ptr| {
+            let ptr: Pointer = ptr.into();
+
+            // ObjectTreeNode::NewValue {
+            //     runtime_type: RuntimeType::Class,
+            //     location: ptr..ptr + Pointer::SIZE,
+            //     should_read: false,
+            // }
+
+            ObjectTreeNode::Value {
+                value: RuntimeValue::Object(ptr),
+                should_attempt_expand: false,
+            }
         });
         ObjectExplorer {
             state: PersistentState::new(),
@@ -71,7 +90,7 @@ impl ObjectExplorer {
             .expect("The selected line should always point to a node.");
 
         match node {
-            ObjectTreeNode::UnknownObject { should_read, .. } => {
+            ObjectTreeNode::NewValue { should_read, .. } => {
                 *should_read = !*should_read;
             }
             ObjectTreeNode::Object {
@@ -79,7 +98,12 @@ impl ObjectExplorer {
             } => {
                 *display_expanded = !*display_expanded;
             }
-            ObjectTreeNode::Value(_) => todo!(),
+            ObjectTreeNode::Value {
+                should_attempt_expand,
+                ..
+            } => {
+                *should_attempt_expand = !*should_attempt_expand;
+            }
         }
     }
 }
@@ -103,26 +127,61 @@ impl ObjectTreeNode {
         reader: &mut CachedReader,
     ) -> Result<(), Error> {
         match self {
-            ObjectTreeNode::UnknownObject {
-                ptr,
-                should_read: true,
+            ObjectTreeNode::NewValue {
+                runtime_type,
+                location,
+                should_read: should_read @ true,
             } => {
-                let obj = reader.object(*ptr)?;
+                *should_read = false;
+                let value = reader.value(*runtime_type, location.clone())?;
+                *self = ObjectTreeNode::Value {
+                    value,
+                    should_attempt_expand: false,
+                };
+            }
+            ObjectTreeNode::Object { fields, .. } => fields
+                .iter_mut()
+                .try_for_each(|field| field.obj.expand_marked(reader))?,
+
+            ObjectTreeNode::Value {
+                should_attempt_expand: should_attempt_expand @ true,
+                value: RuntimeValue::Object(ptr),
+            } => {
+                *should_attempt_expand = false;
+                if ptr.is_null() {
+                    return Err(Error::CannotExpandNullField);
+                }
+
+                let obj = reader.object((*ptr).into())?;
                 let class_name = reader.class_name(&obj)?;
                 let fields = reader
                     .iter_fields(&obj)?
-                    .into_iter()
-                    .map(|field_name| {
-                        //TODO: Actually read the field's value
-                        ObjectTreeField {
+                    .map(|(obj_module, field, field_metadata)| {
+                        let runtime_type = field.runtime_type()?;
+
+                        let field_name = field_metadata.name()?.to_string();
+                        let is_static_str = if field_metadata.is_static()? {
+                            "static "
+                        } else {
+                            ""
+                        };
+                        let signature = field_metadata.signature()?;
+                        let field_type = format!("{is_static_str}{signature}");
+
+                        let location =
+                            field.location(obj_module, Some(obj.location()))?;
+
+                        Ok(ObjectTreeField {
                             field_name,
-                            obj: ObjectTreeNode::UnknownObject {
-                                ptr: Pointer::null().into(),
+                            field_type,
+                            obj: ObjectTreeNode::NewValue {
+                                runtime_type,
+                                location,
                                 should_read: false,
                             },
-                        }
+                        })
                     })
-                    .collect();
+                    .collect::<Result<_, Error>>()?;
 
                 *self = ObjectTreeNode::Object {
                     obj,
@@ -131,9 +190,18 @@ impl ObjectTreeNode {
                     display_expanded: true,
                 };
             }
-            ObjectTreeNode::Object { fields, .. } => fields
-                .iter_mut()
-                .try_for_each(|field| field.obj.expand_marked(reader))?,
+
+            ObjectTreeNode::Value {
+                should_attempt_expand: should_attempt_expand @ true,
+                ..
+            } => {
+                *should_attempt_expand = false;
+                return Err(Error::NotImplementedYet(
+                    "Collapse view of containing object when value selected"
+                        .to_string(),
+                ));
+            }
+
             _ => {}
         }
 
@@ -203,16 +271,20 @@ impl ObjectTreeNode {
         &self,
         indent: Indent,
         field_name: &str,
+        field_type: &str,
     ) -> impl Iterator<Item = String> + '_ {
         let iter: Box<dyn Iterator<Item = String>> = match self {
-            ObjectTreeNode::UnknownObject { ptr, .. } => {
-                let iter = [format!("{indent}Object {field_name} = {ptr};")]
-                    .into_iter();
+            ObjectTreeNode::NewValue { location, .. } => {
+                let ptr = location.start;
+                let iter =
+                    [format!("{indent}{field_type} {field_name} @ {ptr};")]
+                        .into_iter();
                 Box::new(iter)
             }
-            ObjectTreeNode::Value(_) => {
-                let iter = [format!("{indent}Value {field_name} = (TODO);")]
-                    .into_iter();
+            ObjectTreeNode::Value { value, .. } => {
+                let iter =
+                    [format!("{indent}{field_type} {field_name} = {value};")]
+                        .into_iter();
                 Box::new(iter)
             }
             ObjectTreeNode::Object {
@@ -220,16 +292,26 @@ impl ObjectTreeNode {
                 class_name,
                 ..
             } => {
-                let iter = [format!("{indent}{class_name}")].into_iter();
+                let iter = [format!(
+                    "{indent}{field_type} {field_name} = {class_name} {{...}}"
+                )]
+                .into_iter();
                 Box::new(iter)
             }
             ObjectTreeNode::Object {
                 class_name, fields, ..
             } => {
                 let iter = std::iter::empty::<String>()
-                    .chain([format!("{indent}class {class_name} {{").into()])
+                    .chain([format!(
+                        "{indent}{field_type} {field_name} = {class_name} {{"
+                    )
+                    .into()])
                     .chain(fields.iter().flat_map(move |field| {
-                        field.obj.iter_lines(indent + 4, &field.field_name)
+                        field.obj.iter_lines(
+                            indent + 4,
+                            &field.field_name,
+                            &field.field_type,
+                        )
                     }))
                     .chain([format!("{indent}}}")]);
                 Box::new(iter)
@@ -285,15 +367,43 @@ impl WidgetWindow for ObjectExplorer {
     ) {
         self.prev_draw_height = area.height as usize;
 
+        let (area_sidebar, area) = area.split_from_left(5);
+
         let lines = self
             .object_tree
             .iter()
-            .flat_map(|node| node.iter_lines(Indent(0), "_"))
+            .flat_map(|node| {
+                node.iter_lines(Indent(0), "top_object", "TopObject")
+            })
             .map(|text| Line::raw(text));
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED));
 
         StatefulWidget::render(widget, area, buf, &mut self.list_state);
+
+        {
+            let lines = self
+                .object_tree
+                .iter()
+                .flat_map(|node| {
+                    node.iter_lines(Indent(0), "top_object", "TopObject")
+                })
+                .enumerate()
+                .map(|(i, _)| Line::raw(format!("{i: >4}")));
+
+            let widget = List::new(lines)
+                .highlight_style(
+                    Style::default().add_modifier(Modifier::REVERSED),
+                )
+                .style(Style::default().fg(ratatui::style::Color::Gray));
+
+            StatefulWidget::render(
+                widget,
+                area_sidebar,
+                buf,
+                &mut self.list_state,
+            );
+        }
     }
 }

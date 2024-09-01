@@ -25,7 +25,7 @@ pub enum RuntimeValue {
     F32(f32),
     F64(f64),
 
-    Pointer(Pointer),
+    Object(Pointer),
     // String,
     // Ptr,
     // ByRef,
@@ -90,7 +90,8 @@ impl RuntimeValue {
             ))),
 
             RuntimeType::ValueType | RuntimeType::Class => {
-                Ok(Self::parse_pointer(bytes))
+                let ptr: Pointer = bytes[..8].try_into().unwrap();
+                Ok(Self::Object(ptr))
             }
             RuntimeType::Object => todo!(),
             RuntimeType::String => todo!(),
@@ -128,10 +129,6 @@ impl RuntimeValue {
             })
         }
     }
-
-    fn parse_pointer(bytes: &[u8]) -> Self {
-        RuntimeValue::Pointer(bytes[..8].try_into().unwrap())
-    }
 }
 
 impl std::fmt::Display for RuntimeValue {
@@ -151,7 +148,7 @@ impl std::fmt::Display for RuntimeValue {
             RuntimeValue::NativeInt(val) => write!(f, "{val}"),
             RuntimeValue::F32(val) => write!(f, "{val}"),
             RuntimeValue::F64(val) => write!(f, "{val}"),
-            RuntimeValue::Pointer(val) => write!(f, "{val}"),
+            RuntimeValue::Object(val) => write!(f, "{val}"),
         }
     }
 }

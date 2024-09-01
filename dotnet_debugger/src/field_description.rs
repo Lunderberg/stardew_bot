@@ -6,7 +6,10 @@ use dll_unpacker::{
 };
 use memory_reader::{ByteRange, OwnedBytes, Pointer};
 
-use crate::{unpack_fields, Error, RuntimeModule, RuntimeType};
+use crate::{
+    unpack_fields, Error, RuntimeModule, RuntimeObject, RuntimeType,
+    TypedPointer,
+};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,
@@ -142,14 +145,15 @@ impl<'a> FieldDescription<'a> {
     pub fn location(
         &self,
         module: &RuntimeModule,
-        instance: Option<Pointer>,
+        instance: Option<TypedPointer<RuntimeObject>>,
     ) -> Result<Range<Pointer>, Error> {
         let runtime_type = self.runtime_type()?;
         let is_instance_field = !self.is_static();
 
         let base = if is_instance_field {
-            let instance = instance
-                .ok_or(Error::LocationOfInstanceFieldRequiresInstance)?;
+            let instance: Pointer = instance
+                .ok_or(Error::LocationOfInstanceFieldRequiresInstance)?
+                .into();
             instance + Pointer::SIZE
         } else if matches!(
             runtime_type,

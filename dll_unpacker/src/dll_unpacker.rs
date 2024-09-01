@@ -66,6 +66,7 @@ pub struct MetadataTableHeader<'a> {
     bytes: ByteRange<'a>,
 }
 
+#[derive(Clone, Copy)]
 pub struct Metadata<'a> {
     layout: &'a MetadataLayout,
     dll_bytes: ByteRange<'a>,
@@ -230,7 +231,7 @@ pub struct MetadataTable<'a, TableTag> {
     bytes: ByteRange<'a>,
 
     /// The CLR metadata that contains this table.
-    metadata: &'a Metadata<'a>,
+    metadata: Metadata<'a>,
 
     /// A compile-time tag indicating which table this is.
     _phantom: PhantomData<TableTag>,
@@ -296,7 +297,7 @@ pub struct MetadataRow<'a, TableTag> {
     index: MetadataTableIndex<TableTag>,
 
     /// The metadata object that contains this row.
-    pub(crate) metadata: &'a Metadata<'a>,
+    pub(crate) metadata: Metadata<'a>,
 }
 
 pub trait MetadataTableTag: Copy {
@@ -793,7 +794,7 @@ decl_metadata_table! {
     Field: {
         flags: {value FieldFlags},
         name: {heap String},
-        signature: {heap Blob},
+        raw_signature: {heap Blob},
     },
 
     MethodDef: {
@@ -1972,7 +1973,7 @@ impl<'a> Metadata<'a> {
         })
     }
 
-    fn get_table<'b, TableTag>(&'b self) -> MetadataTable<'b, TableTag>
+    fn get_table<TableTag>(self) -> MetadataTable<'a, TableTag>
     where
         TableTag: MetadataTableTag,
     {
@@ -1980,7 +1981,7 @@ impl<'a> Metadata<'a> {
 
         MetadataTable {
             bytes,
-            metadata: &self,
+            metadata: self,
             _phantom: PhantomData,
         }
     }
@@ -2049,7 +2050,7 @@ impl<'a> Metadata<'a> {
 macro_rules! define_table_method {
     ($method_name:ident,$tag:ident) => {
         impl<'a> Metadata<'a> {
-            pub fn $method_name<'b>(&'b self) -> MetadataTable<'b, $tag> {
+            pub fn $method_name(&self) -> MetadataTable<'a, $tag> {
                 self.get_table()
             }
         }
@@ -2159,7 +2160,7 @@ impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
 impl<TableTag: MetadataTableTag> TypedMetadataIndex
     for MetadataTableIndex<TableTag>
 {
-    type Output<'a: 'b, 'b> = MetadataRow<'b, TableTag>;
+    type Output<'a: 'b, 'b> = MetadataRow<'a, TableTag>;
 
     fn access<'a: 'b, 'b>(
         self,
@@ -2670,8 +2671,8 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         }
     }
 
-    pub fn get<'b>(
-        &'b self,
+    pub fn get(
+        &self,
         index: MetadataTableIndex<TableTag>,
     ) -> Result<MetadataRow<'a, TableTag>, Error>
     where
@@ -2680,8 +2681,8 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
         self.get_row(index.index)
     }
 
-    pub fn get_row<'b>(
-        &'b self,
+    pub fn get_row(
+        &self,
         index: usize,
     ) -> Result<MetadataRow<'a, TableTag>, Error>
     where
@@ -2857,9 +2858,9 @@ impl<'a> MetadataRow<'a, Field> {
         type_def_table.get_row(index_range.start)
     }
 
-    pub fn parsed_signature(&self) -> Result<Signature<'a>, Error> {
-        let bytes = self.signature()?.content();
-        Ok(Signature::new(bytes))
+    pub fn signature(&self) -> Result<Signature<'a>, Error> {
+        let bytes = self.raw_signature()?.content();
+        Ok(Signature::new(bytes, self.metadata))
     }
 }
 

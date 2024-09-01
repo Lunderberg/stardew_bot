@@ -2,14 +2,22 @@ use itertools::Itertools as _;
 
 use memory_reader::ByteRange;
 
-use crate::{Error, MetadataCodedIndex, MetadataTableKind, TypeDefOrRef};
+use crate::{
+    Error, Metadata, MetadataCodedIndex, MetadataTableKind, TypeDefOrRef,
+};
 
 /// A CLR signature, as defined in ECMA-335, section II.23.2.
 ///
 /// Parsing of all types is not yet implemented.
 #[derive(Clone, Copy)]
 pub struct Signature<'a> {
+    /// The bytes that compose the signature
     bytes: ByteRange<'a>,
+
+    /// The metadata that owns this signature.  Used to determine
+    /// appropriate names for TypeDefOrRef fields within the
+    /// signature.
+    metadata: Metadata<'a>,
 }
 
 /// Decompress the values of a signature, as defined in ECMA-335,
@@ -22,6 +30,7 @@ struct SignatureDecompressor<'a> {
     bytes: ByteRange<'a>,
     verbose: bool,
     offset: usize,
+    metadata: Metadata<'a>,
 }
 
 #[derive(Clone, Copy)]
@@ -45,14 +54,20 @@ pub enum PrimType {
     NativeUInt,
 }
 
-#[derive(Clone, Debug)]
-pub enum SignatureType {
+#[derive(Clone)]
+pub enum SignatureType<'a> {
     Prim(PrimType),
-    ValueType(MetadataCodedIndex<TypeDefOrRef>),
-    Class(MetadataCodedIndex<TypeDefOrRef>),
+    ValueType {
+        index: MetadataCodedIndex<TypeDefOrRef>,
+        metadata: Metadata<'a>,
+    },
+    Class {
+        index: MetadataCodedIndex<TypeDefOrRef>,
+        metadata: Metadata<'a>,
+    },
 
     Array {
-        element_type: Box<SignatureType>,
+        element_type: Box<SignatureType<'a>>,
         #[allow(dead_code)]
         rank: u32,
         #[allow(dead_code)]
@@ -60,13 +75,14 @@ pub enum SignatureType {
         #[allow(dead_code)]
         lower_bounds: Vec<u32>,
     },
-    SizeArray(Box<SignatureType>),
+    SizeArray(Box<SignatureType<'a>>),
 
     GenericType(u32),
     GenericInst {
         _is_value_type: bool,
         index: MetadataCodedIndex<TypeDefOrRef>,
-        type_args: Vec<Box<SignatureType>>,
+        type_args: Vec<Box<SignatureType<'a>>>,
+        metadata: Metadata<'a>,
     },
     Object,
     String,
@@ -139,8 +155,8 @@ pub enum ElementType {
 }
 
 impl<'a> Signature<'a> {
-    pub fn new(bytes: ByteRange<'a>) -> Self {
-        Self { bytes }
+    pub fn new(bytes: ByteRange<'a>, metadata: Metadata<'a>) -> Self {
+        Self { bytes, metadata }
     }
 
     pub fn flags(&self) -> SignatureFlags {
@@ -195,7 +211,7 @@ impl SignatureFlags {
         self.0 & 0x10 > 0
     }
 
-    /// Used for MethodDef, MethodRef, Field, and Property signatures
+    /// Used for MethodDef, MethodRef, and Property signatures
     /// to indicate that this is associated with an instance (i.e. is
     /// not static).
     pub fn has_this(&self) -> bool {
@@ -370,7 +386,7 @@ impl<'a> SignatureDecompressor<'a> {
         Ok(element)
     }
 
-    fn next_type(&mut self) -> Result<SignatureType, Error> {
+    fn next_type(&mut self) -> Result<SignatureType<'a>, Error> {
         let offset = self.offset;
         if self.verbose {
             println!("Starting parsing of a type at offset {offset}");
@@ -386,12 +402,14 @@ impl<'a> SignatureDecompressor<'a> {
             ElementType::SizeArray => {
                 SignatureType::SizeArray(Box::new(self.next_type()?))
             }
-            ElementType::Class => {
-                SignatureType::Class(self.next_type_def_or_ref()?)
-            }
-            ElementType::ValueType => {
-                SignatureType::ValueType(self.next_type_def_or_ref()?)
-            }
+            ElementType::Class => SignatureType::Class {
+                index: self.next_type_def_or_ref()?,
+                metadata: self.metadata,
+            },
+            ElementType::ValueType => SignatureType::ValueType {
+                index: self.next_type_def_or_ref()?,
+                metadata: self.metadata,
+            },
             ElementType::GenericInst => {
                 let is_value_type = match self.next_element_type()? {
                     ElementType::Class => Ok(false),
@@ -412,6 +430,7 @@ impl<'a> SignatureDecompressor<'a> {
                     _is_value_type: is_value_type,
                     index,
                     type_args,
+                    metadata: self.metadata,
                 }
             }
 
@@ -522,13 +541,10 @@ impl<'a> std::fmt::Display for Signature<'a> {
             bytes: self.bytes.clone(),
             verbose: false,
             offset: 0,
+            metadata: self.metadata,
         };
 
         let flags = SignatureFlags(iter.next_byte().unwrap());
-
-        if !flags.has_this() {
-            write!(f, "static ")?;
-        }
 
         match flags.0 & 0x0f {
             0..6 => write!(f, "TODO: MethodSig unpacking")?,
@@ -542,7 +558,7 @@ impl<'a> std::fmt::Display for Signature<'a> {
     }
 }
 
-impl std::fmt::Display for SignatureType {
+impl std::fmt::Display for SignatureType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SignatureType::Prim(prim) => write!(f, "{prim}"),
@@ -551,12 +567,23 @@ impl std::fmt::Display for SignatureType {
             SignatureType::Array { element_type, .. } => {
                 write!(f, "{element_type}[]")
             }
-            SignatureType::Class(index) => write!(f, "{index}"),
-            SignatureType::ValueType(index) => write!(f, "{index}"),
+            SignatureType::Class { index, metadata } => {
+                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
+            }
+            SignatureType::ValueType { index, metadata } => {
+                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
+            }
             SignatureType::GenericInst {
-                index, type_args, ..
+                index,
+                type_args,
+                metadata,
+                ..
             } => {
-                write!(f, "{index}<")?;
+                write!(
+                    f,
+                    "{}<",
+                    metadata.get(*index).unwrap().name().unwrap()
+                )?;
                 type_args.iter().with_position().try_for_each(
                     |(position, arg)| match position {
                         itertools::Position::First

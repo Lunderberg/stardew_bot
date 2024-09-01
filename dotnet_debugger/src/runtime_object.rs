@@ -26,6 +26,10 @@ impl RuntimeObject {
         Ok(Self::new(location.into(), method_table.into()))
     }
 
+    pub fn location(&self) -> TypedPointer<RuntimeObject> {
+        self.location
+    }
+
     pub fn method_table(&self) -> TypedPointer<MethodTable> {
         self.method_table
     }

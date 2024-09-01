@@ -446,12 +446,12 @@ impl<'a> MetadataRow<'a, Field> {
             .name("name")
             .append_value(name);
         annotator
-            .value(self.signature_index()?)
+            .value(self.raw_signature_index()?)
             .name("signature")
-            .append_value(self.parsed_signature()?);
+            .append_value(self.signature()?);
 
         annotator
-            .range(self.signature()?.into())
+            .range(self.raw_signature()?.into())
             .name(format!("'{type_name}.{name}' signature"));
 
         Ok(())

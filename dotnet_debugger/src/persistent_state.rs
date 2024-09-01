@@ -1,7 +1,13 @@
 use std::collections::HashMap;
+use std::ops::Range;
 
 use memory_reader::MemoryReader;
+use memory_reader::Pointer;
 
+use crate::extensions::*;
+use crate::FieldDescriptions;
+use crate::RuntimeType;
+use crate::RuntimeValue;
 use crate::{Error, MethodTable, RuntimeObject};
 use crate::{ReadTypedPointer, RuntimeModule, TypedPointer};
 
@@ -9,6 +15,11 @@ use crate::{ReadTypedPointer, RuntimeModule, TypedPointer};
 pub struct PersistentState {
     method_tables: LookupCache<MethodTable>,
     runtime_modules: LookupCache<RuntimeModule>,
+
+    // The field description can't use the LookupCache class, because
+    // it requires additional information from the MethodTable.
+    field_descriptions:
+        HashMap<TypedPointer<MethodTable>, Option<FieldDescriptions>>,
 }
 
 pub struct CachedReader<'a> {
@@ -44,6 +55,18 @@ impl<'a> CachedReader<'a> {
         location.read(self.reader)
     }
 
+    pub fn value(
+        &mut self,
+        runtime_type: RuntimeType,
+        location: Range<Pointer>,
+    ) -> Result<RuntimeValue, Error> {
+        let bytes = self
+            .reader
+            .read_bytes(location.start, location.end - location.start)?;
+        let value = runtime_type.parse(&bytes)?;
+        Ok(value)
+    }
+
     pub fn class_name(&mut self, obj: &RuntimeObject) -> Result<String, Error> {
         let Self { state, reader } = self;
         let method_table_ptr = obj.method_table();
@@ -65,7 +88,16 @@ impl<'a> CachedReader<'a> {
     pub fn iter_fields(
         &mut self,
         obj: &RuntimeObject,
-    ) -> Result<Vec<String>, Error> {
+    ) -> Result<
+        impl Iterator<
+                Item = (
+                    &RuntimeModule,
+                    crate::FieldDescription,
+                    dll_unpacker::MetadataRow<dll_unpacker::Field>,
+                ),
+            > + '_,
+        Error,
+    > {
         let Self { state, reader } = self;
         let method_table_ptr = obj.method_table();
 
@@ -78,23 +110,47 @@ impl<'a> CachedReader<'a> {
             .cached_or_read(method_table.module(), reader)?;
         let metadata = module.metadata();
 
-        method_table
-            .get_field_descriptions(reader)?
-            .iter()
-            .flatten()
-            .map(|field| -> Result<String, Error> {
-                Ok(metadata.get(field.token())?.name()?.to_string())
-            })
-            .collect()
+        let field_descriptions = state
+            .field_descriptions
+            .entry(method_table_ptr)
+            .or_try_insert(|_| method_table.get_field_descriptions(reader))?;
+
+        let iter = field_descriptions.iter().flatten();
+
+        let iter = iter.map(move |field| {
+            // TODO: Add validation of the RuntimeModule against the
+            // unpacked metadata.  That way, the panic that would
+            // occur here from an out-of-bounds metadata token could
+            // instead be caught earlier.
+            let metadata_row = metadata.get(field.token()).unwrap();
+            (module, field, metadata_row)
+        });
+
+        Ok(iter)
     }
 }
 
 impl<T> LookupCache<T> {
+    // pub fn cached_or_read<'a>(
+    //     &'a mut self,
+    //     ptr: TypedPointer<T>,
+    //     reader: &MemoryReader,
+    // ) -> Result<&'a mut T, Error>
+    // where
+    //     T: ReadTypedPointer,
+    // {
+    //     use std::collections::hash_map::Entry;
+    //     match self.cache.entry(ptr) {
+    //         Entry::Occupied(value) => Ok(value.into_mut()),
+    //         Entry::Vacant(vacant) => Ok(vacant.insert(ptr.read(reader)?)),
+    //     }
+    // }
+
     pub fn cached_or_read<'a>(
         &'a mut self,
         ptr: TypedPointer<T>,
         reader: &MemoryReader,
-    ) -> Result<&'a mut T, Error>
+    ) -> Result<&'a T, Error>
     where
         T: ReadTypedPointer,
     {

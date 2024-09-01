@@ -427,21 +427,22 @@ impl TuiExplorerBuilder {
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
-        let game_obj: Pointer =
-            dotnet_debugger::find_most_likely_object_instance(
-                &game_obj_method_table,
-                &self.reader,
-            )?
-            .into();
+        let game_obj = dotnet_debugger::find_most_likely_object_instance(
+            &game_obj_method_table,
+            &self.reader,
+        )?;
 
         self.running_log
             .add_log(format!("Top-level Game1 object {game_obj}"));
 
-        self.range(game_obj..game_obj + Pointer::SIZE)
-            .name("Game object method table");
-        self.range(game_obj..game_obj + game_obj_method_table.base_size())
-            .name("Top-level game object")
-            .disable_highlight();
+        {
+            let game_obj: Pointer = game_obj.into();
+            self.range(game_obj..game_obj + Pointer::SIZE)
+                .name("Game object method table");
+            self.range(game_obj..game_obj + game_obj_method_table.base_size())
+                .name("Top-level game object")
+                .disable_highlight();
+        }
 
         game_obj_method_table
             .get_field_descriptions(&self.reader)?
@@ -473,7 +474,7 @@ impl TuiExplorerBuilder {
                 Ok(())
             })?;
 
-        self.initial_pointer = game_obj;
+        self.initial_pointer = game_obj.into();
 
         Ok(self)
     }
