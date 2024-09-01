@@ -9,7 +9,9 @@ use memory_reader::{
 use crate::enum_map::{EnumKey, EnumMap};
 use crate::intermediate_language::CILMethod;
 use crate::portable_executable::DataDirectoryKind;
-use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
+use crate::relative_virtual_address::{
+    RelativeVirtualAddress, VirtualAddressRelocation, VirtualRange,
+};
 use crate::{Error, Signature, UnpackedBlob};
 
 #[derive(Copy, Clone)]
@@ -26,12 +28,6 @@ pub struct RawCLRMetadata<'a> {
     /// The bytes owned by the Metadata stream, as determined from the
     /// CLR runtime header.
     pub(crate) bytes: ByteRange<'a>,
-
-    /// The DLL that contains the metadata stream.  Used to decode
-    /// Relative Virtual Address (RVA) fields into actual pointers
-    /// within the DLL, and to unpack metadata fields with RVAs that
-    /// point outside the metadata table.
-    dll_unpacker: DLLUnpacker<'a>,
 }
 
 pub struct StreamHeader<'a> {
@@ -159,6 +155,19 @@ pub struct MetadataLayout {
     table_offsets: EnumMap<MetadataTableKind, usize>,
     heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
     tables_location: Range<Pointer>,
+    rva_relocations: Vec<VirtualAddressRelocation>,
+}
+
+impl MetadataLayout {
+    pub(crate) fn virtual_address_to_raw(
+        &self,
+        addr: RelativeVirtualAddress,
+    ) -> Result<Pointer, Error> {
+        self.rva_relocations
+            .iter()
+            .find_map(|relocation| relocation.apply(addr))
+            .ok_or(Error::InvalidVirtualAddress(addr))
+    }
 }
 
 pub struct MetadataTable<'a, TableTag> {
@@ -1450,19 +1459,6 @@ impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
     }
 }
 
-impl Default for MetadataLayout {
-    fn default() -> Self {
-        Self {
-            num_rows: Default::default(),
-            index_size: Default::default(),
-            bytes_per_row: Default::default(),
-            table_offsets: Default::default(),
-            heap_locations: EnumMap::init(|| Pointer::null()..Pointer::null()),
-            tables_location: Pointer::null()..Pointer::null(),
-        }
-    }
-}
-
 impl<'a> DLLUnpacker<'a> {
     pub fn new(bytes: impl Into<ByteRange<'a>>) -> Self {
         Self {
@@ -1471,14 +1467,11 @@ impl<'a> DLLUnpacker<'a> {
     }
 
     pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
-        let metadata = self.raw_metadata()?;
-        // Ok(metadata.bytes.start)
+        let metadata = self.metadata()?;
 
-        let metadata_tables = metadata.metadata_tables()?;
-        Ok(metadata_tables.module_table().bytes.start())
+        Ok(metadata.module_table().bytes.start())
 
-        // let metadata_tables = metadata.metadata_tables()?;
-        // let table = metadata_tables.method_def_table();
+        // let table = metadata.method_def_table();
         // let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
         // Ok(start_at)
     }
@@ -1503,18 +1496,17 @@ impl<'a> DLLUnpacker<'a> {
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
         let num_bytes = metadata_range.size as usize;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
-        Ok(RawCLRMetadata {
-            bytes,
-            dll_unpacker: self,
-        })
+        Ok(RawCLRMetadata { bytes })
     }
 
     pub fn metadata_layout(&self) -> Result<MetadataLayout, Error> {
+        let rva_relocations = self.virtual_address_relocations()?;
+
         let raw_metadata = self.raw_metadata()?;
         let heap_locations = raw_metadata.metadata_heap_locations()?;
 
         let header = raw_metadata.metadata_tables_header()?;
-        let layout = header.metadata_table_sizes(heap_locations)?;
+        let layout = header.metadata_layout(heap_locations, rva_relocations)?;
 
         Ok(layout)
     }
@@ -1744,22 +1736,6 @@ impl<'a> RawCLRMetadata<'a> {
 
         Ok(heaps)
     }
-
-    pub fn metadata_tables(self) -> Result<Metadata<'a>, Error> {
-        let header = self.metadata_tables_header()?;
-
-        let heap_locations = self.metadata_heap_locations()?;
-
-        let layout = header.metadata_table_sizes(heap_locations)?;
-
-        let bytes = header.tables_after_header()?;
-
-        Ok(Metadata {
-            bytes,
-            dll_unpacker: self.dll_unpacker,
-            layout,
-        })
-    }
 }
 
 impl<'a> MetadataTableHeader<'a> {
@@ -1832,9 +1808,10 @@ impl<'a> MetadataTableHeader<'a> {
         Ok(iter)
     }
 
-    pub fn metadata_table_sizes(
+    pub fn metadata_layout(
         &self,
         heap_locations: EnumMap<MetadataHeapKind, Range<Pointer>>,
+        rva_relocations: Vec<VirtualAddressRelocation>,
     ) -> Result<MetadataLayout, Error> {
         let heap_sizes = {
             let mut heap_sizes = EnumMap::<MetadataHeapKind, bool>::default();
@@ -1930,6 +1907,7 @@ impl<'a> MetadataTableHeader<'a> {
             table_offsets,
             heap_locations,
             tables_location,
+            rva_relocations,
         })
     }
 
@@ -1940,11 +1918,6 @@ impl<'a> MetadataTableHeader<'a> {
         let location = self.bytes.address_range(header_size..);
 
         Ok(location)
-    }
-
-    fn tables_after_header(&self) -> Result<ByteRange<'a>, Error> {
-        let location = self.tables_location()?;
-        Ok(self.bytes.subrange(location))
     }
 }
 
@@ -2843,7 +2816,7 @@ impl<'a> MetadataRow<'a, Field> {
 impl<'a> MetadataRow<'a, MethodDef> {
     pub fn address(&self) -> Result<Option<Pointer>, Error> {
         self.rva()?
-            .map(|rva| self.metadata.dll_unpacker.virtual_address_to_raw(rva))
+            .map(|rva| self.metadata.layout.virtual_address_to_raw(rva))
             .transpose()
     }
 

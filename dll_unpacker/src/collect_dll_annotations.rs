@@ -27,6 +27,7 @@ impl<'a> DLLUnpacker<'a> {
         }
 
         self.raw_metadata()?.collect_annotations(annotator)?;
+        self.metadata()?.collect_annotations(annotator)?;
 
         Ok(())
     }
@@ -100,8 +101,6 @@ impl<'a> RawCLRMetadata<'a> {
 
         self.metadata_tables_header()?
             .collect_annotations(annotator)?;
-
-        self.metadata_tables()?.collect_annotations(annotator)?;
 
         Ok(())
     }

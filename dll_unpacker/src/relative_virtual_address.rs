@@ -1,6 +1,8 @@
+use std::ops::Range;
+
 use crate::Error;
 
-use memory_reader::{ByteRange, UnpackBytes, UnpackOptBytes};
+use memory_reader::{ByteRange, Pointer, UnpackBytes, UnpackOptBytes};
 
 /// A virtual address, relative to the start of the file.  Can be
 /// converted to an actual address using
@@ -14,9 +16,57 @@ pub struct VirtualRange {
     pub(crate) size: usize,
 }
 
+#[derive(Copy, Clone)]
+pub struct VirtualAddressRelocation {
+    range: VirtualRange,
+    location: Pointer,
+}
+
 impl RelativeVirtualAddress {
     pub fn new(value: usize) -> Self {
         Self(value)
+    }
+}
+
+impl VirtualRange {
+    pub fn new(rva: RelativeVirtualAddress, size: usize) -> Self {
+        Self { rva, size }
+    }
+
+    fn start(&self) -> RelativeVirtualAddress {
+        self.rva
+    }
+
+    fn end(&self) -> RelativeVirtualAddress {
+        self.rva + self.size
+    }
+
+    fn contains(&self, rva: RelativeVirtualAddress) -> bool {
+        self.start() <= rva && rva < self.end()
+    }
+}
+
+impl VirtualAddressRelocation {
+    pub fn new(range: VirtualRange, location: Pointer) -> Self {
+        Self { range, location }
+    }
+
+    pub fn apply(&self, rva: RelativeVirtualAddress) -> Option<Pointer> {
+        self.range.contains(rva).then(|| {
+            let offset = rva - self.range.start();
+            self.location + offset
+        })
+    }
+
+    pub fn apply_range(&self, range: VirtualRange) -> Option<Range<Pointer>> {
+        self.range.contains(range.start()).then(|| {
+            let location_start =
+                self.location + (range.start() - self.range.start());
+            let location_end =
+                self.location + (range.end() - self.range.start());
+
+            location_start..location_end
+        })
     }
 }
 

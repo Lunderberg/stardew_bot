@@ -2,7 +2,9 @@ use std::ops::Range;
 
 use memory_reader::{ByteRange, Pointer, UnpackedValue};
 
-use crate::relative_virtual_address::{RelativeVirtualAddress, VirtualRange};
+use crate::relative_virtual_address::{
+    RelativeVirtualAddress, VirtualAddressRelocation, VirtualRange,
+};
 use crate::Annotation as _;
 use crate::DLLUnpacker;
 use crate::{Annotator, Error};
@@ -47,6 +49,14 @@ impl<'a> DLLUnpacker<'a> {
             });
 
         Ok(iter)
+    }
+
+    pub(crate) fn virtual_address_relocations(
+        &self,
+    ) -> Result<Vec<VirtualAddressRelocation>, Error> {
+        self.iter_section_header()?
+            .map(|header| header.virtual_address_relocation())
+            .collect()
     }
 
     pub(crate) fn virtual_address_to_raw(
@@ -719,7 +729,21 @@ impl<'a> SectionHeaderUnpacker<'a> {
         Ok(start..start + size)
     }
 
-    pub fn map_address(
+    pub fn virtual_address_relocation(
+        &self,
+    ) -> Result<VirtualAddressRelocation, Error> {
+        let virtual_start = self.virtual_address()?.value();
+        let virtual_size = self.virtual_size()?.value();
+        let section_start = self.raw_address()?.value() as usize;
+
+        let range = VirtualRange::new(virtual_start, virtual_size);
+        let location = self.file_start + section_start;
+        let relocation = VirtualAddressRelocation::new(range, location);
+
+        Ok(relocation)
+    }
+
+    pub(crate) fn map_address(
         &self,
         rva: RelativeVirtualAddress,
     ) -> Result<Option<Pointer>, Error> {
