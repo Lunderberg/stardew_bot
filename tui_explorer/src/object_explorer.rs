@@ -75,6 +75,17 @@ impl ObjectExplorer {
         }
     }
 
+    fn selected_node(&self) -> Option<&ObjectTreeNode> {
+        self.list_state.selected().and_then(|selected| {
+            self.object_tree
+                .as_ref()
+                .into_iter()
+                .flat_map(|node| node.iter())
+                .map(|(node, _)| node)
+                .nth(selected)
+        })
+    }
+
     fn toggle_expansion(&mut self) {
         let selected = self
             .list_state
@@ -346,7 +357,7 @@ impl WidgetWindow for ObjectExplorer {
         &'a mut self,
         keystrokes: &'a crate::KeySequence,
         _globals: crate::extended_tui::WidgetGlobals<'a>,
-        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
         let num_lines = self
             .object_tree
@@ -404,6 +415,11 @@ impl WidgetWindow for ObjectExplorer {
             })
             .or_try_binding("C-r", keystrokes, || {
                 self.start_search(SearchDirection::Reverse)
+            })
+            .or_try_binding("<enter>", keystrokes, || {
+                if let Some(selected) = self.selected_node() {
+                    side_effects.change_address(selected.location.start);
+                }
             })
     }
 
