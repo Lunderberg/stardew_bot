@@ -27,28 +27,24 @@ pub struct ObjectExplorer {
     search: Option<SearchWindow<ListState>>,
 }
 
-enum ObjectTreeNode {
-    NewValue {
-        runtime_type: RuntimeType,
-        location: Range<Pointer>,
-        should_read: bool,
-    },
-    Value {
-        value: RuntimeValue,
-        should_attempt_expand: bool,
-    },
-    Object {
-        display_expanded: bool,
-        obj: RuntimeObject,
-        class_name: String,
-        fields: Vec<ObjectTreeField>,
-    },
-}
-
-struct ObjectTreeField {
+struct ObjectTreeNode {
+    location: Range<Pointer>,
+    runtime_type: RuntimeType,
+    should_read: bool,
+    tree_depth: usize,
     field_name: String,
     field_type: String,
-    obj: ObjectTreeNode,
+    kind: ObjectTreeNodeKind,
+}
+
+enum ObjectTreeNodeKind {
+    NewValue,
+    Value(RuntimeValue),
+    Object {
+        display_expanded: bool,
+        class_name: String,
+        fields: Vec<ObjectTreeNode>,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -59,11 +55,17 @@ impl ObjectExplorer {
         let object_tree = top_object.map(|ptr| {
             let ptr: Pointer = ptr.into();
 
-            ObjectTreeNode::Value {
-                value: RuntimeValue::Object(ptr),
-                should_attempt_expand: false,
+            ObjectTreeNode {
+                kind: ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)),
+                location: ptr..ptr + Pointer::SIZE,
+                runtime_type: RuntimeType::Class,
+                should_read: true,
+                tree_depth: 0,
+                field_name: "top_object".to_string(),
+                field_type: "TopObject".to_string(),
             }
         });
+
         ObjectExplorer {
             state: PersistentState::new(),
             object_tree,
@@ -87,20 +89,16 @@ impl ObjectExplorer {
             .node_at_line(selected)
             .expect("The selected line should always point to a node.");
 
-        match node {
-            ObjectTreeNode::NewValue { should_read, .. } => {
-                *should_read = !*should_read;
-            }
-            ObjectTreeNode::Object {
+        match &mut node.kind {
+            ObjectTreeNodeKind::Object {
                 display_expanded, ..
             } => {
+                // TODO: Find a good UX to distinguish between
+                // "collapse this node" and "re-read this node".
                 *display_expanded = !*display_expanded;
             }
-            ObjectTreeNode::Value {
-                should_attempt_expand,
-                ..
-            } => {
-                *should_attempt_expand = !*should_attempt_expand;
+            _ => {
+                node.should_read = !node.should_read;
             }
         }
     }
@@ -135,106 +133,39 @@ impl std::ops::Add<usize> for Indent {
 }
 
 impl ObjectTreeNode {
-    fn expand_marked(
-        &mut self,
-        reader: &mut CachedReader,
-    ) -> Result<(), Error> {
-        match self {
-            ObjectTreeNode::NewValue {
-                runtime_type,
-                location,
-                should_read: should_read @ true,
-            } => {
-                *should_read = false;
-                let value = reader.value(*runtime_type, location.clone())?;
-                *self = ObjectTreeNode::Value {
-                    value,
-                    should_attempt_expand: false,
-                };
-            }
-            ObjectTreeNode::Object { fields, .. } => fields
-                .iter_mut()
-                .try_for_each(|field| field.obj.expand_marked(reader))?,
-
-            ObjectTreeNode::Value {
-                should_attempt_expand: should_attempt_expand @ true,
-                value: RuntimeValue::Object(ptr),
-            } => {
-                *should_attempt_expand = false;
-                if ptr.is_null() {
-                    return Err(Error::CannotExpandNullField);
-                }
-
-                let obj = reader.object((*ptr).into())?;
-                let class_name = reader.class_name(&obj)?;
-                let fields = reader
-                    .iter_fields(&obj)?
-                    .map(|(obj_module, field, field_metadata)| {
-                        let runtime_type = field.runtime_type()?;
-
-                        let field_name = field_metadata.name()?.to_string();
-                        let is_static_str = if field_metadata.is_static()? {
-                            "static "
-                        } else {
-                            ""
-                        };
-                        let signature = field_metadata.signature()?;
-                        let field_type = format!("{is_static_str}{signature}");
-
-                        let location =
-                            field.location(obj_module, Some(obj.location()))?;
-
-                        Ok(ObjectTreeField {
-                            field_name,
-                            field_type,
-                            obj: ObjectTreeNode::NewValue {
-                                runtime_type,
-                                location,
-                                should_read: false,
-                            },
-                        })
-                    })
-                    .collect::<Result<_, Error>>()?;
-
-                *self = ObjectTreeNode::Object {
-                    obj,
-                    class_name,
-                    fields,
-                    display_expanded: true,
-                };
-            }
-
-            ObjectTreeNode::Value {
-                should_attempt_expand: should_attempt_expand @ true,
-                ..
-            } => {
-                *should_attempt_expand = false;
-                return Err(Error::NotImplementedYet(
-                    "Collapse view of containing object when value selected"
-                        .to_string(),
-                ));
-            }
-
-            _ => {}
-        }
-
-        Ok(())
-    }
-
     fn num_lines(&self) -> usize {
-        match self {
-            ObjectTreeNode::Object {
+        match &self.kind {
+            ObjectTreeNodeKind::Object {
                 display_expanded: true,
                 fields,
                 ..
             } => {
-                2 + fields
-                    .iter()
-                    .map(|field| field.obj.num_lines())
-                    .sum::<usize>()
+                let child_lines: usize =
+                    fields.iter().map(|field| field.num_lines()).sum();
+                child_lines + 2
             }
             _ => 1,
         }
+    }
+
+    fn iter(&self) -> impl Iterator<Item = (&Self, bool)> + '_ {
+        let fields: Option<Box<dyn Iterator<Item = (&Self, bool)>>> =
+            match &self.kind {
+                ObjectTreeNodeKind::Object {
+                    display_expanded: true,
+                    fields,
+                    ..
+                } => {
+                    let iter = fields
+                        .iter()
+                        .flat_map(|field| field.iter())
+                        .chain(std::iter::once((self, false)));
+                    Some(Box::new(iter))
+                }
+                _ => None,
+            };
+
+        std::iter::once((self, true)).chain(fields.into_iter().flatten())
     }
 
     fn node_at_line<'a>(
@@ -248,11 +179,11 @@ impl ObjectTreeNode {
         if i_line == 0 {
             Some(self)
         } else if i_line + 1 < num_lines {
-            let Self::Object {
+            let ObjectTreeNodeKind::Object {
                 display_expanded: true,
                 fields,
                 ..
-            } = self
+            } = &mut self.kind
             else {
                 panic!(
                     "This conditional should only be reached \
@@ -262,9 +193,9 @@ impl ObjectTreeNode {
 
             i_line -= 1;
             for field in fields {
-                let field_lines = field.obj.num_lines();
+                let field_lines = field.num_lines();
                 if i_line < field_lines {
-                    return field.obj.node_at_line(i_line);
+                    return field.node_at_line(i_line);
                 }
                 i_line -= field_lines;
             }
@@ -280,58 +211,129 @@ impl ObjectTreeNode {
         }
     }
 
-    fn iter_lines(
-        &self,
-        indent: Indent,
-        field_name: &str,
-        field_type: &str,
-    ) -> impl Iterator<Item = String> + '_ {
-        let iter: Box<dyn Iterator<Item = String>> = match self {
-            ObjectTreeNode::NewValue { location, .. } => {
-                let ptr = location.start;
-                let iter =
-                    [format!("{indent}{field_type} {field_name} @ {ptr};")]
-                        .into_iter();
-                Box::new(iter)
-            }
-            ObjectTreeNode::Value { value, .. } => {
-                let iter =
-                    [format!("{indent}{field_type} {field_name} = {value};")]
-                        .into_iter();
-                Box::new(iter)
-            }
-            ObjectTreeNode::Object {
-                display_expanded: false,
-                class_name,
-                ..
-            } => {
-                let iter = [format!(
-                    "{indent}{field_type} {field_name} = {class_name} {{...}}"
-                )]
-                .into_iter();
-                Box::new(iter)
-            }
-            ObjectTreeNode::Object {
-                class_name, fields, ..
-            } => {
-                let iter = std::iter::empty::<String>()
-                    .chain([format!(
-                        "{indent}{field_type} {field_name} = {class_name} {{"
-                    )
-                    .into()])
-                    .chain(fields.iter().flat_map(move |field| {
-                        field.obj.iter_lines(
-                            indent + 4,
-                            &field.field_name,
-                            &field.field_type,
-                        )
-                    }))
-                    .chain([format!("{indent}}}")]);
-                Box::new(iter)
-            }
-        };
+    fn expand_marked(
+        &mut self,
+        reader: &mut CachedReader,
+    ) -> Result<(), Error> {
+        if self.should_read {
+            self.should_read = false;
+            match &mut self.kind {
+                ObjectTreeNodeKind::NewValue => {
+                    let value = reader
+                        .value(self.runtime_type, self.location.clone())?;
+                    self.kind = ObjectTreeNodeKind::Value(value);
+                }
+                ObjectTreeNodeKind::Object { .. } => {
+                    let value = reader
+                        .value(RuntimeType::Class, self.location.clone())?;
+                    self.kind = ObjectTreeNodeKind::Value(value);
+                }
 
-        iter
+                ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
+
+                    let obj = reader.object((*ptr).into())?;
+                    let class_name = reader.class_name(&obj)?;
+                    let fields = reader
+                        .iter_fields(&obj)?
+                        .map(|(obj_module, field, field_metadata)| {
+                            let runtime_type = field.runtime_type()?;
+
+                            let field_name = field_metadata.name()?.to_string();
+                            let is_static = if field_metadata.is_static()? {
+                                "static "
+                            } else {
+                                ""
+                            };
+                            let signature = field_metadata.signature()?;
+                            let field_type = format!("{is_static}{signature}");
+
+                            let location = field
+                                .location(obj_module, Some(obj.location()))?;
+
+                            Ok(ObjectTreeNode {
+                                kind: ObjectTreeNodeKind::NewValue,
+                                location,
+                                runtime_type,
+                                should_read: false,
+                                tree_depth: self.tree_depth + 1,
+                                field_name,
+                                field_type,
+                            })
+                        })
+                        .collect::<Result<_, Error>>()?;
+
+                    self.kind = ObjectTreeNodeKind::Object {
+                        class_name,
+                        fields,
+                        display_expanded: true,
+                    };
+                }
+
+                ObjectTreeNodeKind::Value { .. } => {
+                    return Err(Error::NotImplementedYet(
+                    "Collapse view of containing object when value selected"
+                        .to_string(),
+                ));
+                }
+            }
+        } else if let ObjectTreeNodeKind::Object { fields, .. } = &mut self.kind
+        {
+            fields
+                .iter_mut()
+                .try_for_each(|field| field.expand_marked(reader))?;
+        }
+
+        Ok(())
+    }
+
+    fn format_str(&self, is_start: bool) -> String {
+        let indent = Indent(self.tree_depth * 4);
+        let field_name = self.field_name.as_str();
+        let field_type = self.field_type.as_str();
+        let ptr = self.location.start;
+
+        match (&self.kind, is_start) {
+            (ObjectTreeNodeKind::NewValue, _) => {
+                format!("{indent}{field_type} {field_name} @ {ptr};")
+            }
+            (ObjectTreeNodeKind::Value(value), _) => {
+                format!("{indent}{field_type} {field_name} = {value};")
+            }
+
+            (
+                ObjectTreeNodeKind::Object {
+                    display_expanded: false,
+                    class_name,
+                    ..
+                },
+                _,
+            ) => format!(
+                "{indent}{field_type} {field_name} = {class_name} {{...}}"
+            ),
+            (
+                ObjectTreeNodeKind::Object {
+                    display_expanded: true,
+                    class_name,
+                    ..
+                },
+                true,
+            ) => format!("{indent}{field_type} {field_name} = {class_name} {{"),
+            (
+                ObjectTreeNodeKind::Object {
+                    display_expanded: true,
+                    ..
+                },
+                false,
+            ) => format!("{indent}}}"),
+        }
+    }
+
+    fn iter_lines(&self) -> impl Iterator<Item = String> + '_ {
+        self.iter()
+            .map(|(field, is_start)| field.format_str(is_start))
     }
 }
 
@@ -368,23 +370,19 @@ impl WidgetWindow for ObjectExplorer {
                                     keystrokes,
                                     num_lines,
                                     |i_line| {
-                                        // TODO: Make a more efficient
-                                        // way to implement this that
-                                        // doesn't require iterating
-                                        // over every line.
-                                        let text = self
-                                            .object_tree
+                                        self.object_tree
                                             .iter()
-                                            .flat_map(|node| {
-                                                node.iter_lines(
-                                                    Indent(0),
-                                                    "top_object",
-                                                    "TopObject",
+                                            .filter_map(|node| {
+                                                node.iter().nth(i_line).map(
+                                                    |(field, is_start)| {
+                                                        field.format_str(
+                                                            is_start,
+                                                        )
+                                                    },
                                                 )
                                             })
-                                            .nth(i_line)
-                                            .unwrap();
-                                        vec![text]
+                                            .into_iter()
+                                            .collect()
                                     },
                                 )
                                 .then(|| {
@@ -442,9 +440,7 @@ impl WidgetWindow for ObjectExplorer {
         let lines = self
             .object_tree
             .iter()
-            .flat_map(|node| {
-                node.iter_lines(Indent(0), "top_object", "TopObject")
-            })
+            .flat_map(|node| node.iter_lines())
             .map(|text| Line::raw(text))
             .map(|line| {
                 line.style_regex(
@@ -475,9 +471,7 @@ impl WidgetWindow for ObjectExplorer {
             let lines = self
                 .object_tree
                 .iter()
-                .flat_map(|node| {
-                    node.iter_lines(Indent(0), "top_object", "TopObject")
-                })
+                .flat_map(|node| node.iter_lines())
                 .enumerate()
                 .map(|(i, _)| Line::raw(format!("{i: >4}")));
 
