@@ -27,7 +27,8 @@ impl<'a> DLLUnpacker<'a> {
         }
 
         self.raw_metadata()?.collect_annotations(annotator)?;
-        self.metadata()?.collect_annotations(annotator)?;
+        let layout = self.metadata_layout()?;
+        layout.metadata(self.bytes).collect_annotations(annotator)?;
 
         Ok(())
     }

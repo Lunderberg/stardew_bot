@@ -14,6 +14,16 @@ use crate::relative_virtual_address::{
 };
 use crate::{Error, Signature, UnpackedBlob};
 
+/// Convenience function for unpacking DLL metadata.
+///
+/// Returns a `MetadataLayout` object, containing the cache-able
+/// information required to interpret a CLR DLL.
+pub fn unpack_metadata_layout<'a>(
+    dll_bytes: impl Into<ByteRange<'a>>,
+) -> Result<MetadataLayout, Error> {
+    DLLUnpacker::new(dll_bytes).metadata_layout()
+}
+
 #[derive(Copy, Clone)]
 pub struct DLLUnpacker<'a> {
     pub(crate) bytes: ByteRange<'a>,
@@ -57,7 +67,7 @@ pub struct MetadataTableHeader<'a> {
 }
 
 pub struct Metadata<'a> {
-    layout: MetadataLayout,
+    layout: &'a MetadataLayout,
     dll_bytes: ByteRange<'a>,
 }
 
@@ -1511,16 +1521,6 @@ impl<'a> DLLUnpacker<'a> {
         }
     }
 
-    pub fn unpacked_so_far(&self) -> Result<Pointer, Error> {
-        let metadata = self.metadata()?;
-
-        Ok(metadata.module_table().bytes.start())
-
-        // let table = metadata.method_def_table();
-        // let start_at = table.iter_rows().nth(1).unwrap().address()?.unwrap();
-        // Ok(start_at)
-    }
-
     pub fn clr_runtime_header(&self) -> Result<ClrRuntimeHeader, Error> {
         let optional_header = self.optional_header()?;
         let data_dir = optional_header
@@ -1554,14 +1554,6 @@ impl<'a> DLLUnpacker<'a> {
         let layout = header.metadata_layout(heap_locations, rva_relocations)?;
 
         Ok(layout)
-    }
-
-    pub fn metadata(self) -> Result<Metadata<'a>, Error> {
-        let layout = self.metadata_layout()?;
-        Ok(Metadata {
-            layout,
-            dll_bytes: self.bytes,
-        })
     }
 }
 
@@ -2320,6 +2312,16 @@ impl MetadataTableKind {
 }
 
 impl MetadataLayout {
+    pub fn metadata<'a>(
+        &'a self,
+        dll_bytes: impl Into<ByteRange<'a>>,
+    ) -> Metadata<'a> {
+        Metadata {
+            layout: self,
+            dll_bytes: dll_bytes.into(),
+        }
+    }
+
     fn column_size(&self, column_type: MetadataColumnType) -> usize {
         match column_type {
             MetadataColumnType::Index(index) => self.index_size[index],

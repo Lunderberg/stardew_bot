@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use std::ops::Range;
 
-use dll_unpacker::{Metadata, MetadataTableIndex, TypeDef};
+use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
 use itertools::Itertools as _;
 use memory_reader::{extensions::*, MemoryRegion, OwnedBytes};
 use memory_reader::{MemoryReader, Pointer};
@@ -16,6 +16,9 @@ pub struct RuntimeModule {
 
     /// The DLL corresponding to this Module.
     pub dll_region: MemoryRegion,
+
+    /// The metadata associated with the DLL
+    pub metadata_layout: MetadataLayout,
 
     /// The location of the pointer to the MethodTableLookup.
     pub ptr_to_table_of_method_tables: Pointer,
@@ -136,8 +139,10 @@ impl RuntimeModule {
             })
             .ok_or(Error::DLLPointerNotFoundFromModule)?
             .read()?;
-        let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
-        let metadata = dll_info.metadata()?;
+
+        let metadata_layout =
+            dll_unpacker::unpack_metadata_layout(&dll_region)?;
+        let metadata = metadata_layout.metadata(&dll_region);
 
         // The layout of the Module varies by .NET version, but should
         // be less than 4kB for each.  If I don't find each pointer by
@@ -278,9 +283,13 @@ impl RuntimeModule {
             .read_byte_array(base_ptr_of_non_gc_statics + 32)?
             .into();
 
+        let metadata_layout =
+            dll_unpacker::DLLUnpacker::new(&dll_region).metadata_layout()?;
+
         Ok(Self {
             location,
             dll_region,
+            metadata_layout,
             ptr_to_table_of_method_tables,
             method_table_lookup,
             base_ptr_of_non_gc_statics,
@@ -295,13 +304,8 @@ impl RuntimeModule {
         self.method_table_lookup.iter_tables(reader)
     }
 
-    pub fn metadata(&self) -> Result<Metadata, Error> {
-        // TODO: Cache the information from the header (offset to CLR
-        // metadata, heaps, ans MetadataTableSizes) so that it can be
-        // quickly reconstructed.
-        let dll_info = dll_unpacker::DLLUnpacker::new(&self.dll_region);
-        let metadata = dll_info.metadata()?;
-        Ok(metadata)
+    pub fn metadata<'a>(&'a self) -> Metadata<'a> {
+        self.metadata_layout.metadata(&self.dll_region)
     }
 }
 

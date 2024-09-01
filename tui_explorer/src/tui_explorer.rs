@@ -225,11 +225,10 @@ impl TuiExplorerBuilder {
     }
 
     pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
-        let region = self.stardew_valley_dll()?.read()?;
-        let dll_info = dll_unpacker::DLLUnpacker::new(&region);
+        let region = self.stardew_valley_dll()?;
 
         Ok(Self {
-            initial_pointer: dll_info.unpacked_so_far()?,
+            initial_pointer: region.address_range().start,
             ..self
         })
     }
@@ -256,8 +255,9 @@ impl TuiExplorerBuilder {
 
     pub fn initialize_view_to_game_obj(mut self) -> Result<Self, Error> {
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
-        let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
-        let metadata = dll_info.metadata()?;
+        let metadata_layout =
+            dll_unpacker::unpack_metadata_layout(&dll_region)?;
+        let metadata = metadata_layout.metadata(&dll_region);
 
         let module_ptr =
             dotnet_debugger::RuntimeModule::locate(&metadata, &self.reader)?;
@@ -298,8 +298,9 @@ impl TuiExplorerBuilder {
         use dll_unpacker::{Annotation, Annotator};
 
         let dll_region = stardew_valley_dll(&self.reader)?.read()?;
-        let dll_info = dll_unpacker::DLLUnpacker::new(&dll_region);
-        let metadata = dll_info.metadata()?;
+        let metadata_layout =
+            dll_unpacker::unpack_metadata_layout(&dll_region)?;
+        let metadata = metadata_layout.metadata(&dll_region);
 
         metadata
             .iter_table_locations()

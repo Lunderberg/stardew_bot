@@ -55,7 +55,7 @@ impl<'a> CachedReader<'a> {
         let module = state
             .runtime_modules
             .cached_or_read(method_table.module(), reader)?;
-        let metadata = module.metadata()?;
+        let metadata = module.metadata();
 
         let name = metadata.get(method_table.token())?.name()?;
 
@@ -76,7 +76,7 @@ impl<'a> CachedReader<'a> {
         let module = state
             .runtime_modules
             .cached_or_read(method_table.module(), reader)?;
-        let metadata = module.metadata()?;
+        let metadata = module.metadata();
 
         method_table
             .get_field_descriptions(reader)?
