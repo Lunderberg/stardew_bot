@@ -31,15 +31,19 @@ pub struct TuiExplorer {
     // Display state
     layout: DynamicLayout,
     // Display widgets
+    buffers: TuiBuffers,
+    annotations: Vec<Annotation>,
+    // Display state
+    should_exit: bool,
+    keystrokes: KeySequence,
+}
+
+struct TuiBuffers {
     stack_frame_table: StackFrameTable,
     running_log: RunningLog,
     memory_table: MemoryTable,
     detail_view: DetailView,
     object_explorer: ObjectExplorer,
-    annotations: Vec<Annotation>,
-    // Display state
-    should_exit: bool,
-    keystrokes: KeySequence,
 }
 
 pub struct Annotation {
@@ -515,11 +519,13 @@ impl TuiExplorerBuilder {
             current_region,
             _symbols: self.symbols,
             layout: self.layout,
-            stack_frame_table,
-            running_log: self.running_log,
-            memory_table,
-            detail_view,
-            object_explorer: ObjectExplorer::new(self.top_object),
+            buffers: TuiBuffers {
+                stack_frame_table,
+                running_log: self.running_log,
+                memory_table,
+                detail_view,
+                object_explorer: ObjectExplorer::new(self.top_object),
+            },
             annotations,
 
             should_exit: false,
@@ -527,6 +533,18 @@ impl TuiExplorerBuilder {
         };
 
         Ok(out)
+    }
+}
+
+impl TuiBuffers {
+    fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow>> {
+        vec![
+            Box::new(&mut self.stack_frame_table),
+            Box::new(&mut self.detail_view),
+            Box::new(&mut self.memory_table),
+            Box::new(&mut self.running_log),
+            Box::new(&mut self.object_explorer),
+        ]
     }
 }
 
@@ -570,13 +588,7 @@ impl TuiExplorer {
     }
 
     pub fn draw(&mut self, frame: &mut Frame) {
-        let mut buffers: Vec<Box<&mut dyn WidgetWindow>> = vec![
-            Box::new(&mut self.stack_frame_table),
-            Box::new(&mut self.detail_view),
-            Box::new(&mut self.memory_table),
-            Box::new(&mut self.running_log),
-            Box::new(&mut self.object_explorer),
-        ];
+        let mut buffers = self.buffers.buffer_list();
         let layout = self.layout.drawable(
             &mut buffers,
             WidgetGlobals {
@@ -591,7 +603,7 @@ impl TuiExplorer {
 
     pub fn handle_event(&mut self, event: Event) {
         if let Err(err) = self.try_handle_event(event) {
-            self.running_log.add_log(format!("Error: {err}"));
+            self.buffers.running_log.add_log(format!("Error: {err}"));
         }
     }
 
@@ -629,16 +641,7 @@ impl TuiExplorer {
 
         let mut side_effects = WidgetSideEffects::default();
 
-        // TODO: Move the buffers into a separate class, to allow this
-        // to be de-duplicated between `apply_key_binding` and `draw`,
-        // without running into multiple borrows of `self`.
-        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
-            Box::new(&mut self.stack_frame_table),
-            Box::new(&mut self.detail_view),
-            Box::new(&mut self.memory_table),
-            Box::new(&mut self.running_log),
-            Box::new(&mut self.object_explorer),
-        ];
+        let mut buffer_list = self.buffers.buffer_list();
 
         let result = KeyBindingMatch::Mismatch
             .or_try_binding("C-c", keystrokes, || {
@@ -671,16 +674,7 @@ impl TuiExplorer {
             annotations: &self.annotations,
         };
 
-        // TODO: Move the buffers into a separate class, to allow this
-        // to be de-duplicated between `apply_key_binding`, `update`, and `draw`,
-        // without running into multiple borrows of `self`.
-        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
-            Box::new(&mut self.stack_frame_table),
-            Box::new(&mut self.detail_view),
-            Box::new(&mut self.memory_table),
-            Box::new(&mut self.running_log),
-            Box::new(&mut self.object_explorer),
-        ];
+        let mut buffer_list = self.buffers.buffer_list();
 
         let mut side_effects = WidgetSideEffects::default();
 
@@ -689,7 +683,7 @@ impl TuiExplorer {
         });
 
         if let Err(err) = res {
-            self.running_log.add_log(format!("Error: {err}"));
+            side_effects.add_log(format!("Error: {err}"));
         }
 
         self.apply_side_effects(side_effects);
@@ -709,7 +703,9 @@ impl TuiExplorer {
                         self.current_region = region;
                     }
                     Err(err) => {
-                        self.running_log.add_log(format!("Error: {err}"));
+                        self.buffers
+                            .running_log
+                            .add_log(format!("Error: {err}"));
                         return;
                     }
                 }
@@ -722,16 +718,7 @@ impl TuiExplorer {
             annotations: &self.annotations,
         };
 
-        // TODO: Move the buffers into a separate class, to allow this
-        // to be de-duplicated between `apply_key_binding` and `draw`,
-        // without running into multiple borrows of `self`.
-        let mut buffer_list: Vec<Box<&mut dyn WidgetWindow>> = vec![
-            Box::new(&mut self.stack_frame_table),
-            Box::new(&mut self.detail_view),
-            Box::new(&mut self.memory_table),
-            Box::new(&mut self.running_log),
-            Box::new(&mut self.object_explorer),
-        ];
+        let mut buffer_list = self.buffers.buffer_list();
 
         if let Some(ptr) = side_effects.change_address {
             buffer_list.iter_mut().for_each(|buffer| {
@@ -742,7 +729,7 @@ impl TuiExplorer {
         // Process the log messages last, since handling other side
         // effects may result in additional log messages.
         for message in side_effects.log_messages {
-            self.running_log.add_log(message);
+            self.buffers.running_log.add_log(message);
         }
     }
 }
