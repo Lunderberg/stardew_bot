@@ -6,14 +6,16 @@ use dotnet_debugger::{
 };
 use memory_reader::Pointer;
 use ratatui::{
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     text::Line,
-    widgets::{List, ListState, StatefulWidget},
+    widgets::{List, ListState, StatefulWidget, Widget as _},
 };
 
 use crate::extensions::*;
 use crate::{
-    extended_tui::{ScrollableState as _, WidgetWindow},
+    extended_tui::{
+        ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
+    },
     Error, KeyBindingMatch,
 };
 
@@ -22,6 +24,7 @@ pub struct ObjectExplorer {
     object_tree: Option<ObjectTreeNode>,
     list_state: ListState,
     prev_draw_height: usize,
+    search: Option<SearchWindow<ListState>>,
 }
 
 enum ObjectTreeNode {
@@ -56,12 +59,6 @@ impl ObjectExplorer {
         let object_tree = top_object.map(|ptr| {
             let ptr: Pointer = ptr.into();
 
-            // ObjectTreeNode::NewValue {
-            //     runtime_type: RuntimeType::Class,
-            //     location: ptr..ptr + Pointer::SIZE,
-            //     should_read: false,
-            // }
-
             ObjectTreeNode::Value {
                 value: RuntimeValue::Object(ptr),
                 should_attempt_expand: false,
@@ -72,6 +69,7 @@ impl ObjectExplorer {
             object_tree,
             list_state: ListState::default().with_selected(Some(0)),
             prev_draw_height: 1,
+            search: None,
         }
     }
 
@@ -105,6 +103,21 @@ impl ObjectExplorer {
                 *should_attempt_expand = !*should_attempt_expand;
             }
         }
+    }
+
+    fn start_search(&mut self, direction: SearchDirection) {
+        self.search =
+            Some(SearchWindow::new(direction, self.list_state.clone()));
+    }
+
+    fn cancel_search(&mut self) {
+        if let Some(search) = self.search.take() {
+            self.list_state = search.pre_search_state;
+        }
+    }
+
+    fn finalize_search(&mut self) {
+        self.search = None;
     }
 }
 
@@ -333,18 +346,67 @@ impl WidgetWindow for ObjectExplorer {
         _globals: crate::extended_tui::WidgetGlobals<'a>,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
+        let num_lines = self
+            .object_tree
+            .as_ref()
+            .map(|obj| obj.num_lines())
+            .unwrap_or(1);
+
         KeyBindingMatch::Mismatch
             .or_else(|| {
-                self.list_state.apply_key_binding(
-                    keystrokes,
-                    self.object_tree
-                        .as_ref()
-                        .map(|obj| obj.num_lines())
-                        .unwrap_or(1),
-                    self.prev_draw_height,
-                )
+                self.list_state
+                    .apply_key_binding(
+                        keystrokes,
+                        num_lines,
+                        self.prev_draw_height,
+                    )
+                    .then(|| self.finalize_search())
+                    .or_else(|| {
+                        if let Some(search) = self.search.as_mut() {
+                            search
+                                .apply_key_binding(
+                                    keystrokes,
+                                    num_lines,
+                                    |i_line| {
+                                        // TODO: Make a more efficient
+                                        // way to implement this that
+                                        // doesn't require iterating
+                                        // over every line.
+                                        let text = self
+                                            .object_tree
+                                            .iter()
+                                            .flat_map(|node| {
+                                                node.iter_lines(
+                                                    Indent(0),
+                                                    "top_object",
+                                                    "TopObject",
+                                                )
+                                            })
+                                            .nth(i_line)
+                                            .unwrap();
+                                        vec![text]
+                                    },
+                                )
+                                .then(|| {
+                                    self.list_state.select(Some(
+                                        search.recommended_row_selection(),
+                                    ))
+                                })
+                                .or_try_binding("C-g", keystrokes, || {
+                                    self.cancel_search()
+                                })
+                        } else {
+                            KeyBindingMatch::Mismatch
+                        }
+                    })
             })
             .or_try_binding("<tab>", keystrokes, || self.toggle_expansion())
+            .or_try_binding("C-s", keystrokes, || {
+                self.start_search(SearchDirection::Forward)
+            })
+            .or_try_binding("C-r", keystrokes, || {
+                self.start_search(SearchDirection::Reverse)
+            })
     }
 
     fn periodic_update<'a>(
@@ -367,6 +429,14 @@ impl WidgetWindow for ObjectExplorer {
     ) {
         self.prev_draw_height = area.height as usize;
 
+        let area = if let Some(search) = &self.search {
+            let (area, search_area) = area.split_from_bottom(3);
+            search.render(search_area, buf);
+            area
+        } else {
+            area
+        };
+
         let (area_sidebar, area) = area.split_from_left(5);
 
         let lines = self
@@ -375,7 +445,20 @@ impl WidgetWindow for ObjectExplorer {
             .flat_map(|node| {
                 node.iter_lines(Indent(0), "top_object", "TopObject")
             })
-            .map(|text| Line::raw(text));
+            .map(|text| Line::raw(text))
+            .map(|line| {
+                line.style_regex(
+                    "0x[0-9a-fA-F]+",
+                    Style::default().fg(Color::Red),
+                )
+            })
+            .map(|line| {
+                if let Some(search) = self.search.as_ref() {
+                    search.highlight_search_matches(line)
+                } else {
+                    line
+                }
+            });
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
