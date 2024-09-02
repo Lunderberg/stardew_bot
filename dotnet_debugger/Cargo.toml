@@ -9,6 +9,7 @@ edition = "2021"
 thiserror = "*"
 itertools = "*"
 paste = "*"
+elsa = "*"
 
 memory_reader = { path = "../memory_reader" }
 dll_unpacker = { path = "../dll_unpacker" }

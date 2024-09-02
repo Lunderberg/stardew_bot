@@ -265,7 +265,7 @@ impl TuiExplorerBuilder {
         let runtime_module = module_ptr.read(&self.reader)?;
 
         let game_obj_method_table = runtime_module
-            .iter_method_tables(&self.reader)
+            .iter_method_tables(&self.reader)?
             .try_find(|method_table| -> Result<_, Error> {
                 let type_def = metadata.get(method_table.token())?;
                 let name = type_def.name()?;
@@ -322,24 +322,29 @@ impl TuiExplorerBuilder {
 
         self.running_log.add_log(format!(
             "Method table: {}",
-            runtime_module.ptr_to_table_of_method_tables
+            runtime_module.ptr_to_table_of_method_tables(&self.reader)?
         ));
 
         self.running_log.add_log(format!(
             "Base-ptr of non-GC statics: {}",
-            runtime_module.base_ptr_of_non_gc_statics
+            runtime_module.base_ptr_of_non_gc_statics(&self.reader)?
         ));
 
         self.running_log.add_log(format!(
             "Base-ptr of GC statics: {}",
-            runtime_module.base_ptr_of_gc_statics
+            runtime_module.base_ptr_of_gc_statics(&self.reader)?
         ));
 
-        self.range(runtime_module.method_table_lookup.location.clone())
-            .name("TypeDefToMethodDef table");
+        self.range(
+            runtime_module
+                .method_table_lookup(&self.reader)?
+                .location
+                .clone(),
+        )
+        .name("TypeDefToMethodDef table");
 
         runtime_module
-            .iter_method_tables(&self.reader)
+            .iter_method_tables(&self.reader)?
             .try_for_each(|table| -> Result<_, Error> {
                 let table = table?;
 
@@ -351,7 +356,7 @@ impl TuiExplorerBuilder {
                 self.annotations
                     .range(
                         runtime_module
-                            .method_table_lookup
+                            .method_table_lookup(&self.reader)?
                             .location_of_method_table_pointer(table.token()),
                     )
                     .name(format!("Ptr to {class_name} MethodTable"));
@@ -396,7 +401,11 @@ impl TuiExplorerBuilder {
                     .filter(|field| field.is_static())
                     .try_for_each(|field| -> Result<_, Error> {
                         let field_name = metadata.get(field.token())?.name()?;
-                        let location = field.location(&runtime_module, None)?;
+                        let location = field.location(
+                            &runtime_module,
+                            None,
+                            &self.reader,
+                        )?;
 
                         let ann = self
                             .annotations
@@ -420,7 +429,7 @@ impl TuiExplorerBuilder {
             })?;
 
         let game_obj_method_table = runtime_module
-            .iter_method_tables(&self.reader)
+            .iter_method_tables(&self.reader)?
             .try_find(|method_table| -> Result<_, Error> {
                 let type_def = metadata.get(method_table.token())?;
                 let name = type_def.name()?;
@@ -456,8 +465,11 @@ impl TuiExplorerBuilder {
             })
             .try_for_each(|field| -> Result<_, Error> {
                 let field_name = metadata.get(field.token())?.name()?;
-                let location =
-                    field.location(&runtime_module, Some(game_obj))?;
+                let location = field.location(
+                    &runtime_module,
+                    Some(game_obj),
+                    &self.reader,
+                )?;
 
                 let ann = self
                     .annotations

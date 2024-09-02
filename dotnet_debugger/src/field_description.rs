@@ -4,7 +4,7 @@ use dll_unpacker::{
     dll_unpacker::{Field, MetadataTableIndex},
     Annotation as _, Annotator,
 };
-use memory_reader::{ByteRange, OwnedBytes, Pointer};
+use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
     unpack_fields, CorElementType, Error, RuntimeModule, RuntimeObject,
@@ -150,6 +150,7 @@ impl<'a> FieldDescription<'a> {
         &self,
         module: &RuntimeModule,
         instance: Option<TypedPointer<RuntimeObject>>,
+        reader: &MemoryReader,
     ) -> Result<Range<Pointer>, Error> {
         let runtime_type = self.cor_element_type()?;
         let is_instance_field = !self.is_static();
@@ -170,9 +171,9 @@ impl<'a> FieldDescription<'a> {
                 .into();
             instance + Pointer::SIZE
         } else if uses_gc_statics_base_ptr {
-            module.base_ptr_of_gc_statics
+            module.base_ptr_of_gc_statics(reader)?
         } else {
-            module.base_ptr_of_non_gc_statics
+            module.base_ptr_of_non_gc_statics(reader)?
         };
         let ptr = base + self.offset();
 

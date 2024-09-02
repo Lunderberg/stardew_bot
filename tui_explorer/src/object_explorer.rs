@@ -245,6 +245,8 @@ impl ObjectTreeNode {
                         return Err(Error::CannotExpandNullField);
                     }
 
+                    let underlying_reader = reader.underlying_reader();
+
                     let obj = reader.object((*ptr).into())?;
                     let class_name = reader.class_name(&obj)?;
                     let fields = reader
@@ -261,8 +263,11 @@ impl ObjectTreeNode {
                             let signature = field_metadata.signature()?;
                             let field_type = format!("{is_static}{signature}");
 
-                            let location = field
-                                .location(obj_module, Some(obj.location()))?;
+                            let location = field.location(
+                                obj_module,
+                                Some(obj.location()),
+                                underlying_reader,
+                            )?;
 
                             Ok(ObjectTreeNode {
                                 kind: ObjectTreeNodeKind::NewValue,

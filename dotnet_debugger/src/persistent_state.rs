@@ -1,6 +1,6 @@
-use std::collections::HashMap;
 use std::ops::Range;
 
+use elsa::FrozenMap;
 use memory_reader::MemoryReader;
 use memory_reader::Pointer;
 
@@ -9,26 +9,19 @@ use crate::CorElementType;
 use crate::FieldDescriptions;
 use crate::RuntimeValue;
 use crate::{Error, MethodTable, RuntimeObject};
-use crate::{ReadTypedPointer, RuntimeModule, TypedPointer};
+use crate::{RuntimeModule, TypedPointer};
 
 #[derive(Default)]
 pub struct PersistentState {
-    method_tables: LookupCache<MethodTable>,
-    runtime_modules: LookupCache<RuntimeModule>,
-
-    // The field description can't use the LookupCache class, because
-    // it requires additional information from the MethodTable.
+    method_tables: FrozenMap<TypedPointer<MethodTable>, Box<MethodTable>>,
+    runtime_modules: FrozenMap<TypedPointer<RuntimeModule>, Box<RuntimeModule>>,
     field_descriptions:
-        HashMap<TypedPointer<MethodTable>, Option<FieldDescriptions>>,
+        FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
 }
 
 pub struct CachedReader<'a> {
-    state: &'a mut PersistentState,
+    state: &'a PersistentState,
     reader: &'a MemoryReader,
-}
-
-struct LookupCache<T> {
-    cache: HashMap<TypedPointer<T>, T>,
 }
 
 impl PersistentState {
@@ -37,7 +30,7 @@ impl PersistentState {
     }
 
     pub fn cached_reader<'a>(
-        &'a mut self,
+        &'a self,
         reader: &'a MemoryReader,
     ) -> CachedReader<'a> {
         CachedReader {
@@ -45,18 +38,49 @@ impl PersistentState {
             reader,
         }
     }
+
+    pub fn method_table(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+        reader: &MemoryReader,
+    ) -> Result<&MethodTable, Error> {
+        self.method_tables.try_insert(ptr, || ptr.read(reader))
+    }
+
+    pub fn runtime_module(
+        &self,
+        ptr: TypedPointer<RuntimeModule>,
+        reader: &MemoryReader,
+    ) -> Result<&RuntimeModule, Error> {
+        self.runtime_modules.try_insert(ptr, || ptr.read(reader))
+    }
+
+    pub fn field_descriptions(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+        reader: &MemoryReader,
+    ) -> Result<&Option<FieldDescriptions>, Error> {
+        self.field_descriptions.try_insert(ptr, || {
+            let method_table = self.method_table(ptr, reader)?;
+            method_table.get_field_descriptions(reader)
+        })
+    }
 }
 
 impl<'a> CachedReader<'a> {
+    pub fn underlying_reader(&self) -> &'a MemoryReader {
+        self.reader
+    }
+
     pub fn object(
-        &mut self,
+        &self,
         location: TypedPointer<RuntimeObject>,
     ) -> Result<RuntimeObject, Error> {
         location.read(self.reader)
     }
 
     pub fn value(
-        &mut self,
+        &self,
         runtime_type: CorElementType,
         location: Range<Pointer>,
     ) -> Result<RuntimeValue, Error> {
@@ -67,18 +91,24 @@ impl<'a> CachedReader<'a> {
         Ok(value)
     }
 
-    pub fn class_name(&mut self, obj: &RuntimeObject) -> Result<String, Error> {
+    pub fn method_table(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<&MethodTable, Error> {
+        self.state
+            .method_tables
+            .try_insert(ptr, || ptr.read(self.reader))
+    }
+
+    pub fn class_name(&self, obj: &RuntimeObject) -> Result<String, Error> {
         let Self { state, reader } = self;
         let method_table_ptr = obj.method_table();
 
-        let method_table = state
-            .method_tables
-            .cached_or_read(method_table_ptr, reader)?;
+        let method_table = state.method_table(method_table_ptr, reader)?;
 
-        let module = state
-            .runtime_modules
-            .cached_or_read(method_table.module(), reader)?;
-        let metadata = module.metadata();
+        let module = state.runtime_module(method_table.module(), reader)?;
+
+        let metadata = module.metadata(reader)?;
 
         let name = metadata.get(method_table.token())?.name()?;
 
@@ -86,7 +116,7 @@ impl<'a> CachedReader<'a> {
     }
 
     pub fn iter_fields(
-        &mut self,
+        &self,
         obj: &RuntimeObject,
     ) -> Result<
         impl Iterator<
@@ -101,19 +131,13 @@ impl<'a> CachedReader<'a> {
         let Self { state, reader } = self;
         let method_table_ptr = obj.method_table();
 
-        let method_table = state
-            .method_tables
-            .cached_or_read(method_table_ptr, reader)?;
+        let method_table = state.method_table(method_table_ptr, reader)?;
 
-        let module = state
-            .runtime_modules
-            .cached_or_read(method_table.module(), reader)?;
-        let metadata = module.metadata();
+        let module = state.runtime_module(method_table.module(), reader)?;
+        let metadata = module.metadata(reader)?;
 
-        let field_descriptions = state
-            .field_descriptions
-            .entry(method_table_ptr)
-            .or_try_insert(|_| method_table.get_field_descriptions(reader))?;
+        let field_descriptions =
+            state.field_descriptions(method_table_ptr, reader)?;
 
         let iter = field_descriptions.iter().flatten();
 
@@ -127,59 +151,5 @@ impl<'a> CachedReader<'a> {
         });
 
         Ok(iter)
-    }
-}
-
-impl<T> LookupCache<T> {
-    // pub fn cached_or_read<'a>(
-    //     &'a mut self,
-    //     ptr: TypedPointer<T>,
-    //     reader: &MemoryReader,
-    // ) -> Result<&'a mut T, Error>
-    // where
-    //     T: ReadTypedPointer,
-    // {
-    //     use std::collections::hash_map::Entry;
-    //     match self.cache.entry(ptr) {
-    //         Entry::Occupied(value) => Ok(value.into_mut()),
-    //         Entry::Vacant(vacant) => Ok(vacant.insert(ptr.read(reader)?)),
-    //     }
-    // }
-
-    pub fn cached_or_read<'a>(
-        &'a mut self,
-        ptr: TypedPointer<T>,
-        reader: &MemoryReader,
-    ) -> Result<&'a T, Error>
-    where
-        T: ReadTypedPointer,
-    {
-        use std::collections::hash_map::Entry;
-        match self.cache.entry(ptr) {
-            Entry::Occupied(value) => Ok(value.into_mut()),
-            Entry::Vacant(vacant) => Ok(vacant.insert(ptr.read(reader)?)),
-        }
-    }
-}
-
-impl<T> std::ops::Deref for LookupCache<T> {
-    type Target = HashMap<TypedPointer<T>, T>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.cache
-    }
-}
-
-impl<T> std::ops::DerefMut for LookupCache<T> {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cache
-    }
-}
-
-impl<T> Default for LookupCache<T> {
-    fn default() -> Self {
-        Self {
-            cache: Default::default(),
-        }
     }
 }
