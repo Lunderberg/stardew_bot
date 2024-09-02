@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    CachedReader, PersistentState, RuntimeObject, RuntimeType, RuntimeValue,
+    CachedReader, CorElementType, PersistentState, RuntimeObject, RuntimeValue,
     TypedPointer,
 };
 use memory_reader::Pointer;
@@ -29,7 +29,7 @@ pub struct ObjectExplorer {
 
 struct ObjectTreeNode {
     location: Range<Pointer>,
-    runtime_type: RuntimeType,
+    runtime_type: CorElementType,
     should_read: bool,
     tree_depth: usize,
     field_name: String,
@@ -58,7 +58,7 @@ impl ObjectExplorer {
             ObjectTreeNode {
                 kind: ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)),
                 location: ptr..ptr + Pointer::SIZE,
-                runtime_type: RuntimeType::Class,
+                runtime_type: CorElementType::Class,
                 should_read: true,
                 tree_depth: 0,
                 field_name: "top_object".to_string(),
@@ -236,7 +236,7 @@ impl ObjectTreeNode {
                 }
                 ObjectTreeNodeKind::Object { .. } => {
                     let value = reader
-                        .value(RuntimeType::Class, self.location.clone())?;
+                        .value(CorElementType::Class, self.location.clone())?;
                     self.kind = ObjectTreeNodeKind::Value(value);
                 }
 
@@ -250,7 +250,7 @@ impl ObjectTreeNode {
                     let fields = reader
                         .iter_fields(&obj)?
                         .map(|(obj_module, field, field_metadata)| {
-                            let runtime_type = field.runtime_type()?;
+                            let runtime_type = field.cor_element_type()?;
 
                             let field_name = field_metadata.name()?.to_string();
                             let is_static = if field_metadata.is_static()? {

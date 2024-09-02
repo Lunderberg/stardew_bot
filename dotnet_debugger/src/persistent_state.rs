@@ -5,8 +5,8 @@ use memory_reader::MemoryReader;
 use memory_reader::Pointer;
 
 use crate::extensions::*;
+use crate::CorElementType;
 use crate::FieldDescriptions;
-use crate::RuntimeType;
 use crate::RuntimeValue;
 use crate::{Error, MethodTable, RuntimeObject};
 use crate::{ReadTypedPointer, RuntimeModule, TypedPointer};
@@ -57,7 +57,7 @@ impl<'a> CachedReader<'a> {
 
     pub fn value(
         &mut self,
-        runtime_type: RuntimeType,
+        runtime_type: CorElementType,
         location: Range<Pointer>,
     ) -> Result<RuntimeValue, Error> {
         let bytes = self

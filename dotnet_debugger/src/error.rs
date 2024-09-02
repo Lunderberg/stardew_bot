@@ -1,7 +1,7 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::RuntimeType;
+use crate::CorElementType;
 
 #[derive(Error)]
 pub enum Error {
@@ -39,7 +39,7 @@ pub enum Error {
         "Element type {0} is only used for signatures, \
          and should not appear as a field type."
     )]
-    NoSuchRuntimeValue(RuntimeType),
+    NoSuchRuntimeValue(CorElementType),
 
     #[error("Locating non-static field requires pointer to instance")]
     LocationOfInstanceFieldRequiresInstance,
@@ -49,7 +49,7 @@ pub enum Error {
          but was only provided with {provided}."
     )]
     InsufficientBytesForValue {
-        runtime_type: RuntimeType,
+        runtime_type: CorElementType,
         provided: usize,
         expected: usize,
     },

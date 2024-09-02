@@ -4,7 +4,7 @@ use crate::{Error, RuntimeValue};
 
 /// Equivalent representation to CorElementType
 #[derive(Clone, Copy, Debug)]
-pub enum RuntimeType {
+pub enum CorElementType {
     End,
     Void,
     Bool,
@@ -44,13 +44,13 @@ pub enum RuntimeType {
     Pinned,
 }
 
-impl std::fmt::Display for RuntimeType {
+impl std::fmt::Display for CorElementType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
     }
 }
 
-impl TryFrom<u8> for RuntimeType {
+impl TryFrom<u8> for CorElementType {
     type Error = Error;
 
     fn try_from(value: u8) -> Result<Self, Self::Error> {
@@ -95,7 +95,7 @@ impl TryFrom<u8> for RuntimeType {
     }
 }
 
-impl RuntimeType {
+impl CorElementType {
     pub fn is_ptr(self) -> bool {
         matches!(self, Self::Ptr | Self::Object | Self::Class)
     }
@@ -108,29 +108,29 @@ impl RuntimeType {
         match self {
             // RuntimeType::End => todo!(),
             // RuntimeType::Void => todo!(),
-            RuntimeType::Bool => 1,
+            CorElementType::Bool => 1,
             // RuntimeType::Char => todo!(),
-            RuntimeType::I8 => 1,
-            RuntimeType::U8 => 1,
-            RuntimeType::I16 => 2,
-            RuntimeType::U16 => 2,
-            RuntimeType::I32 => 4,
-            RuntimeType::U32 => 4,
-            RuntimeType::I64 => 8,
-            RuntimeType::U64 => 8,
-            RuntimeType::F32 => 4,
-            RuntimeType::F64 => 8,
+            CorElementType::I8 => 1,
+            CorElementType::U8 => 1,
+            CorElementType::I16 => 2,
+            CorElementType::U16 => 2,
+            CorElementType::I32 => 4,
+            CorElementType::U32 => 4,
+            CorElementType::I64 => 8,
+            CorElementType::U64 => 8,
+            CorElementType::F32 => 4,
+            CorElementType::F64 => 8,
             // RuntimeType::String => todo!(),
-            RuntimeType::Ptr
-            | RuntimeType::ValueType
-            | RuntimeType::Class
-            | RuntimeType::Object => Pointer::SIZE,
+            CorElementType::Ptr
+            | CorElementType::ValueType
+            | CorElementType::Class
+            | CorElementType::Object => Pointer::SIZE,
             // RuntimeType::ByRef => todo!(),
             // RuntimeType::Var => todo!(),
             // RuntimeType::Array => todo!(),
             // RuntimeType::GenericInst => todo!(),
             // RuntimeType::TypedByRef => todo!(),
-            RuntimeType::NativeInt | RuntimeType::NativeUInt => {
+            CorElementType::NativeInt | CorElementType::NativeUInt => {
                 std::mem::size_of::<usize>()
             }
             // RuntimeType::FunctionPtr => todo!(),

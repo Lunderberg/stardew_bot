@@ -403,12 +403,13 @@ impl TuiExplorerBuilder {
                             .range(location.clone())
                             .name(format!("{class_name}.{field_name}"));
 
-                        if !field.is_pointer()? {
+                        if !field.is_pointer()? && !field.is_value_type()? {
                             let bytes = self.reader.read_bytes(
                                 location.start,
                                 location.end - location.start,
                             )?;
-                            let value = field.runtime_type()?.parse(&bytes)?;
+                            let value =
+                                field.cor_element_type()?.parse(&bytes)?;
                             ann.value(value);
                         }
 
@@ -463,12 +464,12 @@ impl TuiExplorerBuilder {
                     .range(location.clone())
                     .name(format!(" {field_name}"));
 
-                if !field.is_pointer()? {
+                if !field.is_pointer()? && !field.is_value_type()? {
                     let bytes = self.reader.read_bytes(
                         location.start,
                         location.end - location.start,
                     )?;
-                    let value = field.runtime_type()?.parse(&bytes)?;
+                    let value = field.cor_element_type()?.parse(&bytes)?;
                     ann.value(value);
                 }
                 Ok(())

@@ -72,7 +72,10 @@ fn iter_possible_object_instances<'a>(
         .flatten()
         .filter(|field| !field.is_static())
         .filter(|field| {
-            field.runtime_type().map(|ty| ty.is_ptr()).unwrap_or(false)
+            field
+                .cor_element_type()
+                .map(|ty| ty.is_ptr())
+                .unwrap_or(false)
         })
         .map(|field| {
             // The offset is recorded relative to the location after

@@ -1,6 +1,6 @@
 use memory_reader::Pointer;
 
-use crate::{Error, RuntimeType};
+use crate::{CorElementType, Error};
 
 pub enum RuntimeValue {
     Bool(bool),
@@ -43,78 +43,78 @@ pub enum RuntimeValue {
 }
 
 impl RuntimeValue {
-    pub fn parse(kind: RuntimeType, bytes: &[u8]) -> Result<Self, Error> {
+    pub fn parse(kind: CorElementType, bytes: &[u8]) -> Result<Self, Error> {
         let bytes = Self::truncate_to_length(kind, bytes)?;
 
         match kind {
-            RuntimeType::Bool => Ok(RuntimeValue::Bool(bytes[0] > 0)),
-            RuntimeType::Char => todo!(),
+            CorElementType::Bool => Ok(RuntimeValue::Bool(bytes[0] > 0)),
+            CorElementType::Char => todo!(),
 
-            RuntimeType::I8 => Ok(RuntimeValue::I8(i8::from_ne_bytes(
+            CorElementType::I8 => Ok(RuntimeValue::I8(i8::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::I16 => Ok(RuntimeValue::I16(i16::from_ne_bytes(
+            CorElementType::I16 => Ok(RuntimeValue::I16(i16::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::I32 => Ok(RuntimeValue::I32(i32::from_ne_bytes(
+            CorElementType::I32 => Ok(RuntimeValue::I32(i32::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::I64 => Ok(RuntimeValue::I64(i64::from_ne_bytes(
+            CorElementType::I64 => Ok(RuntimeValue::I64(i64::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::NativeInt => Ok(RuntimeValue::NativeInt(
+            CorElementType::NativeInt => Ok(RuntimeValue::NativeInt(
                 isize::from_ne_bytes(bytes.try_into().unwrap()),
             )),
 
-            RuntimeType::U8 => Ok(RuntimeValue::U8(u8::from_ne_bytes(
+            CorElementType::U8 => Ok(RuntimeValue::U8(u8::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::U16 => Ok(RuntimeValue::U16(u16::from_ne_bytes(
+            CorElementType::U16 => Ok(RuntimeValue::U16(u16::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::U32 => Ok(RuntimeValue::U32(u32::from_ne_bytes(
+            CorElementType::U32 => Ok(RuntimeValue::U32(u32::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::U64 => Ok(RuntimeValue::U64(u64::from_ne_bytes(
+            CorElementType::U64 => Ok(RuntimeValue::U64(u64::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::NativeUInt => Ok(RuntimeValue::NativeUInt(
+            CorElementType::NativeUInt => Ok(RuntimeValue::NativeUInt(
                 usize::from_ne_bytes(bytes.try_into().unwrap()),
             )),
 
-            RuntimeType::F32 => Ok(RuntimeValue::F32(f32::from_ne_bytes(
+            CorElementType::F32 => Ok(RuntimeValue::F32(f32::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
-            RuntimeType::F64 => Ok(RuntimeValue::F64(f64::from_ne_bytes(
+            CorElementType::F64 => Ok(RuntimeValue::F64(f64::from_ne_bytes(
                 bytes.try_into().unwrap(),
             ))),
 
-            RuntimeType::ValueType | RuntimeType::Class => {
+            CorElementType::ValueType | CorElementType::Class => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(Self::Object(ptr))
             }
-            RuntimeType::Object => todo!(),
-            RuntimeType::String => todo!(),
-            RuntimeType::Ptr => todo!(),
+            CorElementType::Object => todo!(),
+            CorElementType::String => todo!(),
+            CorElementType::Ptr => todo!(),
 
-            RuntimeType::Array => todo!(),
-            RuntimeType::SizeArray => todo!(),
+            CorElementType::Array => todo!(),
+            CorElementType::SizeArray => todo!(),
 
-            RuntimeType::FunctionPtr => todo!(),
-            RuntimeType::MethodType => todo!(),
+            CorElementType::FunctionPtr => todo!(),
+            CorElementType::MethodType => todo!(),
 
-            RuntimeType::ByRef => todo!(),
-            RuntimeType::TypedByRef => todo!(),
+            CorElementType::ByRef => todo!(),
+            CorElementType::TypedByRef => todo!(),
 
-            RuntimeType::Var => todo!(),
-            RuntimeType::GenericInst => todo!(),
+            CorElementType::Var => todo!(),
+            CorElementType::GenericInst => todo!(),
 
             other => Err(Error::NoSuchRuntimeValue(other)),
         }
     }
 
     fn truncate_to_length(
-        runtime_type: RuntimeType,
+        runtime_type: CorElementType,
         bytes: &[u8],
     ) -> Result<&[u8], Error> {
         let expected = runtime_type.size_bytes();

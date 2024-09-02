@@ -7,7 +7,7 @@ use dll_unpacker::{
 use memory_reader::{ByteRange, OwnedBytes, Pointer};
 
 use crate::{
-    unpack_fields, Error, RuntimeModule, RuntimeObject, RuntimeType,
+    unpack_fields, CorElementType, Error, RuntimeModule, RuntimeObject,
     TypedPointer,
 };
 
@@ -69,7 +69,7 @@ impl<'a> FieldDescription<'a> {
         protection: {u32,  8..12, 2..5},
         requires_all_token_bits : {u32,  8..12, 1..2},
         raw_offset: {u32,  12..16, 5..32},
-        raw_runtime_type: {u32,  12..16, 0..5},
+        raw_cor_element_type: {u32,  12..16, 0..5},
     }
 
     pub fn ptr_range(&self) -> Range<Pointer> {
@@ -107,8 +107,8 @@ impl<'a> FieldDescription<'a> {
             .name("requires_all_token_bits");
         annotator.value(self.raw_offset_unpacked()).name("offset");
         annotator
-            .range(self.raw_runtime_type_unpacked().loc())
-            .value(self.runtime_type()?)
+            .range(self.raw_cor_element_type_unpacked().loc())
+            .value(self.cor_element_type()?)
             .name("runtime_type");
 
         Ok(())
@@ -131,14 +131,18 @@ impl<'a> FieldDescription<'a> {
         MetadataTableIndex::new(index - 1)
     }
 
-    pub fn runtime_type(&self) -> Result<RuntimeType, Error> {
-        (self.raw_runtime_type() as u8).try_into()
+    pub fn cor_element_type(&self) -> Result<CorElementType, Error> {
+        (self.raw_cor_element_type() as u8).try_into()
     }
 
     pub fn is_pointer(&self) -> Result<bool, Error> {
+        Ok(self.cor_element_type()?.is_ptr())
+    }
+
+    pub fn is_value_type(&self) -> Result<bool, Error> {
         Ok(matches!(
-            self.runtime_type()?,
-            RuntimeType::Class | RuntimeType::ValueType
+            self.cor_element_type()?,
+            CorElementType::ValueType
         ))
     }
 
@@ -147,18 +151,25 @@ impl<'a> FieldDescription<'a> {
         module: &RuntimeModule,
         instance: Option<TypedPointer<RuntimeObject>>,
     ) -> Result<Range<Pointer>, Error> {
-        let runtime_type = self.runtime_type()?;
+        let runtime_type = self.cor_element_type()?;
         let is_instance_field = !self.is_static();
+
+        // The Module contains two pointers for static values,
+        // depending on whether the value must be inspected by the
+        // garbage collector.  This includes both class types
+        // (directly managed by garbage collector) and value types
+        // (may include class types), but not primitives.
+        let uses_gc_statics_base_ptr = matches!(
+            runtime_type,
+            CorElementType::Class | CorElementType::ValueType
+        );
 
         let base = if is_instance_field {
             let instance: Pointer = instance
                 .ok_or(Error::LocationOfInstanceFieldRequiresInstance)?
                 .into();
             instance + Pointer::SIZE
-        } else if matches!(
-            runtime_type,
-            RuntimeType::Class | RuntimeType::ValueType
-        ) {
+        } else if uses_gc_statics_base_ptr {
             module.base_ptr_of_gc_statics
         } else {
             module.base_ptr_of_non_gc_statics
