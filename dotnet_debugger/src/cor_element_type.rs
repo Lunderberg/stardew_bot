@@ -1,26 +1,27 @@
 use memory_reader::Pointer;
 
-use crate::{Error, RuntimeValue};
+use crate::{runtime_type::RuntimePrimType, Error, RuntimeValue};
 
 /// Equivalent representation to CorElementType
 #[derive(Clone, Copy, Debug)]
 pub enum CorElementType {
     End,
     Void,
-    Bool,
-    Char,
-    I8,
-    U8,
-    I16,
-    U16,
-    I32,
-    U32,
-    I64,
-    U64,
-    F32,
-    F64,
+    Prim(RuntimePrimType),
+    // Bool,
+    // Char,
+    // I8,
+    // U8,
+    // I16,
+    // U16,
+    // I32,
+    // U32,
+    // I64,
+    // U64,
+    // F32,
+    // F64,
     String,
-    Ptr,
+    // Ptr,
     ByRef,
     ValueType,
     Class,
@@ -28,8 +29,8 @@ pub enum CorElementType {
     Array,
     GenericInst,
     TypedByRef,
-    NativeInt,
-    NativeUInt,
+    // NativeInt,
+    // NativeUInt,
     FunctionPtr,
     Object,
     SizeArray,
@@ -57,20 +58,20 @@ impl TryFrom<u8> for CorElementType {
         match value {
             0x00 => Ok(Self::End),
             0x01 => Ok(Self::Void),
-            0x02 => Ok(Self::Bool),
-            0x03 => Ok(Self::Char),
-            0x04 => Ok(Self::I8),
-            0x05 => Ok(Self::U8),
-            0x06 => Ok(Self::I16),
-            0x07 => Ok(Self::U16),
-            0x08 => Ok(Self::I32),
-            0x09 => Ok(Self::U32),
-            0x0a => Ok(Self::I64),
-            0x0b => Ok(Self::U64),
-            0x0c => Ok(Self::F32),
-            0x0d => Ok(Self::F64),
+            0x02 => Ok(Self::Prim(RuntimePrimType::Bool)),
+            0x03 => Ok(Self::Prim(RuntimePrimType::Char)),
+            0x04 => Ok(Self::Prim(RuntimePrimType::I8)),
+            0x05 => Ok(Self::Prim(RuntimePrimType::U8)),
+            0x06 => Ok(Self::Prim(RuntimePrimType::I16)),
+            0x07 => Ok(Self::Prim(RuntimePrimType::U16)),
+            0x08 => Ok(Self::Prim(RuntimePrimType::I32)),
+            0x09 => Ok(Self::Prim(RuntimePrimType::U32)),
+            0x0a => Ok(Self::Prim(RuntimePrimType::I64)),
+            0x0b => Ok(Self::Prim(RuntimePrimType::U64)),
+            0x0c => Ok(Self::Prim(RuntimePrimType::F32)),
+            0x0d => Ok(Self::Prim(RuntimePrimType::F64)),
             0x0e => Ok(Self::String),
-            0x0f => Ok(Self::Ptr),
+            0x0f => Ok(Self::Prim(RuntimePrimType::Ptr)),
             0x10 => Ok(Self::ByRef),
             0x11 => Ok(Self::ValueType),
             0x12 => Ok(Self::Class),
@@ -78,8 +79,8 @@ impl TryFrom<u8> for CorElementType {
             0x14 => Ok(Self::Array),
             0x15 => Ok(Self::GenericInst),
             0x16 => Ok(Self::TypedByRef),
-            0x18 => Ok(Self::NativeInt),
-            0x19 => Ok(Self::NativeUInt),
+            0x18 => Ok(Self::Prim(RuntimePrimType::NativeInt)),
+            0x19 => Ok(Self::Prim(RuntimePrimType::NativeUInt)),
             0x1b => Ok(Self::FunctionPtr),
             0x1c => Ok(Self::Object),
             0x1d => Ok(Self::SizeArray),
@@ -97,7 +98,10 @@ impl TryFrom<u8> for CorElementType {
 
 impl CorElementType {
     pub fn is_ptr(self) -> bool {
-        matches!(self, Self::Ptr | Self::Object | Self::Class)
+        matches!(
+            self,
+            Self::Prim(RuntimePrimType::Ptr) | Self::Object | Self::Class
+        )
     }
 
     pub fn parse(self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
@@ -106,23 +110,12 @@ impl CorElementType {
 
     pub fn size_bytes(self) -> usize {
         match self {
+            CorElementType::Prim(prim) => prim.size_bytes(),
             // RuntimeType::End => todo!(),
             // RuntimeType::Void => todo!(),
-            CorElementType::Bool => 1,
             // RuntimeType::Char => todo!(),
-            CorElementType::I8 => 1,
-            CorElementType::U8 => 1,
-            CorElementType::I16 => 2,
-            CorElementType::U16 => 2,
-            CorElementType::I32 => 4,
-            CorElementType::U32 => 4,
-            CorElementType::I64 => 8,
-            CorElementType::U64 => 8,
-            CorElementType::F32 => 4,
-            CorElementType::F64 => 8,
             // RuntimeType::String => todo!(),
-            CorElementType::Ptr
-            | CorElementType::ValueType
+            CorElementType::ValueType
             | CorElementType::Class
             | CorElementType::Object => Pointer::SIZE,
             // RuntimeType::ByRef => todo!(),
@@ -130,9 +123,6 @@ impl CorElementType {
             // RuntimeType::Array => todo!(),
             // RuntimeType::GenericInst => todo!(),
             // RuntimeType::TypedByRef => todo!(),
-            CorElementType::NativeInt | CorElementType::NativeUInt => {
-                std::mem::size_of::<usize>()
-            }
             // RuntimeType::FunctionPtr => todo!(),
 
             // RuntimeType::SizeArray => todo!(),
