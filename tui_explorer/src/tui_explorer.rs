@@ -467,7 +467,7 @@ impl TuiExplorerBuilder {
                 let field_name = metadata.get(field.token())?.name()?;
                 let location = field.location(
                     &runtime_module,
-                    Some(game_obj),
+                    Some(game_obj.into()),
                     &self.reader,
                 )?;
 

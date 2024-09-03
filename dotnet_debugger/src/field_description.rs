@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{borrow::Borrow, ops::Range};
 
 use dll_unpacker::{
     dll_unpacker::{Field, MetadataTableIndex},
@@ -6,10 +6,7 @@ use dll_unpacker::{
 };
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
-use crate::{
-    unpack_fields, CorElementType, Error, RuntimeModule, RuntimeObject,
-    TypedPointer,
-};
+use crate::{unpack_fields, CorElementType, Error, RuntimeModule};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,
@@ -149,9 +146,10 @@ impl<'a> FieldDescription<'a> {
     pub fn location(
         &self,
         module: &RuntimeModule,
-        instance: Option<TypedPointer<RuntimeObject>>,
-        reader: &MemoryReader,
+        instance: Option<Pointer>,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Range<Pointer>, Error> {
+        let reader = reader.borrow();
         let runtime_type = self.cor_element_type()?;
         let is_instance_field = !self.is_static();
 

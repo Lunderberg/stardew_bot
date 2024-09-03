@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::ops::Range;
 
 use elsa::FrozenMap;
@@ -59,11 +60,13 @@ impl PersistentState {
         &self,
         ptr: TypedPointer<MethodTable>,
         reader: &MemoryReader,
-    ) -> Result<&Option<FieldDescriptions>, Error> {
-        self.field_descriptions.try_insert(ptr, || {
-            let method_table = self.method_table(ptr, reader)?;
-            method_table.get_field_descriptions(reader)
-        })
+    ) -> Result<Option<&FieldDescriptions>, Error> {
+        self.field_descriptions
+            .try_insert(ptr, || {
+                let method_table = self.method_table(ptr, reader)?;
+                method_table.get_field_descriptions(reader)
+            })
+            .map(|opt| opt.as_ref())
     }
 }
 
@@ -95,13 +98,25 @@ impl<'a> CachedReader<'a> {
         &self,
         ptr: TypedPointer<MethodTable>,
     ) -> Result<&MethodTable, Error> {
-        self.state
-            .method_tables
-            .try_insert(ptr, || ptr.read(self.reader))
+        self.state.method_table(ptr, self.reader)
+    }
+
+    pub fn runtime_module(
+        &self,
+        ptr: TypedPointer<RuntimeModule>,
+    ) -> Result<&RuntimeModule, Error> {
+        self.state.runtime_module(ptr, self.reader)
+    }
+
+    pub fn field_descriptions(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<Option<&FieldDescriptions>, Error> {
+        self.state.field_descriptions(ptr, self.reader)
     }
 
     pub fn class_name(&self, obj: &RuntimeObject) -> Result<String, Error> {
-        let Self { state, reader } = self;
+        let Self { state, reader } = *self;
         let method_table_ptr = obj.method_table();
 
         let method_table = state.method_table(method_table_ptr, reader)?;
@@ -128,7 +143,7 @@ impl<'a> CachedReader<'a> {
             > + '_,
         Error,
     > {
-        let Self { state, reader } = self;
+        let Self { state, reader } = *self;
         let method_table_ptr = obj.method_table();
 
         let method_table = state.method_table(method_table_ptr, reader)?;
@@ -139,7 +154,7 @@ impl<'a> CachedReader<'a> {
         let field_descriptions =
             state.field_descriptions(method_table_ptr, reader)?;
 
-        let iter = field_descriptions.iter().flatten();
+        let iter = field_descriptions.into_iter().flatten();
 
         let iter = iter.map(move |field| {
             // TODO: Add validation of the RuntimeModule against the
@@ -151,5 +166,17 @@ impl<'a> CachedReader<'a> {
         });
 
         Ok(iter)
+    }
+}
+
+impl<'a> Borrow<MemoryReader> for CachedReader<'a> {
+    fn borrow(&self) -> &MemoryReader {
+        self.reader
+    }
+}
+
+impl<'a, 'b> Borrow<MemoryReader> for &'b CachedReader<'a> {
+    fn borrow(&self) -> &MemoryReader {
+        self.reader
     }
 }

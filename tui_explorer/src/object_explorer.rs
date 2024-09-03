@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    CachedReader, CorElementType, PersistentState, RuntimeObject, RuntimeValue,
-    TypedPointer,
+    CachedReader, CorElementType, FieldDescription, MethodTable,
+    PersistentState, RuntimeObject, RuntimeValue, TypedPointer,
 };
 use memory_reader::Pointer;
 use ratatui::{
@@ -222,10 +222,105 @@ impl ObjectTreeNode {
         }
     }
 
-    fn expand_marked(
-        &mut self,
-        reader: &mut CachedReader,
-    ) -> Result<(), Error> {
+    fn initial_field(
+        instance_location: Pointer,
+        method_table_ptr: TypedPointer<MethodTable>,
+        tree_depth: usize,
+        field: FieldDescription,
+        reader: &CachedReader,
+    ) -> Result<ObjectTreeNode, Error> {
+        let method_table = reader.method_table(method_table_ptr)?;
+        let obj_module = reader.runtime_module(method_table.module())?;
+        let metadata = obj_module.metadata(reader)?;
+
+        let field_metadata = metadata.get(field.token())?;
+
+        let runtime_type = field.cor_element_type()?;
+
+        let field_name = field_metadata.name()?.to_string();
+        let is_static = if field_metadata.is_static()? {
+            "static "
+        } else {
+            ""
+        };
+        let signature = field_metadata.signature()?;
+        let field_type = format!("{is_static}{signature}");
+
+        let location =
+            field.location(obj_module, Some(instance_location), reader)?;
+
+        let kind = match runtime_type {
+            CorElementType::ValueType => {
+                let signature = field_metadata.signature()?;
+                let value_type =
+                    signature.as_value_type()?.ok_or_else(|| {
+                        Error::ExpectedValueTypeAsMetadataSignature {
+                            field_name: field_name.clone(),
+                            field_type: field_type.clone(),
+                        }
+                    })?;
+                let value_metadata = metadata.get(value_type)?;
+                let class_name = value_metadata.name()?.to_string();
+
+                let fields = match value_metadata {
+                    dll_unpacker::MetadataTypeDefOrRef::TypeDef(row) => {
+                        Some(row.index())
+                    }
+                    dll_unpacker::MetadataTypeDefOrRef::TypeRef(_) => {
+                        // TODO: Handle ValueType fields that are in a
+                        // different module than the object in which
+                        // they occur.
+                        None
+                    }
+                    dll_unpacker::MetadataTypeDefOrRef::TypeSpec(_) => None,
+                }
+                .map(|field_typedef| -> Result<_, Error> {
+                    let field_method_table = obj_module
+                        .method_table_lookup(reader)?
+                        .get_ptr(field_typedef);
+                    let fields = reader
+                        .field_descriptions(field_method_table)?
+                        .into_iter()
+                        .flatten()
+                        .map(|subfield| {
+                            Self::initial_field(
+                                location.start,
+                                field_method_table,
+                                tree_depth + 1,
+                                subfield,
+                                reader,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    Ok(fields)
+                })
+                .transpose()?
+                .unwrap_or_else(Vec::new);
+
+                ObjectTreeNodeKind::Object {
+                    display_expanded: false,
+                    class_name,
+                    fields,
+                }
+            }
+            _ => ObjectTreeNodeKind::NewValue,
+        };
+
+        Ok(ObjectTreeNode {
+            kind,
+            location,
+            runtime_type,
+            should_read: false,
+            tree_depth: tree_depth + 1,
+            field_name,
+            field_type,
+        })
+    }
+
+    fn expand_marked(&mut self, reader: &CachedReader) -> Result<(), Error> {
+        let underlying_reader = reader.underlying_reader();
+
         if self.should_read {
             self.should_read = false;
             match &mut self.kind {
@@ -245,41 +340,31 @@ impl ObjectTreeNode {
                         return Err(Error::CannotExpandNullField);
                     }
 
-                    let underlying_reader = reader.underlying_reader();
-
                     let obj = reader.object((*ptr).into())?;
-                    let class_name = reader.class_name(&obj)?;
+                    let instance_location = obj.location();
+                    let method_table =
+                        reader.method_table(obj.method_table())?;
+                    let obj_module =
+                        reader.runtime_module(method_table.module())?;
+                    let metadata = obj_module.metadata(underlying_reader)?;
+
+                    let class_name =
+                        metadata.get(method_table.token())?.name()?.to_string();
+
                     let fields = reader
-                        .iter_fields(&obj)?
-                        .map(|(obj_module, field, field_metadata)| {
-                            let runtime_type = field.cor_element_type()?;
-
-                            let field_name = field_metadata.name()?.to_string();
-                            let is_static = if field_metadata.is_static()? {
-                                "static "
-                            } else {
-                                ""
-                            };
-                            let signature = field_metadata.signature()?;
-                            let field_type = format!("{is_static}{signature}");
-
-                            let location = field.location(
-                                obj_module,
-                                Some(obj.location()),
-                                underlying_reader,
-                            )?;
-
-                            Ok(ObjectTreeNode {
-                                kind: ObjectTreeNodeKind::NewValue,
-                                location,
-                                runtime_type,
-                                should_read: false,
-                                tree_depth: self.tree_depth + 1,
-                                field_name,
-                                field_type,
-                            })
+                        .field_descriptions(obj.method_table())?
+                        .into_iter()
+                        .flatten()
+                        .map(|field| -> Result<_, Error> {
+                            Self::initial_field(
+                                instance_location.into(),
+                                obj.method_table(),
+                                self.tree_depth + 1,
+                                field,
+                                reader,
+                            )
                         })
-                        .collect::<Result<_, Error>>()?;
+                        .collect::<Result<Vec<_>, Error>>()?;
 
                     self.kind = ObjectTreeNodeKind::Object {
                         class_name,
@@ -434,8 +519,8 @@ impl WidgetWindow for ObjectExplorer {
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
         if let Some(obj) = &mut self.object_tree {
-            let mut reader = self.state.cached_reader(globals.reader);
-            obj.expand_marked(&mut reader)?;
+            let reader = self.state.cached_reader(globals.reader);
+            obj.expand_marked(&reader)?;
         }
         Ok(())
     }

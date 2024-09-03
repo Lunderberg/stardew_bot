@@ -126,9 +126,12 @@ impl RuntimeValue {
             CorElementType::Prim(prim_type) => Ok(RuntimeValue::Prim(
                 RuntimePrimValue::parse(prim_type, bytes)?,
             )),
-            CorElementType::ValueType | CorElementType::Class => {
+            CorElementType::Class => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(Self::Object(ptr))
+            }
+            CorElementType::ValueType => {
+                Err(Error::ValueTypeRequiresContextualParsing)
             }
             CorElementType::Object => todo!(),
             CorElementType::String => todo!(),

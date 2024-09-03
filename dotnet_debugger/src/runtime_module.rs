@@ -1,3 +1,4 @@
+use std::borrow::Borrow;
 use std::cell::OnceCell;
 use std::collections::HashSet;
 use std::ops::Range;
@@ -237,8 +238,10 @@ impl RuntimeModule {
 
     pub fn method_table_lookup(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<&MethodTableLookup, Error> {
+        let reader = reader.borrow();
+
         self.method_table_lookup.or_try_init(|| {
             let num_type_defs =
                 self.metadata(reader)?.type_def_table().num_rows();
@@ -389,8 +392,9 @@ impl RuntimeModule {
 
     pub fn metadata<'a>(
         &'a self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Metadata<'a>, Error> {
+        let reader = reader.borrow();
         let layout = self.metadata_layout(reader)?;
         let dll_region = self.dll_region(reader)?;
         let metadata = layout.metadata(dll_region);
@@ -438,13 +442,22 @@ impl MethodTableLookup {
     pub fn get(
         &self,
         index: MetadataTableIndex<TypeDef>,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<MethodTable, Error> {
+        let reader = reader.borrow();
+
         let byte_range = &self[index];
         let bytes = reader
             .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
         let bytes = OwnedBytes::new(byte_range.start, bytes);
         Ok(MethodTable { bytes })
+    }
+
+    pub fn get_ptr(
+        &self,
+        index: MetadataTableIndex<TypeDef>,
+    ) -> TypedPointer<MethodTable> {
+        self[index].start.into()
     }
 }
 

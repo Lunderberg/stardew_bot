@@ -79,7 +79,7 @@ pub enum SignatureType<'a> {
 
     GenericType(u32),
     GenericInst {
-        _is_value_type: bool,
+        is_value_type: bool,
         index: MetadataCodedIndex<TypeDefOrRef>,
         type_args: Vec<Box<SignatureType<'a>>>,
         metadata: Metadata<'a>,
@@ -162,6 +162,35 @@ impl<'a> Signature<'a> {
     pub fn flags(&self) -> SignatureFlags {
         SignatureFlags(self.bytes[0])
     }
+
+    pub fn as_value_type(
+        &self,
+    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+        let mut unpacker = self.unpacker();
+        let flags = unpacker.next_flags()?;
+        flags.check_field()?;
+
+        let ty = unpacker.next_type()?;
+
+        match ty {
+            SignatureType::ValueType { index, .. }
+            | SignatureType::GenericInst {
+                index,
+                is_value_type: true,
+                ..
+            } => Ok(Some(index)),
+            _ => Ok(None),
+        }
+    }
+
+    fn unpacker(&self) -> SignatureDecompressor {
+        SignatureDecompressor {
+            bytes: self.bytes.clone(),
+            verbose: false,
+            offset: 0,
+            metadata: self.metadata,
+        }
+    }
 }
 
 impl SignatureFlags {
@@ -242,6 +271,11 @@ impl<'a> SignatureDecompressor<'a> {
             self.offset += 1;
             Ok(res)
         }
+    }
+
+    fn next_flags(&mut self) -> Result<SignatureFlags, Error> {
+        let byte = self.next_byte()?;
+        Ok(SignatureFlags(byte))
     }
 
     fn next_compressed_value(&mut self) -> Result<CompressedValue, Error> {
@@ -427,7 +461,7 @@ impl<'a> SignatureDecompressor<'a> {
                     .collect::<Result<_, _>>()?;
 
                 SignatureType::GenericInst {
-                    _is_value_type: is_value_type,
+                    is_value_type,
                     index,
                     type_args,
                     metadata: self.metadata,
@@ -544,7 +578,7 @@ impl<'a> std::fmt::Display for Signature<'a> {
             metadata: self.metadata,
         };
 
-        let flags = SignatureFlags(iter.next_byte().unwrap());
+        let flags = iter.next_flags().unwrap();
 
         match flags.0 & 0x0f {
             0..6 => write!(f, "TODO: MethodSig unpacking")?,
@@ -568,10 +602,18 @@ impl std::fmt::Display for SignatureType<'_> {
                 write!(f, "{element_type}[]")
             }
             SignatureType::Class { index, metadata } => {
-                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
+                write!(
+                    f,
+                    "Class {}",
+                    metadata.get(*index).unwrap().name().unwrap()
+                )
             }
             SignatureType::ValueType { index, metadata } => {
-                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
+                write!(
+                    f,
+                    "ValueType {}",
+                    metadata.get(*index).unwrap().name().unwrap()
+                )
             }
             SignatureType::GenericInst {
                 index,

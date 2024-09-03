@@ -56,6 +56,12 @@ pub enum Error {
         provided: usize,
         expected: usize,
     },
+
+    #[error(
+        "Parsing ValueType requires the containing MethodTable \
+         in order to determine the type."
+    )]
+    ValueTypeRequiresContextualParsing,
 }
 
 impl std::fmt::Debug for Error {
