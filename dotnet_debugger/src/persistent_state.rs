@@ -1,4 +1,5 @@
 use std::borrow::Borrow;
+use std::cell::OnceCell;
 use std::ops::Range;
 
 use elsa::FrozenMap;
@@ -15,9 +16,11 @@ use crate::{RuntimeModule, TypedPointer};
 #[derive(Default)]
 pub struct PersistentState {
     method_tables: FrozenMap<TypedPointer<MethodTable>, Box<MethodTable>>,
+    runtime_module_vtable: OnceCell<Pointer>,
     runtime_modules: FrozenMap<TypedPointer<RuntimeModule>, Box<RuntimeModule>>,
     field_descriptions:
         FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
+    runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
 }
 
 pub struct CachedReader<'a> {
@@ -53,7 +56,63 @@ impl PersistentState {
         ptr: TypedPointer<RuntimeModule>,
         reader: &MemoryReader,
     ) -> Result<&RuntimeModule, Error> {
-        self.runtime_modules.try_insert(ptr, || ptr.read(reader))
+        self.runtime_modules.try_insert(ptr, || {
+            let runtime_module = ptr.read(reader)?;
+
+            self.runtime_module_vtable
+                .or_try_init(|| runtime_module.vtable_location(reader))?;
+
+            // Save the name of the module, to avoid needing to do a
+            // memory search for it later.
+            //
+            // TODO: See if this could cause a weird order-dependent
+            // error, if a module can be successfully located through
+            // a known pointer, but cannot be located by the
+            // heuristics used to search in memory.  If that is the
+            // case, then this caching could paper over a need to
+            // improve the heuristics.
+            let dll_region = runtime_module.dll_region(reader)?;
+            self.runtime_module_by_name.insert(
+                dll_region.name().trim_end_matches(".dll").to_string(),
+                Box::new(ptr),
+            );
+            Ok(runtime_module)
+        })
+    }
+
+    pub fn runtime_module_by_name(
+        &self,
+        name: &str,
+        reader: &MemoryReader,
+    ) -> Result<TypedPointer<RuntimeModule>, Error> {
+        // TODO: Have `try_insert` accept `impl ToOwned<Owned=T>` to
+        // avoid needing to copy the string.
+        self.runtime_module_by_name
+            .try_insert(name.to_string(), || {
+                let dll_region = reader
+                    .regions
+                    .iter()
+                    .find(|region| {
+                        region.short_name().ends_with(".dll")
+                            && region.short_name().trim_end_matches(".dll")
+                                == name
+                    })
+                    .ok_or_else(|| {
+                        Error::RegionForDLLNotFoundFromName(name.to_string())
+                    })?
+                    .read()?;
+
+                let metadata_layout =
+                    dll_unpacker::unpack_metadata_layout(&dll_region)?;
+                let metadata = metadata_layout.metadata(&dll_region);
+                let module_vtable = self.runtime_module_vtable.get().copied();
+
+                let module_ptr =
+                    RuntimeModule::locate(&metadata, module_vtable, &reader)?;
+
+                Ok(module_ptr)
+            })
+            .copied()
     }
 
     pub fn field_descriptions(
@@ -106,6 +165,13 @@ impl<'a> CachedReader<'a> {
         ptr: TypedPointer<RuntimeModule>,
     ) -> Result<&RuntimeModule, Error> {
         self.state.runtime_module(ptr, self.reader)
+    }
+
+    pub fn runtime_module_by_name(
+        &self,
+        name: &str,
+    ) -> Result<TypedPointer<RuntimeModule>, Error> {
+        self.state.runtime_module_by_name(name, self.reader)
     }
 
     pub fn field_descriptions(

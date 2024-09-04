@@ -17,8 +17,8 @@ pub enum Error {
         err: memory_reader::Error,
     },
 
-    #[error("Could not find pointer to .NET Module")]
-    ModulePointerNotFound,
+    #[error("Could not find pointer to .NET Module '{0}'")]
+    ModulePointerNotFound(String),
 
     #[error("Could not find pointer to table of method tables")]
     PointerToMethodTableTableNotFound,
@@ -32,8 +32,11 @@ pub enum Error {
     #[error("Could not locate the DLL, starting from the Module")]
     DLLPointerNotFoundFromModule,
 
+    #[error("Memmap region for .NET Module {0} not found")]
+    RegionForDLLNotFoundFromName(String),
+
     #[error("Could not read the CLR DLL at {0}")]
-    RegionForDLLNotFound(Pointer),
+    RegionForDLLNotFoundFromPointer(Pointer),
 
     #[error("Value 0x{0:02x} does not correspond to any element type")]
     InvalidRuntimeType(u8),

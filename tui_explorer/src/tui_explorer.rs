@@ -273,8 +273,11 @@ impl TuiExplorerBuilder {
             dll_unpacker::unpack_metadata_layout(&dll_region)?;
         let metadata = metadata_layout.metadata(&dll_region);
 
-        let module_ptr =
-            dotnet_debugger::RuntimeModule::locate(&metadata, &self.reader)?;
+        let module_ptr = dotnet_debugger::RuntimeModule::locate(
+            &metadata,
+            None,
+            &self.reader,
+        )?;
 
         let runtime_module = module_ptr.read(&self.reader)?;
 
@@ -329,8 +332,11 @@ impl TuiExplorerBuilder {
                     .add_log(format!("{kind} table: {}", range.start));
             });
 
-        let module_ptr =
-            dotnet_debugger::RuntimeModule::locate(&metadata, &self.reader)?;
+        let module_ptr = dotnet_debugger::RuntimeModule::locate(
+            &metadata,
+            None,
+            &self.reader,
+        )?;
 
         self.running_log.add_log(format!(
             "Found module pointer at {module_ptr} for {}",

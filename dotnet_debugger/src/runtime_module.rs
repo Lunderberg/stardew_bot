@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::OnceCell;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::ops::Range;
 
 use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
@@ -58,13 +58,48 @@ pub struct MethodTableLookup {
 }
 
 impl RuntimeModule {
+    // TODO: Better locate/lookup.
+    //
+    // For the entry-point DLL, can located it as
+    //
+    // static AppDomain::m_pTheAppDomain
+    //    -> m_pRootAssembly
+    //    -> m_pManifest
+    //
+    // Similar steps could be done from `static
+    // SystemDomain::m_pSystemDomain` to locate the system module.
+    // The only problem is that the these static variables are
+    // internal symbols, and only have ELF symbols in the
+    // `libcoreclr.so.dbg` file.
+    //
+    // The `g_dacTable` does have its symbol externally exposed, even
+    // in release builds.  However, interpreting it would be very
+    // version-dependent and rather painful with the debug symbols.
+    // And if I do have the debug symbols, why not just use them to
+    // jump straight to the `m_pTheAppDomain` and `m_pSystemDomain`
+    // statics directly?
+
     /// Given the unpacked Metadata from a DLL, attempt to locate its
     /// runtime representation.
+    ///
+    /// * metadata: The unpacked metadata for the DLL to be located.
+    ///
+    /// * module_vtable_loc: The location of the module's vtable, if
+    /// present.
+    ///
+    /// * reader: The memory reader to inspect the running subprocess.
     pub fn locate(
         metadata: &Metadata,
+        module_vtable_loc: Option<Pointer>,
         reader: &MemoryReader,
     ) -> Result<TypedPointer<Self>, Error> {
-        // Pointers to IL method definitions in the loaded DLL.
+        // Pointers to IL method definitions in the loaded DLL.  These
+        // are used to identify pointers to the module, which I
+        // believe to be held by the `ILStubLinker`.  For each method,
+        // there's an `ILStubLinker` that holds both a pointer to the
+        // IL method definition, adjacent a pointer to the `Module`
+        // that owns it.  Finding pointers to the IL method
+        // definitions lets the
         let dll_method_def: HashSet<Pointer> = metadata
             .method_def_table()
             .iter_rows()
@@ -73,7 +108,29 @@ impl RuntimeModule {
             .map(|method_body| method_body.start)
             .collect();
 
-        let ptr = reader
+        // However, that isn't sufficient for all modules.  Modules
+        // aren't required to have any method definitions, and
+        // `System.Runtime` in particular can't be located by this
+        // method.  Instead, we can search for a pointer to the vtable
+        // for Module, followed by a pointer to the name of the module.
+        //
+        // This is only possible if we already know the location of
+        // the vtable.  With the debug symbols in `libcoreclr.so.dbg`,
+        // this could be identified as the `_ZTV6Module` symbol.
+        // However, as long as I'm being masochistic by assuming I
+        // won't always have access to the debug symbols, the vtable
+        // is only available after first identifying a module through
+        // the first method.
+        let module_name_location: Pointer = metadata
+            .assembly_table()
+            .iter_rows()
+            .exactly_one()
+            .unwrap_or_else(|_| {
+                panic!("Each .DLL should define exactly one Assembly")
+            })
+            .name_location()?;
+
+        let ptr_pairs = reader
             .regions
             .iter()
             .filter(|region| {
@@ -81,34 +138,57 @@ impl RuntimeModule {
                     && region.is_writable
                     && !region.is_shared_memory
             })
-            .flat_map(|region| {
-                region
-                    .read()
-                    .unwrap()
-                    .into_iter_as_pointers()
-                    .map(|mem_value| mem_value.value)
-                    .tuple_windows()
-            })
-            .filter(|(module_ptr, il_ptr)| {
-                // The pattern-matching above is pretty reliable at finding
-                // the most common location.  With about 17k methods in
-                // StardewValley.dll, there were 243 unique pairs of
-                // `(module_ptr, il_ptr)`, one of which occurred
-                // over 500 times.  No other pair occurred more than 3 times.
-                //
-                // I suppose I could further filter the `module_ptr` by values
-                // that point to a pointer, which itself points to
-                // `libcoreclr.so`, but that doesn't seem necessary at the
-                // moment.
-                dll_method_def.contains(il_ptr)
-                    && reader.is_valid_ptr(*module_ptr)
-            })
-            .map(|(module_ptr, _)| module_ptr)
-            .counts()
-            .into_iter()
-            .max_by_key(|(_, counts)| *counts)
-            .map(|(value, _)| value)
-            .ok_or(Error::ModulePointerNotFound)?;
+            .filter_map(|region| region.read().ok())
+            .flat_map(|region| region.into_iter_as_pointers().tuple_windows());
+
+        // TODO: Search for several modules at the same time, to avoid
+        // needing to re-scan the entire memory for each DLL.
+
+        let mut found_by_vtable = Vec::new();
+        let mut count_ptr_adjacent_to_il = HashMap::new();
+        for (a, b) in ptr_pairs {
+            // This pattern-matching above is pretty reliable at finding
+            // the most common location.  With about 17k methods in
+            // StardewValley.dll, there were 243 unique pairs of
+            // `(module_ptr, il_ptr)`, one of which occurred
+            // over 500 times.  No other pair occurred more than 3 times.
+            //
+            // I suppose I could further filter the `module_ptr` by values
+            // that point to a pointer, which itself points to
+            // `libcoreclr.so`, but that doesn't seem necessary at the
+            // moment.
+            if dll_method_def.contains(&b.value) && reader.is_valid_ptr(a.value)
+            {
+                *count_ptr_adjacent_to_il.entry(a.value).or_insert(0) += 1;
+            }
+
+            if Some(a.value) == module_vtable_loc
+                && b.value == module_name_location
+            {
+                found_by_vtable.push(a.location);
+            }
+        }
+
+        let ptr = if found_by_vtable.is_empty() {
+            count_ptr_adjacent_to_il
+                .into_iter()
+                .max_by_key(|(_, counts)| *counts)
+                .map(|(value, _)| value)
+                .ok_or_else(|| {
+                    let metadata_start = metadata.ptr_range().start;
+                    let name = reader
+                        .regions
+                        .iter()
+                        .find(|region| region.contains(metadata_start))
+                        .map(|region| region.short_name())
+                        .unwrap_or("(unknown)")
+                        .to_string();
+                    Error::ModulePointerNotFound(name)
+                })?
+        } else {
+            assert!(found_by_vtable.len() == 1);
+            found_by_vtable[0]
+        };
 
         Ok(ptr.into())
     }
@@ -188,7 +268,7 @@ impl RuntimeModule {
                     region.contains(image_ptr) && region.file_offset() == 0
                 })
                 .max_by_key(|region| region.size_bytes())
-                .ok_or(Error::RegionForDLLNotFound(image_ptr))?
+                .ok_or(Error::RegionForDLLNotFoundFromPointer(image_ptr))?
                 .read()?)
         })
     }

@@ -264,18 +264,47 @@ impl ObjectTreeNode {
 
                 let fields = match value_metadata {
                     dll_unpacker::MetadataTypeDefOrRef::TypeDef(row) => {
-                        Some(row.index())
+                        Some((obj_module, row.index()))
                     }
-                    dll_unpacker::MetadataTypeDefOrRef::TypeRef(_) => {
-                        // TODO: Handle ValueType fields that are in a
-                        // different module than the object in which
-                        // they occur.
+                    dll_unpacker::MetadataTypeDefOrRef::TypeRef(row) => {
+                        let target_dll_name = row.target_dll_name()?;
+                        let target_namespace = row.namespace()?;
+                        let target_name = row.name()?;
+                        let field_module_ptr =
+                            reader.runtime_module_by_name(target_dll_name)?;
+                        let field_module =
+                            reader.runtime_module(field_module_ptr)?;
+                        let field_module_metadata =
+                            field_module.metadata(reader)?;
+
+                        let field_typedef = field_module_metadata
+                            .type_def_table()
+                            .iter_rows()
+                            .find(|ref_row| {
+                                let Ok(namespace) = ref_row.namespace() else {
+                                    return false;
+                                };
+                                let Ok(name) = ref_row.name() else {
+                                    return false;
+                                };
+
+                                name == target_name
+                                    && namespace == target_namespace
+                            })
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "Could not find {target_name}.{target_namespace} \
+                                     in {target_dll_name}."
+                                )
+                            });
+
                         None
+                        // Some((field_module, field_typedef.index()))
                     }
                     dll_unpacker::MetadataTypeDefOrRef::TypeSpec(_) => None,
                 }
-                .map(|field_typedef| -> Result<_, Error> {
-                    let field_method_table = obj_module
+                .map(|(field_module, field_typedef)| -> Result<_, Error> {
+                    let field_method_table = field_module
                         .method_table_lookup(reader)?
                         .get_ptr(field_typedef);
                     let fields = reader
@@ -299,7 +328,7 @@ impl ObjectTreeNode {
                 .unwrap_or_else(Vec::new);
 
                 ObjectTreeNodeKind::Object {
-                    display_expanded: false,
+                    display_expanded: true,
                     class_name,
                     fields,
                 }
