@@ -2913,6 +2913,26 @@ impl std::fmt::Display for FieldFlags {
     }
 }
 
+impl<'a> MetadataRow<'a, TypeRef> {
+    pub fn target_dll_name(&self) -> Result<&'a str, Error> {
+        let mut resolution_scope = self.resolution_scope()?;
+        while let MetadataResolutionScope::TypeRef(indirect) = resolution_scope
+        {
+            resolution_scope = indirect.resolution_scope()?;
+        }
+        match resolution_scope {
+            MetadataResolutionScope::ModuleRef(_) => todo!(),
+            MetadataResolutionScope::AssemblyRef(row) => row.name(),
+            MetadataResolutionScope::Module(_) => panic!(
+                "References to current module should use TypeDef, not TypeRef."
+            ),
+            MetadataResolutionScope::TypeRef(_) => {
+                panic!("Unreachable due to while let loop above.")
+            }
+        }
+    }
+}
+
 impl<'a> MetadataRow<'a, Field> {
     pub fn is_static(&self) -> Result<bool, Error> {
         Ok(self.flags()?.is_static())
