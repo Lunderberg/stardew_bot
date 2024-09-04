@@ -1973,6 +1973,15 @@ impl<'a> Metadata<'a> {
         })
     }
 
+    pub fn iter_heap_locations(
+        &self,
+    ) -> impl Iterator<Item = (MetadataHeapKind, Range<Pointer>)> + '_ {
+        MetadataHeapKind::iter_keys().map(|kind| {
+            let location = self.layout.heap_locations[kind].clone();
+            (kind, location)
+        })
+    }
+
     fn get_table<TableTag>(self) -> MetadataTable<'a, TableTag>
     where
         TableTag: MetadataTableTag,
@@ -2261,6 +2270,12 @@ impl std::fmt::Display for HeapSizes {
 }
 
 impl std::fmt::Display for MetadataTableKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self:?}")
+    }
+}
+
+impl std::fmt::Display for MetadataHeapKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self:?}")
     }

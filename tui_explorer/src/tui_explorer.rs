@@ -302,6 +302,11 @@ impl TuiExplorerBuilder {
             dll_unpacker::unpack_metadata_layout(&dll_region)?;
         let metadata = metadata_layout.metadata(&dll_region);
 
+        metadata.iter_heap_locations().for_each(|(kind, range)| {
+            self.running_log
+                .add_log(format!("{kind} heap: {}", range.start));
+        });
+
         metadata
             .iter_table_locations()
             .filter(|(_, range)| range.start != range.end)
