@@ -17,6 +17,9 @@ pub struct RuntimeModule {
     /// Location of the Module object
     pub location: Pointer,
 
+    /// Location of the vtable
+    vtable_location: OnceCell<Pointer>,
+
     /// Location of the DLL in memory
     image_ptr: OnceCell<Pointer>,
 
@@ -113,6 +116,7 @@ impl RuntimeModule {
     pub fn read(location: Pointer) -> Result<Self, Error> {
         Ok(Self {
             location,
+            vtable_location: Default::default(),
             image_ptr: Default::default(),
             dll_region: Default::default(),
             metadata_layout: Default::default(),
@@ -129,6 +133,15 @@ impl RuntimeModule {
     ) -> Result<impl Iterator<Item = Result<MethodTable, Error>> + 'a, Error>
     {
         Ok(self.method_table_lookup(reader)?.iter_tables(reader))
+    }
+
+    pub fn vtable_location(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<Pointer, Error> {
+        self.vtable_location
+            .or_try_init(|| Ok(reader.read_byte_array(self.location)?.into()))
+            .copied()
     }
 
     pub fn image_ptr(&self, reader: &MemoryReader) -> Result<Pointer, Error> {
