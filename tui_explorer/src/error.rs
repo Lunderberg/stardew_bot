@@ -56,6 +56,9 @@ pub enum Error {
     #[error("The named annotation was not found")]
     AnnotationNotFound,
 
+    #[error("The named symbol was not found")]
+    SymbolNotFound,
+
     #[error("Could not find method table {0}")]
     MethodTableNotFound(&'static str),
 

@@ -224,6 +224,20 @@ impl TuiExplorerBuilder {
         })
     }
 
+    pub fn initialize_view_to_symbol(self, name: &str) -> Result<Self, Error> {
+        let initial_pointer = self
+            .symbols
+            .iter()
+            .find(|sym| sym.name == name)
+            .map(|sym| sym.location.start)
+            .ok_or(Error::SymbolNotFound)?;
+
+        Ok(Self {
+            initial_pointer,
+            ..self
+        })
+    }
+
     pub fn initialize_view_to_stardew_dll(self) -> Result<Self, Error> {
         let region = self.stardew_valley_dll()?;
 
@@ -583,6 +597,9 @@ impl TuiExplorer {
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?
             .initialize_view_to_game_obj()?
+            // .initialize_view_to_symbol("AppDomain::m_pTheAppDomain")?
+            // .initialize_view_to_symbol("SystemDomain::m_pSystemDomain")?
+            // .initialize_view_to_symbol("g_dacTable")?
             .build()
     }
 
