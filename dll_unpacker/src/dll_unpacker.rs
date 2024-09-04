@@ -246,8 +246,10 @@ pub trait TypedMetadataIndex {
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error>;
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error>;
 }
 
 /// Typed index into a specific metadata type
@@ -543,6 +545,15 @@ macro_rules! decl_metadata_table {
                     &self,
                 ) -> Result<UnpackedValue<MetadataHeapIndex<$heap_type>>, Error> {
                     self.get_field_bytes($field_index).unpack()
+                }
+
+                pub fn [< $field_name _location >](
+                    &self,
+                ) -> Result<Pointer, Error> {
+                    let index = self. [< $field_name _index >] ()?;
+                    let index = index.value();
+                    let location = self.metadata.location_of(index)?;
+                    Ok(location.start)
                 }
 
                 pub fn $field_name<'b>(
@@ -1062,7 +1073,7 @@ macro_rules! decl_core_coded_index_type {
             }
 
             impl TypedMetadataIndex for MetadataCodedIndex<$tag> {
-                type Output<'a: 'b, 'b> = [< Metadata $tag >]<'b>;
+                type Output<'a: 'b, 'b> = [< Metadata $tag >]<'a>;
 
                 fn access<'a: 'b, 'b>(
                     self,
@@ -1073,6 +1084,27 @@ macro_rules! decl_core_coded_index_type {
                             MetadataTableKind::$table_type => [< Metadata $tag >]::$table_type(
                                 tables.get(MetadataTableIndex::new(self.index))?,
                             ),
+                        )*
+
+                            _ => panic!(
+                                "Shouldn't be possible for {} to contain {}",
+                                stringify!{$tag},
+                                self.kind,
+                            ),
+                    })
+                }
+
+                fn location(
+                    self,
+                    tables: &Metadata,
+                ) -> Result<Range<Pointer>, Error> {
+                    Ok(match self.kind {
+                        $(
+                            MetadataTableKind::$table_type => {
+                                let index = MetadataTableIndex::<$table_type>::new(self.index);
+                                let row = tables.get(index)?;
+                                row.ptr_range()
+                            }
                         )*
 
                             _ => panic!(
@@ -2018,6 +2050,16 @@ impl<'a> Metadata<'a> {
         index.access(self)
     }
 
+    pub fn location_of<'b, Index>(
+        &'b self,
+        index: Index,
+    ) -> Result<Range<Pointer>, Error>
+    where
+        Index: TypedMetadataIndex,
+    {
+        index.location(self)
+    }
+
     fn iter_range<TableTag>(
         &self,
         indices: impl Borrow<MetadataTableIndexRange<TableTag>>,
@@ -2112,9 +2154,13 @@ where
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
-        self.value().access(tables)
+        self.value().access(metadata)
+    }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
+        self.value().location(metadata)
     }
 }
 
@@ -2130,6 +2176,13 @@ impl TypedMetadataIndex for MetadataHeapIndex<String> {
         let bytes = metadata.dll_bytes.subrange(heap_location);
         Ok(bytes.get_null_terminated(self.index)?.value())
     }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
+        let heap_location =
+            metadata.layout.heap_locations[MetadataHeapKind::String].clone();
+        let bytes = metadata.dll_bytes.subrange(heap_location);
+        Ok(bytes.get_null_terminated(self.index)?.loc())
+    }
 }
 
 impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
@@ -2144,6 +2197,10 @@ impl TypedMetadataIndex for MetadataHeapIndex<Blob> {
         let heap_bytes = metadata.dll_bytes.subrange(heap_location);
         UnpackedBlob::new(heap_bytes.subrange(self.index..))
     }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
+        Ok(self.access(metadata)?.ptr_range())
+    }
 }
 
 impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
@@ -2153,16 +2210,21 @@ impl TypedMetadataIndex for MetadataHeapIndex<GUID> {
         self,
         metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
+        let location = self.location(metadata)?;
+        let value = metadata.dll_bytes.subrange(location).unpack()?;
+        Ok(value)
+    }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
         let index = self.index;
         let guid_size = 16;
 
         let heap_location =
             metadata.layout.heap_locations[MetadataHeapKind::GUID].clone();
         let heap_bytes = metadata.dll_bytes.subrange(heap_location);
-        let value = heap_bytes
-            .subrange(index * guid_size..(index + 1) * guid_size)
-            .unpack()?;
-        Ok(value)
+        let location = heap_bytes
+            .address_range(index * guid_size..(index + 1) * guid_size);
+        Ok(location)
     }
 }
 
@@ -2173,9 +2235,13 @@ impl<TableTag: MetadataTableTag> TypedMetadataIndex
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
-        tables.get_table().get_row(self.index)
+        metadata.get_table().get_row(self.index)
+    }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
+        Ok(self.access(metadata)?.ptr_range())
     }
 }
 
@@ -2187,9 +2253,16 @@ where
 
     fn access<'a: 'b, 'b>(
         self,
-        tables: &'b Metadata<'a>,
+        metadata: &'b Metadata<'a>,
     ) -> Result<Self::Output<'a, 'b>, Error> {
-        self.map(|index| index.access(tables)).transpose()
+        self.map(|index| index.access(metadata)).transpose()
+    }
+
+    fn location(self, metadata: &Metadata) -> Result<Range<Pointer>, Error> {
+        Ok(self
+            .map(|index| index.location(metadata))
+            .transpose()?
+            .unwrap_or_else(|| Pointer::null()..Pointer::null()))
     }
 }
 
