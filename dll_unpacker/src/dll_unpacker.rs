@@ -2865,7 +2865,7 @@ where
                 else {
                     panic!("Only simple indices are used as ranges")
                 };
-                self.metadata.layout.num_rows[table_kind]
+                self.metadata.layout.num_rows[table_kind] + 1
             });
 
         let (loc, begin_index): (_, usize) =
