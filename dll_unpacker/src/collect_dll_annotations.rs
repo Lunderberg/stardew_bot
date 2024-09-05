@@ -114,7 +114,7 @@ impl<'a> StreamHeader<'a> {
     ) -> Result<(), Error> {
         annotator
             .group(self.offset.loc().start..self.name.loc().end)
-            .name("CLR Stream Header");
+            .name(format!("CLR {} Stream Header", self.name.value()));
 
         annotator.value(self.offset).name("Stream Offset");
         annotator.value(self.size).name("Stream Size");
