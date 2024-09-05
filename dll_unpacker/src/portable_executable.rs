@@ -369,7 +369,9 @@ impl<'a> OptionalHeaderUnpacker<'a> {
         annotator
             .value(self.rva_code_section()?)
             .name("rva_code_section");
-        // annotate! {rva_data_section};
+        if let Some(rva_data_section) = self.rva_data_section() {
+            annotator.value(rva_data_section?).name("rva_data_section");
+        }
         annotator.value(self.image_base()?).name("image_base");
         annotator
             .value(self.section_alignment()?)
@@ -582,12 +584,7 @@ impl<'a> OptionalHeaderUnpacker<'a> {
     }
 
     pub fn file_checksum(&self) -> Result<UnpackedValue<u32>, Error> {
-        let unpacked = self.bytes.get_u32(64)?;
-        if unpacked.value() == 0 {
-            Ok(unpacked)
-        } else {
-            Err(Error::InvalidFileChecksum)
-        }
+        self.bytes.get_u32(64).map_err(Into::into)
     }
 
     pub fn sub_system(&self) -> Result<UnpackedValue<u16>, Error> {
