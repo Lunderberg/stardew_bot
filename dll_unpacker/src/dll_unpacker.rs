@@ -79,7 +79,7 @@ pub struct HeapSizes {
     blob_stream_uses_u32_addr: bool,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum MetadataTableKind {
     Module,
     TypeRef,
@@ -1544,6 +1544,19 @@ impl<TableType> std::cmp::Eq for MetadataTableIndex<TableType> {}
 impl<TableType> std::hash::Hash for MetadataTableIndex<TableType> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.index.hash(state);
+    }
+}
+
+impl<TableType> std::cmp::PartialEq for MetadataCodedIndex<TableType> {
+    fn eq(&self, other: &Self) -> bool {
+        self.index == other.index && self.kind == other.kind
+    }
+}
+impl<TableType> std::cmp::Eq for MetadataCodedIndex<TableType> {}
+impl<TableType> std::hash::Hash for MetadataCodedIndex<TableType> {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.index.hash(state);
+        self.kind.hash(state);
     }
 }
 
