@@ -981,7 +981,7 @@ decl_metadata_table! {
 
     ExportedType: {
         flags: {value u32},
-        type_def_id: {index TypeDef},
+        type_def: {value u32},
         name: {heap String},
         namespace: {heap String},
         implementation: {coded_index Implementation},
