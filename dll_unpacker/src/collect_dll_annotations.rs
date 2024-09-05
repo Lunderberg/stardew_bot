@@ -7,7 +7,7 @@ use crate::dll_unpacker::{
     MethodSpec, Module, ModuleRef, NestedClass, Param, Property, PropertyMap,
     RawCLRMetadata, StandAloneSig, StreamHeader, TypeDef, TypeRef, TypeSpec,
 };
-use crate::{Annotation, Annotator, DLLUnpacker, Error};
+use crate::{Annotation, Annotator, DLLUnpacker, Error, ExportedType};
 
 impl<'a> DLLUnpacker<'a> {
     pub fn collect_annotations(
@@ -267,6 +267,10 @@ impl<'a> Metadata<'a> {
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
         self.assembly_ref_table()
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator))?;
+
+        self.exported_type_table()
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
@@ -1007,6 +1011,34 @@ impl<'a> MetadataRow<'a, AssemblyRef> {
         annotator
             .range(self.hash_value()?.into())
             .name(format!("HashValue, '{name}' AssemblyRef"));
+
+        Ok(())
+    }
+}
+
+impl<'a> MetadataRow<'a, ExportedType> {
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator.value(self.flags_unpacked()?).name("Flags");
+        annotator
+            .value(self.type_def_unpacked()?)
+            .name("TypeDef id");
+
+        annotator
+            .value(self.name_index()?)
+            .name("name")
+            .append_value(self.name()?);
+
+        annotator
+            .value(self.namespace_index()?)
+            .name("namespace")
+            .append_value(self.namespace()?);
+
+        annotator
+            .value(self.implementation_index()?)
+            .name("Implementation");
 
         Ok(())
     }
