@@ -2,24 +2,19 @@ use std::borrow::Borrow;
 use std::cell::OnceCell;
 use std::ops::Range;
 
-use dll_unpacker::Field;
-use dll_unpacker::MetadataCodedIndex;
-use dll_unpacker::MetadataRow;
-use dll_unpacker::MetadataTableIndex;
-use dll_unpacker::TypeDefOrRef;
-use dll_unpacker::TypeRef;
 use elsa::FrozenMap;
-use memory_reader::MemoryReader;
-use memory_reader::Pointer;
+
+use dll_unpacker::{
+    Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex, TypeDefOrRef,
+    TypeRef,
+};
+use memory_reader::{MemoryReader, Pointer};
 
 use crate::extensions::*;
-use crate::CorElementType;
-use crate::FieldDescription;
-use crate::FieldDescriptions;
-use crate::RuntimeType;
-use crate::RuntimeValue;
-use crate::{Error, MethodTable, RuntimeObject};
-use crate::{RuntimeModule, TypedPointer};
+use crate::{
+    Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
+    RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
+};
 
 #[derive(Default)]
 pub struct PersistentState {
@@ -31,10 +26,20 @@ pub struct PersistentState {
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
     method_table_by_metadata:
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
-    method_table_from_field: FrozenMap<
+
+    field_to_method_table: FrozenMap<
         (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
         Box<TypedPointer<MethodTable>>,
     >,
+    field_to_type_name: FrozenMap<
+        (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
+        Box<String>,
+    >,
+    field_to_name: FrozenMap<
+        (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
+        Box<String>,
+    >,
+
     method_table_to_name: FrozenMap<TypedPointer<MethodTable>, Box<String>>,
 }
 
@@ -137,19 +142,12 @@ impl PersistentState {
             .copied()
     }
 
-    pub fn runtime_type(
+    pub fn field_to_method_table(
         &self,
         desc: &FieldDescription,
         reader: &MemoryReader,
     ) -> Result<RuntimeType, Error> {
-        let element_type = desc.cor_element_type()?;
-        let locally_known_type = match element_type {
-            CorElementType::Prim(prim) => Ok(Some(RuntimeType::Prim(prim))),
-            CorElementType::Class => Ok(Some(RuntimeType::Class)),
-            CorElementType::ValueType => Ok(None),
-
-            other => Err(Error::NoSuchRuntimeValue(other)),
-        }?;
+        let locally_known_type = desc.runtime_type()?;
         if let Some(ty) = locally_known_type {
             // Quick return case, when the FieldDescription is
             // sufficient to know how to unpack the field.
@@ -162,7 +160,7 @@ impl PersistentState {
         let lookup_key = (desc.method_table(), desc.token());
 
         let method_table = self
-            .method_table_from_field
+            .field_to_method_table
             .try_insert(lookup_key, || {
                 let module_ptr =
                     self.method_table(desc.method_table(), reader)?.module();
@@ -188,6 +186,55 @@ impl PersistentState {
             .copied()?;
 
         Ok(RuntimeType::ValueType(method_table))
+    }
+
+    pub fn field_to_type_name(
+        &self,
+        desc: &FieldDescription,
+        reader: &MemoryReader,
+    ) -> Result<&str, Error> {
+        let lookup_key = (desc.method_table(), desc.token());
+        self.field_to_type_name
+            .try_insert(lookup_key, || {
+                let module_ptr =
+                    self.method_table(desc.method_table(), reader)?.module();
+                let field_metadata = self
+                    .runtime_module(module_ptr, reader)?
+                    .metadata(reader)?
+                    .get(desc.token())?;
+
+                let is_static = if field_metadata.is_static()? {
+                    "static "
+                } else {
+                    ""
+                };
+                let signature = field_metadata.signature()?;
+                let type_name = format!("{is_static}{signature}");
+
+                Ok(type_name)
+            })
+            .map(|s| s.as_str())
+    }
+
+    pub fn field_to_name(
+        &self,
+        desc: &FieldDescription,
+        reader: &MemoryReader,
+    ) -> Result<&str, Error> {
+        let lookup_key = (desc.method_table(), desc.token());
+        self.field_to_name
+            .try_insert(lookup_key, || {
+                let module_ptr =
+                    self.method_table(desc.method_table(), reader)?.module();
+                let field_metadata = self
+                    .runtime_module(module_ptr, reader)?
+                    .metadata(reader)?
+                    .get(desc.token())?;
+                let name = field_metadata.name()?.to_string();
+
+                Ok(name)
+            })
+            .map(|s| s.as_str())
     }
 
     pub fn field_descriptions(
@@ -400,7 +447,7 @@ impl<'a> CachedReader<'a> {
 
     pub fn value(
         &self,
-        runtime_type: CorElementType,
+        runtime_type: RuntimeType,
         location: Range<Pointer>,
     ) -> Result<RuntimeValue, Error> {
         let bytes = self
@@ -431,11 +478,25 @@ impl<'a> CachedReader<'a> {
         self.state.runtime_module_by_name(name, self.reader)
     }
 
-    pub fn runtime_type(
+    pub fn field_to_method_table(
         &self,
         desc: &FieldDescription,
     ) -> Result<RuntimeType, Error> {
-        self.state.runtime_type(desc, self.reader)
+        self.state.field_to_method_table(desc, self.reader)
+    }
+
+    pub fn field_to_type_name(
+        &self,
+        desc: &FieldDescription,
+    ) -> Result<&str, Error> {
+        self.state.field_to_type_name(desc, self.reader)
+    }
+
+    pub fn field_to_name(
+        &self,
+        desc: &FieldDescription,
+    ) -> Result<&str, Error> {
+        self.state.field_to_name(desc, self.reader)
     }
 
     pub fn field_descriptions(

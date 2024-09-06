@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    CachedReader, CorElementType, FieldContainer, FieldDescription,
-    MethodTable, PersistentState, RuntimeObject, RuntimeValue, TypedPointer,
+    CachedReader, FieldContainer, FieldDescription, MethodTable,
+    PersistentState, RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
 };
 use memory_reader::Pointer;
 use ratatui::{
@@ -29,7 +29,7 @@ pub struct ObjectExplorer {
 
 struct ObjectTreeNode {
     location: Range<Pointer>,
-    runtime_type: CorElementType,
+    runtime_type: RuntimeType,
     should_read: bool,
     tree_depth: usize,
     field_name: String,
@@ -57,8 +57,8 @@ impl ObjectExplorer {
 
             ObjectTreeNode {
                 kind: ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)),
+                runtime_type: RuntimeType::Class,
                 location: ptr..ptr + Pointer::SIZE,
-                runtime_type: CorElementType::Class,
                 should_read: true,
                 tree_depth: 0,
                 field_name: "top_object".to_string(),
@@ -230,26 +230,15 @@ impl ObjectTreeNode {
         reader: &CachedReader,
     ) -> Result<ObjectTreeNode, Error> {
         let method_table = reader.method_table(method_table_ptr)?;
-        let obj_module_ptr = method_table.module();
-        let obj_module = reader.runtime_module(obj_module_ptr)?;
-        let metadata = obj_module.metadata(reader)?;
+        let obj_module = reader.runtime_module(method_table.module())?;
 
-        let field_metadata = metadata.get(field.token())?;
+        let runtime_type = reader.field_to_method_table(&field)?;
 
-        let cor_element_type = field.cor_element_type()?;
-
-        let field_name = field_metadata.name()?.to_string();
-        let is_static = if field_metadata.is_static()? {
-            "static "
-        } else {
-            ""
-        };
-        let signature = field_metadata.signature()?;
-        let field_type = format!("{is_static}{signature}");
+        let field_name = reader.field_to_name(&field)?.to_string();
+        let field_type = reader.field_to_type_name(&field)?.to_string();
 
         let location = field.location(obj_module, container, reader)?;
 
-        let runtime_type = reader.runtime_type(&field)?;
         let kind = match runtime_type {
             dotnet_debugger::RuntimeType::Prim(_)
             | dotnet_debugger::RuntimeType::Class => {
@@ -287,7 +276,7 @@ impl ObjectTreeNode {
         Ok(ObjectTreeNode {
             kind,
             location,
-            runtime_type: cor_element_type,
+            runtime_type,
             should_read: false,
             tree_depth: tree_depth + 1,
             field_name,
@@ -296,8 +285,6 @@ impl ObjectTreeNode {
     }
 
     fn expand_marked(&mut self, reader: &CachedReader) -> Result<(), Error> {
-        let underlying_reader = reader.underlying_reader();
-
         if self.should_read {
             self.should_read = false;
             match &mut self.kind {
@@ -308,7 +295,7 @@ impl ObjectTreeNode {
                 }
                 ObjectTreeNodeKind::Object { .. } => {
                     let value = reader
-                        .value(CorElementType::Class, self.location.clone())?;
+                        .value(RuntimeType::Class, self.location.clone())?;
                     self.kind = ObjectTreeNodeKind::Value(value);
                 }
 
@@ -318,15 +305,11 @@ impl ObjectTreeNode {
                     }
 
                     let obj = reader.object((*ptr).into())?;
-                    let instance_location = obj.location();
-                    let method_table =
-                        reader.method_table(obj.method_table())?;
-                    let obj_module =
-                        reader.runtime_module(method_table.module())?;
-                    let metadata = obj_module.metadata(underlying_reader)?;
+                    let class_name = reader
+                        .method_table_to_name(obj.method_table())?
+                        .to_string();
 
-                    let class_name =
-                        metadata.get(method_table.token())?.name()?.to_string();
+                    let instance_location = obj.location();
 
                     let fields = reader
                         .iter_fields(obj.method_table())?

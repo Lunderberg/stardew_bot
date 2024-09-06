@@ -1,7 +1,7 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::CorElementType;
+use crate::{CorElementType, RuntimeType};
 
 #[derive(Error)]
 pub enum Error {
@@ -55,7 +55,7 @@ pub enum Error {
          but was only provided with {provided}."
     )]
     InsufficientBytesForValue {
-        runtime_type: CorElementType,
+        runtime_type: RuntimeType,
         provided: usize,
         expected: usize,
     },

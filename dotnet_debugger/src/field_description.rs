@@ -8,7 +8,7 @@ use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
     unpack_fields, CorElementType, Error, MethodTable, RuntimeModule,
-    TypedPointer,
+    RuntimeType, TypedPointer,
 };
 
 pub struct FieldDescriptions {
@@ -151,6 +151,19 @@ impl<'a> FieldDescription<'a> {
 
     pub fn cor_element_type(&self) -> Result<CorElementType, Error> {
         (self.raw_cor_element_type() as u8).try_into()
+    }
+
+    /// Returns the runtime type, if it can be determined solely from
+    /// the local information.  To determine the runtime type of a
+    /// ValueType, use CachedReader.runtime_type.
+    pub fn runtime_type(&self) -> Result<Option<RuntimeType>, Error> {
+        let element_type = self.cor_element_type()?;
+        match element_type {
+            CorElementType::Prim(prim) => Ok(Some(RuntimeType::Prim(prim))),
+            CorElementType::Class => Ok(Some(RuntimeType::Class)),
+            CorElementType::ValueType => Ok(None),
+            other => Err(Error::NoSuchRuntimeValue(other)),
+        }
     }
 
     pub fn is_pointer(&self) -> Result<bool, Error> {

@@ -1,6 +1,6 @@
 use memory_reader::Pointer;
 
-use crate::{runtime_type::RuntimePrimType, CorElementType, Error};
+use crate::{runtime_type::RuntimePrimType, Error, RuntimeType};
 
 pub enum RuntimeValue {
     Prim(RuntimePrimValue),
@@ -110,59 +110,7 @@ impl RuntimePrimValue {
             Ok(&bytes[..expected])
         } else {
             Err(Error::InsufficientBytesForValue {
-                runtime_type: CorElementType::Prim(runtime_type),
-                provided,
-                expected,
-            })
-        }
-    }
-}
-
-impl RuntimeValue {
-    pub fn parse(kind: CorElementType, bytes: &[u8]) -> Result<Self, Error> {
-        let bytes = Self::truncate_to_length(kind, bytes)?;
-
-        match kind {
-            CorElementType::Prim(prim_type) => Ok(RuntimeValue::Prim(
-                RuntimePrimValue::parse(prim_type, bytes)?,
-            )),
-            CorElementType::Class => {
-                let ptr: Pointer = bytes[..8].try_into().unwrap();
-                Ok(Self::Object(ptr))
-            }
-            CorElementType::ValueType => {
-                Err(Error::ValueTypeRequiresContextualParsing)
-            }
-            CorElementType::Object => todo!(),
-            CorElementType::String => todo!(),
-
-            CorElementType::Array => todo!(),
-            CorElementType::SizeArray => todo!(),
-
-            CorElementType::FunctionPtr => todo!(),
-            CorElementType::MethodType => todo!(),
-
-            CorElementType::ByRef => todo!(),
-            CorElementType::TypedByRef => todo!(),
-
-            CorElementType::Var => todo!(),
-            CorElementType::GenericInst => todo!(),
-
-            other => Err(Error::NoSuchRuntimeValue(other)),
-        }
-    }
-
-    fn truncate_to_length(
-        runtime_type: CorElementType,
-        bytes: &[u8],
-    ) -> Result<&[u8], Error> {
-        let expected = runtime_type.size_bytes();
-        let provided = bytes.len();
-        if provided >= expected {
-            Ok(&bytes[..expected])
-        } else {
-            Err(Error::InsufficientBytesForValue {
-                runtime_type,
+                runtime_type: RuntimeType::Prim(runtime_type),
                 provided,
                 expected,
             })

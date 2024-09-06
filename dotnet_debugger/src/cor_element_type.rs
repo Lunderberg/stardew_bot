@@ -1,6 +1,6 @@
 use memory_reader::Pointer;
 
-use crate::{runtime_type::RuntimePrimType, Error, RuntimeValue};
+use crate::{runtime_type::RuntimePrimType, Error};
 
 /// Equivalent representation to CorElementType
 #[derive(Clone, Copy, Debug)]
@@ -102,10 +102,6 @@ impl CorElementType {
             self,
             Self::Prim(RuntimePrimType::Ptr) | Self::Object | Self::Class
         )
-    }
-
-    pub fn parse(self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
-        RuntimeValue::parse(self, bytes)
     }
 
     pub fn size_bytes(self) -> usize {
