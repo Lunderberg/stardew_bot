@@ -4,7 +4,6 @@ use memory_reader::{MemoryReader, Pointer, UnpackBytes};
 
 use crate::Error;
 
-#[derive(Debug)]
 pub struct TypedPointer<T> {
     ptr: Pointer,
     _phantom: PhantomData<T>,
@@ -30,6 +29,14 @@ impl<T> TypedPointer<T> {
         T: ReadTypedPointer,
     {
         T::read_typed_ptr(self.ptr, reader)
+    }
+}
+
+impl<T> std::fmt::Debug for TypedPointer<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TypedPointer")
+            .field("ptr", &self.ptr)
+            .finish()
     }
 }
 
