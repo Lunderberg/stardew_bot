@@ -71,6 +71,15 @@ pub enum Error {
          but found NULL pointer for {0}."
     )]
     UnexpectedNullMethodTable(String),
+
+    #[error(
+        "Field {field_name} has type {field_type} in the DLL's metadata, \
+         but was expected to be a ValueType based on usage in the runtime."
+    )]
+    ExpectedValueTypeAsMetadataSignature {
+        field_name: String,
+        field_type: String,
+    },
 }
 
 impl std::fmt::Debug for Error {

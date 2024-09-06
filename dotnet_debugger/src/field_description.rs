@@ -6,7 +6,10 @@ use dll_unpacker::{
 };
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
-use crate::{unpack_fields, CorElementType, Error, RuntimeModule};
+use crate::{
+    unpack_fields, CorElementType, Error, MethodTable, RuntimeModule,
+    TypedPointer,
+};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,
@@ -76,7 +79,7 @@ impl<'a> FieldDescription<'a> {
     pub const SIZE: usize = 16;
 
     unpack_fields! {
-        method_table: {Pointer, 0..8},
+        method_table: {TypedPointer<MethodTable>, 0..8},
         raw_token: {u32, 8..12, 8..32},
         raw_is_static: {u32,  8..12, 7..8},
         is_thread_local: {u32,  8..12, 6..7},

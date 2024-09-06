@@ -1,11 +1,14 @@
 use memory_reader::Pointer;
 
+use crate::{MethodTable, TypedPointer};
+
 #[derive(Clone, Copy, Debug)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
-    String,
-    ValueType,
+    ValueType(TypedPointer<MethodTable>),
     Class,
+    // String,
+
     // GenericVar,
     // Array,
     // GenericInst,

@@ -236,7 +236,7 @@ impl ObjectTreeNode {
 
         let field_metadata = metadata.get(field.token())?;
 
-        let runtime_type = field.cor_element_type()?;
+        let cor_element_type = field.cor_element_type()?;
 
         let field_name = field_metadata.name()?.to_string();
         let is_static = if field_metadata.is_static()? {
@@ -249,52 +249,32 @@ impl ObjectTreeNode {
 
         let location = field.location(obj_module, container, reader)?;
 
+        let runtime_type = reader.runtime_type(&field)?;
         let kind = match runtime_type {
-            CorElementType::ValueType => {
-                let signature = field_metadata.signature()?;
-                let value_type =
-                    signature.as_value_type()?.ok_or_else(|| {
-                        Error::ExpectedValueTypeAsMetadataSignature {
-                            field_name: field_name.clone(),
-                            field_type: field_type.clone(),
-                        }
-                    })?;
+            dotnet_debugger::RuntimeType::Prim(_)
+            | dotnet_debugger::RuntimeType::Class => {
+                ObjectTreeNodeKind::NewValue
+            }
+            dotnet_debugger::RuntimeType::ValueType(field_method_table) => {
+                let class_name = reader
+                    .method_table_to_name(field_method_table)?
+                    .to_string();
 
-                let class_name = metadata.get(value_type)?.name()?.to_string();
-
-                let field_method_table: Option<TypedPointer<MethodTable>> =
-                    match reader
-                        .method_table_by_metadata(obj_module_ptr, value_type)
-                    {
-                        Ok(ptr) => Ok(Some(ptr)),
-                        Err(
-                            dotnet_debugger::Error::UnexpectedNullMethodTable(
-                                _,
-                            ),
-                        ) => Ok(None),
-                        Err(err) => Err(err),
-                    }?;
-
-                let fields = field_method_table
-                    .map(|field_method_table| {
-                        reader
-                            .field_descriptions(field_method_table)?
-                            .into_iter()
-                            .flatten()
-                            .filter(|subfield| !subfield.is_static())
-                            .map(|subfield| {
-                                Self::initial_field(
-                                    FieldContainer::ValueType(location.start),
-                                    field_method_table,
-                                    tree_depth + 1,
-                                    subfield,
-                                    reader,
-                                )
-                            })
-                            .collect::<Result<Vec<_>, _>>()
+                let fields = reader
+                    .field_descriptions(field_method_table)?
+                    .into_iter()
+                    .flatten()
+                    .filter(|subfield| !subfield.is_static())
+                    .map(|subfield| {
+                        Self::initial_field(
+                            FieldContainer::ValueType(location.start),
+                            field_method_table,
+                            tree_depth + 1,
+                            subfield,
+                            reader,
+                        )
                     })
-                    .transpose()?
-                    .unwrap_or_default();
+                    .collect::<Result<Vec<_>, _>>()?;
 
                 ObjectTreeNodeKind::Object {
                     display_expanded: true,
@@ -302,13 +282,12 @@ impl ObjectTreeNode {
                     fields,
                 }
             }
-            _ => ObjectTreeNodeKind::NewValue,
         };
 
         Ok(ObjectTreeNode {
             kind,
             location,
-            runtime_type,
+            runtime_type: cor_element_type,
             should_read: false,
             tree_depth: tree_depth + 1,
             field_name,
