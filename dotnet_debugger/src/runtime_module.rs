@@ -329,6 +329,16 @@ impl RuntimeModule {
         self.method_table_info(reader).map(|(ptr, _)| *ptr)
     }
 
+    pub fn get_method_table(
+        &self,
+        index: MetadataTableIndex<TypeDef>,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        let lookup = self.method_table_lookup(reader)?;
+        let method_table = lookup.get_ptr(index);
+        Ok(method_table)
+    }
+
     pub fn method_table_lookup(
         &self,
         reader: impl Borrow<MemoryReader>,

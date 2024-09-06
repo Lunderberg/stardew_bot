@@ -2,6 +2,10 @@ use std::borrow::Borrow;
 use std::cell::OnceCell;
 use std::ops::Range;
 
+use dll_unpacker::MetadataCodedIndex;
+use dll_unpacker::MetadataRow;
+use dll_unpacker::TypeDefOrRef;
+use dll_unpacker::TypeRef;
 use elsa::FrozenMap;
 use memory_reader::MemoryReader;
 use memory_reader::Pointer;
@@ -21,6 +25,14 @@ pub struct PersistentState {
     field_descriptions:
         FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
+    method_table_by_metadata:
+        FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+struct TypeInModule {
+    module: TypedPointer<RuntimeModule>,
+    coded_index: MetadataCodedIndex<TypeDefOrRef>,
 }
 
 pub struct CachedReader<'a> {
@@ -92,11 +104,12 @@ impl PersistentState {
                 let dll_region = reader
                     .regions
                     .iter()
-                    .find(|region| {
+                    .filter(|region| {
                         region.short_name().ends_with(".dll")
                             && region.short_name().trim_end_matches(".dll")
                                 == name
                     })
+                    .max_by_key(|region| region.size_bytes())
                     .ok_or_else(|| {
                         Error::RegionForDLLNotFoundFromName(name.to_string())
                     })?
@@ -126,6 +139,136 @@ impl PersistentState {
                 method_table.get_field_descriptions(reader)
             })
             .map(|opt| opt.as_ref())
+    }
+
+    pub fn method_table_by_metadata(
+        &self,
+        module: TypedPointer<RuntimeModule>,
+        coded_index: MetadataCodedIndex<TypeDefOrRef>,
+        reader: &MemoryReader,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        let lookup_key = TypeInModule {
+            module,
+            coded_index,
+        };
+        self.method_table_by_metadata
+            .try_insert(
+                lookup_key,
+                || -> Result<TypedPointer<MethodTable>, Error> {
+                    let module = self.runtime_module(module, reader)?;
+                    let type_metadata =
+                        module.metadata(reader)?.get(coded_index)?;
+                    match type_metadata {
+                        dll_unpacker::MetadataTypeDefOrRef::TypeDef(row) => {
+                            module.get_method_table(row.index(), reader)
+                        }
+                        dll_unpacker::MetadataTypeDefOrRef::TypeRef(row) => {
+                            self.type_ref_lookup(row, reader)
+                        }
+                        dll_unpacker::MetadataTypeDefOrRef::TypeSpec(_) => {
+                            todo!()
+                        }
+                    }
+                },
+            )
+            .and_then(|ptr| {
+                if ptr.is_null() {
+                    let module = self.runtime_module(module, reader)?;
+                    let metadata = module.metadata(reader)?.get(coded_index)?;
+                    let name = metadata.name()?;
+                    let namespace = metadata.namespace()?;
+                    Err(Error::UnexpectedNullMethodTable(format!(
+                        "{namespace}.{name}"
+                    )))
+                } else {
+                    Ok(ptr)
+                }
+            })
+            .copied()
+    }
+
+    fn type_ref_lookup(
+        &self,
+        type_ref: MetadataRow<TypeRef>,
+        reader: &MemoryReader,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        self.pseudo_link_method_table(
+            type_ref.target_dll_name()?,
+            type_ref.name()?,
+            type_ref.namespace()?,
+            reader,
+        )
+    }
+
+    fn pseudo_link_method_table(
+        &self,
+        assembly_name: &str,
+        symbol_name: &str,
+        symbol_namespace: &str,
+        reader: &MemoryReader,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        let field_module_ptr =
+            self.runtime_module_by_name(assembly_name, reader)?;
+        let field_module = self.runtime_module(field_module_ptr, reader)?;
+        let metadata = field_module.metadata(reader)?;
+
+        let ref_type_def = metadata.type_def_table().iter_rows().find_ok(
+            |row| -> Result<_, Error> {
+                Ok(row.name()? == symbol_name
+                    && row.namespace()? == symbol_namespace)
+            },
+        )?;
+
+        if let Some(ref_type_def) = ref_type_def {
+            // The TypeRef pointed to an assembly, and that assembly
+            // contains the TypeDef we're looking for.
+            return field_module.get_method_table(ref_type_def.index(), reader);
+        }
+
+        let ref_exported_type = metadata
+            .exported_type_table()
+            .iter_rows()
+            .find_ok(|row| -> Result<_, Error> {
+                Ok(row.name()? == symbol_name
+                    && row.namespace()? == symbol_namespace)
+            })?;
+
+        if let Some(ref_exported_type) = ref_exported_type {
+            // > I'm sorry, but your TypeDef is in another castle.
+            //
+            // The TypeRef/ExportedType pointed to an assembly, but
+            // that assembly just re-exports a symbol, and points to
+            // another
+            return self.pseudo_link_method_table(
+                ref_exported_type.target_dll_name()?,
+                ref_exported_type.name()?,
+                ref_exported_type.namespace()?,
+                reader,
+            );
+        }
+
+        use itertools::Itertools;
+        let names = std::iter::empty()
+            .chain(metadata.type_def_table().iter_rows().filter_map(|row| {
+                let name = row.name().ok()?;
+                let namespace = row.namespace().ok()?;
+                Some(format!("  TypeDef {namespace} . {name}"))
+            }))
+            .chain(metadata.exported_type_table().iter_rows().filter_map(
+                |row| {
+                    let name = row.name().ok()?;
+                    let namespace = row.namespace().ok()?;
+                    Some(format!("  ExportedType {namespace} . {name}"))
+                },
+            ))
+            .sorted()
+            .join("\n");
+
+        panic!(
+            "Could not find {symbol_namespace} . {symbol_name} \
+                in the assembly {assembly_name}.  \
+                The assembly contains symbols:\n{names}"
+        )
     }
 }
 
@@ -179,6 +322,15 @@ impl<'a> CachedReader<'a> {
         ptr: TypedPointer<MethodTable>,
     ) -> Result<Option<&FieldDescriptions>, Error> {
         self.state.field_descriptions(ptr, self.reader)
+    }
+
+    pub fn method_table_by_metadata(
+        &self,
+        module: TypedPointer<RuntimeModule>,
+        coded_index: MetadataCodedIndex<TypeDefOrRef>,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        self.state
+            .method_table_by_metadata(module, coded_index, self.reader)
     }
 
     pub fn class_name(&self, obj: &RuntimeObject) -> Result<String, Error> {

@@ -65,6 +65,12 @@ pub enum Error {
          in order to determine the type."
     )]
     ValueTypeRequiresContextualParsing,
+
+    #[error(
+        "Expected valid pointer to MethodTable, \
+         but found NULL pointer for {0}."
+    )]
+    UnexpectedNullMethodTable(String),
 }
 
 impl std::fmt::Debug for Error {

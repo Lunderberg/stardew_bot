@@ -16,6 +16,24 @@ pub struct FieldDescription<'a> {
     pub bytes: ByteRange<'a>,
 }
 
+#[derive(Clone, Copy)]
+pub enum FieldContainer {
+    /// Field is contained in a Class.  The Pointer is the value
+    /// stored in the containing Class, and points to the MethodTable
+    /// pointer.  Offsets to fields within the Class are relative to
+    /// the location just after the MethodTable pointer.
+    Class(Pointer),
+
+    /// Field is contained in a ValueType.  There is no Pointer to the
+    /// ValueType itself, but instead is located relative to the
+    /// containing object.  Offsets to fields within the ValueType are
+    /// relative to the Pointer itself.
+    ValueType(Pointer),
+
+    /// Field is static.
+    Static,
+}
+
 impl FieldDescriptions {
     pub fn ptr_range(&self) -> Range<Pointer> {
         (&self.bytes).into()
@@ -146,7 +164,7 @@ impl<'a> FieldDescription<'a> {
     pub fn location(
         &self,
         module: &RuntimeModule,
-        instance: Option<Pointer>,
+        container: FieldContainer,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<Range<Pointer>, Error> {
         let reader = reader.borrow();
@@ -160,14 +178,18 @@ impl<'a> FieldDescription<'a> {
         // (may include class types), but not primitives.
         let uses_gc_statics_base_ptr = matches!(
             runtime_type,
-            CorElementType::Class | CorElementType::ValueType
+            //CorElementType::Class | CorElementType::ValueType
+            CorElementType::Class
         );
 
         let base = if is_instance_field {
-            let instance: Pointer = instance
-                .ok_or(Error::LocationOfInstanceFieldRequiresInstance)?
-                .into();
-            instance + Pointer::SIZE
+            match container {
+                FieldContainer::Class(ptr) => Ok(ptr + Pointer::SIZE),
+                FieldContainer::ValueType(ptr) => Ok(ptr),
+                FieldContainer::Static => {
+                    Err(Error::LocationOfInstanceFieldRequiresInstance)
+                }
+            }?
         } else if uses_gc_statics_base_ptr {
             module.base_ptr_of_gc_statics(reader)?
         } else {

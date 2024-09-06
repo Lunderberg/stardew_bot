@@ -392,6 +392,8 @@ impl<'a> SignatureDecompressor<'a> {
             other => Err(Error::InvalidMetadataTypeDefOrRef(other)),
         }?;
         let index = (coded_index >> 2) as usize;
+        assert!(index != 0);
+        let index = index - 1;
         let typed_index = MetadataCodedIndex::new(kind, index);
 
         if self.verbose {

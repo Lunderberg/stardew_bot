@@ -1,8 +1,8 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    CachedReader, CorElementType, FieldDescription, MethodTable,
-    PersistentState, RuntimeObject, RuntimeValue, TypedPointer,
+    CachedReader, CorElementType, FieldContainer, FieldDescription,
+    MethodTable, PersistentState, RuntimeObject, RuntimeValue, TypedPointer,
 };
 use memory_reader::Pointer;
 use ratatui::{
@@ -223,14 +223,15 @@ impl ObjectTreeNode {
     }
 
     fn initial_field(
-        instance_location: Pointer,
+        container: FieldContainer,
         method_table_ptr: TypedPointer<MethodTable>,
         tree_depth: usize,
         field: FieldDescription,
         reader: &CachedReader,
     ) -> Result<ObjectTreeNode, Error> {
         let method_table = reader.method_table(method_table_ptr)?;
-        let obj_module = reader.runtime_module(method_table.module())?;
+        let obj_module_ptr = method_table.module();
+        let obj_module = reader.runtime_module(obj_module_ptr)?;
         let metadata = obj_module.metadata(reader)?;
 
         let field_metadata = metadata.get(field.token())?;
@@ -246,8 +247,7 @@ impl ObjectTreeNode {
         let signature = field_metadata.signature()?;
         let field_type = format!("{is_static}{signature}");
 
-        let location =
-            field.location(obj_module, Some(instance_location), reader)?;
+        let location = field.location(obj_module, container, reader)?;
 
         let kind = match runtime_type {
             CorElementType::ValueType => {
@@ -259,73 +259,49 @@ impl ObjectTreeNode {
                             field_type: field_type.clone(),
                         }
                     })?;
-                let value_metadata = metadata.get(value_type)?;
-                let class_name = value_metadata.name()?.to_string();
 
-                let fields = match value_metadata {
-                    dll_unpacker::MetadataTypeDefOrRef::TypeDef(row) => {
-                        Some((obj_module, row.index()))
-                    }
-                    dll_unpacker::MetadataTypeDefOrRef::TypeRef(row) => {
-                        let target_dll_name = row.target_dll_name()?;
-                        let target_namespace = row.namespace()?;
-                        let target_name = row.name()?;
-                        let field_module_ptr =
-                            reader.runtime_module_by_name(target_dll_name)?;
-                        let field_module =
-                            reader.runtime_module(field_module_ptr)?;
-                        let field_module_metadata =
-                            field_module.metadata(reader)?;
+                let class_name = metadata.get(value_type)?.name()?.to_string();
 
-                        let field_typedef = field_module_metadata
-                            .type_def_table()
-                            .iter_rows()
-                            .find(|ref_row| {
-                                let Ok(namespace) = ref_row.namespace() else {
-                                    return false;
-                                };
-                                let Ok(name) = ref_row.name() else {
-                                    return false;
-                                };
+                let field_method_table: Option<TypedPointer<MethodTable>> =
+                    match reader
+                        .method_table_by_metadata(obj_module_ptr, value_type)
+                    {
+                        Ok(ptr) => Ok(Some(ptr)),
+                        Err(
+                            dotnet_debugger::Error::UnexpectedNullMethodTable(
+                                _,
+                            ),
+                        ) => Ok(None),
+                        Err(err) => Err(err),
+                    }?;
 
-                                name == target_name
-                                    && namespace == target_namespace
+                let fields = field_method_table
+                    .map(|field_method_table| {
+                        reader
+                            .field_descriptions(field_method_table)?
+                            .into_iter()
+                            .flatten()
+                            .filter(|subfield| !subfield.is_static())
+                            .map(|subfield| {
+                                let token = subfield.token();
+                                Self::initial_field(
+                                    FieldContainer::ValueType(location.start),
+                                    field_method_table,
+                                    tree_depth + 1,
+                                    subfield,
+                                    reader,
+                                ).map_err(|err| ->Error  {match &err {
+                                    Error::DotnetDebugger { err: dotnet_debugger::Error::UnexpectedNullMethodTable(subfield_type) } => {
+                                        let subfield_name = metadata.get(token).unwrap().name().unwrap();
+                                        dotnet_debugger::Error::UnexpectedNullMethodTable(format!("{subfield_name} {subfield_type}")).into()
+                                    }
+                                    _ => err,
+                                }})
                             })
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "Could not find {target_name}.{target_namespace} \
-                                     in {target_dll_name}."
-                                )
-                            });
-
-                        None
-                        // Some((field_module, field_typedef.index()))
-                    }
-                    dll_unpacker::MetadataTypeDefOrRef::TypeSpec(_) => None,
-                }
-                .map(|(field_module, field_typedef)| -> Result<_, Error> {
-                    let field_method_table = field_module
-                        .method_table_lookup(reader)?
-                        .get_ptr(field_typedef);
-                    let fields = reader
-                        .field_descriptions(field_method_table)?
-                        .into_iter()
-                        .flatten()
-                        .map(|subfield| {
-                            Self::initial_field(
-                                location.start,
-                                field_method_table,
-                                tree_depth + 1,
-                                subfield,
-                                reader,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    Ok(fields)
-                })
-                .transpose()?
-                .unwrap_or_else(Vec::new);
+                            .collect::<Result<Vec<_>, _>>()
+                    })
+                    .transpose()?
+                    .unwrap_or_default();
 
                 ObjectTreeNodeKind::Object {
                     display_expanded: true,
@@ -385,13 +361,20 @@ impl ObjectTreeNode {
                         .into_iter()
                         .flatten()
                         .map(|field| -> Result<_, Error> {
+                            let token = field.token();
                             Self::initial_field(
-                                instance_location.into(),
+                                FieldContainer::Class(instance_location.into()),
                                 obj.method_table(),
                                 self.tree_depth + 1,
                                 field,
                                 reader,
-                            )
+                            ).map_err(|err| ->Error  {match &err {
+                            Error::DotnetDebugger { err: dotnet_debugger::Error::UnexpectedNullMethodTable(subfield_type) } => {
+                                let subfield_name = metadata.get(token).unwrap().name().unwrap();
+                                dotnet_debugger::Error::UnexpectedNullMethodTable(format!("{subfield_name} {subfield_type}")).into()
+                            }
+                            _ => err,
+                        }})
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 

@@ -1263,6 +1263,14 @@ impl<'a> MetadataTypeDefOrRef<'a> {
             MetadataTypeDefOrRef::TypeSpec(_) => Ok("TypeSpec (anon)"),
         }
     }
+
+    pub fn namespace(&self) -> Result<&'a str, Error> {
+        match self {
+            MetadataTypeDefOrRef::TypeDef(row) => row.namespace(),
+            MetadataTypeDefOrRef::TypeRef(row) => row.namespace(),
+            MetadataTypeDefOrRef::TypeSpec(_) => Ok("TypeSpec (anon)"),
+        }
+    }
 }
 
 impl<'a> MetadataHasConstant<'a> {
@@ -3029,5 +3037,16 @@ impl std::fmt::Display for MethodDefFlags {
 impl<'a> MetadataRow<'a, FieldRVA> {
     pub fn address(&self) -> Result<Pointer, Error> {
         self.metadata.layout.virtual_address_to_raw(self.rva()?)
+    }
+}
+
+impl<'a> MetadataRow<'a, ExportedType> {
+    pub fn target_dll_name(&self) -> Result<&'a str, Error> {
+        let implementation = self.implementation()?;
+        match implementation {
+            MetadataImplementation::File(row) => row.name(),
+            MetadataImplementation::AssemblyRef(row) => row.name(),
+            MetadataImplementation::ExportedType(row) => row.target_dll_name(),
+        }
     }
 }

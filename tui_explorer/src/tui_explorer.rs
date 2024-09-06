@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use dotnet_debugger::{RuntimeObject, TypedPointer};
+use dotnet_debugger::{FieldContainer, RuntimeObject, TypedPointer};
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
 };
@@ -247,6 +247,24 @@ impl TuiExplorerBuilder {
         })
     }
 
+    pub fn initialize_view_to_region(self, name: &str) -> Result<Self, Error> {
+        let region = self
+            .reader
+            .regions
+            .iter()
+            .filter(|region| region.short_name() == name)
+            .filter(|region| region.file_offset() == 0)
+            .max_by_key(|region| {
+                region.address_range().end - region.address_range().start
+            })
+            .unwrap();
+
+        Ok(Self {
+            initial_pointer: region.address_range().start,
+            ..self
+        })
+    }
+
     pub fn initialize_view_to_stack(self) -> Result<Self, Error> {
         let stack_memory = self.reader.stack()?.read()?;
 
@@ -428,7 +446,7 @@ impl TuiExplorerBuilder {
                         let field_name = metadata.get(field.token())?.name()?;
                         let location = field.location(
                             &runtime_module,
-                            None,
+                            FieldContainer::Static,
                             &self.reader,
                         )?;
 
@@ -492,7 +510,7 @@ impl TuiExplorerBuilder {
                 let field_name = metadata.get(field.token())?.name()?;
                 let location = field.location(
                     &runtime_module,
-                    Some(game_obj.into()),
+                    FieldContainer::Class(game_obj.into()),
                     &self.reader,
                 )?;
 
