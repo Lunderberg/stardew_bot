@@ -283,20 +283,13 @@ impl ObjectTreeNode {
                             .flatten()
                             .filter(|subfield| !subfield.is_static())
                             .map(|subfield| {
-                                let token = subfield.token();
                                 Self::initial_field(
                                     FieldContainer::ValueType(location.start),
                                     field_method_table,
                                     tree_depth + 1,
                                     subfield,
                                     reader,
-                                ).map_err(|err| ->Error  {match &err {
-                                    Error::DotnetDebugger { err: dotnet_debugger::Error::UnexpectedNullMethodTable(subfield_type) } => {
-                                        let subfield_name = metadata.get(token).unwrap().name().unwrap();
-                                        dotnet_debugger::Error::UnexpectedNullMethodTable(format!("{subfield_name} {subfield_type}")).into()
-                                    }
-                                    _ => err,
-                                }})
+                                )
                             })
                             .collect::<Result<Vec<_>, _>>()
                     })
@@ -361,20 +354,13 @@ impl ObjectTreeNode {
                         .into_iter()
                         .flatten()
                         .map(|field| -> Result<_, Error> {
-                            let token = field.token();
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),
                                 obj.method_table(),
                                 self.tree_depth + 1,
                                 field,
                                 reader,
-                            ).map_err(|err| ->Error  {match &err {
-                            Error::DotnetDebugger { err: dotnet_debugger::Error::UnexpectedNullMethodTable(subfield_type) } => {
-                                let subfield_name = metadata.get(token).unwrap().name().unwrap();
-                                dotnet_debugger::Error::UnexpectedNullMethodTable(format!("{subfield_name} {subfield_type}")).into()
-                            }
-                            _ => err,
-                        }})
+                            )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 
