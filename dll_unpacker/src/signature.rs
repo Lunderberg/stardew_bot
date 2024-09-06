@@ -604,18 +604,10 @@ impl std::fmt::Display for SignatureType<'_> {
                 write!(f, "{element_type}[]")
             }
             SignatureType::Class { index, metadata } => {
-                write!(
-                    f,
-                    "Class {}",
-                    metadata.get(*index).unwrap().name().unwrap()
-                )
+                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
             }
             SignatureType::ValueType { index, metadata } => {
-                write!(
-                    f,
-                    "ValueType {}",
-                    metadata.get(*index).unwrap().name().unwrap()
-                )
+                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
             }
             SignatureType::GenericInst {
                 index,
