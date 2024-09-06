@@ -349,6 +349,41 @@ impl PersistentState {
                 The assembly contains symbols:\n{names}"
         )
     }
+
+    pub fn iter_fields<'a>(
+        &'a self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        reader: &'a MemoryReader,
+    ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+        let iter = std::iter::successors(
+            Some(Ok(method_table_ptr)),
+            |res_ptr| -> Option<Result<_, Error>> {
+                res_ptr
+                    .as_ref()
+                    .ok()
+                    .map(|ptr| -> Result<_, Error> {
+                        let method_table = self.method_table(*ptr, reader)?;
+                        let parent = method_table.parent_method_table();
+                        if parent.is_null() {
+                            Ok(None)
+                        } else {
+                            Ok(Some(parent))
+                        }
+                    })
+                    .map(|res| res.transpose())
+                    .flatten()
+            },
+        )
+        .map(|res_ptr| {
+            res_ptr.and_then(|ptr| self.field_descriptions(ptr, reader))
+        })
+        .collect::<Result<Vec<_>, Error>>()?
+        .into_iter()
+        .flatten()
+        .flatten();
+
+        Ok(iter)
+    }
 }
 
 impl<'a> CachedReader<'a> {
@@ -426,57 +461,11 @@ impl<'a> CachedReader<'a> {
         self.state.method_table_to_name(ptr, self.reader)
     }
 
-    pub fn class_name(&self, obj: &RuntimeObject) -> Result<String, Error> {
-        let Self { state, reader } = *self;
-        let method_table_ptr = obj.method_table();
-
-        let method_table = state.method_table(method_table_ptr, reader)?;
-
-        let module = state.runtime_module(method_table.module(), reader)?;
-
-        let metadata = module.metadata(reader)?;
-
-        let name = metadata.get(method_table.token())?.name()?;
-
-        Ok(name.to_string())
-    }
-
     pub fn iter_fields(
         &self,
-        obj: &RuntimeObject,
-    ) -> Result<
-        impl Iterator<
-                Item = (
-                    &RuntimeModule,
-                    crate::FieldDescription,
-                    dll_unpacker::MetadataRow<dll_unpacker::Field>,
-                ),
-            > + '_,
-        Error,
-    > {
-        let Self { state, reader } = *self;
-        let method_table_ptr = obj.method_table();
-
-        let method_table = state.method_table(method_table_ptr, reader)?;
-
-        let module = state.runtime_module(method_table.module(), reader)?;
-        let metadata = module.metadata(reader)?;
-
-        let field_descriptions =
-            state.field_descriptions(method_table_ptr, reader)?;
-
-        let iter = field_descriptions.into_iter().flatten();
-
-        let iter = iter.map(move |field| {
-            // TODO: Add validation of the RuntimeModule against the
-            // unpacked metadata.  That way, the panic that would
-            // occur here from an out-of-bounds metadata token could
-            // instead be caught earlier.
-            let metadata_row = metadata.get(field.token()).unwrap();
-            (module, field, metadata_row)
-        });
-
-        Ok(iter)
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+        self.state.iter_fields(ptr, self.reader)
     }
 }
 

@@ -329,9 +329,7 @@ impl ObjectTreeNode {
                         metadata.get(method_table.token())?.name()?.to_string();
 
                     let fields = reader
-                        .field_descriptions(obj.method_table())?
-                        .into_iter()
-                        .flatten()
+                        .iter_fields(obj.method_table())?
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),
