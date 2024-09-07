@@ -8,7 +8,10 @@ use crate::{
 #[derive(Clone, Copy, Debug)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
-    ValueType(TypedPointer<MethodTable>),
+    ValueType {
+        method_table: TypedPointer<MethodTable>,
+        size: usize,
+    },
     Class,
     // String,
 
@@ -56,7 +59,7 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Object(ptr))
             }
-            RuntimeType::ValueType(_) => {
+            RuntimeType::ValueType { .. } => {
                 Err(Error::ValueTypeRequiresContextualParsing)
             }
         }
@@ -66,7 +69,7 @@ impl RuntimeType {
         match self {
             RuntimeType::Prim(prim) => prim.size_bytes(),
             RuntimeType::Class => Pointer::SIZE,
-            RuntimeType::ValueType(_) => todo!(),
+            RuntimeType::ValueType { size, .. } => *size,
         }
     }
 }
@@ -173,7 +176,9 @@ impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeType::Prim(prim) => write!(f, "{prim}"),
-            RuntimeType::ValueType(ptr) => write!(f, "ValueType({ptr})"),
+            RuntimeType::ValueType { method_table, size } => {
+                write!(f, "struct({size} bytes, vtable {method_table})")
+            }
             RuntimeType::Class => write!(f, "Object"),
         }
     }

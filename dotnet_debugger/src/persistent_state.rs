@@ -27,9 +27,9 @@ pub struct PersistentState {
     method_table_by_metadata:
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
 
-    field_to_method_table: FrozenMap<
+    field_to_runtime_type: FrozenMap<
         (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
-        Box<TypedPointer<MethodTable>>,
+        Box<RuntimeType>,
     >,
     field_to_type_name: FrozenMap<
         (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
@@ -142,7 +142,7 @@ impl PersistentState {
             .copied()
     }
 
-    pub fn field_to_method_table(
+    pub fn field_to_runtime_type(
         &self,
         desc: &FieldDescription,
         reader: &MemoryReader,
@@ -159,8 +159,7 @@ impl PersistentState {
 
         let lookup_key = (desc.method_table(), desc.token());
 
-        let method_table = self
-            .field_to_method_table
+        self.field_to_runtime_type
             .try_insert(lookup_key, || {
                 let module_ptr =
                     self.method_table(desc.method_table(), reader)?.module();
@@ -181,11 +180,16 @@ impl PersistentState {
                         }
                     })?;
 
-                self.method_table_by_metadata(module_ptr, coded_index, reader)
-            })
-            .copied()?;
+                let method_table = self.method_table_by_metadata(
+                    module_ptr,
+                    coded_index,
+                    reader,
+                )?;
+                let size = self.method_table(method_table, reader)?.base_size();
 
-        Ok(RuntimeType::ValueType(method_table))
+                Ok(RuntimeType::ValueType { method_table, size })
+            })
+            .copied()
     }
 
     pub fn field_to_type_name(
@@ -478,11 +482,11 @@ impl<'a> CachedReader<'a> {
         self.state.runtime_module_by_name(name, self.reader)
     }
 
-    pub fn field_to_method_table(
+    pub fn field_to_runtime_type(
         &self,
         desc: &FieldDescription,
     ) -> Result<RuntimeType, Error> {
-        self.state.field_to_method_table(desc, self.reader)
+        self.state.field_to_runtime_type(desc, self.reader)
     }
 
     pub fn field_to_type_name(

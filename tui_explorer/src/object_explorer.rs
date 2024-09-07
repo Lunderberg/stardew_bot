@@ -232,7 +232,7 @@ impl ObjectTreeNode {
         let method_table = reader.method_table(method_table_ptr)?;
         let obj_module = reader.runtime_module(method_table.module())?;
 
-        let runtime_type = reader.field_to_method_table(&field)?;
+        let runtime_type = reader.field_to_runtime_type(&field)?;
 
         let field_name = reader.field_to_name(&field)?.to_string();
         let field_type = reader.field_to_type_name(&field)?.to_string();
@@ -244,7 +244,10 @@ impl ObjectTreeNode {
             | dotnet_debugger::RuntimeType::Class => {
                 ObjectTreeNodeKind::NewValue
             }
-            dotnet_debugger::RuntimeType::ValueType(field_method_table) => {
+            dotnet_debugger::RuntimeType::ValueType {
+                method_table: field_method_table,
+                ..
+            } => {
                 let class_name = reader
                     .method_table_to_name(field_method_table)?
                     .to_string();
