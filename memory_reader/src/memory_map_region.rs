@@ -122,7 +122,7 @@ impl MemoryMapRegion {
             .start
             .read_bytes(self.pid, self.size_bytes())
             .map_err(|err| match err {
-                Error::MemoryReadBadAddress => Error::MemoryReadBadRegion {
+                Error::MemoryReadBadAddress(_) => Error::MemoryReadBadRegion {
                     name: self.name.clone(),
                     start: self.start,
                     end: self.end,

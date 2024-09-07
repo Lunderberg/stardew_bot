@@ -27,8 +27,13 @@ pub enum Error {
          with 'echo 0 | sudo tee /proc/sys/kernel/yama/ptrace_scope'"
     )]
     MemoryReadInsufficientPermission,
-    #[error("Bad address in remote process")]
-    MemoryReadBadAddress,
+
+    #[error("Attempted memory read at nullptr of remote process")]
+    MemoryReadNullPointer,
+
+    #[error("Bad address {0} in remote process")]
+    MemoryReadBadAddress(Pointer),
+
     #[error("Region {name:?} from address {start} to {end} could not be read")]
     MemoryReadBadRegion {
         name: Option<String>,

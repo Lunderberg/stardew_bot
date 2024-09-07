@@ -70,6 +70,10 @@ impl Pointer {
     }
 
     fn read_exact(&self, pid: u32, buffer: &mut [u8]) -> Result<()> {
+        if self.is_null() {
+            return Err(Error::MemoryReadNullPointer);
+        }
+
         let mut process_io =
             unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }?;
 
@@ -78,7 +82,7 @@ impl Pointer {
             if err_string.contains("Operation not permitted") {
                 Error::MemoryReadInsufficientPermission
             } else if err_string.contains("Bad address") {
-                Error::MemoryReadBadAddress
+                Error::MemoryReadBadAddress(*self)
             } else {
                 Error::MemoryReadOther { err }
             }
