@@ -57,13 +57,20 @@ impl Pointer {
         self.address.next_multiple_of(alignment).into()
     }
 
-    pub fn read_byte_array<const N: usize>(&self, pid: u32) -> Result<[u8; N]> {
+    pub(crate) fn read_byte_array<const N: usize>(
+        &self,
+        pid: u32,
+    ) -> Result<[u8; N]> {
         let mut buffer = [0u8; N];
         self.read_exact(pid, &mut buffer)?;
         Ok(buffer)
     }
 
-    pub fn read_bytes(&self, pid: u32, num_bytes: usize) -> Result<Vec<u8>> {
+    pub(crate) fn read_bytes(
+        &self,
+        pid: u32,
+        num_bytes: usize,
+    ) -> Result<Vec<u8>> {
         let mut buffer = vec![0u8; num_bytes];
         self.read_exact(pid, &mut buffer)?;
         Ok(buffer)
