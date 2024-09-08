@@ -77,7 +77,15 @@ fn bench_render_full_tui_initialized_to_stardew_dll<M: Measurement>(
     group: &mut BenchmarkGroup<M>,
     name: &str,
 ) -> Result<(), Error> {
-    let mut tui = TuiExplorer::new()?;
+    let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
+        .init_symbols()
+        .default_detail_formatters()
+        .default_column_formatters()
+        .initialize_annotations()?
+        .search_based_on_annotations()?
+        .initialize_view_to_stardew_dll()?
+        .build()?;
 
     group.bench_function(name, |bencher| {
         let mut context = TerminalContext::new().unwrap();
@@ -93,6 +101,7 @@ fn bench_render_full_tui_initialized_to_game_obj<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
@@ -115,6 +124,7 @@ fn bench_scroll_in_stardew_dll<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
@@ -138,6 +148,7 @@ fn bench_scroll_in_region_with_game_obj<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
@@ -163,6 +174,7 @@ fn bench_render_tui_initialized_to_stardew_dll<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
@@ -183,6 +195,7 @@ fn bench_render_tui_initialized_to_game_obj<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
@@ -204,6 +217,7 @@ fn bench_render_minimal_tui<M: Measurement>(
     name: &str,
 ) -> Result<(), Error> {
     let mut tui = TuiExplorerBuilder::new()?
+        .layout_memory_table()
         .initialize_view_to_stardew_dll()?
         .build()?;
 
@@ -235,6 +249,43 @@ fn bench_render_minimal_frame<M: Measurement>(
         });
     });
 
+    Ok(())
+}
+
+fn bench_render_object_explorer<M: Measurement>(
+    group: &mut BenchmarkGroup<M>,
+    name: &str,
+) -> Result<(), Error> {
+    let mut tui = TuiExplorerBuilder::new()?
+        .layout_object_explorer()
+        .initialize_view_to_game_obj()?
+        .build()?;
+
+    group.bench_function(name, |bencher| {
+        let mut context = TerminalContext::new().unwrap();
+        bencher.iter(|| {
+            context.draw(|frame| tui.draw(frame)).unwrap();
+        })
+    });
+
+    Ok(())
+}
+
+fn bench_scroll_in_object_explorer<M: Measurement>(
+    group: &mut BenchmarkGroup<M>,
+    name: &str,
+) -> Result<(), Error> {
+    let mut tui = TuiExplorerBuilder::new()?
+        .layout_object_explorer()
+        .initialize_view_to_game_obj()?
+        .build()?;
+
+    group.bench_function(name, |bencher| {
+        bencher.iter(|| {
+            tui.handle_event(Event::Key(KeyCode::Up.into()));
+            tui.handle_event(Event::Key(KeyCode::Down.into()));
+        })
+    });
     Ok(())
 }
 
@@ -280,6 +331,11 @@ fn bench_per_frame(c: &mut Criterion) {
 
     bench_render_minimal_tui(&mut group, "render_minimal_tui").unwrap();
     bench_render_minimal_frame(&mut group, "render_minimal_frame").unwrap();
+
+    bench_render_object_explorer(&mut group, "render_object_explorer").unwrap();
+
+    bench_scroll_in_object_explorer(&mut group, "scroll_in_object_explorer")
+        .unwrap();
 
     group.finish();
 }
