@@ -21,8 +21,7 @@ use crate::{
 
 pub struct ObjectExplorer {
     state: PersistentState,
-    // TODO: Make this be mandatory, not an Option<T>.
-    object_tree: Option<ObjectTreeNode>,
+    object_tree: ObjectTreeNode,
     list_state: ListState,
     prev_draw_height: usize,
     search: Option<SearchWindow<ListState>>,
@@ -88,7 +87,7 @@ impl ObjectExplorer {
 
         // TODO: Make a better display, since displaying the static
         // fields as being in a single class is incorrect.
-        let object_tree = Some(ObjectTreeNode {
+        let object_tree = ObjectTreeNode {
             kind: ObjectTreeNodeKind::Object {
                 display_expanded: true,
                 class_name: "statics".into(),
@@ -100,7 +99,7 @@ impl ObjectExplorer {
             tree_depth: 0,
             field_name: "(static fields)".into(),
             field_type: "(static fields)".into(),
-        });
+        };
 
         Ok(ObjectExplorer {
             state,
@@ -113,12 +112,7 @@ impl ObjectExplorer {
 
     fn selected_node(&self) -> Option<&ObjectTreeNode> {
         self.list_state.selected().and_then(|selected| {
-            self.object_tree
-                .as_ref()
-                .into_iter()
-                .flat_map(|node| node.iter())
-                .map(|(node, _)| node)
-                .nth(selected)
+            self.object_tree.iter().map(|(node, _)| node).nth(selected)
         })
     }
 
@@ -128,11 +122,8 @@ impl ObjectExplorer {
             .selected()
             .expect("ObjectExplorer should always have a selected line.");
 
-        let Some(object_tree) = &mut self.object_tree else {
-            return;
-        };
-
-        let node = object_tree
+        let node = self
+            .object_tree
             .node_at_line(selected)
             .expect("The selected line should always point to a node.");
 
@@ -446,11 +437,7 @@ impl WidgetWindow for ObjectExplorer {
         _globals: crate::extended_tui::WidgetGlobals<'a>,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
-        let num_lines = self
-            .object_tree
-            .as_ref()
-            .map(|obj| obj.num_lines())
-            .unwrap_or(1);
+        let num_lines = self.object_tree.num_lines();
 
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -470,14 +457,9 @@ impl WidgetWindow for ObjectExplorer {
                                     |i_line| {
                                         self.object_tree
                                             .iter()
-                                            .filter_map(|node| {
-                                                node.iter().nth(i_line).map(
-                                                    |(field, is_start)| {
-                                                        field.format_str(
-                                                            is_start,
-                                                        )
-                                                    },
-                                                )
+                                            .nth(i_line)
+                                            .map(|(field, is_start)| {
+                                                field.format_str(is_start)
                                             })
                                             .into_iter()
                                             .collect()
@@ -515,10 +497,8 @@ impl WidgetWindow for ObjectExplorer {
         globals: crate::extended_tui::WidgetGlobals<'a>,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
-        if let Some(obj) = &mut self.object_tree {
-            let reader = self.state.cached_reader(globals.reader);
-            obj.expand_marked(&reader)?;
-        }
+        let reader = self.state.cached_reader(globals.reader);
+        self.object_tree.expand_marked(&reader)?;
         Ok(())
     }
 
@@ -542,8 +522,7 @@ impl WidgetWindow for ObjectExplorer {
 
         let lines = self
             .object_tree
-            .iter()
-            .flat_map(|node| node.iter_lines())
+            .iter_lines()
             .map(|text| Line::raw(text))
             .map(|line| {
                 line.style_regex(
@@ -561,20 +540,14 @@ impl WidgetWindow for ObjectExplorer {
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .with_scrollbar(
-                self.object_tree
-                    .as_ref()
-                    .map(|tree| tree.num_lines())
-                    .unwrap_or(1),
-            );
+            .with_scrollbar(self.object_tree.num_lines());
 
         StatefulWidget::render(widget, area, buf, &mut self.list_state);
 
         {
             let lines = self
                 .object_tree
-                .iter()
-                .flat_map(|node| node.iter_lines())
+                .iter_lines()
                 .enumerate()
                 .map(|(i, _)| Line::raw(format!("{i: >4}")));
 
