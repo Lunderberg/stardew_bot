@@ -58,30 +58,13 @@ impl ObjectExplorer {
         let reader = state.cached_reader(reader);
         let static_fields = reader
             .iter_known_modules()
-            .map(|res_module_ptr| {
-                res_module_ptr
-                    .and_then(|module_ptr| reader.runtime_module(module_ptr))
-            })
-            .flat_map(|res_module| {
-                match res_module.and_then(|module| {
+            .flat_map_ok(|module_ptr| {
+                reader.runtime_module(module_ptr).and_then(|module| {
                     module.iter_method_table_pointers(&reader)
-                }) {
-                    Ok(iter) => itertools::Either::Left(iter.map(Ok)),
-                    Err(err) => {
-                        itertools::Either::Right(std::iter::once(Err(err)))
-                    }
-                }
+                })
             })
-            .flat_map(|res_method_table_ptr| {
-                // TODO: Make a .flat_map_ok extension method.
-                match res_method_table_ptr.and_then(|method_table_ptr| {
-                    reader.iter_static_fields(method_table_ptr)
-                }) {
-                    Ok(iter) => itertools::Either::Left(iter.map(Ok)),
-                    Err(err) => {
-                        itertools::Either::Right(std::iter::once(Err(err)))
-                    }
-                }
+            .flat_map_ok(|method_table_ptr| {
+                reader.iter_static_fields(method_table_ptr)
             })
             // TODO: Allow a configurable display order for the static fields.
             //
