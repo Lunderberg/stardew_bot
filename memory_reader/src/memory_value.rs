@@ -11,6 +11,7 @@ pub struct MemoryValue<T> {
 }
 
 impl<T> MemoryValue<T> {
+    #[inline]
     pub fn new(location: Pointer, value: T) -> Self {
         Self { location, value }
     }

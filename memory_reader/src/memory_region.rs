@@ -138,6 +138,7 @@ impl MemoryRegion {
             })
     }
 
+    #[inline]
     pub fn into_iter_as_pointers(
         self,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> {
@@ -145,6 +146,7 @@ impl MemoryRegion {
         self.into_iter_as_pointers_from(start)
     }
 
+    #[inline]
     pub fn into_iter_as_pointers_from(
         self,
         after_address: Pointer,

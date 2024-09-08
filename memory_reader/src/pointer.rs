@@ -29,30 +29,37 @@ impl std::cmp::Ord for Pointer {
 impl Pointer {
     pub const SIZE: usize = std::mem::size_of::<Self>();
 
+    #[inline]
     pub fn new(address: impl Into<Self>) -> Self {
         address.into()
     }
 
+    #[inline]
     pub fn as_usize(self) -> usize {
         self.address
     }
 
+    #[inline]
     pub fn null() -> Self {
         Self { address: 0 }
     }
 
+    #[inline]
     pub fn is_null(&self) -> bool {
         self.address == 0
     }
 
+    #[inline]
     pub fn is_aligned(&self, alignment: usize) -> bool {
         self.address % alignment == 0
     }
 
+    #[inline]
     pub fn as_aligned(self, alignment: usize) -> Option<Self> {
         self.is_aligned(alignment).then_some(self)
     }
 
+    #[inline]
     pub fn next_multiple_of(self, alignment: usize) -> Self {
         self.address.next_multiple_of(alignment).into()
     }
@@ -203,12 +210,14 @@ impl Display for Pointer {
 }
 
 impl From<usize> for Pointer {
+    #[inline]
     fn from(address: usize) -> Self {
         Self { address }
     }
 }
 
 impl From<[u8; 8]> for Pointer {
+    #[inline]
     fn from(bytes: [u8; 8]) -> Self {
         let address = usize::from_ne_bytes(bytes);
         Self { address }
@@ -218,6 +227,7 @@ impl From<[u8; 8]> for Pointer {
 impl TryFrom<&[u8]> for Pointer {
     type Error = std::array::TryFromSliceError;
 
+    #[inline]
     fn try_from(bytes: &[u8]) -> std::result::Result<Self, Self::Error> {
         let address = usize::from_ne_bytes(bytes.try_into()?);
         Ok(Self { address })
