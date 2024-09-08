@@ -4,7 +4,7 @@ use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable,
     PersistentState, RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
 };
-use memory_reader::Pointer;
+use memory_reader::{MemoryReader, Pointer};
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
@@ -51,7 +51,10 @@ enum ObjectTreeNodeKind {
 struct Indent(usize);
 
 impl ObjectExplorer {
-    pub fn new(top_object: Option<TypedPointer<RuntimeObject>>) -> Self {
+    pub fn new(
+        top_object: Option<TypedPointer<RuntimeObject>>,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
         let object_tree = top_object.map(|ptr| {
             let ptr: Pointer = ptr.into();
 
@@ -66,13 +69,15 @@ impl ObjectExplorer {
             }
         });
 
-        ObjectExplorer {
-            state: PersistentState::new(),
+        let state = PersistentState::new().init_dlls(reader)?;
+
+        Ok(ObjectExplorer {
+            state,
             object_tree,
             list_state: ListState::default().with_selected(Some(0)),
             prev_draw_height: 1,
             search: None,
-        }
+        })
     }
 
     fn selected_node(&self) -> Option<&ObjectTreeNode> {

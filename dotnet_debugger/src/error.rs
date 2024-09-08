@@ -20,6 +20,12 @@ pub enum Error {
     #[error("Could not find pointer to .NET Module '{0}'")]
     ModulePointerNotFound(String),
 
+    #[error(
+        "Could not find pointer to any .NET Module \
+         during initial search based on MethodDef locations."
+    )]
+    NoModulePointerFoundFromMethodDef,
+
     #[error("Could not find pointer to table of method tables")]
     PointerToMethodTableTableNotFound,
 
