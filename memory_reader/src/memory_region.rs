@@ -156,10 +156,6 @@ impl MemoryRegion {
 
         let num_ptr = (self.bytes.len() - offset) / Self::POINTER_SIZE;
 
-        // println!("Region start: {start}");
-        // println!("Iterate from: {after_address}");
-        // println!("Num ptr: {num_ptr}");
-
         let bytes = self.bytes;
         (0..num_ptr).map(move |i| {
             let pointer_start = offset + i * Self::POINTER_SIZE;
