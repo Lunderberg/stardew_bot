@@ -303,6 +303,15 @@ impl RuntimeModule {
         })
     }
 
+    pub fn iter_method_table_pointers<'a>(
+        &'a self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<impl Iterator<Item = TypedPointer<MethodTable>> + 'a, Error>
+    {
+        let reader = reader.borrow();
+        Ok(self.method_table_lookup(reader)?.iter_table_pointers())
+    }
+
     pub fn iter_method_tables<'a>(
         &'a self,
         reader: &'a MemoryReader,
@@ -619,6 +628,15 @@ impl MethodTableLookup {
         let index = index + 1;
         let ptr_start = self.location.start + index * Pointer::SIZE;
         ptr_start..ptr_start + Pointer::SIZE
+    }
+
+    pub fn iter_table_pointers(
+        &self,
+    ) -> impl Iterator<Item = TypedPointer<MethodTable>> + '_ {
+        self.method_tables
+            .iter()
+            .map(|range| -> TypedPointer<MethodTable> { range.start.into() })
+            .filter(|ptr| !ptr.is_null())
     }
 
     pub fn iter_tables<'a>(

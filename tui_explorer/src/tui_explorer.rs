@@ -570,7 +570,7 @@ impl TuiExplorerBuilder {
             self.column_formatters,
         )?;
 
-        let object_explorer = ObjectExplorer::new(self.top_object, &reader)?;
+        let object_explorer = ObjectExplorer::new(&reader)?;
 
         let out = TuiExplorer {
             _pid: self.pid,

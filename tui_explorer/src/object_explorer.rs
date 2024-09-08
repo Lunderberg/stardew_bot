@@ -2,7 +2,7 @@ use std::ops::Range;
 
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable,
-    PersistentState, RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
+    PersistentState, RuntimeType, RuntimeValue, TypedPointer,
 };
 use memory_reader::{MemoryReader, Pointer};
 use ratatui::{
@@ -21,6 +21,7 @@ use crate::{
 
 pub struct ObjectExplorer {
     state: PersistentState,
+    // TODO: Make this be mandatory, not an Option<T>.
     object_tree: Option<ObjectTreeNode>,
     list_state: ListState,
     prev_draw_height: usize,
@@ -51,25 +52,72 @@ enum ObjectTreeNodeKind {
 struct Indent(usize);
 
 impl ObjectExplorer {
-    pub fn new(
-        top_object: Option<TypedPointer<RuntimeObject>>,
-        reader: &MemoryReader,
-    ) -> Result<Self, Error> {
-        let object_tree = top_object.map(|ptr| {
-            let ptr: Pointer = ptr.into();
-
-            ObjectTreeNode {
-                kind: ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)),
-                runtime_type: RuntimeType::Class,
-                location: ptr..ptr + Pointer::SIZE,
-                should_read: true,
-                tree_depth: 0,
-                field_name: "top_object".to_string(),
-                field_type: "TopObject".to_string(),
-            }
-        });
-
+    pub fn new(reader: &MemoryReader) -> Result<Self, Error> {
         let state = PersistentState::new().init_dlls(reader)?;
+
+        let reader = state.cached_reader(reader);
+        let static_fields = reader
+            .iter_known_modules()
+            .map(|res_module_ptr| {
+                res_module_ptr
+                    .and_then(|module_ptr| reader.runtime_module(module_ptr))
+            })
+            .flat_map(|res_module| {
+                match res_module.and_then(|module| {
+                    module.iter_method_table_pointers(&reader)
+                }) {
+                    Ok(iter) => itertools::Either::Left(iter.map(Ok)),
+                    Err(err) => {
+                        itertools::Either::Right(std::iter::once(Err(err)))
+                    }
+                }
+            })
+            .flat_map(|res_method_table_ptr| {
+                // TODO: Make a .flat_map_ok extension method.
+                match res_method_table_ptr.and_then(|method_table_ptr| {
+                    reader.iter_static_fields(method_table_ptr)
+                }) {
+                    Ok(iter) => itertools::Either::Left(iter.map(Ok)),
+                    Err(err) => {
+                        itertools::Either::Right(std::iter::once(Err(err)))
+                    }
+                }
+            })
+            // TODO: Allow a configurable display order for the static fields.
+            //
+            // TODO: Allow a configurable hiding of static fields
+            // (e.g. a lot of the compiler-generated fields.
+            //
+            // TODO: Performance improvement, since this GUI moves at
+            // a crawl now with all static values displayed in it.
+            .map(|res_field| -> Result<_, Error> {
+                let field = res_field?;
+                let node = ObjectTreeNode::initial_field(
+                    FieldContainer::Static,
+                    field.method_table(),
+                    1,
+                    field,
+                    &reader,
+                )?;
+                Ok(node)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // TODO: Make a better display, since displaying the static
+        // fields as being in a single class is incorrect.
+        let object_tree = Some(ObjectTreeNode {
+            kind: ObjectTreeNodeKind::Object {
+                display_expanded: true,
+                class_name: "statics".into(),
+                fields: static_fields,
+            },
+            location: Pointer::null()..Pointer::null(),
+            runtime_type: RuntimeType::Class,
+            should_read: false,
+            tree_depth: 0,
+            field_name: "(static fields)".into(),
+            field_type: "(static fields)".into(),
+        });
 
         Ok(ObjectExplorer {
             state,
@@ -320,7 +368,7 @@ impl ObjectTreeNode {
                     let instance_location = obj.location();
 
                     let fields = reader
-                        .iter_fields(obj.method_table())?
+                        .iter_instance_fields(obj.method_table())?
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),

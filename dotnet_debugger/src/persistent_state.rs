@@ -8,7 +8,7 @@ use dll_unpacker::{
     Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex, TypeDefOrRef,
     TypeRef,
 };
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
 use crate::extensions::*;
 use crate::{
@@ -59,8 +59,10 @@ impl PersistentState {
         Default::default()
     }
 
-    pub fn init_dlls(self, reader: &MemoryReader) -> Result<Self, Error> {
-        let dll_data = reader
+    fn iter_clr_dll_regions(
+        reader: &MemoryReader,
+    ) -> impl Iterator<Item = &MemoryMapRegion> {
+        reader
             .regions
             .iter()
             .filter(|region| region.file_offset() == 0)
@@ -71,6 +73,10 @@ impl PersistentState {
                     .map(|name| name.ends_with(".dll"))
                     .unwrap_or(false)
             })
+    }
+
+    pub fn init_dlls(self, reader: &MemoryReader) -> Result<Self, Error> {
+        let dll_data = Self::iter_clr_dll_regions(reader)
             .filter_map(|region| region.read().ok())
             .collect::<Vec<_>>();
 
@@ -380,7 +386,16 @@ impl PersistentState {
                     self.runtime_module(method_table.module(), reader)?;
                 let metadata = module.metadata(reader)?;
                 let name = metadata.get(method_table.token())?.name()?;
-                Ok(name.to_string())
+                let namespace =
+                    metadata.get(method_table.token())?.namespace()?;
+
+                let fullname = if namespace.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{namespace}.{name}")
+                };
+
+                Ok(fullname)
             })
             .map(|s| s.as_str())
     }
@@ -469,11 +484,40 @@ impl PersistentState {
         )
     }
 
-    pub fn iter_fields<'a>(
+    pub fn iter_known_modules<'a>(
+        &'a self,
+        reader: &'a MemoryReader,
+    ) -> impl Iterator<Item = Result<TypedPointer<RuntimeModule>, Error>> + 'a
+    {
+        Self::iter_clr_dll_regions(reader)
+            .map(|region| region.short_name().trim_end_matches(".dll"))
+            .map(|name| self.runtime_module_by_name(name, reader))
+    }
+
+    pub fn iter_static_fields<'a>(
         &'a self,
         method_table_ptr: TypedPointer<MethodTable>,
         reader: &'a MemoryReader,
     ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+        // Static fields are stored by class, so there's no need to
+        // check the parent classes.
+        let iter = self
+            .field_descriptions(method_table_ptr, reader)?
+            .into_iter()
+            .flatten()
+            .filter(|field| field.is_static());
+
+        Ok(iter)
+    }
+
+    pub fn iter_instance_fields<'a>(
+        &'a self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        reader: &'a MemoryReader,
+    ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+        // Each class only records its own instance fields.  To get a
+        // full record of all instance fields, the parent classes must
+        // also be inspected.
         let iter = std::iter::successors(
             Some(Ok(method_table_ptr)),
             |res_ptr| -> Option<Result<_, Error>> {
@@ -499,7 +543,8 @@ impl PersistentState {
         .collect::<Result<Vec<_>, Error>>()?
         .into_iter()
         .flatten()
-        .flatten();
+        .flatten()
+        .filter(|field| !field.is_static());
 
         Ok(iter)
     }
@@ -594,11 +639,25 @@ impl<'a> CachedReader<'a> {
         self.state.method_table_to_name(ptr, self.reader)
     }
 
-    pub fn iter_fields(
+    pub fn iter_known_modules(
+        &self,
+    ) -> impl Iterator<Item = Result<TypedPointer<RuntimeModule>, Error>> + '_
+    {
+        self.state.iter_known_modules(self.reader)
+    }
+
+    pub fn iter_static_fields(
         &self,
         ptr: TypedPointer<MethodTable>,
     ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
-        self.state.iter_fields(ptr, self.reader)
+        self.state.iter_static_fields(ptr, self.reader)
+    }
+
+    pub fn iter_instance_fields(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+        self.state.iter_instance_fields(ptr, self.reader)
     }
 }
 
