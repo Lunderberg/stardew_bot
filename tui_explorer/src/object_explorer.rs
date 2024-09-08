@@ -69,9 +69,6 @@ impl ObjectExplorer {
             //
             // TODO: Allow a configurable hiding of static fields
             // (e.g. a lot of the compiler-generated fields.
-            //
-            // TODO: Performance improvement, since this GUI moves at
-            // a crawl now with all static values displayed in it.
             .map(|res_field| -> Result<_, Error> {
                 let field = res_field?;
                 let node = ObjectTreeNode::initial_field(
@@ -520,22 +517,32 @@ impl WidgetWindow for ObjectExplorer {
 
         let (area_sidebar, area) = area.split_from_left(5);
 
+        let display_range = {
+            let start = self.list_state.offset();
+            let num_lines = area.height as usize;
+            start..start + num_lines
+        };
+
         let lines = self
             .object_tree
             .iter_lines()
             .map(|text| Line::raw(text))
-            .map(|line| {
-                line.style_regex(
-                    "0x[0-9a-fA-F]+",
-                    Style::default().fg(Color::Red),
-                )
-            })
-            .map(|line| {
-                if let Some(search) = self.search.as_ref() {
-                    search.highlight_search_matches(line)
-                } else {
-                    line
+            .enumerate()
+            .map(|(i, mut line)| {
+                if display_range.contains(&i) {
+                    line = line.style_regex(
+                        "0x[0-9a-fA-F]+",
+                        Style::default().fg(Color::Red),
+                    );
                 }
+
+                if display_range.contains(&i) {
+                    if let Some(search) = self.search.as_ref() {
+                        line = search.highlight_search_matches(line);
+                    }
+                }
+
+                line
             });
 
         let widget = List::new(lines)
