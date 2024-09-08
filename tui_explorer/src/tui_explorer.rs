@@ -292,7 +292,7 @@ impl TuiExplorerBuilder {
         let metadata = metadata_layout.metadata(&dll_region);
 
         let module_ptr = dotnet_debugger::RuntimeModule::locate(
-            &metadata,
+            metadata,
             None,
             &self.reader,
         )?;
@@ -351,7 +351,7 @@ impl TuiExplorerBuilder {
             });
 
         let module_ptr = dotnet_debugger::RuntimeModule::locate(
-            &metadata,
+            metadata,
             None,
             &self.reader,
         )?;

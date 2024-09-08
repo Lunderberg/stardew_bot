@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::OnceCell;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::ops::Range;
 
 use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
@@ -84,30 +84,108 @@ impl RuntimeModule {
     ///
     /// * metadata: The unpacked metadata for the DLL to be located.
     ///
-    /// * module_vtable_loc: The location of the module's vtable, if
-    /// present.
-    ///
     /// * reader: The memory reader to inspect the running subprocess.
-    pub fn locate(
-        metadata: &Metadata,
-        module_vtable_loc: Option<Pointer>,
+    ///
+    /// Returns a HashMap containing the location of each
+    /// RuntimeModule that could be identified.  This may not include
+    /// all modfules in the input `metadata`, as modules that don't
+    /// define any methods tend not to be identifiable.  For those,
+    /// see `locate_by_vtable`.
+    pub fn locate_by_metadata(
+        metadata: &[Metadata],
         reader: &MemoryReader,
-    ) -> Result<TypedPointer<Self>, Error> {
+    ) -> Vec<Option<TypedPointer<RuntimeModule>>> {
         // Pointers to IL method definitions in the loaded DLL.  These
         // are used to identify pointers to the module, which I
         // believe to be held by the `ILStubLinker`.  For each method,
         // there's an `ILStubLinker` that holds both a pointer to the
         // IL method definition, adjacent a pointer to the `Module`
-        // that owns it.  Finding pointers to the IL method
-        // definitions lets the
-        let dll_method_def: HashSet<Pointer> = metadata
-            .method_def_table()
-            .iter_rows()
-            .filter_map(|method_def| method_def.cil_method().ok().flatten())
-            .filter_map(|cil_method| cil_method.body_range().ok())
-            .map(|method_body| method_body.start)
+        // that owns it.
+        let dll_method_defs: HashMap<Pointer, usize> = metadata
+            .iter()
+            .enumerate()
+            .flat_map(|(i, metadata)| {
+                metadata
+                    .method_def_table()
+                    .iter_rows()
+                    .filter_map(|method_def| {
+                        method_def.cil_method().ok().flatten()
+                    })
+                    .filter_map(|cil_method| cil_method.body_range().ok())
+                    .map(move |method_body| (method_body.start, i))
+            })
             .collect();
 
+        // Hashing the Pointer values to check if they're located in
+        // `dll_method_defs` ends up being the slowest part of this
+        // function.  Filtering out values that are outside of the
+        // range of `dll_method_defs` gives a ~3x performance
+        // improvement for this function, by skipping the hash
+        // altogether.
+        let method_def_range: Range<Pointer> = dll_method_defs
+            .iter()
+            .map(|(ptr, _)| *ptr)
+            .minmax()
+            .into_option()
+            .map(|(a, b)| a..b)
+            .unwrap();
+
+        let mut counter_lookups: Vec<HashMap<Pointer, usize>> =
+            vec![HashMap::new(); metadata.len()];
+
+        reader
+            .regions
+            .iter()
+            .filter(|region| {
+                region.is_readable
+                    && region.is_writable
+                    && !region.is_shared_memory
+            })
+            .filter_map(|region| region.read().ok())
+            .flat_map(|region| {
+                region
+                    .into_iter_as_pointers()
+                    .map(|mem_value| mem_value.value)
+                    .tuple_windows()
+            })
+            .filter(|(_, il_ptr)| method_def_range.contains(il_ptr))
+            .for_each(|(module_ptr, il_ptr)| {
+                // The pattern-matching above is pretty reliable at finding
+                // the most common location.  With about 17k methods in
+                // StardewValley.dll, there were 243 unique pairs of
+                // `(module_ptr, il_ptr)`, one of which occurred
+                // over 500 times.  No other pair occurred more than 3 times.
+                //
+                // I suppose I could further filter the `module_ptr` by values
+                // that point to a pointer, which itself points to
+                // `libcoreclr.so`, but that doesn't seem necessary at the
+                // moment.
+
+                if let Some(index) = dll_method_defs.get(&il_ptr) {
+                    if reader.is_valid_ptr(module_ptr) {
+                        *counter_lookups[*index]
+                            .entry(module_ptr)
+                            .or_insert(0) += 1;
+                    }
+                }
+            });
+
+        counter_lookups
+            .into_iter()
+            .map(|counter_lookup| {
+                counter_lookup
+                    .into_iter()
+                    .max_by_key(|(_, counts)| *counts)
+                    .map(|(ptr, _)| ptr.into())
+            })
+            .collect()
+    }
+
+    pub fn locate_by_vtable(
+        metadata: &[Metadata],
+        module_vtable: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Vec<Option<TypedPointer<RuntimeModule>>>, Error> {
         // However, that isn't sufficient for all modules.  Modules
         // aren't required to have any method definitions, and
         // `System.Runtime` in particular can't be located by this
@@ -121,16 +199,29 @@ impl RuntimeModule {
         // won't always have access to the debug symbols, the vtable
         // is only available after first identifying a module through
         // the first method.
-        let module_name_location: Pointer = metadata
-            .assembly_table()
-            .iter_rows()
-            .exactly_one()
-            .unwrap_or_else(|_| {
-                panic!("Each .DLL should define exactly one Assembly")
+        let module_name_location: Vec<Pointer> = metadata
+            .iter()
+            .map(|metadata| {
+                metadata
+                    .assembly_table()
+                    .iter_rows()
+                    .exactly_one()
+                    .unwrap_or_else(|_| {
+                        panic!("Each .DLL should define exactly one Assembly")
+                    })
+                    .name_location()
             })
-            .name_location()?;
+            .collect::<Result<Vec<_>, _>>()?;
 
-        let ptr_pairs = reader
+        #[derive(Clone)]
+        enum NumFound {
+            Zero,
+            One(Pointer),
+            Many,
+        }
+        let mut located = vec![NumFound::Zero; module_name_location.len()];
+
+        reader
             .regions
             .iter()
             .filter(|region| {
@@ -139,58 +230,63 @@ impl RuntimeModule {
                     && !region.is_shared_memory
             })
             .filter_map(|region| region.read().ok())
-            .flat_map(|region| region.into_iter_as_pointers().tuple_windows());
+            .flat_map(|region| region.into_iter_as_pointers().tuple_windows())
+            .filter(|(a, _)| a.value == module_vtable)
+            .for_each(|(a, b)| {
+                for (name_ptr, out) in
+                    module_name_location.iter().zip(located.iter_mut())
+                {
+                    if b.value == *name_ptr {
+                        *out = match out {
+                            NumFound::Zero => NumFound::One(a.location),
+                            _ => NumFound::Many,
+                        };
+                    }
+                }
+            });
 
-        // TODO: Search for several modules at the same time, to avoid
-        // needing to re-scan the entire memory for each DLL.
+        let output = located
+            .into_iter()
+            .map(|out| match out {
+                NumFound::One(ptr) => Some(ptr.into()),
+                _ => None,
+            })
+            .collect();
 
-        let mut found_by_vtable = Vec::new();
-        let mut count_ptr_adjacent_to_il = HashMap::new();
-        for (a, b) in ptr_pairs {
-            // This pattern-matching above is pretty reliable at finding
-            // the most common location.  With about 17k methods in
-            // StardewValley.dll, there were 243 unique pairs of
-            // `(module_ptr, il_ptr)`, one of which occurred
-            // over 500 times.  No other pair occurred more than 3 times.
-            //
-            // I suppose I could further filter the `module_ptr` by values
-            // that point to a pointer, which itself points to
-            // `libcoreclr.so`, but that doesn't seem necessary at the
-            // moment.
-            if dll_method_def.contains(&b.value) && reader.is_valid_ptr(a.value)
-            {
-                *count_ptr_adjacent_to_il.entry(a.value).or_insert(0) += 1;
-            }
+        Ok(output)
+    }
 
-            if Some(a.value) == module_vtable_loc
-                && b.value == module_name_location
-            {
-                found_by_vtable.push(a.location);
-            }
-        }
-
-        let ptr = if found_by_vtable.is_empty() {
-            count_ptr_adjacent_to_il
-                .into_iter()
-                .max_by_key(|(_, counts)| *counts)
-                .map(|(value, _)| value)
-                .ok_or_else(|| {
-                    let metadata_start = metadata.ptr_range().start;
-                    let name = reader
-                        .regions
-                        .iter()
-                        .find(|region| region.contains(metadata_start))
-                        .map(|region| region.short_name())
-                        .unwrap_or("(unknown)")
-                        .to_string();
-                    Error::ModulePointerNotFound(name)
-                })?
-        } else {
-            assert!(found_by_vtable.len() == 1);
-            found_by_vtable[0]
-        };
-
-        Ok(ptr.into())
+    /// Given the unpacked Metadata from a DLL, attempt to locate its
+    /// runtime representation.
+    ///
+    /// * metadata: The unpacked metadata for the DLL to be located.
+    ///
+    /// * module_vtable_loc: The location of the module's vtable, if
+    /// present.
+    ///
+    /// * reader: The memory reader to inspect the running subprocess.
+    pub fn locate(
+        metadata: Metadata,
+        module_vtable_loc: Option<Pointer>,
+        reader: &MemoryReader,
+    ) -> Result<TypedPointer<Self>, Error> {
+        let opt_ptr_vec: Vec<Option<TypedPointer<Self>>> =
+            if let Some(module_vtable_loc) = module_vtable_loc {
+                Self::locate_by_vtable(&[metadata], module_vtable_loc, reader)?
+            } else {
+                Self::locate_by_metadata(&[metadata], reader)
+            };
+        opt_ptr_vec[0].ok_or_else(|| {
+            let metadata_start = metadata.ptr_range().start;
+            let name = reader
+                .regions
+                .iter()
+                .find(|region| region.contains(metadata_start))
+                .map(|region| region.short_name())
+                .unwrap_or("(unknown)")
+                .to_string();
+            Error::ModulePointerNotFound(name)
+        })
     }
 
     pub fn read(location: Pointer) -> Result<Self, Error> {

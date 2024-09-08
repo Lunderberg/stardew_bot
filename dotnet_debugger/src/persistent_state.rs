@@ -135,7 +135,7 @@ impl PersistentState {
                 let module_vtable = self.runtime_module_vtable.get().copied();
 
                 let module_ptr =
-                    RuntimeModule::locate(&metadata, module_vtable, &reader)?;
+                    RuntimeModule::locate(metadata, module_vtable, &reader)?;
 
                 Ok(module_ptr)
             })
