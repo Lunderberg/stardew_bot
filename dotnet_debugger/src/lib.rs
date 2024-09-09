@@ -30,7 +30,7 @@ pub use field_description::*;
 mod runtime_object;
 pub use runtime_object::*;
 
-mod persistent_state;
-pub use persistent_state::*;
+mod static_value_cache;
+pub use static_value_cache::*;
 
 pub mod extensions;

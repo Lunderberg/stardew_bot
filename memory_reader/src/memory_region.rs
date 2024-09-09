@@ -28,6 +28,14 @@ impl MemoryRegion {
         }
     }
 
+    pub fn empty() -> Self {
+        Self {
+            start: Pointer::null(),
+            bytes: Vec::new(),
+            source: MemoryMapRegion::empty(),
+        }
+    }
+
     pub const POINTER_SIZE: usize = std::mem::size_of::<usize>();
 
     pub fn as_range(&self) -> Range<Pointer> {

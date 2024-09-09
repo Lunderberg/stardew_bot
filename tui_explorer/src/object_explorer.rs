@@ -10,21 +10,20 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, PersistentState,
-    RuntimeType, RuntimeValue,
+    CachedReader, FieldContainer, FieldDescription, RuntimeType, RuntimeValue,
 };
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::Pointer;
 
 use crate::{
     extended_tui::{
         ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
     },
     extensions::*,
+    TuiGlobals, UserConfig,
 };
-use crate::{Error, KeyBindingMatch, UserConfig};
+use crate::{Error, KeyBindingMatch};
 
 pub struct ObjectExplorer {
-    state: PersistentState,
     object_tree: ObjectTreeNode,
     list_state: ListState,
     prev_draw_height: usize,
@@ -65,7 +64,7 @@ struct Indent(usize);
 impl ObjectExplorer {
     pub(crate) fn new(
         user_config: &UserConfig,
-        reader: &MemoryReader,
+        globals: &TuiGlobals,
     ) -> Result<Self, Error> {
         // TOOD: Indicate that there's been a failed Regex parsing,
         // rather than just silently ignoring it.
@@ -85,9 +84,7 @@ impl ObjectExplorer {
                 .collect(),
         };
 
-        let state = PersistentState::new().init_dlls(reader)?;
-
-        let reader = state.cached_reader(reader);
+        let reader = globals.cached_reader();
         let static_fields = reader
             .iter_known_modules()
             .flat_map_ok(|module_ptr| {
@@ -133,7 +130,6 @@ impl ObjectExplorer {
         };
 
         Ok(ObjectExplorer {
-            state,
             object_tree,
             list_state: ListState::default().with_selected(Some(0)),
             prev_draw_height: 1,
@@ -549,7 +545,7 @@ impl WidgetWindow for ObjectExplorer {
         globals: &'a crate::TuiGlobals,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
-        let reader = self.state.cached_reader(&globals.reader);
+        let reader = globals.cached_reader();
         self.object_tree
             .expand_marked(&self.display_options, &reader)?;
         Ok(())

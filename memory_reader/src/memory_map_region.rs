@@ -41,6 +41,20 @@ impl MemoryMapRegion {
         })
     }
 
+    pub(crate) fn empty() -> Self {
+        Self {
+            pid: 0,
+            start: Pointer::null(),
+            end: Pointer::null(),
+            file_offset: 0,
+            name: None,
+            is_executable: false,
+            is_readable: false,
+            is_writable: false,
+            is_shared_memory: false,
+        }
+    }
+
     pub fn name(&self) -> Option<&str> {
         self.name.as_ref().map(|s| s.as_str())
     }

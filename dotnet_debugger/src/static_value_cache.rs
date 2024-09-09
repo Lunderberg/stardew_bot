@@ -16,8 +16,13 @@ use crate::{
     RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
 };
 
+/// Cache containing known state of the remote process.  Only values
+/// that are stable across the lifetime of the remote process should
+/// be stored here.  For example, the location of a static field may
+/// be stored, but the value contained within that static field may
+/// not.
 #[derive(Default)]
-pub struct PersistentState {
+pub struct StaticValueCache {
     method_tables: FrozenMap<TypedPointer<MethodTable>, Box<MethodTable>>,
     runtime_module_vtable: OnceCell<Pointer>,
     runtime_modules: FrozenMap<TypedPointer<RuntimeModule>, Box<RuntimeModule>>,
@@ -50,11 +55,11 @@ struct TypeInModule {
 }
 
 pub struct CachedReader<'a> {
-    state: &'a PersistentState,
+    state: &'a StaticValueCache,
     reader: &'a MemoryReader,
 }
 
-impl PersistentState {
+impl StaticValueCache {
     pub fn new() -> Self {
         Default::default()
     }

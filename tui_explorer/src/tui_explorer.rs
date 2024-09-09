@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use dotnet_debugger::{FieldContainer, RuntimeObject, TypedPointer};
+use dotnet_debugger::{
+    CachedReader, FieldContainer, RuntimeObject, StaticValueCache, TypedPointer,
+};
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
 };
@@ -44,6 +46,7 @@ pub(crate) struct TuiGlobals {
     pub(crate) annotations: Vec<Annotation>,
     #[allow(dead_code)]
     pub(crate) symbols: Vec<Symbol>,
+    pub(crate) static_value_cache: StaticValueCache,
 }
 
 struct TuiBuffers {
@@ -68,12 +71,10 @@ pub struct Annotation {
 }
 
 pub struct TuiExplorerBuilder {
-    reader: MemoryReader,
-    symbols: Vec<Symbol>,
+    tui_globals: TuiGlobals,
     detail_formatters: Vec<Box<dyn InfoFormatter>>,
     column_formatters: Vec<Box<dyn ColumnFormatter>>,
     initial_pointer: Pointer,
-    annotations: Vec<Annotation>,
     running_log: RunningLog,
     layout: DynamicLayout,
     top_object: Option<TypedPointer<RuntimeObject>>,
@@ -128,7 +129,7 @@ impl dll_unpacker::Annotator for TuiExplorerBuilder {
         &mut self,
         range: Range<Pointer>,
     ) -> &mut impl dll_unpacker::Annotation {
-        self.annotations.range(range)
+        self.tui_globals.annotations.range(range)
     }
 }
 
@@ -136,12 +137,18 @@ impl TuiExplorerBuilder {
     pub fn new() -> Result<Self, Error> {
         let pid = stardew_valley_pid()?;
         Ok(Self {
-            reader: MemoryReader::new(pid)?,
-            symbols: Vec::new(),
+            tui_globals: TuiGlobals {
+                reader: MemoryReader::new(pid)?,
+                current_region: MemoryRegion::empty(),
+                annotations: Vec::new(),
+                symbols: Vec::new(),
+                static_value_cache: StaticValueCache::new(),
+            },
+
             detail_formatters: Vec::new(),
             column_formatters: Vec::new(),
             initial_pointer: Pointer::null(),
-            annotations: Vec::new(),
+
             running_log: RunningLog::new(100),
             layout: DynamicLayout::new(),
             top_object: None,
@@ -177,8 +184,12 @@ impl TuiExplorerBuilder {
     }
 
     pub fn init_symbols(self) -> Self {
+        let symbols = self.tui_globals.reader.iter_symbols().collect();
         Self {
-            symbols: self.reader.iter_symbols().collect(),
+            tui_globals: TuiGlobals {
+                symbols,
+                ..self.tui_globals
+            },
             ..self
         }
     }
@@ -192,10 +203,14 @@ impl TuiExplorerBuilder {
                 Box::new(FormatDecValue::<u64>::new()),
                 Box::new(FormatNullTerminatedString),
                 Box::new(FormatUTF16String),
-                Box::new(FormatSymbolContainingCursor(self.symbols.clone())),
+                Box::new(FormatSymbolContainingCursor(
+                    self.tui_globals.symbols.clone(),
+                )),
                 Box::new(FormatSpacer),
                 Box::new(FormatRegionPointedTo),
-                Box::new(FormatSymbolPointedTo(self.symbols.clone())),
+                Box::new(FormatSymbolPointedTo(
+                    self.tui_globals.symbols.clone(),
+                )),
                 Box::new(FormatPointerOffset),
                 Box::new(FormatStringPointerWithLength),
                 Box::new(FormatStringPointerNullTerminated),
@@ -218,7 +233,7 @@ impl TuiExplorerBuilder {
     }
 
     fn stardew_valley_dll(&self) -> Result<&MemoryMapRegion, Error> {
-        stardew_valley_dll(&self.reader)
+        stardew_valley_dll(&self.tui_globals.reader)
     }
 
     pub fn initialize_view_to_annotation(
@@ -226,6 +241,7 @@ impl TuiExplorerBuilder {
         name: &str,
     ) -> Result<Self, Error> {
         let initial_pointer = self
+            .tui_globals
             .annotations
             .iter()
             .find(|ann| ann.name == name)
@@ -240,6 +256,7 @@ impl TuiExplorerBuilder {
 
     pub fn initialize_view_to_symbol(self, name: &str) -> Result<Self, Error> {
         let initial_pointer = self
+            .tui_globals
             .symbols
             .iter()
             .find(|sym| sym.name == name)
@@ -263,6 +280,7 @@ impl TuiExplorerBuilder {
 
     pub fn initialize_view_to_region(self, name: &str) -> Result<Self, Error> {
         let region = self
+            .tui_globals
             .reader
             .regions
             .iter()
@@ -280,10 +298,10 @@ impl TuiExplorerBuilder {
     }
 
     pub fn initialize_view_to_stack(self) -> Result<Self, Error> {
-        let stack_memory = self.reader.stack()?.read()?;
+        let stack_memory = self.tui_globals.reader.stack()?.read()?;
 
         let bottom_stack_frame = stack_memory
-            .stack_pointers(&self.reader)
+            .stack_pointers(&self.tui_globals.reader)
             .map(|p| p.location)
             .next();
         let x86_64_tag = stack_memory.rfind_pattern(
@@ -300,21 +318,13 @@ impl TuiExplorerBuilder {
     }
 
     pub fn initialize_view_to_game_obj(mut self) -> Result<Self, Error> {
-        let dll_region = stardew_valley_dll(&self.reader)?.read()?;
-        let metadata_layout =
-            dll_unpacker::unpack_metadata_layout(&dll_region)?;
-        let metadata = metadata_layout.metadata(&dll_region);
-
-        let module_ptr = dotnet_debugger::RuntimeModule::locate(
-            metadata,
-            None,
-            &self.reader,
-        )?;
-
-        let runtime_module = module_ptr.read(&self.reader)?;
+        let reader = self.tui_globals.cached_reader();
+        let module_ptr = reader.runtime_module_by_name("Stardew Valley")?;
+        let runtime_module = reader.runtime_module(module_ptr)?;
+        let metadata = runtime_module.metadata(&reader)?;
 
         let game_obj_method_table = runtime_module
-            .iter_method_tables(&self.reader)?
+            .iter_method_tables(&self.tui_globals.reader)?
             .try_find(|method_table| -> Result<_, Error> {
                 let type_def = metadata.get(method_table.token())?;
                 let name = type_def.name()?;
@@ -325,7 +335,7 @@ impl TuiExplorerBuilder {
         let game_obj: TypedPointer<RuntimeObject> =
             dotnet_debugger::find_most_likely_object_instance(
                 &game_obj_method_table,
-                &self.reader,
+                &self.tui_globals.reader,
             )?;
 
         self.initial_pointer = game_obj.into();
@@ -346,10 +356,19 @@ impl TuiExplorerBuilder {
     pub fn search_based_on_annotations(mut self) -> Result<Self, Error> {
         use dll_unpacker::{Annotation, Annotator};
 
-        let dll_region = stardew_valley_dll(&self.reader)?.read()?;
-        let metadata_layout =
-            dll_unpacker::unpack_metadata_layout(&dll_region)?;
-        let metadata = metadata_layout.metadata(&dll_region);
+        let reader = self
+            .tui_globals
+            .static_value_cache
+            .cached_reader(&self.tui_globals.reader);
+        let module_ptr = reader.runtime_module_by_name("Stardew Valley")?;
+        let runtime_module = reader.runtime_module(module_ptr)?;
+        let metadata = runtime_module.metadata(&reader)?;
+
+        // let dll_region =
+        //     stardew_valley_dll(&self.tui_globals.reader)?.read()?;
+        // let metadata_layout =
+        //     dll_unpacker::unpack_metadata_layout(&dll_region)?;
+        // let metadata = metadata_layout.metadata(&dll_region);
 
         metadata.iter_heap_locations().for_each(|(kind, range)| {
             self.running_log
@@ -367,69 +386,80 @@ impl TuiExplorerBuilder {
         let module_ptr = dotnet_debugger::RuntimeModule::locate(
             metadata,
             None,
-            &self.reader,
+            &self.tui_globals.reader,
         )?;
 
         self.running_log.add_log(format!(
             "Found module pointer at {module_ptr} for {}",
-            dll_region.name()
+            metadata
+                .assembly_table()
+                .iter_rows()
+                .next()
+                .unwrap()
+                .name()? // dll_region.name()
         ));
 
-        let runtime_module = module_ptr.read(&self.reader)?;
+        let runtime_module = module_ptr.read(&self.tui_globals.reader)?;
 
         self.running_log.add_log(format!(
             "Method table: {}",
-            runtime_module.ptr_to_table_of_method_tables(&self.reader)?
+            runtime_module
+                .ptr_to_table_of_method_tables(&self.tui_globals.reader)?
         ));
 
         self.running_log.add_log(format!(
             "Base-ptr of non-GC statics: {}",
-            runtime_module.base_ptr_of_non_gc_statics(&self.reader)?
+            runtime_module
+                .base_ptr_of_non_gc_statics(&self.tui_globals.reader)?
         ));
 
         self.running_log.add_log(format!(
             "Base-ptr of GC statics: {}",
-            runtime_module.base_ptr_of_gc_statics(&self.reader)?
+            runtime_module.base_ptr_of_gc_statics(&self.tui_globals.reader)?
         ));
 
-        self.range(
-            runtime_module
-                .method_table_lookup(&self.reader)?
-                .location
-                .clone(),
-        )
-        .name("TypeDefToMethodDef table");
+        let annotations = &mut self.tui_globals.annotations;
+
+        annotations
+            .range(
+                runtime_module
+                    .method_table_lookup(&self.tui_globals.reader)?
+                    .location
+                    .clone(),
+            )
+            .name("TypeDefToMethodDef table");
 
         runtime_module
-            .iter_method_tables(&self.reader)?
+            .iter_method_tables(&self.tui_globals.reader)?
             .try_for_each(|table| -> Result<_, Error> {
                 let table = table?;
 
                 let class_name = metadata.get(table.token())?.name()?;
-                self.annotations
+                annotations
                     .range(table.ptr_range())
                     .name(format!("MethodTable, {class_name}"));
 
-                self.annotations
+                annotations
                     .range(
                         runtime_module
-                            .method_table_lookup(&self.reader)?
+                            .method_table_lookup(&self.tui_globals.reader)?
                             .location_of_method_table_pointer(table.token()),
                     )
                     .name(format!("Ptr to {class_name} MethodTable"));
 
-                table.collect_annotations(&mut self.annotations)?;
-                let ee_class = table.get_ee_class(&self.reader)?;
+                table.collect_annotations(annotations)?;
+                let ee_class = table.get_ee_class(&self.tui_globals.reader)?;
 
-                self.annotations
+                annotations
                     .range(ee_class.ptr_range())
                     .name(format!("EEClass, {class_name}"));
-                ee_class.collect_annotations(&mut self.annotations)?;
+                ee_class.collect_annotations(annotations)?;
 
-                let fields = table.get_field_descriptions(&self.reader)?;
+                let fields =
+                    table.get_field_descriptions(&self.tui_globals.reader)?;
 
                 if let Some(fields) = &fields {
-                    self.annotations
+                    annotations
                         .range(fields.ptr_range())
                         .name(format!("Fields of {class_name}"));
                 }
@@ -444,10 +474,10 @@ impl TuiExplorerBuilder {
                             table.token()
                         );
                         let field_name = metadata.get(field.token())?.name()?;
-                        self.annotations
+                        annotations
                             .range(field.ptr_range())
                             .name(format!("FieldDesc {field_name}"));
-                        field.collect_annotations(&mut self.annotations)?;
+                        field.collect_annotations(annotations)?;
                         Ok(())
                     },
                 )?;
@@ -461,16 +491,15 @@ impl TuiExplorerBuilder {
                         let location = field.location(
                             &runtime_module,
                             FieldContainer::Static,
-                            &self.reader,
+                            &self.tui_globals.reader,
                         )?;
 
-                        let ann = self
-                            .annotations
+                        let ann = annotations
                             .range(location.clone())
                             .name(format!("{class_name}.{field_name}"));
 
                         if let Some(runtime_type) = field.runtime_type()? {
-                            let bytes = self.reader.read_bytes(
+                            let bytes = self.tui_globals.reader.read_bytes(
                                 location.start,
                                 location.end - location.start,
                             )?;
@@ -485,7 +514,7 @@ impl TuiExplorerBuilder {
             })?;
 
         let game_obj_method_table = runtime_module
-            .iter_method_tables(&self.reader)?
+            .iter_method_tables(&self.tui_globals.reader)?
             .try_find(|method_table| -> Result<_, Error> {
                 let type_def = metadata.get(method_table.token())?;
                 let name = type_def.name()?;
@@ -495,7 +524,7 @@ impl TuiExplorerBuilder {
 
         let game_obj = dotnet_debugger::find_most_likely_object_instance(
             &game_obj_method_table,
-            &self.reader,
+            &self.tui_globals.reader,
         )?;
 
         self.running_log
@@ -503,15 +532,17 @@ impl TuiExplorerBuilder {
 
         {
             let game_obj: Pointer = game_obj.into();
-            self.range(game_obj..game_obj + Pointer::SIZE)
+            annotations
+                .range(game_obj..game_obj + Pointer::SIZE)
                 .name("Game object method table");
-            self.range(game_obj..game_obj + game_obj_method_table.base_size())
+            annotations
+                .range(game_obj..game_obj + game_obj_method_table.base_size())
                 .name("Top-level game object")
                 .disable_highlight();
         }
 
         game_obj_method_table
-            .get_field_descriptions(&self.reader)?
+            .get_field_descriptions(&self.tui_globals.reader)?
             .iter()
             .flatten()
             .filter(|field| {
@@ -524,16 +555,17 @@ impl TuiExplorerBuilder {
                 let location = field.location(
                     &runtime_module,
                     FieldContainer::Class(game_obj.into()),
-                    &self.reader,
+                    &self.tui_globals.reader,
                 )?;
 
                 let ann = self
+                    .tui_globals
                     .annotations
                     .range(location.clone())
                     .name(format!(" {field_name}"));
 
                 if let Some(runtime_type) = field.runtime_type()? {
-                    let bytes = self.reader.read_bytes(
+                    let bytes = self.tui_globals.reader.read_bytes(
                         location.start,
                         location.end - location.start,
                     )?;
@@ -549,27 +581,20 @@ impl TuiExplorerBuilder {
     }
 
     pub fn build(self) -> Result<TuiExplorer, Error> {
-        let reader = self.reader;
+        let mut tui_globals = self.tui_globals;
+        tui_globals.static_value_cache = tui_globals
+            .static_value_cache
+            .init_dlls(&tui_globals.reader)?;
 
-        let current_region = reader
+        tui_globals.current_region = tui_globals
+            .reader
             .find_containing_region(self.initial_pointer)
             .ok_or(Error::PointerNotFound(self.initial_pointer))?
             .read()?;
 
-        let annotations = {
-            let mut arr = self.annotations;
-            arr.sort_by_key(|ann| {
-                (ann.highlight_range, ann.range.end, ann.range.start)
-            });
-            arr
-        };
-
-        let tui_globals = TuiGlobals {
-            reader,
-            current_region,
-            symbols: self.symbols,
-            annotations,
-        };
+        tui_globals.annotations.sort_by_key(|ann| {
+            (ann.highlight_range, ann.range.end, ann.range.start)
+        });
 
         let stack_memory = tui_globals.reader.stack()?.read()?;
         let stack_frame_table =
@@ -587,7 +612,7 @@ impl TuiExplorerBuilder {
         )?;
 
         let object_explorer =
-            ObjectExplorer::new(&self.user_config, &tui_globals.reader)?;
+            ObjectExplorer::new(&self.user_config, &tui_globals)?;
 
         let out = TuiExplorer {
             tui_globals,
@@ -619,6 +644,12 @@ impl TuiBuffers {
             Box::new(&mut self.object_explorer),
             Box::new(&mut self.user_config_editor),
         ]
+    }
+}
+
+impl TuiGlobals {
+    pub(crate) fn cached_reader(&self) -> CachedReader {
+        self.static_value_cache.cached_reader(&self.reader)
     }
 }
 
