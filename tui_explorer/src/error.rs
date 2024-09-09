@@ -38,6 +38,12 @@ pub enum Error {
         err: stardew_utils::Error,
     },
 
+    #[error("UserConfig error: {err}")]
+    UserConfigError {
+        #[from]
+        err: crate::user_config::Error,
+    },
+
     #[error("Invalid emacs-style key sequence: {0}")]
     InvalidKeyBinding(String),
 

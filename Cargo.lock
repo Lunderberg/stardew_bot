@@ -1221,6 +1221,8 @@ dependencies = [
  "memory_reader",
  "ratatui",
  "regex",
+ "serde",
+ "serde_json",
  "signal-hook",
  "stardew_utils",
  "thiserror",

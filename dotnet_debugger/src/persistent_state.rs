@@ -281,13 +281,16 @@ impl PersistentState {
                     .metadata(reader)?
                     .get(desc.token())?;
 
-                let is_static = if field_metadata.is_static()? {
-                    "static "
-                } else {
-                    ""
-                };
+                // let is_static = if field_metadata.is_static()? {
+                //     "static "
+                // } else {
+                //     ""
+                // };
+                // let signature = field_metadata.signature()?;
+                // let type_name = format!("{is_static}{signature}");
+
                 let signature = field_metadata.signature()?;
-                let type_name = format!("{is_static}{signature}");
+                let type_name = format!("{signature}");
 
                 Ok(type_name)
             })

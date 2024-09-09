@@ -52,3 +52,9 @@ pub(crate) mod extensions;
 
 mod non_empty_vec;
 pub(crate) use non_empty_vec::NonEmptyVec;
+
+mod user_config;
+pub(crate) use user_config::UserConfig;
+
+mod user_config_editor;
+pub(crate) use user_config_editor::UserConfigEditor;

@@ -9,7 +9,7 @@ use stardew_utils::stardew_valley_pid;
 use crate::extended_tui::{
     DynamicLayout, WidgetGlobals, WidgetSideEffects, WidgetWindow,
 };
-use crate::{extensions::*, ObjectExplorer};
+use crate::{extensions::*, ObjectExplorer, UserConfig, UserConfigEditor};
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
     SigintHandler,
@@ -44,6 +44,7 @@ struct TuiBuffers {
     memory_table: MemoryTable,
     detail_view: DetailView,
     object_explorer: ObjectExplorer,
+    user_config_editor: UserConfigEditor,
 }
 
 pub struct Annotation {
@@ -69,6 +70,7 @@ pub struct TuiExplorerBuilder {
     running_log: RunningLog,
     layout: DynamicLayout,
     top_object: Option<TypedPointer<RuntimeObject>>,
+    user_config: UserConfig,
 }
 
 fn stardew_valley_dll(
@@ -137,7 +139,13 @@ impl TuiExplorerBuilder {
             running_log: RunningLog::new(100),
             layout: DynamicLayout::new(),
             top_object: None,
+            user_config: Default::default(),
         })
+    }
+
+    pub fn load_config_from_default_location(mut self) -> Result<Self, Error> {
+        self.user_config = UserConfig::load_default()?;
+        Ok(self)
     }
 
     pub fn layout_memory_table(mut self) -> Self {
@@ -156,7 +164,7 @@ impl TuiExplorerBuilder {
 
     pub fn layout_object_explorer(mut self) -> Self {
         self.layout.close_all_other_windows();
-        self.layout.switch_to_buffer(3);
+        self.layout.switch_to_buffer(5);
         self.layout.split_horizontally(None, Some(60));
         self.layout.switch_to_buffer(4);
         self
@@ -570,7 +578,7 @@ impl TuiExplorerBuilder {
             self.column_formatters,
         )?;
 
-        let object_explorer = ObjectExplorer::new(&reader)?;
+        let object_explorer = ObjectExplorer::new(&self.user_config, &reader)?;
 
         let out = TuiExplorer {
             _pid: self.pid,
@@ -584,6 +592,7 @@ impl TuiExplorerBuilder {
                 memory_table,
                 detail_view,
                 object_explorer,
+                user_config_editor: UserConfigEditor::new(self.user_config),
             },
             annotations,
 
@@ -603,6 +612,7 @@ impl TuiBuffers {
             Box::new(&mut self.memory_table),
             Box::new(&mut self.running_log),
             Box::new(&mut self.object_explorer),
+            Box::new(&mut self.user_config_editor),
         ]
     }
 }
@@ -610,6 +620,7 @@ impl TuiBuffers {
 impl TuiExplorer {
     pub fn new() -> Result<Self, Error> {
         TuiExplorerBuilder::new()?
+            .load_config_from_default_location()?
             // .layout_memory_table()
             .layout_object_explorer()
             .init_symbols()

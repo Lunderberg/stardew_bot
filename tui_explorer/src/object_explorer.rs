@@ -1,23 +1,27 @@
 use std::ops::Range;
 
-use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, MethodTable,
-    PersistentState, RuntimeType, RuntimeValue, TypedPointer,
-};
-use memory_reader::{MemoryReader, Pointer};
+use itertools::Itertools;
+use regex::Regex;
+
 use ratatui::{
     style::{Color, Modifier, Style},
     text::Line,
     widgets::{List, ListState, StatefulWidget, Widget as _},
 };
 
-use crate::extensions::*;
+use dotnet_debugger::{
+    CachedReader, FieldContainer, FieldDescription, MethodTable,
+    PersistentState, RuntimeType, RuntimeValue, TypedPointer,
+};
+use memory_reader::{MemoryReader, Pointer};
+
 use crate::{
     extended_tui::{
         ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
     },
-    Error, KeyBindingMatch,
+    extensions::*,
 };
+use crate::{Error, KeyBindingMatch, UserConfig};
 
 pub struct ObjectExplorer {
     state: PersistentState,
@@ -25,6 +29,14 @@ pub struct ObjectExplorer {
     list_state: ListState,
     prev_draw_height: usize,
     search: Option<SearchWindow<ListState>>,
+    // TODO: Allow UserConfigEditor to propagate changes to
+    // ObjectExplorer without restarting the program.
+    parsed_config: ParsedConfig,
+}
+
+struct ParsedConfig {
+    sort_top: Vec<Regex>,
+    sort_bottom: Vec<Regex>,
 }
 
 struct ObjectTreeNode {
@@ -51,7 +63,28 @@ enum ObjectTreeNodeKind {
 struct Indent(usize);
 
 impl ObjectExplorer {
-    pub fn new(reader: &MemoryReader) -> Result<Self, Error> {
+    pub(crate) fn new(
+        user_config: &UserConfig,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        // TOOD: Indicate that there's been a failed Regex parsing,
+        // rather than just silently ignoring it.
+        let parsed_config = ParsedConfig {
+            sort_top: user_config
+                .object_explorer_sort_top
+                .iter()
+                .cloned()
+                .filter_map(|string| string.try_into().ok())
+                .collect(),
+
+            sort_bottom: user_config
+                .object_explorer_sort_bottom
+                .iter()
+                .cloned()
+                .filter_map(|string| string.try_into().ok())
+                .collect(),
+        };
+
         let state = PersistentState::new().init_dlls(reader)?;
 
         let reader = state.cached_reader(reader);
@@ -64,6 +97,40 @@ impl ObjectExplorer {
             })
             .flat_map_ok(|method_table_ptr| {
                 reader.iter_static_fields(method_table_ptr)
+            })
+            .sorted_by_key(|res_field| {
+                res_field
+                    .as_ref()
+                    .map_err(|_| Error::NotImplementedYet("".to_string()))
+                    .and_then(|field: &FieldDescription| -> Result<_, Error> {
+                        let class_name = reader
+                            .method_table_to_name(field.method_table())?;
+                        let field_name =
+                            reader.field_to_name(&field)?.to_string();
+                        let field_type =
+                            reader.field_to_type_name(&field)?.to_string();
+                        let search_string = format!(
+                            "static {field_type} {class_name}.{field_name}"
+                        );
+
+                        let sort_key = if let Some((top_match, _)) =
+                            parsed_config.sort_top.iter().enumerate().find(
+                                |(_, regex)| regex.is_match(&search_string),
+                            ) {
+                            (false, 0, top_match)
+                        } else if let Some((bottom_match, _)) =
+                            parsed_config.sort_bottom.iter().enumerate().find(
+                                |(_, regex)| regex.is_match(&search_string),
+                            )
+                        {
+                            (false, 2, bottom_match)
+                        } else {
+                            (false, 1, 0)
+                        };
+
+                        Ok(sort_key)
+                    })
+                    .unwrap_or_else(|_| (true, 0, 0))
             })
             // TODO: Allow a configurable display order for the static fields.
             //
@@ -104,6 +171,7 @@ impl ObjectExplorer {
             list_state: ListState::default().with_selected(Some(0)),
             prev_draw_height: 1,
             search: None,
+            parsed_config,
         })
     }
 
@@ -259,6 +327,14 @@ impl ObjectTreeNode {
         let runtime_type = reader.field_to_runtime_type(&field)?;
 
         let field_name = reader.field_to_name(&field)?.to_string();
+        let field_name = if field.is_static() {
+            let class_name =
+                reader.method_table_to_name(field.method_table())?;
+            format!("{class_name}.{field_name}")
+        } else {
+            field_name
+        };
+
         let field_type = reader.field_to_type_name(&field)?.to_string();
 
         let location = field.location(obj_module, container, reader)?;
