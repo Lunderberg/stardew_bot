@@ -10,8 +10,8 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, MethodTable,
-    PersistentState, RuntimeType, RuntimeValue, TypedPointer,
+    CachedReader, FieldContainer, FieldDescription, PersistentState,
+    RuntimeType, RuntimeValue,
 };
 use memory_reader::{MemoryReader, Pointer};
 
@@ -107,7 +107,6 @@ impl ObjectExplorer {
                 let field = res_field?;
                 let node = ObjectTreeNode::initial_field(
                     FieldContainer::Static,
-                    field.method_table(),
                     1,
                     field,
                     &reader,
@@ -284,18 +283,14 @@ impl ObjectTreeNode {
 
     fn initial_field(
         container: FieldContainer,
-        method_table_ptr: TypedPointer<MethodTable>,
         tree_depth: usize,
         field: FieldDescription,
         reader: &CachedReader,
         display_options: &DisplayOptions,
     ) -> Result<ObjectTreeNode, Error> {
-        let method_table = reader.method_table(method_table_ptr)?;
-        let obj_module = reader.runtime_module(method_table.module())?;
-
-        let runtime_type = reader.field_to_runtime_type(&field)?;
-
         let field_name = reader.field_to_name(&field)?.to_string();
+
+        // TODO: Move this formatting over to the Signature class
         let field_name = if field.is_static() {
             let class_name =
                 reader.method_table_to_name(field.method_table())?;
@@ -306,8 +301,11 @@ impl ObjectTreeNode {
 
         let field_type = reader.field_to_type_name(&field)?.to_string();
 
-        let location = field.location(obj_module, container, reader)?;
+        let method_table = reader.method_table(field.method_table())?;
+        let module = reader.runtime_module(method_table.module())?;
+        let location = field.location(module, container, reader)?;
 
+        let runtime_type = reader.field_to_runtime_type(&field)?;
         let kind = match runtime_type {
             dotnet_debugger::RuntimeType::Prim(_)
             | dotnet_debugger::RuntimeType::Class => {
@@ -333,7 +331,6 @@ impl ObjectTreeNode {
                     .map(|subfield| {
                         Self::initial_field(
                             FieldContainer::ValueType(location.start),
-                            field_method_table,
                             tree_depth + 1,
                             subfield,
                             reader,
@@ -401,7 +398,6 @@ impl ObjectTreeNode {
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),
-                                obj.method_table(),
                                 self.tree_depth + 1,
                                 field,
                                 reader,
