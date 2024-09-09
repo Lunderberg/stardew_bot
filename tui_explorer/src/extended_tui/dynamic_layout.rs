@@ -1,4 +1,3 @@
-use crate::{extensions::*, KeyBindingMatch, KeySequence};
 use crossterm::event::{MouseButton, MouseEvent};
 use itertools::Itertools as _;
 use ratatui::{
@@ -7,7 +6,10 @@ use ratatui::{
     widgets::{Block, Borders, Widget},
 };
 
-use super::{BufferSelection, WidgetGlobals, WidgetSideEffects, WidgetWindow};
+use crate::extensions::*;
+use crate::{KeyBindingMatch, KeySequence, TuiGlobals};
+
+use super::{BufferSelection, WidgetSideEffects, WidgetWindow};
 
 pub struct DynamicLayout {
     /// Index into the `windows` array.  Should reference a `Buffer`
@@ -27,7 +29,7 @@ pub struct DynamicLayout {
 pub struct DrawableDynamicLayout<'a, B> {
     layout: &'a mut DynamicLayout,
     buffers: &'a mut [B],
-    globals: WidgetGlobals<'a>,
+    globals: &'a TuiGlobals,
 }
 
 struct NestedWindow {
@@ -426,7 +428,7 @@ impl DynamicLayout {
     pub fn drawable<'a, B>(
         &'a mut self,
         buffers: &'a mut [B],
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
     ) -> DrawableDynamicLayout<'a, B> {
         DrawableDynamicLayout {
             layout: self,
@@ -438,7 +440,7 @@ impl DynamicLayout {
     pub(crate) fn apply_key_binding<'a, 'b>(
         &'a mut self,
         keystrokes: &KeySequence,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         side_effects: &mut WidgetSideEffects,
         buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
     ) -> KeyBindingMatch {

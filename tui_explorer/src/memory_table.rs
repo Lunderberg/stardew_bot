@@ -8,11 +8,14 @@ use ratatui::{
 use memory_reader::extensions::*;
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::extended_tui::{
-    InputWindow, ScrollableState, SearchDirection, SearchWindow, WidgetGlobals,
-    WidgetSideEffects, WidgetWindow,
-};
 use crate::{extended_tui::DynamicTable, extensions::*};
+use crate::{
+    extended_tui::{
+        InputWindow, ScrollableState, SearchDirection, SearchWindow,
+        WidgetSideEffects, WidgetWindow,
+    },
+    TuiGlobals,
+};
 use crate::{
     ColumnFormatter, Error, KeyBindingMatch, KeySequence, NonEmptyVec,
 };
@@ -25,7 +28,7 @@ pub struct MemoryTable {
 
 pub(crate) struct DrawableMemoryTable<'a> {
     table: &'a mut MemoryTable,
-    globals: WidgetGlobals<'a>,
+    globals: &'a TuiGlobals,
 }
 
 struct ViewFrame {
@@ -38,7 +41,7 @@ struct ViewFrame {
 
 struct DrawableViewFrame<'a> {
     view: &'a mut ViewFrame,
-    globals: WidgetGlobals<'a>,
+    globals: &'a TuiGlobals,
     formatters: &'a [Box<dyn ColumnFormatter>],
 }
 
@@ -189,7 +192,7 @@ impl WidgetWindow for MemoryTable {
 
     fn draw<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
@@ -203,7 +206,7 @@ impl WidgetWindow for MemoryTable {
     fn apply_key_binding<'a>(
         &mut self,
         keystrokes: &'a KeySequence,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
@@ -269,7 +272,7 @@ impl WidgetWindow for MemoryTable {
 
     fn change_address<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
         address: Pointer,
     ) {
@@ -353,7 +356,7 @@ impl ViewFrame {
     pub(crate) fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         side_effects: &mut WidgetSideEffects,
         formatters: &[Box<dyn ColumnFormatter>],
     ) -> KeyBindingMatch {
@@ -414,7 +417,7 @@ impl ViewFrame {
     }
 
     fn get_row_generator<'a>(
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         region: &'a MemoryRegion,
         selected_address: Pointer,
         formatters: &'a [Box<dyn ColumnFormatter>],
@@ -467,7 +470,7 @@ impl ViewFrame {
 
     fn generate_table<'a>(
         &self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         region: &'a MemoryRegion,
         formatters: &'a [Box<dyn ColumnFormatter>],
         search_window: &'a Option<SearchWindow<TableState>>,
@@ -531,7 +534,7 @@ impl ViewFrame {
 
     fn drawable<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         formatters: &'a [Box<dyn ColumnFormatter>],
     ) -> DrawableViewFrame<'a> {
         DrawableViewFrame {

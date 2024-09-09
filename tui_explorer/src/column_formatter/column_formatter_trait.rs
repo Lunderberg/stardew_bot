@@ -2,14 +2,14 @@ use ratatui::text::Line;
 
 use memory_reader::{MemoryRegion, MemoryValue};
 
-use crate::extended_tui::WidgetGlobals;
+use crate::TuiGlobals;
 
 pub(crate) trait ColumnFormatter {
     fn name(&self) -> &'static str;
 
     fn cell_text(
         &self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -17,7 +17,7 @@ pub(crate) trait ColumnFormatter {
 
     fn formatted_cell(
         &self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,

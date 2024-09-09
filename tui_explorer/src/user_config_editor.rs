@@ -455,7 +455,7 @@ impl WidgetWindow for UserConfigEditor {
     fn apply_key_binding<'a>(
         &'a mut self,
         keystrokes: &'a crate::KeySequence,
-        _globals: crate::extended_tui::WidgetGlobals<'a>,
+        _globals: &'a crate::TuiGlobals,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
@@ -502,7 +502,7 @@ impl WidgetWindow for UserConfigEditor {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: crate::extended_tui::WidgetGlobals<'a>,
+        _globals: &'a crate::TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {

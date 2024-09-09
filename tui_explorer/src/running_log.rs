@@ -13,10 +13,10 @@ use chrono::prelude::*;
 use regex::Regex;
 
 use crate::extended_tui::{
-    ScrollableState as _, SearchDirection, SearchWindow, WidgetGlobals,
-    WidgetSideEffects, WidgetWindow,
+    ScrollableState as _, SearchDirection, SearchWindow, WidgetSideEffects,
+    WidgetWindow,
 };
-use crate::extensions::*;
+use crate::{extensions::*, TuiGlobals};
 use crate::{KeyBindingMatch, KeySequence};
 
 pub struct RunningLog {
@@ -173,7 +173,7 @@ impl WidgetWindow for RunningLog {
 
     fn draw<'a>(
         &'a mut self,
-        _: WidgetGlobals<'a>,
+        _: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
@@ -183,7 +183,7 @@ impl WidgetWindow for RunningLog {
     fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
-        _globals: WidgetGlobals,
+        _globals: &TuiGlobals,
         side_effects: &mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch

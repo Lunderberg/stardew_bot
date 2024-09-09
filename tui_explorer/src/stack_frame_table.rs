@@ -7,10 +7,7 @@ use ratatui::{
 
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
-use crate::{
-    extended_tui::{WidgetGlobals, WidgetWindow},
-    extensions::*,
-};
+use crate::{extended_tui::WidgetWindow, extensions::*, TuiGlobals};
 
 pub struct StackFrameTable {
     stack_region: Range<Pointer>,
@@ -107,26 +104,26 @@ impl WidgetWindow for StackFrameTable {
 
     fn draw<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
         DrawableStackFrameTable {
             table: self,
-            reader: globals.reader,
+            reader: &globals.reader,
         }
         .render(area, buf)
     }
 
     fn change_address<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
         address: Pointer,
     ) {
         if !self.stack_region.contains(&address) {
             *self =
-                StackFrameTable::new(globals.reader, globals.current_region);
+                StackFrameTable::new(&globals.reader, &globals.current_region);
         }
         self.select_address(address);
     }

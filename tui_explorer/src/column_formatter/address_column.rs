@@ -1,8 +1,7 @@
 use memory_reader::extensions::*;
 use memory_reader::{MemoryRegion, MemoryValue};
 
-use crate::extended_tui::WidgetGlobals;
-use crate::ColumnFormatter;
+use crate::{ColumnFormatter, TuiGlobals};
 
 pub struct AddressColumn;
 
@@ -13,7 +12,7 @@ impl ColumnFormatter for AddressColumn {
 
     fn cell_text(
         &self,
-        _globals: WidgetGlobals,
+        _globals: &TuiGlobals,
         region: &MemoryRegion,
         _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,

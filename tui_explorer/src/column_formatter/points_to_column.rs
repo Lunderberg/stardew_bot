@@ -1,6 +1,6 @@
 use memory_reader::{MemoryRegion, MemoryValue};
 
-use crate::{extended_tui::WidgetGlobals, ColumnFormatter};
+use crate::{ColumnFormatter, TuiGlobals};
 
 pub struct PointsToColumn;
 
@@ -11,7 +11,7 @@ impl ColumnFormatter for PointsToColumn {
 
     fn cell_text(
         &self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         _region: &MemoryRegion,
         _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,

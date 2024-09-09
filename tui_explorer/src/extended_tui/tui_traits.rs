@@ -1,8 +1,8 @@
 use std::borrow::Cow;
 
-use memory_reader::{MemoryReader, MemoryRegion, Pointer};
+use memory_reader::Pointer;
 
-use crate::{Annotation, Error, KeyBindingMatch, KeySequence};
+use crate::{Error, KeyBindingMatch, KeySequence, TuiGlobals};
 
 pub trait WidgetWindow {
     /// The title of the widget.  This is used for the title in the
@@ -15,7 +15,7 @@ pub trait WidgetWindow {
     fn apply_key_binding<'a>(
         &'a mut self,
         _keystrokes: &'a KeySequence,
-        _globals: WidgetGlobals<'a>,
+        _globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
@@ -23,7 +23,7 @@ pub trait WidgetWindow {
 
     fn periodic_update<'a>(
         &mut self,
-        _globals: WidgetGlobals<'a>,
+        _globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
     ) -> Result<(), Error> {
         Ok(())
@@ -31,7 +31,7 @@ pub trait WidgetWindow {
 
     fn change_address<'a>(
         &'a mut self,
-        _globals: WidgetGlobals<'a>,
+        _globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
         _address: Pointer,
     ) {
@@ -41,17 +41,10 @@ pub trait WidgetWindow {
     /// ratatui's WidgetRef trait is stabilized.
     fn draw<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     );
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct WidgetGlobals<'a> {
-    pub(crate) reader: &'a MemoryReader,
-    pub(crate) current_region: &'a MemoryRegion,
-    pub(crate) annotations: &'a [Annotation],
 }
 
 #[derive(Default)]

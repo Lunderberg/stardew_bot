@@ -9,11 +9,8 @@ use ratatui::{
 
 use memory_reader::{MemoryRegion, Pointer};
 
-use crate::InfoFormatter;
-use crate::{
-    extended_tui::{WidgetGlobals, WidgetWindow},
-    extensions::*,
-};
+use crate::{extended_tui::WidgetWindow, extensions::*};
+use crate::{InfoFormatter, TuiGlobals};
 
 pub struct DetailView {
     values: Vec<(String, String)>,
@@ -30,7 +27,7 @@ impl DetailView {
 
     pub(crate) fn update_details(
         &mut self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         pointer: Pointer,
     ) {
         let from_annotations = globals
@@ -45,7 +42,7 @@ impl DetailView {
 
         let from_formatters = self.formatters.iter().filter_map(|formatter| {
             formatter
-                .format(globals.reader, globals.current_region, pointer)
+                .format(&globals.reader, &globals.current_region, pointer)
                 .map(|text| (formatter.name().to_string(), text))
         });
 
@@ -105,7 +102,7 @@ impl WidgetWindow for DetailView {
 
     fn draw<'a>(
         &'a mut self,
-        _: WidgetGlobals<'a>,
+        _: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
@@ -114,7 +111,7 @@ impl WidgetWindow for DetailView {
 
     fn change_address<'a>(
         &'a mut self,
-        globals: WidgetGlobals<'a>,
+        globals: &'a TuiGlobals,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
         address: Pointer,
     ) {
@@ -130,7 +127,7 @@ impl WidgetWindow for DetailView {
 
         let from_formatters = self.formatters.iter().filter_map(|formatter| {
             formatter
-                .format(globals.reader, globals.current_region, address)
+                .format(&globals.reader, &globals.current_region, address)
                 .map(|text| (formatter.name().to_string(), text))
         });
 

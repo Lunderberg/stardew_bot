@@ -6,9 +6,7 @@ use memory_reader::{
 };
 use stardew_utils::stardew_valley_pid;
 
-use crate::extended_tui::{
-    DynamicLayout, WidgetGlobals, WidgetSideEffects, WidgetWindow,
-};
+use crate::extended_tui::{DynamicLayout, WidgetSideEffects, WidgetWindow};
 use crate::{extensions::*, ObjectExplorer, UserConfig, UserConfigEditor};
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -23,19 +21,29 @@ use crossterm::event::Event;
 use ratatui::Frame;
 
 pub struct TuiExplorer {
-    // Application state
-    _pid: u32,
-    reader: MemoryReader,
-    current_region: MemoryRegion,
-    _symbols: Vec<Symbol>,
-    // Display state
+    /// Information shared to all sub-windows
+    tui_globals: TuiGlobals,
+
+    /// Layout of sub-windows
     layout: DynamicLayout,
-    // Display widgets
+
+    /// Container of subwindows
     buffers: TuiBuffers,
-    annotations: Vec<Annotation>,
-    // Display state
+
+    // Interactions owned by the top-level UI
     should_exit: bool,
     keystrokes: KeySequence,
+}
+
+/// Contains information that may be required by more than one widget.
+/// A read-only reference is provided to each widget during input
+/// handling and rendering.
+pub(crate) struct TuiGlobals {
+    pub(crate) reader: MemoryReader,
+    pub(crate) current_region: MemoryRegion,
+    pub(crate) annotations: Vec<Annotation>,
+    #[allow(dead_code)]
+    pub(crate) symbols: Vec<Symbol>,
 }
 
 struct TuiBuffers {
@@ -60,7 +68,6 @@ pub struct Annotation {
 }
 
 pub struct TuiExplorerBuilder {
-    pid: u32,
     reader: MemoryReader,
     symbols: Vec<Symbol>,
     detail_formatters: Vec<Box<dyn InfoFormatter>>,
@@ -129,7 +136,6 @@ impl TuiExplorerBuilder {
     pub fn new() -> Result<Self, Error> {
         let pid = stardew_valley_pid()?;
         Ok(Self {
-            pid,
             reader: MemoryReader::new(pid)?,
             symbols: Vec::new(),
             detail_formatters: Vec::new(),
@@ -558,33 +564,33 @@ impl TuiExplorerBuilder {
             arr
         };
 
-        let globals = WidgetGlobals {
-            reader: &reader,
-            current_region: &current_region,
-            annotations: &annotations,
+        let tui_globals = TuiGlobals {
+            reader,
+            current_region,
+            symbols: self.symbols,
+            annotations,
         };
 
-        let stack_memory = reader.stack()?.read()?;
-        let stack_frame_table = StackFrameTable::new(&reader, &stack_memory);
+        let stack_memory = tui_globals.reader.stack()?.read()?;
+        let stack_frame_table =
+            StackFrameTable::new(&tui_globals.reader, &stack_memory);
         let detail_view = {
             let mut detail_view = DetailView::new(self.detail_formatters);
-            detail_view.update_details(globals, self.initial_pointer);
+            detail_view.update_details(&tui_globals, self.initial_pointer);
             detail_view
         };
 
         let memory_table = MemoryTable::new(
-            &reader,
+            &tui_globals.reader,
             self.initial_pointer,
             self.column_formatters,
         )?;
 
-        let object_explorer = ObjectExplorer::new(&self.user_config, &reader)?;
+        let object_explorer =
+            ObjectExplorer::new(&self.user_config, &tui_globals.reader)?;
 
         let out = TuiExplorer {
-            _pid: self.pid,
-            reader,
-            current_region,
-            _symbols: self.symbols,
+            tui_globals,
             layout: self.layout,
             buffers: TuiBuffers {
                 stack_frame_table,
@@ -594,7 +600,6 @@ impl TuiExplorerBuilder {
                 object_explorer,
                 user_config_editor: UserConfigEditor::new(self.user_config),
             },
-            annotations,
 
             should_exit: false,
             keystrokes: KeySequence::default(),
@@ -662,14 +667,7 @@ impl TuiExplorer {
 
     pub fn draw(&mut self, frame: &mut Frame) {
         let mut buffers = self.buffers.buffer_list();
-        let layout = self.layout.drawable(
-            &mut buffers,
-            WidgetGlobals {
-                reader: &self.reader,
-                current_region: &self.current_region,
-                annotations: &self.annotations,
-            },
-        );
+        let layout = self.layout.drawable(&mut buffers, &self.tui_globals);
 
         frame.render_widget(layout, frame.size());
     }
@@ -706,11 +704,6 @@ impl TuiExplorer {
 
     fn apply_key_binding(&mut self) -> Result<KeyBindingMatch, Error> {
         let keystrokes = &self.keystrokes;
-        let globals = WidgetGlobals {
-            reader: &self.reader,
-            current_region: &self.current_region,
-            annotations: &self.annotations,
-        };
 
         let mut side_effects = WidgetSideEffects::default();
 
@@ -729,7 +722,7 @@ impl TuiExplorer {
                 // if present.
                 self.layout.apply_key_binding(
                     &keystrokes,
-                    globals,
+                    &self.tui_globals,
                     &mut side_effects,
                     &mut buffer_list,
                 )
@@ -741,18 +734,12 @@ impl TuiExplorer {
     }
 
     pub fn periodic_update(&mut self) {
-        let globals = WidgetGlobals {
-            reader: &self.reader,
-            current_region: &self.current_region,
-            annotations: &self.annotations,
-        };
-
         let mut buffer_list = self.buffers.buffer_list();
 
         let mut side_effects = WidgetSideEffects::default();
 
         let res = buffer_list.iter_mut().try_for_each(|buffer| {
-            buffer.periodic_update(globals, &mut side_effects)
+            buffer.periodic_update(&self.tui_globals, &mut side_effects)
         });
 
         if let Err(err) = res {
@@ -764,8 +751,9 @@ impl TuiExplorer {
 
     fn apply_side_effects(&mut self, mut side_effects: WidgetSideEffects) {
         if let Some(ptr) = side_effects.change_address {
-            if !self.current_region.contains(ptr) {
+            if !self.tui_globals.current_region.contains(ptr) {
                 let new_region = self
+                    .tui_globals
                     .reader
                     .find_containing_region(ptr)
                     .ok_or(Error::PointerNotFound(ptr))
@@ -773,7 +761,7 @@ impl TuiExplorer {
 
                 match new_region {
                     Ok(region) => {
-                        self.current_region = region;
+                        self.tui_globals.current_region = region;
                     }
                     Err(err) => {
                         self.buffers
@@ -785,17 +773,11 @@ impl TuiExplorer {
             }
         }
 
-        let globals = WidgetGlobals {
-            reader: &self.reader,
-            current_region: &self.current_region,
-            annotations: &self.annotations,
-        };
-
         let mut buffer_list = self.buffers.buffer_list();
 
         if let Some(ptr) = side_effects.change_address {
             buffer_list.iter_mut().for_each(|buffer| {
-                buffer.change_address(globals, &mut side_effects, ptr)
+                buffer.change_address(&self.tui_globals, &mut side_effects, ptr)
             });
         }
 

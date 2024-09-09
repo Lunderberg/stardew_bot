@@ -486,7 +486,7 @@ impl WidgetWindow for ObjectExplorer {
     fn apply_key_binding<'a>(
         &'a mut self,
         keystrokes: &'a crate::KeySequence,
-        _globals: crate::extended_tui::WidgetGlobals<'a>,
+        _globals: &'a crate::TuiGlobals,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
         let num_lines = self.object_tree.num_lines();
@@ -546,10 +546,10 @@ impl WidgetWindow for ObjectExplorer {
 
     fn periodic_update<'a>(
         &mut self,
-        globals: crate::extended_tui::WidgetGlobals<'a>,
+        globals: &'a crate::TuiGlobals,
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
-        let reader = self.state.cached_reader(globals.reader);
+        let reader = self.state.cached_reader(&globals.reader);
         self.object_tree
             .expand_marked(&self.display_options, &reader)?;
         Ok(())
@@ -557,7 +557,7 @@ impl WidgetWindow for ObjectExplorer {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: crate::extended_tui::WidgetGlobals<'a>,
+        _globals: &'a crate::TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {

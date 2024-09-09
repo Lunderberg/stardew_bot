@@ -7,10 +7,8 @@ use ratatui::{
 };
 use regex::RegexBuilder;
 
-use super::{
-    ScrollableState as _, WidgetGlobals, WidgetSideEffects, WidgetWindow,
-};
-use crate::extensions::*;
+use super::{ScrollableState as _, WidgetSideEffects, WidgetWindow};
+use crate::{extensions::*, TuiGlobals};
 
 use crate::{KeyBindingMatch, KeySequence};
 
@@ -68,7 +66,7 @@ impl<'a, 'b> WidgetWindow for DrawableBufferSelection<'a, 'b> {
     fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
-        _globals: WidgetGlobals,
+        _globals: &TuiGlobals,
         _side_effects: &mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
@@ -100,7 +98,7 @@ impl<'a, 'b> WidgetWindow for DrawableBufferSelection<'a, 'b> {
             })
     }
 
-    fn draw(&mut self, _globals: WidgetGlobals, area: Rect, buf: &mut Buffer) {
+    fn draw(&mut self, _globals: &TuiGlobals, area: Rect, buf: &mut Buffer) {
         let area = {
             let filter_height = area.height.min(3);
             let (area, filter_area) = area.split_from_bottom(filter_height);

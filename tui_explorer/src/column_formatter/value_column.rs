@@ -5,7 +5,7 @@ use ratatui::{
 
 use memory_reader::{MemoryRegion, MemoryValue, Pointer};
 
-use crate::{extended_tui::WidgetGlobals, Annotation, ColumnFormatter};
+use crate::{Annotation, ColumnFormatter, TuiGlobals};
 
 pub struct HexColumn;
 pub struct AsciiColumn;
@@ -106,7 +106,7 @@ impl ColumnFormatter for HexColumn {
 
     fn cell_text(
         &self,
-        _globals: WidgetGlobals,
+        _globals: &TuiGlobals,
         _region: &MemoryRegion,
         _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -116,7 +116,7 @@ impl ColumnFormatter for HexColumn {
 
     fn formatted_cell(
         &self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         _region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -126,7 +126,7 @@ impl ColumnFormatter for HexColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            globals.annotations,
+            &globals.annotations,
         )
     }
 }
@@ -138,7 +138,7 @@ impl ColumnFormatter for AsciiColumn {
 
     fn cell_text(
         &self,
-        _globals: WidgetGlobals,
+        _globals: &TuiGlobals,
         _region: &MemoryRegion,
         _selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -148,7 +148,7 @@ impl ColumnFormatter for AsciiColumn {
 
     fn formatted_cell(
         &self,
-        globals: WidgetGlobals,
+        globals: &TuiGlobals,
         _region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
@@ -158,7 +158,7 @@ impl ColumnFormatter for AsciiColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            globals.annotations,
+            &globals.annotations,
         )
     }
 }
