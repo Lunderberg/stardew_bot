@@ -4,8 +4,12 @@ use crate::{runtime_type::RuntimePrimType, Error, RuntimeType};
 
 pub enum RuntimeValue {
     Prim(RuntimePrimValue),
-
     Object(Pointer),
+    // Struct{
+    //     vtable: TypedPointer<MethodTable>,
+    //     bytes: OwnedBytes,
+    // },
+
     // String,
     // Ptr,
     // ByRef,

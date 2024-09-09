@@ -35,6 +35,9 @@ pub mod extensions;
 
 pub mod numeric_traits;
 
+mod normalize_indices;
+use normalize_indices::*;
+
 mod owned_bytes;
 pub use owned_bytes::*;
 

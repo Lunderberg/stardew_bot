@@ -3,8 +3,8 @@ use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
 use std::path::PathBuf;
 
-use crate::extensions::*;
 use crate::Symbol;
+use crate::{extensions::*, OwnedBytes};
 
 use super::{
     Error, MemoryMapRegion, MemoryRegion, MemoryValue, Pointer, Result,
@@ -51,9 +51,10 @@ impl MemoryReader {
         &self,
         pointer: impl Into<Pointer>,
         num_bytes: usize,
-    ) -> Result<Vec<u8>> {
-        let pointer: Pointer = pointer.into();
-        pointer.read_bytes(self.pid, num_bytes)
+    ) -> Result<OwnedBytes> {
+        let start: Pointer = pointer.into();
+        let bytes = start.read_bytes(self.pid, num_bytes)?;
+        Ok(OwnedBytes::new(start, bytes))
     }
 
     pub fn find_region(

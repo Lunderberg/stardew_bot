@@ -42,9 +42,7 @@ impl MethodTable {
 
     pub fn read(ptr: Pointer, reader: &MemoryReader) -> Result<Self, Error> {
         let bytes = reader.read_bytes(ptr, Self::SIZE)?;
-        Ok(Self {
-            bytes: OwnedBytes::new(ptr, bytes),
-        })
+        Ok(Self { bytes })
     }
 
     pub fn ptr_range(&self) -> Range<Pointer> {
@@ -190,9 +188,7 @@ impl MethodTable {
         let nbytes = num_fields * FieldDescription::SIZE;
 
         let bytes = reader.read_bytes(ptr, nbytes)?;
-        Ok(Some(FieldDescriptions {
-            bytes: OwnedBytes::new(ptr, bytes),
-        }))
+        Ok(Some(FieldDescriptions { bytes }))
     }
 }
 
@@ -222,9 +218,7 @@ impl EEClass {
         // (2024-01-24)
         let extra_size = 256;
         let bytes = reader.read_bytes(location, base_size + extra_size)?;
-        Ok(Self {
-            bytes: OwnedBytes::new(location, bytes),
-        })
+        Ok(Self { bytes })
     }
 
     pub fn ptr_range(&self) -> Range<Pointer> {

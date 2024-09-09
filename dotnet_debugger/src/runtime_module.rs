@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
 use itertools::Itertools as _;
-use memory_reader::{extensions::*, MemoryRegion, OwnedBytes};
+use memory_reader::{extensions::*, MemoryRegion};
 use memory_reader::{MemoryReader, Pointer};
 
 use crate::extensions::*;
@@ -650,9 +650,7 @@ impl MethodTableLookup {
             .map(move |location| {
                 let nbytes = location.end - location.start;
                 let bytes = reader.read_bytes(location.start, nbytes)?;
-                Ok(MethodTable {
-                    bytes: OwnedBytes::new(location.start, bytes),
-                })
+                Ok(MethodTable { bytes })
             })
     }
 
@@ -666,7 +664,6 @@ impl MethodTableLookup {
         let byte_range = &self[index];
         let bytes = reader
             .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
-        let bytes = OwnedBytes::new(byte_range.start, bytes);
         Ok(MethodTable { bytes })
     }
 
