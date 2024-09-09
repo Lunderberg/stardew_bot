@@ -319,13 +319,19 @@ impl UserConfigEditor {
         }
 
         if *string_index == 0 {
-            if *list_index > 0 {
+            if vec[*list_index].is_empty() {
+                // Empty line, remove
+                vec.remove(*list_index);
+                *list_index = list_index.saturating_sub(1);
+            } else if *list_index > 0 {
                 // Beginning of the line, concatenate into previous line
                 let this_line = vec.remove(*list_index);
                 *list_index -= 1;
                 vec[*list_index].push_str(&this_line);
                 *string_index = vec[*list_index].len();
             }
+        } else if vec.len() == 1 && vec[0].is_empty() {
+            vec.pop();
         } else if let Some(byte_index) = opt_byte_index {
             vec[*list_index].remove(byte_index);
             *string_index -= 1;
@@ -344,6 +350,8 @@ impl UserConfigEditor {
             // End of the line, remove next line and concatenate.
             let next_line = vec.remove(*list_index + 1);
             vec[*list_index].push_str(&next_line);
+        } else if vec.len() == 1 && vec[0].is_empty() {
+            vec.pop();
         }
     }
 

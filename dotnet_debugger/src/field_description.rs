@@ -15,6 +15,7 @@ pub struct FieldDescriptions {
     pub bytes: OwnedBytes,
 }
 
+#[derive(Clone, Copy)]
 pub struct FieldDescription<'a> {
     pub bytes: ByteRange<'a>,
 }

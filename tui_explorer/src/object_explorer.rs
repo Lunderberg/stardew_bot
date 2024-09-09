@@ -31,10 +31,10 @@ pub struct ObjectExplorer {
     search: Option<SearchWindow<ListState>>,
     // TODO: Allow UserConfigEditor to propagate changes to
     // ObjectExplorer without restarting the program.
-    parsed_config: ParsedConfig,
+    display_options: DisplayOptions,
 }
 
-struct ParsedConfig {
+struct DisplayOptions {
     sort_top: Vec<Regex>,
     sort_bottom: Vec<Regex>,
 }
@@ -69,7 +69,7 @@ impl ObjectExplorer {
     ) -> Result<Self, Error> {
         // TOOD: Indicate that there's been a failed Regex parsing,
         // rather than just silently ignoring it.
-        let parsed_config = ParsedConfig {
+        let display_options = DisplayOptions {
             sort_top: user_config
                 .object_explorer_sort_top
                 .iter()
@@ -99,41 +99,8 @@ impl ObjectExplorer {
                 reader.iter_static_fields(method_table_ptr)
             })
             .sorted_by_key(|res_field| {
-                res_field
-                    .as_ref()
-                    .map_err(|_| Error::NotImplementedYet("".to_string()))
-                    .and_then(|field: &FieldDescription| -> Result<_, Error> {
-                        let class_name = reader
-                            .method_table_to_name(field.method_table())?;
-                        let field_name =
-                            reader.field_to_name(&field)?.to_string();
-                        let field_type =
-                            reader.field_to_type_name(&field)?.to_string();
-                        let search_string = format!(
-                            "static {field_type} {class_name}.{field_name}"
-                        );
-
-                        let sort_key = if let Some((top_match, _)) =
-                            parsed_config.sort_top.iter().enumerate().find(
-                                |(_, regex)| regex.is_match(&search_string),
-                            ) {
-                            (false, 0, top_match)
-                        } else if let Some((bottom_match, _)) =
-                            parsed_config.sort_bottom.iter().enumerate().find(
-                                |(_, regex)| regex.is_match(&search_string),
-                            )
-                        {
-                            (false, 2, bottom_match)
-                        } else {
-                            (false, 1, 0)
-                        };
-
-                        Ok(sort_key)
-                    })
-                    .unwrap_or_else(|_| (true, 0, 0))
+                display_options.sort_key(res_field, &reader)
             })
-            // TODO: Allow a configurable display order for the static fields.
-            //
             // TODO: Allow a configurable hiding of static fields
             // (e.g. a lot of the compiler-generated fields.
             .map(|res_field| -> Result<_, Error> {
@@ -144,6 +111,7 @@ impl ObjectExplorer {
                     1,
                     field,
                     &reader,
+                    &display_options,
                 )?;
                 Ok(node)
             })
@@ -171,7 +139,7 @@ impl ObjectExplorer {
             list_state: ListState::default().with_selected(Some(0)),
             prev_draw_height: 1,
             search: None,
-            parsed_config,
+            display_options,
         })
     }
 
@@ -320,6 +288,7 @@ impl ObjectTreeNode {
         tree_depth: usize,
         field: FieldDescription,
         reader: &CachedReader,
+        display_options: &DisplayOptions,
     ) -> Result<ObjectTreeNode, Error> {
         let method_table = reader.method_table(method_table_ptr)?;
         let obj_module = reader.runtime_module(method_table.module())?;
@@ -357,6 +326,10 @@ impl ObjectTreeNode {
                     .into_iter()
                     .flatten()
                     .filter(|subfield| !subfield.is_static())
+                    .sorted_by_key(|subfield| {
+                        display_options
+                            .sort_key(&Ok::<_, Error>(*subfield), reader)
+                    })
                     .map(|subfield| {
                         Self::initial_field(
                             FieldContainer::ValueType(location.start),
@@ -364,6 +337,7 @@ impl ObjectTreeNode {
                             tree_depth + 1,
                             subfield,
                             reader,
+                            display_options,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -387,7 +361,11 @@ impl ObjectTreeNode {
         })
     }
 
-    fn expand_marked(&mut self, reader: &CachedReader) -> Result<(), Error> {
+    fn expand_marked(
+        &mut self,
+        display_options: &DisplayOptions,
+        reader: &CachedReader,
+    ) -> Result<(), Error> {
         if self.should_read {
             self.should_read = false;
             match &mut self.kind {
@@ -416,6 +394,10 @@ impl ObjectTreeNode {
 
                     let fields = reader
                         .iter_instance_fields(obj.method_table())?
+                        .sorted_by_key(|field| {
+                            display_options
+                                .sort_key(&Ok::<_, Error>(*field), reader)
+                        })
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),
@@ -423,6 +405,7 @@ impl ObjectTreeNode {
                                 self.tree_depth + 1,
                                 field,
                                 reader,
+                                display_options,
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
@@ -443,9 +426,9 @@ impl ObjectTreeNode {
             }
         } else if let ObjectTreeNodeKind::Object { fields, .. } = &mut self.kind
         {
-            fields
-                .iter_mut()
-                .try_for_each(|field| field.expand_marked(reader))?;
+            fields.iter_mut().try_for_each(|field| {
+                field.expand_marked(display_options, reader)
+            })?;
         }
 
         Ok(())
@@ -571,7 +554,8 @@ impl WidgetWindow for ObjectExplorer {
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
         let reader = self.state.cached_reader(globals.reader);
-        self.object_tree.expand_marked(&reader)?;
+        self.object_tree
+            .expand_marked(&self.display_options, &reader)?;
         Ok(())
     }
 
@@ -647,5 +631,50 @@ impl WidgetWindow for ObjectExplorer {
                 &mut self.list_state,
             );
         }
+    }
+}
+
+impl DisplayOptions {
+    fn sort_key<E>(
+        &self,
+        res_field: &Result<FieldDescription, E>,
+        reader: &CachedReader,
+    ) -> impl Ord {
+        res_field
+            .as_ref()
+            .map_err(|_| Error::NotImplementedYet("".to_string()))
+            .and_then(|field| {
+                let class_name =
+                    reader.method_table_to_name(field.method_table())?;
+                let field_name = reader.field_to_name(&field)?.to_string();
+                let field_type = reader.field_to_type_name(&field)?.to_string();
+
+                let static_str = if field.is_static() { "static " } else { "" };
+
+                let search_string = format!(
+                    "{static_str}{field_type} {class_name}.{field_name}"
+                );
+
+                let sort_key = if let Some((top_match, _)) = self
+                    .sort_top
+                    .iter()
+                    .enumerate()
+                    .find(|(_, regex)| regex.is_match(&search_string))
+                {
+                    (false, 0, top_match)
+                } else if let Some((bottom_match, _)) = self
+                    .sort_bottom
+                    .iter()
+                    .enumerate()
+                    .find(|(_, regex)| regex.is_match(&search_string))
+                {
+                    (false, 2, bottom_match)
+                } else {
+                    (false, 1, 0)
+                };
+
+                Ok(sort_key)
+            })
+            .unwrap_or_else(|_| (true, 0, 0))
     }
 }
