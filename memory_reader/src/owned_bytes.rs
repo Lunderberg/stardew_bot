@@ -14,6 +14,15 @@ impl OwnedBytes {
         Self { start, bytes }
     }
 
+    pub fn ptr_range(&self) -> Range<Pointer> {
+        self.start..self.start + self.bytes.len()
+    }
+
+    pub fn contains_range(&self, range: impl NormalizeRange) -> bool {
+        let byte_range: ByteRange = self.into();
+        byte_range.contains_range(range)
+    }
+
     pub fn subrange<'a>(&'a self, range: impl NormalizeRange) -> ByteRange<'a> {
         let byte_range: ByteRange<'a> = self.into();
         byte_range.subrange(range)

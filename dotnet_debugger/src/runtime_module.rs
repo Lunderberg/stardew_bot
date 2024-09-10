@@ -510,8 +510,9 @@ impl RuntimeModule {
 
     pub fn base_ptr_of_non_gc_statics(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Pointer, Error> {
+        let reader = reader.borrow();
         self.base_ptr_of_non_gc_statics
             .or_try_init(|| {
                 // The layout of the Module varies by .NET version, but should
@@ -583,8 +584,9 @@ impl RuntimeModule {
 
     pub fn base_ptr_of_gc_statics(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Pointer, Error> {
+        let reader = reader.borrow();
         self.base_ptr_of_gc_statics
             .or_try_init(|| {
                 let base_ptr_of_non_gc_statics =

@@ -2,7 +2,7 @@ use std::{borrow::Borrow, ops::Range};
 
 use dll_unpacker::{
     dll_unpacker::{Field, MetadataTableIndex},
-    Annotation as _, Annotator,
+    Annotation as _, Annotator, RelativeVirtualAddress,
 };
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
@@ -187,6 +187,7 @@ impl<'a> FieldDescription<'a> {
         let reader = reader.borrow();
         let runtime_type = self.cor_element_type()?;
         let is_instance_field = !self.is_static();
+        let is_rva_field = self.is_rva();
 
         // The Module contains two pointers for static values,
         // depending on whether the value must be inspected by the
@@ -199,20 +200,26 @@ impl<'a> FieldDescription<'a> {
             CorElementType::Class
         );
 
-        let base = if is_instance_field {
-            match container {
+        let ptr = if is_instance_field {
+            let base = match container {
                 FieldContainer::Class(ptr) => Ok(ptr + Pointer::SIZE),
                 FieldContainer::ValueType(ptr) => Ok(ptr),
                 FieldContainer::Static => {
                     Err(Error::LocationOfInstanceFieldRequiresInstance)
                 }
-            }?
+            }?;
+            base + self.offset()
+        } else if is_rva_field {
+            let layout = module.metadata_layout(reader)?;
+            let rva = RelativeVirtualAddress::new(self.offset());
+            layout.virtual_address_to_raw(rva)?
         } else if uses_gc_statics_base_ptr {
-            module.base_ptr_of_gc_statics(reader)?
+            let base = module.base_ptr_of_gc_statics(reader)?;
+            base + self.offset()
         } else {
-            module.base_ptr_of_non_gc_statics(reader)?
+            let base = module.base_ptr_of_non_gc_statics(reader)?;
+            base + self.offset()
         };
-        let ptr = base + self.offset();
 
         let size = runtime_type.size_bytes();
 

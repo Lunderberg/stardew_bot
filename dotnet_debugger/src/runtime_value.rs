@@ -1,29 +1,15 @@
-use memory_reader::Pointer;
+use memory_reader::{OwnedBytes, Pointer};
 
-use crate::{runtime_type::RuntimePrimType, Error, RuntimeType};
+use crate::runtime_type::RuntimePrimType;
+use crate::{Error, MethodTable, RuntimeType, TypedPointer};
 
 pub enum RuntimeValue {
     Prim(RuntimePrimValue),
     Object(Pointer),
-    // Struct{
-    //     vtable: TypedPointer<MethodTable>,
-    //     bytes: OwnedBytes,
-    // },
-
-    // String,
-    // Ptr,
-    // ByRef,
-
-    // ValueType,
-    // Class,
-    // Object,
-
-    // Array,
-    // GenericInst,
-    // TypedByRef,
-    // FunctionPtr,
-    // SizeArray,
-    // MethodType,
+    Struct {
+        vtable: TypedPointer<MethodTable>,
+        bytes: OwnedBytes,
+    },
 }
 
 pub enum RuntimePrimValue {
@@ -150,6 +136,9 @@ impl std::fmt::Display for RuntimeValue {
             Self::Prim(val) => write!(f, "{val}"),
             Self::Object(val) if val.is_null() => write!(f, "null"),
             Self::Object(val) => write!(f, "{val}"),
+            Self::Struct { vtable, bytes } => {
+                write!(f, "struct {vtable} @ {}", bytes.start())
+            }
         }
     }
 }

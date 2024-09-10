@@ -1,6 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::OnceCell;
-use std::ops::Range;
+use std::ops::{Deref, Range};
 
 use elsa::FrozenMap;
 
@@ -10,7 +10,7 @@ use dll_unpacker::{
 };
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
-use crate::extensions::*;
+use crate::{extensions::*, FieldContainer};
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
     RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
@@ -664,6 +664,50 @@ impl<'a> CachedReader<'a> {
         ptr: TypedPointer<MethodTable>,
     ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
         self.state.iter_instance_fields(ptr, self.reader)
+    }
+
+    /// Returns ranges in which static values may exist.  Used for
+    /// loading all static values with a minimal number of reads from
+    /// the remote process.
+    pub fn static_value_ranges(
+        &self,
+        ptr: TypedPointer<RuntimeModule>,
+    ) -> impl Iterator<Item = Range<Pointer>> + '_ {
+        let res_iter = || -> Result<_, Error> {
+            let module = self.runtime_module(ptr)?;
+
+            let iter = self
+                .runtime_module(ptr)?
+                .iter_method_table_pointers(self)?
+                .flat_map(|method_table_ptr| {
+                    self.iter_static_fields(method_table_ptr)
+                })
+                .flatten()
+                .filter_map(move |field| {
+                    let runtime_type =
+                        self.field_to_runtime_type(&field).ok()?;
+                    let start = field
+                        .location(&module, FieldContainer::Static, self)
+                        .ok()?
+                        .start;
+
+                    // TODO: Make the Range<Pointer> returned by the
+                    // location be correct for value types.
+                    let size = runtime_type.size_bytes();
+                    Some(start..start + size)
+                });
+            Ok(iter)
+        }();
+
+        res_iter.into_iter().flatten()
+    }
+}
+
+impl<'a> Deref for CachedReader<'a> {
+    type Target = MemoryReader;
+
+    fn deref(&self) -> &Self::Target {
+        self.reader
     }
 }
 

@@ -45,6 +45,11 @@ impl<'a> ByteRange<'a> {
         self.start..self.start + self.bytes.len()
     }
 
+    pub fn contains_range(&self, range: impl NormalizeRange) -> bool {
+        let range: Range<Pointer> = range.as_ptr(self.ptr_range());
+        self.start <= range.start && range.end <= self.end()
+    }
+
     pub fn bytes(&self) -> &'a [u8] {
         self.bytes
     }

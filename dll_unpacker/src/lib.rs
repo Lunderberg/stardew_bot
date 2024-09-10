@@ -2,6 +2,7 @@ mod error;
 pub use error::Error;
 
 pub(crate) mod relative_virtual_address;
+pub use relative_virtual_address::RelativeVirtualAddress;
 
 pub(crate) mod enum_map;
 pub use enum_map::*;

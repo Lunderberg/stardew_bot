@@ -12,7 +12,7 @@ use ratatui::{
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, RuntimeType, RuntimeValue,
 };
-use memory_reader::Pointer;
+use memory_reader::{OwnedBytes, Pointer};
 
 use crate::{
     extended_tui::{
@@ -85,33 +85,59 @@ impl ObjectExplorer {
         };
 
         let reader = globals.cached_reader();
+
+        // TODO: Allow a configurable hiding of static fields
+        // (e.g. a lot of the compiler-generated fields).
+
         let static_fields = reader
             .iter_known_modules()
             .flat_map_ok(|module_ptr| {
-                reader.runtime_module(module_ptr).and_then(|module| {
-                    module.iter_method_table_pointers(&reader)
-                })
+                let static_ranges: Vec<_> = reader
+                    .static_value_ranges(module_ptr)
+                    .map(|range| reader.read_bytes(range))
+                    .collect::<Result<_, _>>()?;
+
+                // The static_ranges must have their ownership moved
+                // into the `.map_ok` lambda function that uses them,
+                // as that lambda lives beyond the local function
+                // scope.  However, using the `move` keyword would
+                // also move the `display_options` and `reader`
+                // objects to be owned by the lambda function.  To
+                // avoid this, declare new variables that hold the
+                // reference, and move the reference into the lambda.
+                let reader_ref = &reader;
+                let display_options_ref = &display_options;
+
+                let module = reader.runtime_module(module_ptr)?;
+                let iter_vtable_ptr =
+                    module.iter_method_table_pointers(&reader)?;
+                let iter_static_fields = iter_vtable_ptr
+                    .map(Ok)
+                    .flat_map_ok(|method_table_ptr| {
+                        reader.iter_static_fields(method_table_ptr)
+                    })
+                    .map_ok(move |field| -> Result<_, Error> {
+                        let node = ObjectTreeNode::initial_field(
+                            FieldContainer::Static,
+                            1,
+                            field,
+                            reader_ref,
+                            display_options_ref,
+                            &static_ranges,
+                        )?;
+                        Ok((field, node))
+                    })
+                    .map(|res| res?);
+                Ok(iter_static_fields)
             })
-            .flat_map_ok(|method_table_ptr| {
-                reader.iter_static_fields(method_table_ptr)
+            .map(|res| res?)
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .sorted_by_key(|(field, _)| {
+                display_options.sort_key(*field, &reader)
             })
-            .sorted_by_key(|res_field| {
-                display_options.sort_key(res_field, &reader)
-            })
-            // TODO: Allow a configurable hiding of static fields
-            // (e.g. a lot of the compiler-generated fields.
-            .map(|res_field| -> Result<_, Error> {
-                let field = res_field?;
-                let node = ObjectTreeNode::initial_field(
-                    FieldContainer::Static,
-                    1,
-                    field,
-                    &reader,
-                    &display_options,
-                )?;
-                Ok(node)
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|(_, node)| node)
+            .collect::<Vec<_>>();
 
         // TODO: Make a better display, since displaying the static
         // fields as being in a single class is incorrect.
@@ -283,6 +309,7 @@ impl ObjectTreeNode {
         field: FieldDescription,
         reader: &CachedReader,
         display_options: &DisplayOptions,
+        prefetch: &[OwnedBytes],
     ) -> Result<ObjectTreeNode, Error> {
         let field_name = reader.field_to_name(&field)?.to_string();
 
@@ -295,19 +322,32 @@ impl ObjectTreeNode {
             field_name
         };
 
+        let runtime_type = reader.field_to_runtime_type(&field)?;
         let field_type = reader.field_to_type_name(&field)?.to_string();
 
         let method_table = reader.method_table(field.method_table())?;
         let module = reader.runtime_module(method_table.module())?;
         let location = field.location(module, container, reader)?;
 
-        let runtime_type = reader.field_to_runtime_type(&field)?;
+        // TODO: Either return the correct size from
+        // FieldDescription::location, or don't return a size at all.
+        let location =
+            location.start..location.start + runtime_type.size_bytes();
+
         let kind = match runtime_type {
-            dotnet_debugger::RuntimeType::Prim(_)
-            | dotnet_debugger::RuntimeType::Class => {
-                ObjectTreeNodeKind::NewValue
+            RuntimeType::Prim(_) | RuntimeType::Class => {
+                let opt_bytes = prefetch
+                    .iter()
+                    .find(|bytes| bytes.contains_range(location.clone()));
+                if let Some(bytes) = opt_bytes {
+                    let runtime_value = runtime_type
+                        .parse(bytes.subrange(location.clone()).into())?;
+                    ObjectTreeNodeKind::Value(runtime_value)
+                } else {
+                    ObjectTreeNodeKind::NewValue
+                }
             }
-            dotnet_debugger::RuntimeType::ValueType {
+            RuntimeType::ValueType {
                 method_table: field_method_table,
                 ..
             } => {
@@ -321,8 +361,7 @@ impl ObjectTreeNode {
                     .flatten()
                     .filter(|subfield| !subfield.is_static())
                     .sorted_by_key(|subfield| {
-                        display_options
-                            .sort_key(&Ok::<_, Error>(*subfield), reader)
+                        display_options.sort_key(*subfield, reader)
                     })
                     .map(|subfield| {
                         Self::initial_field(
@@ -331,6 +370,7 @@ impl ObjectTreeNode {
                             subfield,
                             reader,
                             display_options,
+                            prefetch,
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
@@ -388,8 +428,7 @@ impl ObjectTreeNode {
                     let fields = reader
                         .iter_instance_fields(obj.method_table())?
                         .sorted_by_key(|field| {
-                            display_options
-                                .sort_key(&Ok::<_, Error>(*field), reader)
+                            display_options.sort_key(*field, reader)
                         })
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
@@ -398,6 +437,7 @@ impl ObjectTreeNode {
                                 field,
                                 reader,
                                 display_options,
+                                &[],
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
@@ -627,46 +667,42 @@ impl WidgetWindow for ObjectExplorer {
 }
 
 impl DisplayOptions {
-    fn sort_key<E>(
+    fn sort_key(
         &self,
-        res_field: &Result<FieldDescription, E>,
+        field: FieldDescription,
         reader: &CachedReader,
     ) -> impl Ord {
-        res_field
-            .as_ref()
-            .map_err(|_| Error::NotImplementedYet("".to_string()))
-            .and_then(|field| {
-                let class_name =
-                    reader.method_table_to_name(field.method_table())?;
-                let field_name = reader.field_to_name(&field)?.to_string();
-                let field_type = reader.field_to_type_name(&field)?.to_string();
+        let res_sort_key = || -> Result<_, Error> {
+            let class_name =
+                reader.method_table_to_name(field.method_table())?;
+            let field_name = reader.field_to_name(&field)?.to_string();
+            let field_type = reader.field_to_type_name(&field)?.to_string();
 
-                let static_str = if field.is_static() { "static " } else { "" };
+            let static_str = if field.is_static() { "static " } else { "" };
 
-                let search_string = format!(
-                    "{static_str}{field_type} {class_name}.{field_name}"
-                );
+            let search_string =
+                format!("{static_str}{field_type} {class_name}.{field_name}");
 
-                let sort_key = if let Some((top_match, _)) = self
-                    .sort_top
-                    .iter()
-                    .enumerate()
-                    .find(|(_, regex)| regex.is_match(&search_string))
-                {
-                    (false, 0, top_match)
-                } else if let Some((bottom_match, _)) = self
-                    .sort_bottom
-                    .iter()
-                    .enumerate()
-                    .find(|(_, regex)| regex.is_match(&search_string))
-                {
-                    (false, 2, bottom_match)
-                } else {
-                    (false, 1, 0)
-                };
+            let sort_key = if let Some((top_match, _)) = self
+                .sort_top
+                .iter()
+                .enumerate()
+                .find(|(_, regex)| regex.is_match(&search_string))
+            {
+                (false, 0, top_match)
+            } else if let Some((bottom_match, _)) = self
+                .sort_bottom
+                .iter()
+                .enumerate()
+                .find(|(_, regex)| regex.is_match(&search_string))
+            {
+                (false, 2, bottom_match)
+            } else {
+                (false, 1, 0)
+            };
 
-                Ok(sort_key)
-            })
-            .unwrap_or_else(|_| (true, 0, 0))
+            Ok(sort_key)
+        }();
+        res_sort_key.unwrap_or_else(|_| (true, 0, 0))
     }
 }

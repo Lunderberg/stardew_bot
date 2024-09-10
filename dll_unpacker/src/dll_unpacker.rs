@@ -215,7 +215,7 @@ pub struct MetadataLayout {
 }
 
 impl MetadataLayout {
-    pub(crate) fn virtual_address_to_raw(
+    pub fn virtual_address_to_raw(
         &self,
         addr: RelativeVirtualAddress,
     ) -> Result<Pointer, Error> {

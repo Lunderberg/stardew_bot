@@ -13,16 +13,6 @@ pub enum RuntimeType {
         size: usize,
     },
     Class,
-    // String,
-
-    // GenericVar,
-    // Array,
-    // GenericInst,
-    // TypedByRef,
-    // FunctionPtr,
-    // Object,
-    // SizeArray,
-    // MethodType,
 }
 
 #[derive(Clone, Copy, Debug)]
