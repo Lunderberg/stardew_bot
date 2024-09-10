@@ -1,5 +1,6 @@
 use std::borrow::Borrow;
 use std::cell::OnceCell;
+use std::cmp::Reverse;
 use std::ops::{Deref, Range};
 
 use elsa::FrozenMap;
@@ -8,6 +9,7 @@ use dll_unpacker::{
     Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex, TypeDefOrRef,
     TypeRef,
 };
+use itertools::Itertools;
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
 use crate::{extensions::*, FieldContainer};
@@ -695,6 +697,17 @@ impl<'a> CachedReader<'a> {
                     // location be correct for value types.
                     let size = runtime_type.size_bytes();
                     Some(start..start + size)
+                })
+                .sorted_by_key(|range| (range.start, Reverse(range.end)))
+                .peekable()
+                .batching(|iter| {
+                    let mut range = iter.next()?;
+                    while let Some(next) =
+                        iter.next_if(|peek| peek.start <= range.end + 128)
+                    {
+                        range = range.start..range.end.max(next.end);
+                    }
+                    Some(range)
                 });
             Ok(iter)
         }();

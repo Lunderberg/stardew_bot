@@ -92,7 +92,7 @@ impl ObjectExplorer {
         let static_fields = reader
             .iter_known_modules()
             .flat_map_ok(|module_ptr| {
-                let static_ranges: Vec<_> = reader
+                let prefetch_statics: Vec<_> = reader
                     .static_value_ranges(module_ptr)
                     .map(|range| reader.read_bytes(range))
                     .collect::<Result<_, _>>()?;
@@ -123,7 +123,7 @@ impl ObjectExplorer {
                             field,
                             reader_ref,
                             display_options_ref,
-                            &static_ranges,
+                            &prefetch_statics,
                         )?;
                         Ok((field, node))
                     })
