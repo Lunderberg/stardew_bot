@@ -423,7 +423,13 @@ impl ObjectTreeNode {
                         .method_table_to_name(obj.method_table())?
                         .to_string();
 
-                    let instance_location = obj.location();
+                    let instance_location: Pointer = obj.location().into();
+                    let size_bytes =
+                        reader.method_table(obj.method_table())?.base_size();
+                    let prefetch = reader.read_bytes(
+                        instance_location..instance_location + size_bytes,
+                    )?;
+                    let prefetch = &[prefetch];
 
                     let fields = reader
                         .iter_instance_fields(obj.method_table())?
@@ -437,7 +443,7 @@ impl ObjectTreeNode {
                                 field,
                                 reader,
                                 display_options,
-                                &[],
+                                prefetch,
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
