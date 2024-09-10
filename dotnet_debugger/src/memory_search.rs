@@ -172,7 +172,7 @@ fn iter_possible_object_instances<'a>(
                 let max_offset =
                     offsets_of_pointers.last().unwrap() + Pointer::SIZE;
                 let bytes = reader
-                    .read_bytes(ptr + min_offset, max_offset - min_offset)
+                    .read_bytes(ptr + min_offset..ptr + max_offset)
                     .ok()?;
 
                 let num_non_null_pointers = offsets_of_pointers

@@ -575,9 +575,7 @@ impl<'a> CachedReader<'a> {
         runtime_type: RuntimeType,
         location: Range<Pointer>,
     ) -> Result<RuntimeValue, Error> {
-        let bytes = self
-            .reader
-            .read_bytes(location.start, location.end - location.start)?;
+        let bytes = self.reader.read_bytes(location)?;
         let value = runtime_type.parse(&bytes)?;
         Ok(value)
     }

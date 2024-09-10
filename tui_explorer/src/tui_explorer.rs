@@ -499,10 +499,8 @@ impl TuiExplorerBuilder {
                             .name(format!("{class_name}.{field_name}"));
 
                         if let Some(runtime_type) = field.runtime_type()? {
-                            let bytes = self.tui_globals.reader.read_bytes(
-                                location.start,
-                                location.end - location.start,
-                            )?;
+                            let bytes =
+                                self.tui_globals.reader.read_bytes(location)?;
                             let value = runtime_type.parse(&bytes)?;
                             ann.value(value);
                         }
@@ -565,10 +563,7 @@ impl TuiExplorerBuilder {
                     .name(format!(" {field_name}"));
 
                 if let Some(runtime_type) = field.runtime_type()? {
-                    let bytes = self.tui_globals.reader.read_bytes(
-                        location.start,
-                        location.end - location.start,
-                    )?;
+                    let bytes = self.tui_globals.reader.read_bytes(location)?;
                     let value = runtime_type.parse(&bytes)?;
                     ann.value(value);
                 }

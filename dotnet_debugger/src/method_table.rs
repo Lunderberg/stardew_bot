@@ -41,7 +41,7 @@ impl MethodTable {
     }
 
     pub fn read(ptr: Pointer, reader: &MemoryReader) -> Result<Self, Error> {
-        let bytes = reader.read_bytes(ptr, Self::SIZE)?;
+        let bytes = reader.read_bytes(ptr..ptr + Self::SIZE)?;
         Ok(Self { bytes })
     }
 
@@ -187,7 +187,7 @@ impl MethodTable {
             - num_parent_instance_fields) as usize;
         let nbytes = num_fields * FieldDescription::SIZE;
 
-        let bytes = reader.read_bytes(ptr, nbytes)?;
+        let bytes = reader.read_bytes(ptr..ptr + nbytes)?;
         Ok(Some(FieldDescriptions { bytes }))
     }
 }
@@ -217,7 +217,8 @@ impl EEClass {
         // https://github.com/dotnet/runtime/commit/8b581cad
         // (2024-01-24)
         let extra_size = 256;
-        let bytes = reader.read_bytes(location, base_size + extra_size)?;
+        let bytes =
+            reader.read_bytes(location..location + base_size + extra_size)?;
         Ok(Self { bytes })
     }
 

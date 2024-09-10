@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fs::OpenOptions;
 use std::io::{BufWriter, Write};
+use std::ops::Range;
 use std::path::PathBuf;
 
 use crate::Symbol;
@@ -47,12 +48,9 @@ impl MemoryReader {
         pointer.read_byte_array(self.pid)
     }
 
-    pub fn read_bytes(
-        &self,
-        pointer: impl Into<Pointer>,
-        num_bytes: usize,
-    ) -> Result<OwnedBytes> {
-        let start: Pointer = pointer.into();
+    pub fn read_bytes(&self, range: Range<Pointer>) -> Result<OwnedBytes> {
+        let start = range.start;
+        let num_bytes = range.end - range.start;
         let bytes = start.read_bytes(self.pid, num_bytes)?;
         Ok(OwnedBytes::new(start, bytes))
     }

@@ -400,7 +400,8 @@ impl RuntimeModule {
             // The layout of the Module varies by .NET version, but should
             // be less than 4kB for each.  If I don't find each pointer by
             // then, then something else is probably wrong.
-            let bytes = reader.read_bytes(self.location, 4096)?;
+            let bytes =
+                reader.read_bytes(self.location..self.location + 4096)?;
 
             bytes
                 .chunks_exact(8)
@@ -454,7 +455,8 @@ impl RuntimeModule {
             let num_type_defs =
                 self.metadata(reader)?.type_def_table().num_rows();
 
-            let bytes = reader.read_bytes(self.location, 4096)?;
+            let bytes =
+                reader.read_bytes(self.location..self.location + 4096)?;
 
             let (ptr_to_table_of_method_tables, supported_flags) = bytes
                 .chunks_exact(8)
@@ -486,10 +488,7 @@ impl RuntimeModule {
             };
 
             let method_tables = reader
-                .read_bytes(
-                    ptr_to_method_tables.start,
-                    ptr_to_method_tables.end - ptr_to_method_tables.start,
-                )?
+                .read_bytes(ptr_to_method_tables.clone())?
                 .into_iter()
                 .iter_as::<[u8; Pointer::SIZE]>()
                 .map(|arr| -> Pointer {
@@ -518,7 +517,8 @@ impl RuntimeModule {
                 // The layout of the Module varies by .NET version, but should
                 // be less than 4kB for each.  If I don't find each pointer by
                 // then, then something else is probably wrong.
-                let bytes = reader.read_bytes(self.location, 4096)?;
+                let bytes =
+                    reader.read_bytes(self.location..self.location + 4096)?;
 
                 let num_type_defs =
                     self.metadata(reader)?.type_def_table().num_rows();
@@ -648,8 +648,7 @@ impl MethodTableLookup {
             .cloned()
             .filter(|ptr| !ptr.start.is_null())
             .map(move |location| {
-                let nbytes = location.end - location.start;
-                let bytes = reader.read_bytes(location.start, nbytes)?;
+                let bytes = reader.read_bytes(location)?;
                 Ok(MethodTable { bytes })
             })
     }
@@ -661,9 +660,8 @@ impl MethodTableLookup {
     ) -> Result<MethodTable, Error> {
         let reader = reader.borrow();
 
-        let byte_range = &self[index];
-        let bytes = reader
-            .read_bytes(byte_range.start, byte_range.end - byte_range.start)?;
+        let byte_range = self[index].clone();
+        let bytes = reader.read_bytes(byte_range)?;
         Ok(MethodTable { bytes })
     }
 
