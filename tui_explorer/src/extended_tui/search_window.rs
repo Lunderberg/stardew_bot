@@ -5,6 +5,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph},
 };
+use regex::{Regex, RegexBuilder};
 
 use crate::extended_tui::ScrollableState;
 use crate::extensions::*;
@@ -62,10 +63,9 @@ impl<T> SearchWindow<T> {
         &self,
         line: impl Into<Line<'a>>,
     ) -> Line<'a> {
-        line.into().style_substring(
-            &self.get_search_string(None),
-            Style::default().bg(Color::Yellow),
-        )
+        let regex = self.get_search_regex(None);
+        line.into()
+            .style_regex_ref(&regex, Style::default().bg(Color::Yellow))
     }
 
     // Return the string being searched for.
@@ -201,6 +201,18 @@ impl<T> SearchWindow<T> {
         });
     }
 
+    fn get_search_regex(&self, last_char: Option<char>) -> Regex {
+        let needle = self.get_search_string(last_char);
+        let is_case_sensitive = needle.chars().any(char::is_uppercase);
+
+        let regex = RegexBuilder::new(regex::escape(&needle).as_str())
+            .case_insensitive(!is_case_sensitive)
+            .build()
+            .unwrap();
+
+        regex
+    }
+
     pub(crate) fn search<F>(
         &mut self,
         search_range: impl IntoIterator<Item = usize>,
@@ -210,11 +222,12 @@ impl<T> SearchWindow<T> {
     where
         F: FnMut(usize) -> Vec<String>,
     {
-        let needle = self.get_search_string(last_char);
+        let regex = self.get_search_regex(last_char);
+
         search_range.into_iter().find(|row| {
             row_generator(*row)
                 .iter()
-                .any(|cell_text| cell_text.contains(&needle))
+                .any(|cell_text| regex.is_match(cell_text))
         })
     }
 
