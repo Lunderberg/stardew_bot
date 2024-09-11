@@ -1,11 +1,11 @@
 use memory_reader::{OwnedBytes, Pointer};
 
 use crate::runtime_type::RuntimePrimType;
-use crate::{Error, MethodTable, RuntimeType, TypedPointer};
+use crate::{Error, MethodTable, RuntimeObject, RuntimeType, TypedPointer};
 
 pub enum RuntimeValue {
     Prim(RuntimePrimValue),
-    Object(Pointer),
+    Object(TypedPointer<RuntimeObject>),
     Struct {
         vtable: TypedPointer<MethodTable>,
         bytes: OwnedBytes,

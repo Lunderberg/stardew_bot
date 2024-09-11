@@ -47,7 +47,7 @@ impl RuntimeType {
             }
             RuntimeType::Class => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
-                Ok(RuntimeValue::Object(ptr))
+                Ok(RuntimeValue::Object(ptr.into()))
             }
             RuntimeType::ValueType { .. } => {
                 Err(Error::ValueTypeRequiresContextualParsing)

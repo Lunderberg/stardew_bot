@@ -401,7 +401,7 @@ impl ObjectTreeNode {
     ) -> Result<(), Error> {
         if self.should_read {
             self.should_read = false;
-            match &mut self.kind {
+            match self.kind {
                 ObjectTreeNodeKind::NewValue => {
                     let value = reader
                         .value(self.runtime_type, self.location.clone())?;
@@ -418,7 +418,7 @@ impl ObjectTreeNode {
                         return Err(Error::CannotExpandNullField);
                     }
 
-                    let obj = reader.object((*ptr).into())?;
+                    let obj = reader.object(ptr)?;
                     let class_name = reader
                         .method_table_to_name(obj.method_table())?
                         .to_string();
