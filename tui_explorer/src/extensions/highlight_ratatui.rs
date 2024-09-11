@@ -23,6 +23,7 @@ pub trait HighlightLine {
         self.style_regex_ref(&regex, style)
     }
 
+    #[allow(dead_code)]
     fn style_substring(self, substring: &str, style: impl Into<Style>) -> Self
     where
         Self: Sized,

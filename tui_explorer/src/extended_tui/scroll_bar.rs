@@ -1,21 +1,27 @@
 use ratatui::{
-    layout::{Constraint, Direction, Layout, Rect},
-    widgets::{StatefulWidget, Widget},
+    layout::Rect,
+    style::{Modifier, Style},
+    text::Line,
+    widgets::{List, ListState, StatefulWidget, Widget},
 };
 
 use crate::extended_tui::VerticalBar;
-use crate::{extensions::*, KeyBindingMatch, KeySequence};
+use crate::extensions::*;
+use crate::{KeyBindingMatch, KeySequence};
 
 pub struct WithScrollbar<Inner> {
     inner: Inner,
     num_rows: usize,
     num_header_rows: usize,
+    numbered: bool,
 }
 
 pub trait ScrollableState {
     fn selected_row(&self) -> Option<usize>;
 
     fn select_row(&mut self, row: Option<usize>);
+
+    fn current_offset(&self) -> usize;
 
     fn apply_key_binding(
         &mut self,
@@ -76,34 +82,23 @@ impl<Inner> WithScrollbar<Inner> {
         WithScrollbar {
             inner,
             num_rows,
-            num_header_rows: 2,
+            num_header_rows: 0,
+            numbered: false,
         }
     }
 
-    pub fn _num_header_rows(self, num_header_rows: usize) -> Self {
+    pub fn num_header_rows(self, num_header_rows: usize) -> Self {
         Self {
             num_header_rows,
             ..self
         }
     }
 
-    fn split_scroll_area(&self, area: Rect) -> (Rect, Rect) {
-        let (left_column, inner_area) = Layout::default()
-            .direction(Direction::Horizontal)
-            .margin(0)
-            .constraints([Constraint::Min(1), Constraint::Percentage(100)])
-            .split_tuple(area);
-
-        let (_, scrollbar_area) = Layout::default()
-            .direction(Direction::Vertical)
-            .margin(0)
-            .constraints([
-                Constraint::Min(self.num_header_rows as u16),
-                Constraint::Percentage(100),
-            ])
-            .split_tuple(left_column);
-
-        (scrollbar_area, inner_area)
+    pub fn number_each_row(self) -> Self {
+        Self {
+            numbered: true,
+            ..self
+        }
     }
 
     fn make_scrollbar(&self, area: Rect, state: &Inner::State) -> impl Widget
@@ -148,10 +143,36 @@ where
         buf: &mut ratatui::prelude::Buffer,
         state: &mut Self::State,
     ) {
-        let (scrollbar_area, inner_area) = self.split_scroll_area(area);
+        let (left_column, inner_area) = area.split_from_left(1);
+        let (_, scrollbar_area) =
+            left_column.split_from_top(self.num_header_rows as u16);
+
+        let (sidebar, inner_area) = if self.numbered {
+            let ncols = (self.num_rows + 1).ilog10() as u16;
+            let (sidebar, inner_area) = inner_area.split_from_left(ncols);
+
+            (Some(sidebar), inner_area)
+        } else {
+            (None, inner_area)
+        };
 
         self.make_scrollbar(area, state).render(scrollbar_area, buf);
         self.inner.render(inner_area, buf, state);
+
+        if let Some(sidebar) = sidebar {
+            let offset = state.current_offset();
+            let lines = (0..sidebar.height as usize)
+                .map(|i| Line::raw(format!("{}", i + offset)));
+            let widget = List::new(lines)
+                .highlight_style(
+                    Style::default().add_modifier(Modifier::REVERSED),
+                )
+                .style(Style::default().fg(ratatui::style::Color::Gray));
+            let mut dummy_state = ListState::default()
+                .with_offset(0)
+                .with_selected(state.selected_row().map(|sel| sel - offset));
+            StatefulWidget::render(widget, sidebar, buf, &mut dummy_state);
+        }
     }
 }
 
@@ -163,6 +184,10 @@ impl ScrollableState for ratatui::widgets::TableState {
     fn select_row(&mut self, row: Option<usize>) {
         self.select(row)
     }
+
+    fn current_offset(&self) -> usize {
+        self.offset()
+    }
 }
 
 impl ScrollableState for ratatui::widgets::ListState {
@@ -172,5 +197,9 @@ impl ScrollableState for ratatui::widgets::ListState {
 
     fn select_row(&mut self, row: Option<usize>) {
         self.select(row)
+    }
+
+    fn current_offset(&self) -> usize {
+        self.offset()
     }
 }

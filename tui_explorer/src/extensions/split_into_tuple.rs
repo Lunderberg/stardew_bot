@@ -2,6 +2,7 @@ use itertools::{traits::HomogeneousTuple, Itertools as _};
 use ratatui::layout::{Layout, Rect};
 
 pub trait SplitIntoTuple<Tuple> {
+    #[allow(dead_code)]
     fn split_tuple(self, area: Rect) -> Tuple;
 }
 

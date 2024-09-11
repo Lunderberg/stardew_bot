@@ -626,8 +626,6 @@ impl WidgetWindow for ObjectExplorer {
             area
         };
 
-        let (area_sidebar, area) = area.split_from_left(5);
-
         let display_range = {
             let start = self.list_state.offset();
             let num_lines = area.height as usize;
@@ -658,30 +656,10 @@ impl WidgetWindow for ObjectExplorer {
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .with_scrollbar(self.object_tree.num_lines());
+            .with_scrollbar(self.object_tree.num_lines())
+            .number_each_row();
 
         StatefulWidget::render(widget, area, buf, &mut self.list_state);
-
-        {
-            let lines = self
-                .object_tree
-                .iter_lines()
-                .enumerate()
-                .map(|(i, _)| Line::raw(format!("{i: >4}")));
-
-            let widget = List::new(lines)
-                .highlight_style(
-                    Style::default().add_modifier(Modifier::REVERSED),
-                )
-                .style(Style::default().fg(ratatui::style::Color::Gray));
-
-            StatefulWidget::render(
-                widget,
-                area_sidebar,
-                buf,
-                &mut self.list_state,
-            );
-        }
     }
 }
 

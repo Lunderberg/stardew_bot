@@ -583,7 +583,8 @@ impl<'a> ratatui::widgets::Widget for DrawableViewFrame<'a> {
                 self.formatters,
                 &self.view.search,
             )
-            .with_scrollbar(self.view.num_table_rows());
+            .with_scrollbar(self.view.num_table_rows())
+            .num_header_rows(2);
         table.render(table_area, buf, &mut self.view.table_state);
     }
 }

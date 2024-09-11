@@ -676,7 +676,7 @@ impl TuiExplorer {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
-        while !handler.received() && !self.should_exit {
+        loop {
             context.draw(|frame| self.draw(frame))?;
 
             let timeout = std::time::Duration::from_millis(100);
@@ -687,6 +687,10 @@ impl TuiExplorer {
                 self.handle_event(event_received);
             }
             self.periodic_update();
+
+            if handler.received() || self.should_exit {
+                break;
+            }
         }
         Ok(())
     }
