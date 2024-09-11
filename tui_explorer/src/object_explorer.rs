@@ -5,7 +5,7 @@ use regex::Regex;
 
 use ratatui::{
     style::{Color, Modifier, Style},
-    text::Line,
+    text::{Line, Text},
     widgets::{List, ListState, StatefulWidget, Widget as _},
 };
 
@@ -526,11 +526,6 @@ impl ObjectTreeNode {
             ) => format!("{indent}}}"),
         }
     }
-
-    fn iter_lines(&self) -> impl Iterator<Item = String> + '_ {
-        self.iter()
-            .map(|(field, is_start)| field.format_str(is_start))
-    }
 }
 
 impl WidgetWindow for ObjectExplorer {
@@ -626,33 +621,46 @@ impl WidgetWindow for ObjectExplorer {
             area
         };
 
+        // This is a hack to update the `list_state` so that the
+        // `display_range` will have the correct range.  If the lines
+        // outside of the `display_range` are generated, it slows down
+        // the rendering considerably.  Rendering the list of empty
+        // lines updates `display_range` to be accurate for the actual
+        // rendering.
+        let num_lines = self.object_tree.num_lines();
+        StatefulWidget::render(
+            List::new(vec![Text::default(); num_lines]),
+            area,
+            buf,
+            &mut self.list_state,
+        );
+
         let display_range = {
             let start = self.list_state.offset();
             let num_lines = area.height as usize;
             start..start + num_lines
         };
 
-        let lines = self
-            .object_tree
-            .iter_lines()
-            .map(|text| Line::raw(text))
-            .enumerate()
-            .map(|(i, mut line)| {
+        let lines = self.object_tree.iter().enumerate().map(
+            |(i, (field, is_start))| {
                 if display_range.contains(&i) {
+                    let mut line: Line = field.format_str(is_start).into();
+
                     line = line.style_regex(
                         "0x[0-9a-fA-F]+",
                         Style::default().fg(Color::Red),
                     );
-                }
 
-                if display_range.contains(&i) {
                     if let Some(search) = self.search.as_ref() {
                         line = search.highlight_search_matches(line);
                     }
-                }
 
-                line
-            });
+                    line
+                } else {
+                    Line::default()
+                }
+            },
+        );
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
