@@ -1,15 +1,31 @@
 use memory_reader::{OwnedBytes, Pointer};
 
 use crate::runtime_type::RuntimePrimType;
-use crate::{Error, MethodTable, RuntimeObject, RuntimeType, TypedPointer};
+use crate::{
+    Error, MethodTable, RuntimeObject, RuntimeString, RuntimeType, TypedPointer,
+};
 
 pub enum RuntimeValue {
+    /// A primitive value with fixed size.
     Prim(RuntimePrimValue),
+
+    /// A garbage-collected object.  No method table is required here,
+    /// because classes are self-describing.  The method table is
+    /// stored at the pointed-to location, followed by the instance
+    /// fields.
     Object(TypedPointer<RuntimeObject>),
+
+    /// A non-garbage-collected object.  The method table must be
+    /// stored explicitly, because structs are not self-describing,
+    /// and do not contain pointers to their method tables.  The
+    /// method table for a struct can only be located by inspecting
+    /// the fields structure of the type that contains the struct.
     Struct {
         vtable: TypedPointer<MethodTable>,
         bytes: OwnedBytes,
     },
+
+    String(TypedPointer<RuntimeString>),
 }
 
 pub enum RuntimePrimValue {
@@ -134,11 +150,13 @@ impl std::fmt::Display for RuntimeValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Prim(val) => write!(f, "{val}"),
-            Self::Object(val) if val.is_null() => write!(f, "null"),
-            Self::Object(val) => write!(f, "{val}"),
             Self::Struct { vtable, bytes } => {
                 write!(f, "struct {vtable} @ {}", bytes.start())
             }
+            Self::Object(val) if val.is_null() => write!(f, "null"),
+            Self::String(val) if val.is_null() => write!(f, "null"),
+            Self::Object(val) => write!(f, "{val}"),
+            Self::String(val) => write!(f, "{val}"),
         }
     }
 }

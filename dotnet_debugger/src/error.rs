@@ -86,6 +86,18 @@ pub enum Error {
         field_name: String,
         field_type: String,
     },
+
+    #[error(
+        "Length of System.String should be non-negative, \
+         but found length of {0} UTF-16 code units."
+    )]
+    NegativeStringLength(i32),
+
+    #[error("Invalid UTF-16 string: {err}")]
+    InvalidUTF16 {
+        #[from]
+        err: std::char::DecodeUtf16Error,
+    },
 }
 
 impl std::fmt::Debug for Error {

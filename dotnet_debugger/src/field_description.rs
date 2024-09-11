@@ -155,8 +155,10 @@ impl<'a> FieldDescription<'a> {
     }
 
     /// Returns the runtime type, if it can be determined solely from
-    /// the local information.  To determine the runtime type of a
-    /// ValueType, use CachedReader.runtime_type.
+    /// the local information.  To determine the full runtime type of
+    /// a ValueType, including any special cases such as
+    /// `RuntimeType::String`, use
+    /// `CachedReader::field_to_runtime_type`.
     pub fn runtime_type(&self) -> Result<Option<RuntimeType>, Error> {
         let element_type = self.cor_element_type()?;
         match element_type {

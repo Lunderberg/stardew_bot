@@ -37,7 +37,7 @@ struct SignatureDecompressor<'a> {
 pub struct SignatureFlags(u8);
 
 #[derive(Clone, Copy, Debug)]
-pub enum PrimType {
+pub enum SignaturePrimType {
     Bool,
     Char,
     I8,
@@ -56,7 +56,7 @@ pub enum PrimType {
 
 #[derive(Clone)]
 pub enum SignatureType<'a> {
-    Prim(PrimType),
+    Prim(SignaturePrimType),
     ValueType {
         index: MetadataCodedIndex<TypeDefOrRef>,
         metadata: Metadata<'a>,
@@ -116,7 +116,7 @@ pub enum CallingConvention {
 pub enum ElementType {
     End,
     Void,
-    Prim(PrimType),
+    Prim(SignaturePrimType),
     // Bool,
     // Char,
     // I8,
@@ -163,14 +163,44 @@ impl<'a> Signature<'a> {
         SignatureFlags(self.bytes[0])
     }
 
-    pub fn as_value_type(
-        &self,
-    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+    pub fn first_type(&self) -> Result<SignatureType<'a>, Error> {
         let mut unpacker = self.unpacker();
         let flags = unpacker.next_flags()?;
         flags.check_field()?;
 
         let ty = unpacker.next_type()?;
+
+        Ok(ty)
+    }
+
+    pub fn is_value_type(&self) -> Result<bool, Error> {
+        let ty = self.first_type()?;
+        Ok(matches!(
+            ty,
+            SignatureType::ValueType { .. }
+                | SignatureType::GenericInst {
+                    is_value_type: true,
+                    ..
+                }
+        ))
+    }
+
+    pub fn as_coded_index(
+        &self,
+    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+        let ty = self.first_type()?;
+
+        Ok(match ty {
+            SignatureType::ValueType { index, .. }
+            | SignatureType::GenericInst { index, .. } => Some(index),
+            _ => None,
+        })
+    }
+
+    pub fn as_value_type(
+        &self,
+    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
+        let ty = self.first_type()?;
 
         match ty {
             SignatureType::ValueType { index, .. }
@@ -183,7 +213,7 @@ impl<'a> Signature<'a> {
         }
     }
 
-    fn unpacker(&self) -> SignatureDecompressor {
+    fn unpacker(&self) -> SignatureDecompressor<'a> {
         SignatureDecompressor {
             bytes: self.bytes.clone(),
             verbose: false,
@@ -533,18 +563,18 @@ impl TryFrom<u32> for ElementType {
         match value {
             0x00 => Ok(Self::End),
             0x01 => Ok(Self::Void),
-            0x02 => Ok(Self::Prim(PrimType::Bool)),
-            0x03 => Ok(Self::Prim(PrimType::Char)),
-            0x04 => Ok(Self::Prim(PrimType::I8)),
-            0x05 => Ok(Self::Prim(PrimType::U8)),
-            0x06 => Ok(Self::Prim(PrimType::I16)),
-            0x07 => Ok(Self::Prim(PrimType::U16)),
-            0x08 => Ok(Self::Prim(PrimType::I32)),
-            0x09 => Ok(Self::Prim(PrimType::U32)),
-            0x0a => Ok(Self::Prim(PrimType::I64)),
-            0x0b => Ok(Self::Prim(PrimType::U64)),
-            0x0c => Ok(Self::Prim(PrimType::F32)),
-            0x0d => Ok(Self::Prim(PrimType::F64)),
+            0x02 => Ok(Self::Prim(SignaturePrimType::Bool)),
+            0x03 => Ok(Self::Prim(SignaturePrimType::Char)),
+            0x04 => Ok(Self::Prim(SignaturePrimType::I8)),
+            0x05 => Ok(Self::Prim(SignaturePrimType::U8)),
+            0x06 => Ok(Self::Prim(SignaturePrimType::I16)),
+            0x07 => Ok(Self::Prim(SignaturePrimType::U16)),
+            0x08 => Ok(Self::Prim(SignaturePrimType::I32)),
+            0x09 => Ok(Self::Prim(SignaturePrimType::U32)),
+            0x0a => Ok(Self::Prim(SignaturePrimType::I64)),
+            0x0b => Ok(Self::Prim(SignaturePrimType::U64)),
+            0x0c => Ok(Self::Prim(SignaturePrimType::F32)),
+            0x0d => Ok(Self::Prim(SignaturePrimType::F64)),
             0x0e => Ok(Self::String),
             0x0f => Ok(Self::Ptr),
             0x10 => Ok(Self::ByRef),
@@ -554,8 +584,8 @@ impl TryFrom<u32> for ElementType {
             0x14 => Ok(Self::Array),
             0x15 => Ok(Self::GenericInst),
             0x16 => Ok(Self::TypedByRef),
-            0x18 => Ok(Self::Prim(PrimType::NativeInt)),
-            0x19 => Ok(Self::Prim(PrimType::NativeUInt)),
+            0x18 => Ok(Self::Prim(SignaturePrimType::NativeInt)),
+            0x19 => Ok(Self::Prim(SignaturePrimType::NativeUInt)),
             0x1b => Ok(Self::FunctionPtr),
             0x1c => Ok(Self::Object),
             0x1d => Ok(Self::SizeArray),
@@ -636,23 +666,23 @@ impl std::fmt::Display for SignatureType<'_> {
     }
 }
 
-impl std::fmt::Display for PrimType {
+impl std::fmt::Display for SignaturePrimType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let name = match self {
-            PrimType::Bool => "bool",
-            PrimType::Char => "char",
-            PrimType::I8 => "i8",
-            PrimType::U8 => "u8",
-            PrimType::I16 => "i16",
-            PrimType::U16 => "u16",
-            PrimType::I32 => "i32",
-            PrimType::U32 => "u32",
-            PrimType::I64 => "i64",
-            PrimType::U64 => "u64",
-            PrimType::F32 => "f32",
-            PrimType::F64 => "f64",
-            PrimType::NativeInt => "isize",
-            PrimType::NativeUInt => "usize",
+            SignaturePrimType::Bool => "bool",
+            SignaturePrimType::Char => "char",
+            SignaturePrimType::I8 => "i8",
+            SignaturePrimType::U8 => "u8",
+            SignaturePrimType::I16 => "i16",
+            SignaturePrimType::U16 => "u16",
+            SignaturePrimType::I32 => "i32",
+            SignaturePrimType::U32 => "u32",
+            SignaturePrimType::I64 => "i64",
+            SignaturePrimType::U64 => "u64",
+            SignaturePrimType::F32 => "f32",
+            SignaturePrimType::F64 => "f64",
+            SignaturePrimType::NativeInt => "isize",
+            SignaturePrimType::NativeUInt => "usize",
         };
         write!(f, "{name}")
     }

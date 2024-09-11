@@ -13,6 +13,8 @@ pub enum RuntimeType {
         size: usize,
     },
     Class,
+
+    String,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -52,13 +54,17 @@ impl RuntimeType {
             RuntimeType::ValueType { .. } => {
                 Err(Error::ValueTypeRequiresContextualParsing)
             }
+            RuntimeType::String => {
+                let ptr: Pointer = bytes[..8].try_into().unwrap();
+                Ok(RuntimeValue::String(ptr.into()))
+            }
         }
     }
 
     pub fn size_bytes(&self) -> usize {
         match self {
             RuntimeType::Prim(prim) => prim.size_bytes(),
-            RuntimeType::Class => Pointer::SIZE,
+            RuntimeType::Class | RuntimeType::String => Pointer::SIZE,
             RuntimeType::ValueType { size, .. } => *size,
         }
     }
@@ -170,6 +176,7 @@ impl std::fmt::Display for RuntimeType {
                 write!(f, "struct({size} bytes, vtable {method_table})")
             }
             RuntimeType::Class => write!(f, "Object"),
+            RuntimeType::String => write!(f, "String"),
         }
     }
 }
@@ -192,6 +199,36 @@ impl std::fmt::Display for RuntimePrimType {
             RuntimePrimType::F32 => write!(f, "f32"),
             RuntimePrimType::F64 => write!(f, "f64"),
             RuntimePrimType::Ptr => write!(f, "Ptr"),
+        }
+    }
+}
+
+// This seems a bit silly to have separate types with identical
+// members, but only the SignaturePrimType and RuntimePrimType have
+// this strong of a correspondence.  For all other types, there's
+// extra information in the signature type (e.g. the
+// `MetadataCodedIndex` of a class or struct) or extra information in
+// the runtime type (e.g. pointers to method tables).  Since it
+// wouldn't make sense to combine the entire hierarchy of
+// signature/runtime types, keeping them entirely separate for now,
+// even though that duplicates the signature/runtime prim type.
+impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
+    fn from(value: dll_unpacker::SignaturePrimType) -> Self {
+        match value {
+            dll_unpacker::SignaturePrimType::Bool => Self::Bool,
+            dll_unpacker::SignaturePrimType::Char => Self::Char,
+            dll_unpacker::SignaturePrimType::I8 => Self::I8,
+            dll_unpacker::SignaturePrimType::U8 => Self::U8,
+            dll_unpacker::SignaturePrimType::I16 => Self::I16,
+            dll_unpacker::SignaturePrimType::U16 => Self::U16,
+            dll_unpacker::SignaturePrimType::I32 => Self::I32,
+            dll_unpacker::SignaturePrimType::U32 => Self::U32,
+            dll_unpacker::SignaturePrimType::I64 => Self::I64,
+            dll_unpacker::SignaturePrimType::U64 => Self::U64,
+            dll_unpacker::SignaturePrimType::F32 => Self::F32,
+            dll_unpacker::SignaturePrimType::F64 => Self::F64,
+            dll_unpacker::SignaturePrimType::NativeInt => Self::NativeInt,
+            dll_unpacker::SignaturePrimType::NativeUInt => Self::NativeUInt,
         }
     }
 }

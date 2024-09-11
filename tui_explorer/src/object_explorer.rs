@@ -51,6 +51,7 @@ struct ObjectTreeNode {
 enum ObjectTreeNodeKind {
     NewValue,
     Value(RuntimeValue),
+    String(String),
     Object {
         display_expanded: bool,
         class_name: String,
@@ -335,7 +336,7 @@ impl ObjectTreeNode {
             location.start..location.start + runtime_type.size_bytes();
 
         let kind = match runtime_type {
-            RuntimeType::Prim(_) | RuntimeType::Class => {
+            RuntimeType::Prim(_) | RuntimeType::Class | RuntimeType::String => {
                 let opt_bytes = prefetch
                     .iter()
                     .find(|bytes| bytes.contains_range(location.clone()));
@@ -413,6 +414,14 @@ impl ObjectTreeNode {
                     self.kind = ObjectTreeNodeKind::Value(value);
                 }
 
+                ObjectTreeNodeKind::Value(RuntimeValue::String(ptr)) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
+                    self.kind =
+                        ObjectTreeNodeKind::String(ptr.read(reader)?.into());
+                }
+
                 ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
                     if ptr.is_null() {
                         return Err(Error::CannotExpandNullField);
@@ -455,7 +464,8 @@ impl ObjectTreeNode {
                     };
                 }
 
-                ObjectTreeNodeKind::Value { .. } => {
+                ObjectTreeNodeKind::Value { .. }
+                | ObjectTreeNodeKind::String(_) => {
                     return Err(Error::NotImplementedYet(
                     "Collapse view of containing object when value selected"
                         .to_string(),
@@ -496,6 +506,9 @@ impl ObjectTreeNode {
             ) => format!(
                 "{indent}{field_type} {field_name} = {class_name} {{...}}"
             ),
+            (ObjectTreeNodeKind::String(value), _) => {
+                format!("{indent}{field_type} {field_name} = {value:?}")
+            }
             (
                 ObjectTreeNodeKind::Object {
                     display_expanded: true,

@@ -228,47 +228,58 @@ impl StaticValueCache {
         desc: &FieldDescription,
         reader: &MemoryReader,
     ) -> Result<RuntimeType, Error> {
-        let locally_known_type = desc.runtime_type()?;
-        if let Some(ty) = locally_known_type {
-            // Quick return case, when the FieldDescription is
-            // sufficient to know how to unpack the field.
-            return Ok(ty);
-        }
-
-        // Otherwise, need to use the metadata to find the MethodTable
-        // associated with the ValueType.
-
         let lookup_key = (desc.method_table(), desc.token());
 
         self.field_to_runtime_type
             .try_insert(lookup_key, || {
-                let module_ptr =
-                    self.method_table(desc.method_table(), reader)?.module();
-                let field_metadata = self
-                    .runtime_module(module_ptr, reader)?
-                    .metadata(reader)?
-                    .get(desc.token())?;
+                let method_table =
+                    self.method_table(desc.method_table(), reader)?;
+                let module_ptr = method_table.module();
+                let module = self.runtime_module(module_ptr, reader)?;
+                let metadata = module.metadata(reader)?;
+                let field_metadata = metadata.get(desc.token())?;
                 let signature = field_metadata.signature()?;
 
-                let coded_index =
-                    signature.as_value_type()?.ok_or_else(|| {
-                        Error::ExpectedValueTypeAsMetadataSignature {
-                            field_name: field_metadata
-                                .name()
-                                .unwrap_or("(unknown field)")
-                                .to_string(),
-                            field_type: format!("{signature}"),
-                        }
-                    })?;
+                let ty: RuntimeType = match signature.first_type()? {
+                    dll_unpacker::SignatureType::Prim(prim) => {
+                        // Primitive types could be handled with just
+                        // `desc.runtime_type()`, if necessary.
+                        RuntimeType::Prim(prim.into())
+                    }
+                    dll_unpacker::SignatureType::ValueType {
+                        index, ..
+                    }
+                    | dll_unpacker::SignatureType::GenericInst {
+                        index,
+                        is_value_type: true,
+                        ..
+                    } => {
+                        let method_table = self.method_table_by_metadata(
+                            module_ptr, index, reader,
+                        )?;
+                        let size = self
+                            .method_table(method_table, reader)?
+                            .base_size();
+                        RuntimeType::ValueType { method_table, size }
+                    }
+                    dll_unpacker::SignatureType::Class { .. } => {
+                        RuntimeType::Class
+                    }
+                    dll_unpacker::SignatureType::String => {
+                        // The String type appears as `Runtime::Class`
+                        // when inspecting the `desc.runtime_type()`.
+                        // It's technically correct, but identifying
+                        // the `System.String` type here, where the
+                        // signature must have the shorter type is
+                        // more convenient than identifying strings by
+                        // the use of the `System.String` method
+                        // table.
+                        RuntimeType::String
+                    }
+                    _ => RuntimeType::Class,
+                };
 
-                let method_table = self.method_table_by_metadata(
-                    module_ptr,
-                    coded_index,
-                    reader,
-                )?;
-                let size = self.method_table(method_table, reader)?.base_size();
-
-                Ok(RuntimeType::ValueType { method_table, size })
+                Ok(ty)
             })
             .copied()
     }

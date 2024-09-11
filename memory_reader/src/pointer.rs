@@ -96,7 +96,7 @@ impl Pointer {
             if err_string.contains("Operation not permitted") {
                 Error::MemoryReadInsufficientPermission
             } else if err_string.contains("Bad address") {
-                Error::MemoryReadBadAddress(*self)
+                Error::MemoryReadBadAddress(*self, buffer.len())
             } else {
                 Error::MemoryReadOther { err }
             }

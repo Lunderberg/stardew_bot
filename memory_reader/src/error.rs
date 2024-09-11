@@ -31,8 +31,11 @@ pub enum Error {
     #[error("Attempted memory read at nullptr of remote process")]
     MemoryReadNullPointer,
 
-    #[error("Bad address {0} in remote process")]
-    MemoryReadBadAddress(Pointer),
+    #[error(
+        "Bad read of {1} bytes \
+         from address {0} in remote process"
+    )]
+    MemoryReadBadAddress(Pointer, usize),
 
     #[error("Region {name:?} from address {start} to {end} could not be read")]
     MemoryReadBadRegion {

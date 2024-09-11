@@ -16,7 +16,7 @@ mod blob;
 pub use blob::UnpackedBlob;
 
 mod signature;
-pub use signature::Signature;
+pub use signature::{Signature, SignaturePrimType, SignatureType};
 
 pub(crate) mod dos_header;
 
