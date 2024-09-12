@@ -185,22 +185,10 @@ impl<'a> FieldDescription<'a> {
         module: &RuntimeModule,
         container: FieldContainer,
         reader: impl Borrow<MemoryReader>,
-    ) -> Result<Range<Pointer>, Error> {
+    ) -> Result<Pointer, Error> {
         let reader = reader.borrow();
-        let runtime_type = self.cor_element_type()?;
         let is_instance_field = !self.is_static();
         let is_rva_field = self.is_rva();
-
-        // The Module contains two pointers for static values,
-        // depending on whether the value must be inspected by the
-        // garbage collector.  This includes both class types
-        // (directly managed by garbage collector) and value types
-        // (may include class types), but not primitives.
-        let uses_gc_statics_base_ptr = matches!(
-            runtime_type,
-            //CorElementType::Class | CorElementType::ValueType
-            CorElementType::Class
-        );
 
         let ptr = if is_instance_field {
             let base = match container {
@@ -215,7 +203,12 @@ impl<'a> FieldDescription<'a> {
             let layout = module.metadata_layout(reader)?;
             let rva = RelativeVirtualAddress::new(self.offset());
             layout.virtual_address_to_raw(rva)?
-        } else if uses_gc_statics_base_ptr {
+        } else if matches!(self.cor_element_type()?, CorElementType::Class) {
+            // The Module contains two pointers for static values,
+            // depending on whether the value must be inspected by the
+            // garbage collector.  Objects that may be managed by the
+            // garbage collected are stored separately from unmanaged
+            // objects.
             let base = module.base_ptr_of_gc_statics(reader)?;
             base + self.offset()
         } else {
@@ -223,8 +216,6 @@ impl<'a> FieldDescription<'a> {
             base + self.offset()
         };
 
-        let size = runtime_type.size_bytes();
-
-        Ok(ptr..ptr + size)
+        Ok(ptr)
     }
 }

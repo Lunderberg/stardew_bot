@@ -1,7 +1,8 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, RuntimeObject, StaticValueCache, TypedPointer,
+    CachedReader, FieldContainer, RuntimeObject, RuntimeType, StaticValueCache,
+    TypedPointer,
 };
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
@@ -364,12 +365,6 @@ impl TuiExplorerBuilder {
         let runtime_module = reader.runtime_module(module_ptr)?;
         let metadata = runtime_module.metadata(&reader)?;
 
-        // let dll_region =
-        //     stardew_valley_dll(&self.tui_globals.reader)?.read()?;
-        // let metadata_layout =
-        //     dll_unpacker::unpack_metadata_layout(&dll_region)?;
-        // let metadata = metadata_layout.metadata(&dll_region);
-
         metadata.iter_heap_locations().for_each(|(kind, range)| {
             self.running_log
                 .add_log(format!("{kind} heap: {}", range.start));
@@ -383,11 +378,8 @@ impl TuiExplorerBuilder {
                     .add_log(format!("{kind} table: {}", range.start));
             });
 
-        let module_ptr = dotnet_debugger::RuntimeModule::locate(
-            metadata,
-            None,
-            &self.tui_globals.reader,
-        )?;
+        let module_ptr =
+            dotnet_debugger::RuntimeModule::locate(metadata, None, &reader)?;
 
         self.running_log.add_log(format!(
             "Found module pointer at {module_ptr} for {}",
@@ -429,10 +421,40 @@ impl TuiExplorerBuilder {
             )
             .name("TypeDefToMethodDef table");
 
+        let game_obj_method_table = runtime_module
+            .iter_method_tables(&self.tui_globals.reader)?
+            .try_find(|method_table| -> Result<_, Error> {
+                let type_def = metadata.get(method_table.token())?;
+                let name = type_def.name()?;
+                Ok(name == "Game1")
+            })?
+            .ok_or(Error::MethodTableNotFound("Game1"))?;
+
+        let game_obj_method_table_ptr = game_obj_method_table.ptr_range().start;
+
+        let game_obj = dotnet_debugger::find_most_likely_object_instance(
+            &game_obj_method_table,
+            &self.tui_globals.reader,
+        )?;
+
+        self.running_log
+            .add_log(format!("Top-level Game1 object {game_obj}"));
+
+        {
+            let game_obj: Pointer = game_obj.into();
+            annotations
+                .range(game_obj..game_obj + Pointer::SIZE)
+                .name("Game object method table");
+            annotations
+                .range(game_obj..game_obj + game_obj_method_table.base_size())
+                .name("Top-level game object")
+                .disable_highlight();
+        }
+
         runtime_module
             .iter_method_tables(&self.tui_globals.reader)?
-            .try_for_each(|table| -> Result<_, Error> {
-                let table = table?;
+            .try_for_each(|res_table| -> Result<_, Error> {
+                let table = res_table?;
 
                 let class_name = metadata.get(table.token())?.name()?;
                 annotations
@@ -482,25 +504,50 @@ impl TuiExplorerBuilder {
                     },
                 )?;
 
+                Ok(())
+            })?;
+
+        runtime_module
+            .iter_method_tables(&self.tui_globals.reader)?
+            .try_for_each(|res_table| -> Result<_, Error> {
+                let table = res_table?;
+                let class_name = metadata.get(table.token())?.name()?;
+                let fields =
+                    table.get_field_descriptions(&self.tui_globals.reader)?;
+
                 fields
                     .iter()
                     .flatten()
-                    .filter(|field| field.is_static())
+                    .filter(|field| {
+                        field.is_static()
+                            || field.method_table() == game_obj_method_table_ptr
+                    })
                     .try_for_each(|field| -> Result<_, Error> {
                         let field_name = metadata.get(field.token())?.name()?;
                         let location = field.location(
                             &runtime_module,
-                            FieldContainer::Static,
+                            if field.is_static() {
+                                FieldContainer::Static
+                            } else {
+                                FieldContainer::Class(game_obj.into())
+                            },
                             &self.tui_globals.reader,
                         )?;
 
+                        let runtime_type =
+                            reader.field_to_runtime_type(&field)?;
+                        let size_bytes = runtime_type.size_bytes();
+                        let byte_range = location..location + size_bytes;
+
                         let ann = annotations
-                            .range(location.clone())
+                            .range(byte_range.clone())
                             .name(format!("{class_name}.{field_name}"));
 
-                        if let Some(runtime_type) = field.runtime_type()? {
-                            let bytes =
-                                self.tui_globals.reader.read_bytes(location)?;
+                        if !matches!(
+                            runtime_type,
+                            RuntimeType::ValueType { .. }
+                        ) {
+                            let bytes = reader.read_bytes(byte_range)?;
                             let value = runtime_type.parse(&bytes)?;
                             ann.value(value);
                         }
@@ -508,65 +555,6 @@ impl TuiExplorerBuilder {
                         Ok(())
                     })?;
 
-                Ok(())
-            })?;
-
-        let game_obj_method_table = runtime_module
-            .iter_method_tables(&self.tui_globals.reader)?
-            .try_find(|method_table| -> Result<_, Error> {
-                let type_def = metadata.get(method_table.token())?;
-                let name = type_def.name()?;
-                Ok(name == "Game1")
-            })?
-            .ok_or(Error::MethodTableNotFound("Game1"))?;
-
-        let game_obj = dotnet_debugger::find_most_likely_object_instance(
-            &game_obj_method_table,
-            &self.tui_globals.reader,
-        )?;
-
-        self.running_log
-            .add_log(format!("Top-level Game1 object {game_obj}"));
-
-        {
-            let game_obj: Pointer = game_obj.into();
-            annotations
-                .range(game_obj..game_obj + Pointer::SIZE)
-                .name("Game object method table");
-            annotations
-                .range(game_obj..game_obj + game_obj_method_table.base_size())
-                .name("Top-level game object")
-                .disable_highlight();
-        }
-
-        game_obj_method_table
-            .get_field_descriptions(&self.tui_globals.reader)?
-            .iter()
-            .flatten()
-            .filter(|field| {
-                // Static fields across all classes in the module are
-                // already annotated.
-                !field.is_static()
-            })
-            .try_for_each(|field| -> Result<_, Error> {
-                let field_name = metadata.get(field.token())?.name()?;
-                let location = field.location(
-                    &runtime_module,
-                    FieldContainer::Class(game_obj.into()),
-                    &self.tui_globals.reader,
-                )?;
-
-                let ann = self
-                    .tui_globals
-                    .annotations
-                    .range(location.clone())
-                    .name(format!(" {field_name}"));
-
-                if let Some(runtime_type) = field.runtime_type()? {
-                    let bytes = self.tui_globals.reader.read_bytes(location)?;
-                    let value = runtime_type.parse(&bytes)?;
-                    ann.value(value);
-                }
                 Ok(())
             })?;
 

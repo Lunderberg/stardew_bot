@@ -701,11 +701,8 @@ impl<'a> CachedReader<'a> {
                         self.field_to_runtime_type(&field).ok()?;
                     let start = field
                         .location(&module, FieldContainer::Static, self)
-                        .ok()?
-                        .start;
+                        .ok()?;
 
-                    // TODO: Make the Range<Pointer> returned by the
-                    // location be correct for value types.
                     let size = runtime_type.size_bytes();
                     Some(start..start + size)
                 })

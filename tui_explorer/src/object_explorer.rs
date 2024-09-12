@@ -330,10 +330,7 @@ impl ObjectTreeNode {
         let module = reader.runtime_module(method_table.module())?;
         let location = field.location(module, container, reader)?;
 
-        // TODO: Either return the correct size from
-        // FieldDescription::location, or don't return a size at all.
-        let location =
-            location.start..location.start + runtime_type.size_bytes();
+        let location = location..location + runtime_type.size_bytes();
 
         let kind = match runtime_type {
             RuntimeType::Prim(_) | RuntimeType::Class | RuntimeType::String => {
