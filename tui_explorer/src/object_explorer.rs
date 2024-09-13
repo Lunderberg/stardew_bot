@@ -48,7 +48,7 @@ struct ObjectTreeNode {
 }
 
 enum ObjectTreeNodeKind {
-    NewValue,
+    UnreadValue,
     Value(RuntimeValue),
     String(String),
     Object {
@@ -337,7 +337,7 @@ impl ObjectTreeNode {
                         .parse(bytes.subrange(location.clone()).into())?;
                     ObjectTreeNodeKind::Value(runtime_value)
                 } else {
-                    ObjectTreeNodeKind::NewValue
+                    ObjectTreeNodeKind::UnreadValue
                 }
             }
             RuntimeType::ValueType {
@@ -393,7 +393,7 @@ impl ObjectTreeNode {
         if self.should_read {
             self.should_read = false;
             match self.kind {
-                ObjectTreeNodeKind::NewValue => {
+                ObjectTreeNodeKind::UnreadValue => {
                     let value = reader
                         .value(self.runtime_type, self.location.clone())?;
                     self.kind = ObjectTreeNodeKind::Value(value);
@@ -527,7 +527,7 @@ impl<'a> ObjectTreeIteratorItem<'a> {
         let ptr = self.node.location.start;
 
         match (&self.node.kind, &self.pos) {
-            (ObjectTreeNodeKind::NewValue, _) => {
+            (ObjectTreeNodeKind::UnreadValue, _) => {
                 format!("{indent}{field_type} {field_name} @ {ptr};")
             }
             (ObjectTreeNodeKind::Value(value), _) => {
