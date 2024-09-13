@@ -42,7 +42,6 @@ struct ObjectTreeNode {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
     should_read: bool,
-    tree_depth: usize,
     field_name: String,
     field_type: String,
     kind: ObjectTreeNodeKind,
@@ -57,6 +56,21 @@ enum ObjectTreeNodeKind {
         class_name: String,
         fields: Vec<ObjectTreeNode>,
     },
+}
+
+struct ObjectTreeIterator<'a> {
+    stack: Vec<ObjectTreeIteratorItem<'a>>,
+}
+
+enum LinePosition {
+    StartOfNode,
+    EndOfNode,
+}
+
+struct ObjectTreeIteratorItem<'a> {
+    node: &'a ObjectTreeNode,
+    pos: LinePosition,
+    tree_depth: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -120,7 +134,6 @@ impl ObjectExplorer {
                     .map_ok(move |field| -> Result<_, Error> {
                         let node = ObjectTreeNode::initial_field(
                             FieldContainer::Static,
-                            1,
                             field,
                             reader_ref,
                             display_options_ref,
@@ -151,7 +164,6 @@ impl ObjectExplorer {
             location: Pointer::null()..Pointer::null(),
             runtime_type: RuntimeType::Class,
             should_read: false,
-            tree_depth: 0,
             field_name: "(static fields)".into(),
             field_type: "(static fields)".into(),
         };
@@ -167,7 +179,7 @@ impl ObjectExplorer {
 
     fn selected_node(&self) -> Option<&ObjectTreeNode> {
         self.list_state.selected().and_then(|selected| {
-            self.object_tree.iter().map(|(node, _)| node).nth(selected)
+            self.object_tree.iter().map(|item| item.node).nth(selected)
         })
     }
 
@@ -241,24 +253,8 @@ impl ObjectTreeNode {
         }
     }
 
-    fn iter(&self) -> impl Iterator<Item = (&Self, bool)> + '_ {
-        let fields: Option<Box<dyn Iterator<Item = (&Self, bool)>>> =
-            match &self.kind {
-                ObjectTreeNodeKind::Object {
-                    display_expanded: true,
-                    fields,
-                    ..
-                } => {
-                    let iter = fields
-                        .iter()
-                        .flat_map(|field| field.iter())
-                        .chain(std::iter::once((self, false)));
-                    Some(Box::new(iter))
-                }
-                _ => None,
-            };
-
-        std::iter::once((self, true)).chain(fields.into_iter().flatten())
+    fn iter(&self) -> impl Iterator<Item = ObjectTreeIteratorItem> + '_ {
+        ObjectTreeIterator::new(self)
     }
 
     fn node_at_line<'a>(
@@ -306,7 +302,6 @@ impl ObjectTreeNode {
 
     fn initial_field(
         container: FieldContainer,
-        tree_depth: usize,
         field: FieldDescription,
         reader: &CachedReader,
         display_options: &DisplayOptions,
@@ -364,7 +359,6 @@ impl ObjectTreeNode {
                     .map(|subfield| {
                         Self::initial_field(
                             FieldContainer::ValueType(location.start),
-                            tree_depth + 1,
                             subfield,
                             reader,
                             display_options,
@@ -386,7 +380,6 @@ impl ObjectTreeNode {
             location,
             runtime_type,
             should_read: false,
-            tree_depth: tree_depth + 1,
             field_name,
             field_type,
         })
@@ -445,7 +438,6 @@ impl ObjectTreeNode {
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
                                 FieldContainer::Class(instance_location.into()),
-                                self.tree_depth + 1,
                                 field,
                                 reader,
                                 display_options,
@@ -478,14 +470,63 @@ impl ObjectTreeNode {
 
         Ok(())
     }
+}
 
-    fn format_str(&self, is_start: bool) -> String {
+impl<'a> ObjectTreeIterator<'a> {
+    fn new(node: &'a ObjectTreeNode) -> Self {
+        Self {
+            stack: vec![ObjectTreeIteratorItem {
+                node,
+                pos: LinePosition::StartOfNode,
+                tree_depth: 0,
+            }],
+        }
+    }
+}
+
+impl<'a> Iterator for ObjectTreeIterator<'a> {
+    type Item = ObjectTreeIteratorItem<'a>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let next = self.stack.pop()?;
+
+        if matches!(next.pos, LinePosition::StartOfNode) {
+            match &next.node.kind {
+                ObjectTreeNodeKind::Object {
+                    fields,
+                    display_expanded: true,
+                    ..
+                } => {
+                    self.stack.push(ObjectTreeIteratorItem {
+                        pos: LinePosition::EndOfNode,
+                        ..next
+                    });
+                    fields
+                        .iter()
+                        .rev()
+                        .map(|node| ObjectTreeIteratorItem {
+                            node,
+                            pos: LinePosition::StartOfNode,
+                            tree_depth: next.tree_depth + 1,
+                        })
+                        .for_each(|item| self.stack.push(item));
+                }
+                _ => {}
+            }
+        }
+
+        Some(next)
+    }
+}
+
+impl<'a> ObjectTreeIteratorItem<'a> {
+    fn format_str(&self) -> String {
         let indent = Indent(self.tree_depth * 4);
-        let field_name = self.field_name.as_str();
-        let field_type = self.field_type.as_str();
-        let ptr = self.location.start;
+        let field_name = self.node.field_name.as_str();
+        let field_type = self.node.field_type.as_str();
+        let ptr = self.node.location.start;
 
-        match (&self.kind, is_start) {
+        match (&self.node.kind, &self.pos) {
             (ObjectTreeNodeKind::NewValue, _) => {
                 format!("{indent}{field_type} {field_name} @ {ptr};")
             }
@@ -512,14 +553,14 @@ impl ObjectTreeNode {
                     class_name,
                     ..
                 },
-                true,
+                LinePosition::StartOfNode,
             ) => format!("{indent}{field_type} {field_name} = {class_name} {{"),
             (
                 ObjectTreeNodeKind::Object {
                     display_expanded: true,
                     ..
                 },
-                false,
+                LinePosition::EndOfNode,
             ) => format!("{indent}}}"),
         }
     }
@@ -557,9 +598,7 @@ impl WidgetWindow for ObjectExplorer {
                                         self.object_tree
                                             .iter()
                                             .nth(i_line)
-                                            .map(|(field, is_start)| {
-                                                field.format_str(is_start)
-                                            })
+                                            .map(|item| item.format_str())
                                             .into_iter()
                                             .collect()
                                     },
@@ -638,26 +677,24 @@ impl WidgetWindow for ObjectExplorer {
             start..start + num_lines
         };
 
-        let lines = self.object_tree.iter().enumerate().map(
-            |(i, (field, is_start))| {
-                if display_range.contains(&i) {
-                    let mut line: Line = field.format_str(is_start).into();
+        let lines = self.object_tree.iter().enumerate().map(|(i, item)| {
+            if display_range.contains(&i) {
+                let mut line: Line = item.format_str().into();
 
-                    line = line.style_regex(
-                        "0x[0-9a-fA-F]+",
-                        Style::default().fg(Color::Red),
-                    );
+                line = line.style_regex(
+                    "0x[0-9a-fA-F]+",
+                    Style::default().fg(Color::Red),
+                );
 
-                    if let Some(search) = self.search.as_ref() {
-                        line = search.highlight_search_matches(line);
-                    }
-
-                    line
-                } else {
-                    Line::default()
+                if let Some(search) = self.search.as_ref() {
+                    line = search.highlight_search_matches(line);
                 }
-            },
-        );
+
+                line
+            } else {
+                Line::default()
+            }
+        });
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
