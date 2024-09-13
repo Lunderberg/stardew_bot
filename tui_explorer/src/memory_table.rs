@@ -526,6 +526,7 @@ impl ViewFrame {
                 .fg(Color::LightCyan)
                 .add_modifier(Modifier::BOLD),
         )
+        .column_spacing(1)
         .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
         .highlight_symbol(">> ");
 

@@ -44,10 +44,7 @@ where
     T: Into<Text<'a>>,
 {
     fn from(content: T) -> Self {
-        Self {
-            content: content.into(),
-            style: Style::default(),
-        }
+        Self::new::<T>(content)
     }
 }
 

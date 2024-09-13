@@ -255,7 +255,7 @@ impl<'a> PEHeaderUnpacker<'a> {
         Ok(start..start + optional_header_size)
     }
 
-    pub fn iter_section_headers(
+    pub fn _iter_section_headers(
         &self,
     ) -> Result<impl Iterator<Item = Range<Pointer>>, Error> {
         let num_sections = self.num_sections()?.value() as usize;
@@ -708,6 +708,8 @@ impl TryFrom<u32> for DataDirectoryKind {
 }
 
 impl<'a> SectionHeaderUnpacker<'a> {
+    #![allow(dead_code)]
+
     const SIZE: usize = 40;
 
     pub(crate) fn new(bytes: ByteRange<'a>, file_start: Pointer) -> Self {
