@@ -41,9 +41,10 @@ struct DisplayOptions {
 struct ObjectTreeNode {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
-    should_read: bool,
     field_name: String,
     field_type: String,
+    should_read: bool,
+    display_expanded: bool,
     kind: ObjectTreeNodeKind,
 }
 
@@ -52,7 +53,6 @@ enum ObjectTreeNodeKind {
     Value(RuntimeValue),
     String(String),
     Object {
-        display_expanded: bool,
         class_name: String,
         fields: Vec<ObjectTreeNode>,
     },
@@ -157,13 +157,14 @@ impl ObjectExplorer {
         // fields as being in a single class is incorrect.
         let object_tree = ObjectTreeNode {
             kind: ObjectTreeNodeKind::Object {
-                display_expanded: true,
                 class_name: "statics".into(),
                 fields: static_fields,
             },
             location: Pointer::null()..Pointer::null(),
             runtime_type: RuntimeType::Class,
             should_read: false,
+            display_expanded: true,
+
             field_name: "(static fields)".into(),
             field_type: "(static fields)".into(),
         };
@@ -194,17 +195,12 @@ impl ObjectExplorer {
             .node_at_line(selected)
             .expect("The selected line should always point to a node.");
 
-        match &mut node.kind {
-            ObjectTreeNodeKind::Object {
-                display_expanded, ..
-            } => {
-                // TODO: Find a good UX to distinguish between
-                // "collapse this node" and "re-read this node".
-                *display_expanded = !*display_expanded;
-            }
-            _ => {
-                node.should_read = !node.should_read;
-            }
+        if matches!(node.kind, ObjectTreeNodeKind::Object { .. }) {
+            // TODO: Find a good UX to distinguish between
+            // "collapse this node" and "re-read this node".
+            node.display_expanded = !node.display_expanded;
+        } else {
+            node.should_read = !node.should_read;
         }
     }
 
@@ -240,11 +236,9 @@ impl std::ops::Add<usize> for Indent {
 impl ObjectTreeNode {
     fn num_lines(&self) -> usize {
         match &self.kind {
-            ObjectTreeNodeKind::Object {
-                display_expanded: true,
-                fields,
-                ..
-            } => {
+            ObjectTreeNodeKind::Object { fields, .. }
+                if self.display_expanded =>
+            {
                 let child_lines: usize =
                     fields.iter().map(|field| field.num_lines()).sum();
                 child_lines + 2
@@ -268,17 +262,18 @@ impl ObjectTreeNode {
         if i_line == 0 {
             Some(self)
         } else if i_line + 1 < num_lines {
-            let ObjectTreeNodeKind::Object {
-                display_expanded: true,
-                fields,
-                ..
-            } = &mut self.kind
+            let ObjectTreeNodeKind::Object { fields, .. } = &mut self.kind
             else {
                 panic!(
                     "This conditional should only be reached \
                      if this is a multi-line object."
                 )
             };
+            assert!(
+                self.display_expanded,
+                "This conditional should only be reached \
+                 if this is a multi-line object."
+            );
 
             i_line -= 1;
             for field in fields {
@@ -367,11 +362,7 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeNodeKind::Object {
-                    display_expanded: true,
-                    class_name,
-                    fields,
-                }
+                ObjectTreeNodeKind::Object { class_name, fields }
             }
         };
 
@@ -380,6 +371,7 @@ impl ObjectTreeNode {
             location,
             runtime_type,
             should_read: false,
+            display_expanded: true,
             field_name,
             field_type,
         })
@@ -446,11 +438,8 @@ impl ObjectTreeNode {
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 
-                    self.kind = ObjectTreeNodeKind::Object {
-                        class_name,
-                        fields,
-                        display_expanded: true,
-                    };
+                    self.kind =
+                        ObjectTreeNodeKind::Object { class_name, fields };
                 }
 
                 ObjectTreeNodeKind::Value { .. }
@@ -490,29 +479,32 @@ impl<'a> Iterator for ObjectTreeIterator<'a> {
     fn next(&mut self) -> Option<Self::Item> {
         let next = self.stack.pop()?;
 
-        if matches!(next.pos, LinePosition::StartOfNode) {
-            match &next.node.kind {
-                ObjectTreeNodeKind::Object {
-                    fields,
-                    display_expanded: true,
-                    ..
-                } => {
-                    self.stack.push(ObjectTreeIteratorItem {
-                        pos: LinePosition::EndOfNode,
-                        ..next
-                    });
-                    fields
-                        .iter()
-                        .rev()
-                        .map(|node| ObjectTreeIteratorItem {
-                            node,
-                            pos: LinePosition::StartOfNode,
-                            tree_depth: next.tree_depth + 1,
-                        })
-                        .for_each(|item| self.stack.push(item));
-                }
-                _ => {}
+        match &next {
+            ObjectTreeIteratorItem {
+                pos: LinePosition::StartOfNode,
+                node:
+                    ObjectTreeNode {
+                        display_expanded: true,
+                        kind: ObjectTreeNodeKind::Object { fields, .. },
+                        ..
+                    },
+                ..
+            } => {
+                self.stack.push(ObjectTreeIteratorItem {
+                    pos: LinePosition::EndOfNode,
+                    ..next
+                });
+                fields
+                    .iter()
+                    .rev()
+                    .map(|node| ObjectTreeIteratorItem {
+                        node,
+                        pos: LinePosition::StartOfNode,
+                        tree_depth: next.tree_depth + 1,
+                    })
+                    .for_each(|item| self.stack.push(item));
             }
+            _ => {}
         }
 
         Some(next)
@@ -534,34 +526,23 @@ impl<'a> ObjectTreeIteratorItem<'a> {
                 format!("{indent}{field_type} {field_name} = {value};")
             }
 
-            (
-                ObjectTreeNodeKind::Object {
-                    display_expanded: false,
-                    class_name,
-                    ..
-                },
-                _,
-            ) => format!(
-                "{indent}{field_type} {field_name} = {class_name} {{...}}"
-            ),
             (ObjectTreeNodeKind::String(value), _) => {
                 format!("{indent}{field_type} {field_name} = {value:?}")
             }
             (
-                ObjectTreeNodeKind::Object {
-                    display_expanded: true,
-                    class_name,
-                    ..
-                },
+                ObjectTreeNodeKind::Object { class_name, .. },
                 LinePosition::StartOfNode,
-            ) => format!("{indent}{field_type} {field_name} = {class_name} {{"),
-            (
-                ObjectTreeNodeKind::Object {
-                    display_expanded: true,
-                    ..
-                },
-                LinePosition::EndOfNode,
-            ) => format!("{indent}}}"),
+            ) if self.node.display_expanded => {
+                format!("{indent}{field_type} {field_name} = {class_name} {{")
+            }
+            (ObjectTreeNodeKind::Object { .. }, LinePosition::EndOfNode) => {
+                format!("{indent}}}")
+            }
+            (ObjectTreeNodeKind::Object { class_name, .. }, _) => {
+                format!(
+                    "{indent}{field_type} {field_name} = {class_name} {{...}}"
+                )
+            }
         }
     }
 }
