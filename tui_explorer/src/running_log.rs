@@ -123,7 +123,7 @@ impl<'a> Widget for &'a mut RunningLog {
             .map(|line| {
                 line.style_regex(
                     "0x[0-9a-fA-F]+",
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(Color::LightRed),
                 )
             })
             .map(|line| {

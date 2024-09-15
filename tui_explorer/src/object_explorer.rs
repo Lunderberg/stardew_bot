@@ -664,7 +664,7 @@ impl WidgetWindow for ObjectExplorer {
 
                 line = line.style_regex(
                     "0x[0-9a-fA-F]+",
-                    Style::default().fg(Color::Red),
+                    Style::default().fg(Color::LightRed),
                 );
 
                 if let Some(search) = self.search.as_ref() {
