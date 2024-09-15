@@ -33,6 +33,9 @@ pub use runtime_object::*;
 mod runtime_string;
 pub use runtime_string::*;
 
+mod runtime_array;
+pub use runtime_array::*;
+
 mod static_value_cache;
 pub use static_value_cache::*;
 

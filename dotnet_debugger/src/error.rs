@@ -98,6 +98,24 @@ pub enum Error {
         #[from]
         err: std::char::DecodeUtf16Error,
     },
+
+    #[error("The method table of an array should contain the element size.")]
+    ArrayMissingComponentSize,
+
+    #[error("The method table of an array should contain the element type.")]
+    ArrayMissingElementType,
+
+    #[error(
+        "From flags in method table, expected PrimType, \
+         but EEClass contained type {0}."
+    )]
+    ExpectedPrimType(CorElementType),
+
+    #[error("Method table contained invalid type flag 0x{0:x}.")]
+    InvalidTypeFlag(u32),
+
+    #[error("Not yet implemented: {0}")]
+    NotImplementedYet(&'static str),
 }
 
 impl std::fmt::Debug for Error {

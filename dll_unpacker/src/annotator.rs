@@ -40,6 +40,14 @@ pub trait Annotation: Sized {
 
     fn disable_highlight(&mut self) -> &mut Self;
 
+    fn opt_value(&mut self, opt_value: Option<impl Display>) -> &mut Self {
+        if let Some(value) = opt_value {
+            self.value(value)
+        } else {
+            self.value("None")
+        }
+    }
+
     fn append_value(&mut self, value: impl Display) -> &mut Self {
         // Not the most efficient if done in a loop, but convenient
         // enough for now.

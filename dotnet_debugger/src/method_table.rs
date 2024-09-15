@@ -7,8 +7,9 @@ use dll_unpacker::{
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    unpack_fields, Error, FieldDescription, FieldDescriptions,
-    ReadTypedPointer, RuntimeModule, TypedPointer,
+    runtime_type::RuntimePrimType, unpack_fields, CorElementType, Error,
+    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
+    RuntimeType, TypedPointer,
 };
 
 pub struct MethodTable {
@@ -37,7 +38,7 @@ impl MethodTable {
         module: {TypedPointer<RuntimeModule>, 24..32},
         writable_data: {Pointer, 32..40},
         ee_class_or_canonical_table: {Pointer, 40..48},
-
+        element_type_handle: {TypedPointer<MethodTable>, 48..56},
     }
 
     pub fn read(ptr: Pointer, reader: &MemoryReader) -> Result<Self, Error> {
@@ -60,7 +61,7 @@ impl MethodTable {
         annotator.value(self.flags_2_unpacked()).name("flags2");
         annotator
             .range(self.raw_token_unpacked().loc())
-            .value(self.token())
+            .opt_value(self.token())
             .name("token");
         annotator
             .value(self.num_virtuals_unpacked())
@@ -91,9 +92,81 @@ impl MethodTable {
         self.flags_2() & 0x0002 > 0
     }
 
-    pub fn token(&self) -> MetadataTableIndex<TypeDef> {
+    pub fn component_size(&self) -> Option<usize> {
+        let flags = self.flags();
+        let has_component_size = (flags & 0x80000000) > 0;
+        if has_component_size {
+            let component_size = self.flags() & 0xFFFF;
+            Some(component_size as usize)
+        } else {
+            None
+        }
+    }
+
+    fn local_runtime_type(&self) -> Option<RuntimeType> {
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+
+        if type_flag == 0 && self.component_size() == Some(2) {
+            Some(RuntimeType::String)
+        } else if type_flag == 0 {
+            Some(RuntimeType::Class)
+        } else if type_flag == 0x000A0000 {
+            Some(RuntimeType::Array)
+        } else if type_flag == 0x00080000 {
+            todo!("Unpacking of ELEMENT_TYPE_ARRAY")
+        } else if type_flag == 0x00040000 {
+            Some(RuntimeType::ValueType {
+                method_table: self.ptr_range().start.into(),
+                size: self.base_size(),
+            })
+        } else if type_flag == 0x00060000 {
+            // This is a RuntimePrimType, but which primitive type
+            // cannot be determined solely from the MethodTable.
+            // Instead, this case should be handled with
+            // `EEClass::prim_type`.
+            None
+        } else {
+            None
+        }
+    }
+
+    pub fn is_array(&self) -> bool {
+        matches!(self.local_runtime_type(), Some(RuntimeType::Array))
+    }
+
+    pub fn is_string(&self) -> bool {
+        matches!(self.local_runtime_type(), Some(RuntimeType::String))
+    }
+
+    pub fn runtime_type(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<RuntimeType, Error> {
+        if let Some(ty) = self.local_runtime_type() {
+            Ok(ty)
+        } else {
+            let ee_class = self.get_ee_class(reader)?;
+            if let Some(prim) = ee_class.prim_type() {
+                Ok(RuntimeType::Prim(prim))
+            } else {
+                let type_flag = self.flags() & 0x000F0000;
+                Err(Error::InvalidTypeFlag(type_flag))
+            }
+        }
+    }
+
+    pub fn array_element_type(&self) -> Option<TypedPointer<MethodTable>> {
+        if matches!(self.local_runtime_type()?, RuntimeType::Array) {
+            Some(self.element_type_handle())
+        } else {
+            None
+        }
+    }
+
+    pub fn token(&self) -> Option<MetadataTableIndex<TypeDef>> {
         let index = self.raw_token() as usize;
-        MetadataTableIndex::new(index - 1)
+        (index > 0).then(|| MetadataTableIndex::new(index - 1))
     }
 
     pub fn ee_class_ptr(
@@ -284,6 +357,15 @@ impl EEClass {
         let offset = self.fixed_class_fields() as usize;
         let bytes = self.bytes.subrange(offset..offset + 44);
         EEClassPackedFields { bytes }
+    }
+
+    pub fn prim_type(&self) -> Option<RuntimePrimType> {
+        let norm_type: u8 = self.norm_type();
+        let element_type: CorElementType = norm_type.try_into().ok()?;
+        match element_type {
+            CorElementType::Prim(prim_type) => Some(prim_type),
+            _ => None,
+        }
     }
 }
 

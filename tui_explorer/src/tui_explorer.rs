@@ -327,9 +327,12 @@ impl TuiExplorerBuilder {
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.tui_globals.reader)?
             .try_find(|method_table| -> Result<_, Error> {
-                let type_def = metadata.get(method_table.token())?;
-                let name = type_def.name()?;
-                Ok(name == "Game1")
+                if let Some(type_def) = metadata.get(method_table.token())? {
+                    let name = type_def.name()?;
+                    Ok(name == "Game1")
+                } else {
+                    Ok(false)
+                }
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
@@ -424,9 +427,12 @@ impl TuiExplorerBuilder {
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.tui_globals.reader)?
             .try_find(|method_table| -> Result<_, Error> {
-                let type_def = metadata.get(method_table.token())?;
-                let name = type_def.name()?;
-                Ok(name == "Game1")
+                if let Some(type_def) = metadata.get(method_table.token())? {
+                    let name = type_def.name()?;
+                    Ok(name == "Game1")
+                } else {
+                    Ok(false)
+                }
             })?
             .ok_or(Error::MethodTableNotFound("Game1"))?;
 
@@ -456,18 +462,27 @@ impl TuiExplorerBuilder {
             .try_for_each(|res_table| -> Result<_, Error> {
                 let table = res_table?;
 
-                let class_name = metadata.get(table.token())?.name()?;
+                let type_def = metadata.get(table.token())?;
+                let class_name = if let Some(row) = type_def {
+                    row.name()?
+                } else {
+                    "(unknown class name)"
+                };
                 annotations
                     .range(table.ptr_range())
                     .name(format!("MethodTable, {class_name}"));
 
-                annotations
-                    .range(
-                        runtime_module
-                            .method_table_lookup(&self.tui_globals.reader)?
-                            .location_of_method_table_pointer(table.token()),
-                    )
-                    .name(format!("Ptr to {class_name} MethodTable"));
+                if let Some(type_def_token) = table.token() {
+                    annotations
+                        .range(
+                            runtime_module
+                                .method_table_lookup(&self.tui_globals.reader)?
+                                .location_of_method_table_pointer(
+                                    type_def_token,
+                                ),
+                        )
+                        .name(format!("Ptr to {class_name} MethodTable"));
+                }
 
                 table.collect_annotations(annotations)?;
                 let ee_class = table.get_ee_class(&self.tui_globals.reader)?;
@@ -493,7 +508,11 @@ impl TuiExplorerBuilder {
                             "Field {i} of class {class_name} \
                              (index = {}) \
                              did not point back to MethodTable",
-                            table.token()
+                            if let Some(token) = table.token() {
+                                format!("{token}")
+                            } else {
+                                "None".to_string()
+                            }
                         );
                         let field_name = metadata.get(field.token())?.name()?;
                         annotations
@@ -511,7 +530,11 @@ impl TuiExplorerBuilder {
             .iter_method_tables(&self.tui_globals.reader)?
             .try_for_each(|res_table| -> Result<_, Error> {
                 let table = res_table?;
-                let class_name = metadata.get(table.token())?.name()?;
+                let class_name = metadata
+                    .get(table.token())?
+                    .map(|row| row.name())
+                    .transpose()?
+                    .unwrap_or("(unknown class)");
                 let fields =
                     table.get_field_descriptions(&self.tui_globals.reader)?;
 

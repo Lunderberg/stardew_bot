@@ -15,6 +15,7 @@ pub enum RuntimeType {
     Class,
 
     String,
+    Array,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -58,14 +59,20 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::String(ptr.into()))
             }
+            RuntimeType::Array => {
+                let ptr: Pointer = bytes[..8].try_into().unwrap();
+                Ok(RuntimeValue::Array(ptr.into()))
+            }
         }
     }
 
     pub fn size_bytes(&self) -> usize {
         match self {
             RuntimeType::Prim(prim) => prim.size_bytes(),
-            RuntimeType::Class | RuntimeType::String => Pointer::SIZE,
             RuntimeType::ValueType { size, .. } => *size,
+            RuntimeType::Class | RuntimeType::String | RuntimeType::Array => {
+                Pointer::SIZE
+            }
         }
     }
 }
@@ -177,6 +184,7 @@ impl std::fmt::Display for RuntimeType {
             }
             RuntimeType::Class => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),
+            RuntimeType::Array => write!(f, "Array"),
         }
     }
 }

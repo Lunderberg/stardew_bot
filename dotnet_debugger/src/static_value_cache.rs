@@ -276,6 +276,9 @@ impl StaticValueCache {
                         // table.
                         RuntimeType::String
                     }
+                    dll_unpacker::SignatureType::SizeArray(_) => {
+                        RuntimeType::Array
+                    }
                     _ => RuntimeType::Class,
                 };
 
@@ -403,12 +406,17 @@ impl StaticValueCache {
         self.method_table_to_name
             .try_insert(ptr, || {
                 let method_table = self.method_table(ptr, reader)?;
+                let Some(type_def_token) = method_table.token() else {
+                    return Ok("(null metadata token)".to_string());
+                };
+
                 let module =
                     self.runtime_module(method_table.module(), reader)?;
                 let metadata = module.metadata(reader)?;
-                let name = metadata.get(method_table.token())?.name()?;
-                let namespace =
-                    metadata.get(method_table.token())?.namespace()?;
+
+                let type_def = metadata.get(type_def_token)?;
+                let name = type_def.name()?;
+                let namespace = type_def.namespace()?;
 
                 let fullname = if namespace.is_empty() {
                     name.to_string()

@@ -1,10 +1,16 @@
-use memory_reader::{OwnedBytes, Pointer};
+use memory_reader::Pointer;
 
 use crate::runtime_type::RuntimePrimType;
 use crate::{
-    Error, MethodTable, RuntimeObject, RuntimeString, RuntimeType, TypedPointer,
+    Error, RuntimeArray, RuntimeObject, RuntimeString, RuntimeType,
+    TypedPointer,
 };
 
+/// A value read out from the remote process.  This only handles
+/// fixed-size types, and does not handle structs (CLR ValueType).  To
+/// unpack structs, it should be broken down into its constituent
+/// fixed-size values.
+#[derive(Clone, Copy)]
 pub enum RuntimeValue {
     /// A primitive value with fixed size.
     Prim(RuntimePrimValue),
@@ -15,19 +21,12 @@ pub enum RuntimeValue {
     /// fields.
     Object(TypedPointer<RuntimeObject>),
 
-    /// A non-garbage-collected object.  The method table must be
-    /// stored explicitly, because structs are not self-describing,
-    /// and do not contain pointers to their method tables.  The
-    /// method table for a struct can only be located by inspecting
-    /// the fields structure of the type that contains the struct.
-    Struct {
-        vtable: TypedPointer<MethodTable>,
-        bytes: OwnedBytes,
-    },
-
     String(TypedPointer<RuntimeString>),
+
+    Array(TypedPointer<RuntimeArray>),
 }
 
+#[derive(Clone, Copy)]
 pub enum RuntimePrimValue {
     Bool(bool),
 
@@ -150,13 +149,12 @@ impl std::fmt::Display for RuntimeValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Prim(val) => write!(f, "{val}"),
-            Self::Struct { vtable, bytes } => {
-                write!(f, "struct {vtable} @ {}", bytes.start())
-            }
             Self::Object(val) if val.is_null() => write!(f, "null"),
+            Self::Object(val) => write!(f, "Object@{val}"),
             Self::String(val) if val.is_null() => write!(f, "null"),
-            Self::Object(val) => write!(f, "{val}"),
-            Self::String(val) => write!(f, "{val}"),
+            Self::String(val) => write!(f, "String@{val}"),
+            Self::Array(val) if val.is_null() => write!(f, "null"),
+            Self::Array(val) => write!(f, "Array@{val}"),
         }
     }
 }
