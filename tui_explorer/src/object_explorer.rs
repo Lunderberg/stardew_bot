@@ -432,6 +432,39 @@ impl ObjectTreeNode {
     ) -> Result<(), Error> {
         if self.value.should_read {
             self.value.should_read = false;
+
+            // Check if a generic `TypedPointer<RuntimeObject>` should
+            // actually be a type with a more specific unpacker.
+            //
+            // TODO: See if there's a cleaner way to handle this.
+            // These mostly occur from generic entries, where a member
+            // variable has type `GenericType`, and are currently
+            // treated as arbitrary objects.  These should instead be
+            // substituted with the types from the containing
+            // `GenericInst`.  Granted, this wouldn't cover all cases,
+            // as there could also be a generic `List<Object>`, so
+            // maybe the later check will still be necessary anyways.
+            match self.value.kind {
+                ObjectTreeValueKind::Value(RuntimeValue::Object(ptr)) => {
+                    let obj = reader.object(ptr)?;
+                    let method_table =
+                        reader.method_table(obj.method_table())?;
+
+                    let ptr: Pointer = ptr.into();
+                    if method_table.is_string() {
+                        self.value.kind = ObjectTreeValueKind::Value(
+                            RuntimeValue::String(ptr.into()),
+                        );
+                    } else if method_table.is_array() {
+                        self.value.kind = ObjectTreeValueKind::Value(
+                            RuntimeValue::Array(ptr.into()),
+                        );
+                    }
+                }
+                _ => {}
+            }
+
+            // Reading each type
             match self.value.kind {
                 ObjectTreeValueKind::UnreadValue => {
                     let value = reader.value(
