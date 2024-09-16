@@ -451,14 +451,26 @@ impl ObjectTreeNode {
                         reader.method_table(obj.method_table())?;
 
                     let ptr: Pointer = ptr.into();
-                    if method_table.is_string() {
-                        self.value.kind = ObjectTreeValueKind::Value(
-                            RuntimeValue::String(ptr.into()),
-                        );
-                    } else if method_table.is_array() {
-                        self.value.kind = ObjectTreeValueKind::Value(
-                            RuntimeValue::Array(ptr.into()),
-                        );
+                    self.value.runtime_type =
+                        method_table.runtime_type(reader)?;
+                    match self.value.runtime_type {
+                        RuntimeType::Prim(_) => {
+                            self.value.kind = ObjectTreeValueKind::UnreadValue;
+                        }
+                        RuntimeType::ValueType { .. } => {
+                            panic!("Leaf node should not have ValueType")
+                        }
+                        RuntimeType::Class => {}
+                        RuntimeType::String => {
+                            self.value.kind = ObjectTreeValueKind::Value(
+                                RuntimeValue::String(ptr.into()),
+                            );
+                        }
+                        RuntimeType::Array => {
+                            self.value.kind = ObjectTreeValueKind::Value(
+                                RuntimeValue::Array(ptr.into()),
+                            );
+                        }
                     }
                 }
                 _ => {}
