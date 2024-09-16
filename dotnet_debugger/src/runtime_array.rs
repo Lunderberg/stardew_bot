@@ -6,8 +6,9 @@ use crate::{Error, MethodTable, ReadTypedPointer, RuntimeType, TypedPointer};
 
 pub struct RuntimeArray {
     start: Pointer,
-    element_type: RuntimeType,
+    stride: usize,
     num_elements: usize,
+    element_type: RuntimeType,
 }
 
 impl RuntimeArray {
@@ -31,9 +32,8 @@ impl RuntimeArray {
     }
 
     pub fn element_location(&self, index: usize) -> Range<Pointer> {
-        let stride = self.element_type.size_bytes();
-        let start = self.start + Self::HEADER_SIZE + index * stride;
-        start..start + stride
+        let start = self.start + Self::HEADER_SIZE + index * self.stride;
+        start..start + self.stride
     }
 }
 
@@ -56,6 +56,10 @@ impl ReadTypedPointer for RuntimeArray {
         assert!(method_table.is_array());
         assert!(method_table.component_size().is_some());
 
+        let stride = method_table
+            .component_size()
+            .ok_or(Error::ArrayMissingComponentSize)?;
+
         let element_type_ptr = method_table
             .array_element_type()
             .ok_or(Error::ArrayMissingElementType)?;
@@ -64,6 +68,7 @@ impl ReadTypedPointer for RuntimeArray {
 
         Ok(Self {
             start: ptr,
+            stride,
             element_type,
             num_elements,
         })
