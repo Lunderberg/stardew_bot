@@ -137,9 +137,16 @@ impl dll_unpacker::Annotator for TuiExplorerBuilder {
 impl TuiExplorerBuilder {
     pub fn new() -> Result<Self, Error> {
         let pid = stardew_valley_pid()?;
+        let reader = MemoryReader::new(pid)?;
+
+        // Even if this is overridden later, finding the [stack]
+        // memory region is cheap to do, and ensures that we're
+        // looking at a valid memory location in the remote process.
+        let initial_pointer = reader.stack()?.address_range().start;
+
         Ok(Self {
             tui_globals: TuiGlobals {
-                reader: MemoryReader::new(pid)?,
+                reader,
                 current_region: MemoryRegion::empty(),
                 annotations: Vec::new(),
                 symbols: Vec::new(),
@@ -148,7 +155,7 @@ impl TuiExplorerBuilder {
 
             detail_formatters: Vec::new(),
             column_formatters: Vec::new(),
-            initial_pointer: Pointer::null(),
+            initial_pointer,
 
             running_log: RunningLog::new(100),
             layout: DynamicLayout::new(),
