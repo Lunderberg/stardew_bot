@@ -41,7 +41,7 @@ struct DisplayOptions {
 
 #[derive(Clone)]
 struct ObjectTreeNode {
-    context: ObjectTreeContext,
+    context: Option<ObjectTreeContext>,
     value: ObjectTreeValue,
 }
 
@@ -73,6 +73,7 @@ enum ObjectTreeValueKind {
         class_name: String,
         fields: Vec<ObjectTreeNode>,
     },
+    DisplayList(Vec<ObjectTreeNode>),
 }
 
 struct ObjectTreeIterator<'a> {
@@ -172,20 +173,14 @@ impl ObjectExplorer {
         // fields as being in a single class is incorrect.
         let object_tree = ObjectTreeNode {
             value: ObjectTreeValue {
-                kind: ObjectTreeValueKind::Object {
-                    class_name: "statics".into(),
-                    fields: static_fields,
-                },
+                kind: ObjectTreeValueKind::DisplayList(static_fields),
                 location: Pointer::null()..Pointer::null(),
                 runtime_type: RuntimeType::Class,
                 should_read: false,
                 display_expanded: true,
             },
 
-            context: ObjectTreeContext::Field {
-                field_name: "(static fields)".into(),
-                field_type: "(static fields)".into(),
-            },
+            context: None,
         };
 
         Ok(ObjectExplorer {
@@ -201,6 +196,7 @@ impl ObjectExplorer {
         self.list_state.selected().and_then(|selected| {
             self.object_tree
                 .iter()
+                .filter(|item| item.node.value.has_non_child_lines())
                 .map(|item| &item.node.value)
                 .nth(selected)
         })
@@ -316,13 +312,40 @@ impl ObjectTreeValue {
         self.display_expanded
             .then(|| {
                 self.kind
-                    .iter_children()
-                    .map(|child| child.value.num_lines())
+                    .iter_children(0)
+                    .map(|child| child.node.value.num_lines())
                     .sum::<usize>()
             })
             .filter(|child_lines| *child_lines > 0)
-            .map(|child_lines| child_lines + 2)
+            .map(|child_lines| {
+                child_lines
+                    + self.num_previsit_lines()
+                    + self.num_postvisit_lines()
+            })
             .unwrap_or(1)
+    }
+
+    fn has_non_child_lines(&self) -> bool {
+        self.num_previsit_lines() > 0 || self.num_postvisit_lines() > 0
+    }
+
+    fn num_previsit_lines(&self) -> usize {
+        match self.kind {
+            ObjectTreeValueKind::DisplayList(_) => 0,
+            _ => 1,
+        }
+    }
+
+    fn num_postvisit_lines(&self) -> usize {
+        match self.kind {
+            ObjectTreeValueKind::Array(_)
+            | ObjectTreeValueKind::Object { .. }
+                if self.display_expanded =>
+            {
+                1
+            }
+            _ => 0,
+        }
     }
 
     fn node_at_line<'a>(
@@ -330,19 +353,17 @@ impl ObjectTreeValue {
         mut i_line: usize,
     ) -> Option<&'a mut ObjectTreeValue> {
         let num_lines = self.num_lines();
-        if i_line >= num_lines {
-            return None;
-        }
-        if i_line == 0 {
+
+        if i_line < self.num_previsit_lines() {
             Some(self)
-        } else if i_line + 1 < num_lines {
+        } else if i_line + self.num_postvisit_lines() < num_lines {
             assert!(
                 self.display_expanded,
                 "This conditional should only be reached \
                  if this is a multi-line object."
             );
 
-            i_line -= 1;
+            i_line -= self.num_previsit_lines();
             for child in self.kind.iter_mut_children() {
                 let child_lines = child.value.num_lines();
                 if i_line < child_lines {
@@ -402,10 +423,10 @@ impl ObjectTreeNode {
         )?;
 
         Ok(ObjectTreeNode {
-            context: ObjectTreeContext::Field {
+            context: Some(ObjectTreeContext::Field {
                 field_name,
                 field_type,
-            },
+            }),
             value,
         })
     }
@@ -515,7 +536,7 @@ impl ObjectTreeNode {
                                 prefetch,
                             )?;
                             Ok(ObjectTreeNode {
-                                context: ObjectTreeContext::ListElement,
+                                context: Some(ObjectTreeContext::ListElement),
                                 value,
                             })
                         })
@@ -562,6 +583,8 @@ impl ObjectTreeNode {
                         ObjectTreeValueKind::Object { class_name, fields };
                 }
 
+                ObjectTreeValueKind::DisplayList(..) => {}
+
                 ObjectTreeValueKind::Value { .. }
                 | ObjectTreeValueKind::String(_) => {
                     return Err(Error::NotImplementedYet(
@@ -588,6 +611,8 @@ impl ObjectTreeNode {
                 IterationOrder::PreVisit
             }
 
+            ObjectTreeValueKind::DisplayList(_) => IterationOrder::PreVisit,
+
             ObjectTreeValueKind::Array(_)
             | ObjectTreeValueKind::Object { .. }
             | ObjectTreeValueKind::UnreadValue
@@ -600,12 +625,26 @@ impl ObjectTreeNode {
 impl ObjectTreeValueKind {
     fn iter_children(
         &self,
-    ) -> impl Iterator<Item = &ObjectTreeNode> + DoubleEndedIterator + '_ {
+        tree_depth: usize,
+    ) -> impl Iterator<Item = ObjectTreeIteratorItem> + DoubleEndedIterator + '_
+    {
+        let child_depth = match self {
+            ObjectTreeValueKind::DisplayList(..) => tree_depth,
+            _ => tree_depth + 1,
+        };
+
         match self {
             ObjectTreeValueKind::Array(children)
+            | ObjectTreeValueKind::DisplayList(children)
             | ObjectTreeValueKind::Object {
                 fields: children, ..
-            } => Either::Left(children.iter()),
+            } => Either::Left(children.iter().map(move |child| {
+                ObjectTreeIteratorItem {
+                    pos: child.iter_visit_type(),
+                    node: child,
+                    tree_depth: child_depth,
+                }
+            })),
 
             ObjectTreeValueKind::UnreadValue
             | ObjectTreeValueKind::Value(_)
@@ -621,6 +660,7 @@ impl ObjectTreeValueKind {
     {
         match self {
             ObjectTreeValueKind::Array(children)
+            | ObjectTreeValueKind::DisplayList(children)
             | ObjectTreeValueKind::Object {
                 fields: children, ..
             } => Either::Left(children.iter_mut()),
@@ -656,13 +696,8 @@ impl<'a> Iterator for ObjectTreeIterator<'a> {
             next.node
                 .value
                 .kind
-                .iter_children()
+                .iter_children(next.tree_depth)
                 .rev()
-                .map(|child| ObjectTreeIteratorItem {
-                    pos: child.iter_visit_type(),
-                    node: child,
-                    tree_depth: next.tree_depth + 1,
-                })
                 .with_position()
                 .for_each(|(pos, item)| {
                     if matches!(
@@ -691,13 +726,14 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
         match self.pos {
             IterationOrder::PreVisit | IterationOrder::LeafNode => {
                 match &self.node.context {
-                    ObjectTreeContext::Field {
+                    Some(ObjectTreeContext::Field {
                         field_name,
                         field_type,
-                    } => {
+                    }) => {
                         write!(fmt, "{field_type} {field_name} = ")?;
                     }
-                    ObjectTreeContext::ListElement { .. } => {}
+                    Some(ObjectTreeContext::ListElement { .. }) => {}
+                    None => {}
                 }
             }
             IterationOrder::PostVisit => {}
@@ -710,6 +746,8 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
                 ObjectTreeValueKind::Object { class_name, .. } => {
                     write!(fmt, "{class_name} {{")?;
                 }
+
+                ObjectTreeValueKind::DisplayList(_) => {}
 
                 ObjectTreeValueKind::UnreadValue
                 | ObjectTreeValueKind::Value(_)
@@ -725,6 +763,7 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
                     write!(fmt, "{class_name} {{...}}")?;
                 }
                 ObjectTreeValueKind::Array(_) => write!(fmt, "[...]")?,
+                ObjectTreeValueKind::DisplayList(_) => {}
                 ObjectTreeValueKind::UnreadValue => {
                     let ptr = value.location.start;
                     write!(fmt, "unread value @ {ptr}")?
@@ -735,6 +774,7 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
             IterationOrder::PostVisit => match &value.kind {
                 ObjectTreeValueKind::Array(_) => write!(fmt, "]")?,
                 ObjectTreeValueKind::Object { .. } => write!(fmt, "}}")?,
+                ObjectTreeValueKind::DisplayList(_) => {}
 
                 ObjectTreeValueKind::UnreadValue
                 | ObjectTreeValueKind::Value(_)
@@ -751,8 +791,11 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
             IterationOrder::PreVisit => {}
             IterationOrder::LeafNode | IterationOrder::PostVisit => {
                 match &self.node.context {
-                    ObjectTreeContext::Field { .. } => write!(fmt, ";")?,
-                    ObjectTreeContext::ListElement { .. } => write!(fmt, ",")?,
+                    Some(ObjectTreeContext::Field { .. }) => write!(fmt, ";")?,
+                    Some(ObjectTreeContext::ListElement { .. }) => {
+                        write!(fmt, ",")?
+                    }
+                    None => {}
                 }
             }
         }
@@ -792,6 +835,11 @@ impl WidgetWindow for ObjectExplorer {
                                     |i_line| {
                                         self.object_tree
                                             .iter()
+                                            .filter(|item| {
+                                                item.node
+                                                    .value
+                                                    .has_non_child_lines()
+                                            })
                                             .nth(i_line)
                                             .map(|item| format!("{item}"))
                                             .into_iter()
@@ -872,24 +920,29 @@ impl WidgetWindow for ObjectExplorer {
             start..start + num_lines
         };
 
-        let lines = self.object_tree.iter().enumerate().map(|(i, item)| {
-            if display_range.contains(&i) {
-                let mut line: Line = format!("{item}").into();
+        let lines = self
+            .object_tree
+            .iter()
+            .filter(|item| item.node.value.has_non_child_lines())
+            .enumerate()
+            .map(|(i, item)| {
+                if display_range.contains(&i) {
+                    let mut line: Line = format!("{item}").into();
 
-                line = line.style_regex(
-                    "0x[0-9a-fA-F]+",
-                    Style::default().fg(Color::LightRed),
-                );
+                    line = line.style_regex(
+                        "0x[0-9a-fA-F]+",
+                        Style::default().fg(Color::LightRed),
+                    );
 
-                if let Some(search) = self.search.as_ref() {
-                    line = search.highlight_search_matches(line);
+                    if let Some(search) = self.search.as_ref() {
+                        line = search.highlight_search_matches(line);
+                    }
+
+                    line
+                } else {
+                    Line::default()
                 }
-
-                line
-            } else {
-                Line::default()
-            }
-        });
+            });
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
