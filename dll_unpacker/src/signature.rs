@@ -82,7 +82,8 @@ pub enum SignatureType<'a> {
     },
     SizeArray(Box<SignatureType<'a>>),
 
-    GenericType(u32),
+    GenericVarFromType(u32),
+    GenericVarFromMethod(u32),
     GenericInst {
         is_value_type: bool,
         index: MetadataCodedIndex<TypeDefOrRef>,
@@ -139,7 +140,7 @@ pub enum ElementType {
     ByRef,
     ValueType,
     Class,
-    Var,
+    GenericVarFromType,
     Array,
     GenericInst,
     TypedByRef,
@@ -148,7 +149,7 @@ pub enum ElementType {
     FunctionPtr,
     Object,
     SizeArray,
-    MethodType,
+    GenericVarFromMethod,
     RequiredCustomModifier,
     OptionalCustomModifier,
     Internal,
@@ -475,8 +476,11 @@ impl<'a> SignatureDecompressor<'a> {
 
         let ty = match element {
             ElementType::Prim(prim) => SignatureType::Prim(prim),
-            ElementType::Var => {
-                SignatureType::GenericType(self.next_unsigned()?)
+            ElementType::GenericVarFromType => {
+                SignatureType::GenericVarFromType(self.next_unsigned()?)
+            }
+            ElementType::GenericVarFromMethod => {
+                SignatureType::GenericVarFromMethod(self.next_unsigned()?)
             }
             ElementType::SizeArray => {
                 SignatureType::SizeArray(Box::new(self.next_type()?))
@@ -593,7 +597,7 @@ impl TryFrom<u32> for ElementType {
             0x10 => Ok(Self::ByRef),
             0x11 => Ok(Self::ValueType),
             0x12 => Ok(Self::Class),
-            0x13 => Ok(Self::Var),
+            0x13 => Ok(Self::GenericVarFromType),
             0x14 => Ok(Self::Array),
             0x15 => Ok(Self::GenericInst),
             0x16 => Ok(Self::TypedByRef),
@@ -602,7 +606,7 @@ impl TryFrom<u32> for ElementType {
             0x1b => Ok(Self::FunctionPtr),
             0x1c => Ok(Self::Object),
             0x1d => Ok(Self::SizeArray),
-            0x1e => Ok(Self::MethodType),
+            0x1e => Ok(Self::GenericVarFromMethod),
             0x1f => Ok(Self::RequiredCustomModifier),
             0x20 => Ok(Self::OptionalCustomModifier),
             0x21 => Ok(Self::Internal),
@@ -645,7 +649,10 @@ impl std::fmt::Display for SignatureType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             SignatureType::Prim(prim) => write!(f, "{prim}"),
-            SignatureType::GenericType(index) => write!(f, "_{index}"),
+            SignatureType::GenericVarFromType(index) => write!(f, "_T{index}"),
+            SignatureType::GenericVarFromMethod(index) => {
+                write!(f, "_M{index}")
+            }
             SignatureType::SizeArray(ty) => write!(f, "{ty}[]"),
             SignatureType::Array { element_type, .. } => {
                 write!(f, "{element_type}[]")
