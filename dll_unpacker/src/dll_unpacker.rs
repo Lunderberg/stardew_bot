@@ -2465,6 +2465,16 @@ impl std::fmt::Display for MetadataHeapKind {
     }
 }
 
+impl<TableTag> std::fmt::Debug for MetadataTableIndexRange<TableTag> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MetadataTableIndexRange")
+            .field("start", &self.start)
+            .field("end", &self.end)
+            .field("_phantom", &self._phantom)
+            .finish()
+    }
+}
+
 impl MetadataTableKind {
     fn from_bit_index(bit: u8) -> Result<Self, Error> {
         match bit {
