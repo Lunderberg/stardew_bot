@@ -16,7 +16,8 @@ use memory_reader::{OwnedBytes, Pointer};
 
 use crate::{
     extended_tui::{
-        ScrollableState as _, SearchDirection, SearchWindow, WidgetWindow,
+        Indent, ScrollableState as _, SearchDirection, SearchWindow,
+        WidgetWindow,
     },
     extensions::*,
     TuiGlobals, UserConfig,
@@ -89,9 +90,6 @@ struct ObjectTreeIteratorItem<'a> {
     pos: IterationOrder,
     tree_depth: usize,
 }
-
-#[derive(Clone, Copy)]
-struct Indent(usize);
 
 impl ObjectExplorer {
     pub(crate) fn new(
@@ -245,19 +243,6 @@ impl ObjectExplorer {
 
     fn finalize_search(&mut self) {
         self.search = None;
-    }
-}
-
-impl std::fmt::Display for Indent {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{: >indent$}", "", indent = self.0)
-    }
-}
-impl std::ops::Add<usize> for Indent {
-    type Output = Indent;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        Self(self.0 + rhs)
     }
 }
 
