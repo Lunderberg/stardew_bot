@@ -10,7 +10,10 @@ use memory_reader::{
 use stardew_utils::stardew_valley_pid;
 
 use crate::extended_tui::{DynamicLayout, WidgetSideEffects, WidgetWindow};
-use crate::{extensions::*, ObjectExplorer, UserConfig, UserConfigEditor};
+use crate::{
+    extensions::*, MetadataDisplay, ObjectExplorer, UserConfig,
+    UserConfigEditor,
+};
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
     SigintHandler,
@@ -57,6 +60,7 @@ struct TuiBuffers {
     detail_view: DetailView,
     object_explorer: ObjectExplorer,
     user_config_editor: UserConfigEditor,
+    metadata_display: MetadataDisplay,
 }
 
 pub struct Annotation {
@@ -188,6 +192,14 @@ impl TuiExplorerBuilder {
         self.layout.switch_to_buffer(5);
         self.layout.split_horizontally(None, Some(60));
         self.layout.switch_to_buffer(4);
+        self
+    }
+
+    pub fn layout_metadata_display(mut self) -> Self {
+        self.layout.close_all_other_windows();
+        self.layout.switch_to_buffer(3);
+        self.layout.split_horizontally(None, Some(60));
+        self.layout.switch_to_buffer(6);
         self
     }
 
@@ -627,6 +639,9 @@ impl TuiExplorerBuilder {
         let object_explorer =
             ObjectExplorer::new(&self.user_config, &tui_globals)?;
 
+        let metadata_display =
+            MetadataDisplay::new(tui_globals.cached_reader())?;
+
         let out = TuiExplorer {
             tui_globals,
             layout: self.layout,
@@ -637,6 +652,7 @@ impl TuiExplorerBuilder {
                 detail_view,
                 object_explorer,
                 user_config_editor: UserConfigEditor::new(self.user_config),
+                metadata_display,
             },
 
             should_exit: false,
@@ -656,6 +672,7 @@ impl TuiBuffers {
             Box::new(&mut self.running_log),
             Box::new(&mut self.object_explorer),
             Box::new(&mut self.user_config_editor),
+            Box::new(&mut self.metadata_display),
         ]
     }
 }
@@ -672,6 +689,7 @@ impl TuiExplorer {
             .load_config_from_default_location()?
             // .layout_memory_table()
             .layout_object_explorer()
+            // .layout_metadata_display()
             .init_symbols()
             .initialize_view_to_stardew_dll()?
             .default_detail_formatters()

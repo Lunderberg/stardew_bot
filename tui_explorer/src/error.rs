@@ -79,6 +79,9 @@ pub enum Error {
 
     #[error("Cannot expand NULL field")]
     CannotExpandNullField,
+
+    #[error("Attempted to access MetadataDisplay at invalid index")]
+    InvalidMetadataDisplayIndex,
 }
 
 impl std::fmt::Debug for Error {

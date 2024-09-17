@@ -40,6 +40,9 @@ pub use detail_view::*;
 mod object_explorer;
 pub use object_explorer::*;
 
+mod metadata_display;
+pub use metadata_display::*;
+
 pub(crate) mod extended_tui;
 
 pub mod column_formatter;
