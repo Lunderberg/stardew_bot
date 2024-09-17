@@ -2978,9 +2978,9 @@ impl<'a> MetadataRow<'a, Field> {
                 .value()
                 .start;
             if midpoint_field_index <= field_index {
-                index_range = index_range.start..midpoint_field_index;
+                index_range = midpoint..index_range.end;
             } else {
-                index_range = midpoint_field_index..index_range.end;
+                index_range = index_range.start..midpoint;
             }
         }
 
