@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{borrow::Borrow, ops::Range};
 
 use dll_unpacker::{
     dll_unpacker::{MetadataTableIndex, TypeDef},
@@ -146,11 +146,12 @@ impl MethodTable {
 
     pub fn runtime_type(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<RuntimeType, Error> {
         if let Some(ty) = self.local_runtime_type() {
             Ok(ty)
         } else {
+            let reader = reader.borrow();
             let ee_class = self.get_ee_class(reader)?;
             if let Some(prim) = ee_class.prim_type() {
                 Ok(RuntimeType::Prim(prim))
@@ -228,8 +229,10 @@ impl MethodTable {
 
     pub fn generic_types(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Vec<TypedPointer<MethodTable>>, Error> {
+        let reader = reader.borrow();
+
         let element_type =
             std::iter::successors(Some(Ok(self.clone())), |res_prev| {
                 let prev = res_prev.as_ref().ok()?;
@@ -318,8 +321,9 @@ impl MethodTable {
 
     pub fn get_field_descriptions(
         &self,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<Option<FieldDescriptions>, Error> {
+        let reader = reader.borrow();
         let ee_class = self.get_ee_class(reader)?;
 
         let ptr = ee_class.fields();

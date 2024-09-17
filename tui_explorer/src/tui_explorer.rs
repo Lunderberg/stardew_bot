@@ -607,9 +607,8 @@ impl TuiExplorerBuilder {
 
     pub fn build(self) -> Result<TuiExplorer, Error> {
         let mut tui_globals = self.tui_globals;
-        tui_globals.static_value_cache = tui_globals
-            .static_value_cache
-            .init_dlls(&tui_globals.reader)?;
+
+        tui_globals.cached_reader().init_dlls()?;
 
         tui_globals.current_region = tui_globals
             .reader

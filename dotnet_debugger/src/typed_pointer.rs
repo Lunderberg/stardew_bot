@@ -1,4 +1,4 @@
-use std::marker::PhantomData;
+use std::{borrow::Borrow, marker::PhantomData};
 
 use memory_reader::{MemoryReader, Pointer, UnpackBytes};
 
@@ -24,11 +24,11 @@ impl<T> TypedPointer<T> {
         }
     }
 
-    pub fn read(&self, reader: &MemoryReader) -> Result<T, Error>
+    pub fn read(&self, reader: impl Borrow<MemoryReader>) -> Result<T, Error>
     where
         T: ReadTypedPointer,
     {
-        T::read_typed_ptr(self.ptr, reader)
+        T::read_typed_ptr(self.ptr, reader.borrow())
     }
 }
 

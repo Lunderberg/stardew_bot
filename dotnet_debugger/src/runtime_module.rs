@@ -5,7 +5,7 @@ use std::ops::Range;
 
 use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
 use itertools::Itertools as _;
-use memory_reader::{extensions::*, MemoryRegion};
+use memory_reader::{extensions::*, MemoryMapRegion, MemoryRegion};
 use memory_reader::{MemoryReader, Pointer};
 
 use crate::extensions::*;
@@ -22,6 +22,9 @@ pub struct RuntimeModule {
 
     /// Location of the DLL in memory
     image_ptr: OnceCell<Pointer>,
+
+    /// The DLL corresponding to this Module.
+    dll_region_info: OnceCell<MemoryMapRegion>,
 
     /// The DLL corresponding to this Module.
     dll_region: OnceCell<MemoryRegion>,
@@ -268,8 +271,10 @@ impl RuntimeModule {
     pub fn locate(
         metadata: Metadata,
         module_vtable_loc: Option<Pointer>,
-        reader: &MemoryReader,
+        reader: impl Borrow<MemoryReader>,
     ) -> Result<TypedPointer<Self>, Error> {
+        let reader = reader.borrow();
+
         let opt_ptr_vec: Vec<Option<TypedPointer<Self>>> =
             if let Some(module_vtable_loc) = module_vtable_loc {
                 Self::locate_by_vtable(&[metadata], module_vtable_loc, reader)?
@@ -294,6 +299,7 @@ impl RuntimeModule {
             location,
             vtable_location: Default::default(),
             image_ptr: Default::default(),
+            dll_region_info: Default::default(),
             dll_region: Default::default(),
             metadata_layout: Default::default(),
             method_table_info: Default::default(),
@@ -359,22 +365,44 @@ impl RuntimeModule {
             .copied()
     }
 
-    pub fn dll_region(
+    pub fn dll_region_info(
         &self,
         reader: &MemoryReader,
-    ) -> Result<&MemoryRegion, Error> {
-        self.dll_region.or_try_init(|| {
+    ) -> Result<&MemoryMapRegion, Error> {
+        self.dll_region_info.or_try_init(|| {
             let image_ptr = self.image_ptr(reader)?;
 
-            Ok(reader
+            reader
                 .regions
                 .iter()
                 .filter(|region| {
                     region.contains(image_ptr) && region.file_offset() == 0
                 })
                 .max_by_key(|region| region.size_bytes())
-                .ok_or(Error::RegionForDLLNotFoundFromPointer(image_ptr))?
-                .read()?)
+                .cloned()
+                .ok_or(Error::RegionForDLLNotFoundFromPointer(image_ptr))
+        })
+    }
+
+    pub fn name(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<&str, Error> {
+        let reader = reader.borrow();
+        let info = self.dll_region_info(reader)?;
+        let filename = info.short_name();
+        let name = filename.trim_end_matches(".dll");
+        Ok(name)
+    }
+
+    pub fn dll_region(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<&MemoryRegion, Error> {
+        self.dll_region.or_try_init(|| {
+            let info = self.dll_region_info(reader)?;
+            let region = info.read()?;
+            Ok(region)
         })
     }
 
