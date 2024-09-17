@@ -26,6 +26,17 @@ impl<Key, Value> EnumMap<Key, Value> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Key, &Value)> + '_
+    where
+        Key: EnumKey,
+        Key: Clone,
+    {
+        Key::iter_keys().map(|key| {
+            let value = &self[key.clone()];
+            (key, value)
+        })
+    }
 }
 
 impl<Key, Value: Default> Default for EnumMap<Key, Value> {

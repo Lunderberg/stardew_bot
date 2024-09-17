@@ -46,6 +46,10 @@ impl MethodTable {
         Ok(Self { bytes })
     }
 
+    pub fn ptr(&self) -> TypedPointer<Self> {
+        self.bytes.start().into()
+    }
+
     pub fn ptr_range(&self) -> Range<Pointer> {
         (&self.bytes).into()
     }

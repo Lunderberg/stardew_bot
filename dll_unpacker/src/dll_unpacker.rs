@@ -224,6 +224,10 @@ impl MetadataLayout {
             .find_map(|relocation| relocation.apply(addr))
             .ok_or(Error::InvalidVirtualAddress(addr))
     }
+
+    pub fn num_rows_by_table(&self) -> EnumMap<MetadataTableKind, usize> {
+        self.num_rows.clone()
+    }
 }
 
 pub struct MetadataTable<'a, TableTag> {
@@ -2014,6 +2018,10 @@ impl<'a> MetadataTableHeader<'a> {
 impl<'a> Metadata<'a> {
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.layout.tables_location.clone()
+    }
+
+    pub fn layout(&self) -> &MetadataLayout {
+        self.layout
     }
 
     pub fn iter_table_locations(
