@@ -1007,9 +1007,12 @@ impl<'a> MetadataRow<'a, TypeSpec> {
         &self,
         annotator: &mut impl Annotator,
     ) -> Result<(), Error> {
-        annotator.value(self.signature_index()?).name("Signature");
         annotator
-            .range(self.signature()?.into())
+            .value(self.raw_signature_index()?)
+            .name("Signature")
+            .append_value(self.signature()?);
+        annotator
+            .range(self.raw_signature()?.into())
             .name("TypeSpec signature");
 
         Ok(())

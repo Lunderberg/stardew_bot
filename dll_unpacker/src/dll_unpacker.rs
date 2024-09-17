@@ -912,7 +912,7 @@ decl_metadata_table! {
     },
 
     TypeSpec: {
-        signature: {heap Blob},
+        raw_signature: {heap Blob},
     },
 
     ImplMap: {
@@ -3089,7 +3089,11 @@ impl<'a> MetadataRow<'a, Field> {
 
     pub fn signature(&self) -> Result<Signature<'a>, Error> {
         let bytes = self.raw_signature()?.content();
-        Ok(Signature::new(bytes, self.metadata))
+        Ok(Signature::new(
+            bytes,
+            self.metadata,
+            MetadataTableKind::Field,
+        ))
     }
 }
 
@@ -3159,6 +3163,17 @@ impl<'a> UnpackBytes<'a> for MethodDefFlags {
 impl std::fmt::Display for MethodDefFlags {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
+    }
+}
+
+impl<'a> MetadataRow<'a, TypeSpec> {
+    pub fn signature(&self) -> Result<Signature<'a>, Error> {
+        let bytes = self.raw_signature()?.content();
+        Ok(Signature::new(
+            bytes,
+            self.metadata,
+            MetadataTableKind::TypeSpec,
+        ))
     }
 }
 

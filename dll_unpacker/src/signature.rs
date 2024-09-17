@@ -18,6 +18,11 @@ pub struct Signature<'a> {
     /// appropriate names for TypeDefOrRef fields within the
     /// signature.
     metadata: Metadata<'a>,
+
+    /// Which table referenced the signature.  Used to handle
+    /// per-table parsing (e.g. the TypeSpec table points directly to
+    /// a Type, and not to any flags.
+    referenced_from: MetadataTableKind,
 }
 
 /// Decompress the values of a signature, as defined in ECMA-335,
@@ -155,8 +160,16 @@ pub enum ElementType {
 }
 
 impl<'a> Signature<'a> {
-    pub fn new(bytes: ByteRange<'a>, metadata: Metadata<'a>) -> Self {
-        Self { bytes, metadata }
+    pub fn new(
+        bytes: ByteRange<'a>,
+        metadata: Metadata<'a>,
+        referenced_from: MetadataTableKind,
+    ) -> Self {
+        Self {
+            bytes,
+            metadata,
+            referenced_from,
+        }
     }
 
     pub fn flags(&self) -> SignatureFlags {
@@ -610,14 +623,18 @@ impl<'a> std::fmt::Display for Signature<'a> {
             metadata: self.metadata,
         };
 
-        let flags = iter.next_flags().unwrap();
+        if matches!(self.referenced_from, MetadataTableKind::TypeSpec) {
+            write!(f, "{}", iter.next_type().unwrap())?
+        } else {
+            let flags = iter.next_flags().unwrap();
 
-        match flags.0 & 0x0f {
-            0..6 => write!(f, "TODO: MethodSig unpacking")?,
-            6 => write!(f, "{}", iter.next_type().unwrap())?,
-            7 => write!(f, "TODO: LocalVarSig unpacking")?,
-            8 => write!(f, "TODO: Property unpacking")?,
-            _ => (),
+            match flags.0 & 0x0f {
+                0..6 => write!(f, "TODO: MethodSig unpacking")?,
+                6 => write!(f, "{}", iter.next_type().unwrap())?,
+                7 => write!(f, "TODO: LocalVarSig unpacking")?,
+                8 => write!(f, "TODO: Property unpacking")?,
+                _ => (),
+            }
         }
 
         Ok(())
