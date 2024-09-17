@@ -3,11 +3,14 @@ use crate::dll_unpacker::{
     CustomAttribute, DeclSecurity, Event, EventMap, Field, FieldLayout,
     FieldMarshal, FieldRVA, GenericParam, GenericParamConstraint, ImplMap,
     InterfaceImpl, ManifestResource, MemberRef, Metadata, MetadataRow,
-    MetadataTable, MetadataTableHeader, MethodDef, MethodImpl, MethodSemantics,
-    MethodSpec, Module, ModuleRef, NestedClass, Param, Property, PropertyMap,
+    MetadataTableHeader, MethodDef, MethodImpl, MethodSemantics, MethodSpec,
+    Module, ModuleRef, NestedClass, Param, Property, PropertyMap,
     RawCLRMetadata, StandAloneSig, StreamHeader, TypeDef, TypeRef, TypeSpec,
 };
-use crate::{Annotation, Annotator, DLLUnpacker, Error, ExportedType};
+use crate::{
+    Annotation, Annotator, DLLUnpacker, Error, ExportedType,
+    MetadataTableIndex, MetadataTableKind,
+};
 
 impl<'a> DLLUnpacker<'a> {
     pub fn collect_annotations(
@@ -174,17 +177,9 @@ impl<'a> Metadata<'a> {
             .iter_rows()
             .try_for_each(|row| row.collect_annotations(annotator))?;
 
-        let field_table = self.field_table();
-        let method_table = self.method_def_table();
-        let param_table = self.param_table();
-        self.type_def_table().iter_rows().try_for_each(|row| {
-            row.collect_annotations(
-                annotator,
-                &field_table,
-                &method_table,
-                &param_table,
-            )
-        })?;
+        self.type_def_table()
+            .iter_rows()
+            .try_for_each(|row| row.collect_annotations(annotator, true))?;
 
         self.interface_impl_table()
             .iter_rows()
@@ -296,6 +291,153 @@ impl<'a> Metadata<'a> {
 
         Ok(())
     }
+
+    pub fn collect_annotation_by_row(
+        &self,
+        annotator: &mut impl Annotator,
+        kind: MetadataTableKind,
+        index: usize,
+    ) -> Result<(), Error> {
+        match kind {
+            MetadataTableKind::Module => self
+                .module_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::TypeRef => self
+                .type_ref_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::TypeDef => self
+                .type_def_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator, false),
+            MetadataTableKind::Field => self
+                .field_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator, None),
+            MetadataTableKind::MethodDef => self
+                .method_def_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator, None),
+            MetadataTableKind::Param => self
+                .param_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::InterfaceImpl => self
+                .interface_impl_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::MemberRef => self
+                .member_ref_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::Constant => self
+                .constant_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::CustomAttribute => self
+                .custom_attribute_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::FieldMarshal => self
+                .field_marshal_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::DeclSecurity => self
+                .decl_security_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::ClassLayout => self
+                .class_layout_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::FieldLayout => self
+                .field_layout_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::StandAloneSig => self
+                .stand_alone_sig_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::EventMap => self
+                .event_map_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::Event => self
+                .event_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::PropertyMap => self
+                .property_map_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::Property => self
+                .property_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::MethodSemantics => self
+                .method_semantics_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::MethodImpl => self
+                .method_impl_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::ModuleRef => self
+                .module_ref_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::TypeSpec => self
+                .type_spec_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::ImplMap => self
+                .impl_map_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::FieldRVA => self
+                .field_rva_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::Assembly => self
+                .assembly_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::AssemblyProcessor => Ok(()),
+            MetadataTableKind::AssemblyOS => Ok(()),
+            MetadataTableKind::AssemblyRef => self
+                .assembly_ref_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::AssemblyRefProcessor => Ok(()),
+            MetadataTableKind::AssemblyRefOS => Ok(()),
+            MetadataTableKind::File => Ok(()),
+            MetadataTableKind::ExportedType => self
+                .exported_type_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::ManifestResource => self
+                .manifest_resource_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::NestedClass => self
+                .nested_class_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::GenericParam => self
+                .generic_param_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::MethodSpec => self
+                .method_spec_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+            MetadataTableKind::GenericParamConstraint => self
+                .generic_param_constraint_table()
+                .get(MetadataTableIndex::new(index))?
+                .collect_annotations(annotator),
+        }
+    }
 }
 
 impl<'a> MetadataRow<'a, Module> {
@@ -353,9 +495,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        field_table: &MetadataTable<Field>,
-        method_def_table: &MetadataTable<MethodDef>,
-        param_table: &MetadataTable<Param>,
+        visit_fields_and_methods: bool,
     ) -> Result<(), Error> {
         annotator.value(self.flags_unpacked()?).name("flags");
         let type_name = self.name()?;
@@ -378,56 +518,60 @@ impl<'a> MetadataRow<'a, TypeDef> {
             } else {
                 "(none)"
             });
+
         let field_indices = self.field_indices();
         annotator.value(field_indices).name("Fields");
-
-        annotator
-            .group(field_table.address_range(field_indices)?)
-            .name(format!("Class '{type_name}'"));
-
-        self.iter_fields()?.try_for_each(|field| {
-            field.collect_annotations(annotator, type_name, type_namespace)
-        })?;
 
         let method_indices = self.method_indices();
         annotator.value(method_indices).name("method_indices");
 
-        annotator
-            .group(method_def_table.address_range(method_indices)?)
-            .name(format!("Class '{type_name}'"));
+        if visit_fields_and_methods {
+            annotator
+                .group(
+                    self.metadata.field_table().address_range(field_indices)?,
+                )
+                .name(format!("Class '{type_name}'"));
 
-        self.iter_methods()?.try_for_each(|method| {
-            method.collect_annotations(
-                annotator,
-                type_name,
-                type_namespace,
-                param_table,
-            )
-        })?;
+            self.iter_fields()?.try_for_each(|field| {
+                field.collect_annotations(annotator, Some(type_name))
+            })?;
 
-        if self.num_methods() > 0 {
-            let start = self.iter_methods()?.find_map(|method| {
-                method
-                    .iter_params()
-                    .unwrap()
-                    .next()
-                    .map(|param| param.ptr_range().start)
-            });
-            if let Some(start) = start {
-                let end = self
-                    .iter_methods()?
-                    .rev()
-                    .find_map(|method| {
-                        method
-                            .iter_params()
-                            .unwrap()
-                            .last()
-                            .map(|param| param.ptr_range().end)
-                    })
-                    .unwrap();
-                annotator
-                    .group(start..end)
-                    .name(format!("Class '{type_name}'"));
+            annotator
+                .group(
+                    self.metadata
+                        .method_def_table()
+                        .address_range(method_indices)?,
+                )
+                .name(format!("Class '{type_name}'"));
+
+            self.iter_methods()?.try_for_each(|method| {
+                method.collect_annotations(annotator, Some(type_name))
+            })?;
+
+            if self.num_methods() > 0 {
+                let start = self.iter_methods()?.find_map(|method| {
+                    method
+                        .iter_params()
+                        .unwrap()
+                        .next()
+                        .map(|param| param.ptr_range().start)
+                });
+                if let Some(start) = start {
+                    let end = self
+                        .iter_methods()?
+                        .rev()
+                        .find_map(|method| {
+                            method
+                                .iter_params()
+                                .unwrap()
+                                .last()
+                                .map(|param| param.ptr_range().end)
+                        })
+                        .unwrap();
+                    annotator
+                        .group(start..end)
+                        .name(format!("Class '{type_name}'"));
+                }
             }
         }
 
@@ -439,9 +583,14 @@ impl<'a> MetadataRow<'a, Field> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        type_name: &str,
-        _type_namespace: &str,
+        type_name: Option<&str>,
     ) -> Result<(), Error> {
+        let type_name = if let Some(type_name) = type_name {
+            type_name
+        } else {
+            self.find_owning_class()?.name()?
+        };
+
         annotator.value(self.flags_unpacked()?).name("flags");
 
         let name = self.name()?;
@@ -466,11 +615,14 @@ impl<'a> MetadataRow<'a, MethodDef> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        type_name: &str,
-        type_namespace: &str,
-        param_table: &MetadataTable<Param>,
+        type_name: Option<&str>,
     ) -> Result<(), Error> {
         let name = self.name()?;
+        let type_name = if let Some(type_name) = type_name {
+            type_name
+        } else {
+            self.find_owning_class()?.name()?
+        };
 
         let rva_ann = annotator.opt_value(self.rva_unpacked()?).name("rva");
 
@@ -512,17 +664,11 @@ impl<'a> MetadataRow<'a, MethodDef> {
                     .collect::<Result<String, Error>>()?,
             );
 
-        self.iter_params()?.try_for_each(|param| {
-            param.collect_annotations(
-                annotator,
-                type_name,
-                type_namespace,
-                name,
-            )
-        })?;
+        self.iter_params()?
+            .try_for_each(|param| param.collect_annotations(annotator))?;
 
         annotator
-            .group(param_table.address_range(param_indices)?)
+            .group(self.metadata.param_table().address_range(param_indices)?)
             .name(format!("Method '{name}'"));
 
         Ok(())
@@ -533,9 +679,6 @@ impl<'a> MetadataRow<'a, Param> {
     fn collect_annotations(
         &self,
         annotator: &mut impl Annotator,
-        _type_name: &str,
-        _type_namespace: &str,
-        _method_name: &str,
     ) -> Result<(), Error> {
         annotator.value(self.flags_unpacked()?).name("flags");
         annotator.value(self.sequence_unpacked()?).name("sequence");

@@ -3009,6 +3009,34 @@ impl<'a> MetadataRow<'a, MethodDef> {
     pub fn is_static(&self) -> Result<bool, Error> {
         Ok(self.flags()?.is_static())
     }
+
+    pub fn find_owning_class(&self) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        // TODO: Generalize this to apply to Method/Param tables as well.
+        let method_index = self.index().index;
+        let type_def_table = self.metadata.type_def_table();
+
+        let mut index_range = 0..type_def_table.num_rows();
+
+        while index_range.len() > 1 {
+            let midpoint: usize =
+                index_range.start + (index_range.end - index_range.start) / 2;
+            debug_assert!(midpoint != index_range.start);
+            debug_assert!(midpoint != index_range.end);
+
+            let midpoint_method_index: usize = type_def_table
+                .get_row(midpoint)?
+                .method_indices()
+                .value()
+                .start;
+            if midpoint_method_index <= method_index {
+                index_range = midpoint..index_range.end;
+            } else {
+                index_range = index_range.start..midpoint;
+            }
+        }
+
+        type_def_table.get_row(index_range.start)
+    }
 }
 
 impl MethodDefFlags {
