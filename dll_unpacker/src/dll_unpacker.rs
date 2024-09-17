@@ -2071,6 +2071,96 @@ impl<'a> Metadata<'a> {
         index.access(self)
     }
 
+    pub fn get_name(
+        &self,
+        kind: MetadataTableKind,
+        index: usize,
+    ) -> Result<Option<&str>, Error> {
+        Ok(match kind {
+            MetadataTableKind::Module => Some(
+                self.module_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::TypeRef => Some(
+                self.type_ref_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::TypeDef => Some(
+                self.type_def_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::Field => Some(
+                self.field_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::MethodDef => Some(
+                self.method_def_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::Param => Some(
+                self.param_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::MemberRef => Some(
+                self.member_ref_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::Event => Some(
+                self.event_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::Property => Some(
+                self.property_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::ModuleRef => Some(
+                self.module_ref_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::Assembly => Some(
+                self.assembly_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::AssemblyRef => Some(
+                self.assembly_ref_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::File => Some(
+                self.file_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::ExportedType => Some(
+                self.exported_type_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::ManifestResource => Some(
+                self.manifest_resource_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            MetadataTableKind::GenericParam => Some(
+                self.generic_param_table()
+                    .get(MetadataTableIndex::new(index))?
+                    .name()?,
+            ),
+            _ => None,
+        })
+    }
+
     pub fn location_of<'b, Index>(
         &'b self,
         index: Index,
