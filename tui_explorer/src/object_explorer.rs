@@ -10,7 +10,8 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, RuntimeType, RuntimeValue,
+    CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
+    RuntimeValue, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 
@@ -120,54 +121,65 @@ impl ObjectExplorer {
         // TODO: Allow a configurable hiding of static fields
         // (e.g. a lot of the compiler-generated fields).
 
-        let static_fields = reader
-            .iter_known_modules()
-            .flat_map_ok(|module_ptr| {
-                let prefetch_statics: Vec<_> = reader
-                    .static_value_ranges(module_ptr)
-                    .map(|range| reader.read_bytes(range))
-                    .collect::<Result<_, _>>()?;
+        let static_fields =
+            reader
+                .iter_known_modules()
+                .flat_map_ok(|module_ptr| {
+                    let prefetch_statics: Vec<_> = reader
+                        .static_value_ranges(module_ptr)
+                        .map(|range| reader.read_bytes(range))
+                        .collect::<Result<_, _>>()?;
 
-                // The static_ranges must have their ownership moved
-                // into the `.map_ok` lambda function that uses them,
-                // as that lambda lives beyond the local function
-                // scope.  However, using the `move` keyword would
-                // also move the `display_options` and `reader`
-                // objects to be owned by the lambda function.  To
-                // avoid this, declare new variables that hold the
-                // reference, and move the reference into the lambda.
-                let reader_ref = &reader;
-                let display_options_ref = &display_options;
+                    // The static_ranges must have their ownership moved
+                    // into the `.map_ok` lambda function that uses them,
+                    // as that lambda lives beyond the local function
+                    // scope.  However, using the `move` keyword would
+                    // also move the `display_options` and `reader`
+                    // objects to be owned by the lambda function.  To
+                    // avoid this, declare new variables that hold the
+                    // reference, and move the reference into the lambda.
+                    let reader_ref = &reader;
+                    let display_options_ref = &display_options;
 
-                let module = reader.runtime_module(module_ptr)?;
-                let iter_vtable_ptr =
-                    module.iter_method_table_pointers(&reader)?;
-                let iter_static_fields = iter_vtable_ptr
-                    .map(Ok)
-                    .flat_map_ok(|method_table_ptr| {
-                        reader.iter_static_fields(method_table_ptr)
+                    let module = reader.runtime_module(module_ptr)?;
+                    let iter_vtable_ptr =
+                        module.iter_method_table_pointers(&reader)?;
+                    let iter_static_fields = iter_vtable_ptr
+                    .flat_map(|method_table_ptr| {
+                        match reader_ref.iter_static_fields(method_table_ptr) {
+                            Ok(iter) => Either::Left(
+                                iter.map(move |field| (method_table_ptr, field))
+                                    .map(Ok),
+                            ),
+                            Err(err) => {
+                                Either::Right(std::iter::once(Err(err)))
+                            }
+                        }
                     })
-                    .map_ok(move |field| -> Result<_, Error> {
-                        let node = ObjectTreeNode::initial_field(
-                            FieldContainer::Static,
-                            field,
-                            reader_ref,
-                            display_options_ref,
-                            &prefetch_statics,
-                        )?;
-                        Ok((field, node))
-                    })
+                    .map_ok(
+                        move |(method_table_ptr, field)| -> Result<_, Error> {
+                            let node = ObjectTreeNode::initial_field(
+                                method_table_ptr,
+                                FieldContainer::Static,
+                                field,
+                                reader_ref,
+                                display_options_ref,
+                                &prefetch_statics,
+                            )?;
+                            Ok((field, node))
+                        },
+                    )
                     .map(|res| res?);
-                Ok(iter_static_fields)
-            })
-            .map(|res| res?)
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .sorted_by_key(|(field, _)| {
-                display_options.sort_key(*field, &reader)
-            })
-            .map(|(_, node)| node)
-            .collect::<Vec<_>>();
+                    Ok(iter_static_fields)
+                })
+                .map(|res| res?)
+                .collect::<Result<Vec<_>, _>>()?
+                .into_iter()
+                .sorted_by_key(|(field, _)| {
+                    display_options.sort_key(*field, &reader)
+                })
+                .map(|(_, node)| node)
+                .collect::<Vec<_>>();
 
         // TODO: Make a better display, since displaying the static
         // fields as being in a single class is incorrect.
@@ -286,6 +298,7 @@ impl ObjectTreeValue {
                     })
                     .map(|subfield| {
                         ObjectTreeNode::initial_field(
+                            field_method_table,
                             FieldContainer::ValueType(location.start),
                             subfield,
                             reader,
@@ -390,6 +403,7 @@ impl ObjectTreeNode {
     }
 
     fn initial_field(
+        mtable_of_parent: TypedPointer<MethodTable>,
         container: FieldContainer,
         field: FieldDescription,
         reader: &CachedReader,
@@ -407,20 +421,24 @@ impl ObjectTreeNode {
             field_name
         };
 
-        let runtime_type = reader.field_to_runtime_type(&field)?;
         let field_type = reader.field_to_type_name(&field)?.to_string();
 
-        let method_table = reader.method_table(field.method_table())?;
-        let module = reader.runtime_module(method_table.module())?;
-        let location = field.location(module, container, reader)?;
+        let value = {
+            let method_table = reader.method_table(field.method_table())?;
+            let module = reader.runtime_module(method_table.module())?;
+            let location = field.location(module, container, reader)?;
 
-        let value = ObjectTreeValue::initial_value(
-            location,
-            runtime_type,
-            reader,
-            display_options,
-            prefetch,
-        )?;
+            let runtime_type =
+                reader.field_to_runtime_type(mtable_of_parent, &field)?;
+
+            ObjectTreeValue::initial_value(
+                location,
+                runtime_type,
+                reader,
+                display_options,
+                prefetch,
+            )?
+        };
 
         Ok(ObjectTreeNode {
             context: Some(ObjectTreeContext::Field {
@@ -570,6 +588,7 @@ impl ObjectTreeNode {
                         })
                         .map(|field| -> Result<_, Error> {
                             Self::initial_field(
+                                obj.method_table(),
                                 FieldContainer::Class(instance_location.into()),
                                 field,
                                 reader,

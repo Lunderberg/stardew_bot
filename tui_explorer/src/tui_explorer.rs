@@ -576,8 +576,8 @@ impl TuiExplorerBuilder {
                             &self.tui_globals.reader,
                         )?;
 
-                        let runtime_type =
-                            reader.field_to_runtime_type(&field)?;
+                        let runtime_type = reader
+                            .field_to_runtime_type(table.ptr(), &field)?;
                         let size_bytes = runtime_type.size_bytes();
                         let byte_range = location..location + size_bytes;
 
@@ -699,7 +699,7 @@ impl TuiExplorer {
             // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?
-            .initialize_view_to_game_obj()?
+            // .initialize_view_to_game_obj()?
             // .initialize_view_to_symbol("AppDomain::m_pTheAppDomain")?
             // .initialize_view_to_symbol("SystemDomain::m_pSystemDomain")?
             // .initialize_view_to_symbol("g_dacTable")?

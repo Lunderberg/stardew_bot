@@ -12,6 +12,7 @@ use crate::{
     RuntimeType, TypedPointer,
 };
 
+#[derive(Clone)]
 pub struct MethodTable {
     pub bytes: OwnedBytes,
 }
@@ -38,7 +39,7 @@ impl MethodTable {
         module: {TypedPointer<RuntimeModule>, 24..32},
         writable_data: {Pointer, 32..40},
         ee_class_or_canonical_table: {Pointer, 40..48},
-        element_type_handle: {TypedPointer<MethodTable>, 48..56},
+        element_type_handle_or_per_instance_info: {Pointer, 48..56},
     }
 
     pub fn read(ptr: Pointer, reader: &MemoryReader) -> Result<Self, Error> {
@@ -121,7 +122,7 @@ impl MethodTable {
             todo!("Unpacking of ELEMENT_TYPE_ARRAY")
         } else if type_flag == 0x00040000 {
             Some(RuntimeType::ValueType {
-                method_table: self.ptr_range().start.into(),
+                method_table: self.ptr(),
                 size: self.base_size(),
             })
         } else if type_flag == 0x00060000 {
@@ -162,10 +163,96 @@ impl MethodTable {
 
     pub fn array_element_type(&self) -> Option<TypedPointer<MethodTable>> {
         if matches!(self.local_runtime_type()?, RuntimeType::Array) {
-            Some(self.element_type_handle())
+            let ptr = self.element_type_handle_or_per_instance_info();
+            Some(ptr.into())
         } else {
             None
         }
+    }
+
+    fn generic_types_excluding_base_class(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<impl Iterator<Item = TypedPointer<MethodTable>>, Error> {
+        let flags = self.flags();
+        let has_generics = (flags & 0x00000030) > 0;
+        let iter = has_generics.then(|| -> Result<_,Error> {
+            // Step 1: If the flag-check passed, then bytes 48-56 hold
+            // the location of per-instance information of a generic
+            // type.  However, in order to find the generics of this
+            // MethodTable, and not those of the parents, we need to
+            // apply an offset to the pointer.  The size of the offset
+            // is at negative offsets relative to the pointer that is
+            // actually being stored.  (-4 byte offset to -2 byte
+            // offset)
+            let ptr = self.element_type_handle_or_per_instance_info();
+            let per_inst_info_bytes = reader.read_bytes(ptr - 4..ptr)?;
+            let num_dicts =
+                per_inst_info_bytes.subrange(0..2).unpack::<u16>()? as usize;
+
+            let location_of_ptr_to_array =
+                ptr + (num_dicts - 1) * Pointer::SIZE;
+            let ptr_to_array: Pointer =
+                reader.read_byte_array(location_of_ptr_to_array)?.into();
+
+            // Step 2: Now, we need to read some number of elements
+            // from this array.  The number of elements in this array
+            // is also stored at negative offsets relative to the
+            // original pointer.  (-2 byte offset to 0 byte offset)
+            let num_type_params =
+                per_inst_info_bytes.subrange(2..4).unpack::<u16>()? as usize;
+
+            // Step 3: Read the actual array.  This is now the third
+            // value being read based on a single pointer, none of
+            // which are actually stored at the pointed-to location.
+            // (Well, unless `num_dicts` is one, but that just means
+            // it's sometimes possible to get the right answer while
+            // skipping a step.)
+            let generic_arg_bytes = reader.read_bytes(
+                ptr_to_array..ptr_to_array + num_type_params * Pointer::SIZE,
+            )?;
+
+            let iter = (0..num_type_params)
+                .map(move |i| -> TypedPointer<MethodTable> {
+                    let ptr = generic_arg_bytes
+                        .subrange(i * Pointer::SIZE..(i + 1) * Pointer::SIZE)
+                        .unpack()
+                        .expect("Unpacking of pointer only depends on size of slice");
+                    ptr
+                });
+            Ok(iter)
+        }).transpose()?.into_iter().flatten();
+
+        Ok(iter)
+    }
+
+    pub fn generic_types(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<Vec<TypedPointer<MethodTable>>, Error> {
+        let element_type =
+            std::iter::successors(Some(Ok(self.clone())), |res_prev| {
+                let prev = res_prev.as_ref().ok()?;
+                let element_type = prev.array_element_type()?;
+                Some(element_type.read(reader))
+            })
+            .last()
+            .expect("Iterator will at least produce self")?;
+
+        let from_self =
+            element_type.generic_types_excluding_base_class(reader)?;
+        let from_parents = element_type
+            .iter_parents(reader)
+            .map(|res_parent| {
+                res_parent.and_then(|parent| {
+                    parent.generic_types_excluding_base_class(reader)
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .flatten();
+
+        Ok(from_self.chain(from_parents).collect())
     }
 
     pub fn token(&self) -> Option<MetadataTableIndex<TypeDef>> {

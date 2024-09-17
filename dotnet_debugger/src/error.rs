@@ -114,8 +114,14 @@ pub enum Error {
     #[error("Method table contained invalid type flag 0x{0:x}.")]
     InvalidTypeFlag(u32),
 
+    #[error(
+        "Generic type var had index {index}, \
+         but only {num_vars} were found."
+    )]
+    InvalidGenericTypeVar { index: usize, num_vars: usize },
+
     #[error("Not yet implemented: {0}")]
-    NotImplementedYet(&'static str),
+    NotImplementedYet(String),
 }
 
 impl std::fmt::Debug for Error {

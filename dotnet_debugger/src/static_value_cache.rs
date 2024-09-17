@@ -35,7 +35,11 @@ pub struct StaticValueCache {
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
 
     field_to_runtime_type: FrozenMap<
-        (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
+        (
+            TypedPointer<MethodTable>, // Parent's method table
+            TypedPointer<MethodTable>, // Field's method table
+            MetadataTableIndex<Field>,
+        ),
         Box<RuntimeType>,
     >,
     field_to_type_name: FrozenMap<
@@ -225,10 +229,12 @@ impl StaticValueCache {
 
     pub fn field_to_runtime_type(
         &self,
+        ptr_mtable_of_parent: TypedPointer<MethodTable>,
         desc: &FieldDescription,
         reader: &MemoryReader,
     ) -> Result<RuntimeType, Error> {
-        let lookup_key = (desc.method_table(), desc.token());
+        let lookup_key =
+            (ptr_mtable_of_parent, desc.method_table(), desc.token());
 
         self.field_to_runtime_type
             .try_insert(lookup_key, || {
@@ -278,6 +284,29 @@ impl StaticValueCache {
                     }
                     dll_unpacker::SignatureType::SizeArray(_) => {
                         RuntimeType::Array
+                    }
+                    dll_unpacker::SignatureType::GenericVarFromType(
+                        var_index,
+                    ) => {
+                        let mtable_of_parent =
+                            self.method_table(ptr_mtable_of_parent, reader)?;
+
+                        let generic_types =
+                            mtable_of_parent.generic_types(&reader)?;
+                        let var_index = var_index as usize;
+                        let ptr_generic_type = generic_types
+                            .get(var_index)
+                            .ok_or_else(|| Error::InvalidGenericTypeVar {
+                                index: var_index,
+                                num_vars: generic_types.len(),
+                            })?;
+
+                        let generic_type =
+                            self.method_table(*ptr_generic_type, reader)?;
+                        let runtime_type =
+                            generic_type.runtime_type(&reader)?;
+
+                        runtime_type
                     }
                     _ => RuntimeType::Class,
                 };
@@ -658,9 +687,11 @@ impl<'a> CachedReader<'a> {
 
     pub fn field_to_runtime_type(
         &self,
+        mtable_of_parent: TypedPointer<MethodTable>,
         desc: &FieldDescription,
     ) -> Result<RuntimeType, Error> {
-        self.state.field_to_runtime_type(desc, self.reader)
+        self.state
+            .field_to_runtime_type(mtable_of_parent, desc, self.reader)
     }
 
     pub fn field_to_type_name(
@@ -736,18 +767,24 @@ impl<'a> CachedReader<'a> {
                 .iter_method_table_pointers(self)?
                 .flat_map(|method_table_ptr| {
                     self.iter_static_fields(method_table_ptr)
-                })
-                .flatten()
-                .filter_map(move |field| {
-                    let runtime_type =
-                        self.field_to_runtime_type(&field).ok()?;
-                    let start = field
-                        .location(&module, FieldContainer::Static, self)
-                        .ok()?;
+                        .into_iter()
+                        .flatten()
+                        .map(move |field| -> Result<_, Error> {
+                            let runtime_type = self.field_to_runtime_type(
+                                method_table_ptr,
+                                &field,
+                            )?;
+                            let start = field.location(
+                                &module,
+                                FieldContainer::Static,
+                                self,
+                            )?;
 
-                    let size = runtime_type.size_bytes();
-                    Some(start..start + size)
+                            let size = runtime_type.size_bytes();
+                            Ok(start..start + size)
+                        })
                 })
+                .filter_map(|res| res.ok())
                 .sorted_by_key(|range| (range.start, Reverse(range.end)))
                 .peekable()
                 .batching(|iter| {

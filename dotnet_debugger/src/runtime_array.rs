@@ -46,13 +46,13 @@ impl ReadTypedPointer for RuntimeArray {
 
         let bytes = reader.read_bytes(ptr..ptr + SHORT_READ)?;
 
-        let method_table: TypedPointer<MethodTable> =
+        let method_table_ptr: TypedPointer<MethodTable> =
             bytes.subrange(0..Pointer::SIZE).unpack()?;
         let num_elements = bytes
             .subrange(Pointer::SIZE..Pointer::SIZE + 8)
             .unpack::<u64>()? as usize;
 
-        let method_table = method_table.read(reader)?;
+        let method_table = method_table_ptr.read(reader)?;
         assert!(method_table.is_array());
         assert!(method_table.component_size().is_some());
 
