@@ -416,12 +416,46 @@ impl StaticValueCache {
 
                 let type_def = metadata.get(type_def_token)?;
                 let name = type_def.name()?;
-                let namespace = type_def.namespace()?;
 
-                let fullname = if namespace.is_empty() {
-                    name.to_string()
+                let namespace = type_def.namespace()?;
+                let namespace = if namespace.is_empty() {
+                    None
                 } else {
-                    format!("{namespace}.{name}")
+                    Some(namespace)
+                };
+
+                let extends = type_def
+                    .extends()?
+                    .map(|type_def_or_ref| -> Result<_, Error> {
+                        let name: std::borrow::Cow<str> = match type_def_or_ref
+                        {
+                            dll_unpacker::MetadataTypeDefOrRef::TypeDef(
+                                row,
+                            ) => row.name()?.into(),
+                            dll_unpacker::MetadataTypeDefOrRef::TypeRef(
+                                row,
+                            ) => row.name()?.into(),
+                            dll_unpacker::MetadataTypeDefOrRef::TypeSpec(
+                                row,
+                            ) => {
+                                let sig = row.signature()?;
+                                format!("{sig}").into()
+                            }
+                        };
+
+                        Ok(name)
+                    })
+                    .transpose()?;
+
+                let fullname = match (namespace, extends) {
+                    (Some(namespace), Some(extends)) => {
+                        format!("{namespace}.{name} extends {extends}")
+                    }
+                    (None, Some(extends)) => {
+                        format!("{name} extends {extends}")
+                    }
+                    (Some(namespace), None) => format!("{namespace}.{name}"),
+                    (None, None) => format!("{name}"),
                 };
 
                 Ok(fullname)
