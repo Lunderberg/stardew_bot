@@ -808,75 +808,55 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
                     Some(ObjectTreeContext::ListElement { .. }) => {}
                     None => {}
                 }
+
+                match &value.kind {
+                    ObjectTreeValueKind::Array(_) => write!(fmt, "[")?,
+
+                    ObjectTreeValueKind::Object {
+                        class_name,
+                        base_class: Some(base),
+                        ..
+                    } => {
+                        write!(fmt, "{class_name} extends {base} {{")?;
+                    }
+                    ObjectTreeValueKind::Object { class_name, .. } => {
+                        write!(fmt, "{class_name} {{")?;
+                    }
+
+                    _ => {}
+                }
             }
             IterationOrder::PostVisit => {}
         }
 
         match self.pos {
-            IterationOrder::PreVisit => match &value.kind {
-                ObjectTreeValueKind::Array(_) => write!(fmt, "[")?,
-
-                ObjectTreeValueKind::Object {
-                    class_name,
-                    base_class: Some(base),
-                    ..
-                } => {
-                    write!(fmt, "{class_name} extends {base} {{")?;
-                }
-                ObjectTreeValueKind::Object { class_name, .. } => {
-                    write!(fmt, "{class_name} {{")?;
-                }
-
-                ObjectTreeValueKind::DisplayList(_) => {}
-
-                ObjectTreeValueKind::UnreadValue
-                | ObjectTreeValueKind::Value(_)
-                | ObjectTreeValueKind::String(_) => {
-                    panic!(
-                        "Should be unreachable, \
-                         these value kinds are single-line."
-                    )
-                }
-            },
+            IterationOrder::PreVisit => {}
             IterationOrder::LeafNode => match &value.kind {
-                ObjectTreeValueKind::Object {
-                    class_name,
-                    base_class: Some(base),
-                    ..
-                } => {
-                    write!(fmt, "{class_name} extends {base} {{...}}")?;
-                }
-                ObjectTreeValueKind::Object { class_name, .. } => {
-                    write!(fmt, "{class_name} {{...}}")?;
-                }
-                ObjectTreeValueKind::Array(_) => write!(fmt, "[...]")?,
-                ObjectTreeValueKind::DisplayList(_) => {}
+                ObjectTreeValueKind::Object { .. }
+                | ObjectTreeValueKind::Array(_) => write!(fmt, "...")?,
+
                 ObjectTreeValueKind::UnreadValue => {
                     let ptr = value.location.start;
                     write!(fmt, "unread value @ {ptr}")?
                 }
                 ObjectTreeValueKind::Value(value) => write!(fmt, "{value}")?,
                 ObjectTreeValueKind::String(value) => write!(fmt, "{value:?}")?,
+                _ => {}
             },
-            IterationOrder::PostVisit => match &value.kind {
-                ObjectTreeValueKind::Array(_) => write!(fmt, "]")?,
-                ObjectTreeValueKind::Object { .. } => write!(fmt, "}}")?,
-                ObjectTreeValueKind::DisplayList(_) => {}
-
-                ObjectTreeValueKind::UnreadValue
-                | ObjectTreeValueKind::Value(_)
-                | ObjectTreeValueKind::String(_) => {
-                    panic!(
-                        "Should be unreachable, \
-                                 these value kinds are single-line."
-                    )
-                }
-            },
+            IterationOrder::PostVisit => {}
         }
 
         match self.pos {
             IterationOrder::PreVisit => {}
             IterationOrder::LeafNode | IterationOrder::PostVisit => {
+                match &value.kind {
+                    ObjectTreeValueKind::Array(_) => write!(fmt, "]")?,
+                    ObjectTreeValueKind::Object { .. } => write!(fmt, "}}")?,
+                    ObjectTreeValueKind::DisplayList(_) => {}
+
+                    _ => {}
+                }
+
                 match &self.node.context {
                     Some(ObjectTreeContext::Field { .. }) => write!(fmt, ";")?,
                     Some(ObjectTreeContext::ListElement { .. }) => {
