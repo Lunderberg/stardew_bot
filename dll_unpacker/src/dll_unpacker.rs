@@ -1,5 +1,6 @@
 use derive_more::From;
 use paste::paste;
+use std::borrow::Cow;
 use std::{borrow::Borrow, marker::PhantomData, ops::Range};
 
 use memory_reader::{
@@ -1260,11 +1261,13 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
 }
 
 impl<'a> MetadataTypeDefOrRef<'a> {
-    pub fn name(&self) -> Result<&'a str, Error> {
+    pub fn name(&self) -> Result<Cow<'a, str>, Error> {
         match self {
-            MetadataTypeDefOrRef::TypeDef(row) => row.name(),
-            MetadataTypeDefOrRef::TypeRef(row) => row.name(),
-            MetadataTypeDefOrRef::TypeSpec(_) => Ok("TypeSpec (anon)"),
+            MetadataTypeDefOrRef::TypeDef(row) => Ok(row.name()?.into()),
+            MetadataTypeDefOrRef::TypeRef(row) => Ok(row.name()?.into()),
+            MetadataTypeDefOrRef::TypeSpec(spec) => {
+                Ok(format!("{}", spec.signature()?).into())
+            }
         }
     }
 

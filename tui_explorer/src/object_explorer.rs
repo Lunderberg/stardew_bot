@@ -72,6 +72,8 @@ enum ObjectTreeValueKind {
     Array(Vec<ObjectTreeNode>),
     Object {
         class_name: String,
+        class_namespace: String,
+        base_class: Option<String>,
         fields: Vec<ObjectTreeNode>,
     },
     DisplayList(Vec<ObjectTreeNode>),
@@ -284,9 +286,30 @@ impl ObjectTreeValue {
                 method_table: field_method_table,
                 ..
             } => {
-                let class_name = reader
-                    .method_table_to_name(field_method_table)?
-                    .to_string();
+                let (class_name, class_namespace, base_class) = {
+                    let method_table =
+                        reader.method_table(field_method_table)?;
+                    let module =
+                        reader.runtime_module(method_table.module())?;
+                    let metadata = module.metadata(reader)?;
+
+                    let type_def_token = method_table.token().ok_or(
+                        Error::NotImplementedYet(
+                            "Handle null metadata token in MethodTable"
+                                .to_string(),
+                        ),
+                    )?;
+                    let type_def = metadata.get(type_def_token)?;
+
+                    let name = type_def.name()?;
+                    let namespace = type_def.namespace()?;
+                    let extends = type_def
+                        .extends()?
+                        .map(|base| base.name())
+                        .transpose()?
+                        .map(|cow| cow.into_owned());
+                    (name.to_string(), namespace.to_string(), extends)
+                };
 
                 let fields = reader
                     .field_descriptions(field_method_table)?
@@ -308,7 +331,12 @@ impl ObjectTreeValue {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeValueKind::Object { class_name, fields }
+                ObjectTreeValueKind::Object {
+                    class_name,
+                    class_namespace,
+                    base_class,
+                    fields,
+                }
             }
         };
 
@@ -569,9 +597,31 @@ impl ObjectTreeNode {
                     }
 
                     let obj = reader.object(ptr)?;
-                    let class_name = reader
-                        .method_table_to_name(obj.method_table())?
-                        .to_string();
+
+                    let (class_name, class_namespace, base_class) = {
+                        let method_table =
+                            reader.method_table(obj.method_table())?;
+                        let module =
+                            reader.runtime_module(method_table.module())?;
+                        let metadata = module.metadata(reader)?;
+
+                        let type_def_token = method_table.token().ok_or(
+                            Error::NotImplementedYet(
+                                "Handle null metadata token in MethodTable"
+                                    .to_string(),
+                            ),
+                        )?;
+                        let type_def = metadata.get(type_def_token)?;
+
+                        let name = type_def.name()?;
+                        let namespace = type_def.namespace()?;
+                        let extends = type_def
+                            .extends()?
+                            .map(|base| base.name())
+                            .transpose()?
+                            .map(|cow| cow.into_owned());
+                        (name.to_string(), namespace.to_string(), extends)
+                    };
 
                     let instance_location: Pointer = obj.location().into();
                     let size_bytes =
@@ -598,8 +648,12 @@ impl ObjectTreeNode {
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
 
-                    self.value.kind =
-                        ObjectTreeValueKind::Object { class_name, fields };
+                    self.value.kind = ObjectTreeValueKind::Object {
+                        class_name,
+                        class_namespace,
+                        base_class,
+                        fields,
+                    };
                 }
 
                 ObjectTreeValueKind::DisplayList(..) => {}
@@ -762,6 +816,13 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
             IterationOrder::PreVisit => match &value.kind {
                 ObjectTreeValueKind::Array(_) => write!(fmt, "[")?,
 
+                ObjectTreeValueKind::Object {
+                    class_name,
+                    base_class: Some(base),
+                    ..
+                } => {
+                    write!(fmt, "{class_name} extends {base} {{")?;
+                }
                 ObjectTreeValueKind::Object { class_name, .. } => {
                     write!(fmt, "{class_name} {{")?;
                 }
@@ -778,6 +839,13 @@ impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
                 }
             },
             IterationOrder::LeafNode => match &value.kind {
+                ObjectTreeValueKind::Object {
+                    class_name,
+                    base_class: Some(base),
+                    ..
+                } => {
+                    write!(fmt, "{class_name} extends {base} {{...}}")?;
+                }
                 ObjectTreeValueKind::Object { class_name, .. } => {
                     write!(fmt, "{class_name} {{...}}")?;
                 }

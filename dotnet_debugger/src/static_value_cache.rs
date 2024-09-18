@@ -564,25 +564,7 @@ impl<'a> CachedReader<'a> {
 
                 let extends = type_def
                     .extends()?
-                    .map(|type_def_or_ref| -> Result<_, Error> {
-                        let name: std::borrow::Cow<str> = match type_def_or_ref
-                        {
-                            dll_unpacker::MetadataTypeDefOrRef::TypeDef(
-                                row,
-                            ) => row.name()?.into(),
-                            dll_unpacker::MetadataTypeDefOrRef::TypeRef(
-                                row,
-                            ) => row.name()?.into(),
-                            dll_unpacker::MetadataTypeDefOrRef::TypeSpec(
-                                row,
-                            ) => {
-                                let sig = row.signature()?;
-                                format!("{sig}").into()
-                            }
-                        };
-
-                        Ok(name)
-                    })
+                    .map(|type_def_or_ref| type_def_or_ref.name())
                     .transpose()?;
 
                 let fullname = match (namespace, extends) {

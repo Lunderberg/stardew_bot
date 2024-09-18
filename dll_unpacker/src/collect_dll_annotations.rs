@@ -516,7 +516,7 @@ impl<'a> MetadataRow<'a, TypeDef> {
             .append_value(if let Some(base_class) = self.extends()? {
                 base_class.name()?
             } else {
-                "(none)"
+                "(none)".into()
             });
 
         let field_indices = self.field_indices();
@@ -902,7 +902,7 @@ impl<'a> MetadataRow<'a, Event> {
             .append_value(if let Some(event) = self.event_type()? {
                 event.name()?
             } else {
-                "(none)"
+                "(none)".into()
             });
 
         Ok(())
