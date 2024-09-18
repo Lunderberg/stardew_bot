@@ -410,22 +410,22 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<ObjectTreeNode, Error> {
-        let field_name = reader.field_to_name(&field)?.to_string();
+        let method_table = reader.method_table(field.method_table())?;
+        let module = reader.runtime_module(method_table.module())?;
+        let metadata = module.metadata(reader)?;
+        let field_metadata = metadata.get(field.token())?;
 
-        // TODO: Move this formatting over to the Signature class
+        let field_type = format!("{}", field_metadata.signature()?);
+
         let field_name = if field.is_static() {
-            let class_name =
-                reader.method_table_to_name(field.method_table())?;
+            let field_name = field_metadata.name()?;
+            let class_name = field_metadata.find_owning_class()?.name()?;
             format!("{class_name}.{field_name}")
         } else {
-            field_name
+            field_metadata.name()?.to_string()
         };
 
-        let field_type = reader.field_to_type_name(&field)?.to_string();
-
         let value = {
-            let method_table = reader.method_table(field.method_table())?;
-            let module = reader.runtime_module(method_table.module())?;
             let location = field.location(module, container, reader)?;
 
             let runtime_type =
