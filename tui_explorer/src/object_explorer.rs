@@ -51,9 +51,16 @@ struct DisplayAlias {
 struct ObjectTreeNode {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
-    should_read: bool,
+    should_read: ShouldReadState,
     display_expanded: bool,
     kind: ObjectTreeNodeKind,
+}
+
+#[derive(Clone)]
+enum ShouldReadState {
+    NoRead,
+    ReadAndExpand,
+    ReadAndCollapse,
 }
 
 #[derive(Clone)]
@@ -441,7 +448,7 @@ impl ObjectExplorer {
             kind: ObjectTreeNodeKind::DisplayList(static_fields),
             location: Pointer::null()..Pointer::null(),
             runtime_type: RuntimeType::Class,
-            should_read: false,
+            should_read: ShouldReadState::NoRead,
             display_expanded: true,
         };
 
@@ -496,6 +503,18 @@ impl ObjectExplorer {
 
     fn finalize_search(&mut self) {
         self.search = None;
+    }
+
+    fn num_lines(&self) -> usize {
+        let mut num_lines = 0;
+        TreeVisitor::new()
+            .with_extension(FollowDisplayAlias::new(
+                &self.display_options.aliases,
+            ))
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(LineCounter::new(&mut num_lines))
+            .visit(&self.object_tree);
+        num_lines
     }
 }
 
@@ -587,7 +606,7 @@ impl ObjectTreeNode {
             kind,
             location,
             runtime_type,
-            should_read: false,
+            should_read: ShouldReadState::NoRead,
             display_expanded: true,
         })
     }
@@ -630,7 +649,7 @@ impl ObjectTreeNode {
         let node = ObjectTreeNode {
             location: location..location + runtime_type.size_bytes(),
             runtime_type,
-            should_read: false,
+            should_read: ShouldReadState::NoRead,
             display_expanded: true,
             kind: ObjectTreeNodeKind::Field {
                 field_name,
@@ -647,10 +666,15 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         reader: CachedReader<'_>,
     ) -> Result<(), Error> {
-        if !self.should_read {
-            return Ok(());
-        }
-        self.should_read = false;
+        let display_expanded = match self.should_read {
+            ShouldReadState::NoRead => {
+                return Ok(());
+            }
+            ShouldReadState::ReadAndExpand => true,
+            ShouldReadState::ReadAndCollapse => false,
+        };
+
+        self.should_read = ShouldReadState::NoRead;
 
         // Check if a generic `TypedPointer<RuntimeObject>` should
         // actually be a type with a more specific unpacker.
@@ -744,6 +768,7 @@ impl ObjectTreeNode {
                     .collect::<Result<Vec<_>, _>>()?;
 
                 self.kind = ObjectTreeNodeKind::Array(items);
+                self.display_expanded = display_expanded;
             }
 
             ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
@@ -809,6 +834,7 @@ impl ObjectTreeNode {
                     base_class,
                     fields,
                 };
+                self.display_expanded = display_expanded;
             }
 
             ObjectTreeNodeKind::DisplayList(..) => {}
@@ -839,15 +865,6 @@ impl ObjectTreeNode {
         TreeMutator::new().with_extension(&mut visitor).visit(self);
         visitor.err
     }
-
-    fn num_lines(&self) -> usize {
-        let mut num_lines = 0;
-        TreeVisitor::new()
-            .with_extension(CollapseNonExpandedNodes)
-            .with_extension(LineCounter::new(&mut num_lines))
-            .visit(self);
-        num_lines
-    }
 }
 
 struct ToggleDisplayExpanded {
@@ -876,8 +893,60 @@ impl TreeMutatorExtension for ToggleDisplayExpanded {
                     node.display_expanded ^= true;
                 }
                 _ => {
-                    node.should_read ^= true;
+                    node.should_read = match node.should_read {
+                        ShouldReadState::NoRead => {
+                            ShouldReadState::ReadAndExpand
+                        }
+                        ShouldReadState::ReadAndExpand
+                        | ShouldReadState::ReadAndCollapse => {
+                            ShouldReadState::NoRead
+                        }
+                    };
                 }
+            }
+        }
+    }
+}
+
+struct ToggleReadOnDisplayedNodes {
+    current_line: usize,
+    display_region: Range<usize>,
+}
+impl ToggleReadOnDisplayedNodes {
+    fn new(display_region: Range<usize>) -> Self {
+        Self {
+            current_line: 0,
+            display_region,
+        }
+    }
+}
+impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
+    fn next_display_line(&mut self) {
+        self.current_line += 1;
+    }
+
+    fn visit_leaf<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+        if self.display_region.contains(&self.current_line) {
+            let can_expand = match node.kind {
+                ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr))
+                    if !ptr.is_null() =>
+                {
+                    true
+                }
+                ObjectTreeNodeKind::Value(RuntimeValue::Array(ptr))
+                    if !ptr.is_null() =>
+                {
+                    true
+                }
+                ObjectTreeNodeKind::Value(RuntimeValue::String(ptr))
+                    if !ptr.is_null() =>
+                {
+                    true
+                }
+                _ => false,
+            };
+            if can_expand {
+                node.should_read = ShouldReadState::ReadAndCollapse;
             }
         }
     }
@@ -1170,7 +1239,7 @@ impl WidgetWindow for ObjectExplorer {
         _globals: &'a crate::TuiGlobals,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
-        let num_lines = self.object_tree.num_lines();
+        let num_lines = self.num_lines();
 
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -1246,6 +1315,19 @@ impl WidgetWindow for ObjectExplorer {
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), Error> {
         let reader = globals.cached_reader();
+
+        let display_range = {
+            let start = self.list_state.offset();
+            start..start + self.prev_draw_height
+        };
+        TreeMutator::new()
+            .with_extension(FollowDisplayAlias::new(
+                &self.display_options.aliases,
+            ))
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(ToggleReadOnDisplayedNodes::new(display_range))
+            .visit(&mut self.object_tree);
+
         self.object_tree
             .expand_marked(&self.display_options, reader)?;
         Ok(())
@@ -1273,7 +1355,7 @@ impl WidgetWindow for ObjectExplorer {
         // the rendering considerably.  Rendering the list of empty
         // lines updates `display_range` to be accurate for the actual
         // rendering.
-        let num_lines = self.object_tree.num_lines();
+        let num_lines = self.num_lines();
         StatefulWidget::render(
             List::new(vec![Text::default(); num_lines]),
             area,
