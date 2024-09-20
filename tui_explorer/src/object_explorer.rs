@@ -76,187 +76,265 @@ enum ObjectTreeNodeKind {
     DisplayList(Vec<ObjectTreeNode>),
 }
 
-struct TreeVisitor<'a> {
-    extensions: Vec<&'a mut dyn TreeVisitorExtension>,
-}
+macro_rules! define_visitor_mutator {
+    ($visitor:ident, $ext_trait:ident, $node_ty:ty $(,)?) => {
+        trait $ext_trait {
+            /// Called whenever the display moves to the next line
+            fn next_display_line(&mut self) {}
 
-impl<'a> TreeVisitor<'a> {
-    fn new() -> Self {
-        Self {
-            extensions: Vec::new(),
-        }
-    }
+            /// Called whenever the visitor moves into a deeper level of the
+            /// tree.
+            fn increase_tree_depth(&mut self) {}
 
-    fn with_extension(
-        mut self,
-        ext: &'a mut impl TreeVisitorExtension,
-    ) -> Self {
-        self.extensions.push(ext);
-        self
-    }
-}
+            /// Called whenever the visitor moves out of a level of the
+            /// tree.
+            fn decrease_tree_depth(&mut self) {}
 
-trait TreeVisitorExtension {
-    /// Called whenever the display moves to the next line
-    fn next_display_line(&mut self) {}
+            /// Override the node being visited, to instead visit a child
+            /// of that node.
+            fn override_visit<'node>(&self, node: $node_ty) -> $node_ty {
+                node
+            }
 
-    /// Called whenever the visitor moves into a deeper level of the
-    /// tree.
-    fn increase_tree_depth(&mut self) {}
+            /// Returns true if the node is a leaf node, false if it may have
+            /// children, or None if this extension falls back to the default
+            /// behavior.
+            fn is_leaf_node<'node>(&self, _node: $node_ty) -> Option<bool> {
+                None
+            }
 
-    /// Called whenever the visitor moves out of a level of the
-    /// tree.
-    fn decrease_tree_depth(&mut self) {}
+            /// Called for each node, prior to recursing to any child nodes.
+            fn previsit<'node>(&mut self, _node: $node_ty) {}
 
-    /// Override the node being visited, to instead visit a child
-    /// of that node.
-    fn override_visit<'a>(
-        &self,
-        node: &'a mut ObjectTreeNode,
-    ) -> &'a mut ObjectTreeNode {
-        node
-    }
+            /// Called for each leaf node.  A leaf node is any node for which
+            /// an extension has returned true for `is_leaf_node`.
+            fn visit_leaf<'node>(&mut self, _node: $node_ty) {}
 
-    /// Returns true if the node is a leaf node, false if it may have
-    /// children, or None if this extension falls back to the default
-    /// behavior.
-    fn is_leaf_node(&self, _node: &ObjectTreeNode) -> Option<bool> {
-        None
-    }
+            /// Called prior to recursing into a child node.  A child node is
+            /// visited if all extensions return `true`.  A child node is not
+            /// visited if any extension returns `false`.
+            fn child_filter<'node>(&mut self, _node: $node_ty) -> bool {
+                true
+            }
 
-    /// Called for each node, prior to recursing to any child nodes.
-    fn previsit(&mut self, _node: &mut ObjectTreeNode) {}
-
-    /// Called for each leaf node.  A leaf node is any node for which
-    /// an extension has returned true for `is_leaf_node`.
-    fn visit_leaf(&mut self, _node: &mut ObjectTreeNode) {}
-
-    /// Called prior to recursing into a child node.  A child node is
-    /// visited if all extensions return `true`.  A child node is not
-    /// visited if any extension returns `false`.
-    fn child_filter(&self, _node: &ObjectTreeNode) -> bool {
-        true
-    }
-
-    /// Called for each node, after recursing to any child nodes.
-    fn postvisit(&mut self, _node: &ObjectTreeNode) {}
-}
-
-impl TreeVisitor<'_> {
-    fn visit<'a>(&mut self, node: &'a mut ObjectTreeNode) {
-        let node = self.override_visit(node);
-
-        self.previsit(node);
-        if self.is_leaf_node(node) {
-            self.visit_leaf(node);
-        } else {
-            self.visit_children(node);
+            /// Called for each node, after recursing to any child nodes.
+            fn postvisit<'node>(&mut self, _node: $node_ty) {}
         }
 
-        self.postvisit(node);
-    }
+        struct $visitor<'v> {
+            extensions: Vec<Box<dyn $ext_trait + 'v>>,
+        }
 
-    fn next_display_line(&mut self) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.next_display_line());
-    }
+        impl<'v> $visitor<'v> {
+            fn new() -> Self {
+                Self {
+                    extensions: Vec::new(),
+                }
+            }
 
-    fn increase_tree_depth(&mut self) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.increase_tree_depth());
-    }
+            fn with_extension(mut self, ext: impl $ext_trait + 'v) -> Self {
+                self.extensions.push(Box::new(ext));
+                self
+            }
 
-    fn decrease_tree_depth(&mut self) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.decrease_tree_depth());
-    }
+            fn visit<'node>(&mut self, node: $node_ty) {
+                let node = self.override_visit(node);
 
-    fn override_visit<'a>(
-        &self,
-        node: &'a mut ObjectTreeNode,
-    ) -> &'a mut ObjectTreeNode {
-        self.extensions
-            .iter()
-            .fold(node, |prev, ext| ext.override_visit(prev))
-    }
+                self.previsit(node);
+                if self.is_leaf_node(node) {
+                    self.visit_leaf(node);
+                } else {
+                    self.visit_children(node);
+                }
 
-    fn is_leaf_node(&self, node: &ObjectTreeNode) -> bool {
-        self.extensions
-            .iter()
-            .find_map(|ext| ext.is_leaf_node(node))
-            .unwrap_or_else(|| match &node.kind {
-                ObjectTreeNodeKind::UnreadValue => true,
-                ObjectTreeNodeKind::Value(_) => true,
-                ObjectTreeNodeKind::String(_) => true,
-                ObjectTreeNodeKind::Array(elements) => elements.is_empty(),
-                ObjectTreeNodeKind::Object { fields, .. } => fields.is_empty(),
-                ObjectTreeNodeKind::Field { .. } => false,
-                ObjectTreeNodeKind::DisplayList(values) => values.is_empty(),
-            })
-    }
+                self.postvisit(node);
+            }
 
-    fn previsit<'a>(&mut self, node: &'a mut ObjectTreeNode) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.previsit(node));
-    }
+            fn next_display_line(&mut self) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.next_display_line());
+            }
 
-    fn visit_leaf<'a>(&mut self, node: &'a mut ObjectTreeNode) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.visit_leaf(node));
-    }
+            fn increase_tree_depth(&mut self) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.increase_tree_depth());
+            }
 
-    fn child_filter(&self, node: &ObjectTreeNode) -> bool {
-        self.extensions.iter().all(|ext| ext.child_filter(node))
-    }
+            fn decrease_tree_depth(&mut self) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.decrease_tree_depth());
+            }
 
-    fn visit_children<'a>(&mut self, node: &'a mut ObjectTreeNode) {
-        match &mut node.kind {
-            ObjectTreeNodeKind::Array(values)
-            | ObjectTreeNodeKind::Object { fields: values, .. } => {
-                let mut displayed_first_child = false;
-                self.increase_tree_depth();
-                for value in values {
-                    if self.child_filter(value) {
-                        if !displayed_first_child {
-                            self.next_display_line();
-                            displayed_first_child = true;
+            fn override_visit<'node>(&mut self, node: $node_ty) -> $node_ty {
+                self.extensions
+                    .iter()
+                    .fold(node, |prev, ext| ext.override_visit(prev))
+            }
+
+            fn is_leaf_node<'node>(&mut self, node: $node_ty) -> bool {
+                self.extensions
+                    .iter_mut()
+                    .find_map(|ext| ext.is_leaf_node(node))
+                    .unwrap_or_else(|| match &node.kind {
+                        ObjectTreeNodeKind::UnreadValue => true,
+                        ObjectTreeNodeKind::Value(_) => true,
+                        ObjectTreeNodeKind::String(_) => true,
+                        ObjectTreeNodeKind::Array(elements) => {
+                            elements.is_empty()
                         }
-                        self.visit(value);
-                        self.next_display_line();
-                    }
-                }
-                self.decrease_tree_depth();
+                        ObjectTreeNodeKind::Object { fields, .. } => {
+                            fields.is_empty()
+                        }
+                        ObjectTreeNodeKind::Field { .. } => false,
+                        ObjectTreeNodeKind::DisplayList(values) => {
+                            values.is_empty()
+                        }
+                    })
             }
-            ObjectTreeNodeKind::Field { value, .. } => {
-                if self.child_filter(value) {
-                    self.visit(value);
-                }
+
+            fn previsit<'node>(&mut self, node: $node_ty) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.previsit(node));
             }
-            ObjectTreeNodeKind::DisplayList(values) => {
-                for value in values {
-                    if self.child_filter(value) {
-                        self.visit(value);
-                        self.next_display_line();
+
+            fn visit_leaf<'node>(&mut self, node: $node_ty) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.visit_leaf(node));
+            }
+
+            fn child_filter<'node>(&mut self, node: $node_ty) -> bool {
+                self.extensions.iter_mut().all(|ext| ext.child_filter(node))
+            }
+
+            fn visit_children<'node>(&mut self, node: $node_ty) {
+                match node {
+                    ObjectTreeNode {
+                        kind:
+                            ObjectTreeNodeKind::Array(values)
+                            | ObjectTreeNodeKind::Object { fields: values, .. },
+                        ..
+                    } => {
+                        let mut displayed_first_child = false;
+                        self.increase_tree_depth();
+                        for value in values {
+                            if self.child_filter(value) {
+                                if !displayed_first_child {
+                                    self.next_display_line();
+                                    displayed_first_child = true;
+                                }
+                                self.visit(value);
+                                self.next_display_line();
+                            }
+                        }
+                        self.decrease_tree_depth();
                     }
+                    ObjectTreeNode {
+                        kind: ObjectTreeNodeKind::Field { value, .. },
+                        ..
+                    } => {
+                        if self.child_filter(value) {
+                            self.visit(value);
+                        }
+                    }
+                    ObjectTreeNode {
+                        kind: ObjectTreeNodeKind::DisplayList(values),
+                        ..
+                    } => {
+                        for value in values {
+                            if self.child_filter(value) {
+                                self.visit(value);
+                                self.next_display_line();
+                            }
+                        }
+                    }
+
+                    ObjectTreeNode {
+                        kind:
+                            ObjectTreeNodeKind::UnreadValue
+                            | ObjectTreeNodeKind::Value(_)
+                            | ObjectTreeNodeKind::String(_),
+                        ..
+                    } => {}
                 }
             }
 
-            ObjectTreeNodeKind::UnreadValue => {}
-            ObjectTreeNodeKind::Value(_) => {}
-            ObjectTreeNodeKind::String(_) => {}
+            fn postvisit<'node>(&mut self, node: $node_ty) {
+                self.extensions
+                    .iter_mut()
+                    .for_each(|ext| ext.postvisit(node));
+            }
         }
-    }
+    };
+}
 
-    fn postvisit<'a>(&mut self, node: &'a ObjectTreeNode) {
-        self.extensions
-            .iter_mut()
-            .for_each(|ext| ext.postvisit(node));
-    }
+define_visitor_mutator! {
+    TreeMutator,
+    TreeMutatorExtension,
+    &'node mut ObjectTreeNode,
+}
+define_visitor_mutator! {
+    TreeVisitor,
+    TreeVisitorExtension,
+    &'node ObjectTreeNode,
+}
+macro_rules! forward_visitor_as_mutator {
+    ($ext:ty) => {
+        impl TreeMutatorExtension for $ext {
+            fn next_display_line(&mut self) {
+                <$ext as TreeVisitorExtension>::next_display_line(self)
+            }
+
+            fn increase_tree_depth(&mut self) {
+                <$ext as TreeVisitorExtension>::increase_tree_depth(self)
+            }
+
+            fn decrease_tree_depth(&mut self) {
+                <$ext as TreeVisitorExtension>::decrease_tree_depth(self)
+            }
+
+            fn override_visit<'node>(
+                &self,
+                node: &'node mut ObjectTreeNode,
+            ) -> &'node mut ObjectTreeNode {
+                // This method cannot be implemented in terms of
+                // TreeObjectVisitor.  This is also the reason why the
+                // forwarding is provided as a macro, rather than as a
+                // blanket trait implementation.
+                node
+            }
+
+            fn is_leaf_node<'node>(
+                &self,
+                node: &'node mut ObjectTreeNode,
+            ) -> Option<bool> {
+                <$ext as TreeVisitorExtension>::is_leaf_node(self, node)
+            }
+
+            fn previsit<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+                <$ext as TreeVisitorExtension>::previsit(self, node)
+            }
+
+            fn visit_leaf<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+                <$ext as TreeVisitorExtension>::visit_leaf(self, node)
+            }
+
+            fn child_filter<'node>(
+                &mut self,
+                node: &'node mut ObjectTreeNode,
+            ) -> bool {
+                <$ext as TreeVisitorExtension>::child_filter(self, node)
+            }
+
+            fn postvisit<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+                <$ext as TreeVisitorExtension>::postvisit(self, node)
+            }
+        }
+    };
 }
 
 impl ObjectExplorer {
@@ -359,8 +437,6 @@ impl ObjectExplorer {
                 .map(|(_, node)| node)
                 .collect::<Vec<_>>();
 
-        // TODO: Make a better display, since displaying the static
-        // fields as being in a single class is incorrect.
         let object_tree = ObjectTreeNode {
             kind: ObjectTreeNodeKind::DisplayList(static_fields),
             location: Pointer::null()..Pointer::null(),
@@ -381,15 +457,15 @@ impl ObjectExplorer {
     fn address_of_selected_node(&mut self) -> Option<Pointer> {
         let selected = self.list_state.selected()?;
 
-        let mut finder = AddressFinder::new(selected);
+        let mut ptr = None;
         TreeVisitor::new()
-            .with_extension(&mut FollowDisplayAlias::new(
+            .with_extension(FollowDisplayAlias::new(
                 &self.display_options.aliases,
             ))
-            .with_extension(&mut CollapseNonExpandedNodes)
-            .with_extension(&mut finder)
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(AddressFinder::new(selected, &mut ptr))
             .visit(&mut self.object_tree);
-        finder.ptr
+        ptr
     }
 
     fn toggle_expansion(&mut self) {
@@ -398,12 +474,12 @@ impl ObjectExplorer {
             .selected()
             .expect("ObjectExplorer should always have a selected line.");
 
-        TreeVisitor::new()
-            .with_extension(&mut FollowDisplayAlias::new(
+        TreeMutator::new()
+            .with_extension(FollowDisplayAlias::new(
                 &self.display_options.aliases,
             ))
-            .with_extension(&mut CollapseNonExpandedNodes)
-            .with_extension(&mut ToggleDisplayExpanded::new(selected))
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(ToggleDisplayExpanded::new(selected))
             .visit(&mut self.object_tree);
     }
 
@@ -760,20 +836,17 @@ impl ObjectTreeNode {
             reader,
             err: Ok(()),
         };
-        TreeVisitor::new().with_extension(&mut visitor).visit(self);
+        TreeMutator::new().with_extension(&mut visitor).visit(self);
         visitor.err
     }
 
-    // TODO: Make a version of TreeVisitor that doesn't require
-    // mutable access to the tree, as that forces many of the
-    // implementations to be unnecessarily mutable.
-    fn num_lines(&mut self) -> usize {
-        let mut counter = LineCounter::new();
+    fn num_lines(&self) -> usize {
+        let mut num_lines = 0;
         TreeVisitor::new()
-            .with_extension(&mut CollapseNonExpandedNodes)
-            .with_extension(&mut counter)
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(LineCounter::new(&mut num_lines))
             .visit(self);
-        counter.num_lines
+        num_lines
     }
 }
 
@@ -790,7 +863,7 @@ impl ToggleDisplayExpanded {
     }
 }
 
-impl TreeVisitorExtension for ToggleDisplayExpanded {
+impl TreeMutatorExtension for ToggleDisplayExpanded {
     fn next_display_line(&mut self) {
         self.current_line += 1;
     }
@@ -815,7 +888,7 @@ struct ReadMarkedNodes<'a> {
     reader: CachedReader<'a>,
     err: Result<(), Error>,
 }
-impl<'a> TreeVisitorExtension for ReadMarkedNodes<'a> {
+impl<'a, 'b> TreeMutatorExtension for &'b mut ReadMarkedNodes<'a> {
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
         if self.err.is_ok() {
             self.err = node.expand_if_marked(self.display_options, self.reader);
@@ -831,14 +904,9 @@ impl<'a> FollowDisplayAlias<'a> {
     fn new(aliases: &'a [DisplayAlias]) -> Self {
         Self { aliases }
     }
-}
 
-impl TreeVisitorExtension for FollowDisplayAlias<'_> {
-    fn override_visit<'a>(
-        &self,
-        node: &'a mut ObjectTreeNode,
-    ) -> &'a mut ObjectTreeNode {
-        let opt_field_index: Option<usize> = match &node.kind {
+    fn find_valid_alias(&self, node: &ObjectTreeNode) -> Option<usize> {
+        match &node.kind {
             ObjectTreeNodeKind::Object {
                 class_name,
                 class_namespace,
@@ -864,7 +932,16 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
                         .map(|(i, _)| i)
                 }),
             _ => None,
-        };
+        }
+    }
+}
+
+impl TreeMutatorExtension for FollowDisplayAlias<'_> {
+    fn override_visit<'a>(
+        &self,
+        node: &'a mut ObjectTreeNode,
+    ) -> &'a mut ObjectTreeNode {
+        let opt_field_index: Option<usize> = self.find_valid_alias(node);
 
         if let Some(field_index) = opt_field_index {
             match &mut node.kind {
@@ -873,7 +950,40 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
                         ObjectTreeNodeKind::Field { value, .. } => {
                             // Recursively visit in case the alias
                             // points to another alias.
-                            self.override_visit(value.as_mut())
+                            <Self as TreeMutatorExtension>::override_visit(
+                                self,
+                                value.as_mut(),
+                            )
+                        }
+                        _ => panic!("Unreachable due to earlier check"),
+                    }
+                }
+                _ => panic!("Unreachable due to earlier check"),
+            }
+        } else {
+            node
+        }
+    }
+}
+
+impl TreeVisitorExtension for FollowDisplayAlias<'_> {
+    fn override_visit<'a>(
+        &self,
+        node: &'a ObjectTreeNode,
+    ) -> &'a ObjectTreeNode {
+        let opt_field_index: Option<usize> = self.find_valid_alias(node);
+
+        if let Some(field_index) = opt_field_index {
+            match &node.kind {
+                ObjectTreeNodeKind::Object { fields, .. } => {
+                    match &fields[field_index].kind {
+                        ObjectTreeNodeKind::Field { value, .. } => {
+                            // Recursively visit in case the alias
+                            // points to another alias.
+                            <Self as TreeVisitorExtension>::override_visit(
+                                self,
+                                value.as_ref(),
+                            )
                         }
                         _ => panic!("Unreachable due to earlier check"),
                     }
@@ -888,7 +998,7 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
 
 struct CollapseNonExpandedNodes;
 impl TreeVisitorExtension for CollapseNonExpandedNodes {
-    fn is_leaf_node(&self, node: &ObjectTreeNode) -> Option<bool> {
+    fn is_leaf_node<'node>(&self, node: &'node ObjectTreeNode) -> Option<bool> {
         match &node.kind {
             ObjectTreeNodeKind::Object { .. }
             | ObjectTreeNodeKind::Array(_)
@@ -900,43 +1010,44 @@ impl TreeVisitorExtension for CollapseNonExpandedNodes {
         }
     }
 }
+forward_visitor_as_mutator! {CollapseNonExpandedNodes}
 
-struct LineCounter {
-    num_lines: usize,
+struct LineCounter<'a> {
+    num_lines: &'a mut usize,
 }
-impl LineCounter {
-    fn new() -> Self {
-        Self { num_lines: 1 }
+impl<'a> LineCounter<'a> {
+    fn new(num_lines: &'a mut usize) -> Self {
+        Self { num_lines }
     }
 }
-impl TreeVisitorExtension for LineCounter {
+impl<'a> TreeVisitorExtension for LineCounter<'a> {
     fn next_display_line(&mut self) {
-        self.num_lines += 1;
+        *self.num_lines += 1;
     }
 }
 
-struct AddressFinder {
+struct AddressFinder<'a> {
     selected: usize,
     current_line: usize,
-    ptr: Option<Pointer>,
+    ptr: &'a mut Option<Pointer>,
 }
-impl AddressFinder {
-    fn new(selected: usize) -> Self {
+impl<'a> AddressFinder<'a> {
+    fn new(selected: usize, ptr: &'a mut Option<Pointer>) -> Self {
         Self {
             selected,
             current_line: 0,
-            ptr: None,
+            ptr,
         }
     }
 }
-impl TreeVisitorExtension for AddressFinder {
+impl<'a> TreeVisitorExtension for AddressFinder<'a> {
     fn next_display_line(&mut self) {
         self.current_line += 1;
     }
 
-    fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
+    fn visit_leaf(&mut self, node: &ObjectTreeNode) {
         if self.selected == self.current_line {
-            self.ptr = Some(node.location.start);
+            *self.ptr = Some(node.location.start);
         }
     }
 }
@@ -975,7 +1086,7 @@ impl LineCollector {
     }
 }
 
-impl TreeVisitorExtension for LineCollector {
+impl<'a> TreeVisitorExtension for &'a mut LineCollector {
     fn next_display_line(&mut self) {
         self.lines.push(String::new());
     }
@@ -986,7 +1097,7 @@ impl TreeVisitorExtension for LineCollector {
         self.tree_depth -= 1;
     }
 
-    fn previsit(&mut self, node: &mut ObjectTreeNode) {
+    fn previsit(&mut self, node: &ObjectTreeNode) {
         if !self.current_line_is_displayed() {
             return;
         }
@@ -1013,7 +1124,7 @@ impl TreeVisitorExtension for LineCollector {
         }
     }
 
-    fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
+    fn visit_leaf(&mut self, node: &ObjectTreeNode) {
         if !self.current_line_is_displayed() {
             return;
         }
@@ -1035,7 +1146,7 @@ impl TreeVisitorExtension for LineCollector {
         }
     }
 
-    fn postvisit(&mut self, node: &ObjectTreeNode) {
+    fn postvisit<'node>(&mut self, node: &ObjectTreeNode) {
         if !self.current_line_is_displayed() {
             return;
         }
@@ -1082,14 +1193,14 @@ impl WidgetWindow for ObjectExplorer {
                                         );
                                         TreeVisitor::new()
                                             .with_extension(
-                                                &mut FollowDisplayAlias::new(
+                                                FollowDisplayAlias::new(
                                                     &self
                                                         .display_options
                                                         .aliases,
                                                 ),
                                             )
                                             .with_extension(
-                                                &mut CollapseNonExpandedNodes,
+                                                CollapseNonExpandedNodes,
                                             )
                                             .with_extension(&mut collector)
                                             .visit(&mut self.object_tree);
@@ -1179,10 +1290,10 @@ impl WidgetWindow for ObjectExplorer {
         let lines = {
             let mut collector = LineCollector::new(display_range);
             TreeVisitor::new()
-                .with_extension(&mut FollowDisplayAlias::new(
+                .with_extension(FollowDisplayAlias::new(
                     &self.display_options.aliases,
                 ))
-                .with_extension(&mut CollapseNonExpandedNodes)
+                .with_extension(CollapseNonExpandedNodes)
                 .with_extension(&mut collector)
                 .visit(&mut self.object_tree);
             collector.lines
