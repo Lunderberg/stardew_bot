@@ -60,6 +60,7 @@ struct TypeInModule {
     coded_index: MetadataCodedIndex<TypeDefOrRef>,
 }
 
+#[derive(Clone, Copy)]
 pub struct CachedReader<'a> {
     state: &'a StaticValueCache,
     reader: &'a MemoryReader,

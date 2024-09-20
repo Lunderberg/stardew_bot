@@ -38,34 +38,26 @@ pub struct ObjectExplorer {
 struct DisplayOptions {
     sort_top: Vec<Regex>,
     sort_bottom: Vec<Regex>,
+    aliases: Vec<DisplayAlias>,
+}
+
+struct DisplayAlias {
+    namespace: String,
+    name: String,
+    field: String,
 }
 
 #[derive(Clone)]
 struct ObjectTreeNode {
-    context: Option<ObjectTreeContext>,
-    value: ObjectTreeValue,
-}
-
-#[derive(Clone)]
-enum ObjectTreeContext {
-    ListElement,
-    Field {
-        field_name: String,
-        field_type: String,
-    },
-}
-
-#[derive(Clone)]
-struct ObjectTreeValue {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
     should_read: bool,
     display_expanded: bool,
-    kind: ObjectTreeValueKind,
+    kind: ObjectTreeNodeKind,
 }
 
 #[derive(Clone)]
-enum ObjectTreeValueKind {
+enum ObjectTreeNodeKind {
     UnreadValue,
     Value(RuntimeValue),
     String(String),
@@ -76,23 +68,195 @@ enum ObjectTreeValueKind {
         base_class: Option<String>,
         fields: Vec<ObjectTreeNode>,
     },
+    Field {
+        field_name: String,
+        field_type: String,
+        value: Box<ObjectTreeNode>,
+    },
     DisplayList(Vec<ObjectTreeNode>),
 }
 
-struct ObjectTreeIterator<'a> {
-    stack: Vec<ObjectTreeIteratorItem<'a>>,
+struct TreeVisitor<'a> {
+    extensions: Vec<&'a mut dyn TreeVisitorExtension>,
 }
 
-enum IterationOrder {
-    PreVisit,
-    LeafNode,
-    PostVisit,
+impl<'a> TreeVisitor<'a> {
+    fn new() -> Self {
+        Self {
+            extensions: Vec::new(),
+        }
+    }
+
+    fn with_extension(
+        mut self,
+        ext: &'a mut impl TreeVisitorExtension,
+    ) -> Self {
+        self.extensions.push(ext);
+        self
+    }
 }
 
-struct ObjectTreeIteratorItem<'a> {
-    node: &'a ObjectTreeNode,
-    pos: IterationOrder,
-    tree_depth: usize,
+trait TreeVisitorExtension {
+    /// Called whenever the display moves to the next line
+    fn next_display_line(&mut self) {}
+
+    /// Called whenever the visitor moves into a deeper level of the
+    /// tree.
+    fn increase_tree_depth(&mut self) {}
+
+    /// Called whenever the visitor moves out of a level of the
+    /// tree.
+    fn decrease_tree_depth(&mut self) {}
+
+    /// Override the node being visited, to instead visit a child
+    /// of that node.
+    fn override_visit<'a>(
+        &self,
+        node: &'a mut ObjectTreeNode,
+    ) -> &'a mut ObjectTreeNode {
+        node
+    }
+
+    /// Returns true if the node is a leaf node, false if it may have
+    /// children, or None if this extension falls back to the default
+    /// behavior.
+    fn is_leaf_node(&self, _node: &ObjectTreeNode) -> Option<bool> {
+        None
+    }
+
+    /// Called for each node, prior to recursing to any child nodes.
+    fn previsit(&mut self, _node: &mut ObjectTreeNode) {}
+
+    /// Called for each leaf node.  A leaf node is any node for which
+    /// an extension has returned true for `is_leaf_node`.
+    fn visit_leaf(&mut self, _node: &mut ObjectTreeNode) {}
+
+    /// Called prior to recursing into a child node.  A child node is
+    /// visited if all extensions return `true`.  A child node is not
+    /// visited if any extension returns `false`.
+    fn child_filter(&self, _node: &ObjectTreeNode) -> bool {
+        true
+    }
+
+    /// Called for each node, after recursing to any child nodes.
+    fn postvisit(&mut self, _node: &ObjectTreeNode) {}
+}
+
+impl TreeVisitor<'_> {
+    fn visit<'a>(&mut self, node: &'a mut ObjectTreeNode) {
+        let node = self.override_visit(node);
+
+        self.previsit(node);
+        if self.is_leaf_node(node) {
+            self.visit_leaf(node);
+        } else {
+            self.visit_children(node);
+        }
+
+        self.postvisit(node);
+    }
+
+    fn next_display_line(&mut self) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.next_display_line());
+    }
+
+    fn increase_tree_depth(&mut self) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.increase_tree_depth());
+    }
+
+    fn decrease_tree_depth(&mut self) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.decrease_tree_depth());
+    }
+
+    fn override_visit<'a>(
+        &self,
+        node: &'a mut ObjectTreeNode,
+    ) -> &'a mut ObjectTreeNode {
+        self.extensions
+            .iter()
+            .fold(node, |prev, ext| ext.override_visit(prev))
+    }
+
+    fn is_leaf_node(&self, node: &ObjectTreeNode) -> bool {
+        self.extensions
+            .iter()
+            .find_map(|ext| ext.is_leaf_node(node))
+            .unwrap_or_else(|| match &node.kind {
+                ObjectTreeNodeKind::UnreadValue => true,
+                ObjectTreeNodeKind::Value(_) => true,
+                ObjectTreeNodeKind::String(_) => true,
+                ObjectTreeNodeKind::Array(elements) => elements.is_empty(),
+                ObjectTreeNodeKind::Object { fields, .. } => fields.is_empty(),
+                ObjectTreeNodeKind::Field { .. } => false,
+                ObjectTreeNodeKind::DisplayList(values) => values.is_empty(),
+            })
+    }
+
+    fn previsit<'a>(&mut self, node: &'a mut ObjectTreeNode) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.previsit(node));
+    }
+
+    fn visit_leaf<'a>(&mut self, node: &'a mut ObjectTreeNode) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.visit_leaf(node));
+    }
+
+    fn child_filter(&self, node: &ObjectTreeNode) -> bool {
+        self.extensions.iter().all(|ext| ext.child_filter(node))
+    }
+
+    fn visit_children<'a>(&mut self, node: &'a mut ObjectTreeNode) {
+        match &mut node.kind {
+            ObjectTreeNodeKind::Array(values)
+            | ObjectTreeNodeKind::Object { fields: values, .. } => {
+                let mut displayed_first_child = false;
+                self.increase_tree_depth();
+                for value in values {
+                    if self.child_filter(value) {
+                        if !displayed_first_child {
+                            self.next_display_line();
+                            displayed_first_child = true;
+                        }
+                        self.visit(value);
+                        self.next_display_line();
+                    }
+                }
+                self.decrease_tree_depth();
+            }
+            ObjectTreeNodeKind::Field { value, .. } => {
+                if self.child_filter(value) {
+                    self.visit(value);
+                }
+            }
+            ObjectTreeNodeKind::DisplayList(values) => {
+                for value in values {
+                    if self.child_filter(value) {
+                        self.visit(value);
+                        self.next_display_line();
+                    }
+                }
+            }
+
+            ObjectTreeNodeKind::UnreadValue => {}
+            ObjectTreeNodeKind::Value(_) => {}
+            ObjectTreeNodeKind::String(_) => {}
+        }
+    }
+
+    fn postvisit<'a>(&mut self, node: &'a ObjectTreeNode) {
+        self.extensions
+            .iter_mut()
+            .for_each(|ext| ext.postvisit(node));
+    }
 }
 
 impl ObjectExplorer {
@@ -115,6 +279,19 @@ impl ObjectExplorer {
                 .iter()
                 .cloned()
                 .filter_map(|string| string.try_into().ok())
+                .collect(),
+
+            aliases: user_config
+                .object_explorer_alias
+                .iter()
+                .filter_map(|(pattern, alias)| {
+                    let (namespace, name) = pattern.rsplit_once(".")?;
+                    Some(DisplayAlias {
+                        namespace: namespace.into(),
+                        name: name.into(),
+                        field: alias.clone(),
+                    })
+                })
                 .collect(),
         };
 
@@ -140,7 +317,6 @@ impl ObjectExplorer {
                     // objects to be owned by the lambda function.  To
                     // avoid this, declare new variables that hold the
                     // reference, and move the reference into the lambda.
-                    let reader_ref = &reader;
                     let display_options_ref = &display_options;
 
                     let module = reader.runtime_module(module_ptr)?;
@@ -148,7 +324,7 @@ impl ObjectExplorer {
                         module.iter_method_table_pointers(&reader)?;
                     let iter_static_fields = iter_vtable_ptr
                     .flat_map(|method_table_ptr| {
-                        match reader_ref.iter_static_fields(method_table_ptr) {
+                        match reader.iter_static_fields(method_table_ptr) {
                             Ok(iter) => Either::Left(
                                 iter.map(move |field| (method_table_ptr, field))
                                     .map(Ok),
@@ -164,7 +340,7 @@ impl ObjectExplorer {
                                 method_table_ptr,
                                 FieldContainer::Static,
                                 field,
-                                reader_ref,
+                                reader,
                                 display_options_ref,
                                 &prefetch_statics,
                             )?;
@@ -178,7 +354,7 @@ impl ObjectExplorer {
                 .collect::<Result<Vec<_>, _>>()?
                 .into_iter()
                 .sorted_by_key(|(field, _)| {
-                    display_options.sort_key(*field, &reader)
+                    display_options.sort_key(*field, reader)
                 })
                 .map(|(_, node)| node)
                 .collect::<Vec<_>>();
@@ -186,15 +362,11 @@ impl ObjectExplorer {
         // TODO: Make a better display, since displaying the static
         // fields as being in a single class is incorrect.
         let object_tree = ObjectTreeNode {
-            value: ObjectTreeValue {
-                kind: ObjectTreeValueKind::DisplayList(static_fields),
-                location: Pointer::null()..Pointer::null(),
-                runtime_type: RuntimeType::Class,
-                should_read: false,
-                display_expanded: true,
-            },
-
-            context: None,
+            kind: ObjectTreeNodeKind::DisplayList(static_fields),
+            location: Pointer::null()..Pointer::null(),
+            runtime_type: RuntimeType::Class,
+            should_read: false,
+            display_expanded: true,
         };
 
         Ok(ObjectExplorer {
@@ -206,14 +378,18 @@ impl ObjectExplorer {
         })
     }
 
-    fn selected_node(&self) -> Option<&ObjectTreeValue> {
-        self.list_state.selected().and_then(|selected| {
-            self.object_tree
-                .iter()
-                .filter(|item| item.node.value.has_non_child_lines())
-                .map(|item| &item.node.value)
-                .nth(selected)
-        })
+    fn address_of_selected_node(&mut self) -> Option<Pointer> {
+        let selected = self.list_state.selected()?;
+
+        let mut finder = AddressFinder::new(selected);
+        TreeVisitor::new()
+            .with_extension(&mut FollowDisplayAlias::new(
+                &self.display_options.aliases,
+            ))
+            .with_extension(&mut CollapseNonExpandedNodes)
+            .with_extension(&mut finder)
+            .visit(&mut self.object_tree);
+        finder.ptr
     }
 
     fn toggle_expansion(&mut self) {
@@ -222,22 +398,13 @@ impl ObjectExplorer {
             .selected()
             .expect("ObjectExplorer should always have a selected line.");
 
-        let node = self
-            .object_tree
-            .value
-            .node_at_line(selected)
-            .expect("The selected line should always point to a node.");
-
-        if matches!(
-            node.kind,
-            ObjectTreeValueKind::Object { .. } | ObjectTreeValueKind::Array(_)
-        ) {
-            // TODO: Find a good UX to distinguish between
-            // "collapse this node" and "re-read this node".
-            node.display_expanded = !node.display_expanded;
-        } else {
-            node.should_read = !node.should_read;
-        }
+        TreeVisitor::new()
+            .with_extension(&mut FollowDisplayAlias::new(
+                &self.display_options.aliases,
+            ))
+            .with_extension(&mut CollapseNonExpandedNodes)
+            .with_extension(&mut ToggleDisplayExpanded::new(selected))
+            .visit(&mut self.object_tree);
     }
 
     fn start_search(&mut self, direction: SearchDirection) {
@@ -256,11 +423,11 @@ impl ObjectExplorer {
     }
 }
 
-impl ObjectTreeValue {
+impl ObjectTreeNode {
     fn initial_value(
         location: Pointer,
         runtime_type: RuntimeType,
-        reader: &CachedReader,
+        reader: CachedReader<'_>,
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<Self, Error> {
@@ -277,9 +444,9 @@ impl ObjectTreeValue {
                 if let Some(bytes) = opt_bytes {
                     let runtime_value = runtime_type
                         .parse(bytes.subrange(location.clone()).into())?;
-                    ObjectTreeValueKind::Value(runtime_value)
+                    ObjectTreeNodeKind::Value(runtime_value)
                 } else {
-                    ObjectTreeValueKind::UnreadValue
+                    ObjectTreeNodeKind::UnreadValue
                 }
             }
             RuntimeType::ValueType {
@@ -331,7 +498,7 @@ impl ObjectTreeValue {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeValueKind::Object {
+                ObjectTreeNodeKind::Object {
                     class_name,
                     class_namespace,
                     base_class,
@@ -340,7 +507,7 @@ impl ObjectTreeValue {
             }
         };
 
-        Ok(ObjectTreeValue {
+        Ok(ObjectTreeNode {
             kind,
             location,
             runtime_type,
@@ -349,92 +516,11 @@ impl ObjectTreeValue {
         })
     }
 
-    fn num_lines(&self) -> usize {
-        self.display_expanded
-            .then(|| {
-                self.kind
-                    .iter_children(0)
-                    .map(|child| child.node.value.num_lines())
-                    .sum::<usize>()
-            })
-            .filter(|child_lines| *child_lines > 0)
-            .map(|child_lines| {
-                child_lines
-                    + self.num_previsit_lines()
-                    + self.num_postvisit_lines()
-            })
-            .unwrap_or(1)
-    }
-
-    fn has_non_child_lines(&self) -> bool {
-        self.num_previsit_lines() > 0 || self.num_postvisit_lines() > 0
-    }
-
-    fn num_previsit_lines(&self) -> usize {
-        match self.kind {
-            ObjectTreeValueKind::DisplayList(_) => 0,
-            _ => 1,
-        }
-    }
-
-    fn num_postvisit_lines(&self) -> usize {
-        match self.kind {
-            ObjectTreeValueKind::Array(_)
-            | ObjectTreeValueKind::Object { .. }
-                if self.display_expanded =>
-            {
-                1
-            }
-            _ => 0,
-        }
-    }
-
-    fn node_at_line<'a>(
-        &'a mut self,
-        mut i_line: usize,
-    ) -> Option<&'a mut ObjectTreeValue> {
-        let num_lines = self.num_lines();
-
-        if i_line < self.num_previsit_lines() {
-            Some(self)
-        } else if i_line + self.num_postvisit_lines() < num_lines {
-            assert!(
-                self.display_expanded,
-                "This conditional should only be reached \
-                 if this is a multi-line object."
-            );
-
-            i_line -= self.num_previsit_lines();
-            for child in self.kind.iter_mut_children() {
-                let child_lines = child.value.num_lines();
-                if i_line < child_lines {
-                    return child.value.node_at_line(i_line);
-                }
-                i_line -= child_lines;
-            }
-
-            panic!(
-                "This should be unreachable, \
-                 should have found a field containing the line."
-            );
-        } else if i_line < num_lines {
-            Some(self)
-        } else {
-            None
-        }
-    }
-}
-
-impl ObjectTreeNode {
-    fn iter(&self) -> impl Iterator<Item = ObjectTreeIteratorItem> + '_ {
-        ObjectTreeIterator::new(self)
-    }
-
     fn initial_field(
         mtable_of_parent: TypedPointer<MethodTable>,
         container: FieldContainer,
         field: FieldDescription,
-        reader: &CachedReader,
+        reader: CachedReader<'_>,
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<ObjectTreeNode, Error> {
@@ -453,421 +539,512 @@ impl ObjectTreeNode {
             field_metadata.name()?.to_string()
         };
 
-        let value = {
-            let location = field.location(module, container, reader)?;
+        let location = field.location(module, container, reader)?;
 
-            let runtime_type =
-                reader.field_to_runtime_type(mtable_of_parent, &field)?;
+        let runtime_type =
+            reader.field_to_runtime_type(mtable_of_parent, &field)?;
+        let value = ObjectTreeNode::initial_value(
+            location.clone(),
+            runtime_type.clone(),
+            reader,
+            display_options,
+            prefetch,
+        )?;
 
-            ObjectTreeValue::initial_value(
-                location,
-                runtime_type,
-                reader,
-                display_options,
-                prefetch,
-            )?
-        };
-
-        Ok(ObjectTreeNode {
-            context: Some(ObjectTreeContext::Field {
+        let node = ObjectTreeNode {
+            location: location..location + runtime_type.size_bytes(),
+            runtime_type,
+            should_read: false,
+            display_expanded: true,
+            kind: ObjectTreeNodeKind::Field {
                 field_name,
                 field_type,
-            }),
-            value,
-        })
+                value: Box::new(value),
+            },
+        };
+
+        Ok(node)
+    }
+
+    fn expand_if_marked(
+        &mut self,
+        display_options: &DisplayOptions,
+        reader: CachedReader<'_>,
+    ) -> Result<(), Error> {
+        if !self.should_read {
+            return Ok(());
+        }
+        self.should_read = false;
+
+        // Check if a generic `TypedPointer<RuntimeObject>` should
+        // actually be a type with a more specific unpacker.
+        //
+        // TODO: See if there's a cleaner way to handle this.
+        // These mostly occur from generic entries, where a member
+        // variable has type `GenericType`, and are currently
+        // treated as arbitrary objects.  These should instead be
+        // substituted with the types from the containing
+        // `GenericInst`.  Granted, this wouldn't cover all cases,
+        // as there could also be a generic `List<Object>`, so
+        // maybe the later check will still be necessary anyways.
+        match self.kind {
+            ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
+                let obj = reader.object(ptr)?;
+                let method_table = reader.method_table(obj.method_table())?;
+
+                let ptr: Pointer = ptr.into();
+                self.runtime_type = method_table.runtime_type(reader)?;
+                match self.runtime_type {
+                    RuntimeType::Prim(_) => {
+                        self.kind = ObjectTreeNodeKind::UnreadValue;
+                    }
+                    RuntimeType::ValueType { .. } => {
+                        panic!("Leaf node should not have ValueType")
+                    }
+                    RuntimeType::Class => {}
+                    RuntimeType::String => {
+                        self.kind = ObjectTreeNodeKind::Value(
+                            RuntimeValue::String(ptr.into()),
+                        );
+                    }
+                    RuntimeType::Array => {
+                        self.kind = ObjectTreeNodeKind::Value(
+                            RuntimeValue::Array(ptr.into()),
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Reading each type
+        match self.kind {
+            ObjectTreeNodeKind::UnreadValue => {
+                let value =
+                    reader.value(self.runtime_type, self.location.clone())?;
+                self.kind = ObjectTreeNodeKind::Value(value);
+            }
+            ObjectTreeNodeKind::Object { .. } => {
+                let value =
+                    reader.value(RuntimeType::Class, self.location.clone())?;
+                self.kind = ObjectTreeNodeKind::Value(value);
+            }
+            ObjectTreeNodeKind::Array { .. } => {
+                let value =
+                    reader.value(RuntimeType::Array, self.location.clone())?;
+                self.kind = ObjectTreeNodeKind::Value(value);
+            }
+
+            ObjectTreeNodeKind::Value(RuntimeValue::String(ptr)) => {
+                if ptr.is_null() {
+                    return Err(Error::CannotExpandNullField);
+                }
+                self.kind =
+                    ObjectTreeNodeKind::String(ptr.read(reader)?.into());
+            }
+
+            ObjectTreeNodeKind::Value(RuntimeValue::Array(ptr)) => {
+                if ptr.is_null() {
+                    return Err(Error::CannotExpandNullField);
+                }
+
+                let array = ptr.read(reader)?;
+                let prefetch = reader.read_bytes(array.ptr_range())?;
+                let prefetch = &[prefetch];
+
+                let element_type = array.element_type();
+
+                let items = (0..array.num_elements())
+                    .map(|index| {
+                        let location = array.element_location(index);
+                        ObjectTreeNode::initial_value(
+                            location.start,
+                            element_type,
+                            reader,
+                            display_options,
+                            prefetch,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
+                self.kind = ObjectTreeNodeKind::Array(items);
+            }
+
+            ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
+                if ptr.is_null() {
+                    return Err(Error::CannotExpandNullField);
+                }
+
+                let obj = reader.object(ptr)?;
+
+                let (class_name, class_namespace, base_class) = {
+                    let method_table =
+                        reader.method_table(obj.method_table())?;
+                    let module =
+                        reader.runtime_module(method_table.module())?;
+                    let metadata = module.metadata(reader)?;
+
+                    let type_def_token = method_table.token().ok_or(
+                        Error::NotImplementedYet(
+                            "Handle null metadata token in MethodTable"
+                                .to_string(),
+                        ),
+                    )?;
+                    let type_def = metadata.get(type_def_token)?;
+
+                    let name = type_def.name()?;
+                    let namespace = type_def.namespace()?;
+                    let extends = type_def
+                        .extends()?
+                        .map(|base| base.name())
+                        .transpose()?
+                        .map(|cow| cow.into_owned());
+                    (name.to_string(), namespace.to_string(), extends)
+                };
+
+                let instance_location: Pointer = obj.location().into();
+                let size_bytes =
+                    reader.method_table(obj.method_table())?.base_size();
+                let prefetch = reader.read_bytes(
+                    instance_location..instance_location + size_bytes,
+                )?;
+                let prefetch = &[prefetch];
+
+                let fields = reader
+                    .iter_instance_fields(obj.method_table())?
+                    .sorted_by_key(|field| {
+                        display_options.sort_key(*field, reader)
+                    })
+                    .map(|field| -> Result<_, Error> {
+                        Self::initial_field(
+                            obj.method_table(),
+                            FieldContainer::Class(instance_location.into()),
+                            field,
+                            reader,
+                            display_options,
+                            prefetch,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, Error>>()?;
+
+                self.kind = ObjectTreeNodeKind::Object {
+                    class_name,
+                    class_namespace,
+                    base_class,
+                    fields,
+                };
+            }
+
+            ObjectTreeNodeKind::DisplayList(..) => {}
+            ObjectTreeNodeKind::Field { .. } => {}
+
+            ObjectTreeNodeKind::Value { .. }
+            | ObjectTreeNodeKind::String(_) => {
+                return Err(Error::NotImplementedYet(
+                    "Collapse view of containing object when value selected"
+                        .to_string(),
+                ));
+            }
+        }
+
+        Ok(())
     }
 
     fn expand_marked(
         &mut self,
         display_options: &DisplayOptions,
-        reader: &CachedReader,
+        reader: CachedReader<'_>,
     ) -> Result<(), Error> {
-        if self.value.should_read {
-            self.value.should_read = false;
-
-            // Check if a generic `TypedPointer<RuntimeObject>` should
-            // actually be a type with a more specific unpacker.
-            //
-            // TODO: See if there's a cleaner way to handle this.
-            // These mostly occur from generic entries, where a member
-            // variable has type `GenericType`, and are currently
-            // treated as arbitrary objects.  These should instead be
-            // substituted with the types from the containing
-            // `GenericInst`.  Granted, this wouldn't cover all cases,
-            // as there could also be a generic `List<Object>`, so
-            // maybe the later check will still be necessary anyways.
-            match self.value.kind {
-                ObjectTreeValueKind::Value(RuntimeValue::Object(ptr)) => {
-                    let obj = reader.object(ptr)?;
-                    let method_table =
-                        reader.method_table(obj.method_table())?;
-
-                    let ptr: Pointer = ptr.into();
-                    self.value.runtime_type =
-                        method_table.runtime_type(reader)?;
-                    match self.value.runtime_type {
-                        RuntimeType::Prim(_) => {
-                            self.value.kind = ObjectTreeValueKind::UnreadValue;
-                        }
-                        RuntimeType::ValueType { .. } => {
-                            panic!("Leaf node should not have ValueType")
-                        }
-                        RuntimeType::Class => {}
-                        RuntimeType::String => {
-                            self.value.kind = ObjectTreeValueKind::Value(
-                                RuntimeValue::String(ptr.into()),
-                            );
-                        }
-                        RuntimeType::Array => {
-                            self.value.kind = ObjectTreeValueKind::Value(
-                                RuntimeValue::Array(ptr.into()),
-                            );
-                        }
-                    }
-                }
-                _ => {}
-            }
-
-            // Reading each type
-            match self.value.kind {
-                ObjectTreeValueKind::UnreadValue => {
-                    let value = reader.value(
-                        self.value.runtime_type,
-                        self.value.location.clone(),
-                    )?;
-                    self.value.kind = ObjectTreeValueKind::Value(value);
-                }
-                ObjectTreeValueKind::Object { .. } => {
-                    let value = reader.value(
-                        RuntimeType::Class,
-                        self.value.location.clone(),
-                    )?;
-                    self.value.kind = ObjectTreeValueKind::Value(value);
-                }
-                ObjectTreeValueKind::Array { .. } => {
-                    let value = reader.value(
-                        RuntimeType::Array,
-                        self.value.location.clone(),
-                    )?;
-                    self.value.kind = ObjectTreeValueKind::Value(value);
-                }
-
-                ObjectTreeValueKind::Value(RuntimeValue::String(ptr)) => {
-                    if ptr.is_null() {
-                        return Err(Error::CannotExpandNullField);
-                    }
-                    self.value.kind =
-                        ObjectTreeValueKind::String(ptr.read(reader)?.into());
-                }
-
-                ObjectTreeValueKind::Value(RuntimeValue::Array(ptr)) => {
-                    if ptr.is_null() {
-                        return Err(Error::CannotExpandNullField);
-                    }
-
-                    let array = ptr.read(reader)?;
-                    let prefetch = reader.read_bytes(array.ptr_range())?;
-                    let prefetch = &[prefetch];
-
-                    let element_type = array.element_type();
-
-                    let items = (0..array.num_elements())
-                        .map(|index| -> Result<_, Error> {
-                            let location = array.element_location(index);
-                            let value = ObjectTreeValue::initial_value(
-                                location.start,
-                                element_type,
-                                reader,
-                                display_options,
-                                prefetch,
-                            )?;
-                            Ok(ObjectTreeNode {
-                                context: Some(ObjectTreeContext::ListElement),
-                                value,
-                            })
-                        })
-                        .collect::<Result<Vec<_>, _>>()?;
-
-                    self.value.kind = ObjectTreeValueKind::Array(items);
-                }
-
-                ObjectTreeValueKind::Value(RuntimeValue::Object(ptr)) => {
-                    if ptr.is_null() {
-                        return Err(Error::CannotExpandNullField);
-                    }
-
-                    let obj = reader.object(ptr)?;
-
-                    let (class_name, class_namespace, base_class) = {
-                        let method_table =
-                            reader.method_table(obj.method_table())?;
-                        let module =
-                            reader.runtime_module(method_table.module())?;
-                        let metadata = module.metadata(reader)?;
-
-                        let type_def_token = method_table.token().ok_or(
-                            Error::NotImplementedYet(
-                                "Handle null metadata token in MethodTable"
-                                    .to_string(),
-                            ),
-                        )?;
-                        let type_def = metadata.get(type_def_token)?;
-
-                        let name = type_def.name()?;
-                        let namespace = type_def.namespace()?;
-                        let extends = type_def
-                            .extends()?
-                            .map(|base| base.name())
-                            .transpose()?
-                            .map(|cow| cow.into_owned());
-                        (name.to_string(), namespace.to_string(), extends)
-                    };
-
-                    let instance_location: Pointer = obj.location().into();
-                    let size_bytes =
-                        reader.method_table(obj.method_table())?.base_size();
-                    let prefetch = reader.read_bytes(
-                        instance_location..instance_location + size_bytes,
-                    )?;
-                    let prefetch = &[prefetch];
-
-                    let fields = reader
-                        .iter_instance_fields(obj.method_table())?
-                        .sorted_by_key(|field| {
-                            display_options.sort_key(*field, reader)
-                        })
-                        .map(|field| -> Result<_, Error> {
-                            Self::initial_field(
-                                obj.method_table(),
-                                FieldContainer::Class(instance_location.into()),
-                                field,
-                                reader,
-                                display_options,
-                                prefetch,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, Error>>()?;
-
-                    self.value.kind = ObjectTreeValueKind::Object {
-                        class_name,
-                        class_namespace,
-                        base_class,
-                        fields,
-                    };
-                }
-
-                ObjectTreeValueKind::DisplayList(..) => {}
-
-                ObjectTreeValueKind::Value { .. }
-                | ObjectTreeValueKind::String(_) => {
-                    return Err(Error::NotImplementedYet(
-                    "Collapse view of containing object when value selected"
-                        .to_string(),
-                ));
-                }
-            }
-        } else {
-            self.value.kind.iter_mut_children().try_for_each(|field| {
-                field.expand_marked(display_options, reader)
-            })?;
-        }
-
-        Ok(())
+        let mut visitor = ReadMarkedNodes {
+            display_options,
+            reader,
+            err: Ok(()),
+        };
+        TreeVisitor::new().with_extension(&mut visitor).visit(self);
+        visitor.err
     }
 
-    fn iter_visit_type(&self) -> IterationOrder {
-        match self.value.kind {
-            ObjectTreeValueKind::Array(_)
-            | ObjectTreeValueKind::Object { .. }
-                if self.value.display_expanded =>
-            {
-                IterationOrder::PreVisit
-            }
+    // TODO: Make a version of TreeVisitor that doesn't require
+    // mutable access to the tree, as that forces many of the
+    // implementations to be unnecessarily mutable.
+    fn num_lines(&mut self) -> usize {
+        let mut counter = LineCounter::new();
+        TreeVisitor::new()
+            .with_extension(&mut CollapseNonExpandedNodes)
+            .with_extension(&mut counter)
+            .visit(self);
+        counter.num_lines
+    }
+}
 
-            ObjectTreeValueKind::DisplayList(_) => IterationOrder::PreVisit,
-
-            ObjectTreeValueKind::Array(_)
-            | ObjectTreeValueKind::Object { .. }
-            | ObjectTreeValueKind::UnreadValue
-            | ObjectTreeValueKind::Value(_)
-            | ObjectTreeValueKind::String(_) => IterationOrder::LeafNode,
+struct ToggleDisplayExpanded {
+    current_line: usize,
+    selected: usize,
+}
+impl ToggleDisplayExpanded {
+    fn new(selected: usize) -> Self {
+        Self {
+            current_line: 0,
+            selected,
         }
     }
 }
 
-impl ObjectTreeValueKind {
-    fn iter_children(
+impl TreeVisitorExtension for ToggleDisplayExpanded {
+    fn next_display_line(&mut self) {
+        self.current_line += 1;
+    }
+
+    fn previsit(&mut self, node: &mut ObjectTreeNode) {
+        if self.selected == self.current_line {
+            match &node.kind {
+                ObjectTreeNodeKind::Array(_)
+                | ObjectTreeNodeKind::Object { .. } => {
+                    node.display_expanded ^= true;
+                }
+                _ => {
+                    node.should_read ^= true;
+                }
+            }
+        }
+    }
+}
+
+struct ReadMarkedNodes<'a> {
+    display_options: &'a DisplayOptions,
+    reader: CachedReader<'a>,
+    err: Result<(), Error>,
+}
+impl<'a> TreeVisitorExtension for ReadMarkedNodes<'a> {
+    fn previsit(&mut self, node: &mut ObjectTreeNode) {
+        if self.err.is_ok() {
+            self.err = node.expand_if_marked(self.display_options, self.reader);
+        }
+    }
+}
+
+struct FollowDisplayAlias<'a> {
+    aliases: &'a [DisplayAlias],
+}
+
+impl<'a> FollowDisplayAlias<'a> {
+    fn new(aliases: &'a [DisplayAlias]) -> Self {
+        Self { aliases }
+    }
+}
+
+impl TreeVisitorExtension for FollowDisplayAlias<'_> {
+    fn override_visit<'a>(
         &self,
-        tree_depth: usize,
-    ) -> impl Iterator<Item = ObjectTreeIteratorItem> + DoubleEndedIterator + '_
-    {
-        let child_depth = match self {
-            ObjectTreeValueKind::DisplayList(..) => tree_depth,
-            _ => tree_depth + 1,
+        node: &'a mut ObjectTreeNode,
+    ) -> &'a mut ObjectTreeNode {
+        let opt_field_index: Option<usize> = match &node.kind {
+            ObjectTreeNodeKind::Object {
+                class_name,
+                class_namespace,
+                fields,
+                ..
+            } => self
+                .aliases
+                .iter()
+                .find(|alias| {
+                    &alias.namespace == class_namespace
+                        && &alias.name == class_name
+                })
+                .and_then(|alias| {
+                    fields
+                        .iter()
+                        .enumerate()
+                        .find(|(_, field)| match &field.kind {
+                            ObjectTreeNodeKind::Field {
+                                field_name, ..
+                            } => field_name == &alias.field,
+                            _ => false,
+                        })
+                        .map(|(i, _)| i)
+                }),
+            _ => None,
         };
 
-        match self {
-            ObjectTreeValueKind::Array(children)
-            | ObjectTreeValueKind::DisplayList(children)
-            | ObjectTreeValueKind::Object {
-                fields: children, ..
-            } => Either::Left(children.iter().map(move |child| {
-                ObjectTreeIteratorItem {
-                    pos: child.iter_visit_type(),
-                    node: child,
-                    tree_depth: child_depth,
+        if let Some(field_index) = opt_field_index {
+            match &mut node.kind {
+                ObjectTreeNodeKind::Object { fields, .. } => {
+                    match &mut fields[field_index].kind {
+                        ObjectTreeNodeKind::Field { value, .. } => {
+                            // Recursively visit in case the alias
+                            // points to another alias.
+                            self.override_visit(value.as_mut())
+                        }
+                        _ => panic!("Unreachable due to earlier check"),
+                    }
                 }
-            })),
-
-            ObjectTreeValueKind::UnreadValue
-            | ObjectTreeValueKind::Value(_)
-            | ObjectTreeValueKind::String(_) => {
-                Either::Right(std::iter::empty())
+                _ => panic!("Unreachable due to earlier check"),
             }
-        }
-    }
-
-    fn iter_mut_children(
-        &mut self,
-    ) -> impl Iterator<Item = &mut ObjectTreeNode> + DoubleEndedIterator + '_
-    {
-        match self {
-            ObjectTreeValueKind::Array(children)
-            | ObjectTreeValueKind::DisplayList(children)
-            | ObjectTreeValueKind::Object {
-                fields: children, ..
-            } => Either::Left(children.iter_mut()),
-
-            ObjectTreeValueKind::UnreadValue
-            | ObjectTreeValueKind::Value(_)
-            | ObjectTreeValueKind::String(_) => {
-                Either::Right(std::iter::empty())
-            }
+        } else {
+            node
         }
     }
 }
 
-impl<'a> ObjectTreeIterator<'a> {
-    fn new(node: &'a ObjectTreeNode) -> Self {
+struct CollapseNonExpandedNodes;
+impl TreeVisitorExtension for CollapseNonExpandedNodes {
+    fn is_leaf_node(&self, node: &ObjectTreeNode) -> Option<bool> {
+        match &node.kind {
+            ObjectTreeNodeKind::Object { .. }
+            | ObjectTreeNodeKind::Array(_)
+                if !node.display_expanded =>
+            {
+                Some(true)
+            }
+            _ => None,
+        }
+    }
+}
+
+struct LineCounter {
+    num_lines: usize,
+}
+impl LineCounter {
+    fn new() -> Self {
+        Self { num_lines: 1 }
+    }
+}
+impl TreeVisitorExtension for LineCounter {
+    fn next_display_line(&mut self) {
+        self.num_lines += 1;
+    }
+}
+
+struct AddressFinder {
+    selected: usize,
+    current_line: usize,
+    ptr: Option<Pointer>,
+}
+impl AddressFinder {
+    fn new(selected: usize) -> Self {
         Self {
-            stack: vec![ObjectTreeIteratorItem {
-                pos: node.iter_visit_type(),
-                node,
-                tree_depth: 0,
-            }],
+            selected,
+            current_line: 0,
+            ptr: None,
+        }
+    }
+}
+impl TreeVisitorExtension for AddressFinder {
+    fn next_display_line(&mut self) {
+        self.current_line += 1;
+    }
+
+    fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
+        if self.selected == self.current_line {
+            self.ptr = Some(node.location.start);
         }
     }
 }
 
-impl<'a> Iterator for ObjectTreeIterator<'a> {
-    type Item = ObjectTreeIteratorItem<'a>;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let next = self.stack.pop()?;
-
-        if matches!(next.pos, IterationOrder::PreVisit) {
-            next.node
-                .value
-                .kind
-                .iter_children(next.tree_depth)
-                .rev()
-                .with_position()
-                .for_each(|(pos, item)| {
-                    if matches!(
-                        pos,
-                        itertools::Position::First | itertools::Position::Only
-                    ) {
-                        self.stack.push(ObjectTreeIteratorItem {
-                            pos: IterationOrder::PostVisit,
-                            ..next
-                        });
-                    }
-                    self.stack.push(item);
-                });
+struct LineCollector {
+    lines: Vec<String>,
+    tree_depth: usize,
+    display_range: Range<usize>,
+}
+impl LineCollector {
+    fn new(display_range: Range<usize>) -> Self {
+        Self {
+            lines: vec![String::default()],
+            tree_depth: 0,
+            display_range,
         }
+    }
 
-        Some(next)
+    fn current_line_is_displayed(&self) -> bool {
+        let line_num = self.lines.len() - 1;
+        self.display_range.contains(&line_num)
+    }
+
+    fn push(&mut self, val: impl std::fmt::Display) {
+        let line = self
+            .lines
+            .last_mut()
+            .expect("Vector of lines should always be non-empty");
+
+        if line.is_empty() {
+            let indent = Indent(self.tree_depth * 4);
+            line.push_str(&format!("{indent}{val}"));
+        } else {
+            line.push_str(&format!("{val}"));
+        }
     }
 }
 
-impl<'a> std::fmt::Display for ObjectTreeIteratorItem<'a> {
-    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(fmt, "{}", Indent(self.tree_depth * 4))?;
+impl TreeVisitorExtension for LineCollector {
+    fn next_display_line(&mut self) {
+        self.lines.push(String::new());
+    }
+    fn increase_tree_depth(&mut self) {
+        self.tree_depth += 1;
+    }
+    fn decrease_tree_depth(&mut self) {
+        self.tree_depth -= 1;
+    }
 
-        let value = &self.node.value;
-
-        match self.pos {
-            IterationOrder::PreVisit | IterationOrder::LeafNode => {
-                match &self.node.context {
-                    Some(ObjectTreeContext::Field {
-                        field_name,
-                        field_type,
-                    }) => {
-                        write!(fmt, "{field_type} {field_name} = ")?;
-                    }
-                    Some(ObjectTreeContext::ListElement { .. }) => {}
-                    None => {}
+    fn previsit(&mut self, node: &mut ObjectTreeNode) {
+        if !self.current_line_is_displayed() {
+            return;
+        }
+        match &node.kind {
+            ObjectTreeNodeKind::Array(_) => self.push("["),
+            ObjectTreeNodeKind::Object {
+                class_name,
+                class_namespace,
+                base_class,
+                ..
+            } => {
+                self.push(format!("{class_namespace}.{class_name} "));
+                if let Some(base) = base_class {
+                    self.push(format!("extends {base} "));
                 }
-
-                match &value.kind {
-                    ObjectTreeValueKind::Array(_) => write!(fmt, "[")?,
-
-                    ObjectTreeValueKind::Object {
-                        class_name,
-                        base_class: Some(base),
-                        ..
-                    } => {
-                        write!(fmt, "{class_name} extends {base} {{")?;
-                    }
-                    ObjectTreeValueKind::Object { class_name, .. } => {
-                        write!(fmt, "{class_name} {{")?;
-                    }
-
-                    _ => {}
-                }
+                self.push("{");
             }
-            IterationOrder::PostVisit => {}
+            ObjectTreeNodeKind::Field {
+                field_name,
+                field_type,
+                ..
+            } => self.push(format!("{field_type} {field_name} = ")),
+            _ => {}
         }
+    }
 
-        match self.pos {
-            IterationOrder::PreVisit => {}
-            IterationOrder::LeafNode => match &value.kind {
-                ObjectTreeValueKind::Object { .. }
-                | ObjectTreeValueKind::Array(_) => write!(fmt, "...")?,
-
-                ObjectTreeValueKind::UnreadValue => {
-                    let ptr = value.location.start;
-                    write!(fmt, "unread value @ {ptr}")?
-                }
-                ObjectTreeValueKind::Value(value) => write!(fmt, "{value}")?,
-                ObjectTreeValueKind::String(value) => write!(fmt, "{value:?}")?,
-                _ => {}
-            },
-            IterationOrder::PostVisit => {}
+    fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
+        if !self.current_line_is_displayed() {
+            return;
         }
-
-        match self.pos {
-            IterationOrder::PreVisit => {}
-            IterationOrder::LeafNode | IterationOrder::PostVisit => {
-                match &value.kind {
-                    ObjectTreeValueKind::Array(_) => write!(fmt, "]")?,
-                    ObjectTreeValueKind::Object { .. } => write!(fmt, "}}")?,
-                    ObjectTreeValueKind::DisplayList(_) => {}
-
-                    _ => {}
-                }
-
-                match &self.node.context {
-                    Some(ObjectTreeContext::Field { .. }) => write!(fmt, ";")?,
-                    Some(ObjectTreeContext::ListElement { .. }) => {
-                        write!(fmt, ",")?
-                    }
-                    None => {}
-                }
+        match &node.kind {
+            ObjectTreeNodeKind::UnreadValue => {
+                let ptr = node.location.start;
+                self.push(format!("unread value @ {ptr}"));
             }
-        }
+            ObjectTreeNodeKind::Value(val) => self.push(val),
+            ObjectTreeNodeKind::String(val) => self.push(format!("{val:?}")),
 
-        Ok(())
+            ObjectTreeNodeKind::Array(values) if !values.is_empty() => {
+                self.push("...")
+            }
+            ObjectTreeNodeKind::Object { fields, .. } if !fields.is_empty() => {
+                self.push("...")
+            }
+            _ => {}
+        }
+    }
+
+    fn postvisit(&mut self, node: &ObjectTreeNode) {
+        if !self.current_line_is_displayed() {
+            return;
+        }
+        match &node.kind {
+            ObjectTreeNodeKind::Array(_) => self.push("]"),
+            ObjectTreeNodeKind::Object { .. } => self.push("}"),
+            ObjectTreeNodeKind::Field { .. } => self.push(";"),
+            _ => {}
+        }
     }
 }
 
@@ -882,7 +1059,7 @@ impl WidgetWindow for ObjectExplorer {
         _globals: &'a crate::TuiGlobals,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
-        let num_lines = self.object_tree.value.num_lines();
+        let num_lines = self.object_tree.num_lines();
 
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -900,15 +1077,27 @@ impl WidgetWindow for ObjectExplorer {
                                     keystrokes,
                                     num_lines,
                                     |i_line| {
-                                        self.object_tree
-                                            .iter()
-                                            .filter(|item| {
-                                                item.node
-                                                    .value
-                                                    .has_non_child_lines()
-                                            })
+                                        let mut collector = LineCollector::new(
+                                            i_line..i_line + 1,
+                                        );
+                                        TreeVisitor::new()
+                                            .with_extension(
+                                                &mut FollowDisplayAlias::new(
+                                                    &self
+                                                        .display_options
+                                                        .aliases,
+                                                ),
+                                            )
+                                            .with_extension(
+                                                &mut CollapseNonExpandedNodes,
+                                            )
+                                            .with_extension(&mut collector)
+                                            .visit(&mut self.object_tree);
+
+                                        collector
+                                            .lines
+                                            .into_iter()
                                             .nth(i_line)
-                                            .map(|item| format!("{item}"))
                                             .into_iter()
                                             .collect()
                                     },
@@ -934,8 +1123,8 @@ impl WidgetWindow for ObjectExplorer {
                 self.start_search(SearchDirection::Reverse)
             })
             .or_try_binding("<enter>", keystrokes, || {
-                if let Some(selected) = self.selected_node() {
-                    side_effects.change_address(selected.location.start);
+                if let Some(pointer) = self.address_of_selected_node() {
+                    side_effects.change_address(pointer);
                 }
             })
     }
@@ -947,7 +1136,7 @@ impl WidgetWindow for ObjectExplorer {
     ) -> Result<(), Error> {
         let reader = globals.cached_reader();
         self.object_tree
-            .expand_marked(&self.display_options, &reader)?;
+            .expand_marked(&self.display_options, reader)?;
         Ok(())
     }
 
@@ -973,7 +1162,7 @@ impl WidgetWindow for ObjectExplorer {
         // the rendering considerably.  Rendering the list of empty
         // lines updates `display_range` to be accurate for the actual
         // rendering.
-        let num_lines = self.object_tree.value.num_lines();
+        let num_lines = self.object_tree.num_lines();
         StatefulWidget::render(
             List::new(vec![Text::default(); num_lines]),
             area,
@@ -987,33 +1176,44 @@ impl WidgetWindow for ObjectExplorer {
             start..start + num_lines
         };
 
-        let lines = self
-            .object_tree
-            .iter()
-            .filter(|item| item.node.value.has_non_child_lines())
-            .enumerate()
-            .map(|(i, item)| {
-                if display_range.contains(&i) {
-                    let mut line: Line = format!("{item}").into();
+        let lines = {
+            let mut collector = LineCollector::new(display_range);
+            TreeVisitor::new()
+                .with_extension(&mut FollowDisplayAlias::new(
+                    &self.display_options.aliases,
+                ))
+                .with_extension(&mut CollapseNonExpandedNodes)
+                .with_extension(&mut collector)
+                .visit(&mut self.object_tree);
+            collector.lines
+        };
+        let lines = lines.into_iter().map(|line| {
+            if line.is_empty() {
+                Line::default()
+            } else {
+                let line: Line = line.into();
 
-                    line = line.style_regex(
-                        "0x[0-9a-fA-F]+",
-                        Style::default().fg(Color::LightRed),
-                    );
+                let line = line.style_regex(
+                    "0x[0-9a-fA-F]+",
+                    Style::default().fg(Color::LightRed),
+                );
 
-                    if let Some(search) = self.search.as_ref() {
-                        line = search.highlight_search_matches(line);
-                    }
-
-                    line
+                let line = if let Some(search) = self.search.as_ref() {
+                    search.highlight_search_matches(line)
                 } else {
-                    Line::default()
-                }
-            });
+                    line
+                };
+
+                line
+            }
+        });
+
+        let lines: Vec<_> = lines.collect();
+        let num_lines = lines.len();
 
         let widget = List::new(lines)
             .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .with_scrollbar(self.object_tree.value.num_lines())
+            .with_scrollbar(num_lines)
             .number_each_row();
 
         StatefulWidget::render(widget, area, buf, &mut self.list_state);
@@ -1024,7 +1224,7 @@ impl DisplayOptions {
     fn sort_key(
         &self,
         field: FieldDescription,
-        reader: &CachedReader,
+        reader: CachedReader<'_>,
     ) -> impl Ord {
         let res_sort_key = || -> Result<_, Error> {
             let class_name =

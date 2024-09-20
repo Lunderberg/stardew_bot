@@ -19,6 +19,9 @@ fn xdg_home() -> PathBuf {
 pub(crate) struct UserConfig {
     pub(crate) object_explorer_sort_top: Vec<String>,
     pub(crate) object_explorer_sort_bottom: Vec<String>,
+
+    #[serde(default)]
+    pub(crate) object_explorer_alias: Vec<(String, String)>,
 }
 
 impl UserConfig {
