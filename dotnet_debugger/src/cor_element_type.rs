@@ -1,5 +1,3 @@
-use memory_reader::Pointer;
-
 use crate::{runtime_type::RuntimePrimType, Error};
 
 /// Equivalent representation to CorElementType
@@ -8,20 +6,7 @@ pub enum CorElementType {
     End,
     Void,
     Prim(RuntimePrimType),
-    // Bool,
-    // Char,
-    // I8,
-    // U8,
-    // I16,
-    // U16,
-    // I32,
-    // U32,
-    // I64,
-    // U64,
-    // F32,
-    // F64,
     String,
-    // Ptr,
     ByRef,
     ValueType,
     Class,
@@ -29,8 +14,6 @@ pub enum CorElementType {
     Array,
     GenericInst,
     TypedByRef,
-    // NativeInt,
-    // NativeUInt,
     FunctionPtr,
     Object,
     SizeArray,
@@ -102,37 +85,5 @@ impl CorElementType {
             self,
             Self::Prim(RuntimePrimType::Ptr) | Self::Object | Self::Class
         )
-    }
-
-    pub fn size_bytes(self) -> usize {
-        match self {
-            CorElementType::Prim(prim) => prim.size_bytes(),
-            // RuntimeType::End => todo!(),
-            // RuntimeType::Void => todo!(),
-            // RuntimeType::Char => todo!(),
-            // RuntimeType::String => todo!(),
-            CorElementType::ValueType
-            | CorElementType::Class
-            | CorElementType::Object => Pointer::SIZE,
-            // RuntimeType::ByRef => todo!(),
-            // RuntimeType::Var => todo!(),
-            // RuntimeType::Array => todo!(),
-            // RuntimeType::GenericInst => todo!(),
-            // RuntimeType::TypedByRef => todo!(),
-            // RuntimeType::FunctionPtr => todo!(),
-
-            // RuntimeType::SizeArray => todo!(),
-            // RuntimeType::MethodType => todo!(),
-            // RuntimeType::RequiredCModifier => todo!(),
-            // RuntimeType::OptionalCModifier => todo!(),
-            // RuntimeType::Internal => todo!(),
-            // RuntimeType::Modifier => todo!(),
-            // RuntimeType::Sentinel => todo!(),
-            // RuntimeType::Pinned => todo!(),
-            other => {
-                println!("Encountered RuntimeType {other}");
-                1
-            }
-        }
     }
 }
