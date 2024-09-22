@@ -53,8 +53,14 @@ impl ReadTypedPointer for RuntimeArray {
             .unpack::<u64>()? as usize;
 
         let method_table = method_table_ptr.read(reader)?;
-        assert!(method_table.is_array());
-        assert!(method_table.component_size().is_some());
+        if !method_table.is_array() {
+            return Err(Error::ArrayNotMarkedAsArray(
+                method_table.runtime_type(reader)?,
+            ));
+        }
+        if method_table.component_size().is_none() {
+            return Err(Error::ArrayMissingComponentSize);
+        }
 
         let stride = method_table
             .component_size()

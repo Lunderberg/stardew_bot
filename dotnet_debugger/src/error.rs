@@ -99,6 +99,9 @@ pub enum Error {
         err: std::char::DecodeUtf16Error,
     },
 
+    #[error("Pointer to array instead found RuntimeType {0}")]
+    ArrayNotMarkedAsArray(RuntimeType),
+
     #[error("The method table of an array should contain the element size.")]
     ArrayMissingComponentSize,
 
