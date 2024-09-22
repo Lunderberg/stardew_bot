@@ -645,6 +645,54 @@ impl<'a> std::fmt::Display for Signature<'a> {
     }
 }
 
+impl std::fmt::Debug for SignatureType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Prim(arg0) => f.debug_tuple("Prim").field(arg0).finish(),
+            Self::ValueType { index, .. } => {
+                f.debug_struct("ValueType").field("index", index).finish()
+            }
+            Self::Class { index, .. } => {
+                f.debug_struct("Class").field("index", index).finish()
+            }
+            Self::Array {
+                element_type,
+                rank,
+                fixed_sizes,
+                lower_bounds,
+            } => f
+                .debug_struct("Array")
+                .field("element_type", element_type)
+                .field("rank", rank)
+                .field("fixed_sizes", fixed_sizes)
+                .field("lower_bounds", lower_bounds)
+                .finish(),
+            Self::SizeArray(arg0) => {
+                f.debug_tuple("SizeArray").field(arg0).finish()
+            }
+            Self::GenericVarFromType(arg0) => {
+                f.debug_tuple("GenericVarFromType").field(arg0).finish()
+            }
+            Self::GenericVarFromMethod(arg0) => {
+                f.debug_tuple("GenericVarFromMethod").field(arg0).finish()
+            }
+            Self::GenericInst {
+                is_value_type,
+                index,
+                type_args,
+                ..
+            } => f
+                .debug_struct("GenericInst")
+                .field("is_value_type", is_value_type)
+                .field("index", index)
+                .field("type_args", type_args)
+                .finish(),
+            Self::Object => write!(f, "Object"),
+            Self::String => write!(f, "String"),
+        }
+    }
+}
+
 impl std::fmt::Display for SignatureType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
