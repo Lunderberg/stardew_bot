@@ -1114,7 +1114,7 @@ impl<'a> TreeVisitorExtension for AddressFinder<'a> {
         self.current_line += 1;
     }
 
-    fn visit_leaf(&mut self, node: &ObjectTreeNode) {
+    fn previsit<'node>(&mut self, node: &'node ObjectTreeNode) {
         if self.selected == self.current_line {
             *self.ptr = Some(node.location.start);
         }
