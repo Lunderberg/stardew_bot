@@ -87,64 +87,6 @@ impl StaticValueCache {
             })
     }
 
-    pub fn init_dlls(self, reader: &MemoryReader) -> Result<Self, Error> {
-        let dll_data = Self::iter_clr_dll_regions(reader)
-            .filter_map(|region| region.read().ok())
-            .collect::<Vec<_>>();
-
-        let layouts = dll_data
-            .iter()
-            .map(|data| dll_unpacker::unpack_metadata_layout(data))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let metadata: Vec<_> = layouts
-            .iter()
-            .zip(dll_data.iter())
-            .map(|(layout, data)| layout.metadata(data))
-            .collect();
-
-        let module_vtable = self
-            .runtime_module_vtable
-            .or_try_init(|| -> Result<_, Error> {
-                // This initial pass based on the MethodDef pointers
-                // is slower and less reliable than the later pass.
-                // However, the later pass requires knowing the
-                // location of the C++ vtable used by the module
-                // object, and that requires first locating at least
-                // one RuntimeModule.
-                let module_pointers =
-                    RuntimeModule::locate_by_metadata(&metadata, reader);
-
-                let module_vtable = module_pointers
-                    .iter()
-                    .filter_map(|opt| opt.as_ref())
-                    .filter_map(|&ptr| RuntimeModule::read(ptr.into()).ok())
-                    .find_map(|runtime_module| {
-                        runtime_module.vtable_location(reader).ok()
-                    })
-                    .ok_or(Error::NoModulePointerFoundFromMethodDef)?;
-
-                Ok(module_vtable)
-            })
-            .copied()?;
-
-        // This is the faster and more reliable way to locate each
-        // RuntimeModule.  But it can only be used once the location
-        // of the vtable has been determined.
-        let modules_pointers =
-            RuntimeModule::locate_by_vtable(&metadata, module_vtable, reader)?;
-
-        modules_pointers
-            .into_iter()
-            .filter_map(|opt_ptr| opt_ptr)
-            .try_for_each(|ptr| -> Result<_, Error> {
-                self.runtime_module(ptr, reader)?;
-                Ok(())
-            })?;
-
-        Ok(self)
-    }
-
     pub fn cached_reader<'a>(
         &'a self,
         reader: &'a MemoryReader,
@@ -153,33 +95,6 @@ impl StaticValueCache {
             state: self,
             reader,
         }
-    }
-
-    fn runtime_module(
-        &self,
-        ptr: TypedPointer<RuntimeModule>,
-        reader: &MemoryReader,
-    ) -> Result<&RuntimeModule, Error> {
-        self.runtime_modules.try_insert(ptr, || {
-            let runtime_module = ptr.read(reader)?;
-
-            self.runtime_module_vtable
-                .or_try_init(|| runtime_module.vtable_location(reader))?;
-
-            // Save the name of the module, to avoid needing to do a
-            // memory search for it later.
-            //
-            // TODO: See if this could cause a weird order-dependent
-            // error, if a module can be successfully located through
-            // a known pointer, but cannot be located by the
-            // heuristics used to search in memory.  If that is the
-            // case, then this caching could paper over a need to
-            // improve the heuristics.
-            let name = runtime_module.name(reader)?;
-            self.runtime_module_by_name
-                .insert(name.to_string(), Box::new(ptr));
-            Ok(runtime_module)
-        })
     }
 }
 
