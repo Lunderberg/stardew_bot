@@ -286,6 +286,26 @@ impl TuiExplorerBuilder {
         })
     }
 
+    pub fn initialize_view_to_runtime_module(
+        self,
+        name: &str,
+    ) -> Result<Self, Error> {
+        let reader = self.tui_globals.cached_reader();
+        let initial_pointer = reader
+            .iter_known_modules()
+            .find_map(|res_module_ptr| {
+                let module_ptr = res_module_ptr.ok()?;
+                let module = reader.runtime_module(module_ptr).ok()?;
+                let module_name = module.name(reader).ok()?;
+                (name == module_name).then(|| module.location)
+            })
+            .ok_or_else(|| Error::RuntimeModuleNotFound(name.to_string()))?;
+        Ok(Self {
+            initial_pointer,
+            ..self
+        })
+    }
+
     pub fn initialize_view_to_stack(self) -> Result<Self, Error> {
         let stack_memory = self.tui_globals.reader.stack()?.read()?;
 
@@ -336,7 +356,7 @@ impl TuiExplorerBuilder {
         Ok(self)
     }
 
-    pub fn initialize_annotations(mut self) -> Result<Self, Error> {
+    pub fn annotate_dll_metadata(mut self) -> Result<Self, Error> {
         let region = self.stardew_valley_dll()?.read()?;
         let dll_info = dll_unpacker::DLLUnpacker::new(&region);
 
@@ -345,7 +365,29 @@ impl TuiExplorerBuilder {
         Ok(self)
     }
 
-    pub fn search_based_on_annotations(mut self) -> Result<Self, Error> {
+    pub fn annotate_runtime_modules(mut self) -> Result<Self, Error> {
+        let reader = self
+            .tui_globals
+            .static_value_cache
+            .cached_reader(&self.tui_globals.reader);
+
+        let annotator = &mut self.tui_globals.annotations;
+
+        reader.iter_known_modules().try_for_each(
+            |res_module_ptr| -> Result<(), Error> {
+                let module_ptr = res_module_ptr?;
+                let module = reader.runtime_module(module_ptr)?;
+
+                module.collect_annotations(annotator, reader)?;
+
+                Ok(())
+            },
+        )?;
+
+        Ok(self)
+    }
+
+    pub fn annotate_game_obj(mut self) -> Result<Self, Error> {
         use dll_unpacker::{Annotation, Annotator};
 
         let reader = self
@@ -569,8 +611,6 @@ impl TuiExplorerBuilder {
                 Ok(())
             })?;
 
-        self.initial_pointer = game_obj.into();
-
         Ok(self)
     }
 
@@ -660,8 +700,10 @@ impl TuiExplorer {
             .initialize_view_to_stardew_dll()?
             .default_detail_formatters()
             .default_column_formatters()
-            .initialize_annotations()?
-            .search_based_on_annotations()?
+            .annotate_dll_metadata()?
+            .annotate_runtime_modules()?
+            // .annotate_game_obj()?
+            .initialize_view_to_runtime_module("Stardew Valley")?
             // .initialize_view_to_stack()?
             // .initialize_view_to_annotation("#Blob Stream")?
             // .initialize_view_to_annotation("Field[100]")?

@@ -1,3 +1,4 @@
+use dotnet_debugger::MethodTable;
 use ratatui::{
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
@@ -5,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, StatefulWidget as _, TableState, Widget},
 };
 
-use memory_reader::extensions::*;
+use memory_reader::{extensions::*, ByteRange};
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 
 use crate::{extended_tui::DynamicTable, extensions::*};
@@ -409,6 +410,42 @@ impl ViewFrame {
             })
             .or_try_binding("C-r", keystrokes, || {
                 self.start_search(SearchDirection::Reverse)
+            })
+            .or_try_binding("M-m", keystrokes, || {
+                let addr = self.selected_address();
+                let region_bytes: ByteRange = (&self.region).into();
+                let bytes =
+                    region_bytes.subrange(addr..addr + MethodTable::SIZE);
+
+                let method_table = MethodTable {
+                    bytes: bytes.to_owned(),
+                };
+
+                let annotator = &mut *side_effects;
+
+                let mut do_collect = || -> Result<_, Error> {
+                    method_table.collect_annotations(annotator)?;
+                    // if let Some(ee_class) =
+                    //     method_table.get_ee_class(&globals.reader)?
+                    // {
+                    //     ee_class.collect_annotations(annotator)?;
+                    // }
+                    // let fields =
+                    //     method_table.get_field_descriptions(&globals.reader)?;
+                    // fields.iter().flatten().try_for_each(
+                    //     |field| -> Result<_, Error> {
+                    //         field.collect_annotations(annotator)?;
+                    //         Ok(())
+                    //     },
+                    // )?;
+                    Ok(())
+                };
+
+                if let Err(err) = do_collect() {
+                    side_effects.add_log(format!(
+                        "Error {err} in annotating method table"
+                    ));
+                }
             })
     }
 

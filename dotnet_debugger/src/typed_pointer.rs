@@ -1,6 +1,6 @@
 use std::marker::PhantomData;
 
-use memory_reader::{MemoryReader, Pointer, UnpackBytes};
+use memory_reader::{MemoryReader, Pointer, UnpackBytes, UnpackOptBytes};
 
 use crate::Error;
 
@@ -99,6 +99,15 @@ impl<T> Into<Pointer> for TypedPointer<T> {
     }
 }
 
+impl<T> std::ops::BitAnd<usize> for TypedPointer<T> {
+    type Output = TypedPointer<T>;
+
+    fn bitand(self, mask: usize) -> Self::Output {
+        let ptr: Pointer = self.into();
+        (ptr & mask).into()
+    }
+}
+
 impl<'a, T> UnpackBytes<'a> for TypedPointer<T> {
     type Error = <Pointer as UnpackBytes<'a>>::Error;
 
@@ -107,5 +116,16 @@ impl<'a, T> UnpackBytes<'a> for TypedPointer<T> {
     ) -> Result<Self, Self::Error> {
         let ptr: Pointer = bytes.unpack()?;
         Ok(ptr.into())
+    }
+}
+
+impl<'a, T> UnpackOptBytes<'a> for TypedPointer<T> {
+    type Error = <Self as UnpackBytes<'a>>::Error;
+
+    fn unpack_opt(
+        bytes: memory_reader::ByteRange<'a>,
+    ) -> Result<Option<Self>, Self::Error> {
+        let ptr: Self = bytes.unpack()?;
+        Ok(if ptr.is_null() { None } else { Some(ptr) })
     }
 }

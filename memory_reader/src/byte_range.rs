@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use super::{NormalizeOffset, NormalizeRange};
-use crate::{Error, Pointer, UnpackedValue};
+use crate::{Error, OwnedBytes, Pointer, UnpackedValue};
 
 #[derive(Clone, Copy)]
 pub struct ByteRange<'a> {
@@ -32,6 +32,10 @@ where
 impl<'a> ByteRange<'a> {
     pub fn new(start: Pointer, bytes: &'a [u8]) -> Self {
         Self { start, bytes }
+    }
+
+    pub fn to_owned(&self) -> OwnedBytes {
+        OwnedBytes::new(self.start, self.bytes.into())
     }
 
     pub fn null() -> Self {
@@ -212,6 +216,15 @@ impl<'a> UnpackBytes<'a> for Pointer {
     fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         let arr: [u8; Pointer::SIZE] = bytes.bytes.try_into().unwrap();
         Ok(arr.into())
+    }
+}
+
+impl<'a> UnpackOptBytes<'a> for Pointer {
+    type Error = <Self as UnpackBytes<'a>>::Error;
+
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
+        let ptr: Self = bytes.unpack()?;
+        Ok(if ptr.is_null() { None } else { Some(ptr) })
     }
 }
 

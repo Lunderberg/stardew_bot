@@ -17,6 +17,12 @@ pub enum Error {
         err: memory_reader::Error,
     },
 
+    #[error("std::fmt::Error{{ {err} }}")]
+    FmtError {
+        #[from]
+        err: std::fmt::Error,
+    },
+
     #[error("Could not find pointer to .NET Module '{0}'")]
     ModulePointerNotFound(String),
 
@@ -130,6 +136,12 @@ pub enum Error {
          but only {num_vars} were found."
     )]
     InvalidGenericTypeVar { index: usize, num_vars: usize },
+
+    #[error("Instantiated generic should have method table")]
+    GenericInstShouldNotBeTypeDescription,
+
+    #[error("Could not find method table for instantiated generic {0}")]
+    GenericMethodTableNotFound(String),
 
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),

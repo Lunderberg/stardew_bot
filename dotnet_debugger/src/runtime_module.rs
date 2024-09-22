@@ -3,12 +3,17 @@ use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::ops::Range;
 
-use dll_unpacker::{Metadata, MetadataLayout, MetadataTableIndex, TypeDef};
+use dll_unpacker::{
+    Annotation, Annotator, Metadata, MetadataLayout, MetadataTableIndex,
+    TypeDef,
+};
 use itertools::Itertools as _;
-use memory_reader::{extensions::*, MemoryMapRegion, MemoryRegion};
+use memory_reader::{
+    extensions::*, MemoryMapRegion, MemoryRegion, OwnedBytes, UnpackedValue,
+};
 use memory_reader::{MemoryReader, Pointer};
 
-use crate::extensions::*;
+use crate::{extensions::*, unpack_fields, TypeHandle};
 use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
 
 /// Contains locations of key structures within the runtime
@@ -35,10 +40,12 @@ pub struct RuntimeModule {
     /// The location of the pointer to the MethodTableLookup, and a
     /// bitmask defining flags that may be set on each method table
     /// pointer.
-    method_table_info: OnceCell<(Pointer, usize)>,
+    method_table_info: OnceCell<(UnpackedValue<Pointer>, usize)>,
 
     /// The lookup for the MethodTables
     method_table_lookup: OnceCell<MethodTableLookup>,
+
+    ptr_to_loaded_types: OnceCell<Option<UnpackedValue<Pointer>>>,
 
     /// The base pointer of static pointer to non-garbage-collected
     /// static values.  These values are relative to the
@@ -47,17 +54,25 @@ pub struct RuntimeModule {
     /// For .NET 9.0 onward, this will need to be updated to find
     /// statics relative to the MethodTable.
     /// https://github.com/dotnet/runtime/commit/eb8f54d9 (2024-06-12)
-    base_ptr_of_non_gc_statics: OnceCell<Pointer>,
+    base_ptr_of_non_gc_statics: OnceCell<UnpackedValue<Pointer>>,
 
     /// The base pointer of static pointers to garbage-collected
     /// static values.  These values are relative to an allocation
     /// owned by the DomainLocalModule.
-    base_ptr_of_gc_statics: OnceCell<Pointer>,
+    base_ptr_of_gc_statics: OnceCell<UnpackedValue<Pointer>>,
 }
 
 pub struct MethodTableLookup {
     pub location: Range<Pointer>,
     pub method_tables: Vec<Range<Pointer>>,
+}
+
+pub struct LoadedParamTypes {
+    bytes: OwnedBytes,
+}
+
+struct LoadedParamTypeEntry {
+    bytes: OwnedBytes,
 }
 
 impl RuntimeModule {
@@ -304,9 +319,50 @@ impl RuntimeModule {
             metadata_layout: Default::default(),
             method_table_info: Default::default(),
             method_table_lookup: Default::default(),
+            ptr_to_loaded_types: Default::default(),
             base_ptr_of_non_gc_statics: Default::default(),
             base_ptr_of_gc_statics: Default::default(),
         })
+    }
+
+    pub fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<(), Error> {
+        let reader = reader.borrow();
+        let name = self.name(reader)?;
+
+        annotator
+            .group(self.location..self.location + 1560)
+            .name(format!("Module {name}"));
+
+        annotator
+            .value(self.base_ptr_of_gc_statics_unpacked(reader)?)
+            .name(format!("Base ptr of GC statics, Module {name}"));
+        annotator
+            .value(self.base_ptr_of_non_gc_statics_unpacked(reader)?)
+            .name(format!("Base ptr of non-GC statics, Module {name}"));
+
+        annotator
+            .value(self.method_table_info_unpacked(reader)?.0)
+            .name(format!("TypeDefToMethodTable, Module {name}"));
+
+        annotator
+            .range(self.method_table_lookup(reader)?.location.clone())
+            .name(format!("TypeDefToMethodDef table"));
+
+        if let Some(ptr) = self.ptr_to_loaded_types_unpacked(reader)? {
+            annotator
+                .value(ptr)
+                .name(format!("Available param types, Module {name}"));
+        }
+
+        if let Some(loaded_types) = self.loaded_types(reader)? {
+            loaded_types.collect_annotations(annotator, reader)?;
+        }
+
+        Ok(())
     }
 
     pub fn iter_method_table_pointers<'a>(
@@ -417,50 +473,73 @@ impl RuntimeModule {
         })
     }
 
+    pub fn method_table_info_unpacked(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<(UnpackedValue<Pointer>, usize), Error> {
+        let reader = reader.borrow();
+
+        self.method_table_info
+            .or_try_init(|| {
+                let num_type_defs =
+                    self.metadata(reader)?.type_def_table().num_rows();
+
+                // The layout of the Module varies by .NET version, but should
+                // be less than 4kB for each.  If I don't find each pointer by
+                // then, then something else is probably wrong.
+                let bytes =
+                    reader.read_bytes(self.location..self.location + 4096)?;
+
+                bytes
+                    .chunks_exact(Pointer::SIZE)
+                    .tuple_windows()
+                    .enumerate()
+                    .map(|(i, (a, b, c, d))| {
+                        let p_next: Pointer = a.try_into().unwrap();
+                        let p_table: Pointer = b.try_into().unwrap();
+                        let dw_count =
+                            u32::from_ne_bytes(c[..4].try_into().unwrap())
+                                as usize;
+                        let supported_flags: usize =
+                            usize::from_ne_bytes(d.try_into().unwrap());
+
+                        (i, p_next, p_table, dw_count, supported_flags)
+                    })
+                    .find(|(_, p_next, _, dw_count, supported_flags)| {
+                        *p_next == Pointer::null()
+                            && *dw_count == num_type_defs + 1
+                            && *supported_flags < 8
+                    })
+                    .map(|(i, _, p_table, _, supported_flags)| {
+                        let start = self.location + (i + 1) * Pointer::SIZE;
+
+                        (
+                            UnpackedValue::new(
+                                start..start + Pointer::SIZE,
+                                p_table,
+                            ),
+                            supported_flags,
+                        )
+                    })
+                    .ok_or(Error::PointerToMethodTableTableNotFound)
+            })
+            .cloned()
+    }
+
     fn method_table_info(
         &self,
         reader: &MemoryReader,
-    ) -> Result<&(Pointer, usize), Error> {
-        self.method_table_info.or_try_init(|| {
-            let num_type_defs =
-                self.metadata(reader)?.type_def_table().num_rows();
-
-            // The layout of the Module varies by .NET version, but should
-            // be less than 4kB for each.  If I don't find each pointer by
-            // then, then something else is probably wrong.
-            let bytes =
-                reader.read_bytes(self.location..self.location + 4096)?;
-
-            bytes
-                .chunks_exact(8)
-                .tuple_windows()
-                .map(|(a, b, c, d)| {
-                    let p_next: Pointer = a.try_into().unwrap();
-                    let p_table: Pointer = b.try_into().unwrap();
-                    let dw_count =
-                        u32::from_ne_bytes(c[..4].try_into().unwrap()) as usize;
-                    let supported_flags: usize =
-                        usize::from_ne_bytes(d.try_into().unwrap());
-
-                    (p_next, p_table, dw_count, supported_flags)
-                })
-                .find(|(p_next, _, dw_count, supported_flags)| {
-                    *p_next == Pointer::null()
-                        && *dw_count == num_type_defs + 1
-                        && *supported_flags < 8
-                })
-                .map(|(_, p_table, _, supported_flags)| {
-                    (p_table, supported_flags)
-                })
-                .ok_or(Error::PointerToMethodTableTableNotFound)
-        })
+    ) -> Result<(Pointer, usize), Error> {
+        let (ptr, bitmask) = self.method_table_info_unpacked(reader)?;
+        let ptr = ptr.value();
+        Ok((ptr, bitmask))
     }
 
     pub fn ptr_to_table_of_method_tables(
         &self,
         reader: &MemoryReader,
     ) -> Result<Pointer, Error> {
-        self.method_table_info(reader).map(|(ptr, _)| *ptr)
+        self.method_table_info(reader).map(|(ptr, _)| ptr)
     }
 
     pub fn get_method_table(
@@ -483,31 +562,8 @@ impl RuntimeModule {
             let num_type_defs =
                 self.metadata(reader)?.type_def_table().num_rows();
 
-            let bytes =
-                reader.read_bytes(self.location..self.location + 4096)?;
-
-            let (ptr_to_table_of_method_tables, supported_flags) = bytes
-                .chunks_exact(8)
-                .tuple_windows()
-                .map(|(a, b, c, d)| {
-                    let p_next: Pointer = a.try_into().unwrap();
-                    let p_table: Pointer = b.try_into().unwrap();
-                    let dw_count =
-                        u32::from_ne_bytes(c[..4].try_into().unwrap()) as usize;
-                    let supported_flags: usize =
-                        usize::from_ne_bytes(d.try_into().unwrap());
-
-                    (p_next, p_table, dw_count, supported_flags)
-                })
-                .find(|(p_next, _, dw_count, supported_flags)| {
-                    *p_next == Pointer::null()
-                        && *dw_count == num_type_defs + 1
-                        && *supported_flags < 8
-                })
-                .map(|(_, p_table, _, supported_flags)| {
-                    (p_table, supported_flags)
-                })
-                .ok_or(Error::PointerToMethodTableTableNotFound)?;
+            let (ptr_to_table_of_method_tables, supported_flags) =
+                self.method_table_info(reader)?;
 
             let ptr_to_method_tables = {
                 let nbytes = (num_type_defs + 1) * Pointer::SIZE;
@@ -536,10 +592,126 @@ impl RuntimeModule {
         })
     }
 
-    pub fn base_ptr_of_non_gc_statics(
+    pub fn ptr_to_loaded_types_unpacked(
         &self,
         reader: impl Borrow<MemoryReader>,
-    ) -> Result<Pointer, Error> {
+    ) -> Result<Option<UnpackedValue<Pointer>>, Error> {
+        let reader = reader.borrow();
+        self.ptr_to_loaded_types
+            .or_try_init(|| -> Result<Option<UnpackedValue<Pointer>>, Error> {
+                {
+                    // TODO: Switch back to a pattern-match search to
+                    // locate `m_pAvailableParamTypes`.
+                    //
+                    // The current pattern-match looks for two adjacent non-null
+                    // pointers, starting after `m_TypeRefToMethodTableMap`.
+                    // These adjacent non-null pointers are
+                    // `m_pAvailableClasses` and `m_pAvailableParamTypes`.
+                    //
+                    // For generic structs, the instantiation of a generic type
+                    // is placed in `m_pAvailableParamTypes` of the module
+                    // corresponding to the first generic argument.  This can
+                    // result in instantiations being placed into
+                    // `System.Private.CoreLib` (e.g. `Nullable<Int32>`).
+                    //
+                    // In any other module, `m_pAvailableClasses` will contain
+                    // the generic class definition, with instantiations in
+                    // `m_pAvailableParamTypes`.  However,
+                    // `System.Private.CoreLib` is special, and has its types
+                    // stored in a different structure in `g_CoreLib` for faster
+                    // lookup.  This results in `m_pAvalableClasses` being
+                    // unused, and a null pointer for `System.Private.CoreLib`.
+                    //
+                    // So, the pattern-match fails for `System.Private.CoreLib`,
+                    // resulting in any instantiations owned by it being missed.
+                    //
+                    // The solution will be to do a pattern match across several
+                    // modules, and to save the offset that is determined by
+                    // that pattern match.  The offset can then be applied to
+                    // `System.Private.CoreLib`, even though the pattern match
+                    // couldn't.
+                    let ptr = UnpackedValue::new(
+                        self.location + 976..self.location + 984,
+                        reader.read_byte_array(self.location + 976)?.into(),
+                    );
+                    return Ok(Some(ptr));
+                }
+
+                // let search_start =
+                //     self.method_table_info_unpacked(reader)?.0.loc().end;
+                // let bytes =
+                //     reader.read_bytes(search_start..search_start + 512)?;
+
+                // let valid_region = reader
+                //     .regions
+                //     .iter()
+                //     .map(|region| region.address_range())
+                //     .reduce(|a, b| {
+                //         let start = a.start.min(b.start);
+                //         let end = a.end.max(b.end);
+                //         start..end
+                //     })
+                //     .unwrap();
+
+                // let opt_unpacked = bytes
+                //     .chunks_exact(Pointer::SIZE)
+                //     .tuple_windows()
+                //     .enumerate()
+                //     .map(|(i, (a, b))| {
+                //         let a: Pointer = a.try_into().unwrap();
+                //         let b: Pointer = b.try_into().unwrap();
+                //         (i, a, b)
+                //     })
+                //     .find(|(_, a, b)| {
+                //         !a.is_null()
+                //             && !b.is_null()
+                //             && valid_region.contains(a)
+                //             && valid_region.contains(b)
+                //             && reader.is_valid_ptr(*a)
+                //             && reader.is_valid_ptr(*b)
+                //     })
+                //     .map(|(i, _, b)| {
+                //         let b = {
+                //             let start = search_start + (i + 1) * Pointer::SIZE;
+                //             UnpackedValue::new(start..start + Pointer::SIZE, b)
+                //         };
+                //         b
+                //     });
+
+                // Ok(opt_unpacked)
+            })
+            .cloned()
+    }
+
+    pub fn ptr_to_loaded_types(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<Option<Pointer>, Error> {
+        let opt_unpacked = self.ptr_to_loaded_types_unpacked(reader)?;
+        let opt_ptr = opt_unpacked.map(|unpacked| unpacked.value());
+        Ok(opt_ptr)
+    }
+
+    pub fn loaded_types(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<Option<LoadedParamTypes>, Error> {
+        let reader = reader.borrow();
+
+        let Some(location) = self.ptr_to_loaded_types(reader)? else {
+            return Ok(None);
+        };
+
+        let bytes =
+            reader.read_bytes(location..location + LoadedParamTypes::SIZE)?;
+        let loaded_types = LoadedParamTypes::new(bytes);
+        Ok(Some(loaded_types))
+    }
+
+    pub fn base_ptr_of_non_gc_statics_unpacked(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<UnpackedValue<Pointer>, Error> {
         let reader = reader.borrow();
         self.base_ptr_of_non_gc_statics
             .or_try_init(|| {
@@ -555,7 +727,8 @@ impl RuntimeModule {
                 bytes
                     .chunks_exact(8)
                     .tuple_windows()
-                    .map(|(a, b, c, d, e)| {
+                    .enumerate()
+                    .map(|(i, (a, b, c, d, e))| {
                         let domain_local_module: Pointer =
                             a.try_into().unwrap();
                         let module_index: u64 =
@@ -568,6 +741,7 @@ impl RuntimeModule {
                             u32::from_ne_bytes(e[..4].try_into().unwrap())
                                 as usize;
                         (
+                            i,
                             domain_local_module,
                             module_index,
                             regular_statics_offsets,
@@ -577,6 +751,7 @@ impl RuntimeModule {
                     })
                     .filter(
                         |(
+                            _,
                             domain_local_module,
                             _,
                             regular_statics_offsets,
@@ -593,7 +768,7 @@ impl RuntimeModule {
                                 && *max_rid_statics_allocated == num_type_defs
                         },
                     )
-                    .filter(|(_, module_index, _, _, _)| {
+                    .filter(|(_, _, module_index, _, _, _)| {
                         // Not technically a requirement, but this is a 64-bit
                         // value that gets incremented for each module that is
                         // loaded.  It's unlikely to have several thousand
@@ -601,11 +776,43 @@ impl RuntimeModule {
                         // this as part of the condition.
                         *module_index < 16384
                     })
-                    .map(|(domain_local_module, _, _, _, _)| {
-                        domain_local_module
+                    .map(|(i, domain_local_module, _, _, _, _)| {
+                        let start = self.location + i * Pointer::SIZE;
+                        UnpackedValue::new(
+                            start..start + Pointer::SIZE,
+                            domain_local_module,
+                        )
                     })
                     .next()
                     .ok_or(Error::PointerToDomainLocalModuleNotFound)
+            })
+            .copied()
+    }
+
+    pub fn base_ptr_of_non_gc_statics(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<Pointer, Error> {
+        Ok(self.base_ptr_of_non_gc_statics_unpacked(reader)?.value())
+    }
+
+    pub fn base_ptr_of_gc_statics_unpacked(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<UnpackedValue<Pointer>, Error> {
+        let reader = reader.borrow();
+        self.base_ptr_of_gc_statics
+            .or_try_init(|| {
+                let base_ptr_of_non_gc_statics =
+                    self.base_ptr_of_non_gc_statics(reader)?;
+                let start = base_ptr_of_non_gc_statics + 32;
+                let base_ptr_of_gc_statics: Pointer =
+                    reader.read_byte_array(start)?.into();
+
+                Ok(UnpackedValue::new(
+                    start..start + Pointer::SIZE,
+                    base_ptr_of_gc_statics,
+                ))
             })
             .copied()
     }
@@ -614,18 +821,7 @@ impl RuntimeModule {
         &self,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<Pointer, Error> {
-        let reader = reader.borrow();
-        self.base_ptr_of_gc_statics
-            .or_try_init(|| {
-                let base_ptr_of_non_gc_statics =
-                    self.base_ptr_of_non_gc_statics(reader)?;
-                let base_ptr_of_gc_statics = reader
-                    .read_byte_array(base_ptr_of_non_gc_statics + 32)?
-                    .into();
-
-                Ok(base_ptr_of_gc_statics)
-            })
-            .copied()
+        Ok(self.base_ptr_of_gc_statics_unpacked(reader)?.value())
     }
 
     pub fn metadata<'a>(
@@ -709,5 +905,160 @@ impl std::ops::Index<MetadataTableIndex<TypeDef>> for MethodTableLookup {
     fn index(&self, index: MetadataTableIndex<TypeDef>) -> &Self::Output {
         let index: usize = index.into();
         &self.method_tables[index + 1]
+    }
+}
+
+impl LoadedParamTypes {
+    const SIZE: usize = 40;
+
+    fn new(bytes: OwnedBytes) -> Self {
+        Self { bytes }
+    }
+
+    unpack_fields! {
+        module_ptr: {TypedPointer<RuntimeModule>, 0..8},
+        heap_ptr: {Pointer, 8..16},
+        buckets_ptr_ptr: {Option<Pointer>, 16..24},
+        raw_num_buckets: {u32, 24..28},
+        raw_num_entries: {u32, 28..32},
+    }
+
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+        reader: &MemoryReader,
+    ) -> Result<(), Error> {
+        annotator
+            .value(self.raw_num_buckets_unpacked())
+            .name("Num buckets");
+        annotator
+            .value(self.raw_num_entries_unpacked())
+            .name("Num entries");
+        annotator
+            .opt_value(self.buckets_ptr_ptr_unpacked())
+            .name("Ptr to ptr to buckets");
+
+        self.iter_entries(reader)?.try_for_each(
+            |res_entry| -> Result<_, Error> {
+                let entry = res_entry?;
+                entry.collect_annotations(annotator)
+            },
+        )?;
+
+        Ok(())
+    }
+
+    fn num_buckets(&self) -> usize {
+        self.raw_num_buckets() as usize
+    }
+
+    pub fn num_entries(&self) -> usize {
+        self.raw_num_entries() as usize
+    }
+
+    fn iter_bucket_ptrs(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<
+        impl Iterator<Item = Option<TypedPointer<LoadedParamTypeEntry>>>,
+        Error,
+    > {
+        let opt_bytes = self
+            .buckets_ptr_ptr()
+            .map(|ptr| {
+                assert!(ptr.as_usize() % Pointer::SIZE == 0);
+                let size = self.num_buckets() * Pointer::SIZE;
+                reader.read_bytes(ptr..ptr + size)
+            })
+            .transpose()?;
+
+        let iter = opt_bytes.into_iter().flat_map(|bytes| {
+            bytes.into_iter().iter_as().map(
+                    |chunk: [u8; Pointer::SIZE]| -> Option<
+                        TypedPointer<LoadedParamTypeEntry>,
+                    > {
+                        let ptr: Pointer = chunk.into();
+                        if ptr.is_null() {
+                            None
+                        } else {
+                            assert!(ptr.as_usize() % Pointer::SIZE == 0);
+                            Some(ptr.into())
+                        }
+                    },
+                )
+        });
+
+        Ok(iter)
+    }
+
+    fn iter_entries<'a>(
+        &self,
+        reader: &'a MemoryReader,
+    ) -> Result<
+        impl Iterator<Item = Result<LoadedParamTypeEntry, Error>> + 'a,
+        Error,
+    > {
+        let iter = self
+            .iter_bucket_ptrs(reader)?
+            .filter_map(|opt_ptr| opt_ptr)
+            .flat_map(move |ptr| {
+                std::iter::successors(Some(ptr.read(reader)), |res_entry| {
+                    match res_entry {
+                        Ok(entry) => {
+                            entry.next_entry().map(|next| next.read(reader))
+                        }
+                        Err(_) => None,
+                    }
+                })
+            });
+
+        Ok(iter)
+    }
+
+    pub fn iter_method_tables<'a>(
+        &self,
+        reader: &'a MemoryReader,
+    ) -> Result<
+        impl Iterator<Item = Result<TypedPointer<TypeHandle>, Error>> + 'a,
+        Error,
+    > {
+        self.iter_entries(reader)
+            .map(|iter| iter.map_ok(|entry| entry.type_handle()))
+    }
+}
+
+impl ReadTypedPointer for LoadedParamTypeEntry {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        let bytes = reader.read_bytes(ptr..ptr + Self::SIZE)?;
+        Ok(Self { bytes })
+    }
+}
+
+impl LoadedParamTypeEntry {
+    // SIZE = 24, at least for 64-bit platforms
+    const SIZE: usize = (Pointer::SIZE * 2 + 4).next_multiple_of(Pointer::SIZE);
+
+    unpack_fields! {
+        type_handle: {TypedPointer<TypeHandle>, 0..Pointer::SIZE},
+        next_entry: {Option<TypedPointer<Self>>, Pointer::SIZE..Pointer::SIZE*2},
+        // hash: {u32, Pointer::SIZE*2..Pointer::SIZE*2+4},
+    }
+
+    fn collect_annotations(
+        &self,
+        annotator: &mut impl Annotator,
+    ) -> Result<(), Error> {
+        annotator
+            .value(self.type_handle_unpacked())
+            .name("Method table");
+
+        annotator
+            .opt_value(self.next_entry_unpacked())
+            .name("Next entry");
+
+        Ok(())
     }
 }

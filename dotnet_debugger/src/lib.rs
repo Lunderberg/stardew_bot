@@ -24,6 +24,9 @@ pub use runtime_value::RuntimeValue;
 mod method_table;
 pub use method_table::*;
 
+mod type_description;
+pub use type_description::*;
+
 mod field_description;
 pub use field_description::*;
 

@@ -15,7 +15,7 @@ fn bench_initialize_annotations(b: &mut Bencher) -> Result<(), Error> {
     b.iter(|| {
         TuiExplorerBuilder::new()
             .unwrap()
-            .initialize_annotations()
+            .annotate_dll_metadata()
             .unwrap()
     });
 
@@ -26,9 +26,9 @@ fn bench_search_based_on_annotations(b: &mut Bencher) -> Result<(), Error> {
     b.iter(|| {
         TuiExplorerBuilder::new()
             .unwrap()
-            .initialize_annotations()
+            .annotate_dll_metadata()
             .unwrap()
-            .search_based_on_annotations()
+            .annotate_game_obj()
             .unwrap()
     });
 
@@ -82,8 +82,8 @@ fn bench_render_full_tui_initialized_to_stardew_dll<M: Measurement>(
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
-        .initialize_annotations()?
-        .search_based_on_annotations()?
+        .annotate_dll_metadata()?
+        .annotate_game_obj()?
         .initialize_view_to_stardew_dll()?
         .build()?;
 
@@ -105,8 +105,8 @@ fn bench_render_full_tui_initialized_to_game_obj<M: Measurement>(
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
-        .initialize_annotations()?
-        .search_based_on_annotations()?
+        .annotate_dll_metadata()?
+        .annotate_game_obj()?
         .initialize_view_to_game_obj()?
         .build()?;
 
@@ -128,8 +128,8 @@ fn bench_scroll_in_stardew_dll<M: Measurement>(
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
-        .initialize_annotations()?
-        .search_based_on_annotations()?
+        .annotate_dll_metadata()?
+        .annotate_game_obj()?
         // .initialize_view_to_game_obj()?
         .initialize_view_to_stardew_dll()?
         .build()?;
@@ -152,8 +152,8 @@ fn bench_scroll_in_region_with_game_obj<M: Measurement>(
         .init_symbols()
         .default_detail_formatters()
         .default_column_formatters()
-        .initialize_annotations()?
-        .search_based_on_annotations()?
+        .annotate_dll_metadata()?
+        .annotate_game_obj()?
         .initialize_view_to_game_obj()?
         // .initialize_view_to_stardew_dll()?
         .build()?;

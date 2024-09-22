@@ -7,9 +7,8 @@ use dll_unpacker::{
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    runtime_type::RuntimePrimType, unpack_fields, CorElementType, Error,
-    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
-    RuntimeType, TypedPointer,
+    unpack_fields, CorElementType, Error, FieldDescription, FieldDescriptions,
+    ReadTypedPointer, RuntimeModule, RuntimeType, TypeHandle, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -35,7 +34,7 @@ impl MethodTable {
         raw_token: {u16, 10..12},
         num_virtuals: {u16, 12..14},
         num_interfaces: {u16, 14..16},
-        parent_method_table: {TypedPointer<MethodTable>, 16..24},
+        parent_method_table: {Option<TypedPointer<MethodTable>>, 16..24},
         module: {TypedPointer<RuntimeModule>, 24..32},
         writable_data: {Pointer, 32..40},
         ee_class_or_canonical_table: {Pointer, 40..48},
@@ -75,7 +74,7 @@ impl MethodTable {
             .value(self.num_interfaces_unpacked())
             .name("num_interfaces");
         annotator
-            .value(self.parent_method_table_unpacked())
+            .opt_value(self.parent_method_table_unpacked())
             .name("parent_method_table");
         annotator.value(self.module_unpacked()).name("module");
         annotator
@@ -95,6 +94,11 @@ impl MethodTable {
 
     pub fn has_dynamic_statics(&self) -> bool {
         self.flags_2() & 0x0002 > 0
+    }
+
+    pub fn has_indirect_parent_method_table(&self) -> bool {
+        // In .NET 6 and earlier, parent may be an "indirect" pointer.
+        self.flags() & 0x00800000 > 0
     }
 
     pub fn component_size(&self) -> Option<usize> {
@@ -119,21 +123,36 @@ impl MethodTable {
         } else if type_flag == 0x000A0000 {
             Some(RuntimeType::Array)
         } else if type_flag == 0x00080000 {
-            todo!("Unpacking of ELEMENT_TYPE_ARRAY")
+            // This is a statically-sized array, but determining the
+            // element type and size require the field metadata to
+            // unpack.
+            None
         } else if type_flag == 0x00040000 {
             Some(RuntimeType::ValueType {
                 method_table: self.ptr(),
                 size: self.base_size(),
             })
-        } else if type_flag == 0x00060000 {
+        } else if type_flag == 0x00070000 {
             // This is a RuntimePrimType, but which primitive type
             // cannot be determined solely from the MethodTable.
             // Instead, this case should be handled with
             // `EEClass::prim_type`.
             None
+        } else if type_flag == 0x00060000 {
+            // This is a primitive type, but not a "true
+            // primitive" type.  I think this just means that it's
+            // a user-defined enum.
+            Some(RuntimeType::ValueType {
+                method_table: self.ptr(),
+                size: self.base_size(),
+            })
         } else {
             None
         }
+    }
+
+    pub fn is_nullable(&self) -> bool {
+        (self.flags() & 0x000F0000) == 0x00050000
     }
 
     pub fn is_array(&self) -> bool {
@@ -153,7 +172,7 @@ impl MethodTable {
         } else {
             let reader = reader.borrow();
             let ee_class = self.get_ee_class(reader)?;
-            if let Some(prim) = ee_class.prim_type() {
+            if let CorElementType::Prim(prim) = ee_class.element_type()? {
                 Ok(RuntimeType::Prim(prim))
             } else {
                 let type_flag = self.flags() & 0x000F0000;
@@ -171,13 +190,22 @@ impl MethodTable {
         }
     }
 
-    fn generic_types_excluding_base_class(
+    pub fn has_generics(&self) -> bool {
+        let flags = self.flags();
+
+        // These two bits encode whether the type contains any generics.
+        //    0: No generics
+        //    1: Instantiation of a generic type
+        //    2: Shared instantiation between compatible types
+        //    3: Generic type in terms of formal parameters
+        (flags & 0x00000030) > 0
+    }
+
+    pub fn generic_types_excluding_base_class(
         &self,
         reader: &MemoryReader,
-    ) -> Result<impl Iterator<Item = TypedPointer<MethodTable>>, Error> {
-        let flags = self.flags();
-        let has_generics = (flags & 0x00000030) > 0;
-        let iter = has_generics.then(|| -> Result<_,Error> {
+    ) -> Result<impl Iterator<Item = TypedPointer<TypeHandle>>, Error> {
+        let iter = self.has_generics().then(|| -> Result<_,Error> {
             // Step 1: If the flag-check passed, then bytes 48-56 hold
             // the location of per-instance information of a generic
             // type.  However, in order to find the generics of this
@@ -214,7 +242,7 @@ impl MethodTable {
             )?;
 
             let iter = (0..num_type_params)
-                .map(move |i| -> TypedPointer<MethodTable> {
+                .map(move |i| -> TypedPointer<TypeHandle> {
                     let ptr = generic_arg_bytes
                         .subrange(i * Pointer::SIZE..(i + 1) * Pointer::SIZE)
                         .unpack()
@@ -230,7 +258,7 @@ impl MethodTable {
     pub fn generic_types(
         &self,
         reader: impl Borrow<MemoryReader>,
-    ) -> Result<Vec<TypedPointer<MethodTable>>, Error> {
+    ) -> Result<Vec<TypedPointer<TypeHandle>>, Error> {
         let reader = reader.borrow();
 
         let element_type =
@@ -263,6 +291,20 @@ impl MethodTable {
         (index > 0).then(|| MetadataTableIndex::new(index - 1))
     }
 
+    pub fn canonical_method_table_ptr(
+        &self,
+    ) -> Option<TypedPointer<MethodTable>> {
+        let ptr = self.ee_class_or_canonical_table();
+        let is_ee_class = ptr.as_usize() & 3usize == 0;
+
+        if is_ee_class {
+            None
+        } else {
+            let ptr = ptr & !3;
+            Some(ptr.into())
+        }
+    }
+
     pub fn ee_class_ptr(
         &self,
         reader: &MemoryReader,
@@ -293,14 +335,9 @@ impl MethodTable {
         &self,
         reader: &MemoryReader,
     ) -> Result<Option<Self>, Error> {
-        let ptr = self.parent_method_table();
-        let parent = if ptr.is_null() {
-            None
-        } else {
-            Some(ptr.read(reader)?)
-        };
-
-        Ok(parent)
+        self.parent_method_table()
+            .map(|ptr| ptr.read(reader))
+            .transpose()
     }
 
     pub fn iter_parents<'a>(
@@ -458,13 +495,9 @@ impl EEClass {
         EEClassPackedFields { bytes }
     }
 
-    pub fn prim_type(&self) -> Option<RuntimePrimType> {
+    pub fn element_type(&self) -> Result<CorElementType, Error> {
         let norm_type: u8 = self.norm_type();
-        let element_type: CorElementType = norm_type.try_into().ok()?;
-        match element_type {
-            CorElementType::Prim(prim_type) => Some(prim_type),
-            _ => None,
-        }
+        norm_type.try_into()
     }
 }
 

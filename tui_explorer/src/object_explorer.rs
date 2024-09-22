@@ -18,7 +18,7 @@ use memory_reader::{OwnedBytes, Pointer};
 use crate::{
     extended_tui::{
         Indent, ScrollableState as _, SearchDirection, SearchWindow,
-        WidgetWindow,
+        WidgetSideEffects, WidgetWindow,
     },
     extensions::*,
     TuiGlobals, UserConfig,
@@ -61,6 +61,7 @@ enum ShouldReadState {
     NoRead,
     ReadAndExpand,
     ReadAndCollapse,
+    ErrOnPreviousRead,
 }
 
 #[derive(Clone)]
@@ -405,14 +406,21 @@ impl ObjectExplorer {
                     let display_options_ref = &display_options;
 
                     let module = reader.runtime_module(module_ptr)?;
-                    let iter_vtable_ptr =
-                        module.iter_method_table_pointers(&reader)?;
-                    let iter_static_fields = iter_vtable_ptr
+                    let iter_static_fields = module
+                    .iter_method_table_pointers(&reader)?
+                    .filter(|&method_table_ptr| {
+                        // TODO: Handle unpacking/display for static
+                        // fields of generic types.
+                        reader
+                            .method_table(method_table_ptr)
+                            .map(|method_table| !method_table.has_generics())
+                            .unwrap_or(true)
+                    })
                     .flat_map(|method_table_ptr| {
                         match reader.iter_static_fields(method_table_ptr) {
                             Ok(iter) => Either::Left(
                                 iter.map(move |field| (method_table_ptr, field))
-                                    .map(Ok),
+                                .map(Ok),
                             ),
                             Err(err) => {
                                 Either::Right(std::iter::once(Err(err)))
@@ -529,6 +537,10 @@ impl ObjectTreeNode {
         let location = location..location + runtime_type.size_bytes();
 
         let kind = match runtime_type {
+            RuntimeType::FixedSizeArray { .. } => {
+                todo!("Display of fixed-size array")
+            }
+
             RuntimeType::Prim(_)
             | RuntimeType::Class
             | RuntimeType::String
@@ -619,6 +631,9 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<ObjectTreeNode, Error> {
+        assert!(mtable_of_parent.as_usize() % Pointer::SIZE == 0);
+        assert!(field.method_table().as_usize() % Pointer::SIZE == 0);
+
         let method_table = reader.method_table(field.method_table())?;
         let module = reader.runtime_module(method_table.module())?;
         let metadata = module.metadata(reader)?;
@@ -667,7 +682,7 @@ impl ObjectTreeNode {
         reader: CachedReader<'_>,
     ) -> Result<(), Error> {
         let display_expanded = match self.should_read {
-            ShouldReadState::NoRead => {
+            ShouldReadState::NoRead | ShouldReadState::ErrOnPreviousRead => {
                 return Ok(());
             }
             ShouldReadState::ReadAndExpand => true,
@@ -712,6 +727,9 @@ impl ObjectTreeNode {
                             RuntimeValue::Array(ptr.into()),
                         );
                     }
+                    RuntimeType::FixedSizeArray { .. } => {
+                        todo!("Rendering of fixed-size array")
+                    }
                 }
             }
             _ => {}
@@ -720,8 +738,8 @@ impl ObjectTreeNode {
         // Reading each type
         match self.kind {
             ObjectTreeNodeKind::UnreadValue => {
-                let value =
-                    reader.value(self.runtime_type, self.location.clone())?;
+                let value = reader
+                    .value(self.runtime_type.clone(), self.location.clone())?;
                 self.kind = ObjectTreeNodeKind::Value(value);
             }
             ObjectTreeNodeKind::Object { .. } => {
@@ -760,7 +778,7 @@ impl ObjectTreeNode {
                         let location = array.element_location(index);
                         ObjectTreeNode::initial_value(
                             location.start,
-                            element_type,
+                            element_type.clone(),
                             reader,
                             display_options,
                             prefetch,
@@ -853,18 +871,19 @@ impl ObjectTreeNode {
         Ok(())
     }
 
-    fn expand_marked(
+    fn expand_marked<'a>(
         &mut self,
         display_options: &DisplayOptions,
         reader: CachedReader<'_>,
-    ) -> Result<(), Error> {
-        let mut visitor = ReadMarkedNodes {
+        side_effects: &'a mut WidgetSideEffects,
+    ) {
+        let visitor = ReadMarkedNodes {
             display_options,
             reader,
-            err: Ok(()),
+            side_effects,
+            current_path: Vec::new(),
         };
-        TreeMutator::new().with_extension(&mut visitor).visit(self);
-        visitor.err
+        TreeMutator::new().with_extension(visitor).visit(self);
     }
 }
 
@@ -895,7 +914,8 @@ impl TreeMutatorExtension for ToggleDisplayExpanded {
                 }
                 _ => {
                     node.should_read = match node.should_read {
-                        ShouldReadState::NoRead => {
+                        ShouldReadState::NoRead
+                        | ShouldReadState::ErrOnPreviousRead => {
                             ShouldReadState::ReadAndExpand
                         }
                         ShouldReadState::ReadAndExpand
@@ -947,7 +967,10 @@ impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
                 _ => false,
             };
             if can_expand {
-                node.should_read = ShouldReadState::ReadAndCollapse;
+                node.should_read = match node.should_read.clone() {
+                    ShouldReadState::NoRead => ShouldReadState::ReadAndCollapse,
+                    other => other,
+                };
             }
         }
     }
@@ -956,12 +979,33 @@ impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
 struct ReadMarkedNodes<'a> {
     display_options: &'a DisplayOptions,
     reader: CachedReader<'a>,
-    err: Result<(), Error>,
+    side_effects: &'a mut WidgetSideEffects,
+    current_path: Vec<String>,
 }
-impl<'a, 'b> TreeMutatorExtension for &'b mut ReadMarkedNodes<'a> {
+impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
-        if self.err.is_ok() {
-            self.err = node.expand_if_marked(self.display_options, self.reader);
+        match &node.kind {
+            ObjectTreeNodeKind::Field { field_name, .. } => {
+                self.current_path.push(field_name.clone());
+            }
+            _ => {}
+        }
+
+        let res = node.expand_if_marked(self.display_options, self.reader);
+        if let Err(err) = res {
+            node.should_read = ShouldReadState::ErrOnPreviousRead;
+            let path = self.current_path.iter().join(".");
+            self.side_effects.add_log(format!("    {err}"));
+            self.side_effects.add_log(format!("Error reading {path}"));
+        }
+    }
+
+    fn postvisit(&mut self, node: &mut ObjectTreeNode) {
+        match &node.kind {
+            ObjectTreeNodeKind::Field { .. } => {
+                self.current_path.pop();
+            }
+            _ => {}
         }
     }
 }
@@ -1313,7 +1357,7 @@ impl WidgetWindow for ObjectExplorer {
     fn periodic_update<'a>(
         &mut self,
         globals: &'a crate::TuiGlobals,
-        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        side_effects: &'a mut WidgetSideEffects,
     ) -> Result<(), Error> {
         let reader = globals.cached_reader();
 
@@ -1329,8 +1373,11 @@ impl WidgetWindow for ObjectExplorer {
             .with_extension(ToggleReadOnDisplayedNodes::new(display_range))
             .visit(&mut self.object_tree);
 
-        self.object_tree
-            .expand_marked(&self.display_options, reader)?;
+        self.object_tree.expand_marked(
+            &self.display_options,
+            reader,
+            side_effects,
+        );
         Ok(())
     }
 

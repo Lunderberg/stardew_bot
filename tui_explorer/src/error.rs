@@ -65,6 +65,9 @@ pub enum Error {
     #[error("The named symbol was not found")]
     SymbolNotFound,
 
+    #[error("Could not find module named {0}")]
+    RuntimeModuleNotFound(String),
+
     #[error("Could not find method table {0}")]
     MethodTableNotFound(&'static str),
 

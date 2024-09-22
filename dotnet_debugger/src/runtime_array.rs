@@ -27,8 +27,8 @@ impl RuntimeArray {
         self.num_elements
     }
 
-    pub fn element_type(&self) -> RuntimeType {
-        self.element_type
+    pub fn element_type(&self) -> &RuntimeType {
+        &self.element_type
     }
 
     pub fn element_location(&self, index: usize) -> Range<Pointer> {

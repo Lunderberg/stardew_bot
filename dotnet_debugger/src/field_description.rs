@@ -188,7 +188,14 @@ impl<'a> FieldDescription<'a> {
             let layout = module.metadata_layout(reader)?;
             let rva = RelativeVirtualAddress::new(self.offset());
             layout.virtual_address_to_raw(rva)?
-        } else if matches!(self.cor_element_type()?, CorElementType::Class) {
+        } else if matches!(
+            self.cor_element_type()?,
+            // Based on Field::GetBaseInDomainLocalModule, this
+            // pattern should also include ValueType.  However, the
+            // fields that are unpacked that way seem a lot less
+            // sensible.  Should revisit in the future.
+            CorElementType::Class
+        ) {
             // The Module contains two pointers for static values,
             // depending on whether the value must be inspected by the
             // garbage collector.  Objects that may be managed by the

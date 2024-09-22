@@ -5,7 +5,7 @@ use crate::{
     TypedPointer,
 };
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
     ValueType {
@@ -16,9 +16,15 @@ pub enum RuntimeType {
 
     String,
     Array,
+    FixedSizeArray {
+        element_type: Box<RuntimeType>,
+        rank: usize,
+        sizes: Vec<usize>,
+        lower_bounds: Vec<usize>,
+    },
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum RuntimePrimType {
     Bool,
     Char,
@@ -63,6 +69,9 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Array(ptr.into()))
             }
+            RuntimeType::FixedSizeArray { .. } => {
+                todo!("Parsing of FixedSizeArray fields")
+            }
         }
     }
 
@@ -72,6 +81,9 @@ impl RuntimeType {
             RuntimeType::ValueType { size, .. } => *size,
             RuntimeType::Class | RuntimeType::String | RuntimeType::Array => {
                 Pointer::SIZE
+            }
+            RuntimeType::FixedSizeArray { .. } => {
+                todo!("Size computation of fixed size array")
             }
         }
     }
@@ -185,6 +197,26 @@ impl std::fmt::Display for RuntimeType {
             RuntimeType::Class => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),
             RuntimeType::Array => write!(f, "Array"),
+            RuntimeType::FixedSizeArray {
+                element_type,
+                rank,
+                sizes,
+                lower_bounds,
+            } => {
+                write!(f, "{element_type}[")?;
+                for i in 0..*rank {
+                    if i > 0 {
+                        write!(f, ",")?;
+                    }
+                    if let Some(lower_bound) = lower_bounds.get(i) {
+                        write!(f, "{lower_bound}..")?;
+                    }
+                    if let Some(size) = sizes.get(i) {
+                        write!(f, "{size}")?;
+                    }
+                }
+                write!(f, "]")
+            }
         }
     }
 }
@@ -238,5 +270,18 @@ impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
             dll_unpacker::SignaturePrimType::NativeInt => Self::NativeInt,
             dll_unpacker::SignaturePrimType::NativeUInt => Self::NativeUInt,
         }
+    }
+}
+
+impl std::cmp::PartialEq<dll_unpacker::SignaturePrimType> for RuntimePrimType {
+    fn eq(&self, other: &dll_unpacker::SignaturePrimType) -> bool {
+        let other: Self = (*other).into();
+        *self == other
+    }
+}
+
+impl std::cmp::PartialEq<RuntimePrimType> for dll_unpacker::SignaturePrimType {
+    fn eq(&self, other: &RuntimePrimType) -> bool {
+        other == self
     }
 }

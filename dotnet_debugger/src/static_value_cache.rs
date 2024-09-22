@@ -6,13 +6,13 @@ use std::ops::{Deref, Range};
 use elsa::FrozenMap;
 
 use dll_unpacker::{
-    Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex, TypeDefOrRef,
-    TypeRef,
+    Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex,
+    MetadataTypeDefOrRef, TypeDef, TypeDefOrRef, TypeRef,
 };
-use itertools::Itertools;
+use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
-use crate::{extensions::*, FieldContainer};
+use crate::{extensions::*, CorElementType, FieldContainer, TypeHandle};
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
     RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
@@ -33,6 +33,11 @@ pub struct StaticValueCache {
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
     method_table_by_metadata:
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
+
+    module_defining_type: FrozenMap<
+        TypeInModule,
+        Box<(TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>)>,
+    >,
 
     field_to_runtime_type: FrozenMap<
         (
@@ -69,22 +74,6 @@ pub struct CachedReader<'a> {
 impl StaticValueCache {
     pub fn new() -> Self {
         Default::default()
-    }
-
-    fn iter_clr_dll_regions(
-        reader: &MemoryReader,
-    ) -> impl Iterator<Item = &MemoryMapRegion> {
-        reader
-            .regions
-            .iter()
-            .filter(|region| region.file_offset() == 0)
-            .filter(|region| region.size_bytes() > 4096)
-            .filter(|region| {
-                region
-                    .name()
-                    .map(|name| name.ends_with(".dll"))
-                    .unwrap_or(false)
-            })
     }
 
     pub fn cached_reader<'a>(
@@ -153,6 +142,7 @@ impl<'a> CachedReader<'a> {
             self.state
                 .runtime_module_by_name
                 .insert(name.to_string(), Box::new(ptr));
+
             Ok(runtime_module)
         })
     }
@@ -235,14 +225,13 @@ impl<'a> CachedReader<'a> {
         &self,
         name: &str,
     ) -> Result<TypedPointer<RuntimeModule>, Error> {
-        // self.state.runtime_module_by_name(name, self.reader)
-
         // TODO: Have `try_insert` accept `impl ToOwned<Owned=T>` to
         // avoid needing to copy the string.
         self.state
             .runtime_module_by_name
             .try_insert(name.to_string(), || {
-                let dll_region = StaticValueCache::iter_clr_dll_regions(self)
+                let dll_region = self
+                    .iter_clr_dll_regions()
                     .filter(|region| {
                         region.short_name().trim_end_matches(".dll") == name
                     })
@@ -271,37 +260,192 @@ impl<'a> CachedReader<'a> {
         ptr_mtable_of_parent: TypedPointer<MethodTable>,
         desc: &FieldDescription,
     ) -> Result<RuntimeType, Error> {
+        let field_name = self.field_to_name(desc)?;
+        assert!(
+            ptr_mtable_of_parent.as_usize() % Pointer::SIZE == 0,
+            "Attempted to find field '{field_name}' \
+             with misaligned parent mtable {ptr_mtable_of_parent}"
+        );
+
         let lookup_key =
             (ptr_mtable_of_parent, desc.method_table(), desc.token());
 
         self.state
             .field_to_runtime_type
             .try_insert(lookup_key, || {
-                let method_table = self.method_table(desc.method_table())?;
-                let module_ptr = method_table.module();
+                match desc.cor_element_type()? {
+                    CorElementType::Prim(prim) => {
+                        return Ok(RuntimeType::Prim(prim));
+                    }
+                    _ => {}
+                }
+
+                let parent = self.method_table(ptr_mtable_of_parent)?;
+                let module_ptr = parent.module();
                 let module = self.runtime_module(module_ptr)?;
                 let metadata = module.metadata(self)?;
                 let field_metadata = metadata.get(desc.token())?;
                 let signature = field_metadata.signature()?;
 
-                let ty: RuntimeType = match signature.first_type()? {
+                let sig_type = signature.first_type()?;
+
+                let ty: RuntimeType = match sig_type.clone() {
                     dll_unpacker::SignatureType::Prim(prim) => {
-                        // Primitive types could be handled with just
-                        // `desc.runtime_type()`, if necessary.
+                        // This case should already have been handled
+                        // by checking the field description.
                         RuntimeType::Prim(prim.into())
                     }
                     dll_unpacker::SignatureType::ValueType {
                         index, ..
-                    }
-                    | dll_unpacker::SignatureType::GenericInst {
-                        index,
-                        is_value_type: true,
-                        ..
                     } => {
                         let method_table =
                             self.method_table_by_metadata(module_ptr, index)?;
                         let size = self.method_table(method_table)?.base_size();
                         RuntimeType::ValueType { method_table, size }
+                    }
+                    dll_unpacker::SignatureType::GenericInst {
+                        is_value_type: true,
+                        index,
+                        type_args,
+                        ..
+                    } => {
+                        let ptr_to_loader_module = type_args
+                            .iter()
+                            .next()
+                            .map(|arg| -> Result<_,Error> {
+                                match arg.as_ref() {
+                                    dll_unpacker::SignatureType::Prim(_) => {
+                                        self.runtime_module_by_name("System.Private.CoreLib")
+                                    }
+                                    dll_unpacker::SignatureType::Class { index, .. } |
+                                    dll_unpacker::SignatureType::ValueType { index, .. } => {
+                                        self.module_defining_type(module_ptr,*index)
+                                            .map(|(ptr,_)| ptr)
+                                    }
+                                    _ => todo!(
+                                        "Handle case, \
+                                         first argument of {sig_type} is {arg}"
+                                    ),
+                                }
+                            })
+                            .expect("GenericInst should have at least one argument")?
+                            .clone();
+
+                        let (
+                            ptr_to_defining_module,
+                            type_def_index,
+                        ) = self.module_defining_type(module_ptr,index)?;
+
+                        let method_table_ptr = [
+                            ptr_to_loader_module,
+                            ptr_to_defining_module,
+                        ]
+                            .into_iter()
+                            .unique()
+                            .map(|module_ptr| self.runtime_module(module_ptr))
+                            .filter_map_ok(|module| {
+                                module
+                                    .loaded_types(self.reader)
+                                    .transpose()
+                            })
+                            .map(|res_loaded_types| -> Result<_,Error> {
+                                let loaded_types = res_loaded_types??;
+                                let iter = loaded_types.iter_method_tables(self.reader)?;
+                                Ok(iter)
+                            })
+                            .flat_map(|res_iter| {
+                                match res_iter {
+                                    Ok(iter) => Either::Left(iter),
+                                    Err(err) => Either::Right(std::iter::once(Err(err))),
+                                }
+                            })
+                            .find_ok(|res_method_table_ptr| -> Result<bool,Error> {
+                                let type_handle_ptr = match res_method_table_ptr.as_ref() {
+                                    Ok(ptr) => ptr,
+                                    Err(_) => {
+                                        return Ok(true);
+                                    }
+                                };
+
+                                let type_handle = type_handle_ptr.read(self.reader)?;
+                                let method_table = match &type_handle {
+                                    TypeHandle::MethodTable(mt) => mt,
+                                    TypeHandle::TypeDescription(_) => {
+                                        return Ok(false);
+                                    },
+                                };
+
+                                if method_table.token() != Some(type_def_index) {
+                                    return Ok(false);
+                                }
+
+                                let generic_types = method_table.generic_types(self)?;
+
+                                if generic_types.len() != type_args.len() {
+                                    return Ok(false);
+                                }
+
+                                for (sig_arg, type_handle_ptr) in type_args.iter().zip(generic_types.iter())
+                                    {
+                                        let type_handle = type_handle_ptr.read(self).unwrap();
+
+                                        let arg_matches = match sig_arg.as_ref() {
+                                            dll_unpacker::SignatureType::Class { index, .. } |
+                                            dll_unpacker::SignatureType::ValueType { index, .. } => {
+                                                match type_handle {
+                                                    TypeHandle::MethodTable(arg_method_table) => {
+                                                        let (expected_module,expected_token) = self
+                                                            .module_defining_type(module_ptr,*index)?;
+
+                                                        arg_method_table.module()==expected_module &&
+                                                            arg_method_table.token() == Some(expected_token)
+                                                    }
+                                                    TypeHandle::TypeDescription(_) => false,
+                                                }
+
+                                            }
+                                            dll_unpacker::SignatureType::Prim(sig_prim_type) => {
+                                                match type_handle{
+                                                    TypeHandle::TypeDescription(type_description) => {
+                                                        match type_description.element_type() {
+                                                            CorElementType::Prim(actual_prim_type) => Some(actual_prim_type),
+                                                            _ => None,
+                                                        }
+                                                    }
+                                                    TypeHandle::MethodTable(method_table) => {
+                                                        match method_table.runtime_type(self.reader).unwrap() {
+                                                            RuntimeType::Prim(actual_prim_type) => Some(actual_prim_type),
+                                                            _ => None,
+                                                        }
+                                                    }
+                                                }
+                                                  .map(|prim_type| sig_prim_type == &prim_type)
+                                                  .unwrap_or(false)
+                                            }
+                                            dll_unpacker::SignatureType::GenericInst { .. } => {
+                                                todo!("Extract out a 'matches_signature' function, \
+                                                       handle this case through recursion.")
+                                            }
+                                            _ => todo!(),
+                                        };
+                                        if !arg_matches {
+                                            return Ok(false);
+                                        }
+                                    }
+
+                                Ok(true)
+                            })?
+                            .ok_or_else(|| {
+                                Error::GenericMethodTableNotFound(format!("{sig_type}"))
+                            })??
+                            .as_method_table()
+                            .ok_or(Error::GenericInstShouldNotBeTypeDescription)?;
+
+                        let size = self.method_table(method_table_ptr)?.base_size();
+                        RuntimeType::ValueType { method_table: method_table_ptr, size }
+                    }
+                    dll_unpacker::SignatureType::GenericInst { .. } => {
+                        RuntimeType::Class
                     }
                     dll_unpacker::SignatureType::Class { .. } => {
                         RuntimeType::Class
@@ -328,26 +472,40 @@ impl<'a> CachedReader<'a> {
 
                         let generic_types =
                             mtable_of_parent.generic_types(self)?;
+
                         let var_index = var_index as usize;
-                        let ptr_generic_type = generic_types
+                        let ptr_type_handle = generic_types
                             .get(var_index)
                             .ok_or_else(|| Error::InvalidGenericTypeVar {
                                 index: var_index,
                                 num_vars: generic_types.len(),
-                            })?;
+                            })?
+                            .clone();
 
-                        let generic_type =
-                            self.method_table(*ptr_generic_type)?;
-                        let runtime_type = generic_type.runtime_type(self)?;
+                        let type_handle = ptr_type_handle.read(self.reader)?;
+                        let runtime_type = match type_handle {
+                            TypeHandle::MethodTable(method_table) => method_table.runtime_type(self.reader)?,
+                            TypeHandle::TypeDescription(type_desc) => match type_desc.element_type() {
+                                CorElementType::Prim(prim) => RuntimeType::Prim(prim),
+                                _ => todo!(),
+                            },
+                        };
 
                         runtime_type
                     }
-                    _ => RuntimeType::Class,
+                    dll_unpacker::SignatureType::Array { .. } => {
+                        RuntimeType::Class
+                    }
+                    dll_unpacker::SignatureType::Object => RuntimeType::Class,
+
+                    other => {
+                        todo!("Not currently handling {other}")
+                    }
                 };
 
                 Ok(ty)
             })
-            .copied()
+            .cloned()
     }
 
     pub fn field_to_type_name(
@@ -407,13 +565,55 @@ impl<'a> CachedReader<'a> {
             .map(|opt| opt.as_ref())
     }
 
+    pub fn module_defining_type(
+        &self,
+        module_ptr: TypedPointer<RuntimeModule>,
+        coded_index: MetadataCodedIndex<TypeDefOrRef>,
+    ) -> Result<(TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>), Error>
+    {
+        let lookup_key = TypeInModule {
+            module: module_ptr,
+            coded_index,
+        };
+        self.state
+            .module_defining_type
+            .try_insert(lookup_key, || -> Result<_, Error> {
+                if let Some(index) = coded_index.as_type::<TypeDef>() {
+                    return Ok((module_ptr, index));
+                }
+
+                let module = self.runtime_module(module_ptr)?;
+                let type_metadata = module.metadata(self)?.get(coded_index)?;
+                let res = match type_metadata {
+                    MetadataTypeDefOrRef::TypeDef(_) => {
+                        panic!(
+                            "Unreachable, should be \
+                             handled by earlier check for TypeDef"
+                        )
+                    }
+                    MetadataTypeDefOrRef::TypeRef(row) => self
+                        .find_containing_module(
+                            row.target_dll_name()?,
+                            row.name()?,
+                            row.namespace()?,
+                        )?,
+                    MetadataTypeDefOrRef::TypeSpec(_) => {
+                        todo!()
+                    }
+                };
+
+                Ok(res)
+            })
+            .cloned()
+    }
+
     pub fn method_table_by_metadata(
         &self,
-        module: TypedPointer<RuntimeModule>,
+        module_ptr: TypedPointer<RuntimeModule>,
         coded_index: MetadataCodedIndex<TypeDefOrRef>,
     ) -> Result<TypedPointer<MethodTable>, Error> {
         let lookup_key = TypeInModule {
-            module,
+            module: module_ptr,
             coded_index,
         };
         self.state
@@ -421,25 +621,27 @@ impl<'a> CachedReader<'a> {
             .try_insert(
                 lookup_key,
                 || -> Result<TypedPointer<MethodTable>, Error> {
-                    let module = self.runtime_module(module)?;
+                    let module = self.runtime_module(module_ptr)?;
                     let type_metadata =
                         module.metadata(self)?.get(coded_index)?;
-                    match type_metadata {
-                        dll_unpacker::MetadataTypeDefOrRef::TypeDef(row) => {
-                            module.get_method_table(row.index(), self)
+                    let method_table_ptr = match type_metadata {
+                        MetadataTypeDefOrRef::TypeDef(row) => {
+                            module.get_method_table(row.index(), self)?
                         }
-                        dll_unpacker::MetadataTypeDefOrRef::TypeRef(row) => {
-                            self.type_ref_lookup(row)
+                        MetadataTypeDefOrRef::TypeRef(row) => {
+                            self.type_ref_lookup(row)?
                         }
-                        dll_unpacker::MetadataTypeDefOrRef::TypeSpec(_) => {
+                        MetadataTypeDefOrRef::TypeSpec(_) => {
                             todo!()
                         }
-                    }
+                    };
+
+                    Ok(method_table_ptr)
                 },
             )
             .and_then(|ptr| {
                 if ptr.is_null() {
-                    let module = self.runtime_module(module)?;
+                    let module = self.runtime_module(module_ptr)?;
                     let metadata = module.metadata(self)?.get(coded_index)?;
                     let name = metadata.name()?;
                     let namespace = metadata.namespace()?;
@@ -503,7 +705,7 @@ impl<'a> CachedReader<'a> {
         &self,
     ) -> impl Iterator<Item = Result<TypedPointer<RuntimeModule>, Error>> + '_
     {
-        StaticValueCache::iter_clr_dll_regions(&self.reader)
+        self.iter_clr_dll_regions()
             .map(|region| region.short_name().trim_end_matches(".dll"))
             .map(|name| self.runtime_module_by_name(name))
     }
@@ -539,11 +741,7 @@ impl<'a> CachedReader<'a> {
                     .map(|ptr| -> Result<_, Error> {
                         let method_table = self.method_table(*ptr)?;
                         let parent = method_table.parent_method_table();
-                        if parent.is_null() {
-                            Ok(None)
-                        } else {
-                            Ok(Some(parent))
-                        }
+                        Ok(parent)
                     })
                     .map(|res| res.transpose())
                     .flatten()
@@ -557,6 +755,75 @@ impl<'a> CachedReader<'a> {
         .filter(|field| !field.is_static());
 
         Ok(iter)
+    }
+
+    fn find_containing_module(
+        &self,
+        assembly_name: &str,
+        symbol_name: &str,
+        symbol_namespace: &str,
+    ) -> Result<(TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>), Error>
+    {
+        let field_module_ptr = self.runtime_module_by_name(assembly_name)?;
+        let field_module = self.runtime_module(field_module_ptr)?;
+        let metadata = field_module.metadata(self)?;
+
+        let ref_type_def = metadata.type_def_table().iter_rows().find_ok(
+            |row| -> Result<_, Error> {
+                Ok(row.name()? == symbol_name
+                    && row.namespace()? == symbol_namespace)
+            },
+        )?;
+
+        if let Some(ref_type_def) = ref_type_def {
+            // The TypeRef pointed to an assembly, and that assembly
+            // contains the TypeDef we're looking for.
+            return Ok((field_module.location.into(), ref_type_def.index()));
+        }
+
+        let ref_exported_type = metadata
+            .exported_type_table()
+            .iter_rows()
+            .find_ok(|row| -> Result<_, Error> {
+                Ok(row.name()? == symbol_name
+                    && row.namespace()? == symbol_namespace)
+            })?;
+
+        if let Some(ref_exported_type) = ref_exported_type {
+            // > I'm sorry, but your TypeDef is in another castle.
+            //
+            // The TypeRef/ExportedType pointed to an assembly, but
+            // that assembly just re-exports a symbol, and points to
+            // another
+            return self.find_containing_module(
+                ref_exported_type.target_dll_name()?,
+                ref_exported_type.name()?,
+                ref_exported_type.namespace()?,
+            );
+        }
+
+        use itertools::Itertools;
+        let names = std::iter::empty()
+            .chain(metadata.type_def_table().iter_rows().filter_map(|row| {
+                let name = row.name().ok()?;
+                let namespace = row.namespace().ok()?;
+                Some(format!("  TypeDef {namespace} . {name}"))
+            }))
+            .chain(metadata.exported_type_table().iter_rows().filter_map(
+                |row| {
+                    let name = row.name().ok()?;
+                    let namespace = row.namespace().ok()?;
+                    Some(format!("  ExportedType {namespace} . {name}"))
+                },
+            ))
+            .sorted()
+            .join("\n");
+
+        panic!(
+            "Could not find {symbol_namespace} . {symbol_name} \
+             in the assembly {assembly_name}.  \
+             The assembly contains symbols:\n{names}"
+        )
     }
 
     fn type_ref_lookup(
@@ -590,7 +857,10 @@ impl<'a> CachedReader<'a> {
         if let Some(ref_type_def) = ref_type_def {
             // The TypeRef pointed to an assembly, and that assembly
             // contains the TypeDef we're looking for.
-            return field_module.get_method_table(ref_type_def.index(), self);
+            let ptr =
+                field_module.get_method_table(ref_type_def.index(), self)?;
+
+            return Ok(ptr);
         }
 
         let ref_exported_type = metadata
@@ -651,6 +921,13 @@ impl<'a> CachedReader<'a> {
             let iter = self
                 .runtime_module(ptr)?
                 .iter_method_table_pointers(self)?
+                .filter(|&method_table_ptr| {
+                    // TODO: Handle unpacking/display for static
+                    // fields of generic types.
+                    self.method_table(method_table_ptr)
+                        .map(|method_table| !method_table.has_generics())
+                        .unwrap_or(true)
+                })
                 .flat_map(|method_table_ptr| {
                     self.iter_static_fields(method_table_ptr)
                         .into_iter()
