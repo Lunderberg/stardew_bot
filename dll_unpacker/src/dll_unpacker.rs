@@ -1517,6 +1517,16 @@ impl<CodedIndexType> MetadataCodedIndex<CodedIndexType> {
             _phantom: PhantomData,
         }
     }
+
+    pub fn as_type<TableTag: MetadataTableTag>(
+        &self,
+    ) -> Option<MetadataTableIndex<TableTag>> {
+        if self.kind == TableTag::KIND {
+            Some(MetadataTableIndex::new(self.index))
+        } else {
+            None
+        }
+    }
 }
 
 impl<'a, CodedIndexType> UnpackOptBytes<'a>
