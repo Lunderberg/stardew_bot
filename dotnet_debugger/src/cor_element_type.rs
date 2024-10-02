@@ -1,3 +1,5 @@
+use memory_reader::UnpackBytes;
+
 use crate::{runtime_type::RuntimePrimType, Error};
 
 /// Equivalent representation to CorElementType
@@ -85,5 +87,16 @@ impl CorElementType {
             self,
             Self::Prim(RuntimePrimType::Ptr) | Self::Object | Self::Class
         )
+    }
+}
+
+impl<'a> UnpackBytes<'a> for CorElementType {
+    type Error = Error;
+
+    fn unpack(
+        bytes: memory_reader::ByteRange<'a>,
+    ) -> Result<Self, Self::Error> {
+        assert!(bytes.len() == 1);
+        bytes[0].try_into()
     }
 }
