@@ -365,7 +365,11 @@ impl ReadTypedPointer for MethodTable {
         ptr: Pointer,
         reader: &MemoryReader,
     ) -> Result<Self, Error> {
-        MethodTable::read(ptr, reader)
+        if ptr.as_usize() % Pointer::SIZE == 0 {
+            MethodTable::read(ptr, reader)
+        } else {
+            Err(Error::MisalignedMethodTable(ptr))
+        }
     }
 }
 
