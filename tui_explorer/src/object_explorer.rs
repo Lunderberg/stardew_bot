@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{borrow::Borrow, ops::Range};
 
 use itertools::{Either, Itertools};
 use regex::Regex;
@@ -739,8 +739,9 @@ impl ObjectTreeNode {
                 if ptr.is_null() {
                     return Err(Error::CannotExpandNullField);
                 }
-                self.kind =
-                    ObjectTreeNodeKind::String(ptr.read(reader)?.into());
+                self.kind = ObjectTreeNodeKind::String(
+                    ptr.read(reader.borrow())?.into(),
+                );
             }
 
             ObjectTreeNodeKind::Value(RuntimeValue::Array(ptr)) => {
@@ -748,7 +749,7 @@ impl ObjectTreeNode {
                     return Err(Error::CannotExpandNullField);
                 }
 
-                let array = ptr.read(reader)?;
+                let array = ptr.read(reader.borrow())?;
                 let prefetch = reader.read_bytes(array.ptr_range())?;
                 let prefetch = &[prefetch];
 
