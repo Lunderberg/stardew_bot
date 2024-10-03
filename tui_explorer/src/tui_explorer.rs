@@ -424,7 +424,7 @@ impl TuiExplorerBuilder {
                 .name()? // dll_region.name()
         ));
 
-        let runtime_module = module_ptr.read(&self.tui_globals.reader)?;
+        let runtime_module = reader.runtime_module(module_ptr)?;
 
         self.running_log.add_log(format!(
             "Method table: {}",

@@ -9,3 +9,6 @@ pub use try_insert::TryInsert as _;
 
 pub(crate) mod find_ok;
 pub use find_ok::FindOk as _;
+
+pub(crate) mod all_ok;
+pub use all_ok::AllOk as _;

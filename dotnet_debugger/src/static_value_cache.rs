@@ -12,7 +12,10 @@ use dll_unpacker::{
 use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
-use crate::{extensions::*, CorElementType, FieldContainer, TypeHandle};
+use crate::{
+    extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
+    TypeHandle,
+};
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
     RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
@@ -26,8 +29,11 @@ use crate::{
 #[derive(Default)]
 pub struct StaticValueCache {
     method_tables: FrozenMap<TypedPointer<MethodTable>, Box<MethodTable>>,
-    runtime_module_vtable: OnceCell<Pointer>,
+
     runtime_modules: FrozenMap<TypedPointer<RuntimeModule>, Box<RuntimeModule>>,
+    runtime_module_vtable: OnceCell<Pointer>,
+    runtime_module_layout: OnceCell<RuntimeModuleLayout>,
+
     field_descriptions:
         FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
@@ -123,21 +129,18 @@ impl<'a> CachedReader<'a> {
         ptr: TypedPointer<RuntimeModule>,
     ) -> Result<&RuntimeModule, Error> {
         self.state.runtime_modules.try_insert(ptr, || {
-            let runtime_module = ptr.read(self)?;
+            let runtime_module = RuntimeModule::new(
+                ptr.into(),
+                self.state.runtime_module_layout.get().cloned(),
+            );
 
+            // If not already known, save the vtable pointer for later
+            // use.
             self.state
                 .runtime_module_vtable
                 .or_try_init(|| runtime_module.vtable_location(self))?;
 
-            // Save the name of the module, to avoid needing to do a
-            // memory search for it later.
-            //
-            // TODO: See if this could cause a weird order-dependent
-            // error, if a module can be successfully located through
-            // a known pointer, but cannot be located by the
-            // heuristics used to search in memory.  If that is the
-            // case, then this caching could paper over a need to
-            // improve the heuristics.
+            // Save the module into the by-name lookup.
             let name = runtime_module.name(self)?;
             self.state
                 .runtime_module_by_name
@@ -194,7 +197,7 @@ impl<'a> CachedReader<'a> {
                 let module_vtable = module_pointers
                     .iter()
                     .filter_map(|opt| opt.as_ref())
-                    .filter_map(|&ptr| RuntimeModule::read(ptr.into()).ok())
+                    .map(|&ptr| RuntimeModule::new(ptr.into(), None))
                     .find_map(|runtime_module| {
                         runtime_module.vtable_location(self).ok()
                     })
@@ -207,10 +210,22 @@ impl<'a> CachedReader<'a> {
         // This is the faster and more reliable way to locate each
         // RuntimeModule.  But it can only be used once the location
         // of the vtable has been determined.
-        let modules_pointers =
+        let module_pointers =
             RuntimeModule::locate_by_vtable(&metadata, module_vtable, self)?;
 
-        modules_pointers
+        // If not already known, infer the layout for every
+        // runtime module, to be re-used later.
+        self.state.runtime_module_layout.or_try_init(|| {
+            let modules = module_pointers
+                .iter()
+                .filter_map(|opt| opt.as_ref())
+                .map(|&ptr| RuntimeModule::new(ptr.into(), None))
+                .collect::<Vec<_>>();
+            RuntimeModule::infer_layout(&modules, self.reader)
+        })?;
+
+        // Read each module, populating the cache for later use.
+        module_pointers
             .into_iter()
             .filter_map(|opt_ptr| opt_ptr)
             .try_for_each(|ptr| -> Result<_, Error> {

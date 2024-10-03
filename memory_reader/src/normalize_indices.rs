@@ -1,4 +1,4 @@
-use std::ops::{Range, RangeFrom, RangeTo};
+use std::ops::{Range, RangeFrom, RangeFull, RangeTo};
 
 use crate::Pointer;
 
@@ -74,5 +74,16 @@ where
     fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer> {
         let end = self.end.as_ptr(buf_range.start);
         buf_range.start..end
+    }
+}
+
+impl NormalizeRange for RangeFull {
+    fn as_offset(self, buf_range: Range<Pointer>) -> Range<usize> {
+        let size = buf_range.end - buf_range.start;
+        0..size
+    }
+
+    fn as_ptr(self, buf_range: Range<Pointer>) -> Range<Pointer> {
+        buf_range
     }
 }

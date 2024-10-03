@@ -16,11 +16,52 @@ use memory_reader::{MemoryReader, Pointer};
 use crate::{extensions::*, unpack_fields, TypeHandle};
 use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
 
+/// Contains layout information that can be applied to any RuntimeModule.
+///
+/// For small structs in the .NET runtime, the layout doesn't usually have
+/// significant changes between versions.  However, the layout of a runtime
+/// module (the `Module` class in `ceeload.h` of the .NET runtime) can change
+/// significantly between .NET versions.  As a result, the location of fields
+/// contained within the Module are located by pattern-matching, not by static
+/// offsets.
+///
+/// However, this pattern-matching is much slower than applying an offset, and
+/// can fail in some edge cases.  For example, the non-generic type definitions
+/// of `System.Private.CoreLib.dll` are stored in a separate lookup, causing the
+/// pattern-match used to locate the hashmap of instantiated generics to fail.
+///
+/// Since the offsets are constant for any specific instance of the .NET
+/// runtime, the pattern matching only needs to be performed applied for one
+/// instance of RuntimeModule, and all subsequent instances can re-use the same
+/// results.  The `RuntimeModuleLayout` struct contains this re-usable layout
+/// information.
+#[derive(Debug, Clone)]
+pub struct RuntimeModuleLayout {
+    /// The offset to the lookup table of TypeDef to MethodTable.  If verifying
+    /// against the debug symbols for API compatibility, this field is called
+    /// `m_TypeDefToMethodTableMap`.
+    offset_to_method_table_lookup: usize,
+
+    /// The offset to the hashmap of instantiated generic types.  If verifying
+    /// against the debug symbols for API compatibility, this field is called
+    /// `m_pAvailableParamTypes`.
+    offset_to_instantiated_generics: usize,
+
+    /// The offset to the address used as the base address for all
+    /// non-garbage-collected static fields.  If verifying against the debug
+    /// symbols for API compatibility, this field is called `m_ModuleID`.
+    offset_to_base_address_of_non_gc_static_values: usize,
+}
+
 /// Contains locations of key structures within the runtime
 /// representation of a single CLR DLL.
 pub struct RuntimeModule {
     /// Location of the Module object
     pub location: Pointer,
+
+    /// The layout of the module.  May be inferred by pattern-matching
+    /// if not provided in `RuntimeModule::new`.
+    layout: OnceCell<RuntimeModuleLayout>,
 
     /// Location of the vtable
     vtable_location: OnceCell<Pointer>,
@@ -45,7 +86,7 @@ pub struct RuntimeModule {
     /// The lookup for the MethodTables
     method_table_lookup: OnceCell<MethodTableLookup>,
 
-    ptr_to_loaded_types: OnceCell<Option<UnpackedValue<Pointer>>>,
+    ptr_to_loaded_types: OnceCell<UnpackedValue<Option<Pointer>>>,
 
     /// The base pointer of static pointer to non-garbage-collected
     /// static values.  These values are relative to the
@@ -309,9 +350,17 @@ impl RuntimeModule {
         })
     }
 
-    pub fn read(location: Pointer) -> Result<Self, Error> {
-        Ok(Self {
+    pub fn new(location: Pointer, layout: Option<RuntimeModuleLayout>) -> Self {
+        let layout_cell = OnceCell::new();
+        if let Some(layout) = layout {
+            layout_cell
+                .set(layout)
+                .expect("First set of OnceCell is guaranteed success.");
+        }
+
+        Self {
             location,
+            layout: layout_cell,
             vtable_location: Default::default(),
             image_ptr: Default::default(),
             dll_region_info: Default::default(),
@@ -322,6 +371,200 @@ impl RuntimeModule {
             ptr_to_loaded_types: Default::default(),
             base_ptr_of_non_gc_statics: Default::default(),
             base_ptr_of_gc_statics: Default::default(),
+        }
+    }
+
+    pub fn infer_layout(
+        modules: &[Self],
+        reader: &MemoryReader,
+    ) -> Result<RuntimeModuleLayout, Error> {
+        // The extent of valid non-null pointers.  Used to quickly
+        // exclude most invalid pointers.
+        let valid_region: Range<Pointer> = reader
+            .regions
+            .iter()
+            .map(|region| region.address_range())
+            .reduce(|a, b| {
+                let start = a.start.min(b.start);
+                let end = a.end.max(b.end);
+                start..end
+            })
+            .unwrap();
+
+        const NBYTES: usize = 4096;
+
+        let bytes = modules
+            .iter()
+            .map(|module| {
+                reader.read_bytes(module.location..module.location + NBYTES)
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let num_type_defs = modules
+            .iter()
+            .map(|module| {
+                module
+                    .metadata(reader)
+                    .map(|metadata| metadata.type_def_table().num_rows())
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let is_valid_method_table_offset = |offset: usize| -> bool {
+            if offset + Pointer::SIZE * 4 > NBYTES {
+                return false;
+            }
+            bytes
+                .iter()
+                .zip(num_type_defs.iter())
+                .all_ok(|(bytes, num_type_defs)| -> Result<_, Error> {
+                    let p_next: Pointer = bytes
+                        .subrange(
+                            offset + Pointer::SIZE * 0
+                                ..offset + Pointer::SIZE * 1,
+                        )
+                        .unpack()?;
+                    let p_table: Pointer = bytes
+                        .subrange(
+                            offset + Pointer::SIZE * 1
+                                ..offset + Pointer::SIZE * 2,
+                        )
+                        .unpack()?;
+                    let dw_count: u32 = bytes
+                        .subrange(
+                            offset + Pointer::SIZE * 2
+                                ..offset + Pointer::SIZE * 2 + 4,
+                        )
+                        .unpack()?;
+                    let dw_count = dw_count as usize;
+                    let supported_flags: Pointer = bytes
+                        .subrange(
+                            offset + Pointer::SIZE * 3
+                                ..offset + Pointer::SIZE * 4,
+                        )
+                        .unpack()?;
+                    let supported_flags = supported_flags.as_usize();
+
+                    Ok(p_next == Pointer::null()
+                        && (p_table.is_null()
+                            || valid_region.contains(&p_table))
+                        && dw_count == num_type_defs + 1
+                        && supported_flags < 8)
+                })
+                .unwrap_or(false)
+        };
+
+        let offset_to_method_table_lookup = (0..NBYTES)
+            .step_by(Pointer::SIZE)
+            .find(|offset| is_valid_method_table_offset(*offset))
+            .ok_or(Error::PointerToMethodTableTableNotFound)?;
+
+        let is_valid_instantiated_generics_offset = |offset: usize| -> bool {
+            if offset < Pointer::SIZE || offset + Pointer::SIZE > NBYTES {
+                return false;
+            }
+
+            let mut at_least_one_pair_of_pointers = false;
+            for bytes in bytes.iter() {
+                let a: Pointer = bytes
+                    .subrange(offset - Pointer::SIZE..offset)
+                    .unpack()
+                    .unwrap();
+                let b: Pointer = bytes
+                    .subrange(offset..offset + Pointer::SIZE)
+                    .unpack()
+                    .unwrap();
+
+                if !(a.is_null() || valid_region.contains(&a)) {
+                    return false;
+                }
+                if !(b.is_null() || valid_region.contains(&b)) {
+                    return false;
+                }
+
+                if valid_region.contains(&a) && valid_region.contains(&b) {
+                    at_least_one_pair_of_pointers = true;
+                }
+            }
+
+            at_least_one_pair_of_pointers
+        };
+
+        let offset_to_instantiated_generics = (offset_to_method_table_lookup
+            ..offset_to_method_table_lookup + 512.min(NBYTES))
+            .step_by(Pointer::SIZE)
+            .find(|offset| is_valid_instantiated_generics_offset(*offset))
+            .ok_or(Error::PointerToInstantiatedGenericsNotFound)?;
+
+        let is_valid_base_address_of_non_gc_static_values =
+            |offset: usize| -> bool {
+                if offset + Pointer::SIZE * 5 > NBYTES {
+                    return false;
+                }
+
+                bytes
+                    .iter()
+                    .zip(num_type_defs.iter().cloned())
+                    .all_ok(|(bytes, num_type_defs)| -> Result<_, Error> {
+                        let domain_local_module: Pointer =
+                            bytes.subrange(offset..offset + 8).unpack()?;
+                        let module_index: u64 =
+                            bytes.subrange(offset + 8..offset + 16).unpack()?;
+                        let regular_statics_offsets: Pointer = bytes
+                            .subrange(offset + 16..offset + 24)
+                            .unpack()?;
+                        let thread_statics_offsets: Pointer = bytes
+                            .subrange(offset + 24..offset + 32)
+                            .unpack()?;
+                        let max_rid_statics_allocated: u32 = bytes
+                            .subrange(offset + 32..offset + 36)
+                            .unpack()?;
+                        let max_rid_statics_allocated =
+                            max_rid_statics_allocated as usize;
+
+                        Ok(valid_region.contains(&domain_local_module)
+                            && (regular_statics_offsets.is_null()
+                                || valid_region
+                                    .contains(&regular_statics_offsets))
+                            && (thread_statics_offsets.is_null()
+                                || valid_region
+                                    .contains(&thread_statics_offsets))
+                            && max_rid_statics_allocated == num_type_defs
+                           // The condition on module_index isn't
+                           // technically a requirement, but this is a
+                           // 64-bit value that gets incremented for
+                           // each module that is loaded.  It's
+                           // unlikely to have several thousand DLLs
+                           // loaded at once, so I might as well
+                           // include this as part of the condition.
+                        && module_index < 16384)
+                    })
+                    .unwrap_or(false)
+            };
+
+        let offset_to_base_address_of_non_gc_static_values =
+            (offset_to_instantiated_generics..NBYTES)
+                .step_by(Pointer::SIZE)
+                .find(|offset| {
+                    is_valid_base_address_of_non_gc_static_values(*offset)
+                })
+                .ok_or(Error::PointerToDomainLocalModuleNotFound)?;
+
+        Ok(RuntimeModuleLayout {
+            offset_to_method_table_lookup,
+            offset_to_instantiated_generics,
+            offset_to_base_address_of_non_gc_static_values,
+        })
+    }
+
+    pub fn get_layout(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<&RuntimeModuleLayout, Error> {
+        self.layout.or_try_init(|| {
+            // The layout of the Module varies by .NET version, but should
+            // be less than 4kB for each.  If I don't find each pointer by
+            // then, then something else is probably wrong.
+            let reader = reader.borrow();
+            Self::infer_layout(std::slice::from_ref(self), reader)
         })
     }
 
@@ -352,11 +595,9 @@ impl RuntimeModule {
             .range(self.method_table_lookup(reader)?.location.clone())
             .name(format!("TypeDefToMethodDef table"));
 
-        if let Some(ptr) = self.ptr_to_loaded_types_unpacked(reader)? {
-            annotator
-                .value(ptr)
-                .name(format!("Available param types, Module {name}"));
-        }
+        annotator
+            .opt_value(self.ptr_to_loaded_types_unpacked(reader)?)
+            .name(format!("Available param types, Module {name}"));
 
         if let Some(loaded_types) = self.loaded_types(reader)? {
             loaded_types.collect_annotations(annotator, reader)?;
@@ -481,47 +722,19 @@ impl RuntimeModule {
 
         self.method_table_info
             .or_try_init(|| {
-                let num_type_defs =
-                    self.metadata(reader)?.type_def_table().num_rows();
+                let layout = self.get_layout(reader)?;
+                let start =
+                    self.location + layout.offset_to_method_table_lookup;
 
-                // The layout of the Module varies by .NET version, but should
-                // be less than 4kB for each.  If I don't find each pointer by
-                // then, then something else is probably wrong.
-                let bytes =
-                    reader.read_bytes(self.location..self.location + 4096)?;
+                let bytes = reader.read_bytes(start..start + 32)?;
 
-                bytes
-                    .chunks_exact(Pointer::SIZE)
-                    .tuple_windows()
-                    .enumerate()
-                    .map(|(i, (a, b, c, d))| {
-                        let p_next: Pointer = a.try_into().unwrap();
-                        let p_table: Pointer = b.try_into().unwrap();
-                        let dw_count =
-                            u32::from_ne_bytes(c[..4].try_into().unwrap())
-                                as usize;
-                        let supported_flags: usize =
-                            usize::from_ne_bytes(d.try_into().unwrap());
+                let p_table: UnpackedValue<Pointer> =
+                    bytes.subrange(8..16).unpack()?;
+                let supported_flags: Pointer =
+                    bytes.subrange(24..32).unpack()?;
+                let supported_flags = supported_flags.as_usize();
 
-                        (i, p_next, p_table, dw_count, supported_flags)
-                    })
-                    .find(|(_, p_next, _, dw_count, supported_flags)| {
-                        *p_next == Pointer::null()
-                            && *dw_count == num_type_defs + 1
-                            && *supported_flags < 8
-                    })
-                    .map(|(i, _, p_table, _, supported_flags)| {
-                        let start = self.location + (i + 1) * Pointer::SIZE;
-
-                        (
-                            UnpackedValue::new(
-                                start..start + Pointer::SIZE,
-                                p_table,
-                            ),
-                            supported_flags,
-                        )
-                    })
-                    .ok_or(Error::PointerToMethodTableTableNotFound)
+                Ok((p_table, supported_flags))
             })
             .cloned()
     }
@@ -595,90 +808,16 @@ impl RuntimeModule {
     pub fn ptr_to_loaded_types_unpacked(
         &self,
         reader: impl Borrow<MemoryReader>,
-    ) -> Result<Option<UnpackedValue<Pointer>>, Error> {
-        let reader = reader.borrow();
+    ) -> Result<UnpackedValue<Option<Pointer>>, Error> {
         self.ptr_to_loaded_types
-            .or_try_init(|| -> Result<Option<UnpackedValue<Pointer>>, Error> {
-                {
-                    // TODO: Switch back to a pattern-match search to
-                    // locate `m_pAvailableParamTypes`.
-                    //
-                    // The current pattern-match looks for two adjacent non-null
-                    // pointers, starting after `m_TypeRefToMethodTableMap`.
-                    // These adjacent non-null pointers are
-                    // `m_pAvailableClasses` and `m_pAvailableParamTypes`.
-                    //
-                    // For generic structs, the instantiation of a generic type
-                    // is placed in `m_pAvailableParamTypes` of the module
-                    // corresponding to the first generic argument.  This can
-                    // result in instantiations being placed into
-                    // `System.Private.CoreLib` (e.g. `Nullable<Int32>`).
-                    //
-                    // In any other module, `m_pAvailableClasses` will contain
-                    // the generic class definition, with instantiations in
-                    // `m_pAvailableParamTypes`.  However,
-                    // `System.Private.CoreLib` is special, and has its types
-                    // stored in a different structure in `g_CoreLib` for faster
-                    // lookup.  This results in `m_pAvalableClasses` being
-                    // unused, and a null pointer for `System.Private.CoreLib`.
-                    //
-                    // So, the pattern-match fails for `System.Private.CoreLib`,
-                    // resulting in any instantiations owned by it being missed.
-                    //
-                    // The solution will be to do a pattern match across several
-                    // modules, and to save the offset that is determined by
-                    // that pattern match.  The offset can then be applied to
-                    // `System.Private.CoreLib`, even though the pattern match
-                    // couldn't.
-                    let ptr = UnpackedValue::new(
-                        self.location + 976..self.location + 984,
-                        reader.read_byte_array(self.location + 976)?.into(),
-                    );
-                    return Ok(Some(ptr));
-                }
-
-                // let search_start =
-                //     self.method_table_info_unpacked(reader)?.0.loc().end;
-                // let bytes =
-                //     reader.read_bytes(search_start..search_start + 512)?;
-
-                // let valid_region = reader
-                //     .regions
-                //     .iter()
-                //     .map(|region| region.address_range())
-                //     .reduce(|a, b| {
-                //         let start = a.start.min(b.start);
-                //         let end = a.end.max(b.end);
-                //         start..end
-                //     })
-                //     .unwrap();
-
-                // let opt_unpacked = bytes
-                //     .chunks_exact(Pointer::SIZE)
-                //     .tuple_windows()
-                //     .enumerate()
-                //     .map(|(i, (a, b))| {
-                //         let a: Pointer = a.try_into().unwrap();
-                //         let b: Pointer = b.try_into().unwrap();
-                //         (i, a, b)
-                //     })
-                //     .find(|(_, a, b)| {
-                //         !a.is_null()
-                //             && !b.is_null()
-                //             && valid_region.contains(a)
-                //             && valid_region.contains(b)
-                //             && reader.is_valid_ptr(*a)
-                //             && reader.is_valid_ptr(*b)
-                //     })
-                //     .map(|(i, _, b)| {
-                //         let b = {
-                //             let start = search_start + (i + 1) * Pointer::SIZE;
-                //             UnpackedValue::new(start..start + Pointer::SIZE, b)
-                //         };
-                //         b
-                //     });
-
-                // Ok(opt_unpacked)
+            .or_try_init(|| -> Result<UnpackedValue<Option<Pointer>>, Error> {
+                let reader = reader.borrow();
+                let layout = self.get_layout(reader)?;
+                let start =
+                    self.location + layout.offset_to_instantiated_generics;
+                let bytes = reader.read_bytes(start..start + Pointer::SIZE)?;
+                let unpacked_ptr = bytes.subrange(..).unpack()?;
+                Ok(unpacked_ptr)
             })
             .cloned()
     }
@@ -687,8 +826,8 @@ impl RuntimeModule {
         &self,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<Option<Pointer>, Error> {
-        let opt_unpacked = self.ptr_to_loaded_types_unpacked(reader)?;
-        let opt_ptr = opt_unpacked.map(|unpacked| unpacked.value());
+        let unpacked_opt = self.ptr_to_loaded_types_unpacked(reader)?;
+        let opt_ptr = unpacked_opt.value();
         Ok(opt_ptr)
     }
 
@@ -712,79 +851,17 @@ impl RuntimeModule {
         &self,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<UnpackedValue<Pointer>, Error> {
-        let reader = reader.borrow();
         self.base_ptr_of_non_gc_statics
             .or_try_init(|| {
-                // The layout of the Module varies by .NET version, but should
-                // be less than 4kB for each.  If I don't find each pointer by
-                // then, then something else is probably wrong.
-                let bytes =
-                    reader.read_bytes(self.location..self.location + 4096)?;
-
-                let num_type_defs =
-                    self.metadata(reader)?.type_def_table().num_rows();
-
-                bytes
-                    .chunks_exact(8)
-                    .tuple_windows()
-                    .enumerate()
-                    .map(|(i, (a, b, c, d, e))| {
-                        let domain_local_module: Pointer =
-                            a.try_into().unwrap();
-                        let module_index: u64 =
-                            u64::from_ne_bytes(b.try_into().unwrap());
-                        let regular_statics_offsets: Pointer =
-                            c.try_into().unwrap();
-                        let thread_statics_offsets: Pointer =
-                            d.try_into().unwrap();
-                        let max_rid_statics_allocated =
-                            u32::from_ne_bytes(e[..4].try_into().unwrap())
-                                as usize;
-                        (
-                            i,
-                            domain_local_module,
-                            module_index,
-                            regular_statics_offsets,
-                            thread_statics_offsets,
-                            max_rid_statics_allocated,
-                        )
-                    })
-                    .filter(
-                        |(
-                            _,
-                            domain_local_module,
-                            _,
-                            regular_statics_offsets,
-                            thread_statics_offsets,
-                            max_rid_statics_allocated,
-                        )| {
-                            reader.is_valid_ptr(*domain_local_module)
-                                && (regular_statics_offsets.is_null()
-                                    || reader
-                                        .is_valid_ptr(*regular_statics_offsets))
-                                && (thread_statics_offsets.is_null()
-                                    || reader
-                                        .is_valid_ptr(*thread_statics_offsets))
-                                && *max_rid_statics_allocated == num_type_defs
-                        },
-                    )
-                    .filter(|(_, _, module_index, _, _, _)| {
-                        // Not technically a requirement, but this is a 64-bit
-                        // value that gets incremented for each module that is
-                        // loaded.  It's unlikely to have several thousand
-                        // DLLs loaded at once, so I might as well include
-                        // this as part of the condition.
-                        *module_index < 16384
-                    })
-                    .map(|(i, domain_local_module, _, _, _, _)| {
-                        let start = self.location + i * Pointer::SIZE;
-                        UnpackedValue::new(
-                            start..start + Pointer::SIZE,
-                            domain_local_module,
-                        )
-                    })
-                    .next()
-                    .ok_or(Error::PointerToDomainLocalModuleNotFound)
+                let reader = reader.borrow();
+                let layout = self.get_layout(reader)?;
+                let start = self.location
+                    + layout.offset_to_base_address_of_non_gc_static_values;
+                let ptr: UnpackedValue<Pointer> = reader
+                    .read_bytes(start..start + Pointer::SIZE)?
+                    .subrange(..)
+                    .unpack()?;
+                Ok(ptr)
             })
             .copied()
     }
@@ -833,15 +910,6 @@ impl RuntimeModule {
         let dll_region = self.dll_region(reader)?;
         let metadata = layout.metadata(dll_region);
         Ok(metadata)
-    }
-}
-
-impl ReadTypedPointer for RuntimeModule {
-    fn read_typed_ptr(
-        ptr: Pointer,
-        _reader: &MemoryReader,
-    ) -> Result<Self, Error> {
-        RuntimeModule::read(ptr)
     }
 }
 

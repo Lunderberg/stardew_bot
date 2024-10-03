@@ -35,8 +35,14 @@ pub enum Error {
     #[error("Could not find pointer to table of method tables")]
     PointerToMethodTableTableNotFound,
 
+    #[error("Could not find pointer to instantiated generics")]
+    PointerToInstantiatedGenericsNotFound,
+
     #[error("Could not find pointer to DomainLocalModule")]
     PointerToDomainLocalModuleNotFound,
+
+    #[error("Could not infer Module layout from any DLL")]
+    LayoutNotInferableFromAnyModule,
 
     #[error("Could not find instance of object")]
     NoObjectInstanceFound,
