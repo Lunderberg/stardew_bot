@@ -225,34 +225,18 @@ impl<'a> CachedReader<'a> {
         &self,
         name: &str,
     ) -> Result<TypedPointer<RuntimeModule>, Error> {
-        // TODO: Have `try_insert` accept `impl ToOwned<Owned=T>` to
-        // avoid needing to copy the string.
-        self.state
-            .runtime_module_by_name
-            .try_insert(name.to_string(), || {
-                let dll_region = self
-                    .iter_clr_dll_regions()
-                    .filter(|region| {
-                        region.short_name().trim_end_matches(".dll") == name
-                    })
-                    .max_by_key(|region| region.size_bytes())
-                    .ok_or_else(|| {
-                        Error::RegionForDLLNotFoundFromName(name.to_string())
-                    })?
-                    .read()?;
-
-                let metadata_layout =
-                    dll_unpacker::unpack_metadata_layout(&dll_region)?;
-                let metadata = metadata_layout.metadata(&dll_region);
-                let module_vtable =
-                    self.state.runtime_module_vtable.get().copied();
-
-                let module_ptr =
-                    RuntimeModule::locate(metadata, module_vtable, self)?;
-
-                Ok(module_ptr)
-            })
-            .copied()
+        if let Some(value) = self.state.runtime_module_by_name.get(name) {
+            Ok(*value)
+        } else {
+            self.init_dlls()?;
+            self.state
+                .runtime_module_by_name
+                .get(name)
+                .ok_or_else(|| {
+                    Error::RegionForDLLNotFoundFromName(name.to_string())
+                })
+                .copied()
+        }
     }
 
     pub fn field_to_runtime_type(

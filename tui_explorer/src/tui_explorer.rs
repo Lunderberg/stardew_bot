@@ -617,8 +617,6 @@ impl TuiExplorerBuilder {
     pub fn build(self) -> Result<TuiExplorer, Error> {
         let mut tui_globals = self.tui_globals;
 
-        tui_globals.cached_reader().init_dlls()?;
-
         tui_globals.current_region = tui_globals
             .reader
             .find_containing_region(self.initial_pointer)
