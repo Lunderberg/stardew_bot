@@ -1,8 +1,10 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, ops::Range};
 
 use memory_reader::Pointer;
 
 use crate::{Error, KeyBindingMatch, KeySequence, TuiGlobals};
+
+use super::Annotation;
 
 pub trait WidgetWindow {
     /// The title of the widget.  This is used for the title in the
@@ -51,6 +53,7 @@ pub trait WidgetWindow {
 pub struct WidgetSideEffects {
     pub(crate) change_address: Option<Pointer>,
     pub(crate) log_messages: Vec<String>,
+    pub(crate) annotations: Vec<Annotation>,
 }
 
 impl WidgetSideEffects {
@@ -60,5 +63,14 @@ impl WidgetSideEffects {
 
     pub(crate) fn add_log(&mut self, message: impl Into<String>) {
         self.log_messages.push(message.into());
+    }
+}
+
+impl dll_unpacker::Annotator for WidgetSideEffects {
+    fn range(
+        &mut self,
+        range: Range<Pointer>,
+    ) -> &mut impl dll_unpacker::Annotation {
+        self.annotations.range(range)
     }
 }

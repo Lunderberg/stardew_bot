@@ -9,7 +9,9 @@ use memory_reader::{
 };
 use stardew_utils::stardew_valley_pid;
 
-use crate::extended_tui::{DynamicLayout, WidgetSideEffects, WidgetWindow};
+use crate::extended_tui::{
+    Annotation, DynamicLayout, WidgetSideEffects, WidgetWindow,
+};
 use crate::{
     extensions::*, MetadataDisplay, ObjectExplorer, UserConfig,
     UserConfigEditor,
@@ -63,18 +65,6 @@ struct TuiBuffers {
     metadata_display: MetadataDisplay,
 }
 
-pub struct Annotation {
-    pub range: std::ops::Range<Pointer>,
-    pub name: String,
-    pub value: String,
-
-    /// If true, highlight this annotation in the MemoryTable.  If
-    /// false, show the annotation in the DetailView, but do not
-    /// highlight.  This allows hierarchical annotations while only
-    /// the inner-most annotation is highlighted.
-    pub highlight_range: bool,
-}
-
 pub struct TuiExplorerBuilder {
     tui_globals: TuiGlobals,
     detail_formatters: Vec<Box<dyn InfoFormatter>>,
@@ -95,27 +85,6 @@ fn stardew_valley_dll(
             "Stardew Valley.dll".to_string(),
         ))
         .map_err(Into::into)
-}
-
-impl dll_unpacker::Annotation for Annotation {
-    fn name(&mut self, name: impl Into<String>) -> &mut Self {
-        self.name = name.into();
-        self
-    }
-
-    fn current_value(&self) -> &str {
-        self.value.as_str()
-    }
-
-    fn value(&mut self, value: impl std::fmt::Display) -> &mut Self {
-        self.value = format!("{value}");
-        self
-    }
-
-    fn disable_highlight(&mut self) -> &mut Self {
-        self.highlight_range = false;
-        self
-    }
 }
 
 impl From<Range<Pointer>> for Annotation {
@@ -616,9 +585,7 @@ impl TuiExplorerBuilder {
             .ok_or(Error::PointerNotFound(self.initial_pointer))?
             .read()?;
 
-        tui_globals.annotations.sort_by_key(|ann| {
-            (ann.highlight_range, ann.range.end, ann.range.start)
-        });
+        tui_globals.annotations.sort_by_key(Annotation::sort_key);
 
         let stack_memory = tui_globals.reader.stack()?.read()?;
         let stack_frame_table =
@@ -844,6 +811,15 @@ impl TuiExplorer {
             buffer_list.iter_mut().for_each(|buffer| {
                 buffer.change_address(&self.tui_globals, &mut side_effects, ptr)
             });
+        }
+
+        if !side_effects.annotations.is_empty() {
+            side_effects.annotations.into_iter().for_each(|ann| {
+                self.tui_globals.annotations.push(ann);
+            });
+            self.tui_globals
+                .annotations
+                .sort_by_key(Annotation::sort_key);
         }
 
         // Process the log messages last, since handling other side

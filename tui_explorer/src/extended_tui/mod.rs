@@ -24,3 +24,6 @@ pub use vertical_bar::*;
 
 mod indent;
 pub use indent::Indent;
+
+mod annotation;
+pub(crate) use annotation::Annotation;

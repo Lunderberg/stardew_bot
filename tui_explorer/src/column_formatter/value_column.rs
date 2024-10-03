@@ -5,7 +5,7 @@ use ratatui::{
 
 use memory_reader::{MemoryRegion, MemoryValue, Pointer};
 
-use crate::{Annotation, ColumnFormatter, TuiGlobals};
+use crate::{extended_tui::Annotation, ColumnFormatter, TuiGlobals};
 
 pub struct HexColumn;
 pub struct AsciiColumn;
