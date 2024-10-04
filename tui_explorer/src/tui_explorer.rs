@@ -158,7 +158,7 @@ impl TuiExplorerBuilder {
 
     pub fn layout_object_explorer(mut self) -> Self {
         self.layout.close_all_other_windows();
-        self.layout.switch_to_buffer(5);
+        self.layout.switch_to_buffer(3);
         self.layout.split_horizontally(None, Some(60));
         self.layout.switch_to_buffer(4);
         self

@@ -11,7 +11,7 @@ use ratatui::{
 
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
-    RuntimeValue, TypedPointer,
+    RuntimeValue, SymbolicAccessChain, SymbolicOperation, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 
@@ -82,6 +82,10 @@ enum ObjectTreeNodeKind {
         value: Box<ObjectTreeNode>,
     },
     DisplayList(Vec<ObjectTreeNode>),
+    ListItem {
+        index: usize,
+        value: Box<ObjectTreeNode>,
+    },
 }
 
 macro_rules! define_visitor_mutator {
@@ -200,6 +204,7 @@ macro_rules! define_visitor_mutator {
                         ObjectTreeNodeKind::DisplayList(values) => {
                             values.is_empty()
                         }
+                        ObjectTreeNodeKind::ListItem { .. } => false,
                     })
             }
 
@@ -243,6 +248,14 @@ macro_rules! define_visitor_mutator {
                     }
                     ObjectTreeNode {
                         kind: ObjectTreeNodeKind::Field { value, .. },
+                        ..
+                    } => {
+                        if self.child_filter(value) {
+                            self.visit(value);
+                        }
+                    }
+                    ObjectTreeNode {
+                        kind: ObjectTreeNodeKind::ListItem { value, .. },
                         ..
                     } => {
                         if self.child_filter(value) {
@@ -469,7 +482,7 @@ impl ObjectExplorer {
         })
     }
 
-    fn address_of_selected_node(&mut self) -> Option<Pointer> {
+    fn address_of_selected_node(&self) -> Option<Pointer> {
         let selected = self.list_state.selected()?;
 
         let mut ptr = None;
@@ -479,7 +492,7 @@ impl ObjectExplorer {
             ))
             .with_extension(CollapseNonExpandedNodes)
             .with_extension(AddressFinder::new(selected, &mut ptr))
-            .visit(&mut self.object_tree);
+            .visit(&self.object_tree);
         ptr
     }
 
@@ -523,6 +536,102 @@ impl ObjectExplorer {
             .with_extension(LineCounter::new(&mut num_lines))
             .visit(&self.object_tree);
         num_lines
+    }
+
+    fn selected_node_chain(&self) -> Result<Vec<&ObjectTreeNode>, Error> {
+        let selected = self
+            .list_state
+            .selected()
+            .expect("ObjectExplorer should always have selected row.");
+
+        let mut node_address = None;
+
+        TreeVisitor::new()
+            .with_extension(FollowDisplayAlias::new(
+                &self.display_options.aliases,
+            ))
+            .with_extension(CollapseNonExpandedNodes)
+            .with_extension(TreeNodeFinder::new(selected, &mut node_address))
+            .visit(&self.object_tree);
+
+        let node_address = node_address
+            .expect("Selected line should always point to some node.");
+
+        let mut child_index_chain = vec![0];
+        TreeVisitor::new()
+            .with_extension(ChildIndexChainFinder::new(
+                node_address,
+                &mut child_index_chain,
+            ))
+            .visit(&self.object_tree);
+
+        let mut output: Vec<&ObjectTreeNode> = Vec::new();
+        let mut node = &self.object_tree;
+        for index in child_index_chain.iter().cloned() {
+            match &node.kind {
+                ObjectTreeNodeKind::UnreadValue => todo!(),
+                ObjectTreeNodeKind::Value(_) => todo!(),
+                ObjectTreeNodeKind::String(_) => todo!(),
+                ObjectTreeNodeKind::Field { .. } => todo!(),
+                ObjectTreeNodeKind::ListItem { .. } => todo!(),
+                ObjectTreeNodeKind::Array(items)
+                | ObjectTreeNodeKind::Object { fields: items, .. }
+                | ObjectTreeNodeKind::DisplayList(items) => {
+                    let item = &items[index];
+                    output.push(item);
+                    node = item;
+                }
+            }
+
+            node = match &node.kind {
+                ObjectTreeNodeKind::Field { value, .. } => value,
+                ObjectTreeNodeKind::ListItem { value, .. } => value,
+                _ => node,
+            };
+        }
+
+        Ok(output)
+    }
+
+    fn access_chain_selected_node(&self) -> Result<SymbolicAccessChain, Error> {
+        let node_chain = self.selected_node_chain()?;
+
+        let (static_field_class, static_field_name) = {
+            let ObjectTreeNodeKind::Field { field_name, .. } =
+                &node_chain[0].kind
+            else {
+                panic!("Outermost node should be static field");
+            };
+
+            let (class_name, field_name) = field_name
+                .rsplit_once(".")
+                .expect("Static field name should have a dot");
+            (class_name.to_string(), field_name.to_string())
+        };
+
+        let ops = node_chain[1..]
+            .iter()
+            .map(|node| match &node.kind {
+                ObjectTreeNodeKind::Field { field_name, .. } => {
+                    SymbolicOperation::Field(field_name.clone())
+                }
+                ObjectTreeNodeKind::ListItem { index, .. } => {
+                    SymbolicOperation::IndexAccess(*index)
+                }
+                ObjectTreeNodeKind::UnreadValue => todo!(),
+                ObjectTreeNodeKind::Value(_) => todo!(),
+                ObjectTreeNodeKind::String(_) => todo!(),
+                ObjectTreeNodeKind::Array(_) => todo!(),
+                ObjectTreeNodeKind::Object { .. } => todo!(),
+                ObjectTreeNodeKind::DisplayList(_) => todo!(),
+            })
+            .collect();
+
+        Ok(SymbolicAccessChain {
+            static_field_class,
+            static_field_name,
+            ops,
+        })
     }
 }
 
@@ -774,15 +883,28 @@ impl ObjectTreeNode {
                 let element_type = array.element_type();
 
                 let items = (0..array.num_elements())
-                    .map(|index| {
+                    .map(|index| -> Result<_, Error> {
                         let location = array.element_location(index);
-                        ObjectTreeNode::initial_value(
+                        let value = ObjectTreeNode::initial_value(
                             location.start,
                             element_type.clone(),
                             reader,
                             display_options,
                             prefetch,
-                        )
+                        )?;
+
+                        let node = ObjectTreeNode {
+                            location: value.location.clone(),
+                            runtime_type: value.runtime_type.clone(),
+                            should_read: ShouldReadState::NoRead,
+                            display_expanded: true,
+                            kind: ObjectTreeNodeKind::ListItem {
+                                index,
+                                value: Box::new(value),
+                            },
+                        };
+
+                        Ok(node)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
@@ -856,8 +978,9 @@ impl ObjectTreeNode {
                 self.display_expanded = display_expanded;
             }
 
-            ObjectTreeNodeKind::DisplayList(..) => {}
-            ObjectTreeNodeKind::Field { .. } => {}
+            ObjectTreeNodeKind::DisplayList(..)
+            | ObjectTreeNodeKind::Field { .. }
+            | ObjectTreeNodeKind::ListItem { .. } => {}
 
             ObjectTreeNodeKind::Value { .. }
             | ObjectTreeNodeKind::String(_) => {
@@ -1166,6 +1289,97 @@ impl<'a> TreeVisitorExtension for AddressFinder<'a> {
     }
 }
 
+struct TreeNodeFinder<'a> {
+    selected: usize,
+    current_line: usize,
+    result: &'a mut Option<*const ObjectTreeNode>,
+}
+impl<'a> TreeNodeFinder<'a> {
+    fn new(
+        selected: usize,
+        result: &'a mut Option<*const ObjectTreeNode>,
+    ) -> Self {
+        Self {
+            selected,
+            current_line: 0,
+            result,
+        }
+    }
+}
+impl<'a> TreeVisitorExtension for TreeNodeFinder<'a> {
+    fn next_display_line(&mut self) {
+        self.current_line += 1;
+    }
+    fn previsit(&mut self, node: &ObjectTreeNode) {
+        if self.result.is_none() && self.current_line == self.selected {
+            *self.result = Some(node as *const _);
+        }
+    }
+    fn postvisit(&mut self, node: &ObjectTreeNode) {
+        if self.current_line == self.selected {
+            *self.result = Some(node as *const _);
+        }
+    }
+}
+
+struct ChildIndexChainFinder<'a> {
+    target: Option<*const ObjectTreeNode>,
+    child_index_chain: &'a mut Vec<usize>,
+}
+
+impl<'a> ChildIndexChainFinder<'a> {
+    fn new(
+        target: *const ObjectTreeNode,
+        child_index_chain: &'a mut Vec<usize>,
+    ) -> Self {
+        Self {
+            target: Some(target),
+            child_index_chain,
+        }
+    }
+}
+
+impl<'a> TreeVisitorExtension for ChildIndexChainFinder<'a> {
+    fn increase_tree_depth(&mut self) {
+        if self.target.is_some() {
+            self.child_index_chain.push(0);
+        }
+    }
+
+    fn decrease_tree_depth(&mut self) {
+        if self.target.is_some() {
+            self.child_index_chain
+                .pop()
+                .expect("Should never have an empty index chain");
+        }
+    }
+
+    fn previsit(&mut self, node: &ObjectTreeNode) {
+        if self.target == Some(node as *const _) {
+            self.target = None;
+        }
+    }
+    fn postvisit(&mut self, node: &ObjectTreeNode) {
+        if self.target == Some(node as *const _) {
+            self.target = None;
+        }
+
+        if self.target.is_some() {
+            let offset = match node.kind {
+                ObjectTreeNodeKind::Field { .. } => 1,
+                ObjectTreeNodeKind::ListItem { .. } => 1,
+                ObjectTreeNodeKind::UnreadValue => 0,
+                ObjectTreeNodeKind::Value(_) => 0,
+                ObjectTreeNodeKind::String(_) => 0,
+                ObjectTreeNodeKind::Array(_) => 0,
+                ObjectTreeNodeKind::Object { .. } => 0,
+                ObjectTreeNodeKind::DisplayList(_) => 0,
+            };
+            *self.child_index_chain.last_mut().unwrap() += offset;
+        }
+    }
+}
+
 struct LineCollector {
     lines: Vec<String>,
     tree_depth: usize,
@@ -1350,6 +1564,13 @@ impl WidgetWindow for ObjectExplorer {
             .or_try_binding("<enter>", keystrokes, || {
                 if let Some(pointer) = self.address_of_selected_node() {
                     side_effects.change_address(pointer);
+                }
+            })
+            .or_try_binding("C-t", keystrokes, || {
+                match self.access_chain_selected_node() {
+                    Ok(access_chain) => side_effects
+                        .add_log(format!("Symbolic access: {access_chain}")),
+                    Err(err) => side_effects.add_log(format!("Err: {err}")),
                 }
             })
     }

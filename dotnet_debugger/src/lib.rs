@@ -43,3 +43,6 @@ mod static_value_cache;
 pub use static_value_cache::*;
 
 pub mod extensions;
+
+mod access_chain;
+pub use access_chain::*;
