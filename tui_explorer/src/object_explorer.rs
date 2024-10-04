@@ -688,9 +688,17 @@ impl ObjectTreeNode {
                     let namespace = type_def.namespace()?;
                     let extends = type_def
                         .extends()?
-                        .map(|base| base.name())
+                        .map(|base| -> Result<_, Error> {
+                            let name = base.name()?;
+                            let namespace = base.namespace()?;
+                            Ok((namespace, name))
+                        })
                         .transpose()?
-                        .map(|cow| cow.into_owned());
+                        .filter(|(namespace, name)| {
+                            *namespace != "System"
+                                || (name != "Object" && name != "ValueType")
+                        })
+                        .map(|(namespace, name)| format!("{namespace}.{name}"));
                     (name.to_string(), namespace.to_string(), extends)
                 };
 
@@ -938,9 +946,17 @@ impl ObjectTreeNode {
                     let namespace = type_def.namespace()?;
                     let extends = type_def
                         .extends()?
-                        .map(|base| base.name())
+                        .map(|base| -> Result<_, Error> {
+                            let name = base.name()?;
+                            let namespace = base.namespace()?;
+                            Ok((namespace, name))
+                        })
                         .transpose()?
-                        .map(|cow| cow.into_owned());
+                        .filter(|(namespace, name)| {
+                            *namespace != "System"
+                                || (name != "Object" && name != "ValueType")
+                        })
+                        .map(|(namespace, name)| format!("{namespace}.{name}"));
                     (name.to_string(), namespace.to_string(), extends)
                 };
 
