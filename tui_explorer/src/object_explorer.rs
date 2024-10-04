@@ -66,7 +66,6 @@ enum ShouldReadState {
 
 #[derive(Clone)]
 enum ObjectTreeNodeKind {
-    UnreadValue,
     Value(RuntimeValue),
     String(String),
     Array(Vec<ObjectTreeNode>),
@@ -191,7 +190,6 @@ macro_rules! define_visitor_mutator {
                     .iter_mut()
                     .find_map(|ext| ext.is_leaf_node(node))
                     .unwrap_or_else(|| match &node.kind {
-                        ObjectTreeNodeKind::UnreadValue => true,
                         ObjectTreeNodeKind::Value(_) => true,
                         ObjectTreeNodeKind::String(_) => true,
                         ObjectTreeNodeKind::Array(elements) => {
@@ -276,8 +274,7 @@ macro_rules! define_visitor_mutator {
 
                     ObjectTreeNode {
                         kind:
-                            ObjectTreeNodeKind::UnreadValue
-                            | ObjectTreeNodeKind::Value(_)
+                            ObjectTreeNodeKind::Value(_)
                             | ObjectTreeNodeKind::String(_),
                         ..
                     } => {}
@@ -569,7 +566,6 @@ impl ObjectExplorer {
         let mut node = &self.object_tree;
         for index in child_index_chain.iter().cloned() {
             match &node.kind {
-                ObjectTreeNodeKind::UnreadValue => todo!(),
                 ObjectTreeNodeKind::Value(_) => todo!(),
                 ObjectTreeNodeKind::String(_) => todo!(),
                 ObjectTreeNodeKind::Field { .. } => todo!(),
@@ -618,7 +614,6 @@ impl ObjectExplorer {
                 ObjectTreeNodeKind::ListItem { index, .. } => {
                     SymbolicOperation::IndexAccess(*index)
                 }
-                ObjectTreeNodeKind::UnreadValue => todo!(),
                 ObjectTreeNodeKind::Value(_) => todo!(),
                 ObjectTreeNodeKind::String(_) => todo!(),
                 ObjectTreeNodeKind::Array(_) => todo!(),
@@ -662,7 +657,7 @@ impl ObjectTreeNode {
                         .parse(bytes.subrange(location.clone()).into())?;
                     ObjectTreeNodeKind::Value(runtime_value)
                 } else {
-                    ObjectTreeNodeKind::UnreadValue
+                    return Err(Error::BytesNotFoundInPrefetch(location.start));
                 }
             }
             RuntimeType::ValueType {
@@ -827,13 +822,6 @@ impl ObjectTreeNode {
                 let ptr: Pointer = ptr.into();
                 self.runtime_type = method_table.runtime_type(reader)?;
                 match self.runtime_type {
-                    RuntimeType::Prim(_) => {
-                        self.kind = ObjectTreeNodeKind::UnreadValue;
-                    }
-                    RuntimeType::ValueType { .. } => {
-                        panic!("Leaf node should not have ValueType")
-                    }
-                    RuntimeType::Class => {}
                     RuntimeType::String => {
                         self.kind = ObjectTreeNodeKind::Value(
                             RuntimeValue::String(ptr.into()),
@@ -844,9 +832,10 @@ impl ObjectTreeNode {
                             RuntimeValue::Array(ptr.into()),
                         );
                     }
-                    RuntimeType::FixedSizeArray { .. } => {
-                        todo!("Rendering of fixed-size array")
-                    }
+                    RuntimeType::Prim(_)
+                    | RuntimeType::ValueType { .. }
+                    | RuntimeType::Class
+                    | RuntimeType::FixedSizeArray { .. } => {}
                 }
             }
             _ => {}
@@ -854,11 +843,6 @@ impl ObjectTreeNode {
 
         // Reading each type
         match self.kind {
-            ObjectTreeNodeKind::UnreadValue => {
-                let value = reader
-                    .value(self.runtime_type.clone(), self.location.clone())?;
-                self.kind = ObjectTreeNodeKind::Value(value);
-            }
             ObjectTreeNodeKind::Object { .. } => {
                 let value =
                     reader.value(RuntimeType::Class, self.location.clone())?;
@@ -1384,7 +1368,6 @@ impl<'a> TreeVisitorExtension for ChildIndexChainFinder<'a> {
             let offset = match node.kind {
                 ObjectTreeNodeKind::Field { .. } => 1,
                 ObjectTreeNodeKind::ListItem { .. } => 1,
-                ObjectTreeNodeKind::UnreadValue => 0,
                 ObjectTreeNodeKind::Value(_) => 0,
                 ObjectTreeNodeKind::String(_) => 0,
                 ObjectTreeNodeKind::Array(_) => 0,
@@ -1473,10 +1456,6 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             return;
         }
         match &node.kind {
-            ObjectTreeNodeKind::UnreadValue => {
-                let ptr = node.location.start;
-                self.push(format!("unread value @ {ptr}"));
-            }
             ObjectTreeNodeKind::Value(val) => self.push(val),
             ObjectTreeNodeKind::String(val) => self.push(format!("{val:?}")),
 

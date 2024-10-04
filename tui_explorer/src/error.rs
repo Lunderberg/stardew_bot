@@ -83,6 +83,12 @@ pub enum Error {
     #[error("Cannot expand NULL field")]
     CannotExpandNullField,
 
+    #[error(
+        "Prefetch should contain all bytes required for unpacked, \
+         but did not include {0}."
+    )]
+    BytesNotFoundInPrefetch(Pointer),
+
     #[error("Attempted to access MetadataDisplay at invalid index")]
     InvalidMetadataDisplayIndex,
 }
