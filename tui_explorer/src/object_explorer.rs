@@ -1,6 +1,6 @@
 use std::{borrow::Borrow, ops::Range};
 
-use itertools::{Either, Itertools};
+use itertools::Itertools;
 use regex::Regex;
 
 use ratatui::{
@@ -48,6 +48,13 @@ struct DisplayAlias {
 }
 
 #[derive(Clone)]
+struct ClassName {
+    namespace: Option<String>,
+    name: String,
+    base_class: Option<String>,
+}
+
+#[derive(Clone)]
 struct ObjectTreeNode {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
@@ -70,14 +77,13 @@ enum ObjectTreeNodeKind {
     String(String),
     Array(Vec<ObjectTreeNode>),
     Object {
-        class_name: String,
-        class_namespace: String,
-        base_class: Option<String>,
+        class_name: ClassName,
         fields: Vec<ObjectTreeNode>,
     },
     Field {
         field_name: String,
         field_type: String,
+        is_static: bool,
         value: Box<ObjectTreeNode>,
     },
     DisplayList(Vec<ObjectTreeNode>),
@@ -355,6 +361,48 @@ macro_rules! forward_visitor_as_mutator {
     };
 }
 
+fn get_class_name(
+    method_table_ptr: TypedPointer<MethodTable>,
+    reader: CachedReader<'_>,
+) -> Result<ClassName, Error> {
+    let method_table = reader.method_table(method_table_ptr)?;
+    let module = reader.runtime_module(method_table.module())?;
+    let metadata = module.metadata(reader)?;
+
+    let type_def_token =
+        method_table.token().ok_or(Error::NotImplementedYet(
+            "Handle null metadata token in MethodTable".to_string(),
+        ))?;
+    let type_def = metadata.get(type_def_token)?;
+
+    let namespace = Some(type_def.namespace()?)
+        .filter(|namespace| !namespace.is_empty())
+        .map(|namespace| namespace.to_string());
+
+    let name = type_def.name()?.to_string();
+
+    let base_class = type_def
+        .extends()?
+        .map(|base| -> Result<_, Error> {
+            let name = base.name()?;
+            let namespace = base.namespace()?;
+            Ok((namespace, name))
+        })
+        .transpose()?
+        .filter(|(namespace, name)| {
+            *namespace != "System" || (name != "Object" && name != "ValueType")
+        })
+        .map(|(namespace, name)| format!("{namespace}.{name}"));
+
+    let cls_name = ClassName {
+        namespace,
+        name,
+        base_class,
+    };
+
+    Ok(cls_name)
+}
+
 impl ObjectExplorer {
     pub(crate) fn new(
         user_config: &UserConfig,
@@ -396,27 +444,26 @@ impl ObjectExplorer {
         // TODO: Allow a configurable hiding of static fields
         // (e.g. a lot of the compiler-generated fields).
 
-        let static_fields =
-            reader
-                .iter_known_modules()
-                .flat_map_ok(|module_ptr| {
-                    let prefetch_statics: Vec<_> = reader
-                        .static_value_ranges(module_ptr)
-                        .map(|range| reader.read_bytes(range))
-                        .collect::<Result<_, _>>()?;
+        let static_fields = reader
+            .iter_known_modules()
+            .flat_map_ok(|module_ptr| {
+                let prefetch_statics: Vec<_> = reader
+                    .static_value_ranges(module_ptr)
+                    .map(|range| reader.read_bytes(range))
+                    .collect::<Result<_, _>>()?;
 
-                    // The static_ranges must have their ownership moved
-                    // into the `.map_ok` lambda function that uses them,
-                    // as that lambda lives beyond the local function
-                    // scope.  However, using the `move` keyword would
-                    // also move the `display_options` and `reader`
-                    // objects to be owned by the lambda function.  To
-                    // avoid this, declare new variables that hold the
-                    // reference, and move the reference into the lambda.
-                    let display_options_ref = &display_options;
+                // The static_ranges must have their ownership moved
+                // into the `.map_ok` lambda function that uses them,
+                // as that lambda lives beyond the local function
+                // scope.  However, using the `move` keyword would
+                // also move the `display_options` and `reader`
+                // objects to be owned by the lambda function.  To
+                // avoid this, declare new variables that hold the
+                // reference, and move the reference into the lambda.
+                let display_options_ref = &display_options;
 
-                    let module = reader.runtime_module(module_ptr)?;
-                    let iter_static_fields = module
+                let module = reader.runtime_module(module_ptr)?;
+                let iter_static_fields = module
                     .iter_method_table_pointers(&reader)?
                     .filter(|&method_table_ptr| {
                         // TODO: Handle unpacking/display for static
@@ -426,41 +473,69 @@ impl ObjectExplorer {
                             .map(|method_table| !method_table.has_generics())
                             .unwrap_or(true)
                     })
-                    .flat_map(|method_table_ptr| {
-                        match reader.iter_static_fields(method_table_ptr) {
-                            Ok(iter) => Either::Left(
-                                iter.map(move |field| (method_table_ptr, field))
-                                .map(Ok),
-                            ),
-                            Err(err) => {
-                                Either::Right(std::iter::once(Err(err)))
-                            }
-                        }
-                    })
-                    .map_ok(
-                        move |(method_table_ptr, field)| -> Result<_, Error> {
-                            let node = ObjectTreeNode::initial_field(
-                                method_table_ptr,
-                                FieldContainer::Static,
-                                field,
-                                reader,
-                                display_options_ref,
-                                &prefetch_statics,
-                            )?;
-                            Ok((field, node))
-                        },
-                    )
-                    .map(|res| res?);
-                    Ok(iter_static_fields)
-                })
-                .map(|res| res?)
-                .collect::<Result<Vec<_>, _>>()?
-                .into_iter()
-                .sorted_by_key(|(field, _)| {
-                    display_options.sort_key(*field, reader)
-                })
-                .map(|(_, node)| node)
-                .collect::<Vec<_>>();
+                    .map(move |method_table_ptr| -> Result<_, Error> {
+                        let class_name =
+                            get_class_name(method_table_ptr, reader)?;
+
+                        let prefetch_statics_ref = &prefetch_statics;
+
+                        let fields = reader
+                            .iter_static_fields(method_table_ptr)?
+                            .map(|field| -> Result<_, Error> {
+                                let node = ObjectTreeNode::initial_field(
+                                    method_table_ptr,
+                                    FieldContainer::Static,
+                                    field,
+                                    reader,
+                                    display_options_ref,
+                                    prefetch_statics_ref,
+                                )?;
+                                Ok((field, node))
+                            })
+                            .collect::<Result<Vec<_>, _>>()?
+                            .into_iter()
+                            .sorted_by_key(|(field, _)| {
+                                display_options_ref
+                                    .field_sort_key(*field, reader)
+                            })
+                            .map(|(_, node)| node)
+                            .collect::<Vec<_>>();
+
+                        let obj = if fields.is_empty() {
+                            None
+                        } else {
+                            Some(ObjectTreeNode {
+                                kind: ObjectTreeNodeKind::Object {
+                                    class_name,
+                                    fields,
+                                },
+                                location: Pointer::null()..Pointer::null(),
+                                runtime_type: RuntimeType::Class,
+                                should_read: ShouldReadState::NoRead,
+                                display_expanded: true,
+                            })
+                        };
+
+                        Ok(obj)
+                    });
+
+                Ok(iter_static_fields)
+            })
+            .map(|res| res?)
+            .filter_map(|res_opt| res_opt.transpose())
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .sorted_by_key(|node| {
+                let ObjectTreeNode {
+                    kind: ObjectTreeNodeKind::Object { class_name, .. },
+                    ..
+                } = node
+                else {
+                    panic!("Unreachable, only objects here");
+                };
+                display_options.class_sort_key(class_name)
+            })
+            .collect::<Vec<_>>();
 
         let object_tree = ObjectTreeNode {
             kind: ObjectTreeNodeKind::DisplayList(static_fields),
@@ -592,20 +667,35 @@ impl ObjectExplorer {
     fn access_chain_selected_node(&self) -> Result<SymbolicAccessChain, Error> {
         let node_chain = self.selected_node_chain()?;
 
-        let (static_field_class, static_field_name) = {
-            let ObjectTreeNodeKind::Field { field_name, .. } =
-                &node_chain[0].kind
+        let (class_namespace, class_name, static_field_name) = {
+            let ObjectTreeNodeKind::Object { class_name, .. } = &node_chain
+                .get(0)
+                .ok_or(Error::InvalidMetadataDisplayIndex)?
+                .kind
             else {
                 panic!("Outermost node should be static field");
             };
 
-            let (class_name, field_name) = field_name
-                .rsplit_once(".")
-                .expect("Static field name should have a dot");
-            (class_name.to_string(), field_name.to_string())
+            let ObjectTreeNodeKind::Field {
+                field_name,
+                is_static: true,
+                ..
+            } = &node_chain
+                .get(1)
+                .ok_or(Error::InvalidMetadataDisplayIndex)?
+                .kind
+            else {
+                panic!("Outermost node should be static field");
+            };
+
+            (
+                class_name.namespace.clone(),
+                class_name.name.clone(),
+                field_name.clone(),
+            )
         };
 
-        let ops = node_chain[1..]
+        let ops = node_chain[2..]
             .iter()
             .map(|node| match &node.kind {
                 ObjectTreeNodeKind::Field { field_name, .. } => {
@@ -623,7 +713,8 @@ impl ObjectExplorer {
             .collect();
 
         Ok(SymbolicAccessChain {
-            static_field_class,
+            class_namespace,
+            class_name,
             static_field_name,
             ops,
         })
@@ -664,38 +755,7 @@ impl ObjectTreeNode {
                 method_table: field_method_table,
                 ..
             } => {
-                let (class_name, class_namespace, base_class) = {
-                    let method_table =
-                        reader.method_table(field_method_table)?;
-                    let module =
-                        reader.runtime_module(method_table.module())?;
-                    let metadata = module.metadata(reader)?;
-
-                    let type_def_token = method_table.token().ok_or(
-                        Error::NotImplementedYet(
-                            "Handle null metadata token in MethodTable"
-                                .to_string(),
-                        ),
-                    )?;
-                    let type_def = metadata.get(type_def_token)?;
-
-                    let name = type_def.name()?;
-                    let namespace = type_def.namespace()?;
-                    let extends = type_def
-                        .extends()?
-                        .map(|base| -> Result<_, Error> {
-                            let name = base.name()?;
-                            let namespace = base.namespace()?;
-                            Ok((namespace, name))
-                        })
-                        .transpose()?
-                        .filter(|(namespace, name)| {
-                            *namespace != "System"
-                                || (name != "Object" && name != "ValueType")
-                        })
-                        .map(|(namespace, name)| format!("{namespace}.{name}"));
-                    (name.to_string(), namespace.to_string(), extends)
-                };
+                let class_name = get_class_name(field_method_table, reader)?;
 
                 let fields = reader
                     .field_descriptions(field_method_table)?
@@ -703,7 +763,7 @@ impl ObjectTreeNode {
                     .flatten()
                     .filter(|subfield| !subfield.is_static())
                     .sorted_by_key(|subfield| {
-                        display_options.sort_key(*subfield, reader)
+                        display_options.field_sort_key(*subfield, reader)
                     })
                     .map(|subfield| {
                         ObjectTreeNode::initial_field(
@@ -717,12 +777,7 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeNodeKind::Object {
-                    class_name,
-                    class_namespace,
-                    base_class,
-                    fields,
-                }
+                ObjectTreeNodeKind::Object { class_name, fields }
             }
         };
 
@@ -753,13 +808,7 @@ impl ObjectTreeNode {
 
         let field_type = format!("{}", field_metadata.signature()?);
 
-        let field_name = if field.is_static() {
-            let field_name = field_metadata.name()?;
-            let class_name = field_metadata.find_owning_class()?.name()?;
-            format!("{class_name}.{field_name}")
-        } else {
-            field_metadata.name()?.to_string()
-        };
+        let field_name = field_metadata.name()?.to_string();
 
         let location = field.location(module, container, reader)?;
 
@@ -781,6 +830,7 @@ impl ObjectTreeNode {
             kind: ObjectTreeNodeKind::Field {
                 field_name,
                 field_type,
+                is_static: field.is_static(),
                 value: Box::new(value),
             },
         };
@@ -911,38 +961,7 @@ impl ObjectTreeNode {
 
                 let obj = reader.object(ptr)?;
 
-                let (class_name, class_namespace, base_class) = {
-                    let method_table =
-                        reader.method_table(obj.method_table())?;
-                    let module =
-                        reader.runtime_module(method_table.module())?;
-                    let metadata = module.metadata(reader)?;
-
-                    let type_def_token = method_table.token().ok_or(
-                        Error::NotImplementedYet(
-                            "Handle null metadata token in MethodTable"
-                                .to_string(),
-                        ),
-                    )?;
-                    let type_def = metadata.get(type_def_token)?;
-
-                    let name = type_def.name()?;
-                    let namespace = type_def.namespace()?;
-                    let extends = type_def
-                        .extends()?
-                        .map(|base| -> Result<_, Error> {
-                            let name = base.name()?;
-                            let namespace = base.namespace()?;
-                            Ok((namespace, name))
-                        })
-                        .transpose()?
-                        .filter(|(namespace, name)| {
-                            *namespace != "System"
-                                || (name != "Object" && name != "ValueType")
-                        })
-                        .map(|(namespace, name)| format!("{namespace}.{name}"));
-                    (name.to_string(), namespace.to_string(), extends)
-                };
+                let class_name = get_class_name(obj.method_table(), reader)?;
 
                 let instance_location: Pointer = obj.location().into();
                 let size_bytes =
@@ -955,7 +974,7 @@ impl ObjectTreeNode {
                 let fields = reader
                     .iter_instance_fields(obj.method_table())?
                     .sorted_by_key(|field| {
-                        display_options.sort_key(*field, reader)
+                        display_options.field_sort_key(*field, reader)
                     })
                     .map(|field| -> Result<_, Error> {
                         Self::initial_field(
@@ -969,12 +988,7 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
 
-                self.kind = ObjectTreeNodeKind::Object {
-                    class_name,
-                    class_namespace,
-                    base_class,
-                    fields,
-                };
+                self.kind = ObjectTreeNodeKind::Object { class_name, fields };
                 self.display_expanded = display_expanded;
             }
 
@@ -1145,16 +1159,17 @@ impl<'a> FollowDisplayAlias<'a> {
     fn find_valid_alias(&self, node: &ObjectTreeNode) -> Option<usize> {
         match &node.kind {
             ObjectTreeNodeKind::Object {
-                class_name,
-                class_namespace,
-                fields,
-                ..
+                class_name, fields, ..
             } => self
                 .aliases
                 .iter()
                 .find(|alias| {
-                    &alias.namespace == class_namespace
-                        && &alias.name == class_name
+                    let correct_namespace = match &class_name.namespace {
+                        Some(namespace) => &alias.namespace == namespace,
+                        None => alias.namespace.is_empty(),
+                    };
+                    let correct_name = alias.name == class_name.name;
+                    correct_namespace && correct_name
                 })
                 .and_then(|alias| {
                     fields
@@ -1430,14 +1445,15 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
         }
         match &node.kind {
             ObjectTreeNodeKind::Array(_) => self.push("["),
-            ObjectTreeNodeKind::Object {
-                class_name,
-                class_namespace,
-                base_class,
-                ..
-            } => {
-                self.push(format!("{class_namespace}.{class_name} "));
-                if let Some(base) = base_class {
+            ObjectTreeNodeKind::Object { class_name, .. } => {
+                if let Some(namespace) = &class_name.namespace {
+                    self.push(format!("{namespace}."));
+                }
+
+                self.push(&class_name.name);
+                self.push(" ");
+
+                if let Some(base) = &class_name.base_class {
                     self.push(format!("extends {base} "));
                 }
                 self.push("{");
@@ -1445,8 +1461,14 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             ObjectTreeNodeKind::Field {
                 field_name,
                 field_type,
+                is_static,
                 ..
-            } => self.push(format!("{field_type} {field_name} = ")),
+            } => {
+                if *is_static {
+                    self.push("static ");
+                }
+                self.push(format!("{field_type} {field_name} = "))
+            }
             _ => {}
         }
     }
@@ -1678,7 +1700,7 @@ impl WidgetWindow for ObjectExplorer {
 }
 
 impl DisplayOptions {
-    fn sort_key(
+    fn field_sort_key(
         &self,
         field: FieldDescription,
         reader: CachedReader<'_>,
@@ -1694,26 +1716,48 @@ impl DisplayOptions {
             let search_string =
                 format!("{static_str}{field_type} {class_name}.{field_name}");
 
-            let sort_key = if let Some((top_match, _)) = self
-                .sort_top
-                .iter()
-                .enumerate()
-                .find(|(_, regex)| regex.is_match(&search_string))
-            {
-                (false, 0, top_match)
-            } else if let Some((bottom_match, _)) = self
-                .sort_bottom
-                .iter()
-                .enumerate()
-                .find(|(_, regex)| regex.is_match(&search_string))
-            {
-                (false, 2, bottom_match)
-            } else {
-                (false, 1, 0)
-            };
-
-            Ok(sort_key)
+            self.string_sort_key(&search_string)
         }();
         res_sort_key.unwrap_or_else(|_| (true, 0, 0))
+    }
+
+    fn class_sort_key(&self, class_name: &ClassName) -> impl Ord {
+        let res_sort_key = || -> Result<_, Error> {
+            let name = &class_name.name;
+
+            let search_string = if let Some(namespace) = &class_name.namespace {
+                &format!("{namespace}.{name}")
+            } else {
+                name
+            };
+
+            self.string_sort_key(search_string)
+        }();
+        res_sort_key.unwrap_or_else(|_| (true, 0, 0))
+    }
+
+    fn string_sort_key(
+        &self,
+        search_string: &str,
+    ) -> Result<(bool, usize, usize), Error> {
+        let sort_key = if let Some((top_match, _)) = self
+            .sort_top
+            .iter()
+            .enumerate()
+            .find(|(_, regex)| regex.is_match(&search_string))
+        {
+            (false, 0, top_match)
+        } else if let Some((bottom_match, _)) = self
+            .sort_bottom
+            .iter()
+            .enumerate()
+            .find(|(_, regex)| regex.is_match(&search_string))
+        {
+            (false, 2, bottom_match)
+        } else {
+            (false, 1, 0)
+        };
+
+        Ok(sort_key)
     }
 }
