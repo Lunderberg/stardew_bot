@@ -2,8 +2,8 @@ use memory_reader::Pointer;
 
 use crate::runtime_type::RuntimePrimType;
 use crate::{
-    Error, RuntimeArray, RuntimeObject, RuntimeString, RuntimeType,
-    TypedPointer,
+    Error, MethodTable, RuntimeArray, RuntimeObject, RuntimeString,
+    RuntimeType, TypedPointer,
 };
 
 /// A value read out from the remote process.  This only handles
@@ -20,6 +20,14 @@ pub enum RuntimeValue {
     /// stored at the pointed-to location, followed by the instance
     /// fields.
     Object(TypedPointer<RuntimeObject>),
+
+    /// A struct.  Unliked RuntimeValue::Object, an additional method
+    /// table is required to interpret the struct's contents, because
+    /// a struct does not contain pointer to its own method tables.
+    ValueType {
+        location: Pointer,
+        method_table: TypedPointer<MethodTable>,
+    },
 
     String(TypedPointer<RuntimeString>),
 
@@ -155,6 +163,7 @@ impl std::fmt::Display for RuntimeValue {
             Self::String(val) => write!(f, "String@{val}"),
             Self::Array(val) if val.is_null() => write!(f, "null"),
             Self::Array(val) => write!(f, "Array@{val}"),
+            Self::ValueType { location, .. } => write!(f, "Struct@{location}"),
         }
     }
 }

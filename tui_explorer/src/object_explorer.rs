@@ -55,23 +55,13 @@ struct ClassName {
 }
 
 #[derive(Clone)]
-struct ObjectTreeNode {
-    location: Range<Pointer>,
-    should_read: ShouldReadState,
-    kind: ObjectTreeNodeKind,
-}
-
-#[derive(Clone)]
-enum ShouldReadState {
-    NoRead,
-    ReadAndExpand,
-    ReadAndCollapse,
-    ErrOnPreviousRead,
-}
-
-#[derive(Clone)]
-enum ObjectTreeNodeKind {
-    Value(RuntimeValue),
+enum ObjectTreeNode {
+    Value {
+        location: Range<Pointer>,
+        value: RuntimeValue,
+        should_read: ShouldReadState,
+        contents: Option<Box<ObjectTreeNode>>,
+    },
     String(String),
     Array {
         items: Vec<ObjectTreeNode>,
@@ -93,6 +83,14 @@ enum ObjectTreeNodeKind {
         index: usize,
         value: Box<ObjectTreeNode>,
     },
+}
+
+#[derive(Clone)]
+enum ShouldReadState {
+    NoRead,
+    ReadAndExpand,
+    ReadAndCollapse,
+    ErrOnPreviousRead,
 }
 
 macro_rules! define_visitor_mutator {
@@ -197,20 +195,20 @@ macro_rules! define_visitor_mutator {
                 self.extensions
                     .iter_mut()
                     .find_map(|ext| ext.is_leaf_node(node))
-                    .unwrap_or_else(|| match &node.kind {
-                        ObjectTreeNodeKind::Value(_) => true,
-                        ObjectTreeNodeKind::String(_) => true,
-                        ObjectTreeNodeKind::Array { items, .. } => {
-                            items.is_empty()
+                    .unwrap_or_else(|| match &node {
+                        ObjectTreeNode::Value { contents, .. } => {
+                            contents.is_none()
                         }
-                        ObjectTreeNodeKind::Object { fields, .. } => {
+                        ObjectTreeNode::String(_) => true,
+                        ObjectTreeNode::Array { items, .. } => items.is_empty(),
+                        ObjectTreeNode::Object { fields, .. } => {
                             fields.is_empty()
                         }
-                        ObjectTreeNodeKind::Field { .. } => false,
-                        ObjectTreeNodeKind::DisplayList(values) => {
+                        ObjectTreeNode::Field { .. } => false,
+                        ObjectTreeNode::DisplayList(values) => {
                             values.is_empty()
                         }
-                        ObjectTreeNodeKind::ListItem { .. } => false,
+                        ObjectTreeNode::ListItem { .. } => false,
                     })
             }
 
@@ -232,12 +230,8 @@ macro_rules! define_visitor_mutator {
 
             fn visit_children<'node>(&mut self, node: $node_ty) {
                 match node {
-                    ObjectTreeNode {
-                        kind:
-                            ObjectTreeNodeKind::Array { items: values, .. }
-                            | ObjectTreeNodeKind::Object { fields: values, .. },
-                        ..
-                    } => {
+                    ObjectTreeNode::Array { items: values, .. }
+                    | ObjectTreeNode::Object { fields: values, .. } => {
                         let mut displayed_first_child = false;
                         self.increase_tree_depth();
                         for value in values {
@@ -252,26 +246,17 @@ macro_rules! define_visitor_mutator {
                         }
                         self.decrease_tree_depth();
                     }
-                    ObjectTreeNode {
-                        kind: ObjectTreeNodeKind::Field { value, .. },
+                    ObjectTreeNode::Field { value, .. }
+                    | ObjectTreeNode::ListItem { value, .. }
+                    | ObjectTreeNode::Value {
+                        contents: Some(value),
                         ..
                     } => {
                         if self.child_filter(value) {
                             self.visit(value);
                         }
                     }
-                    ObjectTreeNode {
-                        kind: ObjectTreeNodeKind::ListItem { value, .. },
-                        ..
-                    } => {
-                        if self.child_filter(value) {
-                            self.visit(value);
-                        }
-                    }
-                    ObjectTreeNode {
-                        kind: ObjectTreeNodeKind::DisplayList(values),
-                        ..
-                    } => {
+                    ObjectTreeNode::DisplayList(values) => {
                         for value in values {
                             if self.child_filter(value) {
                                 self.visit(value);
@@ -280,12 +265,8 @@ macro_rules! define_visitor_mutator {
                         }
                     }
 
-                    ObjectTreeNode {
-                        kind:
-                            ObjectTreeNodeKind::Value(_)
-                            | ObjectTreeNodeKind::String(_),
-                        ..
-                    } => {}
+                    ObjectTreeNode::Value { .. }
+                    | ObjectTreeNode::String(_) => {}
                 }
             }
 
@@ -506,14 +487,10 @@ impl ObjectExplorer {
                         let obj = if fields.is_empty() {
                             None
                         } else {
-                            Some(ObjectTreeNode {
-                                kind: ObjectTreeNodeKind::Object {
-                                    class_name,
-                                    fields,
-                                    display_expanded: true,
-                                },
-                                location: Pointer::null()..Pointer::null(),
-                                should_read: ShouldReadState::NoRead,
+                            Some(ObjectTreeNode::Object {
+                                class_name,
+                                fields,
+                                display_expanded: true,
                             })
                         };
 
@@ -527,22 +504,14 @@ impl ObjectExplorer {
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .sorted_by_key(|node| {
-                let ObjectTreeNode {
-                    kind: ObjectTreeNodeKind::Object { class_name, .. },
-                    ..
-                } = node
-                else {
+                let ObjectTreeNode::Object { class_name, .. } = node else {
                     panic!("Unreachable, only objects here");
                 };
                 display_options.class_sort_key(class_name)
             })
             .collect::<Vec<_>>();
 
-        let object_tree = ObjectTreeNode {
-            kind: ObjectTreeNodeKind::DisplayList(static_fields),
-            location: Pointer::null()..Pointer::null(),
-            should_read: ShouldReadState::NoRead,
-        };
+        let object_tree = ObjectTreeNode::DisplayList(static_fields);
 
         Ok(ObjectExplorer {
             object_tree,
@@ -639,25 +608,35 @@ impl ObjectExplorer {
         let mut output: Vec<&ObjectTreeNode> = Vec::new();
         let mut node = &self.object_tree;
         for index in child_index_chain.iter().cloned() {
-            match &node.kind {
-                ObjectTreeNodeKind::Value(_) => todo!(),
-                ObjectTreeNodeKind::String(_) => todo!(),
-                ObjectTreeNodeKind::Field { .. } => todo!(),
-                ObjectTreeNodeKind::ListItem { .. } => todo!(),
-                ObjectTreeNodeKind::Array { items, .. }
-                | ObjectTreeNodeKind::Object { fields: items, .. }
-                | ObjectTreeNodeKind::DisplayList(items) => {
+            match &node {
+                ObjectTreeNode::Value { .. } => todo!(),
+                ObjectTreeNode::String(_) => todo!(),
+                ObjectTreeNode::Field { .. } => todo!(),
+                ObjectTreeNode::ListItem { .. } => todo!(),
+                ObjectTreeNode::Array { items, .. }
+                | ObjectTreeNode::Object { fields: items, .. }
+                | ObjectTreeNode::DisplayList(items) => {
                     let item = &items[index];
                     output.push(item);
                     node = item;
                 }
             }
 
-            node = match &node.kind {
-                ObjectTreeNodeKind::Field { value, .. } => value,
-                ObjectTreeNodeKind::ListItem { value, .. } => value,
-                _ => node,
-            };
+            loop {
+                match &node {
+                    ObjectTreeNode::Field { value, .. }
+                    | ObjectTreeNode::ListItem { value, .. }
+                    | ObjectTreeNode::Value {
+                        contents: Some(value),
+                        ..
+                    } => {
+                        node = value;
+                    }
+                    _ => {
+                        break;
+                    }
+                }
+            }
         }
 
         Ok(output)
@@ -667,22 +646,20 @@ impl ObjectExplorer {
         let node_chain = self.selected_node_chain()?;
 
         let (class_namespace, class_name, static_field_name) = {
-            let ObjectTreeNodeKind::Object { class_name, .. } = &node_chain
+            let ObjectTreeNode::Object { class_name, .. } = &node_chain
                 .get(0)
                 .ok_or(Error::InvalidMetadataDisplayIndex)?
-                .kind
             else {
                 panic!("Outermost node should be static field");
             };
 
-            let ObjectTreeNodeKind::Field {
+            let ObjectTreeNode::Field {
                 field_name,
                 is_static: true,
                 ..
             } = &node_chain
                 .get(1)
                 .ok_or(Error::InvalidMetadataDisplayIndex)?
-                .kind
             else {
                 panic!("Outermost node should be static field");
             };
@@ -696,18 +673,18 @@ impl ObjectExplorer {
 
         let ops = node_chain[2..]
             .iter()
-            .map(|node| match &node.kind {
-                ObjectTreeNodeKind::Field { field_name, .. } => {
+            .map(|node| match &node {
+                ObjectTreeNode::Field { field_name, .. } => {
                     SymbolicOperation::Field(field_name.clone())
                 }
-                ObjectTreeNodeKind::ListItem { index, .. } => {
+                ObjectTreeNode::ListItem { index, .. } => {
                     SymbolicOperation::IndexAccess(*index)
                 }
-                ObjectTreeNodeKind::Value(_) => todo!(),
-                ObjectTreeNodeKind::String(_) => todo!(),
-                ObjectTreeNodeKind::Array { .. } => todo!(),
-                ObjectTreeNodeKind::Object { .. } => todo!(),
-                ObjectTreeNodeKind::DisplayList(_) => todo!(),
+                ObjectTreeNode::Value { .. } => todo!(),
+                ObjectTreeNode::String(_) => todo!(),
+                ObjectTreeNode::Array { .. } => todo!(),
+                ObjectTreeNode::Object { .. } => todo!(),
+                ObjectTreeNode::DisplayList(_) => todo!(),
             })
             .collect();
 
@@ -730,7 +707,7 @@ impl ObjectTreeNode {
     ) -> Result<Self, Error> {
         let location = location..location + runtime_type.size_bytes();
 
-        let kind = match runtime_type {
+        let node = match runtime_type {
             RuntimeType::FixedSizeArray { .. } => {
                 todo!("Display of fixed-size array")
             }
@@ -745,7 +722,12 @@ impl ObjectTreeNode {
                 if let Some(bytes) = opt_bytes {
                     let runtime_value = runtime_type
                         .parse(bytes.subrange(location.clone()).into())?;
-                    ObjectTreeNodeKind::Value(runtime_value)
+                    ObjectTreeNode::Value {
+                        location: location.clone(),
+                        value: runtime_value,
+                        should_read: ShouldReadState::NoRead,
+                        contents: None,
+                    }
                 } else {
                     return Err(Error::BytesNotFoundInPrefetch(location.start));
                 }
@@ -776,19 +758,25 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeNodeKind::Object {
+                let contents = ObjectTreeNode::Object {
                     class_name,
                     fields,
                     display_expanded: true,
+                };
+
+                ObjectTreeNode::Value {
+                    location: location.clone(),
+                    value: RuntimeValue::ValueType {
+                        location: location.start,
+                        method_table: field_method_table,
+                    },
+                    should_read: ShouldReadState::NoRead,
+                    contents: Some(Box::new(contents)),
                 }
             }
         };
 
-        Ok(ObjectTreeNode {
-            kind,
-            location,
-            should_read: ShouldReadState::NoRead,
-        })
+        Ok(node)
     }
 
     fn initial_field(
@@ -823,15 +811,11 @@ impl ObjectTreeNode {
             prefetch,
         )?;
 
-        let node = ObjectTreeNode {
-            location: location..location + runtime_type.size_bytes(),
-            should_read: ShouldReadState::NoRead,
-            kind: ObjectTreeNodeKind::Field {
-                field_name,
-                field_type,
-                is_static: field.is_static(),
-                value: Box::new(value),
-            },
+        let node = ObjectTreeNode::Field {
+            field_name,
+            field_type,
+            is_static: field.is_static(),
+            value: Box::new(value),
         };
 
         Ok(node)
@@ -842,15 +826,23 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         reader: CachedReader<'_>,
     ) -> Result<(), Error> {
-        let display_expanded = match self.should_read {
-            ShouldReadState::NoRead | ShouldReadState::ErrOnPreviousRead => {
+        let display_expanded = match self {
+            ObjectTreeNode::Value { should_read, .. } => {
+                let val = match should_read {
+                    ShouldReadState::NoRead
+                    | ShouldReadState::ErrOnPreviousRead => {
+                        return Ok(());
+                    }
+                    ShouldReadState::ReadAndExpand => true,
+                    ShouldReadState::ReadAndCollapse => false,
+                };
+                *should_read = ShouldReadState::NoRead;
+                val
+            }
+            _ => {
                 return Ok(());
             }
-            ShouldReadState::ReadAndExpand => true,
-            ShouldReadState::ReadAndCollapse => false,
         };
-
-        self.should_read = ShouldReadState::NoRead;
 
         // Check if a generic `TypedPointer<RuntimeObject>` should
         // actually be a type with a more specific unpacker.
@@ -863,138 +855,142 @@ impl ObjectTreeNode {
         // `GenericInst`.  Granted, this wouldn't cover all cases,
         // as there could also be a generic `List<Object>`, so
         // maybe the later check will still be necessary anyways.
-        match self.kind {
-            ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
+        match &self {
+            ObjectTreeNode::Value {
+                value: RuntimeValue::Object(ptr),
+                contents: None,
+                location,
+                should_read,
+            } => {
+                let ptr = *ptr;
+                let should_read = should_read.clone();
+
                 let obj = reader.object(ptr)?;
                 let method_table = reader.method_table(obj.method_table())?;
 
                 let ptr: Pointer = ptr.into();
                 let runtime_type = method_table.runtime_type(reader)?;
-                match runtime_type {
+                let opt_value = match runtime_type {
                     RuntimeType::String => {
-                        self.kind = ObjectTreeNodeKind::Value(
-                            RuntimeValue::String(ptr.into()),
-                        );
+                        Some(RuntimeValue::String(ptr.into()))
                     }
-                    RuntimeType::Array => {
-                        self.kind = ObjectTreeNodeKind::Value(
-                            RuntimeValue::Array(ptr.into()),
-                        );
-                    }
+
+                    RuntimeType::Array => Some(RuntimeValue::Array(ptr.into())),
                     RuntimeType::Prim(_)
                     | RuntimeType::ValueType { .. }
                     | RuntimeType::Class
-                    | RuntimeType::FixedSizeArray { .. } => {}
+                    | RuntimeType::FixedSizeArray { .. } => None,
+                };
+                if let Some(value) = opt_value {
+                    *self = ObjectTreeNode::Value {
+                        value,
+                        contents: None,
+                        location: location.clone(),
+                        should_read,
+                    };
                 }
             }
             _ => {}
         }
 
         // Reading each type
-        match self.kind {
-            ObjectTreeNodeKind::Value(RuntimeValue::String(ptr)) => {
-                if ptr.is_null() {
-                    return Err(Error::CannotExpandNullField);
+        if let ObjectTreeNode::Value {
+            value,
+            contents: contents @ None,
+            ..
+        } = self
+        {
+            let new_contents = match *value {
+                RuntimeValue::String(ptr) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
+                    Some(ObjectTreeNode::String(
+                        ptr.read(reader.borrow())?.into(),
+                    ))
                 }
-                self.kind = ObjectTreeNodeKind::String(
-                    ptr.read(reader.borrow())?.into(),
-                );
-            }
+                RuntimeValue::Object(ptr) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
 
-            ObjectTreeNodeKind::Value(RuntimeValue::Array(ptr)) => {
-                if ptr.is_null() {
-                    return Err(Error::CannotExpandNullField);
+                    let obj = reader.object(ptr)?;
+
+                    let class_name =
+                        get_class_name(obj.method_table(), reader)?;
+
+                    let instance_location: Pointer = obj.location().into();
+                    let size_bytes =
+                        reader.method_table(obj.method_table())?.base_size();
+                    let prefetch = reader.read_bytes(
+                        instance_location..instance_location + size_bytes,
+                    )?;
+                    let prefetch = &[prefetch];
+
+                    let fields = reader
+                        .iter_instance_fields(obj.method_table())?
+                        .sorted_by_key(|field| {
+                            display_options.field_sort_key(*field, reader)
+                        })
+                        .map(|field| -> Result<_, Error> {
+                            Self::initial_field(
+                                obj.method_table(),
+                                FieldContainer::Class(instance_location.into()),
+                                field,
+                                reader,
+                                display_options,
+                                prefetch,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, Error>>()?;
+
+                    Some(ObjectTreeNode::Object {
+                        class_name,
+                        fields,
+                        display_expanded,
+                    })
                 }
+                RuntimeValue::Array(ptr) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
 
-                let array = ptr.read(reader.borrow())?;
-                let prefetch = reader.read_bytes(array.ptr_range())?;
-                let prefetch = &[prefetch];
+                    let array = ptr.read(reader.borrow())?;
+                    let prefetch = reader.read_bytes(array.ptr_range())?;
+                    let prefetch = &[prefetch];
 
-                let element_type = array.element_type();
+                    let element_type = array.element_type();
 
-                let items = (0..array.num_elements())
-                    .map(|index| -> Result<_, Error> {
-                        let location = array.element_location(index);
-                        let value = ObjectTreeNode::initial_value(
-                            location.start,
-                            element_type.clone(),
-                            reader,
-                            display_options,
-                            prefetch,
-                        )?;
+                    let items = (0..array.num_elements())
+                        .map(|index| -> Result<_, Error> {
+                            let location = array.element_location(index);
+                            let value = ObjectTreeNode::initial_value(
+                                location.start,
+                                element_type.clone(),
+                                reader,
+                                display_options,
+                                prefetch,
+                            )?;
 
-                        let node = ObjectTreeNode {
-                            location: value.location.clone(),
-                            should_read: ShouldReadState::NoRead,
-                            kind: ObjectTreeNodeKind::ListItem {
+                            let node = ObjectTreeNode::ListItem {
                                 index,
                                 value: Box::new(value),
-                            },
-                        };
+                            };
 
-                        Ok(node)
+                            Ok(node)
+                        })
+                        .collect::<Result<Vec<_>, _>>()?;
+
+                    Some(ObjectTreeNode::Array {
+                        items,
+                        display_expanded,
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                self.kind = ObjectTreeNodeKind::Array {
-                    items,
-                    display_expanded,
-                };
-            }
-
-            ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
-                if ptr.is_null() {
-                    return Err(Error::CannotExpandNullField);
                 }
+                RuntimeValue::Prim(_) | RuntimeValue::ValueType { .. } => None,
+            };
 
-                let obj = reader.object(ptr)?;
-
-                let class_name = get_class_name(obj.method_table(), reader)?;
-
-                let instance_location: Pointer = obj.location().into();
-                let size_bytes =
-                    reader.method_table(obj.method_table())?.base_size();
-                let prefetch = reader.read_bytes(
-                    instance_location..instance_location + size_bytes,
-                )?;
-                let prefetch = &[prefetch];
-
-                let fields = reader
-                    .iter_instance_fields(obj.method_table())?
-                    .sorted_by_key(|field| {
-                        display_options.field_sort_key(*field, reader)
-                    })
-                    .map(|field| -> Result<_, Error> {
-                        Self::initial_field(
-                            obj.method_table(),
-                            FieldContainer::Class(instance_location.into()),
-                            field,
-                            reader,
-                            display_options,
-                            prefetch,
-                        )
-                    })
-                    .collect::<Result<Vec<_>, Error>>()?;
-
-                self.kind = ObjectTreeNodeKind::Object {
-                    class_name,
-                    fields,
-                    display_expanded,
-                };
-            }
-
-            ObjectTreeNodeKind::Object { .. }
-            | ObjectTreeNodeKind::Array { .. }
-            | ObjectTreeNodeKind::DisplayList(..)
-            | ObjectTreeNodeKind::Field { .. }
-            | ObjectTreeNodeKind::ListItem { .. } => {}
-
-            ObjectTreeNodeKind::Value { .. }
-            | ObjectTreeNodeKind::String(_) => {
-                return Err(Error::NotImplementedYet(
-                    "Collapse view of containing object when value selected"
-                        .to_string(),
-                ));
+            if let Some(new_contents) = new_contents {
+                *contents = Some(Box::new(new_contents));
             }
         }
 
@@ -1037,17 +1033,18 @@ impl TreeMutatorExtension for ToggleDisplayExpanded {
 
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
         if self.selected == self.current_line {
-            match &mut node.kind {
-                ObjectTreeNodeKind::Array {
+            match node {
+                ObjectTreeNode::Array {
                     display_expanded, ..
                 }
-                | ObjectTreeNodeKind::Object {
+                | ObjectTreeNode::Object {
                     display_expanded, ..
                 } => {
                     *display_expanded ^= true;
                 }
-                _ => {
-                    node.should_read = match node.should_read {
+
+                ObjectTreeNode::Value { should_read, .. } => {
+                    *should_read = match should_read {
                         ShouldReadState::NoRead
                         | ShouldReadState::ErrOnPreviousRead => {
                             ShouldReadState::ReadAndExpand
@@ -1058,6 +1055,8 @@ impl TreeMutatorExtension for ToggleDisplayExpanded {
                         }
                     };
                 }
+
+                _ => {}
             }
         }
     }
@@ -1082,26 +1081,26 @@ impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
 
     fn visit_leaf<'node>(&mut self, node: &'node mut ObjectTreeNode) {
         if self.display_region.contains(&self.current_line) {
-            let can_expand = match node.kind {
-                ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr))
-                    if !ptr.is_null() =>
-                {
-                    true
-                }
-                ObjectTreeNodeKind::Value(RuntimeValue::Array(ptr))
-                    if !ptr.is_null() =>
-                {
-                    true
-                }
-                ObjectTreeNodeKind::Value(RuntimeValue::String(ptr))
-                    if !ptr.is_null() =>
-                {
-                    true
-                }
-                _ => false,
+            let should_read = match node {
+                ObjectTreeNode::Value {
+                    value: RuntimeValue::Object(ptr),
+                    should_read,
+                    ..
+                } if !ptr.is_null() => Some(should_read),
+                ObjectTreeNode::Value {
+                    value: RuntimeValue::Array(ptr),
+                    should_read,
+                    ..
+                } if !ptr.is_null() => Some(should_read),
+                ObjectTreeNode::Value {
+                    value: RuntimeValue::String(ptr),
+                    should_read,
+                    ..
+                } if !ptr.is_null() => Some(should_read),
+                _ => None,
             };
-            if can_expand {
-                node.should_read = match node.should_read.clone() {
+            if let Some(should_read) = should_read {
+                *should_read = match should_read.clone() {
                     ShouldReadState::NoRead => ShouldReadState::ReadAndCollapse,
                     other => other,
                 };
@@ -1118,8 +1117,8 @@ struct ReadMarkedNodes<'a> {
 }
 impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
-        match &node.kind {
-            ObjectTreeNodeKind::Field { field_name, .. } => {
+        match node {
+            ObjectTreeNode::Field { field_name, .. } => {
                 self.current_path.push(field_name.clone());
             }
             _ => {}
@@ -1127,7 +1126,10 @@ impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
 
         let res = node.expand_if_marked(self.display_options, self.reader);
         if let Err(err) = res {
-            node.should_read = ShouldReadState::ErrOnPreviousRead;
+            if let ObjectTreeNode::Value { should_read, .. } = node {
+                *should_read = ShouldReadState::ErrOnPreviousRead;
+            }
+
             let path = self.current_path.iter().join(".");
             self.side_effects.add_log(format!("    {err}"));
             self.side_effects.add_log(format!("Error reading {path}"));
@@ -1135,8 +1137,8 @@ impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
     }
 
     fn postvisit(&mut self, node: &mut ObjectTreeNode) {
-        match &node.kind {
-            ObjectTreeNodeKind::Field { .. } => {
+        match &node {
+            ObjectTreeNode::Field { .. } => {
                 self.current_path.pop();
             }
             _ => {}
@@ -1154,8 +1156,8 @@ impl<'a> FollowDisplayAlias<'a> {
     }
 
     fn find_valid_alias(&self, node: &ObjectTreeNode) -> Option<usize> {
-        match &node.kind {
-            ObjectTreeNodeKind::Object {
+        match &node {
+            ObjectTreeNode::Object {
                 class_name, fields, ..
             } => self
                 .aliases
@@ -1172,10 +1174,10 @@ impl<'a> FollowDisplayAlias<'a> {
                     fields
                         .iter()
                         .enumerate()
-                        .find(|(_, field)| match &field.kind {
-                            ObjectTreeNodeKind::Field {
-                                field_name, ..
-                            } => field_name == &alias.field,
+                        .find(|(_, field)| match &field {
+                            ObjectTreeNode::Field { field_name, .. } => {
+                                field_name == &alias.field
+                            }
                             _ => false,
                         })
                         .map(|(i, _)| i)
@@ -1193,10 +1195,10 @@ impl TreeMutatorExtension for FollowDisplayAlias<'_> {
         let opt_field_index: Option<usize> = self.find_valid_alias(node);
 
         if let Some(field_index) = opt_field_index {
-            match &mut node.kind {
-                ObjectTreeNodeKind::Object { fields, .. } => {
-                    match &mut fields[field_index].kind {
-                        ObjectTreeNodeKind::Field { value, .. } => {
+            match node {
+                ObjectTreeNode::Object { fields, .. } => {
+                    match &mut fields[field_index] {
+                        ObjectTreeNode::Field { value, .. } => {
                             // Recursively visit in case the alias
                             // points to another alias.
                             <Self as TreeMutatorExtension>::override_visit(
@@ -1223,10 +1225,10 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
         let opt_field_index: Option<usize> = self.find_valid_alias(node);
 
         if let Some(field_index) = opt_field_index {
-            match &node.kind {
-                ObjectTreeNodeKind::Object { fields, .. } => {
-                    match &fields[field_index].kind {
-                        ObjectTreeNodeKind::Field { value, .. } => {
+            match &node {
+                ObjectTreeNode::Object { fields, .. } => {
+                    match &fields[field_index] {
+                        ObjectTreeNode::Field { value, .. } => {
                             // Recursively visit in case the alias
                             // points to another alias.
                             <Self as TreeVisitorExtension>::override_visit(
@@ -1248,11 +1250,11 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
 struct CollapseNonExpandedNodes;
 impl TreeVisitorExtension for CollapseNonExpandedNodes {
     fn is_leaf_node<'node>(&self, node: &'node ObjectTreeNode) -> Option<bool> {
-        match &node.kind {
-            ObjectTreeNodeKind::Object {
+        match node {
+            ObjectTreeNode::Object {
                 display_expanded, ..
             }
-            | ObjectTreeNodeKind::Array {
+            | ObjectTreeNode::Array {
                 display_expanded, ..
             } if !display_expanded => Some(true),
             _ => None,
@@ -1296,7 +1298,12 @@ impl<'a> TreeVisitorExtension for AddressFinder<'a> {
 
     fn previsit<'node>(&mut self, node: &'node ObjectTreeNode) {
         if self.selected == self.current_line {
-            *self.ptr = Some(node.location.start);
+            match node {
+                ObjectTreeNode::Value { location, .. } => {
+                    *self.ptr = Some(location.start);
+                }
+                _ => {}
+            }
         }
     }
 }
@@ -1323,7 +1330,7 @@ impl<'a> TreeVisitorExtension for TreeNodeFinder<'a> {
         self.current_line += 1;
     }
     fn previsit(&mut self, node: &ObjectTreeNode) {
-        if self.result.is_none() && self.current_line == self.selected {
+        if self.current_line == self.selected {
             *self.result = Some(node as *const _);
         }
     }
@@ -1377,14 +1384,9 @@ impl<'a> TreeVisitorExtension for ChildIndexChainFinder<'a> {
         }
 
         if self.target.is_some() {
-            let offset = match node.kind {
-                ObjectTreeNodeKind::Field { .. } => 1,
-                ObjectTreeNodeKind::ListItem { .. } => 1,
-                ObjectTreeNodeKind::Value(_) => 0,
-                ObjectTreeNodeKind::String(_) => 0,
-                ObjectTreeNodeKind::Array { .. } => 0,
-                ObjectTreeNodeKind::Object { .. } => 0,
-                ObjectTreeNodeKind::DisplayList(_) => 0,
+            let offset = match node {
+                ObjectTreeNode::Value { .. } => 1,
+                _ => 0,
             };
             *self.child_index_chain.last_mut().unwrap() += offset;
         }
@@ -1440,9 +1442,9 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
         if !self.current_line_is_displayed() {
             return;
         }
-        match &node.kind {
-            ObjectTreeNodeKind::Array { .. } => self.push("["),
-            ObjectTreeNodeKind::Object { class_name, .. } => {
+        match node {
+            ObjectTreeNode::Array { .. } => self.push("["),
+            ObjectTreeNode::Object { class_name, .. } => {
                 if let Some(namespace) = &class_name.namespace {
                     self.push(format!("{namespace}."));
                 }
@@ -1455,7 +1457,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
                 }
                 self.push("{");
             }
-            ObjectTreeNodeKind::Field {
+            ObjectTreeNode::Field {
                 field_name,
                 field_type,
                 is_static,
@@ -1474,14 +1476,14 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
         if !self.current_line_is_displayed() {
             return;
         }
-        match &node.kind {
-            ObjectTreeNodeKind::Value(val) => self.push(val),
-            ObjectTreeNodeKind::String(val) => self.push(format!("{val:?}")),
+        match node {
+            ObjectTreeNode::Value { value, .. } => self.push(value),
+            ObjectTreeNode::String(val) => self.push(format!("{val:?}")),
 
-            ObjectTreeNodeKind::Array { items, .. } if !items.is_empty() => {
+            ObjectTreeNode::Array { items, .. } if !items.is_empty() => {
                 self.push("...")
             }
-            ObjectTreeNodeKind::Object { fields, .. } if !fields.is_empty() => {
+            ObjectTreeNode::Object { fields, .. } if !fields.is_empty() => {
                 self.push("...")
             }
             _ => {}
@@ -1492,10 +1494,10 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
         if !self.current_line_is_displayed() {
             return;
         }
-        match &node.kind {
-            ObjectTreeNodeKind::Array { .. } => self.push("]"),
-            ObjectTreeNodeKind::Object { .. } => self.push("}"),
-            ObjectTreeNodeKind::Field { .. } => self.push(";"),
+        match node {
+            ObjectTreeNode::Array { .. } => self.push("]"),
+            ObjectTreeNode::Object { .. } => self.push("}"),
+            ObjectTreeNode::Field { .. } => self.push(";"),
             _ => {}
         }
     }
