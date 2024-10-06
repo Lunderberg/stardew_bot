@@ -12,3 +12,6 @@ pub use find_ok::FindOk as _;
 
 pub(crate) mod all_ok;
 pub use all_ok::AllOk as _;
+
+pub(crate) mod result_iterator_ext;
+pub use result_iterator_ext::ResultIteratorExt as _;
