@@ -57,7 +57,6 @@ struct ClassName {
 #[derive(Clone)]
 struct ObjectTreeNode {
     location: Range<Pointer>,
-    runtime_type: RuntimeType,
     should_read: ShouldReadState,
     kind: ObjectTreeNodeKind,
 }
@@ -514,7 +513,6 @@ impl ObjectExplorer {
                                     display_expanded: true,
                                 },
                                 location: Pointer::null()..Pointer::null(),
-                                runtime_type: RuntimeType::Class,
                                 should_read: ShouldReadState::NoRead,
                             })
                         };
@@ -543,7 +541,6 @@ impl ObjectExplorer {
         let object_tree = ObjectTreeNode {
             kind: ObjectTreeNodeKind::DisplayList(static_fields),
             location: Pointer::null()..Pointer::null(),
-            runtime_type: RuntimeType::Class,
             should_read: ShouldReadState::NoRead,
         };
 
@@ -790,7 +787,6 @@ impl ObjectTreeNode {
         Ok(ObjectTreeNode {
             kind,
             location,
-            runtime_type,
             should_read: ShouldReadState::NoRead,
         })
     }
@@ -829,7 +825,6 @@ impl ObjectTreeNode {
 
         let node = ObjectTreeNode {
             location: location..location + runtime_type.size_bytes(),
-            runtime_type,
             should_read: ShouldReadState::NoRead,
             kind: ObjectTreeNodeKind::Field {
                 field_name,
@@ -874,8 +869,8 @@ impl ObjectTreeNode {
                 let method_table = reader.method_table(obj.method_table())?;
 
                 let ptr: Pointer = ptr.into();
-                self.runtime_type = method_table.runtime_type(reader)?;
-                match self.runtime_type {
+                let runtime_type = method_table.runtime_type(reader)?;
+                match runtime_type {
                     RuntimeType::String => {
                         self.kind = ObjectTreeNodeKind::Value(
                             RuntimeValue::String(ptr.into()),
@@ -897,17 +892,6 @@ impl ObjectTreeNode {
 
         // Reading each type
         match self.kind {
-            ObjectTreeNodeKind::Object { .. } => {
-                let value =
-                    reader.value(RuntimeType::Class, self.location.clone())?;
-                self.kind = ObjectTreeNodeKind::Value(value);
-            }
-            ObjectTreeNodeKind::Array { .. } => {
-                let value =
-                    reader.value(RuntimeType::Array, self.location.clone())?;
-                self.kind = ObjectTreeNodeKind::Value(value);
-            }
-
             ObjectTreeNodeKind::Value(RuntimeValue::String(ptr)) => {
                 if ptr.is_null() {
                     return Err(Error::CannotExpandNullField);
@@ -941,7 +925,6 @@ impl ObjectTreeNode {
 
                         let node = ObjectTreeNode {
                             location: value.location.clone(),
-                            runtime_type: value.runtime_type.clone(),
                             should_read: ShouldReadState::NoRead,
                             kind: ObjectTreeNodeKind::ListItem {
                                 index,
@@ -1000,7 +983,9 @@ impl ObjectTreeNode {
                 };
             }
 
-            ObjectTreeNodeKind::DisplayList(..)
+            ObjectTreeNodeKind::Object { .. }
+            | ObjectTreeNodeKind::Array { .. }
+            | ObjectTreeNodeKind::DisplayList(..)
             | ObjectTreeNodeKind::Field { .. }
             | ObjectTreeNodeKind::ListItem { .. } => {}
 
