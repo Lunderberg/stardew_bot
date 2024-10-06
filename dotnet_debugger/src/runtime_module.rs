@@ -933,7 +933,7 @@ impl MethodTableLookup {
             .filter(|ptr| !ptr.is_null())
     }
 
-    pub fn iter_tables<'a>(
+    fn iter_tables<'a>(
         &'a self,
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {

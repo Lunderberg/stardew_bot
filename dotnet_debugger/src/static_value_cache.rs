@@ -39,6 +39,7 @@ pub struct StaticValueCache {
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
     method_table_by_metadata:
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
+    method_table_by_name: FrozenMap<String, Box<TypedPointer<MethodTable>>>,
 
     module_defining_type: FrozenMap<
         TypeInModule,
@@ -164,7 +165,7 @@ impl<'a> CachedReader<'a> {
             })
     }
 
-    pub fn init_dlls(&self) -> Result<(), Error> {
+    fn init_dlls(&self) -> Result<(), Error> {
         let dll_data = self
             .iter_clr_dll_regions()
             .filter_map(|region| region.read().ok())
@@ -233,6 +234,31 @@ impl<'a> CachedReader<'a> {
                 Ok(())
             })?;
 
+        Ok(())
+    }
+
+    fn init_method_table_by_name(&self) -> Result<(), Error> {
+        self.iter_known_modules()
+            .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
+            .flat_map_ok(|module| {
+                module.iter_method_table_pointers(self.reader)
+            })
+            .and_map_ok(|method_table_ptr| self.method_table(method_table_ptr))
+            .filter_ok(|method_table| method_table.token().is_some())
+            .try_for_each(|res_method_table| -> Result<_, Error> {
+                let method_table = res_method_table?;
+                let module = self.runtime_module(method_table.module())?;
+                let metadata = module.metadata(self)?;
+                let row = metadata.get(method_table.token().unwrap())?;
+                let namespace = row.namespace()?;
+                let name = row.name()?;
+                let lookup_key = format!("{namespace}.{name}");
+                self.state
+                    .method_table_by_name
+                    .insert(lookup_key, Box::new(method_table.ptr()));
+
+                Ok(())
+            })?;
         Ok(())
     }
 
@@ -606,7 +632,37 @@ impl<'a> CachedReader<'a> {
             .cloned()
     }
 
-    pub fn method_table_by_metadata(
+    pub fn method_table_by_name(
+        &self,
+        namespace: &str,
+        name: &str,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        // I'd rather avoid the string formatting and memory
+        // allocation, but using `(namespace,name)` doesn't work with
+        // the Borrow trait.  There's some known workarounds [0,1] in
+        // case this becomes a bottleneck, but they would be more
+        // hassle than I'd want at the moment.
+        //
+        // [0] https://users.rust-lang.org/t/efficient-multi-string-hashmap-keys/51944
+        // [1] https://users.rust-lang.org/t/the-borrow-trait-and-structs-as-hashmap-keys/18634
+        let lookup_key = format!("{namespace}.{name}");
+
+        if let Some(value) = self.state.method_table_by_name.get(&lookup_key) {
+            Ok(*value)
+        } else {
+            self.init_method_table_by_name()?;
+            self.state
+                .method_table_by_name
+                .get(&lookup_key)
+                .copied()
+                .ok_or_else(|| Error::NoSuchMethodTableFound {
+                    namespace: namespace.to_string(),
+                    name: name.to_string(),
+                })
+        }
+    }
+
+    fn method_table_by_metadata(
         &self,
         module_ptr: TypedPointer<RuntimeModule>,
         coded_index: MetadataCodedIndex<TypeDefOrRef>,

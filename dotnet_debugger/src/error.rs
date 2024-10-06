@@ -149,6 +149,9 @@ pub enum Error {
     #[error("Could not find method table for instantiated generic {0}")]
     GenericMethodTableNotFound(String),
 
+    #[error("Could not find method table {namespace}.{name}")]
+    NoSuchMethodTableFound { namespace: String, name: String },
+
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),
 }
