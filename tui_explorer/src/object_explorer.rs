@@ -59,7 +59,6 @@ struct ObjectTreeNode {
     location: Range<Pointer>,
     runtime_type: RuntimeType,
     should_read: ShouldReadState,
-    display_expanded: bool,
     kind: ObjectTreeNodeKind,
 }
 
@@ -75,10 +74,14 @@ enum ShouldReadState {
 enum ObjectTreeNodeKind {
     Value(RuntimeValue),
     String(String),
-    Array(Vec<ObjectTreeNode>),
+    Array {
+        items: Vec<ObjectTreeNode>,
+        display_expanded: bool,
+    },
     Object {
         class_name: ClassName,
         fields: Vec<ObjectTreeNode>,
+        display_expanded: bool,
     },
     Field {
         field_name: String,
@@ -198,8 +201,8 @@ macro_rules! define_visitor_mutator {
                     .unwrap_or_else(|| match &node.kind {
                         ObjectTreeNodeKind::Value(_) => true,
                         ObjectTreeNodeKind::String(_) => true,
-                        ObjectTreeNodeKind::Array(elements) => {
-                            elements.is_empty()
+                        ObjectTreeNodeKind::Array { items, .. } => {
+                            items.is_empty()
                         }
                         ObjectTreeNodeKind::Object { fields, .. } => {
                             fields.is_empty()
@@ -232,7 +235,7 @@ macro_rules! define_visitor_mutator {
                 match node {
                     ObjectTreeNode {
                         kind:
-                            ObjectTreeNodeKind::Array(values)
+                            ObjectTreeNodeKind::Array { items: values, .. }
                             | ObjectTreeNodeKind::Object { fields: values, .. },
                         ..
                     } => {
@@ -508,11 +511,11 @@ impl ObjectExplorer {
                                 kind: ObjectTreeNodeKind::Object {
                                     class_name,
                                     fields,
+                                    display_expanded: true,
                                 },
                                 location: Pointer::null()..Pointer::null(),
                                 runtime_type: RuntimeType::Class,
                                 should_read: ShouldReadState::NoRead,
-                                display_expanded: true,
                             })
                         };
 
@@ -542,7 +545,6 @@ impl ObjectExplorer {
             location: Pointer::null()..Pointer::null(),
             runtime_type: RuntimeType::Class,
             should_read: ShouldReadState::NoRead,
-            display_expanded: true,
         };
 
         Ok(ObjectExplorer {
@@ -645,7 +647,7 @@ impl ObjectExplorer {
                 ObjectTreeNodeKind::String(_) => todo!(),
                 ObjectTreeNodeKind::Field { .. } => todo!(),
                 ObjectTreeNodeKind::ListItem { .. } => todo!(),
-                ObjectTreeNodeKind::Array(items)
+                ObjectTreeNodeKind::Array { items, .. }
                 | ObjectTreeNodeKind::Object { fields: items, .. }
                 | ObjectTreeNodeKind::DisplayList(items) => {
                     let item = &items[index];
@@ -706,7 +708,7 @@ impl ObjectExplorer {
                 }
                 ObjectTreeNodeKind::Value(_) => todo!(),
                 ObjectTreeNodeKind::String(_) => todo!(),
-                ObjectTreeNodeKind::Array(_) => todo!(),
+                ObjectTreeNodeKind::Array { .. } => todo!(),
                 ObjectTreeNodeKind::Object { .. } => todo!(),
                 ObjectTreeNodeKind::DisplayList(_) => todo!(),
             })
@@ -777,7 +779,11 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                ObjectTreeNodeKind::Object { class_name, fields }
+                ObjectTreeNodeKind::Object {
+                    class_name,
+                    fields,
+                    display_expanded: true,
+                }
             }
         };
 
@@ -786,7 +792,6 @@ impl ObjectTreeNode {
             location,
             runtime_type,
             should_read: ShouldReadState::NoRead,
-            display_expanded: true,
         })
     }
 
@@ -826,7 +831,6 @@ impl ObjectTreeNode {
             location: location..location + runtime_type.size_bytes(),
             runtime_type,
             should_read: ShouldReadState::NoRead,
-            display_expanded: true,
             kind: ObjectTreeNodeKind::Field {
                 field_name,
                 field_type,
@@ -939,7 +943,6 @@ impl ObjectTreeNode {
                             location: value.location.clone(),
                             runtime_type: value.runtime_type.clone(),
                             should_read: ShouldReadState::NoRead,
-                            display_expanded: true,
                             kind: ObjectTreeNodeKind::ListItem {
                                 index,
                                 value: Box::new(value),
@@ -950,8 +953,10 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
-                self.kind = ObjectTreeNodeKind::Array(items);
-                self.display_expanded = display_expanded;
+                self.kind = ObjectTreeNodeKind::Array {
+                    items,
+                    display_expanded,
+                };
             }
 
             ObjectTreeNodeKind::Value(RuntimeValue::Object(ptr)) => {
@@ -988,8 +993,11 @@ impl ObjectTreeNode {
                     })
                     .collect::<Result<Vec<_>, Error>>()?;
 
-                self.kind = ObjectTreeNodeKind::Object { class_name, fields };
-                self.display_expanded = display_expanded;
+                self.kind = ObjectTreeNodeKind::Object {
+                    class_name,
+                    fields,
+                    display_expanded,
+                };
             }
 
             ObjectTreeNodeKind::DisplayList(..)
@@ -1044,10 +1052,14 @@ impl TreeMutatorExtension for ToggleDisplayExpanded {
 
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
         if self.selected == self.current_line {
-            match &node.kind {
-                ObjectTreeNodeKind::Array(_)
-                | ObjectTreeNodeKind::Object { .. } => {
-                    node.display_expanded ^= true;
+            match &mut node.kind {
+                ObjectTreeNodeKind::Array {
+                    display_expanded, ..
+                }
+                | ObjectTreeNodeKind::Object {
+                    display_expanded, ..
+                } => {
+                    *display_expanded ^= true;
                 }
                 _ => {
                     node.should_read = match node.should_read {
@@ -1252,12 +1264,12 @@ struct CollapseNonExpandedNodes;
 impl TreeVisitorExtension for CollapseNonExpandedNodes {
     fn is_leaf_node<'node>(&self, node: &'node ObjectTreeNode) -> Option<bool> {
         match &node.kind {
-            ObjectTreeNodeKind::Object { .. }
-            | ObjectTreeNodeKind::Array(_)
-                if !node.display_expanded =>
-            {
-                Some(true)
+            ObjectTreeNodeKind::Object {
+                display_expanded, ..
             }
+            | ObjectTreeNodeKind::Array {
+                display_expanded, ..
+            } if !display_expanded => Some(true),
             _ => None,
         }
     }
@@ -1385,7 +1397,7 @@ impl<'a> TreeVisitorExtension for ChildIndexChainFinder<'a> {
                 ObjectTreeNodeKind::ListItem { .. } => 1,
                 ObjectTreeNodeKind::Value(_) => 0,
                 ObjectTreeNodeKind::String(_) => 0,
-                ObjectTreeNodeKind::Array(_) => 0,
+                ObjectTreeNodeKind::Array { .. } => 0,
                 ObjectTreeNodeKind::Object { .. } => 0,
                 ObjectTreeNodeKind::DisplayList(_) => 0,
             };
@@ -1444,7 +1456,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             return;
         }
         match &node.kind {
-            ObjectTreeNodeKind::Array(_) => self.push("["),
+            ObjectTreeNodeKind::Array { .. } => self.push("["),
             ObjectTreeNodeKind::Object { class_name, .. } => {
                 if let Some(namespace) = &class_name.namespace {
                     self.push(format!("{namespace}."));
@@ -1481,7 +1493,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             ObjectTreeNodeKind::Value(val) => self.push(val),
             ObjectTreeNodeKind::String(val) => self.push(format!("{val:?}")),
 
-            ObjectTreeNodeKind::Array(values) if !values.is_empty() => {
+            ObjectTreeNodeKind::Array { items, .. } if !items.is_empty() => {
                 self.push("...")
             }
             ObjectTreeNodeKind::Object { fields, .. } if !fields.is_empty() => {
@@ -1496,7 +1508,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             return;
         }
         match &node.kind {
-            ObjectTreeNodeKind::Array(_) => self.push("]"),
+            ObjectTreeNodeKind::Array { .. } => self.push("]"),
             ObjectTreeNodeKind::Object { .. } => self.push("}"),
             ObjectTreeNodeKind::Field { .. } => self.push(";"),
             _ => {}
