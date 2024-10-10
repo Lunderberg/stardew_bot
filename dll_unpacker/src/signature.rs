@@ -71,14 +71,11 @@ pub enum SignatureType<'a> {
         metadata: Metadata<'a>,
     },
 
-    Array {
+    MultiDimArray {
         element_type: Box<SignatureType<'a>>,
-        #[allow(dead_code)]
-        rank: u32,
-        #[allow(dead_code)]
-        fixed_sizes: Vec<u32>,
-        #[allow(dead_code)]
-        lower_bounds: Vec<u32>,
+        rank: usize,
+        fixed_sizes: Vec<usize>,
+        lower_bounds: Vec<usize>,
     },
     SizeArray(Box<SignatureType<'a>>),
 
@@ -522,19 +519,21 @@ impl<'a> SignatureDecompressor<'a> {
 
             ElementType::Array => {
                 let element_type = Box::new(self.next_type()?);
-                let rank = self.next_unsigned()?;
+                let rank = self.next_unsigned()? as usize;
 
                 let num_sizes = self.next_unsigned()?;
                 let fixed_sizes = (0..num_sizes)
                     .map(|_| self.next_unsigned())
+                    .map_ok(|dim| dim as usize)
                     .collect::<Result<_, _>>()?;
 
                 let num_lower_bounds = self.next_unsigned()?;
                 let lower_bounds = (0..num_lower_bounds)
                     .map(|_| self.next_unsigned())
+                    .map_ok(|bound| bound as usize)
                     .collect::<Result<_, _>>()?;
 
-                SignatureType::Array {
+                SignatureType::MultiDimArray {
                     element_type,
                     rank,
                     fixed_sizes,
@@ -655,7 +654,7 @@ impl std::fmt::Debug for SignatureType<'_> {
             Self::Class { index, .. } => {
                 f.debug_struct("Class").field("index", index).finish()
             }
-            Self::Array {
+            Self::MultiDimArray {
                 element_type,
                 rank,
                 fixed_sizes,
@@ -702,7 +701,7 @@ impl std::fmt::Display for SignatureType<'_> {
                 write!(f, "_M{index}")
             }
             SignatureType::SizeArray(ty) => write!(f, "{ty}[]"),
-            SignatureType::Array { element_type, .. } => {
+            SignatureType::MultiDimArray { element_type, .. } => {
                 write!(f, "{element_type}[]")
             }
             SignatureType::Class { index, metadata } => {

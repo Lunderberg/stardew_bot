@@ -757,7 +757,7 @@ impl RuntimeModule {
         &self,
         index: MetadataTableIndex<TypeDef>,
         reader: impl Borrow<MemoryReader>,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
+    ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
         let lookup = self.type_def_table(reader)?;
         let method_table = lookup.get_ptr(index);
         Ok(method_table)
@@ -770,6 +770,16 @@ impl RuntimeModule {
         let reader = reader.borrow();
 
         self.type_def_table.or_try_init(|| {
+            // TODO: Does this cache too much and too early?  If a
+            // type is not yet loaded, it would find a NULL pointer
+            // and save it in the MethodTableLookup.  If a type is
+            // loaded later, this caching would still return a NULL
+            // pointer.
+            //
+            // Maybe the MethodTableLookup should be removed
+            // altogether, with the remote pointer re-read when this
+            // function is called.  Caching would still be handled at
+            // the StaticValueCache/CachedReader level.
             let num_type_defs =
                 self.metadata(reader)?.type_def_table().num_rows();
 
@@ -959,8 +969,9 @@ impl MethodTableLookup {
     pub fn get_ptr(
         &self,
         index: MetadataTableIndex<TypeDef>,
-    ) -> TypedPointer<MethodTable> {
-        self[index].start.into()
+    ) -> Option<TypedPointer<MethodTable>> {
+        let ptr: TypedPointer<MethodTable> = self[index].start.into();
+        ptr.as_non_null()
     }
 }
 

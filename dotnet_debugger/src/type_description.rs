@@ -109,7 +109,7 @@ impl TypeHandle {
             RuntimeType::Prim(prim) => {
                 write!(fmt, "{prim}")?;
             }
-            RuntimeType::Class | RuntimeType::ValueType { .. } => {
+            RuntimeType::Class { .. } | RuntimeType::ValueType { .. } => {
                 let row = reader
                     .runtime_module(method_table.module())?
                     .metadata(&reader)?
@@ -124,11 +124,13 @@ impl TypeHandle {
             RuntimeType::String => {
                 write!(fmt, "String")?;
             }
-            RuntimeType::Array => {
+            RuntimeType::Array { .. } => {
                 write!(fmt, "Array")?;
             }
 
-            RuntimeType::FixedSizeArray { .. } => todo!(),
+            RuntimeType::MultiDimArray { .. } => {
+                write!(fmt, "MultiDimArray")?;
+            }
         }
         Ok(())
     }
@@ -160,6 +162,10 @@ impl TypeHandle {
                     CorElementType::FunctionPtr => {
                         // A dynamic-sized FnPtrTypeDesc
                         write!(fmt, "Function pointer")?;
+                    }
+
+                    CorElementType::MethodType => {
+                        write!(fmt, "Method")?;
                     }
 
                     other => todo!("Pretty-printing for {other}"),

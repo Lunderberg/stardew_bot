@@ -12,6 +12,7 @@ pub struct SymbolicAccessChain {
 pub enum SymbolicOperation {
     Field(String),
     IndexAccess(usize),
+    //Downcast { namespace: String, name: String },
 }
 
 pub struct PhysicalAccessChain {
@@ -23,6 +24,7 @@ pub struct PhysicalAccessChain {
 pub enum PhysicalAccessOperation {
     Dereference,
     Offset(usize),
+    //AssertContainsMethodTable(Pointer),
 }
 
 impl std::fmt::Display for SymbolicAccessChain {

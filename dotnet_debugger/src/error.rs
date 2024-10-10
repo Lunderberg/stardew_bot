@@ -122,6 +122,12 @@ pub enum Error {
     #[error("Pointer to array instead found RuntimeType {0}")]
     ArrayNotMarkedAsArray(RuntimeType),
 
+    #[error(
+        "Pointer to multi-dimensional array \
+         instead found RuntimeType {0}"
+    )]
+    MultiDimArrayNotMarkedAsArray(RuntimeType),
+
     #[error("The method table of an array should contain the element size.")]
     ArrayMissingComponentSize,
 
@@ -148,6 +154,12 @@ pub enum Error {
 
     #[error("Could not find method table for instantiated generic {0}")]
     GenericMethodTableNotFound(String),
+
+    #[error("The System.Object method table should always be present")]
+    MethodTableOfSystemObjectShouldBeLoaded,
+
+    #[error("All static fields should have their method tables loaded")]
+    MethodTableOfStaticFieldShouldBeLoaded,
 
     #[error("Could not find method table {namespace}.{name}")]
     NoSuchMethodTableFound { namespace: String, name: String },

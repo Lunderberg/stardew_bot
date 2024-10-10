@@ -2,8 +2,8 @@ use memory_reader::Pointer;
 
 use crate::runtime_type::RuntimePrimType;
 use crate::{
-    Error, MethodTable, RuntimeArray, RuntimeObject, RuntimeString,
-    RuntimeType, TypedPointer,
+    Error, MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeObject,
+    RuntimeString, RuntimeType, TypedPointer,
 };
 
 /// A value read out from the remote process.  This only handles
@@ -32,6 +32,8 @@ pub enum RuntimeValue {
     String(TypedPointer<RuntimeString>),
 
     Array(TypedPointer<RuntimeArray>),
+
+    MultiDimArray(TypedPointer<RuntimeMultiDimArray>),
 }
 
 #[derive(Clone, Copy)]
@@ -163,6 +165,8 @@ impl std::fmt::Display for RuntimeValue {
             Self::String(val) => write!(f, "String@{val}"),
             Self::Array(val) if val.is_null() => write!(f, "null"),
             Self::Array(val) => write!(f, "Array@{val}"),
+            Self::MultiDimArray(val) if val.is_null() => write!(f, "null"),
+            Self::MultiDimArray(val) => write!(f, "MultiDimArray@{val}"),
             Self::ValueType { location, .. } => write!(f, "Struct@{location}"),
         }
     }

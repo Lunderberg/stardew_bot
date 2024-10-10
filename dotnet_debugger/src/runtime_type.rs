@@ -5,22 +5,76 @@ use crate::{
     TypedPointer,
 };
 
+/// The runtime representation of the static type of a field.
+///
+/// This isn't really the static type of a field, because that
+/// wouldn't have a `MethodTable` at all.  The static type of a field
+/// is the `Signature`, and may refer to classes by name, that exist
+/// in other assemblies.
+///
+/// But this also isn't really the runtime type of a field, because
+/// that would imply the exact type of a field.  For a field of type
+/// `BaseClass`, holding an instance of type `DerivedClass`, this
+/// would refer to the method table of `BaseClass`.
+///
+/// So in absence of a better name, calling it `RuntimeType` for now.
 #[derive(Clone, Debug, PartialEq)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
     ValueType {
+        /// The MethodTable used to unpack the struct.  This must be
+        /// determined from the parent type, since structs do not have
+        /// a pointer to their own vtable.
         method_table: TypedPointer<MethodTable>,
+
+        /// The size of the struct, in bytes.
         size: usize,
     },
-    Class,
+    Class {
+        /// The method table of the class.  This
+        ///
+        /// While all objects must have a MethodTable, a MethodTable
+        /// may not yet exist in the remote process.  If no instances
+        /// of a class have been loaded, the MethodTable pointer may
+        /// not yet exist
+        method_table: Option<TypedPointer<MethodTable>>,
+    },
 
+    /// A `System.String` instance.
+    ///
+    /// This may be identified from a signature as
+    /// `COR_ELEMENT_STRING`, or may be identified from a method table
+    /// as being the only Class that has a component size (2 bytes per
+    /// wchar_t).
     String,
-    Array,
-    FixedSizeArray {
-        element_type: Box<RuntimeType>,
+
+    /// A 1-d array
+    ///
+    /// This may be identified from a signature as
+    /// `COR_ELEMENT_SZARRAY`, or may be identified from a method
+    /// table as having the is-array bit set, along with the
+    /// if-array-then-sz-array bit.
+    Array {
+        element_type: Option<Box<RuntimeType>>,
+    },
+
+    /// A multi-dimensional array
+    ///
+    /// This may be identified from a signature as
+    /// `COR_ELEMENT_ARRAY`, or may be identified from a method table
+    /// as having the is-array bit set, but not the
+    /// if-array-then-sz-array bit.
+    ///
+    /// Even if `rank == 1`, this has distinct semantics and distinct
+    /// layout from `RuntimeType::Array`.  Semantically, the multi-dim
+    /// array may have a fixed size known at compile-time.  Laid out
+    /// in memory, a regular 1-d array has a 16-byte header (8-byte
+    /// pointer and 8-byte size), where a 1-d multi-dim array has an
+    /// additional 4-byte size of its only dimension and a 4-byte
+    /// lower bound of that dimension.
+    MultiDimArray {
+        element_type: Option<Box<RuntimeType>>,
         rank: usize,
-        sizes: Vec<usize>,
-        lower_bounds: Vec<usize>,
     },
 }
 
@@ -54,7 +108,16 @@ impl RuntimeType {
                 let prim = prim.parse(bytes)?;
                 Ok(RuntimeValue::Prim(prim))
             }
-            RuntimeType::Class => {
+            RuntimeType::Class { .. } => {
+                // The RuntimeType holds a pointer to the
+                // statically-known type, while the object holds a
+                // pointer to the instance's type.  For example,
+                // element of `Array<Object>` would have a RuntimeType
+                // pointing to `Object`, but each element may be a
+                // subclass of `Object`.  Therefore, in order to know
+                // the actual type and continue unpacking the object,
+                // we need to read the method table of the
+                // instance.
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Object(ptr.into()))
             }
@@ -65,12 +128,13 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::String(ptr.into()))
             }
-            RuntimeType::Array => {
+            RuntimeType::Array { .. } => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Array(ptr.into()))
             }
-            RuntimeType::FixedSizeArray { .. } => {
-                todo!("Parsing of FixedSizeArray fields")
+            RuntimeType::MultiDimArray { .. } => {
+                let ptr: Pointer = bytes[..8].try_into().unwrap();
+                Ok(RuntimeValue::MultiDimArray(ptr.into()))
             }
         }
     }
@@ -79,12 +143,10 @@ impl RuntimeType {
         match self {
             RuntimeType::Prim(prim) => prim.size_bytes(),
             RuntimeType::ValueType { size, .. } => *size,
-            RuntimeType::Class | RuntimeType::String | RuntimeType::Array => {
-                Pointer::SIZE
-            }
-            RuntimeType::FixedSizeArray { .. } => {
-                todo!("Size computation of fixed size array")
-            }
+            RuntimeType::Class { .. }
+            | RuntimeType::String
+            | RuntimeType::Array { .. }
+            | RuntimeType::MultiDimArray { .. } => Pointer::SIZE,
         }
     }
 }
@@ -194,26 +256,23 @@ impl std::fmt::Display for RuntimeType {
             RuntimeType::ValueType { method_table, size } => {
                 write!(f, "struct({size} bytes, vtable {method_table})")
             }
-            RuntimeType::Class => write!(f, "Object"),
+            RuntimeType::Class { .. } => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),
-            RuntimeType::Array => write!(f, "Array"),
-            RuntimeType::FixedSizeArray {
-                element_type,
-                rank,
-                sizes,
-                lower_bounds,
-            } => {
-                write!(f, "{element_type}[")?;
-                for i in 0..*rank {
-                    if i > 0 {
-                        write!(f, ",")?;
-                    }
-                    if let Some(lower_bound) = lower_bounds.get(i) {
-                        write!(f, "{lower_bound}..")?;
-                    }
-                    if let Some(size) = sizes.get(i) {
-                        write!(f, "{size}")?;
-                    }
+            RuntimeType::Array { element_type } => {
+                match element_type {
+                    Some(ty) => write!(f, "{ty}")?,
+                    None => write!(f, "(not-yet-loaded)")?,
+                }
+                write!(f, "[]")
+            }
+            RuntimeType::MultiDimArray { element_type, rank } => {
+                match element_type {
+                    Some(ty) => write!(f, "{ty}")?,
+                    None => write!(f, "(not-yet-loaded)")?,
+                }
+
+                for _ in 0..*rank - 1 {
+                    write!(f, ",")?;
                 }
                 write!(f, "]")
             }

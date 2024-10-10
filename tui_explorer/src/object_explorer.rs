@@ -708,14 +708,11 @@ impl ObjectTreeNode {
         let location = location..location + runtime_type.size_bytes();
 
         let node = match runtime_type {
-            RuntimeType::FixedSizeArray { .. } => {
-                todo!("Display of fixed-size array")
-            }
-
             RuntimeType::Prim(_)
-            | RuntimeType::Class
+            | RuntimeType::Class { .. }
             | RuntimeType::String
-            | RuntimeType::Array => {
+            | RuntimeType::Array { .. }
+            | RuntimeType::MultiDimArray { .. } => {
                 let opt_bytes = prefetch
                     .iter()
                     .find(|bytes| bytes.contains_range(location.clone()));
@@ -875,11 +872,13 @@ impl ObjectTreeNode {
                         Some(RuntimeValue::String(ptr.into()))
                     }
 
-                    RuntimeType::Array => Some(RuntimeValue::Array(ptr.into())),
+                    RuntimeType::Array { .. } => {
+                        Some(RuntimeValue::Array(ptr.into()))
+                    }
                     RuntimeType::Prim(_)
                     | RuntimeType::ValueType { .. }
-                    | RuntimeType::Class
-                    | RuntimeType::FixedSizeArray { .. } => None,
+                    | RuntimeType::Class { .. }
+                    | RuntimeType::MultiDimArray { .. } => None,
                 };
                 if let Some(value) = opt_value {
                     *self = ObjectTreeNode::Value {
@@ -940,6 +939,7 @@ impl ObjectTreeNode {
                                 reader,
                                 display_options,
                                 prefetch,
+                                // 0,
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
@@ -970,6 +970,7 @@ impl ObjectTreeNode {
                                 reader,
                                 display_options,
                                 prefetch,
+                                // 0,
                             )?;
 
                             let node = ObjectTreeNode::ListItem {
@@ -985,6 +986,70 @@ impl ObjectTreeNode {
                         items,
                         display_expanded,
                     })
+                }
+                RuntimeValue::MultiDimArray(ptr) => {
+                    if ptr.is_null() {
+                        return Err(Error::CannotExpandNullField);
+                    }
+
+                    let array = ptr.read(reader.borrow())?;
+                    let prefetch = reader.read_bytes(array.ptr_range())?;
+                    let prefetch = &[prefetch];
+
+                    let element_type = array.element_type();
+
+                    let shape = array.shape();
+                    let rank = shape.len();
+                    assert!(rank > 0);
+                    let mut nested_list = vec![Vec::new(); shape.len()];
+                    let mut output = None;
+
+                    for index in 0..array.num_elements() {
+                        let location = array.element_location(index);
+                        let value = ObjectTreeNode::initial_value(
+                            location.start,
+                            element_type.clone(),
+                            reader,
+                            display_options,
+                            prefetch,
+                        )?;
+
+                        let node = ObjectTreeNode::ListItem {
+                            index: nested_list.last().unwrap().len(),
+                            value: Box::new(value),
+                        };
+
+                        nested_list.last_mut().unwrap().push(node);
+
+                        for dim in (0..rank).rev() {
+                            if nested_list[dim].len() == shape[dim] {
+                                let items = nested_list[dim].split_off(0);
+
+                                if dim == 0 {
+                                    output = Some(ObjectTreeNode::Array {
+                                        items,
+                                        display_expanded,
+                                    });
+                                } else {
+                                    let index = nested_list[dim - 1].len();
+                                    let item = ObjectTreeNode::ListItem {
+                                        index,
+                                        value: Box::new(
+                                            ObjectTreeNode::Array {
+                                                items,
+                                                display_expanded: true,
+                                            },
+                                        ),
+                                    };
+                                    nested_list[dim - 1].push(item);
+                                }
+                            } else {
+                                break;
+                            }
+                        }
+                    }
+
+                    output
                 }
                 RuntimeValue::Prim(_) | RuntimeValue::ValueType { .. } => None,
             };
@@ -1089,6 +1154,11 @@ impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
                 } if !ptr.is_null() => Some(should_read),
                 ObjectTreeNode::Value {
                     value: RuntimeValue::Array(ptr),
+                    should_read,
+                    ..
+                } if !ptr.is_null() => Some(should_read),
+                ObjectTreeNode::Value {
+                    value: RuntimeValue::MultiDimArray(ptr),
                     should_read,
                     ..
                 } if !ptr.is_null() => Some(should_read),
@@ -1386,6 +1456,13 @@ impl<'a> TreeVisitorExtension for ChildIndexChainFinder<'a> {
         if self.target.is_some() {
             let offset = match node {
                 ObjectTreeNode::Value { .. } => 1,
+                ObjectTreeNode::Object { .. }
+                    if self.child_index_chain.len() == 1 =>
+                {
+                    // Kind of a hack, to get the correct index for
+                    // the outermost DisplayList.
+                    1
+                }
                 _ => 0,
             };
             *self.child_index_chain.last_mut().unwrap() += offset;
@@ -1498,6 +1575,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
             ObjectTreeNode::Array { .. } => self.push("]"),
             ObjectTreeNode::Object { .. } => self.push("}"),
             ObjectTreeNode::Field { .. } => self.push(";"),
+            ObjectTreeNode::ListItem { .. } => self.push(","),
             _ => {}
         }
     }

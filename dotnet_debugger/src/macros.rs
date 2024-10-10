@@ -4,6 +4,7 @@ macro_rules! unpack_fields{
         $name:ident: {$ty:ty, $byte_range:expr}
     ) => {
         ::paste::paste!{
+            #[allow(dead_code)]
             pub fn [< $name _unpacked >](
                 &self,
             ) -> ::memory_reader::UnpackedValue<$ty> {

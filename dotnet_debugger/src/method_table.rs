@@ -119,9 +119,11 @@ impl MethodTable {
         if type_flag == 0 && self.component_size() == Some(2) {
             Some(RuntimeType::String)
         } else if type_flag == 0 {
-            Some(RuntimeType::Class)
+            Some(RuntimeType::Class {
+                method_table: Some(self.ptr()),
+            })
         } else if type_flag == 0x000A0000 {
-            Some(RuntimeType::Array)
+            None
         } else if type_flag == 0x00080000 {
             // This is a statically-sized array, but determining the
             // element type and size require the field metadata to
@@ -146,6 +148,14 @@ impl MethodTable {
                 method_table: self.ptr(),
                 size: self.base_size(),
             })
+        } else if type_flag == 0x000C0000 {
+            // This is the method table for an interface.  Since I'm
+            // only interested in the fields, this doesn't given any
+            // useful information, but is valid.  Treating it as if it
+            // is a Class, for now.
+            Some(RuntimeType::Class {
+                method_table: Some(self.ptr()),
+            })
         } else {
             None
         }
@@ -156,11 +166,36 @@ impl MethodTable {
     }
 
     pub fn is_array(&self) -> bool {
-        matches!(self.local_runtime_type(), Some(RuntimeType::Array))
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+        type_flag == 0x000A0000
     }
 
     pub fn is_string(&self) -> bool {
         matches!(self.local_runtime_type(), Some(RuntimeType::String))
+    }
+
+    pub fn is_prim_type(&self) -> bool {
+        // Can't be expressed in terms of `self.local_runtime_type()`,
+        // because we don't actually know the exact PrimType based on
+        // the fields in the MethodTable.  That information is only
+        // stored in the EEClass.  But often it is sufficient to check
+        // if something is a prim_type.
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+        type_flag == 0x00070000
+    }
+
+    pub fn is_multi_dim_array(&self) -> bool {
+        // Can't be expressed in terms of `self.local_runtime_type()`,
+        // because we can't actually determine the array's rank,
+        // element type, or shape based solely on the fields in the
+        // MethodTable.  That information is only stored in the
+        // EEClass.  But often it is sufficient to check if something
+        // is a multi-dimensional array.
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+        type_flag == 0x00080000
     }
 
     pub fn runtime_type(
@@ -169,25 +204,48 @@ impl MethodTable {
     ) -> Result<RuntimeType, Error> {
         if let Some(ty) = self.local_runtime_type() {
             Ok(ty)
-        } else {
+        } else if self.is_array() {
+            let reader = reader.borrow();
+            let element_type = self
+                .array_element_type()
+                .expect("Returns Some(_) for multi-dim array")
+                .read(reader)?
+                .runtime_type(reader)?;
+            Ok(RuntimeType::Array {
+                element_type: Some(Box::new(element_type)),
+            })
+        } else if self.is_multi_dim_array() {
+            let reader = reader.borrow();
+            let rank = self.get_ee_class(reader)?.multi_dim_rank() as usize;
+            let element_type = self
+                .array_element_type()
+                .expect("Returns Some(_) for multi-dim array")
+                .read(reader)?
+                .runtime_type(reader)?;
+            Ok(RuntimeType::MultiDimArray {
+                element_type: Some(Box::new(element_type)),
+                rank,
+            })
+        } else if self.is_prim_type() {
             let reader = reader.borrow();
             let ee_class = self.get_ee_class(reader)?;
-            if let CorElementType::Prim(prim) = ee_class.element_type()? {
+            let element_type = ee_class.element_type()?;
+            if let CorElementType::Prim(prim) = element_type {
                 Ok(RuntimeType::Prim(prim))
             } else {
-                let type_flag = self.flags() & 0x000F0000;
-                Err(Error::InvalidTypeFlag(type_flag))
+                Err(Error::ExpectedPrimType(element_type))
             }
+        } else {
+            let type_flag = self.flags() & 0x000F0000;
+            Err(Error::InvalidTypeFlag(type_flag))
         }
     }
 
     pub fn array_element_type(&self) -> Option<TypedPointer<MethodTable>> {
-        if matches!(self.local_runtime_type()?, RuntimeType::Array) {
+        (self.is_array() || self.is_multi_dim_array()).then(|| {
             let ptr = self.element_type_handle_or_per_instance_info();
-            Some(ptr.into())
-        } else {
-            None
-        }
+            ptr.into()
+        })
     }
 
     pub fn has_generics(&self) -> bool {
@@ -452,6 +510,9 @@ impl EEClass {
         fields_are_packed: {bool, 49..50},
         fixed_class_fields: {u8, 50..51},
         base_size_padding: {u8, 51..52},
+
+        // This field is only available for multi-dimensional array.
+        multi_dim_rank: {u8, 56..57},
     }
 
     pub fn collect_annotations(
