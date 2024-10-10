@@ -224,7 +224,7 @@ impl<'a> UnpackOptBytes<'a> for Pointer {
 
     fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
         let ptr: Self = bytes.unpack()?;
-        Ok(if ptr.is_null() { None } else { Some(ptr) })
+        Ok(ptr.as_non_null())
     }
 }
 

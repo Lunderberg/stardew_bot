@@ -391,6 +391,10 @@ impl RuntimeModule {
             })
             .unwrap();
 
+        let is_valid_ptr = |ptr: Pointer| -> bool {
+            ptr.is_null() || valid_region.contains(&ptr)
+        };
+
         const NBYTES: usize = 4096;
 
         let bytes = modules
@@ -444,8 +448,7 @@ impl RuntimeModule {
                     let supported_flags = supported_flags.as_usize();
 
                     Ok(p_next == Pointer::null()
-                        && (p_table.is_null()
-                            || valid_region.contains(&p_table))
+                        && is_valid_ptr(p_table)
                         && dw_count == num_type_defs + 1
                         && supported_flags < 8)
                 })
@@ -473,10 +476,10 @@ impl RuntimeModule {
                     .unpack()
                     .unwrap();
 
-                if !(a.is_null() || valid_region.contains(&a)) {
+                if !is_valid_ptr(a) {
                     return false;
                 }
-                if !(b.is_null() || valid_region.contains(&b)) {
+                if !is_valid_ptr(b) {
                     return false;
                 }
 
@@ -521,12 +524,8 @@ impl RuntimeModule {
                             max_rid_statics_allocated as usize;
 
                         Ok(valid_region.contains(&domain_local_module)
-                            && (regular_statics_offsets.is_null()
-                                || valid_region
-                                    .contains(&regular_statics_offsets))
-                            && (thread_statics_offsets.is_null()
-                                || valid_region
-                                    .contains(&thread_statics_offsets))
+                            && is_valid_ptr(regular_statics_offsets)
+                            && is_valid_ptr(thread_statics_offsets)
                             && max_rid_statics_allocated == num_type_defs
                            // The condition on module_index isn't
                            // technically a requirement, but this is a
@@ -1044,12 +1043,10 @@ impl LoadedParamTypes {
                         TypedPointer<LoadedParamTypeEntry>,
                     > {
                         let ptr: Pointer = chunk.into();
-                        if ptr.is_null() {
-                            None
-                        } else {
+                        ptr.as_non_null().map(|ptr| {
                             assert!(ptr.as_usize() % Pointer::SIZE == 0);
-                            Some(ptr.into())
-                        }
+                            ptr.into()
+                        })
                     },
                 )
         });

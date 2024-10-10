@@ -40,6 +40,15 @@ impl Pointer {
     }
 
     #[inline]
+    pub fn as_non_null(self) -> Option<Self> {
+        if self.is_null() {
+            None
+        } else {
+            Some(self)
+        }
+    }
+
+    #[inline]
     pub fn null() -> Self {
         Self { address: 0 }
     }

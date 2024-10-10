@@ -30,6 +30,15 @@ impl<T> TypedPointer<T> {
     {
         T::read_typed_ptr(self.ptr, reader)
     }
+
+    #[inline]
+    pub fn as_non_null(self) -> Option<Self> {
+        if self.is_null() {
+            None
+        } else {
+            Some(self)
+        }
+    }
 }
 
 impl<T> std::fmt::Debug for TypedPointer<T> {
@@ -126,6 +135,6 @@ impl<'a, T> UnpackOptBytes<'a> for TypedPointer<T> {
         bytes: memory_reader::ByteRange<'a>,
     ) -> Result<Option<Self>, Self::Error> {
         let ptr: Self = bytes.unpack()?;
-        Ok(if ptr.is_null() { None } else { Some(ptr) })
+        Ok(ptr.as_non_null())
     }
 }
