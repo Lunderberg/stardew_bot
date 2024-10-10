@@ -40,7 +40,7 @@ pub struct RuntimeModuleLayout {
     /// The offset to the lookup table of TypeDef to MethodTable.  If verifying
     /// against the debug symbols for API compatibility, this field is called
     /// `m_TypeDefToMethodTableMap`.
-    offset_to_method_table_lookup: usize,
+    offset_to_type_def_table: usize,
 
     /// The offset to the hashmap of instantiated generic types.  If verifying
     /// against the debug symbols for API compatibility, this field is called
@@ -81,10 +81,10 @@ pub struct RuntimeModule {
     /// The location of the pointer to the MethodTableLookup, and a
     /// bitmask defining flags that may be set on each method table
     /// pointer.
-    method_table_info: OnceCell<(UnpackedValue<Pointer>, usize)>,
+    type_def_table_info: OnceCell<(UnpackedValue<Pointer>, usize)>,
 
-    /// The lookup for the MethodTables
-    method_table_lookup: OnceCell<MethodTableLookup>,
+    /// The lookup for MethodTables defined in the module.
+    type_def_table: OnceCell<MethodTableLookup>,
 
     ptr_to_loaded_types: OnceCell<UnpackedValue<Option<Pointer>>>,
 
@@ -366,8 +366,8 @@ impl RuntimeModule {
             dll_region_info: Default::default(),
             dll_region: Default::default(),
             metadata_layout: Default::default(),
-            method_table_info: Default::default(),
-            method_table_lookup: Default::default(),
+            type_def_table_info: Default::default(),
+            type_def_table: Default::default(),
             ptr_to_loaded_types: Default::default(),
             base_ptr_of_non_gc_statics: Default::default(),
             base_ptr_of_gc_statics: Default::default(),
@@ -408,7 +408,7 @@ impl RuntimeModule {
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let is_valid_method_table_offset = |offset: usize| -> bool {
+        let is_valid_type_def_offset = |offset: usize| -> bool {
             if offset + Pointer::SIZE * 4 > NBYTES {
                 return false;
             }
@@ -452,9 +452,9 @@ impl RuntimeModule {
                 .unwrap_or(false)
         };
 
-        let offset_to_method_table_lookup = (0..NBYTES)
+        let offset_to_type_def_table = (0..NBYTES)
             .step_by(Pointer::SIZE)
-            .find(|offset| is_valid_method_table_offset(*offset))
+            .find(|offset| is_valid_type_def_offset(*offset))
             .ok_or(Error::PointerToMethodTableTableNotFound)?;
 
         let is_valid_instantiated_generics_offset = |offset: usize| -> bool {
@@ -488,8 +488,8 @@ impl RuntimeModule {
             at_least_one_pair_of_pointers
         };
 
-        let offset_to_instantiated_generics = (offset_to_method_table_lookup
-            ..offset_to_method_table_lookup + 512.min(NBYTES))
+        let offset_to_instantiated_generics = (offset_to_type_def_table
+            ..offset_to_type_def_table + 512.min(NBYTES))
             .step_by(Pointer::SIZE)
             .find(|offset| is_valid_instantiated_generics_offset(*offset))
             .ok_or(Error::PointerToInstantiatedGenericsNotFound)?;
@@ -549,7 +549,7 @@ impl RuntimeModule {
                 .ok_or(Error::PointerToDomainLocalModuleNotFound)?;
 
         Ok(RuntimeModuleLayout {
-            offset_to_method_table_lookup,
+            offset_to_type_def_table,
             offset_to_instantiated_generics,
             offset_to_base_address_of_non_gc_static_values,
         })
@@ -588,11 +588,11 @@ impl RuntimeModule {
             .name(format!("Base ptr of non-GC statics, Module {name}"));
 
         annotator
-            .value(self.method_table_info_unpacked(reader)?.0)
+            .value(self.type_def_table_info_unpacked(reader)?.0)
             .name(format!("TypeDefToMethodTable, Module {name}"));
 
         annotator
-            .range(self.method_table_lookup(reader)?.location.clone())
+            .range(self.type_def_table(reader)?.location.clone())
             .name(format!("TypeDefToMethodDef table"));
 
         annotator
@@ -612,7 +612,7 @@ impl RuntimeModule {
     ) -> Result<impl Iterator<Item = TypedPointer<MethodTable>> + 'a, Error>
     {
         let reader = reader.borrow();
-        Ok(self.method_table_lookup(reader)?.iter_table_pointers())
+        Ok(self.type_def_table(reader)?.iter_table_pointers())
     }
 
     pub fn iter_method_tables<'a>(
@@ -620,7 +620,7 @@ impl RuntimeModule {
         reader: &'a MemoryReader,
     ) -> Result<impl Iterator<Item = Result<MethodTable, Error>> + 'a, Error>
     {
-        Ok(self.method_table_lookup(reader)?.iter_tables(reader))
+        Ok(self.type_def_table(reader)?.iter_tables(reader))
     }
 
     pub fn vtable_location(
@@ -714,17 +714,16 @@ impl RuntimeModule {
         })
     }
 
-    pub fn method_table_info_unpacked(
+    pub fn type_def_table_info_unpacked(
         &self,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<(UnpackedValue<Pointer>, usize), Error> {
         let reader = reader.borrow();
 
-        self.method_table_info
+        self.type_def_table_info
             .or_try_init(|| {
                 let layout = self.get_layout(reader)?;
-                let start =
-                    self.location + layout.offset_to_method_table_lookup;
+                let start = self.location + layout.offset_to_type_def_table;
 
                 let bytes = reader.read_bytes(start..start + 32)?;
 
@@ -739,49 +738,48 @@ impl RuntimeModule {
             .cloned()
     }
 
-    fn method_table_info(
+    fn type_def_table_info(
         &self,
         reader: &MemoryReader,
     ) -> Result<(Pointer, usize), Error> {
-        let (ptr, bitmask) = self.method_table_info_unpacked(reader)?;
+        let (ptr, bitmask) = self.type_def_table_info_unpacked(reader)?;
         let ptr = ptr.value();
         Ok((ptr, bitmask))
     }
 
-    pub fn ptr_to_table_of_method_tables(
+    pub fn ptr_to_type_def_table(
         &self,
         reader: &MemoryReader,
     ) -> Result<Pointer, Error> {
-        self.method_table_info(reader).map(|(ptr, _)| ptr)
+        self.type_def_table_info(reader).map(|(ptr, _)| ptr)
     }
 
-    pub fn get_method_table(
+    pub fn get_type_def(
         &self,
         index: MetadataTableIndex<TypeDef>,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<TypedPointer<MethodTable>, Error> {
-        let lookup = self.method_table_lookup(reader)?;
+        let lookup = self.type_def_table(reader)?;
         let method_table = lookup.get_ptr(index);
         Ok(method_table)
     }
 
-    pub fn method_table_lookup(
+    pub fn type_def_table(
         &self,
         reader: impl Borrow<MemoryReader>,
     ) -> Result<&MethodTableLookup, Error> {
         let reader = reader.borrow();
 
-        self.method_table_lookup.or_try_init(|| {
+        self.type_def_table.or_try_init(|| {
             let num_type_defs =
                 self.metadata(reader)?.type_def_table().num_rows();
 
-            let (ptr_to_table_of_method_tables, supported_flags) =
-                self.method_table_info(reader)?;
+            let (ptr_to_type_def_table, supported_flags) =
+                self.type_def_table_info(reader)?;
 
             let ptr_to_method_tables = {
                 let nbytes = (num_type_defs + 1) * Pointer::SIZE;
-                ptr_to_table_of_method_tables
-                    ..ptr_to_table_of_method_tables + nbytes
+                ptr_to_type_def_table..ptr_to_type_def_table + nbytes
             };
 
             let method_tables = reader

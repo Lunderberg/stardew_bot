@@ -428,8 +428,7 @@ impl TuiExplorerBuilder {
 
         self.running_log.add_log(format!(
             "Method table: {}",
-            runtime_module
-                .ptr_to_table_of_method_tables(&self.tui_globals.reader)?
+            runtime_module.ptr_to_type_def_table(&self.tui_globals.reader)?
         ));
 
         self.running_log.add_log(format!(
@@ -448,7 +447,7 @@ impl TuiExplorerBuilder {
         annotations
             .range(
                 runtime_module
-                    .method_table_lookup(&self.tui_globals.reader)?
+                    .type_def_table(&self.tui_globals.reader)?
                     .location
                     .clone(),
             )
@@ -506,7 +505,7 @@ impl TuiExplorerBuilder {
                     annotations
                         .range(
                             runtime_module
-                                .method_table_lookup(&self.tui_globals.reader)?
+                                .type_def_table(&self.tui_globals.reader)?
                                 .location_of_method_table_pointer(
                                     type_def_token,
                                 ),

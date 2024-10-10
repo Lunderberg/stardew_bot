@@ -681,7 +681,7 @@ impl<'a> CachedReader<'a> {
                         module.metadata(self)?.get(coded_index)?;
                     let method_table_ptr = match type_metadata {
                         MetadataTypeDefOrRef::TypeDef(row) => {
-                            module.get_method_table(row.index(), self)?
+                            module.get_type_def(row.index(), self)?
                         }
                         MetadataTypeDefOrRef::TypeRef(row) => {
                             self.type_ref_lookup(row)?
@@ -912,8 +912,7 @@ impl<'a> CachedReader<'a> {
         if let Some(ref_type_def) = ref_type_def {
             // The TypeRef pointed to an assembly, and that assembly
             // contains the TypeDef we're looking for.
-            let ptr =
-                field_module.get_method_table(ref_type_def.index(), self)?;
+            let ptr = field_module.get_type_def(ref_type_def.index(), self)?;
 
             return Ok(ptr);
         }
