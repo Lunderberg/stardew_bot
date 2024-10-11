@@ -129,7 +129,7 @@ impl MethodTable {
             // element type and size require the field metadata to
             // unpack.
             None
-        } else if type_flag == 0x00040000 {
+        } else if type_flag == 0x00040000 || type_flag == 0x00050000 {
             Some(RuntimeType::ValueType {
                 method_table: self.ptr(),
                 size: self.base_size(),
