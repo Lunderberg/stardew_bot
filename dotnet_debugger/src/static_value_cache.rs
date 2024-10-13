@@ -28,7 +28,7 @@ use crate::{
 /// not.
 #[derive(Default)]
 pub struct StaticValueCache {
-    method_tables: FrozenMap<TypedPointer<MethodTable>, Box<MethodTable>>,
+    type_handles: FrozenMap<TypedPointer<TypeHandle>, Box<TypeHandle>>,
 
     runtime_modules: FrozenMap<TypedPointer<RuntimeModule>, Box<RuntimeModule>>,
     runtime_module_vtable: OnceCell<Pointer>,
@@ -120,8 +120,36 @@ impl<'a> CachedReader<'a> {
         &self,
         ptr: TypedPointer<MethodTable>,
     ) -> Result<&MethodTable, Error> {
+        let ptr: Pointer = ptr.into();
+
+        // All method tables exist at locations with pointer
+        // alignment.  However, many locations in the CLR hold either
+        // method tables or type descriptions, using the low bits of
+        // the pointer to determine which it is.
+        //
+        // To avoid having method tables be duplicated between a
+        // lookup table for MethodTable and a lookup table for
+        // TypeHandle, this function unpacks a TypeHandle, then
+        // unwraps to a MethodTable.
+        if ptr.as_usize() % Pointer::SIZE != 0 {
+            return Err(Error::MisalignedMethodTable(ptr));
+        }
+
+        let type_handle = self.type_handle(ptr.into())?;
+        match type_handle {
+            TypeHandle::MethodTable(method_table) => Ok(method_table),
+            TypeHandle::TypeDescription(_) => panic!(
+                "Unreachable, would be caught by earlier alignment check."
+            ),
+        }
+    }
+
+    pub fn type_handle(
+        &self,
+        ptr: TypedPointer<TypeHandle>,
+    ) -> Result<&TypeHandle, Error> {
         self.state
-            .method_tables
+            .type_handles
             .try_insert(ptr, || ptr.read(self.reader))
     }
 
@@ -354,7 +382,7 @@ impl<'a> CachedReader<'a> {
         sig_arg: &SignatureType<'_>,
         type_handle_ptr: TypedPointer<TypeHandle>,
     ) -> Result<bool, Error> {
-        let type_handle = type_handle_ptr.read(self)?;
+        let type_handle = self.type_handle(type_handle_ptr)?;
 
         let arg_matches = match sig_arg {
             dll_unpacker::SignatureType::Class { index, .. }
@@ -592,8 +620,7 @@ impl<'a> CachedReader<'a> {
                                         }
                                     };
 
-                                let type_handle =
-                                    type_handle_ptr.read(self.reader)?;
+                                let type_handle = self.type_handle(*type_handle_ptr)?;
                                 let method_table = match &type_handle {
                                     TypeHandle::MethodTable(mt) => mt,
                                     TypeHandle::TypeDescription(_) => {
@@ -704,7 +731,7 @@ impl<'a> CachedReader<'a> {
                     })?
                     .clone();
 
-                let type_handle = ptr_type_handle.read(self.reader)?;
+                let type_handle = self.type_handle(ptr_type_handle)?;
                 let runtime_type = match type_handle {
                     TypeHandle::MethodTable(method_table) => {
                         method_table.runtime_type(self.reader)?

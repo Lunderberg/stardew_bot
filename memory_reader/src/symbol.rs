@@ -63,10 +63,10 @@ impl Symbol {
                 Symbol { name, location }
             })
             .map(|symbol| {
-                let name = match cpp_demangle::Symbol::new(&symbol.name) {
-                    Ok(demangled) => format!("{demangled}"),
-                    Err(_) => symbol.name,
-                };
+                let name = cpp_demangle::Symbol::new(&symbol.name)
+                    .ok()
+                    .and_then(|sym| sym.demangle(&Default::default()).ok())
+                    .unwrap_or_else(|| symbol.name);
                 Symbol { name, ..symbol }
             })
     }
