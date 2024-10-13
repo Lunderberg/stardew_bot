@@ -345,6 +345,7 @@ impl DynamicLayout {
         self.windows.swap(self.active_window, 0);
         self.windows.shrink_to(1);
         self.active_window = 0;
+        self.windows[0].parent = None;
     }
 
     pub fn switch_to_buffer(&mut self, index: usize) {
