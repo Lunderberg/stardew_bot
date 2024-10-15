@@ -704,11 +704,13 @@ impl std::fmt::Display for SignatureType<'_> {
             SignatureType::MultiDimArray { element_type, .. } => {
                 write!(f, "{element_type}[]")
             }
-            SignatureType::Class { index, metadata } => {
-                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
-            }
-            SignatureType::ValueType { index, metadata } => {
-                write!(f, "{}", metadata.get(*index).unwrap().name().unwrap())
+            SignatureType::Class { index, metadata }
+            | SignatureType::ValueType { index, metadata } => {
+                write!(
+                    f,
+                    "{}",
+                    metadata.get(*index).unwrap().full_name().unwrap()
+                )
             }
             SignatureType::GenericInst {
                 index,

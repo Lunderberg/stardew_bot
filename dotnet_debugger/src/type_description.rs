@@ -119,6 +119,26 @@ impl TypeHandle {
                 let name = row.name()?;
                 let namespace = row.namespace()?;
                 write!(fmt, "{namespace}.{name}")?;
+
+                if method_table.has_generics() {
+                    write!(fmt, "<")?;
+                    method_table
+                        .generic_types(reader)?
+                        .into_iter()
+                        .try_for_each(
+                            |type_handle_ptr| -> Result<_, Error> {
+                                let type_handle =
+                                    reader.type_handle(type_handle_ptr)?;
+                                write!(
+                                    fmt,
+                                    "{}",
+                                    type_handle.printable(reader)
+                                )?;
+                                Ok(())
+                            },
+                        )?;
+                    write!(fmt, ">")?;
+                }
             }
 
             RuntimeType::String => {

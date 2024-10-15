@@ -35,7 +35,7 @@ impl<'a> RuntimeArrayHeader<'a> {
 }
 
 impl RuntimeArray {
-    const HEADER_SIZE: usize = Pointer::SIZE + 8;
+    pub const HEADER_SIZE: usize = Pointer::SIZE + 8;
 
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.start..self.start + self.size_bytes()

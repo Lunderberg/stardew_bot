@@ -13,8 +13,8 @@ use crate::extended_tui::{
     Annotation, DynamicLayout, WidgetSideEffects, WidgetWindow,
 };
 use crate::{
-    extensions::*, MetadataDisplay, ObjectExplorer, UserConfig,
-    UserConfigEditor,
+    extensions::*, LiveVariableDisplay, MetadataDisplay, ObjectExplorer,
+    UserConfig, UserConfigEditor,
 };
 use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
@@ -63,6 +63,7 @@ struct TuiBuffers {
     object_explorer: ObjectExplorer,
     user_config_editor: UserConfigEditor,
     metadata_display: MetadataDisplay,
+    live_variable_display: LiveVariableDisplay,
 }
 
 pub struct TuiExplorerBuilder {
@@ -158,9 +159,14 @@ impl TuiExplorerBuilder {
 
     pub fn layout_object_explorer(mut self) -> Self {
         self.layout.close_all_other_windows();
-        self.layout.switch_to_buffer(3);
-        self.layout.split_horizontally(None, Some(60));
         self.layout.switch_to_buffer(4);
+        self.layout.split_horizontally(None, None);
+        self.layout.cycle_next();
+        self.layout.switch_to_buffer(7);
+        self.layout.split_vertically(None, None);
+        self.layout.cycle_next();
+        self.layout.switch_to_buffer(3);
+        self.layout.cycle_next();
         self
     }
 
@@ -656,6 +662,7 @@ impl TuiExplorerBuilder {
                 object_explorer,
                 user_config_editor: UserConfigEditor::new(self.user_config),
                 metadata_display,
+                live_variable_display: LiveVariableDisplay::new(),
             },
 
             should_exit: false,
@@ -676,6 +683,7 @@ impl TuiBuffers {
             Box::new(&mut self.object_explorer),
             Box::new(&mut self.user_config_editor),
             Box::new(&mut self.metadata_display),
+            Box::new(&mut self.live_variable_display),
         ]
     }
 }
@@ -853,12 +861,30 @@ impl TuiExplorer {
         }
 
         if !side_effects.annotations.is_empty() {
-            side_effects.annotations.into_iter().for_each(|ann| {
+            let annotations = {
+                let mut vec = Vec::new();
+                std::mem::swap(&mut side_effects.annotations, &mut vec);
+                vec
+            };
+
+            annotations.into_iter().for_each(|ann| {
                 self.tui_globals.annotations.push(ann);
             });
             self.tui_globals
                 .annotations
                 .sort_by_key(Annotation::sort_key);
+        }
+
+        if let Some(live_var) = side_effects.live_variable.take() {
+            if let Err(err) = buffer_list.iter_mut().try_for_each(|buffer| {
+                buffer.add_live_variable(
+                    &self.tui_globals,
+                    &mut side_effects,
+                    &live_var,
+                )
+            }) {
+                side_effects.add_log(format!("Error: {err}"));
+            }
         }
 
         // Process the log messages last, since handling other side

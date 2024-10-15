@@ -1,5 +1,6 @@
 use std::{borrow::Cow, ops::Range};
 
+use dotnet_debugger::SymbolicAccessChain;
 use memory_reader::Pointer;
 
 use crate::{Error, KeyBindingMatch, KeySequence, TuiGlobals};
@@ -39,6 +40,15 @@ pub trait WidgetWindow {
     ) {
     }
 
+    fn add_live_variable<'a>(
+        &'a mut self,
+        _globals: &'a TuiGlobals,
+        _side_effects: &'a mut WidgetSideEffects,
+        _access_chain: &'a SymbolicAccessChain,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
     /// Draw the window.  This may be able to be simplified once
     /// ratatui's WidgetRef trait is stabilized.
     fn draw<'a>(
@@ -54,6 +64,7 @@ pub struct WidgetSideEffects {
     pub(crate) change_address: Option<Pointer>,
     pub(crate) log_messages: Vec<String>,
     pub(crate) annotations: Vec<Annotation>,
+    pub(crate) live_variable: Option<SymbolicAccessChain>,
 }
 
 impl WidgetSideEffects {

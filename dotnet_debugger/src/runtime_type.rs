@@ -270,6 +270,7 @@ impl std::fmt::Display for RuntimeType {
                     Some(ty) => write!(f, "{ty}")?,
                     None => write!(f, "(not-yet-loaded)")?,
                 }
+                write!(f, "[")?;
 
                 for _ in 0..*rank - 1 {
                     write!(f, ",")?;

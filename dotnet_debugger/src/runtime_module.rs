@@ -619,6 +619,10 @@ impl RuntimeModule {
         reader: &'a MemoryReader,
     ) -> Result<impl Iterator<Item = Result<MethodTable, Error>> + 'a, Error>
     {
+        // TODO: Remove this method, since it re-reads every method
+        // table each time.  Instead, should use
+        // `iter_method_table_pointers`, followed by
+        // `CachedReader.method_table`.
         Ok(self.type_def_table(reader)?.iter_tables(reader))
     }
 

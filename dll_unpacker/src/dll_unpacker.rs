@@ -1261,6 +1261,26 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
 }
 
 impl<'a> MetadataTypeDefOrRef<'a> {
+    pub fn full_name(&self) -> Result<String, Error> {
+        let (namespace, name) = match self {
+            MetadataTypeDefOrRef::TypeDef(row) => {
+                (row.namespace()?, row.name()?.to_string())
+            }
+            MetadataTypeDefOrRef::TypeRef(row) => {
+                (row.namespace()?, row.name()?.to_string())
+            }
+            MetadataTypeDefOrRef::TypeSpec(spec) => {
+                ("", format!("{}", spec.signature()?).into())
+            }
+        };
+
+        if namespace.is_empty() {
+            Ok(name)
+        } else {
+            Ok(format!("{namespace}.{name}"))
+        }
+    }
+
     pub fn name(&self) -> Result<Cow<'a, str>, Error> {
         match self {
             MetadataTypeDefOrRef::TypeDef(row) => Ok(row.name()?.into()),

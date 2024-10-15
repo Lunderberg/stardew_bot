@@ -84,10 +84,7 @@ pub enum Error {
     )]
     ValueTypeRequiresContextualParsing,
 
-    #[error(
-        "Expected valid pointer to MethodTable, \
-         but found NULL pointer for {0}."
-    )]
+    #[error("MethodTable pointer for {0} was NULL.")]
     UnexpectedNullMethodTable(String),
 
     #[error(
@@ -163,6 +160,41 @@ pub enum Error {
 
     #[error("Could not find method table {namespace}.{name}")]
     NoSuchMethodTableFound { namespace: String, name: String },
+
+    #[error(
+        "Could not find static field {field} within \
+         method table of {class}."
+    )]
+    NoSuchStaticField { class: String, field: String },
+
+    #[error(
+        "Could not find instance field {field_name} within \
+         method table {class_name}"
+    )]
+    NoSuchInstanceField {
+        class_name: String,
+        field_name: String,
+    },
+
+    #[error(
+        "The SymbolicOperation::Field(name) operation \
+         accesses a field of a class or struct.  \
+         However, it was applied to an object of type {0}."
+    )]
+    FieldAccessRequiresClassOrStruct(RuntimeType),
+
+    #[error(
+        "The SymbolicOperation::IndexAccess(index) operation \
+         accesses an element of an arry.  \
+         However, it was applied to an object of type {0}."
+    )]
+    IndexAccessRequiresArray(RuntimeType),
+
+    #[error(
+        "Fireld {field} was type {ty}, \
+         but expected a primitive type."
+    )]
+    AccessChainMustTerminateInPrimitive { field: String, ty: RuntimeType },
 
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),

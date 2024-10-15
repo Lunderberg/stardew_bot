@@ -61,3 +61,6 @@ pub(crate) use user_config::UserConfig;
 
 mod user_config_editor;
 pub(crate) use user_config_editor::UserConfigEditor;
+
+mod live_variable_display;
+pub(crate) use live_variable_display::LiveVariableDisplay;

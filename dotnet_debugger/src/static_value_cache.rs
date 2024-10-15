@@ -381,66 +381,61 @@ impl<'a> CachedReader<'a> {
         module_ptr: TypedPointer<RuntimeModule>,
         sig_arg: &SignatureType<'_>,
         type_handle_ptr: TypedPointer<TypeHandle>,
+        parent_generic_types: &[TypedPointer<TypeHandle>],
     ) -> Result<bool, Error> {
         let type_handle = self.type_handle(type_handle_ptr)?;
 
         let arg_matches = match sig_arg {
-            dll_unpacker::SignatureType::Class { index, .. }
-            | dll_unpacker::SignatureType::ValueType { index, .. } => {
-                match type_handle {
-                    TypeHandle::MethodTable(arg_method_table) => {
-                        let (expected_module, expected_token) =
-                            self.module_defining_type(module_ptr, *index)?;
+            SignatureType::Class { index, .. }
+            | SignatureType::ValueType { index, .. } => match type_handle {
+                TypeHandle::MethodTable(arg_method_table) => {
+                    let (expected_module, expected_token) =
+                        self.module_defining_type(module_ptr, *index)?;
 
-                        arg_method_table.module() == expected_module
-                            && arg_method_table.token() == Some(expected_token)
-                    }
-                    TypeHandle::TypeDescription(_) => false,
+                    arg_method_table.module() == expected_module
+                        && arg_method_table.token() == Some(expected_token)
                 }
-            }
-            dll_unpacker::SignatureType::Prim(sig_prim_type) => {
-                match type_handle {
-                    TypeHandle::TypeDescription(type_description) => {
-                        match type_description.element_type() {
-                            CorElementType::Prim(actual_prim_type) => {
+                TypeHandle::TypeDescription(_) => false,
+            },
+            SignatureType::Prim(sig_prim_type) => match type_handle {
+                TypeHandle::TypeDescription(type_description) => {
+                    match type_description.element_type() {
+                        CorElementType::Prim(actual_prim_type) => {
+                            Some(actual_prim_type)
+                        }
+                        _ => None,
+                    }
+                }
+                TypeHandle::MethodTable(method_table) => {
+                    if method_table.is_prim_type() {
+                        match method_table.runtime_type(self.reader)? {
+                            RuntimeType::Prim(actual_prim_type) => {
                                 Some(actual_prim_type)
                             }
                             _ => None,
                         }
-                    }
-                    TypeHandle::MethodTable(method_table) => {
-                        if method_table.is_prim_type() {
-                            match method_table.runtime_type(self.reader)? {
-                                RuntimeType::Prim(actual_prim_type) => {
-                                    Some(actual_prim_type)
-                                }
-                                _ => None,
-                            }
-                        } else {
-                            None
-                        }
+                    } else {
+                        None
                     }
                 }
-                .map(|prim_type| sig_prim_type == &prim_type)
-                .unwrap_or(false)
             }
-            dll_unpacker::SignatureType::String => match type_handle {
+            .map(|prim_type| sig_prim_type == &prim_type)
+            .unwrap_or(false),
+            SignatureType::String => match type_handle {
                 TypeHandle::MethodTable(method_table) => {
                     method_table.is_string()
                 }
                 _ => false,
             },
-            dll_unpacker::SignatureType::Object => {
+            SignatureType::Object => {
                 let object_method_table_ptr = self
                     .method_table_by_name("System", "Object")?
                     .ok_or(Error::MethodTableOfSystemObjectShouldBeLoaded)?;
                 type_handle_ptr.as_method_table()
                     == Some(object_method_table_ptr)
             }
-            dll_unpacker::SignatureType::GenericInst {
-                index,
-                type_args,
-                ..
+            SignatureType::GenericInst {
+                index, type_args, ..
             } => match type_handle {
                 TypeHandle::MethodTable(method_table) => {
                     let (_ptr_to_defining_module, type_def_index) =
@@ -459,6 +454,7 @@ impl<'a> CachedReader<'a> {
                                         module_ptr,
                                         sig_arg.as_ref(),
                                         type_handle_ptr,
+                                        parent_generic_types,
                                     )
                                 })?
                     } else {
@@ -467,13 +463,25 @@ impl<'a> CachedReader<'a> {
                 }
                 TypeHandle::TypeDescription(_) => false,
             },
-            SignatureType::GenericVarFromType(sig_index) => match type_handle {
-                TypeHandle::TypeDescription(type_description) => {
-                    type_description.index() == Some(*sig_index as usize)
-                }
-                _ => false,
-            },
+            SignatureType::GenericVarFromType(sig_index) => {
+                let sig_index = *sig_index as usize;
+                let expected_type_handle = parent_generic_types
+                    .get(sig_index)
+                    .ok_or_else(|| Error::InvalidGenericTypeVar {
+                        index: sig_index,
+                        num_vars: parent_generic_types.len(),
+                    })?
+                    .clone();
 
+                type_handle_ptr == expected_type_handle
+
+                // match type_handle {
+                // TypeHandle::TypeDescription(type_description) => {
+                //     type_description.index() == Some(*sig_index as usize)
+                // }
+                // _ => false,
+                // }
+            }
             SignatureType::SizeArray(sig_element_type) => match type_handle {
                 TypeHandle::MethodTable(method_table) => method_table
                     .array_element_type()
@@ -485,6 +493,7 @@ impl<'a> CachedReader<'a> {
                             module_ptr,
                             sig_element_type,
                             element_ptr,
+                            parent_generic_types,
                         )
                     })
                     .transpose()?
@@ -508,13 +517,13 @@ impl<'a> CachedReader<'a> {
     ) -> Result<Option<RuntimeType>, Error> {
         // TODO: Match by reference to avoid the clone.
         let runtime_type = match sig_type.clone() {
-            dll_unpacker::SignatureType::Prim(prim) => {
+            SignatureType::Prim(prim) => {
                 // This case should already have been handled
                 // by checking the field description.
                 RuntimeType::Prim(prim.into())
             }
 
-            dll_unpacker::SignatureType::ValueType { index, .. } => {
+            SignatureType::ValueType { index, .. } => {
                 let Some(method_table) =
                     self.method_table_by_metadata(module_ptr, index)?
                 else {
@@ -523,13 +532,13 @@ impl<'a> CachedReader<'a> {
                 let size = self.method_table(method_table)?.base_size();
                 RuntimeType::ValueType { method_table, size }
             }
-            dll_unpacker::SignatureType::Class { index, .. } => {
+            SignatureType::Class { index, .. } => {
                 let method_table =
                     self.method_table_by_metadata(module_ptr, index)?;
                 RuntimeType::Class { method_table }
             }
 
-            dll_unpacker::SignatureType::GenericInst {
+            SignatureType::GenericInst {
                 index,
                 type_args,
                 is_value_type,
@@ -543,31 +552,20 @@ impl<'a> CachedReader<'a> {
                     .next()
                     .map(|arg| -> Result<_, Error> {
                         Ok(match arg.as_ref() {
-                            dll_unpacker::SignatureType::Prim(_)
-                            | dll_unpacker::SignatureType::Object
-                            | dll_unpacker::SignatureType::String => {
+                            SignatureType::Prim(_)
+                            | SignatureType::Object
+                            | SignatureType::String => {
                                 Some(self.runtime_module_by_name(
                                     "System.Private.CoreLib",
                                 )?)
                             }
-                            dll_unpacker::SignatureType::Class {
-                                index,
-                                ..
-                            }
-                            | dll_unpacker::SignatureType::ValueType {
-                                index,
-                                ..
-                            }
-                            | dll_unpacker::SignatureType::GenericInst {
-                                index,
-                                ..
-                            } => Some(
+                            SignatureType::Class { index, .. }
+                            | SignatureType::ValueType { index, .. }
+                            | SignatureType::GenericInst { index, .. } => Some(
                                 self.module_defining_type(module_ptr, *index)
                                     .map(|(ptr, _)| ptr)?,
                             ),
-                            dll_unpacker::SignatureType::GenericVarFromType(
-                                _,
-                            ) => None,
+                            SignatureType::GenericVarFromType(_) => None,
 
                             _ => todo!(
                                 "Handle case, \
@@ -602,6 +600,10 @@ impl<'a> CachedReader<'a> {
                                 Either::Right(std::iter::once(Err(err)))
                             }
                         });
+
+                let parent_generic_types = self
+                    .method_table(ptr_mtable_of_parent)?
+                    .generic_types(self)?;
 
                 generic_method_table_ptr
                         .into_iter()
@@ -648,6 +650,7 @@ impl<'a> CachedReader<'a> {
                                             module_ptr,
                                             sig_arg,
                                             *type_handle_ptr,
+                                            &parent_generic_types,
                                         )?;
                                     if !arg_matches {
                                         return Ok(false);
@@ -695,7 +698,7 @@ impl<'a> CachedReader<'a> {
                             },
                         )?
             }
-            dll_unpacker::SignatureType::String => {
+            SignatureType::String => {
                 // The String type appears as `Runtime::Class`
                 // when inspecting the `desc.runtime_type()`.
                 // It's technically correct, but identifying
@@ -706,7 +709,7 @@ impl<'a> CachedReader<'a> {
                 // table.
                 RuntimeType::String
             }
-            dll_unpacker::SignatureType::SizeArray(element_type) => {
+            SignatureType::SizeArray(element_type) => {
                 let element_type = self
                     .signature_type_to_runtime_type(
                         module_ptr,
@@ -716,11 +719,10 @@ impl<'a> CachedReader<'a> {
                     .map(Box::new);
                 RuntimeType::Array { element_type }
             }
-            dll_unpacker::SignatureType::GenericVarFromType(var_index) => {
-                let mtable_of_parent =
-                    self.method_table(ptr_mtable_of_parent)?;
-
-                let generic_types = mtable_of_parent.generic_types(self)?;
+            SignatureType::GenericVarFromType(var_index) => {
+                let generic_types = self
+                    .method_table(ptr_mtable_of_parent)?
+                    .generic_types(self)?;
 
                 let var_index = var_index as usize;
                 let ptr_type_handle = generic_types
@@ -732,6 +734,7 @@ impl<'a> CachedReader<'a> {
                     .clone();
 
                 let type_handle = self.type_handle(ptr_type_handle)?;
+
                 let runtime_type = match type_handle {
                     TypeHandle::MethodTable(method_table) => {
                         method_table.runtime_type(self.reader)?
@@ -741,17 +744,27 @@ impl<'a> CachedReader<'a> {
                             CorElementType::Prim(prim) => {
                                 RuntimeType::Prim(prim)
                             }
-                            _ => todo!(),
+                            CorElementType::Var => {
+                                todo!(
+                                    "Signature type {sig_type}, \
+                                     contained withing type {} \
+                                     is a generic type index {var_index} \
+                                     points to generic type index {}",
+                                    self.method_table_to_name(
+                                        ptr_mtable_of_parent
+                                    )?,
+                                    type_desc.index().unwrap()
+                                )
+                            }
+                            other => todo!("Type description with {other}"),
                         }
                     }
                 };
 
                 runtime_type
             }
-            dll_unpacker::SignatureType::MultiDimArray {
-                element_type,
-                rank,
-                ..
+            SignatureType::MultiDimArray {
+                element_type, rank, ..
             } => {
                 let element_type = self
                     .signature_type_to_runtime_type(
@@ -762,7 +775,7 @@ impl<'a> CachedReader<'a> {
                     .map(Box::new);
                 RuntimeType::MultiDimArray { element_type, rank }
             }
-            dll_unpacker::SignatureType::Object => {
+            SignatureType::Object => {
                 let method_table =
                     self.method_table_by_name("System", "Object")?;
                 RuntimeType::Class { method_table }
@@ -941,38 +954,45 @@ impl<'a> CachedReader<'a> {
             .method_table_to_name
             .try_insert(ptr, || {
                 let method_table = self.method_table(ptr)?;
-                let Some(type_def_token) = method_table.token() else {
-                    return Ok("(null metadata token)".to_string());
-                };
 
-                let module = self.runtime_module(method_table.module())?;
-                let metadata = module.metadata(self)?;
+                let fullname = format!(
+                    "{}",
+                    TypeHandle::MethodTable(method_table.clone())
+                        .printable(*self)
+                );
 
-                let type_def = metadata.get(type_def_token)?;
-                let name = type_def.name()?;
+                // let Some(type_def_token) = method_table.token() else {
+                //     return Ok("(null metadata token)".to_string());
+                // };
 
-                let namespace = type_def.namespace()?;
-                let namespace = if namespace.is_empty() {
-                    None
-                } else {
-                    Some(namespace)
-                };
+                // let module = self.runtime_module(method_table.module())?;
+                // let metadata = module.metadata(self)?;
 
-                let extends = type_def
-                    .extends()?
-                    .map(|type_def_or_ref| type_def_or_ref.name())
-                    .transpose()?;
+                // let type_def = metadata.get(type_def_token)?;
+                // let name = type_def.name()?;
 
-                let fullname = match (namespace, extends) {
-                    (Some(namespace), Some(extends)) => {
-                        format!("{namespace}.{name} extends {extends}")
-                    }
-                    (None, Some(extends)) => {
-                        format!("{name} extends {extends}")
-                    }
-                    (Some(namespace), None) => format!("{namespace}.{name}"),
-                    (None, None) => format!("{name}"),
-                };
+                // let namespace = type_def.namespace()?;
+                // let namespace = if namespace.is_empty() {
+                //     None
+                // } else {
+                //     Some(namespace)
+                // };
+
+                // let extends = type_def
+                //     .extends()?
+                //     .map(|type_def_or_ref| type_def_or_ref.name())
+                //     .transpose()?;
+
+                // let fullname = match (namespace, extends) {
+                //     (Some(namespace), Some(extends)) => {
+                //         format!("{namespace}.{name} extends {extends}")
+                //     }
+                //     (None, Some(extends)) => {
+                //         format!("{name} extends {extends}")
+                //     }
+                //     (Some(namespace), None) => format!("{namespace}.{name}"),
+                //     (None, None) => format!("{name}"),
+                // };
 
                 Ok(fullname)
             })
@@ -1006,7 +1026,10 @@ impl<'a> CachedReader<'a> {
     pub fn iter_instance_fields(
         &self,
         method_table_ptr: TypedPointer<MethodTable>,
-    ) -> Result<impl Iterator<Item = FieldDescription<'a>> + 'a, Error> {
+    ) -> Result<
+        impl Iterator<Item = (TypedPointer<MethodTable>, FieldDescription<'a>)> + 'a,
+        Error,
+    > {
         // Each class only records its own instance fields.  To get a
         // full record of all instance fields, the parent classes must
         // also be inspected.
@@ -1025,12 +1048,18 @@ impl<'a> CachedReader<'a> {
                     .flatten()
             },
         )
-        .map(|res_ptr| res_ptr.and_then(|ptr| self.field_descriptions(ptr)))
+        .flat_map_ok(|ptr| {
+            let iter = self
+                .field_descriptions(ptr)?
+                .into_iter()
+                .flatten()
+                .map(move |field| Ok((ptr, field)));
+            Ok(iter)
+        })
+        .map(|res| res?)
+        .filter_ok(|(_, field)| !field.is_static())
         .collect::<Result<Vec<_>, Error>>()?
-        .into_iter()
-        .flatten()
-        .flatten()
-        .filter(|field| !field.is_static());
+        .into_iter();
 
         Ok(iter)
     }

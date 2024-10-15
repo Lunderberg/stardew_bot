@@ -11,7 +11,8 @@ use ratatui::{
 
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
-    RuntimeValue, SymbolicAccessChain, SymbolicOperation, TypedPointer,
+    RuntimeValue, SymbolicAccessChain, SymbolicOperation, SymbolicStaticField,
+    SymbolicType, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 
@@ -645,7 +646,7 @@ impl ObjectExplorer {
     fn access_chain_selected_node(&self) -> Result<SymbolicAccessChain, Error> {
         let node_chain = self.selected_node_chain()?;
 
-        let (class_namespace, class_name, static_field_name) = {
+        let static_field = {
             let ObjectTreeNode::Object { class_name, .. } = &node_chain
                 .get(0)
                 .ok_or(Error::InvalidMetadataDisplayIndex)?
@@ -664,11 +665,13 @@ impl ObjectExplorer {
                 panic!("Outermost node should be static field");
             };
 
-            (
-                class_name.namespace.clone(),
-                class_name.name.clone(),
-                field_name.clone(),
-            )
+            SymbolicStaticField {
+                class: SymbolicType {
+                    namespace: class_name.namespace.clone(),
+                    name: class_name.name.clone(),
+                },
+                field_name: field_name.clone(),
+            }
         };
 
         let ops = node_chain[2..]
@@ -688,12 +691,7 @@ impl ObjectExplorer {
             })
             .collect();
 
-        Ok(SymbolicAccessChain {
-            class_namespace,
-            class_name,
-            static_field_name,
-            ops,
-        })
+        Ok(SymbolicAccessChain { static_field, ops })
     }
 }
 
@@ -792,7 +790,7 @@ impl ObjectTreeNode {
         let metadata = module.metadata(reader)?;
         let field_metadata = metadata.get(field.token())?;
 
-        let field_type = format!("{}", field_metadata.signature()?);
+        let field_type = reader.field_to_type_name(&field)?.to_string();
 
         let field_name = field_metadata.name()?.to_string();
 
@@ -928,18 +926,18 @@ impl ObjectTreeNode {
 
                     let fields = reader
                         .iter_instance_fields(obj.method_table())?
-                        .sorted_by_key(|field| {
+                        .sorted_by_key(|(_, field)| {
                             display_options.field_sort_key(*field, reader)
                         })
-                        .map(|field| -> Result<_, Error> {
+                        .map(|(parent_of_field, field)| -> Result<_, Error> {
                             Self::initial_field(
-                                obj.method_table(),
+                                //obj.method_table(),
+                                parent_of_field,
                                 FieldContainer::Class(instance_location.into()),
                                 field,
                                 reader,
                                 display_options,
                                 prefetch,
-                                // 0,
                             )
                         })
                         .collect::<Result<Vec<_>, Error>>()?;
@@ -1405,7 +1403,7 @@ impl<'a> TreeVisitorExtension for TreeNodeFinder<'a> {
         }
     }
     fn postvisit(&mut self, node: &ObjectTreeNode) {
-        if self.current_line == self.selected {
+        if self.current_line == self.selected && self.result.is_none() {
             *self.result = Some(node as *const _);
         }
     }
@@ -1662,8 +1660,9 @@ impl WidgetWindow for ObjectExplorer {
             })
             .or_try_binding("C-t", keystrokes, || {
                 match self.access_chain_selected_node() {
-                    Ok(access_chain) => side_effects
-                        .add_log(format!("Symbolic access: {access_chain}")),
+                    Ok(chain) => {
+                        side_effects.live_variable = Some(chain);
+                    }
                     Err(err) => side_effects.add_log(format!("Err: {err}")),
                 }
             })

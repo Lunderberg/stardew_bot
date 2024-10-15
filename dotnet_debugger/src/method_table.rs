@@ -7,8 +7,9 @@ use dll_unpacker::{
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    unpack_fields, CorElementType, Error, FieldDescription, FieldDescriptions,
-    ReadTypedPointer, RuntimeModule, RuntimeType, TypeHandle, TypedPointer,
+    extensions::all_ok::AllOk as _, unpack_fields, CorElementType, Error,
+    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
+    RuntimeType, TypeHandle, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -123,11 +124,12 @@ impl MethodTable {
                 method_table: Some(self.ptr()),
             })
         } else if type_flag == 0x000A0000 {
+            // This is a dyanamically-sized 1-d array.
             None
         } else if type_flag == 0x00080000 {
-            // This is a statically-sized array, but determining the
-            // element type and size require the field metadata to
-            // unpack.
+            // This is a multi-dimensional array array, but
+            // determining the element type and size require the field
+            // metadata to unpack.
             None
         } else if type_flag == 0x00040000 || type_flag == 0x00050000 {
             Some(RuntimeType::ValueType {
@@ -342,6 +344,33 @@ impl MethodTable {
             .flatten();
 
         Ok(from_self.chain(from_parents).collect())
+    }
+
+    pub fn has_non_instantiated_generic_types(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<bool, Error> {
+        if !self.has_generics() {
+            return Ok(false);
+        }
+
+        let reader = reader.borrow();
+        self.generic_types(reader)?
+            .into_iter()
+            .all_ok(|type_handle_ptr| {
+                let type_handle = type_handle_ptr.read(reader)?;
+                let is_non_instantiated_generic = match type_handle {
+                    TypeHandle::MethodTable(_) => false,
+                    TypeHandle::TypeDescription(type_desc) => {
+                        match type_desc.element_type() {
+                            CorElementType::Var => true,
+                            _ => false,
+                        }
+                    }
+                };
+
+                Ok(is_non_instantiated_generic)
+            })
     }
 
     pub fn token(&self) -> Option<MetadataTableIndex<TypeDef>> {
