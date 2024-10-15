@@ -635,8 +635,8 @@ impl<'a> CachedReader<'a> {
                                     return Ok(false);
                                 }
 
-                                let generic_types =
-                                    method_table.generic_types(self)?;
+                                let generic_types: Vec<_> =
+                                    method_table.generic_types_excluding_base_class(self)?.collect();
 
                                 if generic_types.len() != type_args.len() {
                                     return Ok(false);
