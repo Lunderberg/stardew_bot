@@ -123,8 +123,7 @@ impl TypeHandle {
                 if method_table.has_generics() {
                     write!(fmt, "<")?;
                     method_table
-                        .generic_types(reader)?
-                        .into_iter()
+                        .generic_types_excluding_base_class(reader.borrow())?
                         .try_for_each(
                             |type_handle_ptr| -> Result<_, Error> {
                                 let type_handle =
