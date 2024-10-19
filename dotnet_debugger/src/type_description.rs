@@ -124,8 +124,12 @@ impl TypeHandle {
                     write!(fmt, "<")?;
                     method_table
                         .generic_types_excluding_base_class(reader.borrow())?
+                        .enumerate()
                         .try_for_each(
-                            |type_handle_ptr| -> Result<_, Error> {
+                            |(i, type_handle_ptr)| -> Result<_, Error> {
+                                if i > 0 {
+                                    write!(fmt, ", ")?;
+                                }
                                 let type_handle =
                                     reader.type_handle(type_handle_ptr)?;
                                 write!(
