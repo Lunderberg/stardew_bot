@@ -7,6 +7,7 @@ use dll_unpacker::{
     Annotation, Annotator, Metadata, MetadataLayout, MetadataTableIndex,
     TypeDef,
 };
+use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools as _;
 use memory_reader::{
     extensions::*, MemoryMapRegion, MemoryRegion, OwnedBytes, UnpackedValue,
@@ -419,7 +420,7 @@ impl RuntimeModule {
             bytes
                 .iter()
                 .zip(num_type_defs.iter())
-                .all_ok(|(bytes, num_type_defs)| -> Result<_, Error> {
+                .and_all(|(bytes, num_type_defs)| -> Result<_, Error> {
                     let p_next: Pointer = bytes
                         .subrange(
                             offset + Pointer::SIZE * 0
@@ -506,7 +507,7 @@ impl RuntimeModule {
                 bytes
                     .iter()
                     .zip(num_type_defs.iter().cloned())
-                    .all_ok(|(bytes, num_type_defs)| -> Result<_, Error> {
+                    .and_all(|(bytes, num_type_defs)| -> Result<_, Error> {
                         let domain_local_module: Pointer =
                             bytes.subrange(offset..offset + 8).unpack()?;
                         let module_index: u64 =

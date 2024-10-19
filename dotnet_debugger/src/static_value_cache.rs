@@ -9,6 +9,7 @@ use dll_unpacker::{
     Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex,
     MetadataTypeDefOrRef, SignatureType, TypeDef, TypeDefOrRef, TypeRef,
 };
+use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
@@ -449,7 +450,7 @@ impl<'a> CachedReader<'a> {
                             && generics
                                 .into_iter()
                                 .zip(type_args.iter().cloned())
-                                .all_ok(|(type_handle_ptr, sig_arg)| {
+                                .and_all(|(type_handle_ptr, sig_arg)| {
                                     self.signature_type_matches_type_handle(
                                         module_ptr,
                                         sig_arg.as_ref(),
@@ -612,7 +613,7 @@ impl<'a> CachedReader<'a> {
                             Ok(ptr.into())
                         })
                         .chain(iter_loaded_types)
-                        .find_ok(
+                        .and_find(
                             |res_method_table_ptr| -> Result<bool, Error> {
                                 let type_handle_ptr =
                                     match res_method_table_ptr.as_ref() {
@@ -1075,7 +1076,7 @@ impl<'a> CachedReader<'a> {
         let field_module = self.runtime_module(field_module_ptr)?;
         let metadata = field_module.metadata(self)?;
 
-        let ref_type_def = metadata.type_def_table().iter_rows().find_ok(
+        let ref_type_def = metadata.type_def_table().iter_rows().and_find(
             |row| -> Result<_, Error> {
                 Ok(row.name()? == symbol_name
                     && row.namespace()? == symbol_namespace)
@@ -1091,7 +1092,7 @@ impl<'a> CachedReader<'a> {
         let ref_exported_type = metadata
             .exported_type_table()
             .iter_rows()
-            .find_ok(|row| -> Result<_, Error> {
+            .and_find(|row| -> Result<_, Error> {
                 Ok(row.name()? == symbol_name
                     && row.namespace()? == symbol_namespace)
             })?;
@@ -1154,7 +1155,7 @@ impl<'a> CachedReader<'a> {
         let field_module = self.runtime_module(field_module_ptr)?;
         let metadata = field_module.metadata(self)?;
 
-        let ref_type_def = metadata.type_def_table().iter_rows().find_ok(
+        let ref_type_def = metadata.type_def_table().iter_rows().and_find(
             |row| -> Result<_, Error> {
                 Ok(row.name()? == symbol_name
                     && row.namespace()? == symbol_namespace)
@@ -1172,7 +1173,7 @@ impl<'a> CachedReader<'a> {
         let ref_exported_type = metadata
             .exported_type_table()
             .iter_rows()
-            .find_ok(|row| -> Result<_, Error> {
+            .and_find(|row| -> Result<_, Error> {
                 Ok(row.name()? == symbol_name
                     && row.namespace()? == symbol_namespace)
             })?;

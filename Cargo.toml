@@ -6,6 +6,7 @@ members = [
   "dll_unpacker",
   "stardew_utils",
   "dotnet_debugger",
+  "iterator_extensions",
 ]
 resolver = "2"
 

@@ -1,5 +1,6 @@
 use std::{borrow::Borrow, ops::Range};
 
+use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools;
 use regex::Regex;
 
@@ -9,7 +10,6 @@ use ratatui::{
     widgets::{List, ListState, StatefulWidget, Widget as _},
 };
 
-use dotnet_debugger::extensions::*;
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
     RuntimeValue, SymbolicAccessChain, SymbolicOperation, SymbolicStaticField,

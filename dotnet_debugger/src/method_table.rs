@@ -4,12 +4,12 @@ use dll_unpacker::{
     dll_unpacker::{MetadataTableIndex, TypeDef},
     Annotation, Annotator,
 };
+use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    extensions::all_ok::AllOk as _, unpack_fields, CorElementType, Error,
-    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
-    RuntimeType, TypeHandle, TypedPointer,
+    unpack_fields, CorElementType, Error, FieldDescription, FieldDescriptions,
+    ReadTypedPointer, RuntimeModule, RuntimeType, TypeHandle, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -363,7 +363,7 @@ impl MethodTable {
         let reader = reader.borrow();
         self.generic_types(reader)?
             .into_iter()
-            .all_ok(|type_handle_ptr| {
+            .and_all(|type_handle_ptr| {
                 let type_handle = type_handle_ptr.read(reader)?;
                 let is_non_instantiated_generic = match type_handle {
                     TypeHandle::MethodTable(_) => false,

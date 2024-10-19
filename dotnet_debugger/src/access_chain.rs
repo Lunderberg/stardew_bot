@@ -1,8 +1,8 @@
+use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools as _;
 use memory_reader::Pointer;
 
 use crate::{
-    extensions::result_iterator_ext::ResultIteratorExt as _,
     runtime_type::RuntimePrimType, runtime_value::RuntimePrimValue,
     CachedReader, Error, FieldContainer, MethodTable, RuntimeArray,
     RuntimeType, TypedPointer,

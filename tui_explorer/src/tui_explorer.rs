@@ -4,6 +4,7 @@ use dotnet_debugger::{
     CachedReader, FieldContainer, RuntimeObject, RuntimeType, StaticValueCache,
     TypedPointer,
 };
+use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::{
     MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
 };
@@ -13,12 +14,12 @@ use crate::extended_tui::{
     Annotation, DynamicLayout, WidgetSideEffects, WidgetWindow,
 };
 use crate::{
-    extensions::*, LiveVariableDisplay, MetadataDisplay, ObjectExplorer,
-    UserConfig, UserConfigEditor,
-};
-use crate::{
     ColumnFormatter, Error, InfoFormatter, KeyBindingMatch, KeySequence,
     SigintHandler,
+};
+use crate::{
+    LiveVariableDisplay, MetadataDisplay, ObjectExplorer, UserConfig,
+    UserConfigEditor,
 };
 
 use super::{
@@ -340,7 +341,7 @@ impl TuiExplorerBuilder {
 
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.tui_globals.reader)?
-            .try_find(|method_table| -> Result<_, Error> {
+            .and_find_ok(|method_table| -> Result<_, Error> {
                 if let Some(type_def) = metadata.get(method_table.token())? {
                     let name = type_def.name()?;
                     Ok(name == "Game1")
@@ -461,7 +462,7 @@ impl TuiExplorerBuilder {
 
         let game_obj_method_table = runtime_module
             .iter_method_tables(&self.tui_globals.reader)?
-            .try_find(|method_table| -> Result<_, Error> {
+            .and_find_ok(|method_table| -> Result<_, Error> {
                 if let Some(type_def) = metadata.get(method_table.token())? {
                     let name = type_def.name()?;
                     Ok(name == "Game1")

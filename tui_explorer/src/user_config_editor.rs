@@ -1,3 +1,4 @@
+use iterator_extensions::ExtendIter as _;
 use itertools::{Either, Itertools};
 use ratatui::style::Stylize as _;
 use ratatui::{
@@ -6,8 +7,8 @@ use ratatui::{
 };
 
 use crate::extended_tui::WidgetWindow;
+use crate::KeyBindingMatch;
 use crate::UserConfig;
-use crate::{extensions::*, KeyBindingMatch};
 
 pub struct UserConfigEditor {
     user_config: UserConfig,
