@@ -2,8 +2,13 @@
 name = "tui_explorer"
 version = "0.1.0"
 edition = "2021"
+default-run = "tui_explorer"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[[bin]]
+name = "tui_explorer"
+path = "src/main.rs"
 
 [dependencies]
 itertools = "*"
