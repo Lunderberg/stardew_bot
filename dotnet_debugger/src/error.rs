@@ -210,9 +210,6 @@ pub enum Error {
     )]
     DowncastRequiresRelatedClasses(String, String),
 
-    #[error("Incorrect mwthod table for downcast")]
-    DowncastFailed,
-
     #[error(
         "Fireld {field} was type {ty}, \
          but expected a primitive type."

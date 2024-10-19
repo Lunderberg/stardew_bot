@@ -147,11 +147,8 @@ impl PhysicalAccessChain {
                         ));
                     }
                     ops.push(PhysicalAccessOperation::Offset(field.offset()));
-                    let new_item_type = reader.field_to_runtime_type(
-                        //method_table_ptr,
-                        parent_of_field,
-                        &field,
-                    )?;
+                    let new_item_type = reader
+                        .field_to_runtime_type(parent_of_field, &field)?;
 
                     if let RuntimeType::Class { method_table: None } =
                         &new_item_type
@@ -264,14 +261,16 @@ impl PhysicalAccessChain {
     pub fn read(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<RuntimePrimValue, Error> {
+    ) -> Result<Option<RuntimePrimValue>, Error> {
         let mut ptr = self.base_ptr;
         for op in &self.ops {
-            ptr = match op {
+            match op {
                 PhysicalAccessOperation::Dereference => {
-                    reader.read_byte_array(ptr)?.into()
+                    ptr = reader.read_byte_array(ptr)?.into();
                 }
-                PhysicalAccessOperation::Offset(offset) => ptr + *offset,
+                PhysicalAccessOperation::Offset(offset) => {
+                    ptr = ptr + *offset;
+                }
                 PhysicalAccessOperation::Downcast(target_type_ptr) => {
                     // TODO: Avoid having the double read of the
                     // object's location.
@@ -279,12 +278,10 @@ impl PhysicalAccessChain {
                         reader.read_byte_array(ptr)?.into();
                     let actual_type_ptr: Pointer =
                         reader.read_byte_array(object_loc)?.into();
-                    if reader
+                    if !reader
                         .is_base_of(*target_type_ptr, actual_type_ptr.into())?
                     {
-                        ptr
-                    } else {
-                        return Err(Error::DowncastFailed);
+                        return Ok(None);
                     }
                 }
             };
@@ -292,7 +289,8 @@ impl PhysicalAccessChain {
 
         let bytes =
             reader.read_bytes(ptr..ptr + self.prim_type.size_bytes())?;
-        self.prim_type.parse(&bytes)
+        let prim_value = self.prim_type.parse(&bytes)?;
+        Ok(Some(prim_value))
     }
 }
 

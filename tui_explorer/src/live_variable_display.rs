@@ -67,7 +67,7 @@ impl WidgetWindow for LiveVariableDisplay {
         for live_var in self.live_variables.iter_mut() {
             let value =
                 live_var.physical_chain.read(globals.cached_reader())?;
-            live_var.most_recent_value = Some(value);
+            live_var.most_recent_value = value;
         }
 
         Ok(())
