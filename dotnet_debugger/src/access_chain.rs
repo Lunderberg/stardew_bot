@@ -1,6 +1,8 @@
-use memory_reader::{MemoryReader, Pointer};
+use itertools::Itertools as _;
+use memory_reader::Pointer;
 
 use crate::{
+    extensions::result_iterator_ext::ResultIteratorExt as _,
     runtime_type::RuntimePrimType, runtime_value::RuntimePrimValue,
     CachedReader, Error, FieldContainer, MethodTable, RuntimeArray,
     RuntimeType, TypedPointer,
@@ -16,6 +18,7 @@ pub struct SymbolicAccessChain {
 pub struct SymbolicType {
     pub namespace: Option<String>,
     pub name: String,
+    pub generics: Vec<SymbolicType>,
 }
 
 #[derive(Clone)]
@@ -33,7 +36,7 @@ struct SymbolicAccessChainView<'a> {
 pub enum SymbolicOperation {
     Field(String),
     IndexAccess(usize),
-    //Downcast { namespace: String, name: String },
+    Downcast(SymbolicType),
 }
 
 pub struct PhysicalAccessChain {
@@ -45,7 +48,7 @@ pub struct PhysicalAccessChain {
 pub enum PhysicalAccessOperation {
     Dereference,
     Offset(usize),
-    //AssertContainsMethodTable(Pointer),
+    Downcast(TypedPointer<MethodTable>),
 }
 
 impl PhysicalAccessChain {
@@ -197,6 +200,49 @@ impl PhysicalAccessChain {
                     ops.push(PhysicalAccessOperation::Offset(stride * index));
                     item_type = (**element_type).clone();
                 }
+                SymbolicOperation::Downcast(symbolic_type) => {
+                    let static_method_table_ptr = match &item_type {
+                        RuntimeType::Class { method_table } => method_table
+                            .ok_or(Error::DowncastRequiresKnownBaseClass)?,
+                        _ => {
+                            return Err(Error::DowncastRequiresClassInstance(
+                                item_type,
+                            ));
+                        }
+                    };
+                    let target_method_table_ptr =
+                        symbolic_type.method_table(reader)?;
+
+                    if reader.is_base_of(
+                        target_method_table_ptr,
+                        static_method_table_ptr,
+                    )? {
+                        // Static type is the same, or superclass of
+                        // the desired runtime type.  No runtime check
+                        // needed.
+                    } else if reader.is_base_of(
+                        static_method_table_ptr,
+                        target_method_table_ptr,
+                    )? {
+                        // Target type is a subclass of the
+                        // statically-known type.  Emit a runtime
+                        // check.
+                        ops.push(PhysicalAccessOperation::Downcast(
+                            target_method_table_ptr,
+                        ));
+                    } else {
+                        // Types are in separate hierachies, cannot
+                        // perform downcast.
+                        return Err(Error::DowncastRequiresRelatedClasses(
+                            format!("{item_type}"),
+                            format!("{symbolic_type}"),
+                        ));
+                    }
+
+                    item_type = RuntimeType::Class {
+                        method_table: Some(target_method_table_ptr),
+                    };
+                }
             }
         }
 
@@ -217,7 +263,7 @@ impl PhysicalAccessChain {
 
     pub fn read(
         &self,
-        reader: &MemoryReader,
+        reader: CachedReader<'_>,
     ) -> Result<RuntimePrimValue, Error> {
         let mut ptr = self.base_ptr;
         for op in &self.ops {
@@ -226,6 +272,21 @@ impl PhysicalAccessChain {
                     reader.read_byte_array(ptr)?.into()
                 }
                 PhysicalAccessOperation::Offset(offset) => ptr + *offset,
+                PhysicalAccessOperation::Downcast(target_type_ptr) => {
+                    // TODO: Avoid having the double read of the
+                    // object's location.
+                    let object_loc: Pointer =
+                        reader.read_byte_array(ptr)?.into();
+                    let actual_type_ptr: Pointer =
+                        reader.read_byte_array(object_loc)?.into();
+                    if reader
+                        .is_base_of(*target_type_ptr, actual_type_ptr.into())?
+                    {
+                        ptr
+                    } else {
+                        return Err(Error::DowncastFailed);
+                    }
+                }
             };
         }
 
@@ -249,14 +310,79 @@ impl SymbolicType {
         &self,
         reader: CachedReader<'_>,
     ) -> Result<TypedPointer<MethodTable>, Error> {
-        reader
+        let method_table_ptr = reader
             .method_table_by_name(
                 self.namespace.as_ref().map(|s| s.as_str()).unwrap_or(""),
                 &self.name,
             )?
             .ok_or_else(|| {
                 Error::UnexpectedNullMethodTable(format!("{}", self))
+            })?;
+
+        if self.generics.is_empty() {
+            return Ok(method_table_ptr);
+        }
+
+        let method_table = reader.method_table(method_table_ptr)?;
+
+        let expected_type_def = method_table.token();
+
+        // TODO: Move this to a cache inside the StaticValueCache.
+        let generics = self
+            .generics
+            .iter()
+            .map(|generic| generic.method_table(reader))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let instantiated_generic = [method_table_ptr, generics[0]]
+            .into_iter()
+            .map(|method_table_ptr| reader.method_table(method_table_ptr))
+            .map_ok(|method_table| method_table.module())
+            .and_map_ok(|module_ptr| reader.runtime_module(module_ptr))
+            .and_map_ok(|module| module.loaded_types(reader))
+            .flatten_ok()
+            .and_flat_map_ok(|instantiated_generics| {
+                instantiated_generics.iter_method_tables(&reader)
             })
+            .filter_map_ok(|type_handle_ptr| type_handle_ptr.as_method_table())
+            .and_map_ok(|method_table_ptr| {
+                reader.method_table(method_table_ptr)
+            })
+            .filter_ok(|method_table| method_table.token() == expected_type_def)
+            .filter_ok(|method_table| method_table.has_generics())
+            .and_filter_ok(|candidate_method_table| {
+                let mut iter_candidate_generics = candidate_method_table
+                    .generic_types_excluding_base_class(&reader)?;
+                for generic in generics.iter().cloned() {
+                    let Some(candidate_generic) =
+                        iter_candidate_generics.next()
+                    else {
+                        return Ok(false);
+                    };
+
+                    let Some(candidate_generic) =
+                        candidate_generic.as_method_table()
+                    else {
+                        return Ok(false);
+                    };
+
+                    if candidate_generic != generic {
+                        return Ok(false);
+                    }
+                }
+
+                if iter_candidate_generics.next().is_some() {
+                    return Ok(false);
+                }
+
+                Ok(true)
+            })
+            .next()
+            .ok_or_else(|| {
+                Error::NoSuchMethodTableFound(format!("{self}"))
+            })??;
+
+        Ok(instantiated_generic.ptr())
     }
 }
 
@@ -310,10 +436,22 @@ impl<'a> std::fmt::Display for SymbolicAccessChainView<'a> {
 impl std::fmt::Display for SymbolicType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(namespace) = &self.namespace {
-            write!(f, "{namespace}.{}", self.name)
-        } else {
-            write!(f, "{}", self.name)
+            write!(f, "{namespace}.")?;
         }
+        write!(f, "{}", self.name)?;
+
+        if !self.generics.is_empty() {
+            write!(f, "<")?;
+            for (i, generic) in self.generics.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{generic}")?;
+            }
+            write!(f, ">")?;
+        }
+
+        Ok(())
     }
 }
 
@@ -328,6 +466,9 @@ impl std::fmt::Display for SymbolicOperation {
         match self {
             SymbolicOperation::Field(field) => write!(f, ".{field}"),
             SymbolicOperation::IndexAccess(index) => write!(f, "[{index}]"),
+            SymbolicOperation::Downcast(symbolic_type) => {
+                write!(f, ".as<{symbolic_type}>()")
+            }
         }
     }
 }
@@ -350,6 +491,9 @@ impl std::fmt::Display for PhysicalAccessOperation {
             PhysicalAccessOperation::Dereference => write!(f, ".deref()"),
             PhysicalAccessOperation::Offset(offset) => {
                 write!(f, ".offset({offset})")
+            }
+            PhysicalAccessOperation::Downcast(typed_pointer) => {
+                write!(f, ".downcast({typed_pointer})")
             }
         }
     }

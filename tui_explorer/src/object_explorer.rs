@@ -9,6 +9,7 @@ use ratatui::{
     widgets::{List, ListState, StatefulWidget, Widget as _},
 };
 
+use dotnet_debugger::extensions::*;
 use dotnet_debugger::{
     CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
     RuntimeValue, SymbolicAccessChain, SymbolicOperation, SymbolicStaticField,
@@ -74,6 +75,7 @@ enum ObjectTreeNode {
         display_expanded: bool,
     },
     Field {
+        ptr_mtable_of_parent: TypedPointer<MethodTable>,
         field_name: String,
         field_type: String,
         is_static: bool,
@@ -343,6 +345,50 @@ macro_rules! forward_visitor_as_mutator {
             }
         }
     };
+}
+
+fn get_symbolic_type(
+    method_table_ptr: TypedPointer<MethodTable>,
+    reader: CachedReader<'_>,
+) -> Result<SymbolicType, Error> {
+    let method_table = reader.method_table(method_table_ptr)?;
+    let module = reader.runtime_module(method_table.module())?;
+    let metadata = module.metadata(reader)?;
+
+    let type_def_token =
+        method_table.token().ok_or(Error::NotImplementedYet(
+            "Handle null metadata token in MethodTable".to_string(),
+        ))?;
+    let type_def = metadata.get(type_def_token)?;
+
+    let namespace = Some(type_def.namespace()?)
+        .filter(|namespace| !namespace.is_empty())
+        .map(|namespace| namespace.to_string());
+
+    let name = type_def.name()?.to_string();
+
+    let generics = if method_table.has_generics() {
+        method_table
+            .generic_types_excluding_base_class(&reader)?
+            .map(|type_handle_ptr| {
+                if let Some(method_table_ptr) =
+                    type_handle_ptr.as_method_table()
+                {
+                    get_symbolic_type(method_table_ptr, reader)
+                } else {
+                    todo!()
+                }
+            })
+            .collect::<Result<Vec<_>, _>>()?
+    } else {
+        Vec::new()
+    };
+
+    Ok(SymbolicType {
+        namespace,
+        name,
+        generics,
+    })
 }
 
 fn get_class_name(
@@ -643,7 +689,10 @@ impl ObjectExplorer {
         Ok(output)
     }
 
-    fn access_chain_selected_node(&self) -> Result<SymbolicAccessChain, Error> {
+    fn access_chain_selected_node(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<SymbolicAccessChain, Error> {
         let node_chain = self.selected_node_chain()?;
 
         let static_field = {
@@ -669,27 +718,50 @@ impl ObjectExplorer {
                 class: SymbolicType {
                     namespace: class_name.namespace.clone(),
                     name: class_name.name.clone(),
+                    generics: Vec::new(),
                 },
                 field_name: field_name.clone(),
             }
         };
 
-        let ops = node_chain[2..]
-            .iter()
-            .map(|node| match &node {
-                ObjectTreeNode::Field { field_name, .. } => {
-                    SymbolicOperation::Field(field_name.clone())
+        let mut ops = Vec::new();
+        for node in node_chain.into_iter().skip(2) {
+            match node {
+                ObjectTreeNode::Field {
+                    ptr_mtable_of_parent,
+                    field_name,
+                    ..
+                } => {
+                    let ptr_mtable_of_parent = *ptr_mtable_of_parent;
+                    let mtable_of_parent =
+                        reader.method_table(ptr_mtable_of_parent)?;
+                    if mtable_of_parent.is_class() {
+                        // The downcast isn't strictly necessary in
+                        // all cases, since a field of the
+                        // statically-known class (or one of its base
+                        // classes) may be accessed without a
+                        // downcast.  However, that's easier and more
+                        // consistently handled as part of the
+                        // lowering from `SymbolicOperation` to
+                        // `PhysicalAccessOperation`, so we can just
+                        // apply downcast all the time and remove it
+                        // later.
+                        ops.push(SymbolicOperation::Downcast(
+                            get_symbolic_type(ptr_mtable_of_parent, reader)?,
+                        ));
+                    }
+                    ops.push(SymbolicOperation::Field(field_name.clone()));
                 }
                 ObjectTreeNode::ListItem { index, .. } => {
-                    SymbolicOperation::IndexAccess(*index)
+                    ops.push(SymbolicOperation::IndexAccess(*index));
                 }
                 ObjectTreeNode::Value { .. } => todo!(),
                 ObjectTreeNode::String(_) => todo!(),
                 ObjectTreeNode::Array { .. } => todo!(),
                 ObjectTreeNode::Object { .. } => todo!(),
                 ObjectTreeNode::DisplayList(_) => todo!(),
-            })
-            .collect();
+            }
+        }
 
         Ok(SymbolicAccessChain { static_field, ops })
     }
@@ -807,6 +879,7 @@ impl ObjectTreeNode {
         )?;
 
         let node = ObjectTreeNode::Field {
+            ptr_mtable_of_parent: mtable_of_parent,
             field_name,
             field_type,
             is_static: field.is_static(),
@@ -931,7 +1004,6 @@ impl ObjectTreeNode {
                         })
                         .map(|(parent_of_field, field)| -> Result<_, Error> {
                             Self::initial_field(
-                                //obj.method_table(),
                                 parent_of_field,
                                 FieldContainer::Class(instance_location.into()),
                                 field,
@@ -1587,7 +1659,7 @@ impl WidgetWindow for ObjectExplorer {
     fn apply_key_binding<'a>(
         &'a mut self,
         keystrokes: &'a crate::KeySequence,
-        _globals: &'a crate::TuiGlobals,
+        globals: &'a crate::TuiGlobals,
         side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> KeyBindingMatch {
         let num_lines = self.num_lines();
@@ -1659,7 +1731,7 @@ impl WidgetWindow for ObjectExplorer {
                 }
             })
             .or_try_binding("C-t", keystrokes, || {
-                match self.access_chain_selected_node() {
+                match self.access_chain_selected_node(globals.cached_reader()) {
                     Ok(chain) => {
                         side_effects.live_variable = Some(chain);
                     }

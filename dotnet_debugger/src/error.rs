@@ -158,8 +158,8 @@ pub enum Error {
     #[error("All static fields should have their method tables loaded")]
     MethodTableOfStaticFieldShouldBeLoaded,
 
-    #[error("Could not find method table {namespace}.{name}")]
-    NoSuchMethodTableFound { namespace: String, name: String },
+    #[error("Could not find method table for '{0}'")]
+    NoSuchMethodTableFound(String),
 
     #[error(
         "Could not find static field {field} within \
@@ -168,8 +168,8 @@ pub enum Error {
     NoSuchStaticField { class: String, field: String },
 
     #[error(
-        "Could not find instance field {field_name} within \
-         method table {class_name}"
+        "Could not find instance field '{field_name}' within \
+         method table of {class_name}"
     )]
     NoSuchInstanceField {
         class_name: String,
@@ -189,6 +189,29 @@ pub enum Error {
          However, it was applied to an object of type {0}."
     )]
     IndexAccessRequiresArray(RuntimeType),
+
+    #[error(
+        "The SymbolicOperation::Downcast operation \
+         casts an object to a subclass, \
+         and may only be applied to Class instances.  \
+         However, it was applied to an object of type {0}."
+    )]
+    DowncastRequiresClassInstance(RuntimeType),
+
+    #[error(
+        "Downcast requires the static type to be known, \
+         but could not find a loaded method table for base class."
+    )]
+    DowncastRequiresKnownBaseClass,
+
+    #[error(
+        "Cannot downcast from '{0}' to '{1}', \
+         because '{1}' is not a subclass of '{0}'"
+    )]
+    DowncastRequiresRelatedClasses(String, String),
+
+    #[error("Incorrect mwthod table for downcast")]
+    DowncastFailed,
 
     #[error(
         "Fireld {field} was type {ty}, \

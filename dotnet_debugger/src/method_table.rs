@@ -167,6 +167,12 @@ impl MethodTable {
         (self.flags() & 0x000F0000) == 0x00050000
     }
 
+    pub fn is_class(&self) -> bool {
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+        type_flag == 0
+    }
+
     pub fn is_array(&self) -> bool {
         let flags = self.flags();
         let type_flag = flags & 0x000F0000;

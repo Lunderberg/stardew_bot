@@ -1271,6 +1271,25 @@ impl<'a> CachedReader<'a> {
 
         res_iter.into_iter().flatten()
     }
+
+    pub fn is_base_of(
+        &self,
+        parent_class_ptr: TypedPointer<MethodTable>,
+        mut child_class_ptr: TypedPointer<MethodTable>,
+    ) -> Result<bool, Error> {
+        loop {
+            if child_class_ptr == parent_class_ptr {
+                return Ok(true);
+            }
+
+            let child_class = self.method_table(child_class_ptr)?;
+            if let Some(next_parent) = child_class.parent_method_table() {
+                child_class_ptr = next_parent;
+            } else {
+                return Ok(false);
+            }
+        }
+    }
 }
 
 impl<'a> Deref for CachedReader<'a> {

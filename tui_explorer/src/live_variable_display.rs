@@ -64,7 +64,8 @@ impl WidgetWindow for LiveVariableDisplay {
         _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
     ) -> Result<(), crate::Error> {
         for live_var in self.live_variables.iter_mut() {
-            let value = live_var.physical_chain.read(&globals.reader)?;
+            let value =
+                live_var.physical_chain.read(globals.cached_reader())?;
             live_var.most_recent_value = Some(value);
         }
 

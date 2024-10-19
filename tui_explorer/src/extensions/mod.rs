@@ -23,8 +23,5 @@ pub use highlight_ratatui::HighlightLine as _;
 mod try_find;
 pub use try_find::TryFind as _;
 
-mod flat_map_ok;
-pub use flat_map_ok::FlatMapOk as _;
-
 mod extend_iter;
 pub use extend_iter::ExtendIter as _;

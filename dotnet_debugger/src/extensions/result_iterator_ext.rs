@@ -15,6 +15,25 @@ pub trait ResultIteratorExt<T, E>:
         self.map(move |res| res.and_then(|item| func(item)))
     }
 
+    fn and_filter_ok<Func>(
+        self,
+        mut func: Func,
+    ) -> impl Iterator<Item = Result<T, E>>
+    where
+        Self: Sized,
+        Self: Iterator<Item = Result<T, E>>,
+        Func: FnMut(&T) -> Result<bool, E>,
+    {
+        self.filter_map(move |res| match res {
+            Ok(value) => match func(&value) {
+                Ok(true) => Some(Ok(value)),
+                Ok(false) => None,
+                Err(err) => Some(Err(err)),
+            },
+            Err(err) => Some(Err(err)),
+        })
+    }
+
     // TODO: Move this into a separate extension crate, so that it
     // doesn't need to be a duplicate of
     // `tui_explorer/src/extensions/flat_map_ok.rs`.

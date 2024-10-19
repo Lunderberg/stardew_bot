@@ -200,7 +200,7 @@ impl TypeHandle {
 }
 
 impl TypedPointer<TypeHandle> {
-    pub(crate) fn as_method_table(&self) -> Option<TypedPointer<MethodTable>> {
+    pub fn as_method_table(&self) -> Option<TypedPointer<MethodTable>> {
         if self.as_usize() & 2 > 0 {
             None
         } else {
