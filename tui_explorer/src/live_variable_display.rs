@@ -2,8 +2,9 @@ use dotnet_debugger::{
     PhysicalAccessChain, RuntimePrimValue, SymbolicAccessChain,
 };
 use ratatui::{
-    layout::Constraint,
+    layout::{Alignment, Constraint},
     style::{Modifier, Style},
+    text::{Line, Text},
     widgets::{Row, StatefulWidget as _, Table, TableState},
 };
 
@@ -98,19 +99,24 @@ impl WidgetWindow for LiveVariableDisplay {
         let rows = self
             .live_variables
             .iter()
-            // .flat_map(|live_var| {
-            // [
-            //     [format!("{}", live_var.symbolic_chain)],
-            //     [format!("{}", live_var.physical_chain)],
-            // ]
-            //})
             .map(|live_var| {
                 [
-                    format!("{}", live_var.symbolic_chain),
-                    match &live_var.most_recent_value {
+                    // TODO: Once
+                    // https://github.com/ratatui/ratatui/pull/1432 is
+                    // available in a release version of ratatui,
+                    // apply the alignment directly on the `Text`
+                    // widget.
+                    //
+                    // Text::from(format!("{}", live_var.symbolic_chain))
+                    //     .alignment(Alignment::Right),
+                    Text::from(
+                        Line::from(format!("{}", live_var.symbolic_chain))
+                            .alignment(Alignment::Right),
+                    ),
+                    Text::from(match &live_var.most_recent_value {
                         Some(value) => format!("{value}"),
                         None => String::default(),
-                    },
+                    }),
                 ]
             })
             .map(Row::new);
