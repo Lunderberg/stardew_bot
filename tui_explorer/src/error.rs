@@ -1,18 +1,17 @@
 use memory_reader::Pointer;
 use thiserror::Error;
-
-use crate::KeySequence;
+use tui_utils::inputs::KeySequence;
 
 #[derive(Error)]
 pub enum Error {
     #[error("Path not convertible to UTF-8")]
     InvalidUTF8InPath,
 
-    #[error("std::io::Error{{ {err} }}")]
-    Io {
-        #[from]
-        err: std::io::Error,
-    },
+    #[error("std::io::Error( {0} )")]
+    Io(#[from] std::io::Error),
+
+    #[error("tui_utils::Error( {0} )")]
+    TuiUtilError(#[from] tui_utils::Error),
 
     #[error("memory_reader::Error{{ {err} }}")]
     MemoryReader {
@@ -43,9 +42,6 @@ pub enum Error {
         #[from]
         err: crate::user_config::Error,
     },
-
-    #[error("Invalid emacs-style key sequence: {0}")]
-    InvalidKeyBinding(String),
 
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),

@@ -1,3 +1,9 @@
+use crate::{
+    containers::NonEmptyVec,
+    extensions::HighlightLine,
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::ScrollableState,
+};
 use itertools::Either;
 use ratatui::{
     layout::Rect,
@@ -6,10 +12,6 @@ use ratatui::{
     widgets::{Block, Borders, Paragraph},
 };
 use regex::{Regex, RegexBuilder};
-
-use crate::extended_tui::ScrollableState;
-use crate::extensions::*;
-use crate::{KeyBindingMatch, KeySequence, NonEmptyVec};
 
 pub struct SearchWindow<T> {
     pub stack: NonEmptyVec<SearchItem>,
@@ -34,7 +36,7 @@ pub enum SearchDirection {
 }
 
 impl<T> SearchWindow<T> {
-    pub(crate) fn new(direction: SearchDirection, pre_search_state: T) -> Self
+    pub fn new(direction: SearchDirection, pre_search_state: T) -> Self
     where
         T: ScrollableState,
     {
@@ -53,13 +55,13 @@ impl<T> SearchWindow<T> {
 
     // Undo the most recent command, unless it was the initial command
     // that started the search.
-    pub(crate) fn pop_command(&mut self) {
+    pub fn pop_command(&mut self) {
         if self.stack.len() > 1 {
             self.stack.pop();
         }
     }
 
-    pub(crate) fn highlight_search_matches<'a>(
+    pub fn highlight_search_matches<'a>(
         &self,
         line: impl Into<Line<'a>>,
     ) -> Line<'a> {
@@ -69,7 +71,7 @@ impl<T> SearchWindow<T> {
     }
 
     // Return the string being searched for.
-    pub(crate) fn get_search_string(&self, last_char: Option<char>) -> String {
+    pub fn get_search_string(&self, last_char: Option<char>) -> String {
         self.stack
             .iter()
             .filter_map(|item| match item.command {
@@ -83,7 +85,7 @@ impl<T> SearchWindow<T> {
     // Return a tuple of 2 strings, where the first string is the
     // portion of the search string that was found, and the second
     // string is the portion of the search string that wasn't found.
-    pub(crate) fn get_search_string_parts(&self) -> (String, String) {
+    pub fn get_search_string_parts(&self) -> (String, String) {
         let vals: Vec<(char, bool)> = self
             .stack
             .iter()
@@ -102,7 +104,7 @@ impl<T> SearchWindow<T> {
         (matching_part, non_matching_part)
     }
 
-    pub(crate) fn apply_key_binding(
+    pub fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
         table_size: usize,
@@ -138,7 +140,7 @@ impl<T> SearchWindow<T> {
             })
     }
 
-    pub(crate) fn apply_command<F>(
+    pub fn apply_command<F>(
         &mut self,
         command: SearchCommand,
         table_size: usize,
@@ -213,7 +215,7 @@ impl<T> SearchWindow<T> {
         regex
     }
 
-    pub(crate) fn search<F>(
+    pub fn search<F>(
         &mut self,
         search_range: impl IntoIterator<Item = usize>,
         last_char: Option<char>,
@@ -237,7 +239,7 @@ impl<T> SearchWindow<T> {
     /// If a match has occurred, select the row containing the most
     /// recent match if a match exists.  Otherwise, select the initial
     /// location of the search.
-    pub(crate) fn recommended_row_selection(&self) -> usize {
+    pub fn recommended_row_selection(&self) -> usize {
         self.stack
             .iter()
             .rev()
@@ -248,7 +250,7 @@ impl<T> SearchWindow<T> {
             )
     }
 
-    pub(crate) fn description(&self) -> String {
+    pub fn description(&self) -> String {
         use SearchCommand::*;
         use SearchDirection::*;
 

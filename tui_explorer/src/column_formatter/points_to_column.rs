@@ -1,6 +1,7 @@
 use memory_reader::{MemoryRegion, MemoryValue};
+use tui_utils::TuiGlobals;
 
-use crate::{ColumnFormatter, TuiGlobals};
+use crate::ColumnFormatter;
 
 pub struct PointsToColumn;
 
@@ -17,7 +18,7 @@ impl ColumnFormatter for PointsToColumn {
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
     ) -> String {
         globals
-            .reader
+            .reader()
             .find_containing_region(printed_row.value.into())
             .map(|pointed_region| pointed_region.short_name())
             .unwrap_or_default()

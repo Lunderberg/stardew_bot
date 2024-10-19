@@ -1,7 +1,8 @@
 use memory_reader::extensions::*;
 use memory_reader::{MemoryRegion, MemoryValue};
+use tui_utils::TuiGlobals;
 
-use crate::{ColumnFormatter, TuiGlobals};
+use crate::ColumnFormatter;
 
 pub struct AddressColumn;
 

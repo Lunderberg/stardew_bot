@@ -8,9 +8,11 @@ use ratatui::{
 };
 
 use memory_reader::{MemoryRegion, Pointer};
+use tui_utils::{
+    extensions::SplitRect as _, TuiGlobals, WidgetSideEffects, WidgetWindow,
+};
 
-use crate::{extended_tui::WidgetWindow, extensions::*};
-use crate::{InfoFormatter, TuiGlobals};
+use crate::{Annotation, ChangeAddress, InfoFormatter};
 
 pub struct DetailView {
     values: Vec<(String, String)>,
@@ -31,8 +33,9 @@ impl DetailView {
         pointer: Pointer,
     ) {
         let from_annotations = globals
-            .annotations
-            .iter()
+            .get::<Vec<Annotation>>()
+            .into_iter()
+            .flatten()
             .filter(|ann| {
                 ann.range.start < pointer + MemoryRegion::POINTER_SIZE
                     && pointer < ann.range.end
@@ -40,9 +43,13 @@ impl DetailView {
             .sorted_by_key(|ann| (ann.range.start, Reverse(ann.range.end)))
             .map(|ann| (ann.name.clone(), ann.value.clone()));
 
+        let current_region = globals
+            .get::<MemoryRegion>()
+            .expect("Should be initialized with a memory region");
+
         let from_formatters = self.formatters.iter().filter_map(|formatter| {
             formatter
-                .format(&globals.reader, &globals.current_region, pointer)
+                .format(globals.reader(), &current_region, pointer)
                 .map(|text| (formatter.name().to_string(), text))
         });
 
@@ -100,6 +107,17 @@ impl WidgetWindow for DetailView {
         "Detail View".into()
     }
 
+    fn apply_side_effects<'a>(
+        &'a mut self,
+        globals: &'a TuiGlobals,
+        side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), tui_utils::Error> {
+        side_effects
+            .iter::<ChangeAddress>()
+            .for_each(|change| self.update_details(globals, change.0));
+        Ok(())
+    }
+
     fn draw<'a>(
         &'a mut self,
         _: &'a TuiGlobals,
@@ -107,30 +125,5 @@ impl WidgetWindow for DetailView {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         self.render(area, buf)
-    }
-
-    fn change_address<'a>(
-        &'a mut self,
-        globals: &'a TuiGlobals,
-        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
-        address: Pointer,
-    ) {
-        let from_annotations = globals
-            .annotations
-            .iter()
-            .filter(|ann| {
-                ann.range.start < address + MemoryRegion::POINTER_SIZE
-                    && address < ann.range.end
-            })
-            .sorted_by_key(|ann| (ann.range.start, Reverse(ann.range.end)))
-            .map(|ann| (ann.name.clone(), ann.value.clone()));
-
-        let from_formatters = self.formatters.iter().filter_map(|formatter| {
-            formatter
-                .format(&globals.reader, &globals.current_region, address)
-                .map(|text| (formatter.name().to_string(), text))
-        });
-
-        self.values = from_annotations.chain(from_formatters).collect();
     }
 }

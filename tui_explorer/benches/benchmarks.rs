@@ -4,7 +4,8 @@ use criterion::{
 };
 
 use crossterm::event::{Event, KeyCode};
-use tui_explorer::{Error, TerminalContext, TuiExplorer, TuiExplorerBuilder};
+use tui_explorer::{Error, TuiExplorer, TuiExplorerBuilder};
+use tui_utils::TerminalContext;
 
 fn bench_construct_tui_explorer(b: &mut Bencher) -> Result<(), Error> {
     b.iter(|| TuiExplorer::new().unwrap());

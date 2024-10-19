@@ -79,9 +79,13 @@ impl<'a, FGenerateCell> DynamicTable<'a, FGenerateCell> {
         }
     }
 
-    pub fn header(self, header: Vec<Cell<'a>>) -> Self {
+    pub fn header<Iter>(self, header: Iter) -> Self
+    where
+        Iter: IntoIterator,
+        Iter::Item: Into<Cell<'a>>,
+    {
         Self {
-            header: Some(header),
+            header: Some(header.into_iter().map(Into::into).collect()),
             ..self
         }
     }
@@ -264,7 +268,5 @@ where
                 }
             }
         }
-
-        // todo!()
     }
 }

@@ -16,16 +16,16 @@ use dotnet_debugger::{
     SymbolicType, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
-
-use crate::{
-    extended_tui::{
-        Indent, ScrollableState as _, SearchDirection, SearchWindow,
-        WidgetSideEffects, WidgetWindow,
+use tui_utils::{
+    extensions::{
+        HighlightLine as _, SplitRect as _, WidgetWithScrollbar as _,
     },
-    extensions::*,
-    TuiGlobals, UserConfig,
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::{Indent, ScrollableState as _, SearchDirection, SearchWindow},
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
-use crate::{Error, KeyBindingMatch};
+
+use crate::{ChangeAddress, Error, UserConfig};
 
 pub struct ObjectExplorer {
     object_tree: ObjectTreeNode,
@@ -1658,9 +1658,9 @@ impl WidgetWindow for ObjectExplorer {
 
     fn apply_key_binding<'a>(
         &'a mut self,
-        keystrokes: &'a crate::KeySequence,
-        globals: &'a crate::TuiGlobals,
-        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        keystrokes: &'a KeySequence,
+        globals: &'a TuiGlobals,
+        side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         let num_lines = self.num_lines();
 
@@ -1727,13 +1727,14 @@ impl WidgetWindow for ObjectExplorer {
             })
             .or_try_binding("<enter>", keystrokes, || {
                 if let Some(pointer) = self.address_of_selected_node() {
-                    side_effects.change_address(pointer);
+                    side_effects.broadcast(ChangeAddress(pointer));
                 }
             })
             .or_try_binding("C-t", keystrokes, || {
                 match self.access_chain_selected_node(globals.cached_reader()) {
                     Ok(chain) => {
-                        side_effects.live_variable = Some(chain);
+                        side_effects.broadcast(chain);
+                        //side_effects.live_variable = Some(chain);
                     }
                     Err(err) => side_effects.add_log(format!("Err: {err}")),
                 }
@@ -1742,9 +1743,9 @@ impl WidgetWindow for ObjectExplorer {
 
     fn periodic_update<'a>(
         &mut self,
-        globals: &'a crate::TuiGlobals,
+        globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), Error> {
+    ) -> Result<(), tui_utils::Error> {
         let reader = globals.cached_reader();
 
         let display_range = {
@@ -1769,7 +1770,7 @@ impl WidgetWindow for ObjectExplorer {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: &'a crate::TuiGlobals,
+        _globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {

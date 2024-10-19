@@ -1,10 +1,10 @@
-use std::borrow::{Borrow, Cow};
+use std::borrow::Borrow;
 use std::fmt::Debug;
 
 use ratatui::prelude::*;
 use regex::Regex;
 
-use crate::extensions::*;
+use super::SplitSpan as _;
 
 pub trait HighlightLine {
     fn style_regex_ref(

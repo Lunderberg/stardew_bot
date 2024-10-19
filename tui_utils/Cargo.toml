@@ -1,0 +1,19 @@
+[package]
+name = "tui_utils"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+thiserror = "*"
+itertools = ">=0.11"
+regex = "*"
+
+anymap = "*"
+ratatui = "*"
+crossterm = "*"
+signal-hook = "*"
+
+dotnet_debugger = { path = "../dotnet_debugger" }
+memory_reader = { path = "../memory_reader" }

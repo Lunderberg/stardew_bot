@@ -4,8 +4,9 @@ use ratatui::{
 };
 
 use memory_reader::{MemoryRegion, MemoryValue, Pointer};
+use tui_utils::TuiGlobals;
 
-use crate::{extended_tui::Annotation, ColumnFormatter, TuiGlobals};
+use crate::{Annotation, ColumnFormatter};
 
 pub struct HexColumn;
 pub struct AsciiColumn;
@@ -126,7 +127,7 @@ impl ColumnFormatter for HexColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            &globals.annotations,
+            &globals.get::<Vec<Annotation>>().unwrap(),
         )
     }
 }
@@ -158,7 +159,7 @@ impl ColumnFormatter for AsciiColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            &globals.annotations,
+            &globals.get::<Vec<Annotation>>().unwrap(),
         )
     }
 }

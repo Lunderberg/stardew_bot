@@ -8,24 +8,26 @@ use ratatui::{
 
 use memory_reader::{extensions::*, ByteRange};
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
-
-use crate::{extended_tui::DynamicTable, extensions::*};
-use crate::{
-    extended_tui::{
-        InputWindow, ScrollableState, SearchDirection, SearchWindow,
-        WidgetSideEffects, WidgetWindow,
+use tui_utils::{
+    containers::NonEmptyVec,
+    extensions::{SplitRect as _, WidgetWithScrollbar as _},
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::{
+        DynamicTable, InputWindow, ScrollableState as _, SearchDirection,
+        SearchWindow,
     },
-    TuiGlobals,
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
-use crate::{
-    ColumnFormatter, Error, KeyBindingMatch, KeySequence, NonEmptyVec,
-};
+
+use crate::{Annotation, ColumnFormatter, Error};
 
 pub struct MemoryTable {
     view_stack: NonEmptyVec<ViewFrame>,
     formatters: Vec<Box<dyn ColumnFormatter>>,
     jump_to_window: Option<InputWindow>,
 }
+
+pub struct ChangeAddress(pub Pointer);
 
 pub(crate) struct DrawableMemoryTable<'a> {
     table: &'a mut MemoryTable,
@@ -127,7 +129,7 @@ impl MemoryTable {
 
         let address: Pointer = address.into();
 
-        side_effects.change_address(address);
+        side_effects.broadcast(ChangeAddress(address));
     }
 
     pub(crate) fn current_region(&self) -> &MemoryRegion {
@@ -255,7 +257,7 @@ impl WidgetWindow for MemoryTable {
                 let selection = self.selected_value();
                 let as_pointer: Pointer = selection.value.into();
                 let pointed_map_region =
-                    globals.reader.find_containing_region(as_pointer);
+                    globals.reader().find_containing_region(as_pointer);
                 if let Some(pointed_map_region) = pointed_map_region {
                     let pointed_region = pointed_map_region.read();
                     match pointed_region {
@@ -271,22 +273,28 @@ impl WidgetWindow for MemoryTable {
             })
     }
 
-    fn change_address<'a>(
+    fn apply_side_effects<'a>(
         &'a mut self,
         globals: &'a TuiGlobals,
-        _side_effects: &'a mut WidgetSideEffects,
-        address: Pointer,
-    ) {
-        if self.active_view().selected_address() == address {
-            // No action needed
-        } else if self.current_region().contains(address) {
-            self.active_view_mut().select_address(address);
-        } else {
-            self.view_stack = NonEmptyVec::new(ViewFrame::new(
-                globals.current_region.clone(),
-                address,
-            ));
-        }
+        side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), tui_utils::Error> {
+        side_effects.iter::<ChangeAddress>().for_each(|address| {
+            let address = address.0;
+            if self.active_view().selected_address() == address {
+                // No action needed
+            } else if self.current_region().contains(address) {
+                self.active_view_mut().select_address(address);
+            } else {
+                let current_region = globals
+                    .get::<MemoryRegion>()
+                    .expect("Should be initialized with a memory region");
+                self.view_stack = NonEmptyVec::new(ViewFrame::new(
+                    current_region.clone(),
+                    address,
+                ));
+            }
+        });
+        Ok(())
     }
 }
 
@@ -373,7 +381,8 @@ impl ViewFrame {
                     .then(|| {
                         let new_selected_address = self.selected_address();
                         if old_selected_address != new_selected_address {
-                            side_effects.change_address(new_selected_address);
+                            side_effects
+                                .broadcast(ChangeAddress(new_selected_address));
                         }
                         self.finalize_search()
                     })
@@ -421,30 +430,37 @@ impl ViewFrame {
                     bytes: bytes.to_owned(),
                 };
 
-                let annotator = &mut *side_effects;
+                let mut annotator = Vec::<Annotation>::new();
 
                 let mut do_collect = || -> Result<_, Error> {
-                    method_table.collect_annotations(annotator)?;
+                    method_table.collect_annotations(&mut annotator)?;
                     // if let Some(ee_class) =
                     //     method_table.get_ee_class(&globals.reader)?
                     // {
-                    //     ee_class.collect_annotations(annotator)?;
+                    //     ee_class.collect_annotations(&mut annotator)?;
                     // }
                     // let fields =
                     //     method_table.get_field_descriptions(&globals.reader)?;
                     // fields.iter().flatten().try_for_each(
                     //     |field| -> Result<_, Error> {
-                    //         field.collect_annotations(annotator)?;
+                    //         field.collect_annotations(&mut annotator)?;
                     //         Ok(())
                     //     },
                     // )?;
                     Ok(())
                 };
 
-                if let Err(err) = do_collect() {
-                    side_effects.add_log(format!(
-                        "Error {err} in annotating method table"
-                    ));
+                match do_collect() {
+                    Ok(_) => {
+                        annotator
+                            .into_iter()
+                            .for_each(|ann| side_effects.broadcast(ann));
+                    }
+                    Err(err) => {
+                        side_effects.add_log(format!(
+                            "Error {err} in annotating method table"
+                        ));
+                    }
                 }
             })
     }
@@ -519,11 +535,7 @@ impl ViewFrame {
                 panic!("Row {selected_address} is outside of the memory region")
             });
 
-        let header = formatters
-            .iter()
-            .map(|formatter| formatter.name())
-            .map(crate::extended_tui::dynamic_table::Cell::from)
-            .collect();
+        let header = formatters.iter().map(|formatter| formatter.name());
 
         let address_width = region.as_range().suffix_hexadecimal_digits();
 

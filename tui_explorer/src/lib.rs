@@ -16,14 +16,8 @@ pub use tui_explorer::*;
 mod error;
 pub use error::Error;
 
-mod key_sequence;
-pub use key_sequence::{KeyBindingMatch, KeySequence};
-
-mod terminal_context;
-pub use terminal_context::*;
-
-mod sigint_handler;
-pub use sigint_handler::*;
+mod annotation;
+pub(crate) use annotation::Annotation;
 
 mod running_log;
 pub use running_log::*;
@@ -43,18 +37,11 @@ pub use object_explorer::*;
 mod metadata_display;
 pub use metadata_display::*;
 
-pub(crate) mod extended_tui;
-
 pub mod column_formatter;
 pub(crate) use column_formatter::ColumnFormatter;
 
 pub mod info_formatter;
 pub use info_formatter::InfoFormatter;
-
-pub(crate) mod extensions;
-
-mod non_empty_vec;
-pub(crate) use non_empty_vec::NonEmptyVec;
 
 mod user_config;
 pub(crate) use user_config::UserConfig;

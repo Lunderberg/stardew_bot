@@ -1,8 +1,7 @@
 use ratatui::text::Line;
 
 use memory_reader::{MemoryRegion, MemoryValue};
-
-use crate::TuiGlobals;
+use tui_utils::TuiGlobals;
 
 pub(crate) trait ColumnFormatter {
     fn name(&self) -> &'static str;

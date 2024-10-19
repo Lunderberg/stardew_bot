@@ -15,15 +15,16 @@ itertools = "*"
 thiserror = "*"
 regex = "*"
 
+anymap = "*"
 ratatui = "*"
 crossterm = "*"
-signal-hook = "*"
 chrono = "*"
 
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "*"
 
 iterator_extensions = { path = "../iterator_extensions" }
+tui_utils = { path = "../tui_utils" }
 dll_unpacker = { path = "../dll_unpacker" }
 memory_reader = { path = "../memory_reader" }
 stardew_utils = { path = "../stardew_utils" }

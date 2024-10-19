@@ -2,12 +2,13 @@ use std::{cmp::Reverse, ops::Range};
 
 use ratatui::{
     layout::{Constraint, Rect},
-    widgets::{Cell, StatefulWidget, Table, TableState, Widget},
+    widgets::{Cell, Row, StatefulWidget, Table, TableState, Widget},
 };
 
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
+use tui_utils::{TuiGlobals, WidgetSideEffects, WidgetWindow};
 
-use crate::{extended_tui::WidgetWindow, extensions::*, TuiGlobals};
+use crate::ChangeAddress;
 
 pub struct StackFrameTable {
     stack_region: Range<Pointer>,
@@ -71,13 +72,13 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
     where
         Self: Sized,
     {
-        let table: Table = self
+        let table = self
             .table
             .stack_frames
             .iter()
             .rev()
             .map(|frame| {
-                [
+                Row::new([
                     Cell::new(format!("{}", frame.frame_pointer.location)),
                     Cell::new(
                         self.reader
@@ -85,11 +86,10 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
                             .map(|reg| reg.short_name())
                             .unwrap_or(""),
                     ),
-                ]
-                .collect_row()
+                ])
             })
-            .chain(std::iter::once(["Prelude"].collect_row()))
-            .collect_table()
+            .chain(std::iter::once(Row::new(["Prelude"])))
+            .collect::<Table>()
             .widths([Constraint::Min(20), Constraint::Percentage(100)])
             .highlight_symbol(">> ");
 
@@ -110,21 +110,26 @@ impl WidgetWindow for StackFrameTable {
     ) {
         DrawableStackFrameTable {
             table: self,
-            reader: &globals.reader,
+            reader: globals.reader(),
         }
         .render(area, buf)
     }
 
-    fn change_address<'a>(
+    fn apply_side_effects<'a>(
         &'a mut self,
         globals: &'a TuiGlobals,
-        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
-        address: Pointer,
-    ) {
-        if !self.stack_region.contains(&address) {
-            *self =
-                StackFrameTable::new(&globals.reader, &globals.current_region);
-        }
-        self.select_address(address);
+        side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), tui_utils::Error> {
+        side_effects.iter::<ChangeAddress>().for_each(|address| {
+            let address = address.0;
+            if !self.stack_region.contains(&address) {
+                let current_region = globals
+                    .get::<MemoryRegion>()
+                    .expect("Should be initialized with a memory region");
+                *self = StackFrameTable::new(globals.reader(), current_region);
+            }
+            self.select_address(address);
+        });
+        Ok(())
     }
 }

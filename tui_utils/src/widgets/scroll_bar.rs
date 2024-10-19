@@ -5,9 +5,11 @@ use ratatui::{
     widgets::{List, ListState, StatefulWidget, Widget},
 };
 
-use crate::extended_tui::VerticalBar;
-use crate::extensions::*;
-use crate::{KeyBindingMatch, KeySequence};
+use crate::{
+    extensions::SplitRect as _,
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::VerticalBar,
+};
 
 pub struct WithScrollbar<Inner> {
     inner: Inner,

@@ -5,9 +5,9 @@ use ratatui::{
     text::{Line, Span},
     widgets::{List, Widget},
 };
+use tui_utils::inputs::{KeyBindingMatch, KeySequence};
+use tui_utils::{TuiGlobals, WidgetSideEffects, WidgetWindow};
 
-use crate::extended_tui::WidgetWindow;
-use crate::KeyBindingMatch;
 use crate::UserConfig;
 
 pub struct UserConfigEditor {
@@ -455,9 +455,9 @@ impl WidgetWindow for UserConfigEditor {
 
     fn apply_key_binding<'a>(
         &'a mut self,
-        keystrokes: &'a crate::KeySequence,
-        _globals: &'a crate::TuiGlobals,
-        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        keystrokes: &'a KeySequence,
+        _globals: &'a TuiGlobals,
+        side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_try_binding("C-x C-s", keystrokes, || {
@@ -503,10 +503,11 @@ impl WidgetWindow for UserConfigEditor {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: &'a crate::TuiGlobals,
+        _globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
+        let _ = _globals;
         let widget: List = self.iter_lines().collect();
         widget.render(area, buf)
     }

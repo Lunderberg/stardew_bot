@@ -1,8 +1,8 @@
-mod error;
-use error::Error;
+use stardew_bot::{Error, StardewBot};
 
 fn main() -> Result<(), Error> {
-    println!("In stardew_bot executable");
+    let mut tui = StardewBot::new()?;
+    tui.run()?;
 
     Ok(())
 }

@@ -1,3 +1,9 @@
+use crate::{
+    extensions::SplitRect as _,
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::BufferSelection,
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
+};
 use crossterm::event::{MouseButton, MouseEvent};
 use itertools::Itertools as _;
 use ratatui::{
@@ -5,11 +11,6 @@ use ratatui::{
     style::{Style, Stylize as _},
     widgets::{Block, Borders, Widget},
 };
-
-use crate::extensions::*;
-use crate::{KeyBindingMatch, KeySequence, TuiGlobals};
-
-use super::{BufferSelection, WidgetSideEffects, WidgetWindow};
 
 pub struct DynamicLayout {
     /// Index into the `windows` array.  Should reference a `Buffer`
@@ -438,7 +439,7 @@ impl DynamicLayout {
         }
     }
 
-    pub(crate) fn apply_key_binding<'a, 'b>(
+    pub fn apply_key_binding<'a, 'b>(
         &'a mut self,
         keystrokes: &KeySequence,
         globals: &TuiGlobals,
@@ -458,6 +459,9 @@ impl DynamicLayout {
             .or_try_binding("C-x 0", keystrokes, || self.close_current_window())
             .or_try_binding("C-x 1", keystrokes, || {
                 self.close_all_other_windows()
+            })
+            .or_try_binding("C-x o", keystrokes, || {
+                self.cycle_next();
             })
             .or_else(|| {
                 let window_kind = &mut self.windows[self.active_window].kind;

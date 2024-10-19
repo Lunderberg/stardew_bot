@@ -1,7 +1,9 @@
+use std::ops::Range;
+
 use memory_reader::Pointer;
 
 pub struct Annotation {
-    pub range: std::ops::Range<Pointer>,
+    pub range: Range<Pointer>,
     pub name: String,
     pub value: String,
 
@@ -36,5 +38,16 @@ impl dll_unpacker::Annotation for Annotation {
     fn disable_highlight(&mut self) -> &mut Self {
         self.highlight_range = false;
         self
+    }
+}
+
+impl From<Range<Pointer>> for Annotation {
+    fn from(range: Range<Pointer>) -> Self {
+        Annotation {
+            range,
+            name: String::default(),
+            value: String::default(),
+            highlight_range: true,
+        }
     }
 }

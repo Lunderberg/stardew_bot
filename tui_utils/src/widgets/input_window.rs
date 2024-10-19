@@ -1,9 +1,8 @@
+use crate::inputs::{KeyBindingMatch, KeySequence};
 use ratatui::{
     layout::Rect,
     widgets::{Block, Borders, Paragraph},
 };
-
-use crate::{KeyBindingMatch, KeySequence};
 
 pub struct InputWindow {
     title: &'static str,
@@ -11,14 +10,14 @@ pub struct InputWindow {
 }
 
 impl InputWindow {
-    pub(crate) fn new(title: &'static str) -> Self {
+    pub fn new(title: &'static str) -> Self {
         Self {
             title,
             chars: Vec::new(),
         }
     }
 
-    pub(crate) fn apply_key_binding(
+    pub fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
     ) -> KeyBindingMatch {
@@ -36,7 +35,7 @@ impl InputWindow {
             })
     }
 
-    pub(crate) fn text(self) -> String {
+    pub fn text(self) -> String {
         self.chars.into_iter().collect()
     }
 }

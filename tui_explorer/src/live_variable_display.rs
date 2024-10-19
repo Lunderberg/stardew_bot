@@ -7,10 +7,10 @@ use ratatui::{
     text::{Line, Text},
     widgets::{Row, StatefulWidget as _, Table, TableState},
 };
-
-use crate::{
-    extended_tui::{ScrollableState as _, WidgetSideEffects, WidgetWindow},
-    Error, KeyBindingMatch, KeySequence, TuiGlobals,
+use tui_utils::{
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::ScrollableState as _,
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
 pub struct LiveVariableDisplay {
@@ -40,39 +40,6 @@ impl WidgetWindow for LiveVariableDisplay {
         "LiveVariableDisplay".into()
     }
 
-    fn add_live_variable<'a>(
-        &'a mut self,
-        globals: &'a TuiGlobals,
-        _side_effects: &'a mut WidgetSideEffects,
-        symbolic_chain: &'a SymbolicAccessChain,
-    ) -> Result<(), Error> {
-        let reader = globals.cached_reader();
-        let symbolic_chain = symbolic_chain.clone();
-        let physical_chain =
-            PhysicalAccessChain::derive(&symbolic_chain, reader)?;
-        let live_var = LiveVariable {
-            symbolic_chain,
-            physical_chain,
-            most_recent_value: None,
-        };
-        self.live_variables.push(live_var);
-        Ok(())
-    }
-
-    fn periodic_update<'a>(
-        &mut self,
-        globals: &'a crate::TuiGlobals,
-        _side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
-    ) -> Result<(), crate::Error> {
-        for live_var in self.live_variables.iter_mut() {
-            let value =
-                live_var.physical_chain.read(globals.cached_reader())?;
-            live_var.most_recent_value = value;
-        }
-
-        Ok(())
-    }
-
     fn apply_key_binding(
         &mut self,
         keystrokes: &KeySequence,
@@ -88,9 +55,44 @@ impl WidgetWindow for LiveVariableDisplay {
         })
     }
 
+    fn periodic_update<'a>(
+        &mut self,
+        globals: &'a TuiGlobals,
+        _side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), tui_utils::Error> {
+        for live_var in self.live_variables.iter_mut() {
+            let value =
+                live_var.physical_chain.read(globals.cached_reader())?;
+            live_var.most_recent_value = value;
+        }
+
+        Ok(())
+    }
+
+    fn apply_side_effects<'a>(
+        &'a mut self,
+        globals: &'a TuiGlobals,
+        side_effects: &'a mut WidgetSideEffects,
+    ) -> Result<(), tui_utils::Error> {
+        side_effects
+            .into_iter::<SymbolicAccessChain>()
+            .try_for_each(|symbolic_chain| {
+                let reader = globals.cached_reader();
+                let physical_chain =
+                    PhysicalAccessChain::derive(&symbolic_chain, reader)?;
+                let live_var = LiveVariable {
+                    symbolic_chain,
+                    physical_chain,
+                    most_recent_value: None,
+                };
+                self.live_variables.push(live_var);
+                Ok(())
+            })
+    }
+
     fn draw<'a>(
         &'a mut self,
-        _globals: &'a crate::TuiGlobals,
+        _globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {

@@ -8,17 +8,13 @@ use ratatui::{
     text::Line,
     widgets::{List, ListState, Widget},
 };
-use regex::Regex;
 
-use memory_reader::Pointer;
 use tui_utils::{
     extensions::HighlightLine as _,
     inputs::{KeyBindingMatch, KeySequence},
     widgets::{ScrollableState as _, SearchDirection, SearchWindow},
     LogMessage, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
-
-use crate::ChangeAddress;
 
 pub struct RunningLog {
     max_elements: usize,
@@ -67,36 +63,6 @@ impl RunningLog {
 
     fn finalize_search(&mut self) {
         self.search = None;
-    }
-
-    fn highlighted_address(&self) -> Option<Pointer> {
-        let line_num = self.state.selected()?;
-
-        let (_, line) = self
-            .items
-            .get(self.items.len() - line_num - 1)
-            .expect("Invalid line num selected");
-
-        Regex::new("0x[0-9A-Fa-f]+")
-            .expect("Invalid regex")
-            .find(&line)
-            .map(|addr_match| addr_match.as_str())
-            .map(|addr_str| {
-                usize::from_str_radix(&addr_str[2..], 16)
-                    .expect("Conversion should succeed from prev regex")
-            })
-            .map(|addr_usize| Pointer::new(addr_usize))
-    }
-
-    fn jump_to_highlighted_address(
-        &mut self,
-        side_effects: &mut WidgetSideEffects,
-    ) {
-        if let Some(address) = self.highlighted_address() {
-            side_effects.broadcast(ChangeAddress(address));
-        } else {
-            side_effects.add_log("Line doesn't contain an address");
-        }
     }
 
     fn get_row_generator<'a>(
@@ -176,7 +142,7 @@ impl WidgetWindow for RunningLog {
         &mut self,
         keystrokes: &KeySequence,
         _globals: &TuiGlobals,
-        side_effects: &mut WidgetSideEffects,
+        _side_effects: &mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_else(|| {
@@ -213,9 +179,6 @@ impl WidgetWindow for RunningLog {
             })
             .or_try_binding("C-r", keystrokes, || {
                 self.start_search(SearchDirection::Reverse)
-            })
-            .or_try_binding("<enter>", keystrokes, || {
-                self.jump_to_highlighted_address(side_effects)
             })
     }
 

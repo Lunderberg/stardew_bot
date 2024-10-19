@@ -1,3 +1,9 @@
+use crate::{
+    extensions::{HighlightLine as _, SplitRect as _},
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::ScrollableState as _,
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
+};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -7,12 +13,7 @@ use ratatui::{
 };
 use regex::RegexBuilder;
 
-use super::{ScrollableState as _, WidgetSideEffects, WidgetWindow};
-use crate::{extensions::*, TuiGlobals};
-
-use crate::{KeyBindingMatch, KeySequence};
-
-pub(crate) struct BufferSelection {
+pub struct BufferSelection {
     prev_buffer_index: usize,
     list_state: ListState,
     selected_buffer: Option<usize>,
@@ -24,13 +25,13 @@ pub(crate) struct BufferSelection {
     currently_highlighted_buffer: usize,
 }
 
-pub(crate) struct DrawableBufferSelection<'a, 'b> {
+pub struct DrawableBufferSelection<'a, 'b> {
     selector: &'a mut BufferSelection,
     buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
 }
 
 impl BufferSelection {
-    pub(crate) fn new(prev_buffer_index: usize) -> Self {
+    pub fn new(prev_buffer_index: usize) -> Self {
         let list_state =
             ListState::default().with_selected(Some(prev_buffer_index));
         Self {
@@ -43,11 +44,11 @@ impl BufferSelection {
         }
     }
 
-    pub(crate) fn selected_buffer(&self) -> Option<usize> {
+    pub fn selected_buffer(&self) -> Option<usize> {
         self.selected_buffer
     }
 
-    pub(crate) fn drawable<'a, 'b>(
+    pub fn drawable<'a, 'b>(
         &'a mut self,
         buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
     ) -> DrawableBufferSelection<'a, 'b> {

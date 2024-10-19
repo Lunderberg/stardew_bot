@@ -10,12 +10,14 @@ use ratatui::{
     text::Text,
     widgets::{Row, StatefulWidget, Table, TableState, Widget},
 };
-
-use crate::extended_tui::{
-    Indent, ScrollableState, SearchDirection, SearchWindow, WidgetWindow,
+use tui_utils::{
+    extensions::{SplitRect as _, WidgetWithScrollbar as _},
+    inputs::{KeyBindingMatch, KeySequence},
+    widgets::{Indent, ScrollableState as _, SearchDirection, SearchWindow},
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
-use crate::extensions::*;
-use crate::{Error, KeyBindingMatch};
+
+use crate::{ChangeAddress, Error};
 
 pub struct MetadataDisplay {
     dll_metadata: Vec<DllMetadata>,
@@ -426,9 +428,9 @@ impl WidgetWindow for MetadataDisplay {
 
     fn apply_key_binding<'a>(
         &'a mut self,
-        keystrokes: &'a crate::KeySequence,
-        globals: &'a crate::TuiGlobals,
-        side_effects: &'a mut crate::extended_tui::WidgetSideEffects,
+        keystrokes: &'a KeySequence,
+        globals: &'a TuiGlobals,
+        side_effects: &'a mut WidgetSideEffects,
     ) -> KeyBindingMatch {
         let num_lines = self.num_lines();
 
@@ -492,7 +494,7 @@ impl WidgetWindow for MetadataDisplay {
                         .nth(selected as usize)
                         .and_then(|item| item.loc)
                     {
-                        side_effects.change_address(loc);
+                        side_effects.broadcast(ChangeAddress(loc));
                     }
                 }
             })
@@ -500,7 +502,7 @@ impl WidgetWindow for MetadataDisplay {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: &'a crate::TuiGlobals,
+        _globals: &'a TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
@@ -525,23 +527,6 @@ impl WidgetWindow for MetadataDisplay {
             buf,
             &mut self.table_state,
         );
-
-        // TODO: Truncate the table before drawing if rendering is
-        // unreasonably slow.
-        //
-        // let truncated_table: Table = self
-        //     .iter_lines()
-        //     .skip(self.table_state.offset())
-        //     .take(area.height as usize)
-        //     .map(|line| Row::new(line.as_table_row().map(Cell::new)))
-        //     .collect();
-        // let mut dummy_state =
-        //     self.table_state.clone().with_offset(0).with_selected(
-        //         self.table_state
-        //             .selected()
-        //             .map(|row| row - self.table_state.offset()),
-        //     );
-        // StatefulWidget::render(truncated_table, area, buf, &mut dummy_state);
 
         let table: Table = Self::iter_lines_impl(&self.dll_metadata)
             .map(|line| {

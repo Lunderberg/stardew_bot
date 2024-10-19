@@ -1,8 +1,6 @@
 use ratatui::layout::Rect;
 
 pub trait SplitRect {
-    #![allow(dead_code)]
-
     fn split_from_bottom(self, lines: u16) -> (Rect, Rect);
 
     fn split_from_top(self, lines: u16) -> (Rect, Rect);
