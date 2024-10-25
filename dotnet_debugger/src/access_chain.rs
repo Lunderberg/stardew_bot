@@ -439,10 +439,10 @@ impl std::fmt::Display for SymbolicType {
         write!(f, "{}", self.name)?;
 
         if !self.generics.is_empty() {
-            write!(f, "<")?;
+            write!(f, "<\u{200B}")?;
             for (i, generic) in self.generics.iter().enumerate() {
                 if i > 0 {
-                    write!(f, ", ")?;
+                    write!(f, ",\u{200B} ")?;
                 }
                 write!(f, "{generic}")?;
             }
@@ -455,17 +455,17 @@ impl std::fmt::Display for SymbolicType {
 
 impl std::fmt::Display for SymbolicStaticField {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}.{}", self.class, self.field_name)
+        write!(f, "{}\u{200B}.{}", self.class, self.field_name)
     }
 }
 
 impl std::fmt::Display for SymbolicOperation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SymbolicOperation::Field(field) => write!(f, ".{field}"),
+            SymbolicOperation::Field(field) => write!(f, "\u{200B}.{field}"),
             SymbolicOperation::IndexAccess(index) => write!(f, "[{index}]"),
             SymbolicOperation::Downcast(symbolic_type) => {
-                write!(f, ".as<{symbolic_type}>()")
+                write!(f, "\u{200B}.as<{symbolic_type}>()")
             }
         }
     }

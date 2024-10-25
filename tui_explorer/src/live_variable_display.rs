@@ -1,3 +1,5 @@
+use itertools::Itertools;
+
 use dotnet_debugger::{
     PhysicalAccessChain, RuntimePrimValue, SymbolicAccessChain,
 };
@@ -98,34 +100,57 @@ impl WidgetWindow for LiveVariableDisplay {
     ) {
         self.prev_draw_height = area.height as usize;
 
-        let rows = self
+        let width_right = 10;
+        let width_left = (area.width as usize).saturating_sub(width_right);
+
+        let exprs = self
             .live_variables
             .iter()
-            .map(|live_var| {
-                [
-                    // TODO: Once
-                    // https://github.com/ratatui/ratatui/pull/1432 is
-                    // available in a release version of ratatui,
-                    // apply the alignment directly on the `Text`
-                    // widget.
-                    //
-                    // Text::from(format!("{}", live_var.symbolic_chain))
-                    //     .alignment(Alignment::Right),
-                    Text::from(
-                        Line::from(format!("{}", live_var.symbolic_chain))
-                            .alignment(Alignment::Right),
-                    ),
+            .map(|live_var| format!("{}", live_var.symbolic_chain))
+            .collect::<Vec<_>>();
+
+        let rows = self.live_variables.iter().zip(exprs.iter()).map(
+            |(live_var, expr)| {
+                let name_lines: Vec<_> = std::iter::empty()
+                    .chain(std::iter::once(0))
+                    .chain(
+                        expr.match_indices("\u{200B}").map(|(index, _)| index),
+                    )
+                    .chain(std::iter::once(expr.len()))
+                    .tuple_windows()
+                    .peekable()
+                    .batching(|iter| {
+                        let (start, mut end) = iter.next()?;
+                        while let Some((_, new_end)) =
+                            iter.next_if(|(_, b)| b - start < width_left)
+                        {
+                            end = new_end;
+                        }
+                        Some((start, end))
+                    })
+                    .map(|(start, end)| &expr[start..end])
+                    .map(|line| Line::from(line).alignment(Alignment::Right))
+                    .collect();
+
+                let height = name_lines.len();
+
+                Row::new([
+                    Text::from(name_lines),
                     Text::from(match &live_var.most_recent_value {
                         Some(value) => format!("{value}"),
                         None => String::default(),
                     }),
-                ]
-            })
-            .map(Row::new);
+                ])
+                .height(height as u16)
+            },
+        );
 
         let table = Table::new(
             rows,
-            [Constraint::Percentage(100), Constraint::Min(10)],
+            [
+                Constraint::Percentage(100),
+                Constraint::Min(width_right as u16),
+            ],
         );
 
         let table = table
