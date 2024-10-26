@@ -464,6 +464,30 @@ impl SymbolicStaticField {
 }
 
 impl PhysicalAccessChain {
+    pub fn simplify(self) -> Self {
+        let ops = self
+            .ops
+            .into_iter()
+            .peekable()
+            .batching(|iter| {
+                let mut op = iter.next()?;
+                if let PhysicalAccessOperation::Offset(offset) = &mut op {
+                    while let Some(next) = iter.next_if(|next| {
+                        matches!(next, PhysicalAccessOperation::Offset(_))
+                    }) {
+                        let PhysicalAccessOperation::Offset(next_offset) = next
+                        else {
+                            unreachable!("Protected by Peekable.next_if")
+                        };
+                        *offset += next_offset;
+                    }
+                }
+                Some(op)
+            })
+            .collect();
+        Self { ops, ..self }
+    }
+
     pub fn read(
         &self,
         reader: CachedReader<'_>,

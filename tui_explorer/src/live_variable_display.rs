@@ -82,6 +82,7 @@ impl WidgetWindow for LiveVariableDisplay {
                 let reader = globals.cached_reader();
                 let symbolic_chain = symbolic_chain.simplify(reader)?;
                 let physical_chain = symbolic_chain.to_physical(reader)?;
+                let physical_chain = physical_chain.simplify();
                 let live_var = LiveVariable {
                     symbolic_chain,
                     physical_chain,
