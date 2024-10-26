@@ -51,35 +51,23 @@ pub enum PhysicalAccessOperation {
     Downcast(TypedPointer<MethodTable>),
 }
 
-impl PhysicalAccessChain {
-    pub fn derive(
-        symbolic: &SymbolicAccessChain,
-        reader: CachedReader<'_>,
-    ) -> Result<Self, Error> {
-        let (base_ptr, mut item_type) =
-            symbolic.static_field.start_of_access_chain(reader)?;
-
-        match &item_type {
-            RuntimeType::ValueType {
-                method_table: method_table_ptr,
-                ..
-            }
-            | RuntimeType::Class {
-                method_table: Some(method_table_ptr),
-            } => {
-                let method_table_ptr = *method_table_ptr;
-                let method_table = reader.method_table(method_table_ptr)?;
-                assert!(
-                    !method_table.has_non_instantiated_generic_types(reader)?,
-                    "Method table for {} has non-instantiated generics.",
-                    reader.method_table_to_name(method_table_ptr)?
-                );
-            }
-            _ => {}
+impl SymbolicAccessChain {
+    fn prefix(&self, index: usize) -> SymbolicAccessChainView {
+        SymbolicAccessChainView {
+            static_field: &self.static_field,
+            ops: &self.ops[..index],
         }
+    }
+
+    pub fn to_physical(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<PhysicalAccessChain, Error> {
+        let (base_ptr, mut item_type) =
+            self.static_field.start_of_access_chain(reader)?;
 
         let mut ops = Vec::new();
-        for (op_index, op) in symbolic.ops.iter().enumerate() {
+        for (op_index, op) in self.ops.iter().enumerate() {
             match &item_type {
                 RuntimeType::ValueType {
                     method_table: method_table_ptr,
@@ -110,7 +98,7 @@ impl PhysicalAccessChain {
                             .ok_or_else(|| {
                                 Error::UnexpectedNullMethodTable(format!(
                                     "{}",
-                                    symbolic.prefix(op_index)
+                                    self.prefix(op_index)
                                 ))
                             })?,
                         _ => {
@@ -160,7 +148,7 @@ impl PhysicalAccessChain {
                                 \tContained in: {}\n\
                                 \tField's parent type: {}\n\
                                 \tField signature: {}",
-                            symbolic.prefix(op_index + 1),
+                            self.prefix(op_index + 1),
                             reader.method_table_to_name(method_table_ptr)?,
                             reader.method_table_to_name(parent_of_field)?,
                             reader.field_to_type_name(&field)?,
@@ -184,7 +172,7 @@ impl PhysicalAccessChain {
                     .ok_or_else(|| {
                         Error::UnexpectedNullMethodTable(format!(
                             "{}",
-                            symbolic.prefix(op_index)
+                            self.prefix(op_index)
                         ))
                     })?;
 
@@ -246,60 +234,16 @@ impl PhysicalAccessChain {
         let prim_type = match item_type {
             RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
             other => Err(Error::AccessChainMustTerminateInPrimitive {
-                field: format!("{symbolic}"),
+                field: format!("{self}"),
                 ty: other,
             }),
         }?;
 
-        Ok(Self {
+        Ok(PhysicalAccessChain {
             base_ptr,
             ops,
             prim_type,
         })
-    }
-
-    pub fn read(
-        &self,
-        reader: CachedReader<'_>,
-    ) -> Result<Option<RuntimePrimValue>, Error> {
-        let mut ptr = self.base_ptr;
-        for op in &self.ops {
-            match op {
-                PhysicalAccessOperation::Dereference => {
-                    ptr = reader.read_byte_array(ptr)?.into();
-                }
-                PhysicalAccessOperation::Offset(offset) => {
-                    ptr = ptr + *offset;
-                }
-                PhysicalAccessOperation::Downcast(target_type_ptr) => {
-                    // TODO: Avoid having the double read of the
-                    // object's location.
-                    let object_loc: Pointer =
-                        reader.read_byte_array(ptr)?.into();
-                    let actual_type_ptr: Pointer =
-                        reader.read_byte_array(object_loc)?.into();
-                    if !reader
-                        .is_base_of(*target_type_ptr, actual_type_ptr.into())?
-                    {
-                        return Ok(None);
-                    }
-                }
-            };
-        }
-
-        let bytes =
-            reader.read_bytes(ptr..ptr + self.prim_type.size_bytes())?;
-        let prim_value = self.prim_type.parse(&bytes)?;
-        Ok(Some(prim_value))
-    }
-}
-
-impl SymbolicAccessChain {
-    fn prefix(&self, index: usize) -> SymbolicAccessChainView {
-        SymbolicAccessChainView {
-            static_field: &self.static_field,
-            ops: &self.ops[..index],
-        }
     }
 }
 
@@ -413,6 +357,43 @@ impl SymbolicStaticField {
             reader.field_to_runtime_type(base_method_table_ptr, &field)?;
 
         Ok((base_ptr, base_type))
+    }
+}
+
+impl PhysicalAccessChain {
+    pub fn read(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<Option<RuntimePrimValue>, Error> {
+        let mut ptr = self.base_ptr;
+        for op in &self.ops {
+            match op {
+                PhysicalAccessOperation::Dereference => {
+                    ptr = reader.read_byte_array(ptr)?.into();
+                }
+                PhysicalAccessOperation::Offset(offset) => {
+                    ptr = ptr + *offset;
+                }
+                PhysicalAccessOperation::Downcast(target_type_ptr) => {
+                    // TODO: Avoid having the double read of the
+                    // object's location.
+                    let object_loc: Pointer =
+                        reader.read_byte_array(ptr)?.into();
+                    let actual_type_ptr: Pointer =
+                        reader.read_byte_array(object_loc)?.into();
+                    if !reader
+                        .is_base_of(*target_type_ptr, actual_type_ptr.into())?
+                    {
+                        return Ok(None);
+                    }
+                }
+            };
+        }
+
+        let bytes =
+            reader.read_bytes(ptr..ptr + self.prim_type.size_bytes())?;
+        let prim_value = self.prim_type.parse(&bytes)?;
+        Ok(Some(prim_value))
     }
 }
 

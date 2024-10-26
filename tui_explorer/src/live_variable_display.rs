@@ -80,8 +80,7 @@ impl WidgetWindow for LiveVariableDisplay {
             .into_iter::<SymbolicAccessChain>()
             .try_for_each(|symbolic_chain| {
                 let reader = globals.cached_reader();
-                let physical_chain =
-                    PhysicalAccessChain::derive(&symbolic_chain, reader)?;
+                let physical_chain = symbolic_chain.to_physical(reader)?;
                 let live_var = LiveVariable {
                     symbolic_chain,
                     physical_chain,
