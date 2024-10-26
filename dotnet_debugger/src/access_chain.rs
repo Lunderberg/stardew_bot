@@ -4,8 +4,8 @@ use memory_reader::Pointer;
 
 use crate::{
     runtime_type::RuntimePrimType, runtime_value::RuntimePrimValue,
-    CachedReader, Error, FieldContainer, MethodTable, RuntimeArray,
-    RuntimeType, TypedPointer,
+    CachedReader, Error, FieldContainer, FieldDescription, MethodTable,
+    RuntimeArray, RuntimeType, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -51,12 +51,166 @@ pub enum PhysicalAccessOperation {
     Downcast(TypedPointer<MethodTable>),
 }
 
+trait RuntimeTypeExt {
+    fn method_table_for_field_access(
+        &self,
+        gen_name: impl FnOnce() -> String,
+    ) -> Result<TypedPointer<MethodTable>, Error>;
+
+    fn method_table_for_downcast(
+        &self,
+    ) -> Result<TypedPointer<MethodTable>, Error>;
+
+    fn as_array_type(
+        &self,
+        gen_name: impl FnOnce() -> String,
+    ) -> Result<&RuntimeType, Error>;
+}
+impl RuntimeTypeExt for RuntimeType {
+    fn method_table_for_field_access(
+        &self,
+        gen_name: impl FnOnce() -> String,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        match self {
+            RuntimeType::ValueType { method_table, .. } => Ok(*method_table),
+            RuntimeType::Class { method_table } => method_table
+                .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name())),
+            _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
+        }
+    }
+
+    fn method_table_for_downcast(
+        &self,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        match self {
+            RuntimeType::Class { method_table } => {
+                method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
+            }
+            _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
+        }
+    }
+
+    fn as_array_type(
+        &self,
+        gen_name: impl FnOnce() -> String,
+    ) -> Result<&RuntimeType, Error> {
+        match self {
+            RuntimeType::Array { element_type } => Ok(element_type.as_ref()),
+            //RuntimeType::MultiDimArray { element_type, rank } => todo!(),
+            _ => Err(Error::IndexAccessRequiresArray(self.clone())),
+        }?
+        .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name()))
+        .map(|b| b.as_ref())
+    }
+}
+
+trait CachedReaderExt<'a> {
+    fn find_field(
+        &self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        field_name: &str,
+    ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error>;
+}
+impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
+    fn find_field(
+        &self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        field_name: &str,
+    ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error> {
+        self.iter_instance_fields(method_table_ptr)?
+            .find(|(_, field)| {
+                self.field_to_name(field)
+                    .map(|name| name == field_name)
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| match self.method_table_to_name(method_table_ptr) {
+                Ok(class_name) => Error::NoSuchInstanceField {
+                    class_name: class_name.to_string(),
+                    field_name: field_name.to_string(),
+                },
+                Err(err) => err,
+            })
+    }
+}
+
 impl SymbolicAccessChain {
     fn prefix(&self, index: usize) -> SymbolicAccessChainView {
         SymbolicAccessChainView {
             static_field: &self.static_field,
             ops: &self.ops[..index],
         }
+    }
+
+    pub fn simplify(mut self, reader: CachedReader<'_>) -> Result<Self, Error> {
+        let (_, mut item_type) =
+            self.static_field.start_of_access_chain(reader)?;
+        let old_ops = {
+            let mut vec = Vec::new();
+            std::mem::swap(&mut vec, &mut self.ops);
+            vec
+        };
+
+        for (op_index, op) in old_ops.into_iter().enumerate() {
+            match &op {
+                SymbolicOperation::Field(field_name) => {
+                    let method_table_ptr = item_type
+                        .method_table_for_field_access(|| format!("{self}"))?;
+                    let (parent_of_field, field) =
+                        reader.find_field(method_table_ptr, field_name)?;
+                    let new_item_type = reader
+                        .field_to_runtime_type(parent_of_field, &field)?;
+
+                    self.ops.push(op);
+                    item_type = new_item_type;
+                }
+                SymbolicOperation::IndexAccess(_) => {
+                    let element_type = item_type.as_array_type(|| {
+                        format!("{}", self.prefix(op_index))
+                    })?;
+
+                    self.ops.push(op);
+                    item_type = element_type.clone();
+                }
+                SymbolicOperation::Downcast(symbolic_type) => {
+                    let static_method_table_ptr =
+                        item_type.method_table_for_downcast()?;
+                    let target_method_table_ptr =
+                        symbolic_type.method_table(reader)?;
+
+                    if reader.is_base_of(
+                        target_method_table_ptr,
+                        static_method_table_ptr,
+                    )? {
+                        // Static type is the same, or superclass of
+                        // the desired runtime type.  This downcast
+                        // can be simplified away.
+                        item_type = RuntimeType::Class {
+                            method_table: Some(static_method_table_ptr),
+                        };
+                    } else if reader.is_base_of(
+                        static_method_table_ptr,
+                        target_method_table_ptr,
+                    )? {
+                        // Target type is a subclass of the
+                        // statically-known type.  The downcast must
+                        // be retained.
+                        self.ops.push(op);
+                        item_type = RuntimeType::Class {
+                            method_table: Some(target_method_table_ptr),
+                        };
+                    } else {
+                        // Types are in separate hierachies.  This
+                        // downcast is illegal.
+                        return Err(Error::DowncastRequiresRelatedClasses(
+                            format!("{item_type}"),
+                            format!("{symbolic_type}"),
+                        ));
+                    }
+                }
+            }
+        }
+
+        Ok(self)
     }
 
     pub fn to_physical(
@@ -90,43 +244,13 @@ impl SymbolicAccessChain {
 
             match op {
                 SymbolicOperation::Field(field_name) => {
-                    let method_table_ptr = match &item_type {
-                        RuntimeType::ValueType { method_table, .. } => {
-                            *method_table
-                        }
-                        RuntimeType::Class { method_table } => method_table
-                            .ok_or_else(|| {
-                                Error::UnexpectedNullMethodTable(format!(
-                                    "{}",
-                                    self.prefix(op_index)
-                                ))
-                            })?,
-                        _ => {
-                            return Err(
-                                Error::FieldAccessRequiresClassOrStruct(
-                                    item_type,
-                                ),
-                            );
-                        }
-                    };
-                    let (parent_of_field, field) = reader
-                        .iter_instance_fields(method_table_ptr)?
-                        .find(|(_, field)| {
-                            reader
-                                .field_to_name(field)
-                                .map(|name| name == field_name)
-                                .unwrap_or(false)
-                        })
-                        .ok_or_else(|| {
-                            match reader.method_table_to_name(method_table_ptr)
-                            {
-                                Ok(class_name) => Error::NoSuchInstanceField {
-                                    class_name: class_name.to_string(),
-                                    field_name: field_name.clone(),
-                                },
-                                Err(err) => err,
-                            }
+                    let method_table_ptr = item_type
+                        .method_table_for_field_access(|| {
+                            format!("{}", self.prefix(op_index))
                         })?;
+
+                    let (parent_of_field, field) =
+                        reader.find_field(method_table_ptr, field_name)?;
 
                     if matches!(&item_type, RuntimeType::Class { .. }) {
                         ops.push(PhysicalAccessOperation::Dereference);
@@ -158,22 +282,8 @@ impl SymbolicAccessChain {
                     item_type = new_item_type;
                 }
                 SymbolicOperation::IndexAccess(index) => {
-                    let element_type = match &item_type {
-                        RuntimeType::Array { element_type } => {
-                            element_type.as_ref()
-                        }
-                        //RuntimeType::MultiDimArray { element_type, rank } => todo!(),
-                        _ => {
-                            return Err(Error::IndexAccessRequiresArray(
-                                item_type,
-                            ));
-                        }
-                    }
-                    .ok_or_else(|| {
-                        Error::UnexpectedNullMethodTable(format!(
-                            "{}",
-                            self.prefix(op_index)
-                        ))
+                    let element_type = item_type.as_array_type(|| {
+                        format!("{}", self.prefix(op_index))
                     })?;
 
                     let stride = element_type.size_bytes();
@@ -183,18 +293,11 @@ impl SymbolicAccessChain {
                         RuntimeArray::HEADER_SIZE,
                     ));
                     ops.push(PhysicalAccessOperation::Offset(stride * index));
-                    item_type = (**element_type).clone();
+                    item_type = element_type.clone();
                 }
                 SymbolicOperation::Downcast(symbolic_type) => {
-                    let static_method_table_ptr = match &item_type {
-                        RuntimeType::Class { method_table } => method_table
-                            .ok_or(Error::DowncastRequiresKnownBaseClass)?,
-                        _ => {
-                            return Err(Error::DowncastRequiresClassInstance(
-                                item_type,
-                            ));
-                        }
-                    };
+                    let static_method_table_ptr =
+                        item_type.method_table_for_downcast()?;
                     let target_method_table_ptr =
                         symbolic_type.method_table(reader)?;
 
