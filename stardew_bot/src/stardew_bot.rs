@@ -1,6 +1,7 @@
-use crate::{Error, RunningLog};
+use crate::{Error, FishingUI, RunningLog};
 
 use crossterm::event::Event;
+use dotnet_debugger::CachedReader;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -28,17 +29,19 @@ pub struct StardewBot {
 
 struct TuiBuffers {
     running_log: RunningLog,
+    fishing: FishingUI,
 }
 
 impl TuiBuffers {
-    fn new() -> Self {
-        Self {
+    fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
+        Ok(Self {
             running_log: RunningLog::new(100),
-        }
+            fishing: FishingUI::new(reader)?,
+        })
     }
 
     fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow>> {
-        vec![Box::new(&mut self.running_log)]
+        vec![Box::new(&mut self.running_log), Box::new(&mut self.fishing)]
     }
 }
 
@@ -47,10 +50,17 @@ impl StardewBot {
         let pid = stardew_valley_pid()?;
         let reader = MemoryReader::new(pid)?;
 
+        let tui_globals = TuiGlobals::new(reader);
+        let buffers = TuiBuffers::new(tui_globals.cached_reader())?;
+
+        let mut layout = DynamicLayout::new();
+        layout.split_horizontally(Some(45), None);
+        layout.switch_to_buffer(1);
+
         Ok(Self {
-            tui_globals: TuiGlobals::new(reader),
-            layout: DynamicLayout::new(),
-            buffers: TuiBuffers::new(),
+            tui_globals,
+            layout,
+            buffers,
             should_exit: false,
             keystrokes: KeySequence::default(),
         })

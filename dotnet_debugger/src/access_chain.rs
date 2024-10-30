@@ -5,7 +5,7 @@ use memory_reader::Pointer;
 use crate::{
     runtime_type::RuntimePrimType, runtime_value::RuntimePrimValue,
     CachedReader, Error, FieldContainer, FieldDescription, MethodTable,
-    RuntimeArray, RuntimeType, TypedPointer,
+    RuntimeArray, RuntimeType, SymbolicParser, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -134,6 +134,10 @@ impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
 }
 
 impl SymbolicAccessChain {
+    pub fn parse(chain: &str, reader: CachedReader<'_>) -> Result<Self, Error> {
+        SymbolicParser::new(chain, reader).next_chain()
+    }
+
     fn prefix(&self, index: usize) -> SymbolicAccessChainView {
         SymbolicAccessChainView {
             static_field: &self.static_field,

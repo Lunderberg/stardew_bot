@@ -6,3 +6,6 @@ pub use error::Error;
 
 mod running_log;
 pub use running_log::RunningLog;
+
+mod fishing;
+pub use fishing::FishingUI;

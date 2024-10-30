@@ -12,6 +12,9 @@ pub enum Error {
     #[error("memory_reader::Error( {0} )")]
     MemoryReadError(#[from] memory_reader::Error),
 
+    #[error("dotnet_debugger::Error( {0} )")]
+    DotnetDebugger(#[from] dotnet_debugger::Error),
+
     #[error("tui_utils::Error( {0} )")]
     TuiUtilError(#[from] tui_utils::Error),
 

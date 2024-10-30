@@ -14,8 +14,8 @@ use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
 use crate::{
-    extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
-    TypeHandle,
+    extensions::*, CorElementType, FieldContainer, PhysicalAccessChain,
+    RuntimeModuleLayout, SymbolicAccessChain, TypeHandle,
 };
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
@@ -1290,6 +1290,16 @@ impl<'a> CachedReader<'a> {
                 return Ok(false);
             }
         }
+    }
+
+    pub fn parse_access_chain(
+        &self,
+        field: &str,
+    ) -> Result<PhysicalAccessChain, Error> {
+        Ok(SymbolicAccessChain::parse(field, *self)?
+            .simplify(*self)?
+            .to_physical(*self)?
+            .simplify())
     }
 }
 

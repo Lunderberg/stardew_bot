@@ -25,11 +25,8 @@ pub enum Error {
         err: dll_unpacker::Error,
     },
 
-    #[error("dotnet_debugger::Error{{ {err} }}")]
-    DotnetDebugger {
-        #[from]
-        err: dotnet_debugger::Error,
-    },
+    #[error("dotnet_debugger::Error( {0} )")]
+    DotnetDebugger(#[from] dotnet_debugger::Error),
 
     #[error("stardew_utils::Error{{ {err} }}")]
     StardewUtilError {

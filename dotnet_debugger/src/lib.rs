@@ -49,3 +49,6 @@ pub mod extensions;
 
 mod access_chain;
 pub use access_chain::*;
+
+mod access_chain_parser;
+pub(crate) use access_chain_parser::*;

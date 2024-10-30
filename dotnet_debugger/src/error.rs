@@ -23,6 +23,9 @@ pub enum Error {
         err: std::fmt::Error,
     },
 
+    #[error("dotnet_debugger::ParseError( {0} )")]
+    ParseError(#[from] crate::ParseError),
+
     #[error("Could not find pointer to .NET Module '{0}'")]
     ModulePointerNotFound(String),
 
