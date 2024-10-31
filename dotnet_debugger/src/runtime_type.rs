@@ -149,6 +149,19 @@ impl RuntimeType {
             | RuntimeType::MultiDimArray { .. } => Pointer::SIZE,
         }
     }
+
+    /// Returns true if instances of this type are held by pointer by
+    /// their containing class.
+    pub fn stored_as_ptr(&self) -> bool {
+        match self {
+            RuntimeType::Prim(_) => false,
+            RuntimeType::ValueType { .. } => false,
+            RuntimeType::Class { .. } => true,
+            RuntimeType::String => true,
+            RuntimeType::Array { .. } => true,
+            RuntimeType::MultiDimArray { .. } => true,
+        }
+    }
 }
 
 impl RuntimePrimType {

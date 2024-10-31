@@ -225,6 +225,11 @@ impl SymbolicAccessChain {
             self.static_field.start_of_access_chain(reader)?;
 
         let mut ops = Vec::new();
+
+        if item_type.stored_as_ptr() {
+            ops.push(PhysicalAccessOperation::Dereference);
+        }
+
         for (op_index, op) in self.ops.iter().enumerate() {
             match &item_type {
                 RuntimeType::ValueType {
@@ -257,7 +262,6 @@ impl SymbolicAccessChain {
                         reader.find_field(method_table_ptr, field_name)?;
 
                     if matches!(&item_type, RuntimeType::Class { .. }) {
-                        ops.push(PhysicalAccessOperation::Dereference);
                         ops.push(PhysicalAccessOperation::Offset(
                             Pointer::SIZE,
                         ));
@@ -283,6 +287,10 @@ impl SymbolicAccessChain {
                         )
                     }
 
+                    if new_item_type.stored_as_ptr() {
+                        ops.push(PhysicalAccessOperation::Dereference);
+                    }
+
                     item_type = new_item_type;
                 }
                 SymbolicOperation::IndexAccess(index) => {
@@ -292,11 +300,13 @@ impl SymbolicAccessChain {
 
                     let stride = element_type.size_bytes();
 
-                    ops.push(PhysicalAccessOperation::Dereference);
                     ops.push(PhysicalAccessOperation::Offset(
                         RuntimeArray::HEADER_SIZE,
                     ));
                     ops.push(PhysicalAccessOperation::Offset(stride * index));
+                    if element_type.stored_as_ptr() {
+                        ops.push(PhysicalAccessOperation::Dereference);
+                    }
                     item_type = element_type.clone();
                 }
                 SymbolicOperation::Downcast(symbolic_type) => {
@@ -482,12 +492,8 @@ impl PhysicalAccessChain {
                     ptr = ptr + *offset;
                 }
                 PhysicalAccessOperation::Downcast(target_type_ptr) => {
-                    // TODO: Avoid having the double read of the
-                    // object's location.
-                    let object_loc: Pointer =
-                        reader.read_byte_array(ptr)?.into();
                     let actual_type_ptr: Pointer =
-                        reader.read_byte_array(object_loc)?.into();
+                        reader.read_byte_array(ptr)?.into();
                     if !reader
                         .is_base_of(*target_type_ptr, actual_type_ptr.into())?
                     {
