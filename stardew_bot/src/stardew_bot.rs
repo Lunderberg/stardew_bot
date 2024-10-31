@@ -1,4 +1,4 @@
-use crate::{Error, FishingUI, RunningLog};
+use crate::{Error, FishingUI, RunningLog, TuiDrawRate};
 
 use crossterm::event::Event;
 use dotnet_debugger::CachedReader;
@@ -29,6 +29,7 @@ pub struct StardewBot {
 
 struct TuiBuffers {
     running_log: RunningLog,
+    draw_rate: TuiDrawRate,
     fishing: FishingUI,
 }
 
@@ -36,12 +37,17 @@ impl TuiBuffers {
     fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
         Ok(Self {
             running_log: RunningLog::new(100),
+            draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(reader)?,
         })
     }
 
     fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow>> {
-        vec![Box::new(&mut self.running_log), Box::new(&mut self.fishing)]
+        vec![
+            Box::new(&mut self.running_log),
+            Box::new(&mut self.draw_rate),
+            Box::new(&mut self.fishing),
+        ]
     }
 }
 
@@ -55,7 +61,7 @@ impl StardewBot {
 
         let mut layout = DynamicLayout::new();
         layout.split_horizontally(Some(45), None);
-        layout.switch_to_buffer(1);
+        layout.switch_to_buffer(2);
 
         Ok(Self {
             tui_globals,
@@ -72,21 +78,29 @@ impl StardewBot {
         let mut context = TerminalContext::new()?;
         let handler = SigintHandler::new();
 
-        loop {
-            context.draw(|frame| self.draw(frame))?;
+        let target_fps = 120;
+        let time_per_draw = std::time::Duration::from_secs(1) / target_fps;
 
-            let timeout = std::time::Duration::from_millis(30);
-            let poll = event::poll(timeout)?;
+        let mut event_timeout = time_per_draw;
+
+        loop {
+            let poll = event::poll(event_timeout)?;
+            let main_loop_start = std::time::Instant::now();
 
             if poll {
                 let event_received = event::read()?;
                 self.handle_event(event_received);
             }
             self.periodic_update();
+            context.draw(|frame| self.draw(frame))?;
 
             if handler.received() || self.should_exit {
                 break;
             }
+
+            let main_loop_end = std::time::Instant::now();
+            let main_loop_duration = main_loop_end - main_loop_start;
+            event_timeout = time_per_draw.saturating_sub(main_loop_duration);
         }
         Ok(())
     }
