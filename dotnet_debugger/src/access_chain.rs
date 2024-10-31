@@ -300,36 +300,12 @@ impl SymbolicAccessChain {
                     item_type = element_type.clone();
                 }
                 SymbolicOperation::Downcast(symbolic_type) => {
-                    let static_method_table_ptr =
-                        item_type.method_table_for_downcast()?;
                     let target_method_table_ptr =
                         symbolic_type.method_table(reader)?;
 
-                    if reader.is_base_of(
+                    ops.push(PhysicalAccessOperation::Downcast(
                         target_method_table_ptr,
-                        static_method_table_ptr,
-                    )? {
-                        // Static type is the same, or superclass of
-                        // the desired runtime type.  No runtime check
-                        // needed.
-                    } else if reader.is_base_of(
-                        static_method_table_ptr,
-                        target_method_table_ptr,
-                    )? {
-                        // Target type is a subclass of the
-                        // statically-known type.  Emit a runtime
-                        // check.
-                        ops.push(PhysicalAccessOperation::Downcast(
-                            target_method_table_ptr,
-                        ));
-                    } else {
-                        // Types are in separate hierachies, cannot
-                        // perform downcast.
-                        return Err(Error::DowncastRequiresRelatedClasses(
-                            format!("{item_type}"),
-                            format!("{symbolic_type}"),
-                        ));
-                    }
+                    ));
 
                     item_type = RuntimeType::Class {
                         method_table: Some(target_method_table_ptr),
