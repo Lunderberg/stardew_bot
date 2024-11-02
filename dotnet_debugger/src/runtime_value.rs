@@ -131,6 +131,26 @@ impl RuntimePrimValue {
             })
         }
     }
+
+    fn type_name(&self) -> &'static str {
+        match self {
+            RuntimePrimValue::Bool(_) => "bool",
+            RuntimePrimValue::Char(_) => "char",
+            RuntimePrimValue::U8(_) => "u8",
+            RuntimePrimValue::U16(_) => "u16",
+            RuntimePrimValue::U32(_) => "u32",
+            RuntimePrimValue::U64(_) => "u64",
+            RuntimePrimValue::NativeUInt(_) => "usize",
+            RuntimePrimValue::I8(_) => "i8",
+            RuntimePrimValue::I16(_) => "i16",
+            RuntimePrimValue::I32(_) => "i32",
+            RuntimePrimValue::I64(_) => "i64",
+            RuntimePrimValue::NativeInt(_) => "isize",
+            RuntimePrimValue::F32(_) => "f32",
+            RuntimePrimValue::F64(_) => "f64",
+            RuntimePrimValue::Ptr(_) => "ptr",
+        }
+    }
 }
 
 impl std::fmt::Display for RuntimePrimValue {
@@ -171,3 +191,34 @@ impl std::fmt::Display for RuntimeValue {
         }
     }
 }
+
+macro_rules! prim_value_into {
+    ($variant:ident, $into:ty) => {
+        impl TryInto<$into> for RuntimePrimValue {
+            type Error = Error;
+            fn try_into(self) -> Result<$into, Self::Error> {
+                match self {
+                    Self::$variant(value) => Ok(value),
+                    other => Err(Error::UnexpectedRuntimeValue {
+                        expected: stringify!($into),
+                        actual: other.type_name(),
+                    }),
+                }
+            }
+        }
+    };
+}
+prim_value_into!(Bool, bool);
+prim_value_into!(U8, u8);
+prim_value_into!(U16, u16);
+prim_value_into!(U32, u32);
+prim_value_into!(U64, u64);
+prim_value_into!(NativeUInt, usize);
+prim_value_into!(I8, i8);
+prim_value_into!(I16, i16);
+prim_value_into!(I32, i32);
+prim_value_into!(I64, i64);
+prim_value_into!(NativeInt, isize);
+prim_value_into!(F32, f32);
+prim_value_into!(F64, f64);
+prim_value_into!(Ptr, Pointer);

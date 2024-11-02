@@ -508,6 +508,21 @@ impl PhysicalAccessChain {
         let prim_value = self.prim_type.parse(&bytes)?;
         Ok(Some(prim_value))
     }
+
+    pub fn read_as<T>(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<Option<T>, Error>
+    where
+        RuntimePrimValue: TryInto<T>,
+        Error: From<<RuntimePrimValue as TryInto<T>>::Error>,
+    {
+        let value = self
+            .read(reader)?
+            .map(|value| value.try_into())
+            .transpose()?;
+        Ok(value)
+    }
 }
 
 impl std::fmt::Display for SymbolicAccessChain {

@@ -219,6 +219,12 @@ pub enum Error {
     )]
     AccessChainMustTerminateInPrimitive { field: String, ty: RuntimeType },
 
+    #[error("Expected {expected}, but found {actual}")]
+    UnexpectedRuntimeValue {
+        expected: &'static str,
+        actual: &'static str,
+    },
+
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),
 }
