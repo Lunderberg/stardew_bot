@@ -454,36 +454,36 @@ impl WidgetWindow for FishingUI {
             [Constraint::Min(33), Constraint::Percentage(100)],
         );
 
-        let graph_data: (Vec<_>, Vec<_>, Vec<_>) = self
+        let fish_data: Vec<_> = self
             .history
             .iter()
-            .map(|state| {
-                (
-                    (state.tick as f64, state.fish_position as f64),
-                    (state.tick as f64, state.fishing_bar.start as f64),
-                    (state.tick as f64, state.fishing_bar.end as f64),
-                )
+            .map(|state| (state.tick as f64, state.fish_position as f64))
+            .collect();
+        let fishing_bar_data: Vec<_> = self
+            .history
+            .iter()
+            .flat_map(|state| {
+                let top = state.fishing_bar.start as f64;
+                let bottom = state.fishing_bar.end as f64;
+                let mid = (top + bottom) / 2.0;
+                let tick = state.tick as f64;
+                [(tick, mid), (tick, bottom), (tick, top), (tick, mid)]
             })
-            .multiunzip();
+            .collect();
+
         let datasets = vec![
             Dataset::default()
-                .data(&graph_data.1)
+                .data(&fishing_bar_data)
                 .graph_type(GraphType::Line)
-                .name("Bar (top)")
+                .name("Fishing Bar")
                 .marker(Marker::Block)
-                .style(Style::default().green()),
+                .style(Color::Rgb(10, 50, 10)),
             Dataset::default()
-                .data(&graph_data.2)
-                .graph_type(GraphType::Line)
-                .name("Bar (bottom)")
-                .marker(Marker::Dot)
-                .style(Style::default().bg(Color::Green)),
-            Dataset::default()
-                .data(&graph_data.0)
+                .data(&fish_data)
                 .graph_type(GraphType::Line)
                 .name("Fish")
                 .marker(Marker::Braille)
-                .style(Style::default().cyan()),
+                .style(Style::default().red()),
         ];
 
         let x_axis = Axis::default()
