@@ -109,7 +109,7 @@ impl StardewBot {
         let mut buffers = self.buffers.buffer_list();
         let layout = self.layout.drawable(&mut buffers, &self.tui_globals);
 
-        frame.render_widget(layout, frame.size());
+        frame.render_widget(layout, frame.area());
     }
 
     pub fn handle_event(&mut self, event: Event) {

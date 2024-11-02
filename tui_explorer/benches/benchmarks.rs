@@ -244,7 +244,7 @@ fn bench_render_minimal_frame<M: Measurement>(
                     let block = ratatui::widgets::Block::default()
                         .borders(ratatui::widgets::Borders::ALL)
                         .title("frame");
-                    frame.render_widget(block, frame.size());
+                    frame.render_widget(block, frame.area());
                 })
                 .unwrap();
         });

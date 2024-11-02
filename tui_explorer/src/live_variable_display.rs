@@ -155,7 +155,9 @@ impl WidgetWindow for LiveVariableDisplay {
         );
 
         let table = table
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .row_highlight_style(
+                Style::default().add_modifier(Modifier::REVERSED),
+            )
             .highlight_symbol(">> ");
 
         table.render(area, buf, &mut self.table_state);

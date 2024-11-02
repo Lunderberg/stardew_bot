@@ -549,7 +549,9 @@ impl WidgetWindow for MetadataDisplay {
             })
             .collect();
         let table = table
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .row_highlight_style(
+                Style::default().add_modifier(Modifier::REVERSED),
+            )
             .with_scrollbar(num_lines);
 
         StatefulWidget::render(table, area, buf, &mut self.table_state);
