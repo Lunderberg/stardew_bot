@@ -60,7 +60,7 @@ impl StardewBot {
         let buffers = TuiBuffers::new(tui_globals.cached_reader())?;
 
         let mut layout = DynamicLayout::new();
-        layout.split_horizontally(Some(45), None);
+        layout.split_horizontally(None, Some(45));
         layout.switch_to_buffer(2);
 
         Ok(Self {
