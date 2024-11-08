@@ -120,9 +120,11 @@ pub struct FishingUI {
 
 struct FishingState {
     tick: i32,
-    fishing_bar: Range<f32>,
+    bar_position: Range<f32>,
+    bar_velocity: f32,
     fish_in_bar: bool,
     fish_position: f32,
+    fish_velocity: f32,
     fish_target_position: f32,
 }
 
@@ -249,17 +251,29 @@ impl FishingUI {
             return Ok(None);
         }
 
-        let fishing_bar_bottom =
-            self.bar_position.read_as::<f32>(reader)?.unwrap_or(-1.0);
+        let fishing_bar_bottom = self
+            .bar_position
+            .read_as::<f32>(reader)?
+            .unwrap_or(f32::NAN);
         let fishing_bar_height =
             self.bar_height.read_as::<i32>(reader)?.unwrap_or(-1);
-        let fishing_bar = fishing_bar_bottom
+        let bar_position = fishing_bar_bottom
             ..fishing_bar_bottom + (fishing_bar_height as f32);
+        let bar_velocity = self
+            .bar_velocity
+            .read_as::<f32>(reader)?
+            .unwrap_or(f32::NAN);
 
         let fish_in_bar =
             self.bobber_in_bar.read_as::<bool>(reader)?.unwrap_or(false);
-        let fish_position =
-            self.fish_position.read_as::<f32>(reader)?.unwrap_or(-1.0);
+        let fish_position = self
+            .fish_position
+            .read_as::<f32>(reader)?
+            .unwrap_or(f32::NAN);
+        let fish_velocity = self
+            .fish_position
+            .read_as::<f32>(reader)?
+            .unwrap_or(f32::NAN);
         let fish_target_position = self
             .fish_target_position
             .read_as::<f32>(reader)?
@@ -267,9 +281,11 @@ impl FishingUI {
 
         Ok(Some(FishingState {
             tick,
-            fishing_bar,
+            bar_position,
+            bar_velocity,
             fish_in_bar,
             fish_position,
+            fish_velocity,
             fish_target_position,
         }))
     }
@@ -454,20 +470,68 @@ impl WidgetWindow for FishingUI {
             [Constraint::Min(33), Constraint::Percentage(100)],
         );
 
-        let fish_data: Vec<_> = self
+        const MAX_SIZE: f64 = 568.0;
+
+        let fish_points_in_bar: Vec<_> = self
             .history
             .iter()
-            .map(|state| (state.tick as f64, state.fish_position as f64))
+            .filter(|state| state.fish_in_bar)
+            .map(|state| {
+                (state.tick as f64, MAX_SIZE - state.fish_position as f64)
+            })
+            .collect();
+        let fish_points_outside_bar: Vec<_> = self
+            .history
+            .iter()
+            .filter(|state| !state.fish_in_bar)
+            .map(|state| {
+                (state.tick as f64, MAX_SIZE - state.fish_position as f64)
+            })
             .collect();
         let fishing_bar_data: Vec<_> = self
             .history
             .iter()
             .flat_map(|state| {
-                let top = state.fishing_bar.start as f64;
-                let bottom = state.fishing_bar.end as f64;
+                let top = state.bar_position.end as f64;
+                let bottom = state.bar_position.start as f64;
+
+                // The computation of `bobberInBar` requires that the
+                // following conditions hold:
+                //
+                //    bobberPosition + 12f <= bobberBarPos - 32f + bobberBarHeight
+                //    bobberPosition - 16f >= bobberBarPos - 32f
+                //
+                // Presumably, these are to account for the finite
+                // size of the fish sprite, which must be entirely
+                // within the bar.  Practically, if we want to apply
+                // `bar <= fish <= bar+height`, it means that both the
+                // position is offset, and that the bar is smaller.
+                //
+                //    bobberBarPos <= bobberPosition + 16.0 <= bobberBarPos + bobberBarHeight - 28.0
+                //    (bobberBarPos-16.0) <= bobberPosition <= (bobberBarPos-16.0) + bobberBarHeight - 28.0
+                let top = top - 44.0;
+                let bottom = bottom - 16.0;
+
+                let top = MAX_SIZE - top;
+                let bottom = MAX_SIZE - bottom;
+
                 let mid = (top + bottom) / 2.0;
                 let tick = state.tick as f64;
                 [(tick, mid), (tick, bottom), (tick, top), (tick, mid)]
+            })
+            .collect();
+
+        let fish_target_points: Vec<_> = self
+            .history
+            .iter()
+            .tuples()
+            .filter(|(a, b)| a.fish_target_position != b.fish_target_position)
+            .map(|(_, b)| b)
+            .map(|state| {
+                (
+                    state.tick as f64,
+                    MAX_SIZE - state.fish_target_position as f64,
+                )
             })
             .collect();
 
@@ -479,11 +543,22 @@ impl WidgetWindow for FishingUI {
                 .marker(Marker::Block)
                 .style(Color::Rgb(10, 50, 10)),
             Dataset::default()
-                .data(&fish_data)
-                .graph_type(GraphType::Line)
+                .data(&fish_points_outside_bar)
+                .graph_type(GraphType::Scatter)
                 .name("Fish")
                 .marker(Marker::Braille)
+                .style(Style::default().blue()),
+            Dataset::default()
+                .data(&fish_points_in_bar)
+                .graph_type(GraphType::Scatter)
+                .marker(Marker::Braille)
                 .style(Style::default().red()),
+            Dataset::default()
+                .data(&fish_target_points)
+                .graph_type(GraphType::Scatter)
+                .name("Fish's Target")
+                .marker(Marker::Dot)
+                .style(Style::default().yellow()),
         ];
 
         let x_axis = Axis::default()
@@ -507,7 +582,7 @@ impl WidgetWindow for FishingUI {
         let y_axis = Axis::default()
             .title("Height")
             .style(Style::default().white())
-            .bounds([0.0, 568.0]);
+            .bounds([0.0, MAX_SIZE]);
 
         let graph = Chart::new(datasets)
             .block(Block::new().title(format!(
