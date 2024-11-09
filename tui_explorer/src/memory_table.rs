@@ -188,7 +188,7 @@ impl<'a> Widget for DrawableMemoryTable<'a> {
     }
 }
 
-impl WidgetWindow for MemoryTable {
+impl WidgetWindow<Error> for MemoryTable {
     fn title(&self) -> std::borrow::Cow<str> {
         self.view_stack.first().title().into()
     }
@@ -277,7 +277,7 @@ impl WidgetWindow for MemoryTable {
         &'a mut self,
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         side_effects.iter::<ChangeAddress>().for_each(|address| {
             let address = address.0;
             if self.active_view().selected_address() == address {

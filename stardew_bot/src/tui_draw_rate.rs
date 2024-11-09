@@ -1,7 +1,7 @@
 use ratatui::{text::Text, widgets::Widget as _};
 use tui_utils::WidgetWindow;
 
-use crate::RateCounter;
+use crate::{Error, RateCounter};
 
 pub struct TuiDrawRate {
     draw_rate: RateCounter,
@@ -16,7 +16,7 @@ impl TuiDrawRate {
     }
 }
 
-impl WidgetWindow for TuiDrawRate {
+impl WidgetWindow<Error> for TuiDrawRate {
     fn title(&self) -> std::borrow::Cow<str> {
         "TUI Draw FPS".into()
     }
@@ -25,7 +25,7 @@ impl WidgetWindow for TuiDrawRate {
         &mut self,
         _globals: &'a tui_utils::TuiGlobals,
         _side_effects: &'a mut tui_utils::WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         self.draw_rate.record_event();
         Ok(())
     }

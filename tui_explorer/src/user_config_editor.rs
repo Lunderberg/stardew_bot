@@ -8,7 +8,7 @@ use ratatui::{
 use tui_utils::inputs::{KeyBindingMatch, KeySequence};
 use tui_utils::{TuiGlobals, WidgetSideEffects, WidgetWindow};
 
-use crate::UserConfig;
+use crate::{Error, UserConfig};
 
 pub struct UserConfigEditor {
     user_config: UserConfig,
@@ -444,7 +444,7 @@ impl UserConfigEditor {
     }
 }
 
-impl WidgetWindow for UserConfigEditor {
+impl WidgetWindow<Error> for UserConfigEditor {
     fn title(&self) -> std::borrow::Cow<str> {
         if self.is_modified {
             "User Config Editor (unsaved modifications)".into()

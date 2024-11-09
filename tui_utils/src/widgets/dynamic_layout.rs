@@ -439,12 +439,12 @@ impl DynamicLayout {
         }
     }
 
-    pub fn apply_key_binding<'a, 'b>(
+    pub fn apply_key_binding<'a, 'b, E>(
         &'a mut self,
         keystrokes: &KeySequence,
         globals: &TuiGlobals,
         side_effects: &mut WidgetSideEffects,
-        buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
+        buffers: &'a mut [Box<&'b mut dyn WidgetWindow<E>>],
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_try_bindings(["C-x b", "C-x C-b"], keystrokes, || {
@@ -487,8 +487,8 @@ impl DynamicLayout {
     }
 }
 
-impl<'a, 'b> Widget
-    for DrawableDynamicLayout<'a, Box<&'b mut (dyn WidgetWindow)>>
+impl<'a, 'b, E> Widget
+    for DrawableDynamicLayout<'a, Box<&'b mut (dyn WidgetWindow<E>)>>
 {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
@@ -503,7 +503,7 @@ impl<'a, 'b> Widget
             .collect::<Vec<_>>()
             .into_iter()
             .for_each(|win| {
-                let widget: &mut dyn WidgetWindow =
+                let widget: &mut dyn WidgetWindow<E> =
                     match &mut self.layout.windows[win.window_index].kind {
                         NestedWindowKind::Buffer(buffer_index) => {
                             *self.buffers[*buffer_index]

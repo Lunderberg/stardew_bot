@@ -644,7 +644,7 @@ impl TuiExplorerBuilder {
 }
 
 impl TuiBuffers {
-    fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow>> {
+    fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow<Error>>> {
         vec![
             Box::new(&mut self.stack_frame_table),
             Box::new(&mut self.detail_view),

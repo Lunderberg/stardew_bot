@@ -291,7 +291,7 @@ impl FishingUI {
     }
 }
 
-impl WidgetWindow for FishingUI {
+impl WidgetWindow<Error> for FishingUI {
     fn title(&self) -> std::borrow::Cow<str> {
         "Fishing".into()
     }
@@ -299,8 +299,8 @@ impl WidgetWindow for FishingUI {
     fn periodic_update<'a>(
         &mut self,
         globals: &'a tui_utils::TuiGlobals,
-        _side_effects: &'a mut tui_utils::WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+        side_effects: &'a mut tui_utils::WidgetSideEffects,
+    ) -> Result<(), Error> {
         let reader = globals.cached_reader();
 
         let is_casting =

@@ -15,6 +15,8 @@ use tui_utils::{
     TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
+use crate::Error;
+
 pub struct LiveVariableDisplay {
     table_state: TableState,
     live_variables: Vec<LiveVariable>,
@@ -37,7 +39,7 @@ impl LiveVariableDisplay {
     }
 }
 
-impl WidgetWindow for LiveVariableDisplay {
+impl WidgetWindow<Error> for LiveVariableDisplay {
     fn title(&self) -> std::borrow::Cow<str> {
         "LiveVariableDisplay".into()
     }
@@ -61,7 +63,7 @@ impl WidgetWindow for LiveVariableDisplay {
         &mut self,
         globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         for live_var in self.live_variables.iter_mut() {
             let value =
                 live_var.physical_chain.read(globals.cached_reader())?;
@@ -75,7 +77,7 @@ impl WidgetWindow for LiveVariableDisplay {
         &'a mut self,
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         side_effects
             .into_iter::<SymbolicAccessChain>()
             .try_for_each(|symbolic_chain| {

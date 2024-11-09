@@ -18,7 +18,7 @@ use tui_utils::{
     LogMessage, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
-use crate::ChangeAddress;
+use crate::{ChangeAddress, Error};
 
 pub struct RunningLog {
     max_elements: usize,
@@ -167,7 +167,7 @@ impl<'a> Widget for &'a mut RunningLog {
     }
 }
 
-impl WidgetWindow for RunningLog {
+impl WidgetWindow<Error> for RunningLog {
     fn title(&self) -> std::borrow::Cow<str> {
         "Log".into()
     }
@@ -232,7 +232,7 @@ impl WidgetWindow for RunningLog {
         &'a mut self,
         _globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         side_effects.into_iter::<LogMessage>().for_each(|log| {
             self.add_log(log.0);
         });

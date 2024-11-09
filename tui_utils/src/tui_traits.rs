@@ -3,10 +3,7 @@ use std::{any::Any, borrow::Cow};
 use dotnet_debugger::{CachedReader, StaticValueCache};
 use memory_reader::MemoryReader;
 
-use crate::{
-    inputs::{KeyBindingMatch, KeySequence},
-    Error,
-};
+use crate::inputs::{KeyBindingMatch, KeySequence};
 
 /// Contains information that may be required by more than one widget.
 /// A read-only reference is provided to each widget during input
@@ -24,7 +21,7 @@ pub struct WidgetSideEffects {
 
 pub struct LogMessage(pub String);
 
-pub trait WidgetWindow {
+pub trait WidgetWindow<E> {
     /// The title of the widget.  This is used for the title in the
     /// border, and for the widget's name when selecting which widget
     /// to display.
@@ -45,7 +42,7 @@ pub trait WidgetWindow {
         &'a mut self,
         _globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), Error> {
+    ) -> Result<(), E> {
         Ok(())
     }
 
@@ -53,7 +50,7 @@ pub trait WidgetWindow {
         &mut self,
         _globals: &'a TuiGlobals,
         _side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), Error> {
+    ) -> Result<(), E> {
         Ok(())
     }
 

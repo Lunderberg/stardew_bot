@@ -12,7 +12,7 @@ use tui_utils::{
     extensions::SplitRect as _, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
-use crate::{Annotation, ChangeAddress, InfoFormatter};
+use crate::{Annotation, ChangeAddress, Error, InfoFormatter};
 
 pub struct DetailView {
     values: Vec<(String, String)>,
@@ -102,7 +102,7 @@ impl<'a> Widget for &'a DetailView {
     }
 }
 
-impl WidgetWindow for DetailView {
+impl WidgetWindow<Error> for DetailView {
     fn title(&self) -> std::borrow::Cow<str> {
         "Detail View".into()
     }
@@ -111,7 +111,7 @@ impl WidgetWindow for DetailView {
         &'a mut self,
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         side_effects
             .iter::<ChangeAddress>()
             .for_each(|change| self.update_details(globals, change.0));

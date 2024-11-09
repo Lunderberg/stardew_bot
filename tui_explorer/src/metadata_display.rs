@@ -421,7 +421,7 @@ impl<'a> TreeIteratorItem<'a> {
     }
 }
 
-impl WidgetWindow for MetadataDisplay {
+impl WidgetWindow<Error> for MetadataDisplay {
     fn title(&self) -> std::borrow::Cow<str> {
         "DLL Metadata".into()
     }

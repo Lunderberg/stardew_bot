@@ -8,7 +8,7 @@ use ratatui::{
 use memory_reader::{MemoryReader, MemoryRegion, MemoryValue, Pointer};
 use tui_utils::{TuiGlobals, WidgetSideEffects, WidgetWindow};
 
-use crate::ChangeAddress;
+use crate::{ChangeAddress, Error};
 
 pub struct StackFrameTable {
     stack_region: Range<Pointer>,
@@ -97,7 +97,7 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
     }
 }
 
-impl WidgetWindow for StackFrameTable {
+impl WidgetWindow<Error> for StackFrameTable {
     fn title(&self) -> std::borrow::Cow<str> {
         "Stack Frames".into()
     }
@@ -119,7 +119,7 @@ impl WidgetWindow for StackFrameTable {
         &'a mut self,
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         side_effects.iter::<ChangeAddress>().for_each(|address| {
             let address = address.0;
             if !self.stack_region.contains(&address) {

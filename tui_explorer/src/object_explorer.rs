@@ -1651,7 +1651,7 @@ impl<'a> TreeVisitorExtension for &'a mut LineCollector {
     }
 }
 
-impl WidgetWindow for ObjectExplorer {
+impl WidgetWindow<Error> for ObjectExplorer {
     fn title(&self) -> std::borrow::Cow<str> {
         "ObjectExplorer".into()
     }
@@ -1745,7 +1745,7 @@ impl WidgetWindow for ObjectExplorer {
         &mut self,
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
-    ) -> Result<(), tui_utils::Error> {
+    ) -> Result<(), Error> {
         let reader = globals.cached_reader();
 
         let display_range = {

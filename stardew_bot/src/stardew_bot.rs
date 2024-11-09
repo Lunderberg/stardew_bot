@@ -42,7 +42,7 @@ impl TuiBuffers {
         })
     }
 
-    fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow>> {
+    fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow<Error>>> {
         vec![
             Box::new(&mut self.running_log),
             Box::new(&mut self.draw_rate),

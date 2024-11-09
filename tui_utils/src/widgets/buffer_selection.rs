@@ -25,9 +25,9 @@ pub struct BufferSelection {
     currently_highlighted_buffer: usize,
 }
 
-pub struct DrawableBufferSelection<'a, 'b> {
+pub struct DrawableBufferSelection<'a, 'b, E> {
     selector: &'a mut BufferSelection,
-    buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
+    buffers: &'a mut [Box<&'b mut dyn WidgetWindow<E>>],
 }
 
 impl BufferSelection {
@@ -48,10 +48,10 @@ impl BufferSelection {
         self.selected_buffer
     }
 
-    pub fn drawable<'a, 'b>(
+    pub fn drawable<'a, 'b, E>(
         &'a mut self,
-        buffers: &'a mut [Box<&'b mut dyn WidgetWindow>],
-    ) -> DrawableBufferSelection<'a, 'b> {
+        buffers: &'a mut [Box<&'b mut dyn WidgetWindow<E>>],
+    ) -> DrawableBufferSelection<'a, 'b, E> {
         DrawableBufferSelection {
             selector: self,
             buffers,
@@ -59,7 +59,7 @@ impl BufferSelection {
     }
 }
 
-impl<'a, 'b> WidgetWindow for DrawableBufferSelection<'a, 'b> {
+impl<'a, 'b, E> WidgetWindow<E> for DrawableBufferSelection<'a, 'b, E> {
     fn title(&self) -> std::borrow::Cow<str> {
         "Select buffer".into()
     }
