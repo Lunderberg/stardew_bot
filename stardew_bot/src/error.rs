@@ -15,11 +15,20 @@ pub enum Error {
     #[error("dotnet_debugger::Error( {0} )")]
     DotnetDebugger(#[from] dotnet_debugger::Error),
 
+    #[error("enigo::NewConError( {0} )")]
+    ConstructKeyMouseHandler(#[from] enigo::NewConError),
+
+    #[error("enigo::InputError( {0} )")]
+    SendInput(#[from] enigo::InputError),
+
     #[error("tui_utils::Error( {0} )")]
     TuiUtilError(#[from] tui_utils::Error),
 
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),
+
+    #[error("Expected non-empty value from PhysicalAccessChain")]
+    ExpectedNoneEmptyValue,
 }
 
 impl std::fmt::Debug for Error {

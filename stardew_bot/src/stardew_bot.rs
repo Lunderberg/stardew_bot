@@ -1,7 +1,8 @@
-use crate::{Error, FishingUI, RunningLog, TuiDrawRate};
+use crate::{Error, FishingUI, GameAction, RunningLog, TuiDrawRate};
 
 use crossterm::event::Event;
 use dotnet_debugger::CachedReader;
+use enigo::Enigo;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -21,6 +22,8 @@ pub struct StardewBot {
 
     /// Container of subwindows
     buffers: TuiBuffers,
+
+    enigo: Enigo,
 
     // Interactions owned by the top-level UI
     should_exit: bool,
@@ -57,6 +60,13 @@ impl StardewBot {
         let reader = MemoryReader::new(pid)?;
 
         let tui_globals = TuiGlobals::new(reader);
+
+        let enigo = Enigo::new(&enigo::Settings {
+            linux_delay: 0,
+            release_keys_when_dropped: true,
+            ..Default::default()
+        })?;
+
         let buffers = TuiBuffers::new(tui_globals.cached_reader())?;
 
         let mut layout = DynamicLayout::new();
@@ -67,6 +77,7 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
+            enigo,
             should_exit: false,
             keystrokes: KeySequence::default(),
         })
@@ -197,6 +208,30 @@ impl StardewBot {
                 })
         {
             side_effects.add_log(format!("Error: {err}"));
+        }
+
+        // Since `active_win_pos_rs` uses `.map_err(|_| ())` to throw
+        // away all information on what error occurred, I'm just going
+        // to unwrap the Result altogether.
+        //
+        // Should replace this usage by direct calls to either xcb or
+        // x11rb (See https://www.reddit.com/r/rust/comments/f7yrle
+        // for details.)
+        let active_window = active_win_pos_rs::get_active_window().unwrap();
+        if active_window.title == "Stardew Valley" {
+            if let Err(err) = {
+                let res = side_effects
+                    .into_iter::<GameAction>()
+                    .try_for_each(|action| action.apply(&mut self.enigo));
+                res
+            } {
+                side_effects.add_log(format!("Error: {err}"));
+            }
+        } else {
+            side_effects.add_log(format!(
+                "Skipping input, active window is {}",
+                active_window.title
+            ));
         }
 
         // Re-process the log messages last, since handling other side

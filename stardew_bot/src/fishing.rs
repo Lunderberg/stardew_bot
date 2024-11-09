@@ -14,7 +14,7 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::Error;
+use crate::{Error, GameAction};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -303,8 +303,25 @@ impl WidgetWindow<Error> for FishingUI {
     ) -> Result<(), Error> {
         let reader = globals.cached_reader();
 
-        let is_casting =
-            self.is_casting.read_as::<bool>(reader)?.unwrap_or(false);
+        let get_bool = |chain: &PhysicalAccessChain| {
+            chain
+                .read_as::<bool>(reader)
+                .ok()
+                .flatten()
+                .unwrap_or(false)
+        };
+
+        let get_float = |chain: &PhysicalAccessChain| -> Result<_, Error> {
+            Ok(chain
+                .read_as::<f32>(reader)?
+                .ok_or(Error::ExpectedNoneEmptyValue)?)
+        };
+
+        let is_casting = get_bool(&self.is_casting);
+        let minigame_in_progress = get_bool(&self.minigame_in_progress);
+        let is_fishing = get_bool(&self.is_fishing);
+        let is_nibbling = get_bool(&self.is_nibbling);
+        let is_timing_cast = get_bool(&self.is_timing_cast);
 
         if is_casting {
             self.history.clear();
@@ -312,6 +329,28 @@ impl WidgetWindow<Error> for FishingUI {
 
         if let Some(state) = self.current_state(reader)? {
             self.history.push(state);
+        }
+
+        if is_timing_cast {
+            let casting_power = get_float(&self.casting_power)?;
+            if casting_power > 0.9 {
+                side_effects.broadcast(GameAction::ReleaseTool);
+            }
+        } else if minigame_in_progress {
+            let bar_position = get_float(&self.bar_position)?;
+            let fish_position = get_float(&self.fish_position)?;
+            let action = if fish_position < bar_position {
+                GameAction::HoldTool
+            } else {
+                GameAction::ReleaseTool
+            };
+            side_effects.broadcast(action);
+        } else if is_nibbling {
+            side_effects.broadcast(GameAction::ReleaseTool);
+        } else if is_fishing {
+            side_effects.broadcast(GameAction::HoldTool);
+        } else {
+            side_effects.broadcast(GameAction::HoldTool);
         }
 
         Ok(())
@@ -597,5 +636,22 @@ impl WidgetWindow<Error> for FishingUI {
         StatefulWidget::render(table, table_area, buf, &mut self.table_state);
 
         graph.render(graph_area, buf);
+    }
+
+    fn apply_key_binding<'a>(
+        &'a mut self,
+        _keystrokes: &'a tui_utils::inputs::KeySequence,
+        _globals: &'a tui_utils::TuiGlobals,
+        _side_effects: &'a mut tui_utils::WidgetSideEffects,
+    ) -> tui_utils::inputs::KeyBindingMatch {
+        tui_utils::inputs::KeyBindingMatch::Mismatch
+    }
+
+    fn apply_side_effects<'a>(
+        &'a mut self,
+        _globals: &'a tui_utils::TuiGlobals,
+        _side_effects: &'a mut tui_utils::WidgetSideEffects,
+    ) -> Result<(), Error> {
+        Ok(())
     }
 }
