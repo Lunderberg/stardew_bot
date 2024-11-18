@@ -4,6 +4,9 @@ pub use stardew_bot::*;
 mod error;
 pub use error::Error;
 
+mod x11_handler;
+pub(crate) use x11_handler::{Error as X11Error, X11Handler};
+
 mod rate_counter;
 pub(crate) use rate_counter::RateCounter;
 

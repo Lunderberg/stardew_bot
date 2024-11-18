@@ -1,8 +1,10 @@
-use crate::{Error, FishingUI, GameAction, RunningLog, TuiDrawRate};
+use crate::{
+    game_action::InputState, Error, FishingUI, GameAction, RunningLog,
+    TuiDrawRate, X11Handler,
+};
 
 use crossterm::event::Event;
 use dotnet_debugger::CachedReader;
-use enigo::Enigo;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -23,11 +25,18 @@ pub struct StardewBot {
     /// Container of subwindows
     buffers: TuiBuffers,
 
-    enigo: Enigo,
+    input_state: InputState,
+
+    x11_handler: X11Handler,
+
+    stardew_window: x11rb::protocol::xproto::Window,
 
     // Interactions owned by the top-level UI
     should_exit: bool,
     keystrokes: KeySequence,
+    most_recent_unknown_key_sequence: Option<std::time::Instant>,
+    most_recent_inactive_window: Option<std::time::Instant>,
+    most_recent_active_window: Option<std::time::Instant>,
 }
 
 struct TuiBuffers {
@@ -61,15 +70,22 @@ impl StardewBot {
 
         let tui_globals = TuiGlobals::new(reader);
 
-        let enigo = Enigo::new(&enigo::Settings {
-            linux_delay: 0,
-            release_keys_when_dropped: true,
-            ..Default::default()
-        })?;
+        let x11_handler = X11Handler::new()?;
 
-        let buffers = TuiBuffers::new(tui_globals.cached_reader())?;
+        let stardew_window =
+            x11_handler.find_window_blocking("Stardew Valley")?;
+
+        let mut buffers = TuiBuffers::new(tui_globals.cached_reader())?;
+
+        buffers
+            .running_log
+            .add_log(format!("SD window: {stardew_window:?}"));
 
         let mut layout = DynamicLayout::new();
+        layout.split_vertically(Some(3), None);
+        layout.switch_to_buffer(1);
+        layout.cycle_next();
+        layout.switch_to_buffer(0);
         layout.split_horizontally(None, Some(45));
         layout.switch_to_buffer(2);
 
@@ -77,9 +93,14 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
-            enigo,
+            input_state: InputState::default(),
+            x11_handler,
             should_exit: false,
             keystrokes: KeySequence::default(),
+            stardew_window,
+            most_recent_unknown_key_sequence: None,
+            most_recent_inactive_window: None,
+            most_recent_active_window: None,
         })
     }
 
@@ -140,9 +161,21 @@ impl StardewBot {
                     }
                     KeyBindingMatch::Partial => {}
                     KeyBindingMatch::Mismatch => {
-                        return Err(Error::UnknownKeySequence(std::mem::take(
-                            &mut self.keystrokes,
-                        )));
+                        let now = std::time::Instant::now();
+                        let raise_err = self
+                            .most_recent_unknown_key_sequence
+                            .map(|prev| {
+                                now - prev > std::time::Duration::from_secs(1)
+                            })
+                            .unwrap_or(true);
+                        if raise_err {
+                            self.most_recent_unknown_key_sequence = Some(now);
+                            return Err(Error::UnknownKeySequence(
+                                std::mem::take(&mut self.keystrokes),
+                            ));
+                        } else {
+                            self.keystrokes.clear();
+                        }
                     }
                 }
             }
@@ -184,11 +217,9 @@ impl StardewBot {
 
         let mut side_effects = WidgetSideEffects::default();
 
-        let res = buffer_list.iter_mut().try_for_each(|buffer| {
+        if let Err(err) = buffer_list.iter_mut().try_for_each(|buffer| {
             buffer.periodic_update(&self.tui_globals, &mut side_effects)
-        });
-
-        if let Err(err) = res {
+        }) {
             side_effects.add_log(format!("Error: {err}"));
         }
 
@@ -196,42 +227,8 @@ impl StardewBot {
     }
 
     fn apply_side_effects(&mut self, mut side_effects: WidgetSideEffects) {
-        if let Err(err) =
-            self.buffers
-                .buffer_list()
-                .iter_mut()
-                .try_for_each(|buffer| {
-                    buffer.apply_side_effects(
-                        &self.tui_globals,
-                        &mut side_effects,
-                    )
-                })
-        {
+        if let Err(err) = self.try_apply_side_effects(&mut side_effects) {
             side_effects.add_log(format!("Error: {err}"));
-        }
-
-        // Since `active_win_pos_rs` uses `.map_err(|_| ())` to throw
-        // away all information on what error occurred, I'm just going
-        // to unwrap the Result altogether.
-        //
-        // Should replace this usage by direct calls to either xcb or
-        // x11rb (See https://www.reddit.com/r/rust/comments/f7yrle
-        // for details.)
-        let active_window = active_win_pos_rs::get_active_window().unwrap();
-        if active_window.title == "Stardew Valley" {
-            if let Err(err) = {
-                let res = side_effects
-                    .into_iter::<GameAction>()
-                    .try_for_each(|action| action.apply(&mut self.enigo));
-                res
-            } {
-                side_effects.add_log(format!("Error: {err}"));
-            }
-        } else {
-            side_effects.add_log(format!(
-                "Skipping input, active window is {}",
-                active_window.title
-            ));
         }
 
         // Re-process the log messages last, since handling other side
@@ -240,5 +237,60 @@ impl StardewBot {
             .running_log
             .apply_side_effects(&self.tui_globals, &mut side_effects)
             .unwrap();
+    }
+
+    fn try_apply_side_effects(
+        &mut self,
+        side_effects: &mut WidgetSideEffects,
+    ) -> Result<(), Error> {
+        self.buffers
+            .buffer_list()
+            .iter_mut()
+            .try_for_each(|buffer| {
+                buffer.apply_side_effects(&self.tui_globals, side_effects)
+            })?;
+
+        let active_window = self.x11_handler.query_active_window()?;
+        if active_window == self.stardew_window {
+            let mut messages: Vec<String> = Vec::new();
+            side_effects
+                .into_iter::<GameAction>()
+                .try_for_each(|action| {
+                    action.apply(
+                        &mut self.input_state,
+                        &mut self.x11_handler,
+                        self.stardew_window,
+                        |message| messages.push(message),
+                    )
+                })?;
+            messages
+                .into_iter()
+                .for_each(|message| side_effects.add_log(message));
+
+            let now = std::time::Instant::now();
+            let show_message = self
+                .most_recent_active_window
+                .map(|prev| now - prev > std::time::Duration::from_secs(1))
+                .unwrap_or(true);
+            if show_message {
+                self.most_recent_active_window = Some(now);
+                side_effects
+                    .add_log(format!("Window {active_window:?} is stardew"));
+            }
+        } else {
+            let now = std::time::Instant::now();
+            let show_message = self
+                .most_recent_inactive_window
+                .map(|prev| now - prev > std::time::Duration::from_secs(1))
+                .unwrap_or(true);
+            if show_message {
+                self.most_recent_inactive_window = Some(now);
+                side_effects.add_log(format!(
+                    "Window {active_window:?} is not stardew"
+                ));
+            }
+        }
+
+        Ok(())
     }
 }

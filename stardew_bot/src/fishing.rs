@@ -352,9 +352,12 @@ impl WidgetWindow<Error> for FishingUI {
 
         if is_timing_cast {
             let casting_power = get_float(&self.casting_power)?;
-            if casting_power > 0.9 {
-                side_effects.broadcast(GameAction::ReleaseTool);
-            }
+            let action = if casting_power > 0.9 {
+                GameAction::ReleaseTool
+            } else {
+                GameAction::HoldTool
+            };
+            side_effects.broadcast(action);
         } else if minigame_in_progress {
             let bar_position = get_float(&self.bar_position)?;
             let fish_position = get_float(&self.fish_position)?;

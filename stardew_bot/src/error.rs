@@ -1,6 +1,8 @@
 use thiserror::Error;
 use tui_utils::inputs::KeySequence;
 
+use crate::X11Error;
+
 #[derive(Error)]
 pub enum Error {
     #[error("std::io::Error( {0} )")]
@@ -15,11 +17,8 @@ pub enum Error {
     #[error("dotnet_debugger::Error( {0} )")]
     DotnetDebugger(#[from] dotnet_debugger::Error),
 
-    #[error("enigo::NewConError( {0} )")]
-    ConstructKeyMouseHandler(#[from] enigo::NewConError),
-
-    #[error("enigo::InputError( {0} )")]
-    SendInput(#[from] enigo::InputError),
+    #[error("X11Error( {0} )")]
+    X11Error(#[from] X11Error),
 
     #[error("tui_utils::Error( {0} )")]
     TuiUtilError(#[from] tui_utils::Error),

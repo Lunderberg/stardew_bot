@@ -16,8 +16,7 @@ ratatui = "*"
 crossterm = "*"
 chrono = "*"
 
-enigo = "*"
-active-win-pos-rs = "0.8"
+x11rb = "*"
 
 memory_reader = {path = "../memory_reader"}
 tui_utils = { path = "../tui_utils" }
