@@ -116,6 +116,14 @@ pub struct FishingUI {
     /// True if the minigame has completed, and the bobber is
     /// currently being pulled from the water.
     pulling_out_of_water: PhysicalAccessChain,
+
+    /// True if the minigame has completed, and the fish is currently
+    /// being displayed above the player's head.
+    showing_fish: PhysicalAccessChain,
+
+    /// True if the minigame has completed, and the player is
+    /// currently being shown the treasure that has been caught.
+    showing_treasure: PhysicalAccessChain,
 }
 
 struct FishingState {
@@ -200,6 +208,12 @@ impl FishingUI {
         let pulling_out_of_water = reader
             .parse_access_chain(&format!("{fishing_rod}.pullingOutOfWater"))?;
 
+        let showing_fish =
+            reader.parse_access_chain(&format!("{fishing_rod}.fishCaught"))?;
+
+        let showing_treasure = reader
+            .parse_access_chain(&format!("{fishing_rod}.showingTreasure"))?;
+
         Ok(Self {
             table_state: TableState::new(),
             history: Vec::new(),
@@ -225,6 +239,8 @@ impl FishingUI {
             bobber_in_bar,
             catch_progress,
             pulling_out_of_water,
+            showing_fish,
+            showing_treasure,
         })
     }
 
@@ -317,10 +333,13 @@ impl WidgetWindow<Error> for FishingUI {
                 .ok_or(Error::ExpectedNoneEmptyValue)?)
         };
 
-        let is_casting = get_bool(&self.is_casting);
+        let showing_fish = get_bool(&self.showing_fish);
         let minigame_in_progress = get_bool(&self.minigame_in_progress);
         let is_fishing = get_bool(&self.is_fishing);
-        let is_nibbling = get_bool(&self.is_nibbling);
+        let is_nibbling = !showing_fish
+            && !minigame_in_progress
+            && get_bool(&self.is_nibbling);
+        let is_casting = get_bool(&self.is_casting);
         let is_timing_cast = get_bool(&self.is_timing_cast);
 
         if is_casting {
@@ -348,6 +367,8 @@ impl WidgetWindow<Error> for FishingUI {
         } else if is_nibbling {
             side_effects.broadcast(GameAction::ReleaseTool);
         } else if is_fishing {
+            side_effects.broadcast(GameAction::HoldTool);
+        } else if showing_fish {
             side_effects.broadcast(GameAction::HoldTool);
         } else {
             side_effects.broadcast(GameAction::HoldTool);
@@ -380,11 +401,15 @@ impl WidgetWindow<Error> for FishingUI {
                 .unwrap_or(false)
         };
 
+        let showing_treasure = get_bool(&self.showing_treasure);
+        let showing_fish = get_bool(&self.showing_fish);
         let pulling_out_of_water = get_bool(&self.pulling_out_of_water);
         let minigame_in_progress = get_bool(&self.minigame_in_progress);
-        let is_nibbling = get_bool(&self.is_nibbling) && !minigame_in_progress;
+        let is_nibbling = !showing_fish
+            && !minigame_in_progress
+            && get_bool(&self.is_nibbling);
         let is_fishing =
-            get_bool(&self.is_fishing) && !is_nibbling && !minigame_in_progress;
+            !is_nibbling && !minigame_in_progress && get_bool(&self.is_fishing);
         let bobber_in_air = get_bool(&self.bobber_in_air);
         let is_casting = get_bool(&self.is_casting);
         let is_timing_cast = get_bool(&self.is_timing_cast);
@@ -505,6 +530,16 @@ impl WidgetWindow<Error> for FishingUI {
                     read_value(&self.pulling_out_of_water),
                 ])
                 .style(get_style(pulling_out_of_water)),
+                Row::new([
+                    "Showing fish:".into(),
+                    read_value(&self.showing_fish),
+                ])
+                .style(get_style(showing_fish)),
+                Row::new([
+                    "Showing treasure:".into(),
+                    read_value(&self.showing_treasure),
+                ])
+                .style(get_style(showing_treasure)),
             ],
             [Constraint::Min(33), Constraint::Percentage(100)],
         );
