@@ -197,8 +197,8 @@ impl<'a> CachedReader<'a> {
     fn init_dlls(&self) -> Result<(), Error> {
         let dll_data = self
             .iter_clr_dll_regions()
-            .filter_map(|region| region.read().ok())
-            .collect::<Vec<_>>();
+            .map(|region| region.read())
+            .collect::<Result<Vec<_>, _>>()?;
 
         let layouts = dll_data
             .iter()

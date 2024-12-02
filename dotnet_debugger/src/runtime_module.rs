@@ -188,7 +188,7 @@ impl RuntimeModule {
             .minmax()
             .into_option()
             .map(|(a, b)| a..b)
-            .unwrap();
+            .unwrap_or_else(|| Pointer::null()..Pointer::null());
 
         let mut counter_lookups: Vec<HashMap<Pointer, usize>> =
             vec![HashMap::new(); metadata.len()];
