@@ -134,6 +134,7 @@ struct FishingState {
     fish_position: f32,
     fish_velocity: f32,
     fish_target_position: f32,
+    fish_difficulty: f32,
 }
 
 impl FishingUI {
@@ -287,13 +288,15 @@ impl FishingUI {
             .read_as::<f32>(reader)?
             .unwrap_or(f32::NAN);
         let fish_velocity = self
-            .fish_position
+            .fish_velocity
             .read_as::<f32>(reader)?
             .unwrap_or(f32::NAN);
         let fish_target_position = self
             .fish_target_position
             .read_as::<f32>(reader)?
             .unwrap_or(-1.0);
+        let fish_difficulty =
+            self.fish_difficulty.read_as::<f32>(reader)?.unwrap_or(-1.0);
 
         Ok(Some(FishingState {
             tick,
@@ -303,6 +306,7 @@ impl FishingUI {
             fish_position,
             fish_velocity,
             fish_target_position,
+            fish_difficulty,
         }))
     }
 }
@@ -424,6 +428,57 @@ impl WidgetWindow<Error> for FishingUI {
                 Style::new().fg(Color::DarkGray)
             }
         };
+
+        let prediction_size = 120;
+        let predicted_fish_points: Vec<_> = self
+            .history
+            .last()
+            .map(|state| {
+                // m*accel + b*velocity + k*position = 0
+                // position = (A*cos(lambda*t) + B*sin(lambda*t))*exp(-lambda*t)
+                //
+                // The position here is not `fish_position`, but is
+                // relative to the `fish_target_position`, since that
+                // makes the equation simpler.
+                let k = 1.0 / (5.0 * (120.0 - state.fish_difficulty));
+
+
+                let b = 1.0 / 5.0;
+                let lambda = b / 2.0;
+                let tau = (lambda * lambda - k).sqrt();
+
+                let initial_offset =
+                    state.fish_position - state.fish_target_position;
+                let initial_velocity = state.fish_velocity;
+
+                let coefficient_of_pos = ((tau - lambda) * initial_offset
+                    - initial_velocity)
+                    / (2.0 * tau);
+                let coefficient_of_neg = ((tau + lambda) * initial_offset
+                    + initial_velocity)
+                    / (2.0 * tau);
+
+
+                (0..prediction_size).map(move |i| {
+                    let t = i as f32;
+                    let offset = coefficient_of_pos
+                        * (-(lambda + tau) * t).exp()
+                        + coefficient_of_neg * (-(lambda - tau) * t).exp();
+
+                    if i==0 {
+                        assert!((offset - initial_offset).abs() < 0.1,
+                                "Initial offset {initial_offset} should be reproduced when i==0, \
+                                 but instead produced {offset}.");
+                    }
+
+                    let predicted = state.fish_target_position + offset;
+
+                    ((state.tick + i) as f64, MAX_SIZE - predicted as f64)
+                })
+            })
+            .into_iter()
+            .flatten()
+            .collect();
 
         let table = Table::new(
             [
@@ -631,6 +686,12 @@ impl WidgetWindow<Error> for FishingUI {
                 .marker(Marker::Braille)
                 .style(Style::default().red()),
             Dataset::default()
+                .data(&predicted_fish_points)
+                .graph_type(GraphType::Scatter)
+                .name("Fish (pred.)")
+                .marker(Marker::Braille)
+                .style(Style::default().yellow()),
+            Dataset::default()
                 .data(&fish_target_points)
                 .graph_type(GraphType::Scatter)
                 .name("Fish's Target")
@@ -650,9 +711,11 @@ impl WidgetWindow<Error> for FishingUI {
                 {
                     itertools::MinMaxResult::NoElements => [0.0, 0.0],
                     itertools::MinMaxResult::OneElement(value) => {
-                        [value, value + 1.0]
+                        [value, value + 1.0 + (prediction_size as f64)]
                     }
-                    itertools::MinMaxResult::MinMax(a, b) => [a, b],
+                    itertools::MinMaxResult::MinMax(a, b) => {
+                        [a, b + (prediction_size as f64)]
+                    }
                 },
             );
 
