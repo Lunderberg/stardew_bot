@@ -232,8 +232,7 @@ impl ReadTypedPointer for TypeHandle {
             Ok(TypeHandle::TypeDescription(type_desc))
         } else {
             let ptr: TypedPointer<MethodTable> = ptr.into();
-            //let method_table = ptr.read(reader)?;
-            let method_table = ptr.read(reader).unwrap();
+            let method_table = ptr.read(reader)?;
             Ok(TypeHandle::MethodTable(method_table))
         }
     }
