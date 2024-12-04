@@ -311,6 +311,41 @@ impl FishingUI {
     }
 }
 
+impl FishingState {
+    fn predicted_positions(&self) -> impl Iterator<Item = f32> {
+        // m*accel + b*velocity + k*position = 0
+        // position = (A*cos(lambda*t) + B*sin(lambda*t))*exp(-lambda*t)
+        //
+        // The position here is not `fish_position`, but is
+        // relative to the `fish_target_position`, since that
+        // makes the equation simpler.
+        let k = 1.0 / (5.0 * (120.0 - self.fish_difficulty));
+
+        let b = 1.0 / 5.0;
+        let lambda = b / 2.0;
+        let tau = (lambda * lambda - k).sqrt();
+
+        let initial_offset = self.fish_position - self.fish_target_position;
+        let initial_velocity = self.fish_velocity;
+
+        let coefficient_of_pos =
+            ((tau - lambda) * initial_offset - initial_velocity) / (2.0 * tau);
+        let coefficient_of_neg =
+            ((tau + lambda) * initial_offset + initial_velocity) / (2.0 * tau);
+
+        let fish_target_position = self.fish_target_position;
+
+        (0..).map(move |i| {
+            let t = i as f32;
+            let offset = coefficient_of_pos * (-(lambda + tau) * t).exp()
+                + coefficient_of_neg * (-(lambda - tau) * t).exp();
+            let predicted = fish_target_position + offset;
+
+            predicted
+        })
+    }
+}
+
 impl WidgetWindow<Error> for FishingUI {
     fn title(&self) -> std::borrow::Cow<str> {
         "Fishing".into()
@@ -428,57 +463,6 @@ impl WidgetWindow<Error> for FishingUI {
                 Style::new().fg(Color::DarkGray)
             }
         };
-
-        let prediction_size = 120;
-        let predicted_fish_points: Vec<_> = self
-            .history
-            .last()
-            .map(|state| {
-                // m*accel + b*velocity + k*position = 0
-                // position = (A*cos(lambda*t) + B*sin(lambda*t))*exp(-lambda*t)
-                //
-                // The position here is not `fish_position`, but is
-                // relative to the `fish_target_position`, since that
-                // makes the equation simpler.
-                let k = 1.0 / (5.0 * (120.0 - state.fish_difficulty));
-
-
-                let b = 1.0 / 5.0;
-                let lambda = b / 2.0;
-                let tau = (lambda * lambda - k).sqrt();
-
-                let initial_offset =
-                    state.fish_position - state.fish_target_position;
-                let initial_velocity = state.fish_velocity;
-
-                let coefficient_of_pos = ((tau - lambda) * initial_offset
-                    - initial_velocity)
-                    / (2.0 * tau);
-                let coefficient_of_neg = ((tau + lambda) * initial_offset
-                    + initial_velocity)
-                    / (2.0 * tau);
-
-
-                (0..prediction_size).map(move |i| {
-                    let t = i as f32;
-                    let offset = coefficient_of_pos
-                        * (-(lambda + tau) * t).exp()
-                        + coefficient_of_neg * (-(lambda - tau) * t).exp();
-
-                    if i==0 {
-                        assert!((offset - initial_offset).abs() < 0.1,
-                                "Initial offset {initial_offset} should be reproduced when i==0, \
-                                 but instead produced {offset}.");
-                    }
-
-                    let predicted = state.fish_target_position + offset;
-
-                    ((state.tick + i) as f64, MAX_SIZE - predicted as f64)
-                })
-            })
-            .into_iter()
-            .flatten()
-            .collect();
 
         let table = Table::new(
             [
@@ -665,6 +649,26 @@ impl WidgetWindow<Error> for FishingUI {
                     MAX_SIZE - state.fish_target_position as f64,
                 )
             })
+            .collect();
+
+        let prediction_size = 120;
+        let predicted_fish_points: Vec<_> = self
+            .history
+            .last()
+            .map(|state| {
+                state
+                    .predicted_positions()
+                    .take(prediction_size)
+                    .enumerate()
+                    .map(|(i, pos)| {
+                        let tick = state.tick as f64;
+                        let i = i as f64;
+                        let pos = pos as f64;
+                        (tick + i, MAX_SIZE - pos)
+                    })
+            })
+            .into_iter()
+            .flatten()
             .collect();
 
         let datasets = vec![
