@@ -312,7 +312,7 @@ impl FishingUI {
 }
 
 impl FishingState {
-    fn predicted_positions(&self) -> impl Iterator<Item = f32> {
+    fn predicted_positions(&self) -> impl Fn(f32) -> f32 {
         // m*accel + b*velocity + k*position = 0
         // position = (A*cos(lambda*t) + B*sin(lambda*t))*exp(-lambda*t)
         //
@@ -335,14 +335,39 @@ impl FishingState {
 
         let fish_target_position = self.fish_target_position;
 
-        (0..).map(move |i| {
-            let t = i as f32;
+        move |t: f32| -> f32 {
             let offset = coefficient_of_pos * (-(lambda + tau) * t).exp()
                 + coefficient_of_neg * (-(lambda - tau) * t).exp();
             let predicted = fish_target_position + offset;
 
             predicted
-        })
+        }
+    }
+
+    fn should_move_upward(&self) -> bool {
+        const LOOKAHEAD_TIME: f32 = 30.0;
+
+        let fish_position = self.predicted_positions()(LOOKAHEAD_TIME);
+
+        let bar_position =
+            (self.bar_position.start + self.bar_position.end - 28.0) / 2.0
+                - 16.0;
+
+        let bar_velocity = self.bar_velocity;
+
+        let bar_velocity_if_click = bar_velocity - 0.25;
+        let bar_velocity_if_release = bar_velocity + 0.25;
+
+        let bar_position_if_click =
+            bar_velocity_if_click * LOOKAHEAD_TIME + bar_position;
+        let bar_position_if_release =
+            bar_velocity_if_release * LOOKAHEAD_TIME + bar_position;
+
+        let distance_if_click = (fish_position - bar_position_if_click).abs();
+        let distance_if_release =
+            (fish_position - bar_position_if_release).abs();
+
+        distance_if_click < distance_if_release
     }
 }
 
@@ -398,14 +423,14 @@ impl WidgetWindow<Error> for FishingUI {
             };
             side_effects.broadcast(action);
         } else if minigame_in_progress {
-            let bar_position = get_float(&self.bar_position)?;
-            let fish_position = get_float(&self.fish_position)?;
-            let action = if fish_position < bar_position {
-                GameAction::HoldTool
-            } else {
-                GameAction::ReleaseTool
-            };
-            side_effects.broadcast(action);
+            if let Some(state) = self.history.last() {
+                let action = if state.should_move_upward() {
+                    GameAction::HoldTool
+                } else {
+                    GameAction::ReleaseTool
+                };
+                side_effects.broadcast(action);
+            }
         } else if is_nibbling {
             side_effects.broadcast(GameAction::ReleaseTool);
         } else if is_fishing {
@@ -656,16 +681,14 @@ impl WidgetWindow<Error> for FishingUI {
             .history
             .last()
             .map(|state| {
-                state
-                    .predicted_positions()
-                    .take(prediction_size)
-                    .enumerate()
-                    .map(|(i, pos)| {
-                        let tick = state.tick as f64;
-                        let i = i as f64;
-                        let pos = pos as f64;
-                        (tick + i, MAX_SIZE - pos)
-                    })
+                let predictor = state.predicted_positions();
+
+                (0..prediction_size).map(move |i| {
+                    let pos = predictor(i as f32) as f64;
+                    let tick = state.tick as f64;
+                    let i = i as f64;
+                    (tick + i, MAX_SIZE - pos)
+                })
             })
             .into_iter()
             .flatten()
