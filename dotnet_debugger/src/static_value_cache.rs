@@ -599,6 +599,12 @@ impl<'a> CachedReader<'a> {
                     .method_table(ptr_mtable_of_parent)?
                     .generic_types(self)?;
 
+                if generic_method_table_ptr.is_none() && is_value_type {
+                    return Err(Error::GenericMethodTableNotFound(format!(
+                        "{sig_type}"
+                    )));
+                }
+
                 generic_method_table_ptr
                         .into_iter()
                         .map(|ptr| -> Result<TypedPointer<TypeHandle>, Error> {
@@ -664,9 +670,17 @@ impl<'a> CachedReader<'a> {
                         .map_or_else(
                             || {
                                if is_value_type {
-                                   Err(Error::GenericMethodTableNotFound(
-                                                format!("{sig_type}"),
-                                            ))
+                                   Err(Error::InstantiatedGenericMethodTableNotFound(
+                                       format!("{sig_type}"),
+                                       parent_generic_types.iter()
+                                           .map(|type_handle_ptr| {
+                                               let Ok(type_handle) = self.type_handle(*type_handle_ptr)
+                                               else {
+                                                   return "err".to_string();
+                                               };
+                                               format!("{}", type_handle.printable(*self))
+                                           }).join(", ")
+                                   ))
                                } else {
                                    Ok(RuntimeType::Class {
                                         method_table: None,

@@ -152,8 +152,13 @@ pub enum Error {
     #[error("Instantiated generic should have method table")]
     GenericInstShouldNotBeTypeDescription,
 
-    #[error("Could not find method table for instantiated generic {0}")]
+    #[error(
+        "Could not find method table for uninstantiated generic used by {0}"
+    )]
     GenericMethodTableNotFound(String),
+
+    #[error("Could not find method table for generic {0} with args [{1}]")]
+    InstantiatedGenericMethodTableNotFound(String, String),
 
     #[error("The System.Object method table should always be present")]
     MethodTableOfSystemObjectShouldBeLoaded,
