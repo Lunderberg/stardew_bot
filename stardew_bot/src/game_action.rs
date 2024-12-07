@@ -24,7 +24,6 @@ impl GameAction {
         state: &mut InputState,
         handler: &mut X11Handler,
         window: x11rb::protocol::xproto::Window,
-        mut callback: impl FnMut(String),
     ) -> Result<(), Error> {
         // TODO: Actually look up the Keycode using xkbcommon
         //
@@ -44,22 +43,6 @@ impl GameAction {
         let same_screen: bool = true;
 
         let mut send_event = |press: bool| -> Result<(), X11Error> {
-            // callback(format!(
-            //     "Sending keyboard {} to {window:?}",
-            //     if press { "press" } else { "release" }
-            // ));
-            // if press && state.pressed_keys.contains(&keycode) {
-            //     callback("Key is already pressed, skipping".to_string());
-            //     return;
-            // } else if press {
-            //     state.pressed_keys.insert(keycode);
-            // } else if !press && !state.pressed_keys.contains(&keycode) {
-            //     callback("Key is already released, skipping".to_string());
-            //     return;
-            // } else if !press {
-            //     state.pressed_keys.remove(&keycode);
-            // }
-
             if press {
                 state.pressed_keys.insert(keycode);
             } else {
@@ -111,65 +94,21 @@ impl GameAction {
                     &event,
                 )?;
             };
-
-            // let event = x11rb::protocol::xproto::KeyPressEvent::new(
-            //     keycode,
-            //     time,
-            //     root,
-            //     event,
-            //     child,
-            //     root_x,
-            //     root_y,
-            //     event_x,
-            //     event_y,
-            //     modifier_keys,
-            //     same_screen,
-            // );
-            // if press {
-            //     let request = x11rb::protocol::xproto::SendEvent {
-            //         propagate: false,
-            //         destination: x11rb::protocol::xproto::SendEventDest::Window(window),
-            //         event_mask: x11rb::protocol::xproto::EventMask::STRUCTURE_NOTIFY,
-            //         event: &event,
-            //     };
-
-            //     handler.conn.send_request(&request);
-            // } else {
-            //     let event: x11rb::protocol::xproto::KeyReleaseEvent = event.into();
-            //     let request = x11rb::protocol::xproto::SendEvent {
-            //         propagate: false,
-            //         destination: x11rb::protocol::xproto::SendEventDest::Window(window),
-            //         event_mask: x11rb::protocol::xproto::EventMask::STRUCTURE_NOTIFY,
-            //         event: &event,
-            //     };
-
-            //     handler.conn.send_request(&request);
-            // };
             Ok(())
         };
 
         match self {
             GameAction::UseTool => {
-                callback(format!(
-                    "Sending keyboard press then release to {window:?}"
-                ));
                 send_event(true)?;
                 send_event(false)?;
             }
             GameAction::HoldTool => {
-                callback(format!("Sending keyboard press to {window:?}"));
                 send_event(true)?;
             }
             GameAction::ReleaseTool => {
-                callback(format!("Sending keyboard release to {window:?}"));
                 send_event(false)?;
             }
         }
-
-        // handler
-        // .conn
-        // .flush()
-        // .map_err(|err| -> X11Error { err.into() })?;
 
         Ok(())
     }

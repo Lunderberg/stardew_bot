@@ -367,7 +367,7 @@ impl<'a> CachedReader<'a> {
                 element_type.is_some()
             }
         };
-        //if !matches!(runtime_type, RuntimeType::Class { method_table: None }) {
+
         if is_complete {
             self.state
                 .field_to_runtime_type
@@ -475,13 +475,6 @@ impl<'a> CachedReader<'a> {
                     .clone();
 
                 type_handle_ptr == expected_type_handle
-
-                // match type_handle {
-                // TypeHandle::TypeDescription(type_description) => {
-                //     type_description.index() == Some(*sig_index as usize)
-                // }
-                // _ => false,
-                // }
             }
             SignatureType::SizeArray(sig_element_type) => match type_handle {
                 TypeHandle::MethodTable(method_table) => method_table

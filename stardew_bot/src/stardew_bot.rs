@@ -35,8 +35,6 @@ pub struct StardewBot {
     should_exit: bool,
     keystrokes: KeySequence,
     most_recent_unknown_key_sequence: Option<std::time::Instant>,
-    most_recent_inactive_window: Option<std::time::Instant>,
-    most_recent_active_window: Option<std::time::Instant>,
 }
 
 struct TuiBuffers {
@@ -99,8 +97,6 @@ impl StardewBot {
             keystrokes: KeySequence::default(),
             stardew_window,
             most_recent_unknown_key_sequence: None,
-            most_recent_inactive_window: None,
-            most_recent_active_window: None,
         })
     }
 
@@ -252,7 +248,6 @@ impl StardewBot {
 
         let active_window = self.x11_handler.query_active_window()?;
         if active_window == self.stardew_window {
-            let mut messages: Vec<String> = Vec::new();
             side_effects
                 .into_iter::<GameAction>()
                 .try_for_each(|action| {
@@ -260,35 +255,8 @@ impl StardewBot {
                         &mut self.input_state,
                         &mut self.x11_handler,
                         self.stardew_window,
-                        |message| messages.push(message),
                     )
                 })?;
-            messages
-                .into_iter()
-                .for_each(|message| side_effects.add_log(message));
-
-            let now = std::time::Instant::now();
-            let show_message = self
-                .most_recent_active_window
-                .map(|prev| now - prev > std::time::Duration::from_secs(1))
-                .unwrap_or(true);
-            if show_message {
-                self.most_recent_active_window = Some(now);
-                side_effects
-                    .add_log(format!("Window {active_window:?} is stardew"));
-            }
-        } else {
-            let now = std::time::Instant::now();
-            let show_message = self
-                .most_recent_inactive_window
-                .map(|prev| now - prev > std::time::Duration::from_secs(1))
-                .unwrap_or(true);
-            if show_message {
-                self.most_recent_inactive_window = Some(now);
-                side_effects.add_log(format!(
-                    "Window {active_window:?} is not stardew"
-                ));
-            }
         }
 
         Ok(())
