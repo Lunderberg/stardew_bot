@@ -511,25 +511,25 @@ impl ObjectExplorer {
 
                         let fields = reader
                             .iter_static_fields(method_table_ptr)?
-                            .map(|field| -> Result<_, Error> {
-                                let node = ObjectTreeNode::initial_field(
-                                    method_table_ptr,
-                                    FieldContainer::Static,
+                            .map(|field| {
+                                (
                                     field,
-                                    reader,
-                                    display_options_ref,
-                                    prefetch_statics_ref,
-                                )?;
-                                Ok((field, node))
+                                    ObjectTreeNode::initial_field(
+                                        method_table_ptr,
+                                        FieldContainer::Static,
+                                        field,
+                                        reader,
+                                        display_options_ref,
+                                        prefetch_statics_ref,
+                                    ),
+                                )
                             })
-                            .collect::<Result<Vec<_>, _>>()?
-                            .into_iter()
                             .sorted_by_key(|(field, _)| {
                                 display_options_ref
                                     .field_sort_key(*field, reader)
                             })
-                            .map(|(_, node)| node)
-                            .collect::<Vec<_>>();
+                            .map(|(_, res_node)| res_node)
+                            .collect::<Result<Vec<_>, _>>()?;
 
                         let obj = if fields.is_empty() {
                             None
@@ -813,18 +813,15 @@ impl ObjectTreeNode {
                 let class_name = get_class_name(field_method_table, reader)?;
 
                 let fields = reader
-                    .field_descriptions(field_method_table)?
-                    .into_iter()
-                    .flatten()
-                    .filter(|subfield| !subfield.is_static())
-                    .sorted_by_key(|subfield| {
-                        display_options.field_sort_key(*subfield, reader)
+                    .iter_instance_fields(field_method_table)?
+                    .sorted_by_key(|(_, field)| {
+                        display_options.field_sort_key(*field, reader)
                     })
-                    .map(|subfield| {
+                    .map(|(parent_of_field, field)| {
                         ObjectTreeNode::initial_field(
-                            field_method_table,
+                            parent_of_field,
                             FieldContainer::ValueType(location.start),
-                            subfield,
+                            field,
                             reader,
                             display_options,
                             prefetch,
@@ -875,15 +872,19 @@ impl ObjectTreeNode {
 
         let location = field.location(module, container, reader)?;
 
-        let runtime_type =
-            reader.field_to_runtime_type(mtable_of_parent, &field)?;
-        let value = ObjectTreeNode::initial_value(
-            location.clone(),
-            runtime_type.clone(),
-            reader,
-            display_options,
-            prefetch,
-        )?;
+        let value = || -> Result<_, Error> {
+            let runtime_type =
+                reader.field_to_runtime_type(mtable_of_parent, &field)?;
+            let value = ObjectTreeNode::initial_value(
+                location.clone(),
+                runtime_type.clone(),
+                reader,
+                display_options,
+                prefetch,
+            )?;
+            Ok(value)
+        }()
+        .unwrap_or_else(|err| ObjectTreeNode::String(format!("{err}")));
 
         let node = ObjectTreeNode::Field {
             ptr_mtable_of_parent: mtable_of_parent,
