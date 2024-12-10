@@ -133,7 +133,7 @@ impl MethodTable {
             None
         } else if type_flag == 0x00040000 || type_flag == 0x00050000 {
             Some(RuntimeType::ValueType {
-                method_table: self.ptr(),
+                method_table: Some(self.ptr()),
                 size: self.base_size(),
             })
         } else if type_flag == 0x00070000 {
@@ -147,7 +147,7 @@ impl MethodTable {
             // primitive" type.  I think this just means that it's
             // a user-defined enum.
             Some(RuntimeType::ValueType {
-                method_table: self.ptr(),
+                method_table: Some(self.ptr()),
                 size: self.base_size(),
             })
         } else if type_flag == 0x000C0000 {

@@ -348,6 +348,7 @@ impl<'a> CachedReader<'a> {
                 module_ptr,
                 ptr_mtable_of_parent,
                 sig_type,
+                false,
             )?
             .ok_or_else(|| {
                 Error::UnexpectedNullMethodTable(format!(
@@ -508,6 +509,7 @@ impl<'a> CachedReader<'a> {
         module_ptr: TypedPointer<RuntimeModule>,
         ptr_mtable_of_parent: TypedPointer<MethodTable>,
         sig_type: SignatureType<'_>,
+        allow_missing: bool,
     ) -> Result<Option<RuntimeType>, Error> {
         // TODO: Match by reference to avoid the clone.
         let runtime_type = match sig_type.clone() {
@@ -518,12 +520,29 @@ impl<'a> CachedReader<'a> {
             }
 
             SignatureType::ValueType { index, .. } => {
-                let Some(method_table) =
-                    self.method_table_by_metadata(module_ptr, index)?
-                else {
-                    return Ok(None);
-                };
-                let size = self.method_table(method_table)?.base_size();
+                let method_table =
+                    self.method_table_by_metadata(module_ptr, index)?;
+
+                // TODO: Either provide a better default here, or
+                // refactor such that the size is determined later.
+                // If no method table is found, then the size is given
+                // as zero.  In any context where an object of the
+                // specified type exists within the remote process,
+                // the method table should exist, but a method table
+                // may not yet have been generated if an object of
+                // that type has not been constructed.  This typically
+                // occurs for empty collections of generic types.
+                //
+                // For example, even if an instance of
+                // `Array<MyGeneric<i32>>` exists, it may be empty and
+                // so `MyGeneric<i32>` may not yet have a method
+                // table.
+                let size = method_table
+                    .map(|ptr| -> Result<_, Error> {
+                        Ok(self.method_table(ptr)?.base_size())
+                    })
+                    .transpose()?
+                    .unwrap_or(0);
                 RuntimeType::ValueType { method_table, size }
             }
             SignatureType::Class { index, .. } => {
@@ -599,7 +618,10 @@ impl<'a> CachedReader<'a> {
                     .method_table(ptr_mtable_of_parent)?
                     .generic_types(self)?;
 
-                if generic_method_table_ptr.is_none() && is_value_type {
+                if generic_method_table_ptr.is_none()
+                    && is_value_type
+                    && !allow_missing
+                {
                     return Err(Error::GenericMethodTableNotFound(format!(
                         "{sig_type}"
                     )));
@@ -669,7 +691,7 @@ impl<'a> CachedReader<'a> {
                         .transpose()?
                         .map_or_else(
                             || {
-                               if is_value_type {
+                               if is_value_type && !allow_missing {
                                    Err(Error::InstantiatedGenericMethodTableNotFound(
                                        format!("{sig_type}"),
                                        parent_generic_types.iter()
@@ -681,6 +703,11 @@ impl<'a> CachedReader<'a> {
                                                format!("{}", type_handle.printable(*self))
                                            }).join(", ")
                                    ))
+                               } else if is_value_type && allow_missing {
+                                   Ok(RuntimeType::ValueType {
+                                       method_table: None,
+                                       size: 0,
+                                   })
                                } else {
                                    Ok(RuntimeType::Class {
                                         method_table: None,
@@ -694,7 +721,7 @@ impl<'a> CachedReader<'a> {
                                         .method_table(method_table_ptr)?
                                         .base_size();
                                     RuntimeType::ValueType {
-                                        method_table: method_table_ptr,
+                                        method_table: Some(method_table_ptr),
                                         size,
                                     }
                                 } else {
@@ -723,6 +750,7 @@ impl<'a> CachedReader<'a> {
                         module_ptr,
                         ptr_mtable_of_parent,
                         *element_type,
+                        true,
                     )?
                     .map(Box::new);
                 RuntimeType::Array { element_type }
@@ -779,6 +807,7 @@ impl<'a> CachedReader<'a> {
                         module_ptr,
                         ptr_mtable_of_parent,
                         *element_type,
+                        true,
                     )?
                     .map(Box::new);
                 RuntimeType::MultiDimArray { element_type, rank }

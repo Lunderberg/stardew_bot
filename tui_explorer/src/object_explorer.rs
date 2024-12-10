@@ -799,8 +799,15 @@ impl ObjectTreeNode {
                     return Err(Error::BytesNotFoundInPrefetch(location.start));
                 }
             }
+
             RuntimeType::ValueType {
-                method_table: field_method_table,
+                method_table: None, ..
+            } => {
+                return Err(Error::MissingMethodTableOfValueType);
+            }
+
+            RuntimeType::ValueType {
+                method_table: Some(field_method_table),
                 ..
             } => {
                 let class_name = get_class_name(field_method_table, reader)?;

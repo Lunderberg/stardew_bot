@@ -25,13 +25,21 @@ pub enum RuntimeType {
         /// The MethodTable used to unpack the struct.  This must be
         /// determined from the parent type, since structs do not have
         /// a pointer to their own vtable.
-        method_table: TypedPointer<MethodTable>,
+        ///
+        /// If no instance of this type has been constructed in the
+        /// remote process, then the method table will not yet exist.
+        /// For example, even if an `Array<Generic<i32>>` exists, if
+        /// it is empty, the method table for `Generic<i32>` may not
+        /// exist.
+        method_table: Option<TypedPointer<MethodTable>>,
 
         /// The size of the struct, in bytes.
         size: usize,
     },
     Class {
-        /// The method table of the class.  This
+        /// The method table of the class.  This is always the
+        /// statically-known type, even if the object itself is a
+        /// subclass of the statically-known type.
         ///
         /// While all objects must have a MethodTable, a MethodTable
         /// may not yet exist in the remote process.  If no instances
@@ -266,8 +274,17 @@ impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeType::Prim(prim) => write!(f, "{prim}"),
-            RuntimeType::ValueType { method_table, size } => {
+            RuntimeType::ValueType {
+                method_table: Some(method_table),
+                size,
+            } => {
                 write!(f, "struct({size} bytes, vtable {method_table})")
+            }
+            RuntimeType::ValueType {
+                method_table: None,
+                size,
+            } => {
+                write!(f, "struct({size} bytes, unknown vtable)")
             }
             RuntimeType::Class { .. } => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),

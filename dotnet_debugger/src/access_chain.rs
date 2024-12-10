@@ -72,8 +72,8 @@ impl RuntimeTypeExt for RuntimeType {
         gen_name: impl FnOnce() -> String,
     ) -> Result<TypedPointer<MethodTable>, Error> {
         match self {
-            RuntimeType::ValueType { method_table, .. } => Ok(*method_table),
-            RuntimeType::Class { method_table } => method_table
+            RuntimeType::ValueType { method_table, .. }
+            | RuntimeType::Class { method_table } => method_table
                 .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name())),
             _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
         }
@@ -233,7 +233,7 @@ impl SymbolicAccessChain {
         for (op_index, op) in self.ops.iter().enumerate() {
             match &item_type {
                 RuntimeType::ValueType {
-                    method_table: method_table_ptr,
+                    method_table: Some(method_table_ptr),
                     ..
                 }
                 | RuntimeType::Class {
