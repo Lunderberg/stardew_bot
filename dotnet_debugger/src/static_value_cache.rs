@@ -872,12 +872,12 @@ impl<'a> CachedReader<'a> {
 
     pub fn field_descriptions(
         &self,
-        ptr: TypedPointer<MethodTable>,
+        method_table_ptr: TypedPointer<MethodTable>,
     ) -> Result<Option<&'a FieldDescriptions>, Error> {
         self.state
             .field_descriptions
-            .try_insert(ptr, || {
-                let method_table = self.method_table(ptr)?;
+            .try_insert(method_table_ptr, || {
+                let method_table = self.method_table(method_table_ptr)?;
                 method_table.get_field_descriptions(self)
             })
             .map(|opt| opt.as_ref())
@@ -1076,8 +1076,9 @@ impl<'a> CachedReader<'a> {
                 res_ptr
                     .as_ref()
                     .ok()
-                    .map(|ptr| -> Result<_, Error> {
-                        let method_table = self.method_table(*ptr)?;
+                    .map(|method_table_ptr| -> Result<_, Error> {
+                        let method_table =
+                            self.method_table(*method_table_ptr)?;
                         let parent = method_table.parent_method_table();
                         Ok(parent)
                     })
@@ -1085,12 +1086,12 @@ impl<'a> CachedReader<'a> {
                     .flatten()
             },
         )
-        .flat_map_ok(|ptr| {
+        .flat_map_ok(|method_table_ptr| {
             let iter = self
-                .field_descriptions(ptr)?
+                .field_descriptions(method_table_ptr)?
                 .into_iter()
                 .flatten()
-                .map(move |field| Ok((ptr, field)));
+                .map(move |field| Ok((method_table_ptr, field)));
             Ok(iter)
         })
         .map(|res| res?)
