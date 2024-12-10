@@ -93,7 +93,7 @@ impl TypeHandle {
         }
     }
 
-    pub(crate) fn printable<'a>(
+    pub fn printable<'a>(
         &'a self,
         reader: CachedReader<'a>,
     ) -> PrintableTypeHandle<'a> {

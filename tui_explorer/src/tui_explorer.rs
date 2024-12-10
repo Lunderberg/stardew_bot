@@ -20,8 +20,8 @@ use dll_unpacker::{Annotation as _, Annotator as _};
 
 use crate::{
     Annotation, ChangeAddress, ColumnFormatter, Error, InfoFormatter,
-    LiveVariableDisplay, MetadataDisplay, ObjectExplorer, UserConfig,
-    UserConfigEditor,
+    LiveVariableDisplay, MetadataDisplay, ObjectExplorer, RuntimeModuleView,
+    UserConfig, UserConfigEditor,
 };
 
 use super::{DetailView, MemoryTable, RunningLog, StackFrameTable};
@@ -53,6 +53,7 @@ struct TuiBuffers {
     user_config_editor: UserConfigEditor,
     metadata_display: MetadataDisplay,
     live_variable_display: LiveVariableDisplay,
+    runtime_module_view: RuntimeModuleView,
 }
 
 pub struct TuiExplorerBuilder {
@@ -621,6 +622,9 @@ impl TuiExplorerBuilder {
         let metadata_display =
             MetadataDisplay::new(tui_globals.cached_reader())?;
 
+        let runtime_module_view =
+            RuntimeModuleView::new(tui_globals.cached_reader())?;
+
         let out = TuiExplorer {
             tui_globals,
             layout: self.layout,
@@ -633,6 +637,7 @@ impl TuiExplorerBuilder {
                 user_config_editor: UserConfigEditor::new(self.user_config),
                 metadata_display,
                 live_variable_display: LiveVariableDisplay::new(),
+                runtime_module_view,
             },
 
             should_exit: false,
@@ -654,6 +659,7 @@ impl TuiBuffers {
             Box::new(&mut self.user_config_editor),
             Box::new(&mut self.metadata_display),
             Box::new(&mut self.live_variable_display),
+            Box::new(&mut self.runtime_module_view),
         ]
     }
 }
