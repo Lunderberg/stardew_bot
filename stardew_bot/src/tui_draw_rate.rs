@@ -77,6 +77,12 @@ impl WidgetWindow<Error> for TuiDrawRate {
             .map(|frame| frame.handle_input)
             .sum::<std::time::Duration>();
 
+        let time_update_per_frame_values = self
+            .frame_history
+            .iter()
+            .map(|frame| frame.update_per_frame_values)
+            .sum::<std::time::Duration>();
+
         let time_periodic_update = self
             .frame_history
             .iter()
@@ -98,6 +104,8 @@ impl WidgetWindow<Error> for TuiDrawRate {
         let percent_active = 100.0 * time_active.div_duration_f32(total_time);
         let percent_handle_input =
             100.0 * time_handle_input.div_duration_f32(total_time);
+        let percent_update_per_frame_values =
+            100.0 * time_update_per_frame_values.div_duration_f32(total_time);
         let percent_periodic_update =
             100.0 * time_periodic_update.div_duration_f32(total_time);
         let percent_draw = 100.0 * time_draw.div_duration_f32(total_time);
@@ -155,6 +163,7 @@ impl WidgetWindow<Error> for TuiDrawRate {
             "{rate:>3.0} FPS, \
              {percent_active:.0}% active \
              ({percent_handle_input:.0}% input handling, \
+             {percent_update_per_frame_values:.0}% read values, \
              {percent_periodic_update:.0}% periodic updates, \
              {percent_draw:.0}% draw)"
         ));

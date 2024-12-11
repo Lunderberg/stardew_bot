@@ -85,6 +85,10 @@ impl TuiGlobals {
         self.type_map.insert(obj);
     }
 
+    pub fn take<T: Any>(&mut self) -> Option<T> {
+        self.type_map.remove()
+    }
+
     pub fn get<T: Any>(&self) -> Option<&T> {
         self.type_map.get()
     }

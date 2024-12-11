@@ -1,24 +1,16 @@
-use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools as _;
 use memory_reader::Pointer;
 
 use crate::{
     runtime_type::RuntimePrimType, runtime_value::RuntimePrimValue,
     CachedReader, Error, FieldContainer, FieldDescription, MethodTable,
-    RuntimeArray, RuntimeType, SymbolicParser, TypedPointer,
+    RuntimeArray, RuntimeType, SymbolicParser, SymbolicType, TypedPointer,
 };
 
 #[derive(Clone)]
 pub struct SymbolicAccessChain {
     pub static_field: SymbolicStaticField,
     pub ops: Vec<SymbolicOperation>,
-}
-
-#[derive(Clone)]
-pub struct SymbolicType {
-    pub namespace: Option<String>,
-    pub name: String,
-    pub generics: Vec<SymbolicType>,
 }
 
 #[derive(Clone)]
@@ -135,7 +127,8 @@ impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
 
 impl SymbolicAccessChain {
     pub fn parse(chain: &str, reader: CachedReader<'_>) -> Result<Self, Error> {
-        SymbolicParser::new(chain, reader).next_chain()
+        let chain = SymbolicParser::new(chain, reader).next_chain()?;
+        Ok(chain)
     }
 
     fn prefix(&self, index: usize) -> SymbolicAccessChainView {
@@ -326,7 +319,7 @@ impl SymbolicAccessChain {
 
         let prim_type = match item_type {
             RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
-            other => Err(Error::AccessChainMustTerminateInPrimitive {
+            other => Err(Error::SymbolicExpressionMustProducePrimitive {
                 field: format!("{self}"),
                 ty: other,
             }),
@@ -337,87 +330,6 @@ impl SymbolicAccessChain {
             ops,
             prim_type,
         })
-    }
-}
-
-impl SymbolicType {
-    fn method_table(
-        &self,
-        reader: CachedReader<'_>,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
-        let method_table_ptr = reader
-            .method_table_by_name(
-                self.namespace.as_ref().map(|s| s.as_str()).unwrap_or(""),
-                &self.name,
-            )?
-            .ok_or_else(|| {
-                Error::UnexpectedNullMethodTable(format!("{}", self))
-            })?;
-
-        if self.generics.is_empty() {
-            return Ok(method_table_ptr);
-        }
-
-        let method_table = reader.method_table(method_table_ptr)?;
-
-        let expected_type_def = method_table.token();
-
-        // TODO: Move this to a cache inside the StaticValueCache.
-        let generics = self
-            .generics
-            .iter()
-            .map(|generic| generic.method_table(reader))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let instantiated_generic = [method_table_ptr, generics[0]]
-            .into_iter()
-            .map(|method_table_ptr| reader.method_table(method_table_ptr))
-            .map_ok(|method_table| method_table.module())
-            .and_map_ok(|module_ptr| reader.runtime_module(module_ptr))
-            .and_map_ok(|module| module.loaded_types(reader))
-            .flatten_ok()
-            .and_flat_map_ok(|instantiated_generics| {
-                instantiated_generics.iter_method_tables(&reader)
-            })
-            .filter_map_ok(|type_handle_ptr| type_handle_ptr.as_method_table())
-            .and_map_ok(|method_table_ptr| {
-                reader.method_table(method_table_ptr)
-            })
-            .filter_ok(|method_table| method_table.token() == expected_type_def)
-            .filter_ok(|method_table| method_table.has_generics())
-            .and_filter_ok(|candidate_method_table| {
-                let mut iter_candidate_generics = candidate_method_table
-                    .generic_types_excluding_base_class(&reader)?;
-                for generic in generics.iter().cloned() {
-                    let Some(candidate_generic) =
-                        iter_candidate_generics.next()
-                    else {
-                        return Ok(false);
-                    };
-
-                    let Some(candidate_generic) =
-                        candidate_generic.as_method_table()
-                    else {
-                        return Ok(false);
-                    };
-
-                    if candidate_generic != generic {
-                        return Ok(false);
-                    }
-                }
-
-                if iter_candidate_generics.next().is_some() {
-                    return Ok(false);
-                }
-
-                Ok(true)
-            })
-            .next()
-            .ok_or_else(|| {
-                Error::NoSuchMethodTableFound(format!("{self}"))
-            })??;
-
-        Ok(instantiated_generic.ptr())
     }
 }
 

@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use dotnet_debugger::{CachedReader, PhysicalAccessChain};
+use dotnet_debugger::{CachedReader, SymbolicExpr};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -14,7 +14,10 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{Error, GameAction};
+use crate::{
+    per_frame_reader::ValueToken, Error, ExpressionsToRead, GameAction,
+    PerFrameValues,
+};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -22,57 +25,57 @@ pub struct FishingUI {
     history: Vec<FishingState>,
 
     /// The number of game ticks that have elapsed
-    game_tick: PhysicalAccessChain,
+    game_tick: ValueToken,
 
     /// True while the power of the cast is being selected.
-    is_timing_cast: PhysicalAccessChain,
+    is_timing_cast: ValueToken,
 
     /// A float, ranging from 0.0 to 1.0, indicating how far the
     /// bobber will travel.
-    casting_power: PhysicalAccessChain,
+    casting_power: ValueToken,
 
     /// True during the casting animation, until the bobber starts
     /// traveling through the air.
-    is_casting: PhysicalAccessChain,
+    is_casting: ValueToken,
 
     /// While while the bobber is in the air.
-    bobber_in_air: PhysicalAccessChain,
+    bobber_in_air: ValueToken,
 
     /// True if the bobber has landed in the water, and the player is
     /// waiting for a fish.  But it doesn't get reset until after the
     /// entire minigame.
-    is_fishing: PhysicalAccessChain,
+    is_fishing: ValueToken,
 
     /// The time at which a fish will bite
-    time_until_fishing_bite: PhysicalAccessChain,
+    time_until_fishing_bite: ValueToken,
 
     /// The time spent waiting for a fish to bite.
-    fishing_bite_accumulator: PhysicalAccessChain,
+    fishing_bite_accumulator: ValueToken,
 
     /// True if a fish is nibbling on the hook.  But it doesn't get
     /// reset until after the entire minigame.
-    is_nibbling: PhysicalAccessChain,
+    is_nibbling: ValueToken,
 
     /// The time at which a fish will no longer be hooked.
-    time_until_fishing_nibble_done: PhysicalAccessChain,
+    time_until_fishing_nibble_done: ValueToken,
 
     /// The time since a fish was hooked, incremented for each frame.
     /// When this value reaches `time_until_fishing_nibble_done`, the
     /// fish can no longer be caught.
-    fishing_nibble_accumulator: PhysicalAccessChain,
+    fishing_nibble_accumulator: ValueToken,
 
     /// True if a fish is currently being caught
-    minigame_in_progress: PhysicalAccessChain,
+    minigame_in_progress: ValueToken,
 
     /// The difficulty of the fish.  Typically on a scale from 0-100
-    fish_difficulty: PhysicalAccessChain,
+    fish_difficulty: ValueToken,
 
     /// The location of the fish within the fishing minigame.
     ///
     /// Initially set to 508 (out of 568)
     ///
     /// Updated by fish_velocity on each frame.
-    fish_position: PhysicalAccessChain,
+    fish_position: ValueToken,
 
     /// The velocity of the fish
     ///
@@ -82,7 +85,7 @@ pub struct FishingUI {
     ///
     ///    accel = (target_pos - pos) / ( 20*rand() + 10 + max(0,100-difficulty))
     ///    vel = 0.8*vel + 0.2*accel
-    fish_velocity: PhysicalAccessChain,
+    fish_velocity: ValueToken,
 
     /// The location that the fish is trying to reach within the
     /// fishing minigame.
@@ -93,37 +96,37 @@ pub struct FishingUI {
     ///    by setting the target position near the top.
     ///
     ///
-    fish_target_position: PhysicalAccessChain,
+    fish_target_position: ValueToken,
 
     /// The location of the fish within the fishing minigame.
-    bar_position: PhysicalAccessChain,
+    bar_position: ValueToken,
 
     /// The location of the fish within the fishing minigame.
-    bar_velocity: PhysicalAccessChain,
+    bar_velocity: ValueToken,
 
     /// The height of the fish within the fishing minigame.
-    bar_height: PhysicalAccessChain,
+    bar_height: ValueToken,
 
     /// A boolean, indicating whether the fish is currently within the
     /// fishing bar.
-    bobber_in_bar: PhysicalAccessChain,
+    bobber_in_bar: ValueToken,
 
     /// A float, indicating how close the fish is to escaping or being
     /// caught.  At 0.0, the fish escapes.  At 1.0, the fish is
     /// caught.
-    catch_progress: PhysicalAccessChain,
+    catch_progress: ValueToken,
 
     /// True if the minigame has completed, and the bobber is
     /// currently being pulled from the water.
-    pulling_out_of_water: PhysicalAccessChain,
+    pulling_out_of_water: ValueToken,
 
     /// True if the minigame has completed, and the fish is currently
     /// being displayed above the player's head.
-    showing_fish: PhysicalAccessChain,
+    showing_fish: ValueToken,
 
     /// True if the minigame has completed, and the player is
     /// currently being shown the treasure that has been caught.
-    showing_treasure: PhysicalAccessChain,
+    showing_treasure: ValueToken,
 }
 
 struct FishingState {
@@ -138,82 +141,73 @@ struct FishingState {
 }
 
 impl FishingUI {
-    pub fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
-        let game_tick =
-            reader.parse_access_chain("StardewValley.Game1​.ticks")?;
+    pub fn new(
+        reader: CachedReader<'_>,
+        per_frame_reader: &mut ExpressionsToRead,
+    ) -> Result<Self, Error> {
+        let mut register = |value: &str| -> Result<ValueToken, Error> {
+            let expr = SymbolicExpr::parse(value, reader)?;
+            let token = per_frame_reader.register(expr);
+            Ok(token)
+        };
 
-        let fishing_rod = "StardewValley.Game1​\
-                           ._player​\
-                           .netItems​.value​.Items​\
-                           .array​.value​.elements​._items\
-                           [5]​.value​\
+        let game_tick = register("StardewValley.Game1.ticks")?;
+
+        let fishing_rod = "StardewValley.Game1\
+                           ._player\
+                           .as<StardewValley.Farmer>()\
+                           .netItems.value.Items\
+                           .array.value.elements._items\
+                           [StardewValley.Game1._player.currentToolIndex.value].value\
                            .as<StardewValley.Tools.FishingRod>()";
 
-        let is_timing_cast = reader
-            .parse_access_chain(&format!("{fishing_rod}.isTimingCast"))?;
-        let casting_power = reader
-            .parse_access_chain(&format!("{fishing_rod}.castingPower"))?;
+        let is_timing_cast = register(&format!("{fishing_rod}.isTimingCast"))?;
+        let casting_power = register(&format!("{fishing_rod}.castingPower"))?;
 
-        let is_casting =
-            reader.parse_access_chain(&format!("{fishing_rod}.isCasting"))?;
+        let is_casting = register(&format!("{fishing_rod}.isCasting"))?;
 
-        let bobber_in_air = reader.parse_access_chain(&format!(
-            "{fishing_rod}.castedButBobberStillInAir"
-        ))?;
+        let bobber_in_air =
+            register(&format!("{fishing_rod}.castedButBobberStillInAir"))?;
 
-        let is_fishing =
-            reader.parse_access_chain(&format!("{fishing_rod}.isFishing"))?;
+        let is_fishing = register(&format!("{fishing_rod}.isFishing"))?;
 
-        let time_until_fishing_bite = reader.parse_access_chain(&format!(
-            "{fishing_rod}.timeUntilFishingBite"
-        ))?;
-        let fishing_bite_accumulator = reader.parse_access_chain(&format!(
-            "{fishing_rod}.fishingBiteAccumulator"
-        ))?;
+        let time_until_fishing_bite =
+            register(&format!("{fishing_rod}.timeUntilFishingBite"))?;
+        let fishing_bite_accumulator =
+            register(&format!("{fishing_rod}.fishingBiteAccumulator"))?;
 
-        let is_nibbling =
-            reader.parse_access_chain(&format!("{fishing_rod}.isNibbling"))?;
-        let time_until_fishing_nibble_done = reader.parse_access_chain(
-            &format!("{fishing_rod}.timeUntilFishingNibbleDone"),
-        )?;
-        let fishing_nibble_accumulator = reader.parse_access_chain(
-            &format!("{fishing_rod}.fishingNibbleAccumulator"),
-        )?;
+        let is_nibbling = register(&format!("{fishing_rod}.isNibbling"))?;
+        let time_until_fishing_nibble_done =
+            register(&format!("{fishing_rod}.timeUntilFishingNibbleDone"))?;
+        let fishing_nibble_accumulator =
+            register(&format!("{fishing_rod}.fishingNibbleAccumulator"))?;
 
         let minigame_in_progress =
-            reader.parse_access_chain(&format!("{fishing_rod}.isReeling"))?;
+            register(&format!("{fishing_rod}.isReeling"))?;
 
         let minigame = "StardewValley.Game1\
                         ._activeClickableMenu\
                         .as<StardewValley.Menus.BobberBar>()";
 
-        let fish_difficulty =
-            reader.parse_access_chain(&format!("{minigame}.difficulty"))?;
-        let fish_position =
-            reader.parse_access_chain(&format!("{minigame}.bobberPosition"))?;
-        let fish_velocity =
-            reader.parse_access_chain(&format!("{minigame}.bobberSpeed"))?;
-        let fish_target_position = reader
-            .parse_access_chain(&format!("{minigame}.bobberTargetPosition"))?;
-        let bar_position =
-            reader.parse_access_chain(&format!("{minigame}.bobberBarPos"))?;
-        let bar_velocity =
-            reader.parse_access_chain(&format!("{minigame}.bobberBarSpeed"))?;
-        let bar_height = reader
-            .parse_access_chain(&format!("{minigame}.bobberBarHeight"))?;
-        let bobber_in_bar =
-            reader.parse_access_chain(&format!("{minigame}.bobberInBar"))?;
-        let catch_progress = reader
-            .parse_access_chain(&format!("{minigame}.distanceFromCatching"))?;
+        let fish_difficulty = register(&format!("{minigame}.difficulty"))?;
+        let fish_position = register(&format!("{minigame}.bobberPosition"))?;
+        let fish_velocity = register(&format!("{minigame}.bobberSpeed"))?;
+        let fish_target_position =
+            register(&format!("{minigame}.bobberTargetPosition"))?;
+        let bar_position = register(&format!("{minigame}.bobberBarPos"))?;
+        let bar_velocity = register(&format!("{minigame}.bobberBarSpeed"))?;
+        let bar_height = register(&format!("{minigame}.bobberBarHeight"))?;
+        let bobber_in_bar = register(&format!("{minigame}.bobberInBar"))?;
+        let catch_progress =
+            register(&format!("{minigame}.distanceFromCatching"))?;
 
-        let pulling_out_of_water = reader
-            .parse_access_chain(&format!("{fishing_rod}.pullingOutOfWater"))?;
+        let pulling_out_of_water =
+            register(&format!("{fishing_rod}.pullingOutOfWater"))?;
 
-        let showing_fish =
-            reader.parse_access_chain(&format!("{fishing_rod}.fishCaught"))?;
+        let showing_fish = register(&format!("{fishing_rod}.fishCaught"))?;
 
-        let showing_treasure = reader
-            .parse_access_chain(&format!("{fishing_rod}.showingTreasure"))?;
+        let showing_treasure =
+            register(&format!("{fishing_rod}.showingTreasure"))?;
 
         Ok(Self {
             table_state: TableState::new(),
@@ -247,18 +241,22 @@ impl FishingUI {
 
     fn current_state(
         &self,
-        reader: CachedReader<'_>,
+        values: &PerFrameValues,
     ) -> Result<Option<FishingState>, dotnet_debugger::Error> {
-        let minigame_in_progress = self
-            .minigame_in_progress
-            .read_as::<bool>(reader)?
-            .unwrap_or(false);
+        let minigame_in_progress: bool = values[self.minigame_in_progress]
+            .map_or(Ok(false), TryInto::try_into)?;
+        // let minigame_in_progress = self
+        //     .minigame_in_progress_vm
+        //     .read_as::<bool>(reader)?
+        //     .unwrap_or(false);
 
         if !minigame_in_progress {
             return Ok(None);
         }
 
-        let tick = self.game_tick.read_as::<i32>(reader)?.unwrap_or(-1);
+        //let tick = self.game_tick_vm.read_as::<i32>(reader)?.unwrap_or(-1);
+        let tick: i32 =
+            values[self.game_tick].map_or(Ok(-1), TryInto::try_into)?;
         if self
             .history
             .last()
@@ -268,35 +266,35 @@ impl FishingUI {
             return Ok(None);
         }
 
-        let fishing_bar_bottom = self
-            .bar_position
-            .read_as::<f32>(reader)?
-            .unwrap_or(f32::NAN);
-        let fishing_bar_height =
-            self.bar_height.read_as::<i32>(reader)?.unwrap_or(-1);
+        // let fishing_bar_bottom = self
+        //     .bar_position_vm
+        //     .read_as::<f32>(reader)?
+        //     .unwrap_or(f32::NAN);
+        let fishing_bar_bottom: f32 = values[self.bar_position]
+            .map_or(Ok(f32::NAN), TryInto::try_into)?;
+        // let fishing_bar_height =
+        //     self.bar_height_vm.read_as::<i32>(reader)?.unwrap_or(-1);
+        let fishing_bar_height: i32 =
+            values[self.bar_height].map_or(Ok(-1), TryInto::try_into)?;
         let bar_position = fishing_bar_bottom
             ..fishing_bar_bottom + (fishing_bar_height as f32);
-        let bar_velocity = self
-            .bar_velocity
-            .read_as::<f32>(reader)?
-            .unwrap_or(f32::NAN);
+        // let bar_velocity = self
+        //     .bar_velocity_vm
+        //     .read_as::<f32>(reader)?
+        //     .unwrap_or(f32::NAN);
+        let bar_velocity: f32 = values[self.bar_velocity]
+            .map_or(Ok(f32::NAN), TryInto::try_into)?;
 
-        let fish_in_bar =
-            self.bobber_in_bar.read_as::<bool>(reader)?.unwrap_or(false);
-        let fish_position = self
-            .fish_position
-            .read_as::<f32>(reader)?
-            .unwrap_or(f32::NAN);
-        let fish_velocity = self
-            .fish_velocity
-            .read_as::<f32>(reader)?
-            .unwrap_or(f32::NAN);
-        let fish_target_position = self
-            .fish_target_position
-            .read_as::<f32>(reader)?
-            .unwrap_or(-1.0);
-        let fish_difficulty =
-            self.fish_difficulty.read_as::<f32>(reader)?.unwrap_or(-1.0);
+        let fish_in_bar: bool =
+            values[self.bobber_in_bar].map_or(Ok(false), TryInto::try_into)?;
+        let fish_position: f32 = values[self.fish_position]
+            .map_or(Ok(f32::NAN), TryInto::try_into)?;
+        let fish_velocity = values[self.fish_velocity]
+            .map_or(Ok(f32::NAN), TryInto::try_into)?;
+        let fish_target_position: f32 = values[self.fish_target_position]
+            .map_or(Ok(-1.0), TryInto::try_into)?;
+        let fish_difficulty: f32 =
+            values[self.fish_difficulty].map_or(Ok(-1.0), TryInto::try_into)?;
 
         Ok(Some(FishingState {
             tick,
@@ -381,41 +379,39 @@ impl WidgetWindow<Error> for FishingUI {
         globals: &'a tui_utils::TuiGlobals,
         side_effects: &'a mut tui_utils::WidgetSideEffects,
     ) -> Result<(), Error> {
-        let reader = globals.cached_reader();
+        let values = globals
+            .get::<PerFrameValues>()
+            .expect("Generated for each frame");
 
-        let get_bool = |chain: &PhysicalAccessChain| {
-            chain
-                .read_as::<bool>(reader)
-                .ok()
-                .flatten()
-                .unwrap_or(false)
+        let get_bool = |token: ValueToken| -> Result<bool, Error> {
+            Ok(values[token].map_or(Ok(false), TryInto::try_into)?)
         };
 
-        let get_float = |chain: &PhysicalAccessChain| -> Result<_, Error> {
-            Ok(chain
-                .read_as::<f32>(reader)?
-                .ok_or(Error::ExpectedNoneEmptyValue)?)
+        let get_float = |token: ValueToken| -> Result<f32, Error> {
+            Ok(values[token]
+                .ok_or(Error::ExpectedNoneEmptyValue)?
+                .try_into()?)
         };
 
-        let showing_fish = get_bool(&self.showing_fish);
-        let minigame_in_progress = get_bool(&self.minigame_in_progress);
-        let is_fishing = get_bool(&self.is_fishing);
+        let showing_fish = get_bool(self.showing_fish)?;
+        let minigame_in_progress = get_bool(self.minigame_in_progress)?;
+        let is_fishing = get_bool(self.is_fishing)?;
         let is_nibbling = !showing_fish
             && !minigame_in_progress
-            && get_bool(&self.is_nibbling);
-        let is_casting = get_bool(&self.is_casting);
-        let is_timing_cast = get_bool(&self.is_timing_cast);
+            && get_bool(self.is_nibbling)?;
+        let is_casting = get_bool(self.is_casting)?;
+        let is_timing_cast = get_bool(self.is_timing_cast)?;
 
         if is_casting {
             self.history.clear();
         }
 
-        if let Some(state) = self.current_state(reader)? {
+        if let Some(state) = self.current_state(values)? {
             self.history.push(state);
         }
 
         if is_timing_cast {
-            let casting_power = get_float(&self.casting_power)?;
+            let casting_power = get_float(self.casting_power)?;
             let action = if casting_power > 0.9 {
                 GameAction::ReleaseTool
             } else {
@@ -450,36 +446,32 @@ impl WidgetWindow<Error> for FishingUI {
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
-        let reader = globals.cached_reader();
-        let read_value = |chain: &PhysicalAccessChain| {
-            let value = match chain.read(reader) {
-                Ok(Some(value)) => format!("{value}"),
-                Ok(None) => "".to_string(),
-                Err(err) => format!("Error: {err}"),
-            };
-            Text::raw(value)
-        };
+        let values = globals
+            .get::<PerFrameValues>()
+            .expect("Generated for each frame");
 
-        let get_bool = |chain: &PhysicalAccessChain| {
-            chain
-                .read_as::<bool>(reader)
-                .ok()
+        let get_bool = |token: ValueToken| -> bool {
+            values[token]
+                .map(|val| val.try_into().ok())
                 .flatten()
                 .unwrap_or(false)
         };
-
-        let showing_treasure = get_bool(&self.showing_treasure);
-        let showing_fish = get_bool(&self.showing_fish);
-        let pulling_out_of_water = get_bool(&self.pulling_out_of_water);
-        let minigame_in_progress = get_bool(&self.minigame_in_progress);
+        let get_value = |token: ValueToken| match values[token] {
+            Some(value) => Text::raw(format!("{value}")),
+            None => Text::raw(""),
+        };
+        let showing_treasure = get_bool(self.showing_treasure);
+        let showing_fish = get_bool(self.showing_fish);
+        let pulling_out_of_water = get_bool(self.pulling_out_of_water);
+        let minigame_in_progress = get_bool(self.minigame_in_progress);
         let is_nibbling = !showing_fish
             && !minigame_in_progress
-            && get_bool(&self.is_nibbling);
+            && get_bool(self.is_nibbling);
         let is_fishing =
-            !is_nibbling && !minigame_in_progress && get_bool(&self.is_fishing);
-        let bobber_in_air = get_bool(&self.bobber_in_air);
-        let is_casting = get_bool(&self.is_casting);
-        let is_timing_cast = get_bool(&self.is_timing_cast);
+            !is_nibbling && !minigame_in_progress && get_bool(self.is_fishing);
+        let bobber_in_air = get_bool(self.bobber_in_air);
+        let is_casting = get_bool(self.is_casting);
+        let is_timing_cast = get_bool(self.is_timing_cast);
 
         let get_style = |is_active: bool| {
             if is_active {
@@ -491,120 +483,117 @@ impl WidgetWindow<Error> for FishingUI {
 
         let table = Table::new(
             [
-                Row::new(["Game tick:".into(), read_value(&self.game_tick)]),
+                Row::new(["Game tick:".into(), get_value(self.game_tick)]),
                 Row::new([
                     "Selecting cast distance:".into(),
-                    read_value(&self.is_timing_cast),
+                    get_value(self.is_timing_cast),
                 ])
                 .style(get_style(is_timing_cast)),
                 Row::new([
                     "Cast distance:".into(),
-                    read_value(&self.casting_power),
+                    get_value(self.casting_power),
                 ])
                 .style(get_style(is_timing_cast)),
                 Row::new([
                     "Currently casting:".into(),
-                    read_value(&self.is_casting),
+                    get_value(self.is_casting),
                 ])
                 .style(get_style(is_casting)),
-                Row::new([
-                    "Bobber in air:".into(),
-                    read_value(&self.is_casting),
-                ])
-                .style(get_style(bobber_in_air)),
+                Row::new(["Bobber in air:".into(), get_value(self.is_casting)])
+                    .style(get_style(bobber_in_air)),
                 Row::new([
                     "Currently fishing:".into(),
-                    read_value(&self.is_fishing),
+                    get_value(self.is_fishing),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Fish bites at:".into(),
-                    read_value(&self.time_until_fishing_bite),
+                    get_value(self.time_until_fishing_bite),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Time waiting for bite:".into(),
-                    read_value(&self.fishing_bite_accumulator),
+                    get_value(self.fishing_bite_accumulator),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Fish nibbling hook:".into(),
-                    read_value(&self.is_nibbling),
+                    get_value(self.is_nibbling),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Fish leaves at:".into(),
-                    read_value(&self.time_until_fishing_nibble_done),
+                    get_value(self.time_until_fishing_nibble_done),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Time waiting with hooked fish:".into(),
-                    read_value(&self.fishing_nibble_accumulator),
+                    get_value(self.fishing_nibble_accumulator),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Minigame in progress:".into(),
-                    read_value(&self.minigame_in_progress),
+                    get_value(self.minigame_in_progress),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish difficulty:".into(),
-                    read_value(&self.fish_difficulty),
+                    get_value(self.fish_difficulty),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish position:".into(),
-                    read_value(&self.fish_position),
+                    get_value(self.fish_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish velocity:".into(),
-                    read_value(&self.fish_velocity),
+                    get_value(self.fish_velocity),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish target position:".into(),
-                    read_value(&self.fish_target_position),
+                    get_value(self.fish_target_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar position:".into(),
-                    read_value(&self.bar_position),
+                    get_value(self.bar_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar velocity:".into(),
-                    read_value(&self.bar_velocity),
+                    get_value(self.bar_velocity),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar height:".into(),
-                    read_value(&self.bar_height),
+                    get_value(self.bar_height),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Bobber in bar:".into(),
-                    read_value(&self.bobber_in_bar),
+                    get_value(self.bobber_in_bar),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Catch progress:".into(),
-                    read_value(&self.catch_progress),
+                    get_value(self.catch_progress),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Pulling out of water:".into(),
-                    read_value(&self.pulling_out_of_water),
+                    get_value(self.pulling_out_of_water),
                 ])
                 .style(get_style(pulling_out_of_water)),
                 Row::new([
                     "Showing fish:".into(),
-                    read_value(&self.showing_fish),
+                    get_value(self.showing_fish),
                 ])
                 .style(get_style(showing_fish)),
                 Row::new([
                     "Showing treasure:".into(),
-                    read_value(&self.showing_treasure),
+                    get_value(self.showing_treasure),
                 ])
                 .style(get_style(showing_treasure)),
             ],

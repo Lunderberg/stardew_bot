@@ -219,10 +219,16 @@ pub enum Error {
     DowncastRequiresRelatedClasses(String, String),
 
     #[error(
-        "Fireld {field} was type {ty}, \
+        "Field {field} was type {ty}, \
          but expected a primitive type."
     )]
-    AccessChainMustTerminateInPrimitive { field: String, ty: RuntimeType },
+    SymbolicExpressionMustProducePrimitive { field: String, ty: RuntimeType },
+
+    #[error(
+        "Currently, tuples are only supported \
+         at the top level of an expression"
+    )]
+    TupleExpressionOnlySupportedAtTopLevel,
 
     #[error("Expected {expected}, but found {actual}")]
     UnexpectedRuntimeValue {
@@ -232,6 +238,9 @@ pub enum Error {
 
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),
+
+    #[error("dotnet_debugger::VMExecutionError( {0} )")]
+    VMExecutionError(#[from] crate::VMExecutionError),
 }
 
 impl std::fmt::Debug for Error {

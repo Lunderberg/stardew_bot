@@ -1,6 +1,7 @@
 use crate::{
-    game_action::InputState, Error, FishingUI, GameAction, RunningLog,
-    TuiDrawRate, X11Handler,
+    game_action::InputState, per_frame_reader::PerFrameReader, Error,
+    ExpressionsToRead, FishingUI, GameAction, RunningLog, TuiDrawRate,
+    X11Handler,
 };
 
 use crossterm::event::Event;
@@ -24,6 +25,10 @@ pub struct StardewBot {
 
     /// Container of subwindows
     buffers: TuiBuffers,
+
+    /// Collected values that should be read out from the remote
+    /// process at the start of each frame.
+    per_frame_reader: PerFrameReader,
 
     /// Previous frame's per-widget timers
     widget_timing_stats: Vec<WidgetTimingStatistics>,
@@ -68,6 +73,10 @@ pub(crate) struct FrameTimingStatistics {
     /// The time required to handle user input, if any.
     pub handle_input: std::time::Duration,
 
+    /// The time required to update any values that are read out for
+    /// each frame.
+    pub update_per_frame_values: std::time::Duration,
+
     /// The time required to process per-frame updates.
     pub periodic_update: std::time::Duration,
 
@@ -90,11 +99,14 @@ pub(crate) struct WidgetTimingStatistics {
 }
 
 impl TuiBuffers {
-    fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
+    fn new(
+        reader: CachedReader<'_>,
+        per_frame_reader: &mut ExpressionsToRead,
+    ) -> Result<Self, Error> {
         Ok(Self {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
-            fishing: FishingUI::new(reader)?,
+            fishing: FishingUI::new(reader, per_frame_reader)?,
         })
     }
 
@@ -119,7 +131,14 @@ impl StardewBot {
         let stardew_window =
             x11_handler.find_window_blocking("Stardew Valley")?;
 
-        let mut buffers = TuiBuffers::new(tui_globals.cached_reader())?;
+        let mut expressions_to_read = ExpressionsToRead::default();
+
+        let mut buffers = TuiBuffers::new(
+            tui_globals.cached_reader(),
+            &mut expressions_to_read,
+        )?;
+        let per_frame_reader =
+            expressions_to_read.compile(tui_globals.cached_reader())?;
 
         buffers
             .running_log
@@ -137,6 +156,7 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
+            per_frame_reader,
             widget_timing_stats: Vec::new(),
             input_state: InputState::default(),
             x11_handler,
@@ -179,8 +199,12 @@ impl StardewBot {
             }
             let finished_handle_input = std::time::Instant::now();
 
+            self.update_per_frame_values()?;
+            let finished_updating_per_frame_values = std::time::Instant::now();
+
             let mut side_effects = WidgetSideEffects::default();
             side_effects.broadcast(timing_stats.clone());
+
             for timing_stat in self.take_widget_timing_stats() {
                 side_effects.broadcast(timing_stat);
             }
@@ -206,8 +230,10 @@ impl StardewBot {
                 sleep_requested,
                 sleep_actual: finished_sleep - main_loop_becomes_inactive,
                 handle_input: finished_handle_input - main_loop_start,
-                periodic_update: finished_periodic_update
+                update_per_frame_values: finished_updating_per_frame_values
                     - finished_handle_input,
+                periodic_update: finished_periodic_update
+                    - finished_updating_per_frame_values,
                 draw: main_loop_becomes_inactive - finished_periodic_update,
                 main_loop_active,
                 total_frame_time: finished_sleep - main_loop_start,
@@ -236,6 +262,14 @@ impl StardewBot {
             });
 
         frame.render_widget(&mut layout, frame.area());
+    }
+
+    pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
+        let per_frame_values = self
+            .per_frame_reader
+            .read(self.tui_globals.cached_reader())?;
+        self.tui_globals.insert(per_frame_values);
+        Ok(())
     }
 
     pub fn handle_event(&mut self, event: Event) {

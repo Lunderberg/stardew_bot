@@ -4,6 +4,9 @@ pub use stardew_bot::*;
 mod error;
 pub use error::Error;
 
+mod per_frame_reader;
+pub(crate) use per_frame_reader::{ExpressionsToRead, PerFrameValues};
+
 mod x11_handler;
 pub(crate) use x11_handler::{Error as X11Error, X11Handler};
 

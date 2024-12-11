@@ -132,6 +132,33 @@ impl RuntimePrimValue {
         }
     }
 
+    pub fn runtime_type(&self) -> RuntimePrimType {
+        match self {
+            RuntimePrimValue::Bool(_) => RuntimePrimType::Bool,
+            RuntimePrimValue::Char(_) => RuntimePrimType::Char,
+            RuntimePrimValue::U8(_) => RuntimePrimType::U8,
+            RuntimePrimValue::U16(_) => RuntimePrimType::U16,
+            RuntimePrimValue::U32(_) => RuntimePrimType::U32,
+            RuntimePrimValue::U64(_) => RuntimePrimType::U64,
+            RuntimePrimValue::NativeUInt(_) => RuntimePrimType::NativeUInt,
+            RuntimePrimValue::I8(_) => RuntimePrimType::I8,
+            RuntimePrimValue::I16(_) => RuntimePrimType::I16,
+            RuntimePrimValue::I32(_) => RuntimePrimType::I32,
+            RuntimePrimValue::I64(_) => RuntimePrimType::I64,
+            RuntimePrimValue::NativeInt(_) => RuntimePrimType::NativeInt,
+            RuntimePrimValue::F32(_) => RuntimePrimType::F32,
+            RuntimePrimValue::F64(_) => RuntimePrimType::F64,
+            RuntimePrimValue::Ptr(_) => RuntimePrimType::Ptr,
+        }
+    }
+
+    pub fn as_type<T>(self) -> Result<T, <Self as TryInto<T>>::Error>
+    where
+        Self: TryInto<T>,
+    {
+        self.try_into()
+    }
+
     fn type_name(&self) -> &'static str {
         match self {
             RuntimePrimValue::Bool(_) => "bool",
