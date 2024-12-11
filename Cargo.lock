@@ -392,6 +392,7 @@ dependencies = [
 name = "dotnet_debugger"
 version = "0.1.0"
 dependencies = [
+ "derive_more",
  "dll_unpacker",
  "elsa",
  "iterator_extensions",

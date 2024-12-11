@@ -47,8 +47,11 @@ pub use static_value_cache::*;
 
 pub mod extensions;
 
+pub(crate) mod symbolic_expr;
+pub use symbolic_expr::{SymbolicExpr, SymbolicType};
+
 mod access_chain;
 pub use access_chain::*;
 
-mod access_chain_parser;
-pub(crate) use access_chain_parser::*;
+mod symbolic_expr_parser;
+pub(crate) use symbolic_expr_parser::*;

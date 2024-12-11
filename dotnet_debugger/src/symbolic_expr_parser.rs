@@ -3,9 +3,11 @@ use std::ops::Range;
 use itertools::Itertools as _;
 use thiserror::Error;
 
+use crate::symbolic_expr;
+use crate::symbolic_expr::{SymbolicExpr, SymbolicType};
 use crate::{
     CachedReader, Error, SymbolicAccessChain, SymbolicOperation,
-    SymbolicStaticField, SymbolicType,
+    SymbolicStaticField,
 };
 
 pub(crate) struct SymbolicParser<'a> {
@@ -99,7 +101,7 @@ impl<'a> SymbolicParser<'a> {
     }
 
     pub(crate) fn next_chain(&mut self) -> Result<SymbolicAccessChain, Error> {
-        let static_field = self.next_static_field()?;
+        let static_field = self.next_static_field_access_chain()?;
         let mut ops = Vec::new();
 
         while let Some(op) = self.next_op()? {
@@ -111,7 +113,37 @@ impl<'a> SymbolicParser<'a> {
         Ok(SymbolicAccessChain { static_field, ops })
     }
 
-    fn expect_end_of_string(&mut self) -> Result<(), Error> {
+    pub fn parse_expr(&mut self) -> Result<SymbolicExpr, Error> {
+        let expr = self.next_expr()?;
+        self.expect_end_of_string()?;
+        Ok(expr)
+    }
+
+    fn next_expr(&mut self) -> Result<SymbolicExpr, Error> {
+        if let Some(index) = self.try_int()? {
+            return Ok(index.into());
+        }
+
+        let mut obj = self.next_static_field()?;
+
+        loop {
+            if let Some(field) = self.try_field_name()? {
+                obj = self.generate_field_access_or_operation(obj, field)?;
+            } else if let Some(index) = self.try_container_access()? {
+                obj = symbolic_expr::IndexAccess {
+                    obj: Box::new(obj),
+                    index: Box::new(index),
+                }
+                .into();
+            } else {
+                break;
+            }
+        }
+
+        Ok(obj)
+    }
+
+    pub(crate) fn expect_end_of_string(&mut self) -> Result<(), Error> {
         if let Some(token) = self.tokens.next()? {
             Err(ParseError::ExpectedEndOfString {
                 kind: token.kind,
@@ -123,7 +155,34 @@ impl<'a> SymbolicParser<'a> {
         }
     }
 
-    fn next_static_field(&mut self) -> Result<SymbolicStaticField, Error> {
+    fn try_int(&mut self) -> Result<Option<usize>, Error> {
+        let opt_index = self
+            .tokens
+            .next_if(|token| matches!(token.kind, TokenKind::Int(_)))?
+            .map(|token| match token.kind {
+                TokenKind::Int(value) => value,
+                _ => unreachable!("Handled by earlier check"),
+            });
+
+        Ok(opt_index)
+    }
+
+    fn next_static_field(&mut self) -> Result<SymbolicExpr, Error> {
+        let class = self.leading_type()?;
+        let field_name = self
+            .try_field_name()?
+            .ok_or(ParseError::UnexpectedEndOfString("static field name"))?
+            .text
+            .to_string();
+
+        let static_field = symbolic_expr::StaticField { class, field_name };
+
+        Ok(static_field.into())
+    }
+
+    fn next_static_field_access_chain(
+        &mut self,
+    ) -> Result<SymbolicStaticField, Error> {
         let class = self.leading_type()?;
         let first_op = self
             .next_op()?
@@ -202,6 +261,122 @@ impl<'a> SymbolicParser<'a> {
         }
 
         Ok(false)
+    }
+
+    fn try_field_name(&mut self) -> Result<Option<Token<'a>>, Error> {
+        if self
+            .tokens
+            .next_if(|token| token.kind.is_punct(Punctuation::Period))?
+            .is_none()
+        {
+            return Ok(None);
+        }
+
+        let ident = self.expect_ident("identifier after period")?;
+
+        Ok(Some(ident))
+    }
+
+    fn generate_field_access_or_operation(
+        &mut self,
+        obj: SymbolicExpr,
+        field: Token<'a>,
+    ) -> Result<SymbolicExpr, Error> {
+        let is_operation = self
+            .tokens
+            .peek()?
+            .map(|peek| {
+                peek.kind.is_punct(Punctuation::LeftAngleBracket)
+                    || peek.kind.is_punct(Punctuation::LeftParen)
+            })
+            .unwrap_or(false);
+
+        if is_operation {
+            match field.text {
+                "as" => {
+                    let (type_args, _) =
+                        self.expect_function_arguments(1, 0)?;
+                    let ty = type_args
+                        .into_iter()
+                        .next()
+                        .expect("Protected by length check");
+                    Ok(symbolic_expr::Downcast {
+                        obj: Box::new(obj),
+                        ty,
+                    }
+                    .into())
+                }
+                _ => Err(ParseError::UnknownOperator {
+                    name: field.text.to_string(),
+                }
+                .into()),
+            }
+        } else {
+            Ok(symbolic_expr::FieldAccess {
+                obj: Box::new(obj),
+                field: field.text.to_string(),
+            }
+            .into())
+        }
+    }
+
+    fn expect_function_arguments(
+        &mut self,
+        num_type_args: usize,
+        num_args: usize,
+    ) -> Result<(Vec<SymbolicType>, Vec<SymbolicExpr>), Error> {
+        let mut type_args = Vec::new();
+        if num_type_args > 0 {
+            self.expect_punct(
+                "'<' to start list of type arguments",
+                Punctuation::LeftAngleBracket,
+            )?;
+
+            for _ in 0..num_type_args {
+                type_args.push(self.expect_type()?);
+            }
+
+            self.expect_punct(
+                "'>' to close list of type arguments",
+                Punctuation::RightAngleBracket,
+            )?;
+        }
+
+        let mut args = Vec::new();
+        self.expect_punct(
+            "left ( to start method arguments",
+            Punctuation::LeftParen,
+        )?;
+        for _ in 0..num_args {
+            args.push(self.next_expr()?);
+        }
+        self.expect_punct(
+            "right ( to finish method arguments",
+            Punctuation::RightParen,
+        )?;
+
+        Ok((type_args, args))
+    }
+
+    fn try_container_access(&mut self) -> Result<Option<SymbolicExpr>, Error> {
+        if self
+            .tokens
+            .next_if(|token| {
+                token.kind.is_punct(Punctuation::LeftSquareBracket)
+            })?
+            .is_none()
+        {
+            return Ok(None);
+        }
+
+        let expr = self.next_expr()?;
+
+        self.expect_punct(
+            "closing ] of index",
+            Punctuation::RightSquareBracket,
+        )?;
+
+        Ok(Some(expr))
     }
 
     fn next_op(&mut self) -> Result<Option<SymbolicOperation>, Error> {
