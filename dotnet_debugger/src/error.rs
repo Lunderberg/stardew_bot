@@ -222,7 +222,7 @@ pub enum Error {
         "Fireld {field} was type {ty}, \
          but expected a primitive type."
     )]
-    AccessChainMustTerminateInPrimitive { field: String, ty: RuntimeType },
+    SymbolicExpressionMustProducePrimitive { field: String, ty: RuntimeType },
 
     #[error("Expected {expected}, but found {actual}")]
     UnexpectedRuntimeValue {
@@ -232,6 +232,9 @@ pub enum Error {
 
     #[error("Not yet implemented: {0}")]
     NotImplementedYet(String),
+
+    #[error("dotnet_debugger::VMExecutionError( {0} )")]
+    VMExecutionError(#[from] crate::VMExecutionError),
 }
 
 impl std::fmt::Debug for Error {

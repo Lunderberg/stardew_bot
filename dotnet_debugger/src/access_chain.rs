@@ -127,21 +127,7 @@ impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
 
 impl SymbolicAccessChain {
     pub fn parse(chain: &str, reader: CachedReader<'_>) -> Result<Self, Error> {
-        let expr = SymbolicParser::new(chain, reader).parse_expr()?;
         let chain = SymbolicParser::new(chain, reader).next_chain()?;
-
-        println!("------------------------------------");
-        println!("Chain: {chain}");
-        println!("Expr : {expr}");
-
-        let expr = expr.simplify(reader)?;
-        let chain = chain.simplify(reader)?;
-
-        println!("Chain: {chain}");
-        println!("Expr : {expr}");
-
-        println!("------------------------------------");
-
         Ok(chain)
     }
 
@@ -333,7 +319,7 @@ impl SymbolicAccessChain {
 
         let prim_type = match item_type {
             RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
-            other => Err(Error::AccessChainMustTerminateInPrimitive {
+            other => Err(Error::SymbolicExpressionMustProducePrimitive {
                 field: format!("{self}"),
                 ty: other,
             }),

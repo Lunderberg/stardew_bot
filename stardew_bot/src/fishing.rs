@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use dotnet_debugger::{CachedReader, PhysicalAccessChain};
+use dotnet_debugger::{CachedReader, VirtualMachine};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -22,57 +22,57 @@ pub struct FishingUI {
     history: Vec<FishingState>,
 
     /// The number of game ticks that have elapsed
-    game_tick: PhysicalAccessChain,
+    game_tick: VirtualMachine,
 
     /// True while the power of the cast is being selected.
-    is_timing_cast: PhysicalAccessChain,
+    is_timing_cast: VirtualMachine,
 
     /// A float, ranging from 0.0 to 1.0, indicating how far the
     /// bobber will travel.
-    casting_power: PhysicalAccessChain,
+    casting_power: VirtualMachine,
 
     /// True during the casting animation, until the bobber starts
     /// traveling through the air.
-    is_casting: PhysicalAccessChain,
+    is_casting: VirtualMachine,
 
     /// While while the bobber is in the air.
-    bobber_in_air: PhysicalAccessChain,
+    bobber_in_air: VirtualMachine,
 
     /// True if the bobber has landed in the water, and the player is
     /// waiting for a fish.  But it doesn't get reset until after the
     /// entire minigame.
-    is_fishing: PhysicalAccessChain,
+    is_fishing: VirtualMachine,
 
     /// The time at which a fish will bite
-    time_until_fishing_bite: PhysicalAccessChain,
+    time_until_fishing_bite: VirtualMachine,
 
     /// The time spent waiting for a fish to bite.
-    fishing_bite_accumulator: PhysicalAccessChain,
+    fishing_bite_accumulator: VirtualMachine,
 
     /// True if a fish is nibbling on the hook.  But it doesn't get
     /// reset until after the entire minigame.
-    is_nibbling: PhysicalAccessChain,
+    is_nibbling: VirtualMachine,
 
     /// The time at which a fish will no longer be hooked.
-    time_until_fishing_nibble_done: PhysicalAccessChain,
+    time_until_fishing_nibble_done: VirtualMachine,
 
     /// The time since a fish was hooked, incremented for each frame.
     /// When this value reaches `time_until_fishing_nibble_done`, the
     /// fish can no longer be caught.
-    fishing_nibble_accumulator: PhysicalAccessChain,
+    fishing_nibble_accumulator: VirtualMachine,
 
     /// True if a fish is currently being caught
-    minigame_in_progress: PhysicalAccessChain,
+    minigame_in_progress: VirtualMachine,
 
     /// The difficulty of the fish.  Typically on a scale from 0-100
-    fish_difficulty: PhysicalAccessChain,
+    fish_difficulty: VirtualMachine,
 
     /// The location of the fish within the fishing minigame.
     ///
     /// Initially set to 508 (out of 568)
     ///
     /// Updated by fish_velocity on each frame.
-    fish_position: PhysicalAccessChain,
+    fish_position: VirtualMachine,
 
     /// The velocity of the fish
     ///
@@ -82,7 +82,7 @@ pub struct FishingUI {
     ///
     ///    accel = (target_pos - pos) / ( 20*rand() + 10 + max(0,100-difficulty))
     ///    vel = 0.8*vel + 0.2*accel
-    fish_velocity: PhysicalAccessChain,
+    fish_velocity: VirtualMachine,
 
     /// The location that the fish is trying to reach within the
     /// fishing minigame.
@@ -93,37 +93,37 @@ pub struct FishingUI {
     ///    by setting the target position near the top.
     ///
     ///
-    fish_target_position: PhysicalAccessChain,
+    fish_target_position: VirtualMachine,
 
     /// The location of the fish within the fishing minigame.
-    bar_position: PhysicalAccessChain,
+    bar_position: VirtualMachine,
 
     /// The location of the fish within the fishing minigame.
-    bar_velocity: PhysicalAccessChain,
+    bar_velocity: VirtualMachine,
 
     /// The height of the fish within the fishing minigame.
-    bar_height: PhysicalAccessChain,
+    bar_height: VirtualMachine,
 
     /// A boolean, indicating whether the fish is currently within the
     /// fishing bar.
-    bobber_in_bar: PhysicalAccessChain,
+    bobber_in_bar: VirtualMachine,
 
     /// A float, indicating how close the fish is to escaping or being
     /// caught.  At 0.0, the fish escapes.  At 1.0, the fish is
     /// caught.
-    catch_progress: PhysicalAccessChain,
+    catch_progress: VirtualMachine,
 
     /// True if the minigame has completed, and the bobber is
     /// currently being pulled from the water.
-    pulling_out_of_water: PhysicalAccessChain,
+    pulling_out_of_water: VirtualMachine,
 
     /// True if the minigame has completed, and the fish is currently
     /// being displayed above the player's head.
-    showing_fish: PhysicalAccessChain,
+    showing_fish: VirtualMachine,
 
     /// True if the minigame has completed, and the player is
     /// currently being shown the treasure that has been caught.
-    showing_treasure: PhysicalAccessChain,
+    showing_treasure: VirtualMachine,
 }
 
 struct FishingState {
@@ -139,81 +139,76 @@ struct FishingState {
 
 impl FishingUI {
     pub fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
-        let game_tick =
-            reader.parse_access_chain("StardewValley.Game1​.ticks")?;
+        let game_tick = reader.parse_expr("StardewValley.Game1.ticks")?;
 
-        let fishing_rod = "StardewValley.Game1​\
-                           ._player​\
-                           .netItems​.value​.Items​\
-                           .array​.value​.elements​._items\
-                           [5]​.value​\
+        let fishing_rod = "StardewValley.Game1\
+                           ._player\
+                           .as<StardewValley.Farmer>()\
+                           .netItems.value.Items\
+                           .array.value.elements._items\
+                           [5].value\
                            .as<StardewValley.Tools.FishingRod>()";
 
-        let is_timing_cast = reader
-            .parse_access_chain(&format!("{fishing_rod}.isTimingCast"))?;
-        let casting_power = reader
-            .parse_access_chain(&format!("{fishing_rod}.castingPower"))?;
+        let is_timing_cast =
+            reader.parse_expr(&format!("{fishing_rod}.isTimingCast"))?;
+        let casting_power =
+            reader.parse_expr(&format!("{fishing_rod}.castingPower"))?;
 
         let is_casting =
-            reader.parse_access_chain(&format!("{fishing_rod}.isCasting"))?;
+            reader.parse_expr(&format!("{fishing_rod}.isCasting"))?;
 
-        let bobber_in_air = reader.parse_access_chain(&format!(
-            "{fishing_rod}.castedButBobberStillInAir"
-        ))?;
+        let bobber_in_air = reader
+            .parse_expr(&format!("{fishing_rod}.castedButBobberStillInAir"))?;
 
         let is_fishing =
-            reader.parse_access_chain(&format!("{fishing_rod}.isFishing"))?;
+            reader.parse_expr(&format!("{fishing_rod}.isFishing"))?;
 
-        let time_until_fishing_bite = reader.parse_access_chain(&format!(
-            "{fishing_rod}.timeUntilFishingBite"
-        ))?;
-        let fishing_bite_accumulator = reader.parse_access_chain(&format!(
-            "{fishing_rod}.fishingBiteAccumulator"
-        ))?;
+        let time_until_fishing_bite = reader
+            .parse_expr(&format!("{fishing_rod}.timeUntilFishingBite"))?;
+        let fishing_bite_accumulator = reader
+            .parse_expr(&format!("{fishing_rod}.fishingBiteAccumulator"))?;
 
         let is_nibbling =
-            reader.parse_access_chain(&format!("{fishing_rod}.isNibbling"))?;
-        let time_until_fishing_nibble_done = reader.parse_access_chain(
-            &format!("{fishing_rod}.timeUntilFishingNibbleDone"),
-        )?;
-        let fishing_nibble_accumulator = reader.parse_access_chain(
-            &format!("{fishing_rod}.fishingNibbleAccumulator"),
-        )?;
+            reader.parse_expr(&format!("{fishing_rod}.isNibbling"))?;
+        let time_until_fishing_nibble_done = reader
+            .parse_expr(&format!("{fishing_rod}.timeUntilFishingNibbleDone"))?;
+        let fishing_nibble_accumulator = reader
+            .parse_expr(&format!("{fishing_rod}.fishingNibbleAccumulator"))?;
 
         let minigame_in_progress =
-            reader.parse_access_chain(&format!("{fishing_rod}.isReeling"))?;
+            reader.parse_expr(&format!("{fishing_rod}.isReeling"))?;
 
         let minigame = "StardewValley.Game1\
                         ._activeClickableMenu\
                         .as<StardewValley.Menus.BobberBar>()";
 
         let fish_difficulty =
-            reader.parse_access_chain(&format!("{minigame}.difficulty"))?;
+            reader.parse_expr(&format!("{minigame}.difficulty"))?;
         let fish_position =
-            reader.parse_access_chain(&format!("{minigame}.bobberPosition"))?;
+            reader.parse_expr(&format!("{minigame}.bobberPosition"))?;
         let fish_velocity =
-            reader.parse_access_chain(&format!("{minigame}.bobberSpeed"))?;
-        let fish_target_position = reader
-            .parse_access_chain(&format!("{minigame}.bobberTargetPosition"))?;
+            reader.parse_expr(&format!("{minigame}.bobberSpeed"))?;
+        let fish_target_position =
+            reader.parse_expr(&format!("{minigame}.bobberTargetPosition"))?;
         let bar_position =
-            reader.parse_access_chain(&format!("{minigame}.bobberBarPos"))?;
+            reader.parse_expr(&format!("{minigame}.bobberBarPos"))?;
         let bar_velocity =
-            reader.parse_access_chain(&format!("{minigame}.bobberBarSpeed"))?;
-        let bar_height = reader
-            .parse_access_chain(&format!("{minigame}.bobberBarHeight"))?;
+            reader.parse_expr(&format!("{minigame}.bobberBarSpeed"))?;
+        let bar_height =
+            reader.parse_expr(&format!("{minigame}.bobberBarHeight"))?;
         let bobber_in_bar =
-            reader.parse_access_chain(&format!("{minigame}.bobberInBar"))?;
-        let catch_progress = reader
-            .parse_access_chain(&format!("{minigame}.distanceFromCatching"))?;
+            reader.parse_expr(&format!("{minigame}.bobberInBar"))?;
+        let catch_progress =
+            reader.parse_expr(&format!("{minigame}.distanceFromCatching"))?;
 
-        let pulling_out_of_water = reader
-            .parse_access_chain(&format!("{fishing_rod}.pullingOutOfWater"))?;
+        let pulling_out_of_water =
+            reader.parse_expr(&format!("{fishing_rod}.pullingOutOfWater"))?;
 
         let showing_fish =
-            reader.parse_access_chain(&format!("{fishing_rod}.fishCaught"))?;
+            reader.parse_expr(&format!("{fishing_rod}.fishCaught"))?;
 
-        let showing_treasure = reader
-            .parse_access_chain(&format!("{fishing_rod}.showingTreasure"))?;
+        let showing_treasure =
+            reader.parse_expr(&format!("{fishing_rod}.showingTreasure"))?;
 
         Ok(Self {
             table_state: TableState::new(),
@@ -383,7 +378,32 @@ impl WidgetWindow<Error> for FishingUI {
     ) -> Result<(), Error> {
         let reader = globals.cached_reader();
 
-        let get_bool = |chain: &PhysicalAccessChain| {
+        self.game_tick.evaluate(reader)?;
+        self.is_timing_cast.evaluate(reader)?;
+        self.casting_power.evaluate(reader)?;
+        self.is_casting.evaluate(reader)?;
+        self.bobber_in_air.evaluate(reader)?;
+        self.is_fishing.evaluate(reader)?;
+        self.time_until_fishing_bite.evaluate(reader)?;
+        self.fishing_bite_accumulator.evaluate(reader)?;
+        self.is_nibbling.evaluate(reader)?;
+        self.time_until_fishing_nibble_done.evaluate(reader)?;
+        self.fishing_nibble_accumulator.evaluate(reader)?;
+        self.minigame_in_progress.evaluate(reader)?;
+        self.fish_difficulty.evaluate(reader)?;
+        self.fish_position.evaluate(reader)?;
+        self.fish_velocity.evaluate(reader)?;
+        self.fish_target_position.evaluate(reader)?;
+        self.bar_position.evaluate(reader)?;
+        self.bar_velocity.evaluate(reader)?;
+        self.bar_height.evaluate(reader)?;
+        self.bobber_in_bar.evaluate(reader)?;
+        self.catch_progress.evaluate(reader)?;
+        self.pulling_out_of_water.evaluate(reader)?;
+        self.showing_fish.evaluate(reader)?;
+        self.showing_treasure.evaluate(reader)?;
+
+        let get_bool = |chain: &VirtualMachine| {
             chain
                 .read_as::<bool>(reader)
                 .ok()
@@ -391,7 +411,7 @@ impl WidgetWindow<Error> for FishingUI {
                 .unwrap_or(false)
         };
 
-        let get_float = |chain: &PhysicalAccessChain| -> Result<_, Error> {
+        let get_float = |chain: &VirtualMachine| -> Result<_, Error> {
             Ok(chain
                 .read_as::<f32>(reader)?
                 .ok_or(Error::ExpectedNoneEmptyValue)?)
@@ -451,8 +471,8 @@ impl WidgetWindow<Error> for FishingUI {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         let reader = globals.cached_reader();
-        let read_value = |chain: &PhysicalAccessChain| {
-            let value = match chain.read(reader) {
+        let read_value = |chain: &VirtualMachine| {
+            let value = match chain.evaluate(reader).map(|values| values[0]) {
                 Ok(Some(value)) => format!("{value}"),
                 Ok(None) => "".to_string(),
                 Err(err) => format!("Error: {err}"),
@@ -460,11 +480,12 @@ impl WidgetWindow<Error> for FishingUI {
             Text::raw(value)
         };
 
-        let get_bool = |chain: &PhysicalAccessChain| {
+        let get_bool = |chain: &VirtualMachine| {
             chain
-                .read_as::<bool>(reader)
+                .evaluate(reader)
                 .ok()
-                .flatten()
+                .and_then(|values| values[0])
+                .and_then(|value| value.try_into().ok())
                 .unwrap_or(false)
         };
 

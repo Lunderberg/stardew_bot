@@ -5,7 +5,8 @@ use itertools::Itertools as _;
 
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, FieldDescription,
-    MethodTable, RuntimeType, TypedPointer,
+    MethodTable, PhysicalExpr, RuntimeArray, RuntimeType, SymbolicParser,
+    TypedPointer,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
@@ -281,6 +282,11 @@ impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
 }
 
 impl SymbolicExpr {
+    pub fn parse(expr: &str, reader: CachedReader<'_>) -> Result<Self, Error> {
+        let expr = SymbolicParser::new(expr, reader).parse_expr()?;
+        Ok(expr)
+    }
+
     pub(crate) fn simplify(
         self,
         reader: CachedReader<'_>,
@@ -295,18 +301,20 @@ impl SymbolicExpr {
     ) -> Result<(Self, RuntimeType), Error> {
         match self {
             SymbolicExpr::Int(_) => {
-                Ok((self, RuntimeType::Prim(RuntimePrimType::NativeUInt)))
+                let runtime_type =
+                    RuntimeType::Prim(RuntimePrimType::NativeUInt);
+                Ok((self, runtime_type))
             }
             SymbolicExpr::StaticField(static_field) => {
                 let runtime_type = static_field.runtime_type(reader)?;
                 Ok((static_field.into(), runtime_type))
             }
             SymbolicExpr::FieldAccess(FieldAccess { obj, field }) => {
-                let (obj, item_type) = obj.simplify_and_infer_type(reader)?;
+                let (obj, obj_type) = obj.simplify_and_infer_type(reader)?;
 
-                let method_table_ptr = item_type
+                let method_table_ptr = obj_type
                     .method_table_for_field_access(|| format!("{obj}"))?;
-                let runtime_type =
+                let field_type =
                     reader.find_field_type(method_table_ptr, field.as_str())?;
 
                 let expr = FieldAccess {
@@ -314,27 +322,27 @@ impl SymbolicExpr {
                     field,
                 }
                 .into();
-                Ok((expr, runtime_type))
+                Ok((expr, field_type))
             }
             SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
-                let (obj, item_type) = obj.simplify_and_infer_type(reader)?;
+                let (obj, obj_type) = obj.simplify_and_infer_type(reader)?;
                 let (index, _) = index.simplify_and_infer_type(reader)?;
 
-                let runtime_type =
-                    item_type.as_array_type(|| format!("{obj}"))?;
+                let element_type =
+                    obj_type.as_array_type(|| format!("{obj}"))?;
 
                 let expr = IndexAccess {
                     obj: Box::new(obj),
                     index: Box::new(index),
                 }
                 .into();
-                Ok((expr, runtime_type))
+                Ok((expr, element_type))
             }
             SymbolicExpr::Downcast(Downcast { obj, ty }) => {
-                let (obj, item_type) = obj.simplify_and_infer_type(reader)?;
+                let (obj, obj_type) = obj.simplify_and_infer_type(reader)?;
 
                 let static_method_table_ptr =
-                    item_type.method_table_for_downcast()?;
+                    obj_type.method_table_for_downcast()?;
                 let target_method_table_ptr = ty.method_table(reader)?;
 
                 if reader.is_base_of(
@@ -344,7 +352,7 @@ impl SymbolicExpr {
                     // Static type is the same, or superclass of
                     // the desired runtime type.  This downcast
                     // can be simplified away.
-                    Ok((obj, item_type))
+                    Ok((obj, obj_type))
                 } else if reader.is_base_of(
                     static_method_table_ptr,
                     target_method_table_ptr,
@@ -365,10 +373,139 @@ impl SymbolicExpr {
                     // Types are in separate hierachies.  This
                     // downcast is illegal.
                     Err(Error::DowncastRequiresRelatedClasses(
-                        format!("{item_type}"),
+                        format!("{obj_type}"),
                         format!("{ty}"),
                     ))
                 }
+            }
+        }
+    }
+
+    pub(crate) fn to_physical(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<PhysicalExpr, Error> {
+        let (expr, runtime_type) = self.to_physical_and_infer_type(reader)?;
+
+        let prim_type = match runtime_type {
+            RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
+            other => Err(Error::SymbolicExpressionMustProducePrimitive {
+                field: format!("{self}"),
+                ty: other,
+            }),
+        }?;
+
+        let expr = PhysicalExpr::PrimCast {
+            obj: Box::new(expr),
+            prim_type,
+        };
+
+        Ok(expr)
+    }
+
+    fn to_physical_and_infer_type(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<(PhysicalExpr, RuntimeType), Error> {
+        match self {
+            SymbolicExpr::Int(value) => {
+                let expr = PhysicalExpr::Int(*value);
+                let runtime_type =
+                    RuntimeType::Prim(RuntimePrimType::NativeUInt);
+                Ok((expr, runtime_type))
+            }
+            SymbolicExpr::StaticField(static_field) => {
+                let runtime_type = static_field.runtime_type(reader)?;
+                let location = static_field.location(reader)?;
+                let expr = PhysicalExpr::Location(location);
+
+                let expr = if runtime_type.stored_as_ptr() {
+                    PhysicalExpr::Dereference(Box::new(expr))
+                } else {
+                    expr
+                };
+
+                Ok((expr, runtime_type))
+            }
+            SymbolicExpr::FieldAccess(FieldAccess { obj, field }) => {
+                let (expr, obj_type) =
+                    obj.to_physical_and_infer_type(reader)?;
+
+                let method_table_ptr = obj_type
+                    .method_table_for_field_access(|| format!("{obj}"))?;
+                let (parent_of_field, field_description) =
+                    reader.find_field(method_table_ptr, field.as_str())?;
+                let field_type = reader.field_to_runtime_type(
+                    parent_of_field,
+                    &field_description,
+                )?;
+
+                let expr = if matches!(obj_type, RuntimeType::Class { .. }) {
+                    PhysicalExpr::Offset {
+                        base: Box::new(expr),
+                        byte_offset: Pointer::SIZE,
+                    }
+                } else {
+                    expr
+                };
+
+                let byte_offset = field_description.offset();
+
+                let expr = PhysicalExpr::Offset {
+                    base: Box::new(expr),
+                    byte_offset,
+                };
+
+                let expr = if field_type.stored_as_ptr() {
+                    PhysicalExpr::Dereference(Box::new(expr))
+                } else {
+                    expr
+                };
+
+                Ok((expr, field_type))
+            }
+            SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
+                let (expr, array_type) =
+                    obj.to_physical_and_infer_type(reader)?;
+                let (element_index, _) =
+                    index.to_physical_and_infer_type(reader)?;
+
+                let element_type =
+                    array_type.as_array_type(|| format!("{obj}"))?;
+
+                let bytes_per_element = element_type.size_bytes();
+
+                let expr = PhysicalExpr::Offset {
+                    base: Box::new(expr),
+                    byte_offset: RuntimeArray::HEADER_SIZE,
+                };
+                let expr = PhysicalExpr::DynamicOffset {
+                    base: Box::new(expr),
+                    element_index: Box::new(element_index),
+                    bytes_per_element,
+                };
+                let expr = if element_type.stored_as_ptr() {
+                    PhysicalExpr::Dereference(Box::new(expr))
+                } else {
+                    expr
+                };
+
+                Ok((expr, element_type))
+            }
+            SymbolicExpr::Downcast(Downcast { obj, ty }) => {
+                let (obj, _obj_type) =
+                    obj.to_physical_and_infer_type(reader)?;
+
+                let target_method_table_ptr = ty.method_table(reader)?;
+                let expr_type = RuntimeType::Class {
+                    method_table: Some(target_method_table_ptr),
+                };
+                let expr = PhysicalExpr::Downcast {
+                    obj: Box::new(obj),
+                    ty: target_method_table_ptr,
+                };
+
+                Ok((expr, expr_type))
             }
         }
     }
