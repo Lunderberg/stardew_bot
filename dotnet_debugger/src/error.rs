@@ -219,10 +219,16 @@ pub enum Error {
     DowncastRequiresRelatedClasses(String, String),
 
     #[error(
-        "Fireld {field} was type {ty}, \
+        "Field {field} was type {ty}, \
          but expected a primitive type."
     )]
     SymbolicExpressionMustProducePrimitive { field: String, ty: RuntimeType },
+
+    #[error(
+        "Currently, tuples are only supported \
+         at the top level of an expression"
+    )]
+    TupleExpressionOnlySupportedAtTopLevel,
 
     #[error("Expected {expected}, but found {actual}")]
     UnexpectedRuntimeValue {

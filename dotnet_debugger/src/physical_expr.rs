@@ -1,10 +1,11 @@
 use std::fmt::Display;
 
+use itertools::Either;
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_type::RuntimePrimType, virtual_machine::Instruction, MethodTable,
-    RuntimePrimValue, TypedPointer, VirtualMachine,
+    runtime_type::RuntimePrimType, virtual_machine::Instruction, Error,
+    MethodTable, RuntimePrimValue, TypedPointer, VirtualMachine,
 };
 
 #[derive(Clone)]
@@ -33,6 +34,51 @@ pub enum PhysicalExpr {
         obj: Box<PhysicalExpr>,
         prim_type: RuntimePrimType,
     },
+
+    Tuple(Vec<PhysicalExpr>),
+}
+
+struct IndexTracker {
+    free_indices: Vec<bool>,
+}
+
+impl IndexTracker {
+    fn new() -> Self {
+        Self {
+            free_indices: Vec::new(),
+        }
+    }
+
+    fn alloc(&mut self) -> usize {
+        if let Some((index, availability)) = self
+            .free_indices
+            .iter_mut()
+            .enumerate()
+            .find(|(_, value)| **value)
+        {
+            *availability = false;
+            index
+        } else {
+            self.free_indices.push(false);
+            self.free_indices.len() - 1
+        }
+    }
+
+    fn free(&mut self, index: usize) {
+        assert!(
+            index < self.free_indices.len(),
+            "Internal errror: \
+             Index {index} is outside of range 0 <= index < {}",
+            self.free_indices.len()
+        );
+        assert!(
+            !self.free_indices[index],
+            "Internal error: \
+             Cannot free index {index}, \
+             as it is not currently allocated."
+        );
+        self.free_indices[index] = true;
+    }
 }
 
 impl PhysicalExpr {
@@ -106,26 +152,44 @@ impl PhysicalExpr {
                     prim_type,
                 }
             }
+            PhysicalExpr::Tuple(tuple) => {
+                let tuple =
+                    tuple.into_iter().map(|value| value.simplify()).collect();
+                PhysicalExpr::Tuple(tuple)
+            }
         }
     }
 
-    pub(crate) fn to_virtual_machine(&self) -> VirtualMachine {
-        let num_outputs = 1;
+    pub(crate) fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
         let mut instructions = Vec::new();
-        let mut current_index = num_outputs;
 
-        self.collect_instructions(&mut instructions, &mut current_index);
+        let mut index_tracker = IndexTracker::new();
 
-        instructions.push(Instruction::SaveValue { index: 0 });
+        let (num_outputs, iter_outputs) =
+            if let PhysicalExpr::Tuple(tuple) = self {
+                (tuple.len(), Either::Left(tuple.iter()))
+            } else {
+                (1, Either::Right(std::iter::once(self)))
+            };
 
-        VirtualMachine::new(instructions)
+        let output_indices: Vec<_> =
+            (0..num_outputs).map(|_| index_tracker.alloc()).collect();
+        for (i_output, expr_output) in iter_outputs.enumerate() {
+            expr_output
+                .collect_instructions(&mut instructions, &mut index_tracker)?;
+            instructions.push(Instruction::SaveValue {
+                index: output_indices[i_output],
+            });
+        }
+
+        Ok(VirtualMachine::new(instructions))
     }
 
     fn collect_instructions(
         &self,
         instructions: &mut Vec<Instruction>,
-        current_index: &mut usize,
-    ) {
+        index_tracker: &mut IndexTracker,
+    ) -> Result<(), Error> {
         match self {
             PhysicalExpr::Int(value) => {
                 instructions.push(Instruction::Const {
@@ -138,7 +202,7 @@ impl PhysicalExpr {
                 });
             }
             PhysicalExpr::Dereference(expr) => {
-                expr.collect_instructions(instructions, current_index);
+                expr.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::Read {
                     ty: RuntimePrimType::Ptr,
                 });
@@ -148,34 +212,41 @@ impl PhysicalExpr {
                 element_index,
                 bytes_per_element,
             } => {
-                element_index.collect_instructions(instructions, current_index);
+                element_index
+                    .collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::AsIndex);
                 instructions.push(Instruction::StaticScale {
                     factor: *bytes_per_element,
                 });
-                let index = *current_index;
-                *current_index += 1;
+                let index = index_tracker.alloc();
 
                 instructions.push(Instruction::SaveValue { index });
-                base.collect_instructions(instructions, current_index);
+                base.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::DynamicOffset { index });
+
+                index_tracker.free(index);
             }
 
             PhysicalExpr::Offset { base, byte_offset } => {
-                base.collect_instructions(instructions, current_index);
+                base.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::StaticOffset {
                     byte_offset: *byte_offset,
                 });
             }
             PhysicalExpr::Downcast { obj, ty } => {
-                obj.collect_instructions(instructions, current_index);
+                obj.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::Downcast { ty: *ty });
             }
             PhysicalExpr::PrimCast { obj, prim_type } => {
-                obj.collect_instructions(instructions, current_index);
+                obj.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::Read { ty: *prim_type });
             }
+            PhysicalExpr::Tuple(_) => {
+                return Err(Error::TupleExpressionOnlySupportedAtTopLevel);
+            }
         }
+
+        Ok(())
     }
 }
 
@@ -201,6 +272,21 @@ impl Display for PhysicalExpr {
             }
             PhysicalExpr::PrimCast { obj, prim_type } => {
                 write!(f, "{obj}.as::<{prim_type}>()")
+            }
+            PhysicalExpr::Tuple(tuple) => {
+                write!(f, "(")?;
+                for (i, value) in tuple.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{value}")?;
+                    if tuple.len() == 1 {
+                        write!(f, ",")?;
+                    }
+                }
+                write!(f, ")")?;
+
+                Ok(())
             }
         }
     }

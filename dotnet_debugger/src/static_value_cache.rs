@@ -14,9 +14,8 @@ use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
 use crate::{
-    extensions::*, CorElementType, FieldContainer, PhysicalAccessChain,
-    RuntimeModuleLayout, SymbolicAccessChain, SymbolicExpr, TypeHandle,
-    VirtualMachine,
+    extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
+    SymbolicExpr, TypeHandle, VirtualMachine,
 };
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
@@ -1335,47 +1334,9 @@ impl<'a> CachedReader<'a> {
         let expr = expr.simplify(self)?;
         let expr = expr.to_physical(self)?;
         let expr = expr.simplify();
-        let expr = expr.to_virtual_machine();
+        let expr = expr.to_virtual_machine()?;
 
         Ok(expr)
-    }
-
-    pub fn parse_access_chain(
-        self,
-        field: &str,
-    ) -> Result<PhysicalAccessChain, Error> {
-        let chain = SymbolicAccessChain::parse(field, self)?;
-        let expr = SymbolicExpr::parse(field, self)?;
-
-        let chain = chain.simplify(self)?;
-        let expr = expr.simplify(self)?;
-
-        println!("##################################################");
-        println!("Chain: {chain}");
-        println!("Expr : {expr}");
-
-        println!("-------------------------------");
-
-        let chain = chain.to_physical(self)?;
-        let expr = expr.to_physical(self)?;
-
-        println!("Chain: {chain}");
-        println!("Expr : {expr}");
-        println!("-------------------------------");
-
-        let chain = chain.simplify();
-        let expr = expr.simplify();
-
-        println!("Chain: {chain}");
-        println!("Expr : {expr}");
-
-        let expr = expr.to_virtual_machine();
-
-        println!("Expr : {expr}");
-
-        println!("##################################################");
-
-        Ok(chain)
     }
 }
 
