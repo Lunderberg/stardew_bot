@@ -43,6 +43,43 @@ struct TuiBuffers {
     fishing: FishingUI,
 }
 
+#[allow(unused)]
+#[derive(Clone, Default)]
+pub(crate) struct FrameTimingStatistics {
+    /// The amount of time intended to be used for each frame.
+    /// (e.g. 33.3 ms for a 30 FPS interface)
+    pub target_time_per_frame: std::time::Duration,
+
+    /// The amount of sleep requested after completion of the previous
+    /// frame.  This is chosen to have `main_loop_duration` and
+    /// `sleep_requested` add up to `target_time_per_draw`.
+    pub sleep_requested: std::time::Duration,
+
+    /// The amount of sleep that actually occurred after the previous
+    /// frame.  May be less than `sleep_requested` if user input was
+    /// received, or if the OS wakes the thread early, or if the
+    /// OS-dependent result of `std::time::Instant::now()` doesn't
+    /// have enough granularity.
+    pub sleep_actual: std::time::Duration,
+
+    /// The time required to handle user input, if any.
+    pub handle_input: std::time::Duration,
+
+    /// The time required to process per-frame updates.
+    pub periodic_update: std::time::Duration,
+
+    /// The time required to re-draw the GUI
+    pub draw: std::time::Duration,
+
+    /// The total processing time used by the frame, excluding any
+    /// time spent sleeping.
+    pub main_loop_active: std::time::Duration,
+
+    /// The total amount of time spent in the frame, including both
+    /// processing and sleeping.
+    pub total_frame_time: std::time::Duration,
+}
+
 impl TuiBuffers {
     fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
         Ok(Self {
@@ -107,28 +144,61 @@ impl StardewBot {
         let handler = SigintHandler::new();
 
         let target_fps = 120;
-        let time_per_draw = std::time::Duration::from_secs(1) / target_fps;
+        let target_time_per_frame =
+            std::time::Duration::from_secs(1) / target_fps;
 
-        let mut event_timeout = time_per_draw;
+        let mut timing_stats = FrameTimingStatistics::default();
+        let mut event_poll_result = false;
 
         loop {
-            let poll = event::poll(event_timeout)?;
             let main_loop_start = std::time::Instant::now();
 
-            if poll {
+            // The `event_poll_result` is set at the end of each loop,
+            // indicating whether the next loop has user input to
+            // process.
+            //
+            // Not sure where the best place is to split the loop
+            // between successive frames.  The current split requires
+            // `event_poll_result` to be propagated forward.  However,
+            // it makes for an easier interpretation of
+            // `FrameTimingStastics`, as all timings are local to the
+            // body of the main loop.
+            if event_poll_result {
                 let event_received = event::read()?;
                 self.handle_event(event_received);
             }
-            self.periodic_update();
+            let finished_handle_input = std::time::Instant::now();
+
+            let mut side_effects = WidgetSideEffects::default();
+            side_effects.broadcast(timing_stats.clone());
+            self.periodic_update(side_effects);
+
+            let finished_periodic_update = std::time::Instant::now();
             context.draw(|frame| self.draw(frame))?;
 
             if handler.received() || self.should_exit {
                 break;
             }
 
-            let main_loop_end = std::time::Instant::now();
-            let main_loop_duration = main_loop_end - main_loop_start;
-            event_timeout = time_per_draw.saturating_sub(main_loop_duration);
+            let main_loop_becomes_inactive = std::time::Instant::now();
+            let main_loop_active = main_loop_becomes_inactive - main_loop_start;
+
+            let sleep_requested =
+                target_time_per_frame.saturating_sub(main_loop_active);
+            event_poll_result = event::poll(sleep_requested)?;
+            let finished_sleep = std::time::Instant::now();
+
+            timing_stats = FrameTimingStatistics {
+                target_time_per_frame,
+                sleep_requested,
+                sleep_actual: finished_sleep - main_loop_becomes_inactive,
+                handle_input: finished_handle_input - main_loop_start,
+                periodic_update: finished_periodic_update
+                    - finished_handle_input,
+                draw: main_loop_becomes_inactive - finished_periodic_update,
+                main_loop_active,
+                total_frame_time: finished_sleep - main_loop_start,
+            };
         }
         Ok(())
     }
@@ -208,10 +278,8 @@ impl StardewBot {
         Ok(result)
     }
 
-    pub fn periodic_update(&mut self) {
+    pub fn periodic_update(&mut self, mut side_effects: WidgetSideEffects) {
         let mut buffer_list = self.buffers.buffer_list();
-
-        let mut side_effects = WidgetSideEffects::default();
 
         if let Err(err) = buffer_list.iter_mut().try_for_each(|buffer| {
             buffer.periodic_update(&self.tui_globals, &mut side_effects)
