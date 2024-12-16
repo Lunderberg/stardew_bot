@@ -149,6 +149,7 @@ impl PhysicalExpr {
                 bytes_per_element,
             } => {
                 element_index.collect_instructions(instructions, current_index);
+                instructions.push(Instruction::AsIndex);
                 instructions.push(Instruction::StaticScale {
                     factor: *bytes_per_element,
                 });

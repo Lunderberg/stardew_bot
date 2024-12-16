@@ -467,8 +467,7 @@ impl SymbolicExpr {
             SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
                 let (expr, array_type) =
                     obj.to_physical_and_infer_type(reader)?;
-                let (element_index, _) =
-                    index.to_physical_and_infer_type(reader)?;
+                let element_index = index.to_physical(reader)?;
 
                 let element_type =
                     array_type.as_array_type(|| format!("{obj}"))?;

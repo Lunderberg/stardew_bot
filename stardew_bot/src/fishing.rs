@@ -146,7 +146,7 @@ impl FishingUI {
                            .as<StardewValley.Farmer>()\
                            .netItems.value.Items\
                            .array.value.elements._items\
-                           [5].value\
+                           [StardewValley.Game1._player.currentToolIndex.value].value\
                            .as<StardewValley.Tools.FishingRod>()";
 
         let is_timing_cast =

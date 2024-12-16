@@ -26,6 +26,9 @@ pub enum Instruction {
     // Increment the value of the register by `byte_offset`
     StaticOffset { byte_offset: usize },
 
+    // Convert the value of the register to `usize`
+    AsIndex,
+
     // Scale the register by the specified value
     StaticScale { factor: usize },
 
@@ -150,6 +153,14 @@ impl VirtualMachine {
                 }
                 Instruction::Const { value } => {
                     register = Some(*value);
+                }
+                Instruction::AsIndex => {
+                    register = match register {
+                        None => None,
+                        Some(value) => Some(RuntimePrimValue::NativeUInt(
+                            value.as_offset()?,
+                        )),
+                    };
                 }
                 Instruction::StaticOffset {
                     byte_offset: offset,
@@ -306,6 +317,7 @@ impl Display for Instruction {
             }
             Instruction::Downcast { ty } => write!(f, "Downcast({ty})"),
             Instruction::Read { ty } => write!(f, "Read({ty})"),
+            Instruction::AsIndex => write!(f, "AsIndex"),
         }
     }
 }
