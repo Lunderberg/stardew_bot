@@ -27,10 +27,11 @@ pub struct DynamicLayout {
     currently_resizing: Option<usize>,
 }
 
-pub struct DrawableDynamicLayout<'a, B> {
+pub struct DrawableDynamicLayout<'a, 'b, B> {
     layout: &'a mut DynamicLayout,
     buffers: &'a mut [B],
     globals: &'a TuiGlobals,
+    func: Box<dyn FnMut(std::borrow::Cow<str>, std::time::Duration) + 'b>,
 }
 
 struct NestedWindow {
@@ -431,11 +432,12 @@ impl DynamicLayout {
         &'a mut self,
         buffers: &'a mut [B],
         globals: &'a TuiGlobals,
-    ) -> DrawableDynamicLayout<'a, B> {
+    ) -> DrawableDynamicLayout<'a, 'static, B> {
         DrawableDynamicLayout {
             layout: self,
             buffers,
             globals,
+            func: Box::new(|_, _| {}),
         }
     }
 
@@ -487,8 +489,24 @@ impl DynamicLayout {
     }
 }
 
-impl<'a, 'b, E> Widget
-    for DrawableDynamicLayout<'a, Box<&'b mut (dyn WidgetWindow<E>)>>
+impl<'a, 'b, B> DrawableDynamicLayout<'a, 'b, B> {
+    pub fn timing_callback<'c>(
+        self,
+        func: impl FnMut(std::borrow::Cow<str>, std::time::Duration) + 'c,
+    ) -> DrawableDynamicLayout<'a, 'c, B> {
+        DrawableDynamicLayout {
+            func: Box::new(func),
+            ..self
+        }
+    }
+}
+
+impl<'a, 'b, 'c, 'd, E> Widget
+    for &'d mut DrawableDynamicLayout<
+        'a,
+        'b,
+        Box<&'c mut (dyn WidgetWindow<E>)>,
+    >
 {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
@@ -503,6 +521,8 @@ impl<'a, 'b, E> Widget
             .collect::<Vec<_>>()
             .into_iter()
             .for_each(|win| {
+                let time_before = std::time::Instant::now();
+
                 let widget: &mut dyn WidgetWindow<E> =
                     match &mut self.layout.windows[win.window_index].kind {
                         NestedWindowKind::Buffer(buffer_index) => {
@@ -531,6 +551,9 @@ impl<'a, 'b, E> Widget
                 let inner_area = border.inner(win.area);
                 border.render(win.area, buf);
                 widget.draw(self.globals, inner_area, buf);
+
+                let time_after = std::time::Instant::now();
+                (self.func)(widget.title(), time_after - time_before);
             });
     }
 }

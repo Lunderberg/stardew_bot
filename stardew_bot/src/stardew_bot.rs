@@ -25,6 +25,9 @@ pub struct StardewBot {
     /// Container of subwindows
     buffers: TuiBuffers,
 
+    /// Previous frame's per-widget timers
+    widget_timing_stats: Vec<WidgetTimingStatistics>,
+
     input_state: InputState,
 
     x11_handler: X11Handler,
@@ -80,6 +83,12 @@ pub(crate) struct FrameTimingStatistics {
     pub total_frame_time: std::time::Duration,
 }
 
+pub(crate) struct WidgetTimingStatistics {
+    pub step: &'static str,
+    pub widget_name: String,
+    pub duration: std::time::Duration,
+}
+
 impl TuiBuffers {
     fn new(reader: CachedReader<'_>) -> Result<Self, Error> {
         Ok(Self {
@@ -128,6 +137,7 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
+            widget_timing_stats: Vec::new(),
             input_state: InputState::default(),
             x11_handler,
             should_exit: false,
@@ -171,6 +181,9 @@ impl StardewBot {
 
             let mut side_effects = WidgetSideEffects::default();
             side_effects.broadcast(timing_stats.clone());
+            for timing_stat in self.take_widget_timing_stats() {
+                side_effects.broadcast(timing_stat);
+            }
             self.periodic_update(side_effects);
 
             let finished_periodic_update = std::time::Instant::now();
@@ -203,11 +216,26 @@ impl StardewBot {
         Ok(())
     }
 
+    fn take_widget_timing_stats(&mut self) -> Vec<WidgetTimingStatistics> {
+        let mut out = Vec::new();
+        std::mem::swap(&mut out, &mut self.widget_timing_stats);
+        out
+    }
+
     pub fn draw(&mut self, frame: &mut Frame) {
         let mut buffers = self.buffers.buffer_list();
-        let layout = self.layout.drawable(&mut buffers, &self.tui_globals);
+        let mut layout = self
+            .layout
+            .drawable(&mut buffers, &self.tui_globals)
+            .timing_callback(|name, duration| {
+                self.widget_timing_stats.push(WidgetTimingStatistics {
+                    step: "Render",
+                    widget_name: name.into(),
+                    duration,
+                });
+            });
 
-        frame.render_widget(layout, frame.area());
+        frame.render_widget(&mut layout, frame.area());
     }
 
     pub fn handle_event(&mut self, event: Event) {
@@ -282,7 +310,18 @@ impl StardewBot {
         let mut buffer_list = self.buffers.buffer_list();
 
         if let Err(err) = buffer_list.iter_mut().try_for_each(|buffer| {
-            buffer.periodic_update(&self.tui_globals, &mut side_effects)
+            let before = std::time::Instant::now();
+            let res =
+                buffer.periodic_update(&self.tui_globals, &mut side_effects);
+            let after = std::time::Instant::now();
+
+            self.widget_timing_stats.push(WidgetTimingStatistics {
+                step: "Periodic Update",
+                widget_name: buffer.title().to_string(),
+                duration: after - before,
+            });
+
+            res
         }) {
             side_effects.add_log(format!("Error: {err}"));
         }
