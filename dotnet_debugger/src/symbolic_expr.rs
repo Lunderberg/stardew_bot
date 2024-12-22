@@ -441,8 +441,8 @@ impl SymbolicExpr {
                     }
                 }?;
 
-                let expr = PhysicalExpr::PrimCast {
-                    obj: Box::new(expr),
+                let expr = PhysicalExpr::ReadValue {
+                    ptr: Box::new(expr),
                     prim_type,
                 };
 
@@ -468,7 +468,10 @@ impl SymbolicExpr {
                 let expr = PhysicalExpr::Location(location);
 
                 let expr = if runtime_type.stored_as_ptr() {
-                    PhysicalExpr::Dereference(Box::new(expr))
+                    PhysicalExpr::ReadValue {
+                        ptr: Box::new(expr),
+                        prim_type: RuntimePrimType::Ptr,
+                    }
                 } else {
                     expr
                 };
@@ -505,7 +508,10 @@ impl SymbolicExpr {
                 };
 
                 let expr = if field_type.stored_as_ptr() {
-                    PhysicalExpr::Dereference(Box::new(expr))
+                    PhysicalExpr::ReadValue {
+                        ptr: Box::new(expr),
+                        prim_type: RuntimePrimType::Ptr,
+                    }
                 } else {
                     expr
                 };
@@ -532,7 +538,10 @@ impl SymbolicExpr {
                     bytes_per_element,
                 };
                 let expr = if element_type.stored_as_ptr() {
-                    PhysicalExpr::Dereference(Box::new(expr))
+                    PhysicalExpr::ReadValue {
+                        ptr: Box::new(expr),
+                        prim_type: RuntimePrimType::Ptr,
+                    }
                 } else {
                     expr
                 };

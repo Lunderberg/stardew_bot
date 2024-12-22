@@ -12,7 +12,6 @@ use crate::{
 pub enum PhysicalExpr {
     Int(usize),
     Location(Pointer),
-    Dereference(Box<PhysicalExpr>),
     DynamicOffset {
         base: Box<PhysicalExpr>,
         element_index: Box<PhysicalExpr>,
@@ -30,8 +29,8 @@ pub enum PhysicalExpr {
 
     // TODO: Better representation, which would allow an array of
     // values to be extracted.
-    PrimCast {
-        obj: Box<PhysicalExpr>,
+    ReadValue {
+        ptr: Box<PhysicalExpr>,
         prim_type: RuntimePrimType,
     },
 
@@ -85,10 +84,6 @@ impl PhysicalExpr {
     pub(crate) fn simplify(self) -> Self {
         match self {
             PhysicalExpr::Int(_) | PhysicalExpr::Location(_) => self,
-            PhysicalExpr::Dereference(expr) => {
-                let expr = expr.simplify();
-                PhysicalExpr::Dereference(Box::new(expr))
-            }
             PhysicalExpr::DynamicOffset {
                 base,
                 element_index,
@@ -145,10 +140,13 @@ impl PhysicalExpr {
                     ty,
                 }
             }
-            PhysicalExpr::PrimCast { obj, prim_type } => {
+            PhysicalExpr::ReadValue {
+                ptr: obj,
+                prim_type,
+            } => {
                 let obj = obj.simplify();
-                PhysicalExpr::PrimCast {
-                    obj: Box::new(obj),
+                PhysicalExpr::ReadValue {
+                    ptr: Box::new(obj),
                     prim_type,
                 }
             }
@@ -201,12 +199,6 @@ impl PhysicalExpr {
                     value: RuntimePrimValue::Ptr(*pointer),
                 });
             }
-            PhysicalExpr::Dereference(expr) => {
-                expr.collect_instructions(instructions, index_tracker)?;
-                instructions.push(Instruction::Read {
-                    ty: RuntimePrimType::Ptr,
-                });
-            }
             PhysicalExpr::DynamicOffset {
                 base,
                 element_index,
@@ -237,7 +229,10 @@ impl PhysicalExpr {
                 obj.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::Downcast { ty: *ty });
             }
-            PhysicalExpr::PrimCast { obj, prim_type } => {
+            PhysicalExpr::ReadValue {
+                ptr: obj,
+                prim_type,
+            } => {
                 obj.collect_instructions(instructions, index_tracker)?;
                 instructions.push(Instruction::Read { ty: *prim_type });
             }
@@ -255,7 +250,6 @@ impl Display for PhysicalExpr {
         match self {
             PhysicalExpr::Int(value) => write!(f, "{value}"),
             PhysicalExpr::Location(pointer) => write!(f, "{pointer}"),
-            PhysicalExpr::Dereference(expr) => write!(f, "{expr}.deref()"),
             PhysicalExpr::DynamicOffset {
                 base,
                 element_index,
@@ -270,8 +264,11 @@ impl Display for PhysicalExpr {
             PhysicalExpr::Downcast { obj, ty } => {
                 write!(f, "{obj}.downcast({ty})")
             }
-            PhysicalExpr::PrimCast { obj, prim_type } => {
-                write!(f, "{obj}.as::<{prim_type}>()")
+            PhysicalExpr::ReadValue {
+                ptr: obj,
+                prim_type,
+            } => {
+                write!(f, "{obj}.read::<{prim_type}>()")
             }
             PhysicalExpr::Tuple(tuple) => {
                 write!(f, "(")?;
