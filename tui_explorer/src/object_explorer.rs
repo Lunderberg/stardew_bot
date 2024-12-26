@@ -11,9 +11,8 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
-    RuntimeValue, SymbolicAccessChain, SymbolicOperation, SymbolicStaticField,
-    SymbolicType, TypedPointer,
+    symbolic_expr, CachedReader, FieldContainer, FieldDescription, MethodTable,
+    RuntimeType, RuntimeValue, SymbolicExpr, SymbolicType, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 use tui_utils::{
@@ -689,10 +688,10 @@ impl ObjectExplorer {
         Ok(output)
     }
 
-    fn access_chain_selected_node(
+    fn expr_of_selected_node(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<SymbolicAccessChain, Error> {
+    ) -> Result<SymbolicExpr, Error> {
         let node_chain = self.selected_node_chain()?;
 
         let static_field = {
@@ -714,7 +713,7 @@ impl ObjectExplorer {
                 panic!("Outermost node should be static field");
             };
 
-            SymbolicStaticField {
+            symbolic_expr::StaticField {
                 class: SymbolicType {
                     namespace: class_name.namespace.clone(),
                     name: class_name.name.clone(),
@@ -724,46 +723,51 @@ impl ObjectExplorer {
             }
         };
 
-        let mut ops = Vec::new();
-        for node in node_chain.into_iter().skip(2) {
-            match node {
-                ObjectTreeNode::Field {
-                    ptr_mtable_of_parent,
-                    field_name,
-                    ..
-                } => {
-                    let ptr_mtable_of_parent = *ptr_mtable_of_parent;
-                    let mtable_of_parent =
-                        reader.method_table(ptr_mtable_of_parent)?;
-                    if mtable_of_parent.is_class() {
-                        // The downcast isn't strictly necessary in
-                        // all cases, since a field of the
-                        // statically-known class (or one of its base
-                        // classes) may be accessed without a
-                        // downcast.  However, that's easier and more
-                        // consistently handled as part of the
-                        // lowering from `SymbolicOperation` to
-                        // `PhysicalAccessOperation`, so we can just
-                        // apply downcast all the time and remove it
-                        // later.
-                        ops.push(SymbolicOperation::Downcast(
-                            get_symbolic_type(ptr_mtable_of_parent, reader)?,
-                        ));
+        node_chain.into_iter().skip(2).try_fold(
+            static_field.into(),
+            |expr, node| -> Result<SymbolicExpr, _> {
+                match node {
+                    ObjectTreeNode::Field {
+                        ptr_mtable_of_parent,
+                        field_name,
+                        ..
+                    } => {
+                        let ptr_mtable_of_parent = *ptr_mtable_of_parent;
+                        let mtable_of_parent =
+                            reader.method_table(ptr_mtable_of_parent)?;
+                        let expr = if mtable_of_parent.is_class() {
+                            // The downcast isn't strictly necessary in
+                            // all cases, since a field of the
+                            // statically-known class (or one of its base
+                            // classes) may be accessed without a
+                            // downcast.  However, that's easier and more
+                            // consistently handled as part of the
+                            // lowering from `SymbolicOperation` to
+                            // `PhysicalAccessOperation`, so we can just
+                            // apply downcast all the time and remove it
+                            // later.
+                            expr.downcast(get_symbolic_type(
+                                ptr_mtable_of_parent,
+                                reader,
+                            )?)
+                        } else {
+                            expr
+                        };
+                        let expr = expr.access_field(field_name.clone());
+                        Ok(expr)
                     }
-                    ops.push(SymbolicOperation::Field(field_name.clone()));
+                    ObjectTreeNode::ListItem { index, .. } => {
+                        let expr = expr.access_index(*index);
+                        Ok(expr)
+                    }
+                    ObjectTreeNode::Value { .. } => todo!(),
+                    ObjectTreeNode::String(_) => todo!(),
+                    ObjectTreeNode::Array { .. } => todo!(),
+                    ObjectTreeNode::Object { .. } => todo!(),
+                    ObjectTreeNode::DisplayList(_) => todo!(),
                 }
-                ObjectTreeNode::ListItem { index, .. } => {
-                    ops.push(SymbolicOperation::IndexAccess(*index));
-                }
-                ObjectTreeNode::Value { .. } => todo!(),
-                ObjectTreeNode::String(_) => todo!(),
-                ObjectTreeNode::Array { .. } => todo!(),
-                ObjectTreeNode::Object { .. } => todo!(),
-                ObjectTreeNode::DisplayList(_) => todo!(),
-            }
-        }
-
-        Ok(SymbolicAccessChain { static_field, ops })
+            },
+        )
     }
 }
 
@@ -1739,7 +1743,7 @@ impl WidgetWindow<Error> for ObjectExplorer {
                 }
             })
             .or_try_binding("C-t", keystrokes, || {
-                match self.access_chain_selected_node(globals.cached_reader()) {
+                match self.expr_of_selected_node(globals.cached_reader()) {
                     Ok(chain) => {
                         side_effects.broadcast(chain);
                         //side_effects.live_variable = Some(chain);

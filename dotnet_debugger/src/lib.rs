@@ -47,16 +47,13 @@ pub use static_value_cache::*;
 
 pub mod extensions;
 
-pub(crate) mod symbolic_expr;
+pub mod symbolic_expr;
 pub use symbolic_expr::{SymbolicExpr, SymbolicType};
 
 pub(crate) mod physical_expr;
 
 pub(crate) mod virtual_machine;
 pub use virtual_machine::{VMExecutionError, VirtualMachine};
-
-mod access_chain;
-pub use access_chain::*;
 
 mod symbolic_expr_parser;
 pub(crate) use symbolic_expr_parser::*;

@@ -293,6 +293,31 @@ impl SymbolicExpr {
         Ok(expr)
     }
 
+    pub fn downcast(self, ty: SymbolicType) -> Self {
+        Downcast {
+            obj: Box::new(self),
+            ty,
+        }
+        .into()
+    }
+
+    pub fn access_field(self, field: String) -> Self {
+        FieldAccess {
+            obj: Box::new(self),
+            field,
+        }
+        .into()
+    }
+
+    pub fn access_index(self, index: impl Into<SymbolicExpr>) -> Self {
+        let index = index.into();
+        IndexAccess {
+            obj: Box::new(self),
+            index: Box::new(index),
+        }
+        .into()
+    }
+
     pub fn compile(
         self,
         reader: CachedReader<'_>,
@@ -313,10 +338,7 @@ impl SymbolicExpr {
         Ok(vm)
     }
 
-    pub(crate) fn simplify(
-        self,
-        reader: CachedReader<'_>,
-    ) -> Result<Self, Error> {
+    pub fn simplify(self, reader: CachedReader<'_>) -> Result<Self, Error> {
         let expr = if let Self::Tuple(Tuple { items }) = self {
             let items = items
                 .into_iter()
@@ -604,6 +626,28 @@ impl Display for SymbolicExpr {
                 Ok(())
             }
         }
+    }
+}
+
+impl Display for SymbolicType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(namespace) = &self.namespace {
+            write!(f, "{namespace}.")?;
+        }
+        write!(f, "{}", self.name)?;
+
+        if !self.generics.is_empty() {
+            write!(f, "<\u{200B}")?;
+            for (i, generic) in self.generics.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ",\u{200B} ")?;
+                }
+                write!(f, "{generic}")?;
+            }
+            write!(f, ">")?;
+        }
+
+        Ok(())
     }
 }
 
