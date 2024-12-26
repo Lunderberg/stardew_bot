@@ -1,8 +1,6 @@
 use itertools::Itertools;
 
-use dotnet_debugger::{
-    PhysicalAccessChain, RuntimePrimValue, SymbolicAccessChain,
-};
+use dotnet_debugger::{RuntimePrimValue, SymbolicExpr, VirtualMachine};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},
@@ -24,8 +22,8 @@ pub struct LiveVariableDisplay {
 }
 
 struct LiveVariable {
-    symbolic_chain: SymbolicAccessChain,
-    physical_chain: PhysicalAccessChain,
+    symbolic_chain: SymbolicExpr,
+    virtual_machine: VirtualMachine,
     most_recent_value: Option<RuntimePrimValue>,
 }
 
@@ -66,7 +64,7 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
     ) -> Result<(), Error> {
         for live_var in self.live_variables.iter_mut() {
             let value =
-                live_var.physical_chain.read(globals.cached_reader())?;
+                live_var.virtual_machine.evaluate(globals.cached_reader())?[0];
             live_var.most_recent_value = value;
         }
 
@@ -78,21 +76,21 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
     ) -> Result<(), Error> {
-        side_effects
-            .into_iter::<SymbolicAccessChain>()
-            .try_for_each(|symbolic_chain| {
+        side_effects.into_iter::<SymbolicExpr>().try_for_each(
+            |symbolic_chain| {
                 let reader = globals.cached_reader();
+
                 let symbolic_chain = symbolic_chain.simplify(reader)?;
-                let physical_chain = symbolic_chain.to_physical(reader)?;
-                let physical_chain = physical_chain.simplify();
+                let virtual_machine = symbolic_chain.clone().compile(reader)?;
                 let live_var = LiveVariable {
                     symbolic_chain,
-                    physical_chain,
+                    virtual_machine,
                     most_recent_value: None,
                 };
                 self.live_variables.push(live_var);
                 Ok(())
-            })
+            },
+        )
     }
 
     fn draw<'a>(

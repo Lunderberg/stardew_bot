@@ -5,10 +5,7 @@ use thiserror::Error;
 
 use crate::symbolic_expr;
 use crate::symbolic_expr::{SymbolicExpr, SymbolicType};
-use crate::{
-    CachedReader, Error, SymbolicAccessChain, SymbolicOperation,
-    SymbolicStaticField,
-};
+use crate::{CachedReader, Error};
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
@@ -49,9 +46,6 @@ pub enum ParseError {
         byte_index: usize,
         kind: TokenKind,
     },
-
-    #[error("Must start with a static field, but found {0}")]
-    ExpectedStaticField(SymbolicOperation),
 }
 
 struct SymbolicTokenizer<'a> {
@@ -98,19 +92,6 @@ impl<'a> SymbolicParser<'a> {
     pub(crate) fn new(text: &'a str, reader: CachedReader<'a>) -> Self {
         let tokens = SymbolicTokenizer::new(text);
         Self { tokens, reader }
-    }
-
-    pub(crate) fn next_chain(&mut self) -> Result<SymbolicAccessChain, Error> {
-        let static_field = self.next_static_field_access_chain()?;
-        let mut ops = Vec::new();
-
-        while let Some(op) = self.next_op()? {
-            ops.push(op);
-        }
-
-        self.expect_end_of_string()?;
-
-        Ok(SymbolicAccessChain { static_field, ops })
     }
 
     pub fn parse_expr(&mut self) -> Result<SymbolicExpr, Error> {
@@ -178,21 +159,6 @@ impl<'a> SymbolicParser<'a> {
         let static_field = symbolic_expr::StaticField { class, field_name };
 
         Ok(static_field.into())
-    }
-
-    fn next_static_field_access_chain(
-        &mut self,
-    ) -> Result<SymbolicStaticField, Error> {
-        let class = self.leading_type()?;
-        let first_op = self
-            .next_op()?
-            .ok_or(ParseError::UnexpectedEndOfString("static field name"))?;
-        let field_name = match first_op {
-            SymbolicOperation::Field(field_name) => Ok(field_name),
-            other => Err(ParseError::ExpectedStaticField(other)),
-        }?;
-
-        Ok(SymbolicStaticField { class, field_name })
     }
 
     fn leading_type(&mut self) -> Result<SymbolicType, Error> {
@@ -379,92 +345,8 @@ impl<'a> SymbolicParser<'a> {
         Ok(Some(expr))
     }
 
-    fn next_op(&mut self) -> Result<Option<SymbolicOperation>, Error> {
-        let Some(token) = self.tokens.next_if(|token| {
-            token.kind.is_punct(Punctuation::Period)
-                || token.kind.is_punct(Punctuation::LeftSquareBracket)
-        })?
-        else {
-            return Ok(None);
-        };
-
-        let symbolic_operation = match token.kind {
-            TokenKind::Punct(Punctuation::Period) => {
-                self.expect_field_or_method()?
-            }
-            TokenKind::Punct(Punctuation::LeftSquareBracket) => {
-                let token_index = self.expect_int("integer index")?;
-                let TokenKind::Int(index) = token_index.kind else {
-                    unreachable!("Already checked for integer in expect_int")
-                };
-                self.expect_punct(
-                    "closing ] of index",
-                    Punctuation::RightSquareBracket,
-                )?;
-                SymbolicOperation::IndexAccess(index)
-            }
-            _ => unreachable!("Must be . or [ at this point"),
-        };
-
-        Ok(Some(symbolic_operation))
-    }
-
-    fn expect_field_or_method(&mut self) -> Result<SymbolicOperation, Error> {
-        let token = self.expect_ident("identifier after period")?;
-
-        let is_special_operation = self
-            .tokens
-            .peek()?
-            .map(|peek| {
-                peek.kind.is_punct(Punctuation::LeftAngleBracket)
-                    || peek.kind.is_punct(Punctuation::LeftParen)
-            })
-            .unwrap_or(false);
-
-        if is_special_operation {
-            let symbolic_operation = match token.text {
-                "as" => {
-                    let (generic_types, span) =
-                        self.expect_generic_type_list()?;
-                    if generic_types.len() == 1 {
-                        Ok(SymbolicOperation::Downcast(
-                            generic_types
-                                .into_iter()
-                                .next()
-                                .expect("Protected by length check"),
-                        ))
-                    } else {
-                        Err(ParseError::ExpectedSingleTypeArg {
-                            num_args: generic_types.len(),
-                            span,
-                        })
-                    }
-                }
-                _ => Err(ParseError::UnknownOperator {
-                    name: token.text.into(),
-                }),
-            }?;
-            self.expect_punct(
-                "left ( to start method arguments",
-                Punctuation::LeftParen,
-            )?;
-            self.expect_punct(
-                "right ( to finish method arguments",
-                Punctuation::RightParen,
-            )?;
-
-            Ok(symbolic_operation)
-        } else {
-            Ok(SymbolicOperation::Field(token.text.to_string()))
-        }
-    }
-
     fn expect_ident(&mut self, desc: &'static str) -> Result<Token<'a>, Error> {
         self.expect_kind(desc, |kind| matches!(kind, TokenKind::Ident))
-    }
-
-    fn expect_int(&mut self, desc: &'static str) -> Result<Token<'a>, Error> {
-        self.expect_kind(desc, |kind| matches!(kind, TokenKind::Int(_)))
     }
 
     fn expect_punct(
