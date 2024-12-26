@@ -86,7 +86,7 @@ pub enum RuntimeType {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum RuntimePrimType {
     Bool,
     Char,

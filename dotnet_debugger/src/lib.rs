@@ -51,7 +51,6 @@ pub(crate) mod symbolic_expr;
 pub use symbolic_expr::{SymbolicExpr, SymbolicType};
 
 pub(crate) mod physical_expr;
-pub use physical_expr::PhysicalExpr;
 
 pub(crate) mod virtual_machine;
 pub use virtual_machine::{VMExecutionError, VirtualMachine};

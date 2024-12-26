@@ -15,7 +15,7 @@ use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
 use crate::{
     extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
-    SymbolicExpr, TypeHandle, VirtualMachine,
+    TypeHandle,
 };
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
@@ -1327,16 +1327,6 @@ impl<'a> CachedReader<'a> {
                 return Ok(false);
             }
         }
-    }
-
-    pub fn parse_expr(self, field: &str) -> Result<VirtualMachine, Error> {
-        let expr = SymbolicExpr::parse(field, self)?;
-        let expr = expr.simplify(self)?;
-        let expr = expr.to_physical(self)?;
-        let expr = expr.simplify();
-        let expr = expr.to_virtual_machine()?;
-
-        Ok(expr)
     }
 }
 
