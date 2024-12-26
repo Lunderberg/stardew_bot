@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use memory_reader::Pointer;
 use thiserror::Error;
@@ -9,10 +12,17 @@ use crate::{
 };
 
 pub struct VirtualMachine {
+    /// The instructions to execute in the virtual machine.
     instructions: Vec<Instruction>,
-    num_values: usize,
+
+    /// The number of output values to produce.
+    num_outputs: usize,
+
+    /// The number of additional temporary values to allocate.
+    num_temporaries: usize,
 }
 
+#[derive(Clone)]
 pub enum Instruction {
     // Write the current value of the register into vm.values[index]
     SaveValue { index: usize },
@@ -118,7 +128,7 @@ impl RuntimePrimValueExt for RuntimePrimValue {
 }
 
 impl VirtualMachine {
-    pub fn new(instructions: Vec<Instruction>) -> Self {
+    pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
         let num_values = instructions
             .iter()
             .filter_map(|instruction| match instruction {
@@ -130,9 +140,120 @@ impl VirtualMachine {
             .max()
             .unwrap_or(0);
 
+        assert!(num_values >= num_outputs);
+
         Self {
             instructions,
-            num_values,
+            num_outputs,
+            num_temporaries: num_values - num_outputs,
+        }
+    }
+
+    pub(crate) fn remove_unnecessary_restore_value(self) -> Self {
+        let mut instructions = Vec::new();
+        let mut value_in_register: Option<usize> = None;
+
+        for inst in self.instructions.into_iter() {
+            match inst {
+                Instruction::SaveValue { index } => {
+                    value_in_register = Some(index);
+                    instructions.push(inst);
+                }
+                Instruction::RestoreValue { index } => {
+                    if value_in_register != Some(index) {
+                        instructions.push(inst);
+                    }
+                }
+                _ => {
+                    value_in_register = None;
+                    instructions.push(inst);
+                }
+            }
+        }
+
+        Self {
+            instructions,
+            ..self
+        }
+    }
+
+    pub(crate) fn remove_unnecessary_save_value(self) -> Self {
+        let mut instructions = Vec::new();
+
+        let used: HashSet<_> = self
+            .instructions
+            .iter()
+            .filter_map(|inst| match inst {
+                Instruction::RestoreValue { index } => Some(*index),
+                Instruction::DynamicOffset { index } => Some(*index),
+                _ => None,
+            })
+            .collect();
+
+        for inst in self.instructions.into_iter() {
+            match inst {
+                Instruction::SaveValue { index } => {
+                    if used.contains(&index) || index < self.num_outputs {
+                        instructions.push(inst);
+                    }
+                }
+                _ => {
+                    instructions.push(inst);
+                }
+            }
+        }
+
+        Self {
+            instructions,
+            ..self
+        }
+    }
+
+    pub(crate) fn remap_temporary_indices(self) -> Self {
+        let mut remap: HashMap<usize, usize> = HashMap::new();
+
+        // TODO: After the last usage of an index, allow it to be
+        // reused for a different temporary value.
+        //
+        // TODO: If all occurrences of a temporary value are before
+        // the write of an output index, allow the output index to be
+        // used as a temporary.
+        let mut do_remap = |index: usize| -> usize {
+            if index < self.num_outputs {
+                index
+            } else if let Some(new_index) = remap.get(&index) {
+                *new_index
+            } else {
+                let new_index = self.num_outputs + remap.len();
+                remap.insert(index, new_index);
+                new_index
+            }
+        };
+
+        let instructions = self
+            .instructions
+            .into_iter()
+            .map(|inst| match inst {
+                Instruction::SaveValue { index } => {
+                    let index = do_remap(index);
+                    Instruction::SaveValue { index }
+                }
+                Instruction::RestoreValue { index } => {
+                    let index = do_remap(index);
+                    Instruction::RestoreValue { index }
+                }
+                Instruction::DynamicOffset { index } => {
+                    let index = do_remap(index);
+                    Instruction::DynamicOffset { index }
+                }
+                other => other,
+            })
+            .collect();
+
+        Self {
+            instructions,
+            num_temporaries: remap.len(),
+            ..self
         }
     }
 
@@ -141,7 +262,7 @@ impl VirtualMachine {
         reader: CachedReader<'_>,
     ) -> Result<Vec<Option<RuntimePrimValue>>, Error> {
         let mut register = None;
-        let mut values = vec![None; self.num_values];
+        let mut values = vec![None; self.num_outputs + self.num_temporaries];
 
         for instruction in &self.instructions {
             match instruction {
@@ -260,6 +381,7 @@ impl VirtualMachine {
             }
         }
 
+        values.truncate(self.num_outputs);
         Ok(values)
     }
 
@@ -287,14 +409,16 @@ impl std::fmt::Debug for VMExecutionError {
 
 impl Display for VirtualMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[")?;
+        writeln!(
+            f,
+            "{} instructions, {} outputs, {} temporaries",
+            self.instructions.len(),
+            self.num_outputs,
+            self.num_temporaries
+        )?;
         for (i, instruction) in self.instructions.iter().enumerate() {
-            if i > 0 {
-                write!(f, ", ")?;
-            }
-            write!(f, "{instruction}")?;
+            writeln!(f, "{i}: {instruction}")?;
         }
-        write!(f, "]")?;
         Ok(())
     }
 }

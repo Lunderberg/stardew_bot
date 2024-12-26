@@ -181,6 +181,7 @@ impl StardewBot {
         let mut event_poll_result = false;
 
         loop {
+            //for _ in 0..10 {
             let main_loop_start = std::time::Instant::now();
 
             // The `event_poll_result` is set at the end of each loop,

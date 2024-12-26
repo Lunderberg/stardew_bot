@@ -4,9 +4,9 @@ use derive_more::derive::From;
 use itertools::Itertools as _;
 
 use crate::{
-    runtime_type::RuntimePrimType, CachedReader, Error, FieldDescription,
-    MethodTable, PhysicalExpr, RuntimeArray, RuntimeType, SymbolicParser,
-    TypedPointer, VirtualMachine,
+    physical_expr::PhysicalSequence, runtime_type::RuntimePrimType,
+    CachedReader, Error, FieldDescription, MethodTable, RuntimeArray,
+    RuntimeType, SymbolicParser, TypedPointer, VirtualMachine,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
@@ -297,11 +297,19 @@ impl SymbolicExpr {
         self,
         reader: CachedReader<'_>,
     ) -> Result<VirtualMachine, Error> {
-        let vm = self
-            .simplify(reader)?
-            .to_physical(reader)?
-            .simplify()
-            .to_virtual_machine()?;
+        let expr = self.simplify(reader)?;
+        let seq = expr.to_physical_sequence(reader)?;
+
+        let seq = seq.simplify()?;
+        let seq = seq.eliminate_common_subexpresssions()?;
+        let seq = seq.dead_code_elimination()?;
+
+        let vm = seq.to_virtual_machine()?;
+
+        let vm = vm.remove_unnecessary_restore_value();
+        let vm = vm.remove_unnecessary_save_value();
+        let vm = vm.remap_temporary_indices();
+
         Ok(vm)
     }
 
@@ -413,51 +421,55 @@ impl SymbolicExpr {
         }
     }
 
-    pub(crate) fn to_physical(
+    pub(crate) fn to_physical_sequence(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<PhysicalExpr, Error> {
+    ) -> Result<PhysicalSequence, Error> {
+        let mut ops = PhysicalSequence::new();
+
         match self {
             Self::Tuple(Tuple { items }) => {
                 let items = items
-                    .into_iter()
-                    .map(|item| item.to_physical(reader))
+                    .iter()
+                    .map(|item| item.collect_physical_ops(&mut ops, reader))
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(PhysicalExpr::Tuple(items))
+                ops.push(items);
             }
             other => {
-                let (expr, runtime_type) =
-                    other.to_physical_and_infer_type(reader)?;
-
-                let prim_type = match runtime_type {
-                    RuntimeType::Prim(runtime_prim_type) => {
-                        Ok(runtime_prim_type)
-                    }
-                    other => {
-                        Err(Error::SymbolicExpressionMustProducePrimitive {
-                            field: format!("{self}"),
-                            ty: other,
-                        })
-                    }
-                }?;
-
-                let expr = PhysicalExpr::ReadValue {
-                    ptr: Box::new(expr),
-                    prim_type,
-                };
-
-                Ok(expr)
+                other.collect_physical_ops(&mut ops, reader)?;
             }
         }
+
+        Ok(ops)
     }
 
-    fn to_physical_and_infer_type(
+    pub(crate) fn collect_physical_ops(
         &self,
+        ops: &mut PhysicalSequence,
         reader: CachedReader<'_>,
-    ) -> Result<(PhysicalExpr, RuntimeType), Error> {
+    ) -> Result<crate::physical_expr::Value, Error> {
+        let (item, runtime_type) =
+            self.collect_physical_ops_and_infer_type(ops, reader)?;
+        let prim_type = match runtime_type {
+            RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
+            other => Err(Error::SymbolicExpressionMustProducePrimitive {
+                field: format!("{self}"),
+                ty: other,
+            }),
+        }?;
+        let item = ops.read_value(item, prim_type);
+        Ok(item)
+    }
+
+    pub(crate) fn collect_physical_ops_and_infer_type(
+        &self,
+        ops: &mut PhysicalSequence,
+        reader: CachedReader<'_>,
+    ) -> Result<(crate::physical_expr::Value, RuntimeType), Error> {
+        use crate::physical_expr::Value;
         match self {
-            SymbolicExpr::Int(value) => {
-                let expr = PhysicalExpr::Int(*value);
+            &SymbolicExpr::Int(value) => {
+                let expr = Value::Int(value);
                 let runtime_type =
                     RuntimeType::Prim(RuntimePrimType::NativeUInt);
                 Ok((expr, runtime_type))
@@ -465,23 +477,17 @@ impl SymbolicExpr {
             SymbolicExpr::StaticField(static_field) => {
                 let runtime_type = static_field.runtime_type(reader)?;
                 let location = static_field.location(reader)?;
-                let expr = PhysicalExpr::Location(location);
-
+                let expr = Value::Ptr(location);
                 let expr = if runtime_type.stored_as_ptr() {
-                    PhysicalExpr::ReadValue {
-                        ptr: Box::new(expr),
-                        prim_type: RuntimePrimType::Ptr,
-                    }
+                    ops.read_value(expr, RuntimePrimType::Ptr)
                 } else {
                     expr
                 };
-
                 Ok((expr, runtime_type))
             }
             SymbolicExpr::FieldAccess(FieldAccess { obj, field }) => {
                 let (expr, obj_type) =
-                    obj.to_physical_and_infer_type(reader)?;
-
+                    obj.collect_physical_ops_and_infer_type(ops, reader)?;
                 let method_table_ptr = obj_type
                     .method_table_for_field_access(|| format!("{obj}"))?;
                 let (parent_of_field, field_description) =
@@ -492,26 +498,15 @@ impl SymbolicExpr {
                 )?;
 
                 let expr = if matches!(obj_type, RuntimeType::Class { .. }) {
-                    PhysicalExpr::Offset {
-                        base: Box::new(expr),
-                        byte_offset: Pointer::SIZE,
-                    }
+                    ops.add(expr, Pointer::SIZE)
                 } else {
                     expr
                 };
 
-                let byte_offset = field_description.offset();
-
-                let expr = PhysicalExpr::Offset {
-                    base: Box::new(expr),
-                    byte_offset,
-                };
+                let expr = ops.add(expr, field_description.offset());
 
                 let expr = if field_type.stored_as_ptr() {
-                    PhysicalExpr::ReadValue {
-                        ptr: Box::new(expr),
-                        prim_type: RuntimePrimType::Ptr,
-                    }
+                    ops.read_value(expr, RuntimePrimType::Ptr)
                 } else {
                     expr
                 };
@@ -520,28 +515,21 @@ impl SymbolicExpr {
             }
             SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
                 let (expr, array_type) =
-                    obj.to_physical_and_infer_type(reader)?;
-                let element_index = index.to_physical(reader)?;
+                    obj.collect_physical_ops_and_infer_type(ops, reader)?;
+                let element_index = index.collect_physical_ops(ops, reader)?;
 
                 let element_type =
                     array_type.as_array_type(|| format!("{obj}"))?;
 
-                let bytes_per_element = element_type.size_bytes();
+                let expr = ops.add(expr, RuntimeArray::HEADER_SIZE);
+                let expr = {
+                    let offset =
+                        ops.mul(element_index, element_type.size_bytes());
+                    ops.add(expr, offset)
+                };
 
-                let expr = PhysicalExpr::Offset {
-                    base: Box::new(expr),
-                    byte_offset: RuntimeArray::HEADER_SIZE,
-                };
-                let expr = PhysicalExpr::DynamicOffset {
-                    base: Box::new(expr),
-                    element_index: Box::new(element_index),
-                    bytes_per_element,
-                };
                 let expr = if element_type.stored_as_ptr() {
-                    PhysicalExpr::ReadValue {
-                        ptr: Box::new(expr),
-                        prim_type: RuntimePrimType::Ptr,
-                    }
+                    ops.read_value(expr, RuntimePrimType::Ptr)
                 } else {
                     expr
                 };
@@ -550,16 +538,13 @@ impl SymbolicExpr {
             }
             SymbolicExpr::Downcast(Downcast { obj, ty }) => {
                 let (obj, _obj_type) =
-                    obj.to_physical_and_infer_type(reader)?;
+                    obj.collect_physical_ops_and_infer_type(ops, reader)?;
 
                 let target_method_table_ptr = ty.method_table(reader)?;
                 let expr_type = RuntimeType::Class {
                     method_table: Some(target_method_table_ptr),
                 };
-                let expr = PhysicalExpr::Downcast {
-                    obj: Box::new(obj),
-                    ty: target_method_table_ptr,
-                };
+                let expr = ops.downcast(obj, target_method_table_ptr);
 
                 Ok((expr, expr_type))
             }

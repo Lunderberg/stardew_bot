@@ -241,6 +241,9 @@ pub enum Error {
 
     #[error("dotnet_debugger::VMExecutionError( {0} )")]
     VMExecutionError(#[from] crate::VMExecutionError),
+
+    #[error("Invalid reference from expression {from} to {to}")]
+    InvalidReference { from: usize, to: usize },
 }
 
 impl std::fmt::Debug for Error {
