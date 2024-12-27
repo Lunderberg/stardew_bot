@@ -396,7 +396,7 @@ impl PhysicalSequence {
                         ),
 
                         Value::Int(value) => panic!(
-                            "LHS of add should be a pointer, \
+                            "LHS of multiply should be a pointer, \
                              but was instead {value}"
                         ),
                     };
