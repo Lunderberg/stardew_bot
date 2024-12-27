@@ -194,6 +194,11 @@ impl PhysicalSequence {
                         rhs: Value::Int(b),
                     } => Some(Value::Int(a + b)),
 
+                    &Expr::Mul {
+                        lhs: Value::Int(a),
+                        rhs: Value::Int(b),
+                    } => Some(Value::Int(a * b)),
+
                     // lhs + 0 => lhs
                     &Expr::Add {
                         lhs,
@@ -203,6 +208,18 @@ impl PhysicalSequence {
                     // 0 + rhs => rhs
                     &Expr::Add {
                         lhs: Value::Int(0),
+                        rhs,
+                    } => Some(rhs),
+
+                    // lhs * 1 => lhs
+                    &Expr::Mul {
+                        lhs,
+                        rhs: Value::Int(1),
+                    } => Some(lhs),
+
+                    // 1 * rhs => rhs
+                    &Expr::Mul {
+                        lhs: Value::Int(1),
                         rhs,
                     } => Some(rhs),
 
