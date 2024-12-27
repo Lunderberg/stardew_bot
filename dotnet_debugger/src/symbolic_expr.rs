@@ -412,10 +412,14 @@ impl SymbolicExpr {
                     // the desired runtime type.  This downcast
                     // can be simplified away.
                     Ok((obj, obj_type))
-                } else if reader.is_base_of(
-                    static_method_table_ptr,
-                    target_method_table_ptr,
-                )? {
+                } else if reader
+                    .method_table(static_method_table_ptr)?
+                    .is_interface()
+                    || reader.is_base_of(
+                        static_method_table_ptr,
+                        target_method_table_ptr,
+                    )?
+                {
                     // Target type is a subclass of the
                     // statically-known type.  The downcast must
                     // be retained.
