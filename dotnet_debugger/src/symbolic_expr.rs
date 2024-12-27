@@ -474,16 +474,9 @@ impl SymbolicExpr {
         ops: &mut PhysicalSequence,
         reader: CachedReader<'_>,
     ) -> Result<crate::physical_expr::Value, Error> {
-        let (item, runtime_type) =
+        let (item, _runtime_type) =
             self.collect_physical_ops_and_infer_type(ops, reader)?;
-        let prim_type = match runtime_type {
-            RuntimeType::Prim(runtime_prim_type) => Ok(runtime_prim_type),
-            other => Err(Error::SymbolicExpressionMustProducePrimitive {
-                field: format!("{self}"),
-                ty: other,
-            }),
-        }?;
-        let item = ops.read_value(item, prim_type);
+
         Ok(item)
     }
 
@@ -504,11 +497,14 @@ impl SymbolicExpr {
                 let runtime_type = static_field.runtime_type(reader)?;
                 let location = static_field.location(reader)?;
                 let expr = Value::Ptr(location);
-                let expr = if runtime_type.stored_as_ptr() {
-                    ops.read_value(expr, RuntimePrimType::Ptr)
+
+                let expr = if let Some(prim_type) = runtime_type.storage_type()
+                {
+                    ops.read_value(expr, prim_type)
                 } else {
                     expr
                 };
+
                 Ok((expr, runtime_type))
             }
             SymbolicExpr::FieldAccess(FieldAccess { obj, field }) => {
@@ -531,8 +527,8 @@ impl SymbolicExpr {
 
                 let expr = ops.add(expr, field_description.offset());
 
-                let expr = if field_type.stored_as_ptr() {
-                    ops.read_value(expr, RuntimePrimType::Ptr)
+                let expr = if let Some(prim_type) = field_type.storage_type() {
+                    ops.read_value(expr, prim_type)
                 } else {
                     expr
                 };
@@ -554,8 +550,9 @@ impl SymbolicExpr {
                     ops.add(expr, offset)
                 };
 
-                let expr = if element_type.stored_as_ptr() {
-                    ops.read_value(expr, RuntimePrimType::Ptr)
+                let expr = if let Some(prim_type) = element_type.storage_type()
+                {
+                    ops.read_value(expr, prim_type)
                 } else {
                     expr
                 };
