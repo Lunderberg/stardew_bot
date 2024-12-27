@@ -170,6 +170,17 @@ impl RuntimeType {
             RuntimeType::MultiDimArray { .. } => true,
         }
     }
+
+    pub fn storage_type(&self) -> Option<RuntimePrimType> {
+        match self {
+            RuntimeType::Prim(prim_type) => Some(*prim_type),
+            RuntimeType::ValueType { .. } => None,
+            RuntimeType::Class { .. } => Some(RuntimePrimType::Ptr),
+            RuntimeType::String => Some(RuntimePrimType::Ptr),
+            RuntimeType::Array { .. } => Some(RuntimePrimType::Ptr),
+            RuntimeType::MultiDimArray { .. } => Some(RuntimePrimType::Ptr),
+        }
+    }
 }
 
 impl RuntimePrimType {
