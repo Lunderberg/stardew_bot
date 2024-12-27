@@ -173,6 +173,12 @@ impl MethodTable {
         type_flag == 0
     }
 
+    pub fn is_interface(&self) -> bool {
+        let flags = self.flags();
+        let type_flag = flags & 0x000F0000;
+        type_flag == 0x000C0000
+    }
+
     pub fn is_array(&self) -> bool {
         let flags = self.flags();
         let type_flag = flags & 0x000F0000;
