@@ -1,4 +1,4 @@
-use memory_reader::Pointer;
+use memory_reader::{MemoryReader, Pointer};
 
 use crate::runtime_type::RuntimePrimType;
 use crate::{
@@ -209,6 +209,16 @@ impl RuntimePrimValue {
             RuntimePrimValue::F64(_) => "f64",
             RuntimePrimValue::Ptr(_) => "ptr",
         }
+    }
+
+    pub fn read_string_ptr(
+        self,
+        reader: &MemoryReader,
+    ) -> Result<String, Error> {
+        let ptr: Pointer = self.try_into()?;
+        let ptr: TypedPointer<RuntimeString> = ptr.into();
+        let runtime_string = ptr.read(reader)?;
+        Ok(runtime_string.into())
     }
 }
 
