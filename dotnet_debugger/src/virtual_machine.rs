@@ -104,29 +104,6 @@ pub enum VMExecutionError {
     ReadAppliedToNonPointer(RuntimePrimValue),
 }
 
-trait RuntimePrimValueExt {
-    fn as_offset(self) -> Result<usize, VMExecutionError>;
-}
-impl RuntimePrimValueExt for RuntimePrimValue {
-    fn as_offset(self) -> Result<usize, VMExecutionError> {
-        match self {
-            RuntimePrimValue::U8(val) => Ok(val as usize),
-            RuntimePrimValue::U16(val) => Ok(val as usize),
-            RuntimePrimValue::U32(val) => Ok(val as usize),
-            RuntimePrimValue::U64(val) => Ok(val as usize),
-            RuntimePrimValue::NativeUInt(val) => Ok(val as usize),
-            RuntimePrimValue::I8(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I16(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I32(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I64(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::NativeInt(val) if val >= 0 => Ok(val as usize),
-            other => {
-                Err(VMExecutionError::DynamicOffsetNotConvertibleToIndex(other))
-            }
-        }
-    }
-}
-
 impl VirtualMachine {
     pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
         let num_values = instructions
@@ -279,7 +256,7 @@ impl VirtualMachine {
                     register = match register {
                         None => None,
                         Some(value) => Some(RuntimePrimValue::NativeUInt(
-                            value.as_offset()?,
+                            value.as_usize()?,
                         )),
                     };
                 }
@@ -305,7 +282,7 @@ impl VirtualMachine {
                     register = match register {
                         None => None,
                         Some(value) => {
-                            let offset = value.as_offset()?;
+                            let offset = value.as_usize()?;
                             Some(RuntimePrimValue::NativeUInt(offset * factor))
                         }
                     };
@@ -315,7 +292,7 @@ impl VirtualMachine {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             let offset = match values[*index] {
-                                Some(value) => value.as_offset(),
+                                Some(value) => Ok(value.as_usize()?),
                                 None => Err(
                                     VMExecutionError::DynamicOffsetWasEmpty(
                                         *index,

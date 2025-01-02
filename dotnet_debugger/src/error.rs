@@ -1,7 +1,7 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{CorElementType, RuntimeType};
+use crate::{CorElementType, RuntimePrimValue, RuntimeType};
 
 #[derive(Error)]
 pub enum Error {
@@ -244,6 +244,9 @@ pub enum Error {
 
     #[error("Invalid reference from expression {from} to {to}")]
     InvalidReference { from: usize, to: usize },
+
+    #[error("Value '{0}' not convertible to an index")]
+    ValueNotConvertibleToIndex(RuntimePrimValue),
 }
 
 impl std::fmt::Debug for Error {

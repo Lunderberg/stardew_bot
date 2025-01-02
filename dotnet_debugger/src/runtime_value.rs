@@ -159,6 +159,38 @@ impl RuntimePrimValue {
         self.try_into()
     }
 
+    pub fn as_isize(self) -> Result<isize, Error> {
+        match self {
+            RuntimePrimValue::U8(val) => Ok(val as isize),
+            RuntimePrimValue::U16(val) => Ok(val as isize),
+            RuntimePrimValue::U32(val) => Ok(val as isize),
+            RuntimePrimValue::U64(val) => Ok(val as isize),
+            RuntimePrimValue::NativeUInt(val) => Ok(val as isize),
+            RuntimePrimValue::I8(val) => Ok(val as isize),
+            RuntimePrimValue::I16(val) => Ok(val as isize),
+            RuntimePrimValue::I32(val) => Ok(val as isize),
+            RuntimePrimValue::I64(val) => Ok(val as isize),
+            RuntimePrimValue::NativeInt(val) => Ok(val),
+            other => Err(Error::ValueNotConvertibleToIndex(other)),
+        }
+    }
+
+    pub fn as_usize(self) -> Result<usize, Error> {
+        match self {
+            RuntimePrimValue::U8(val) => Ok(val as usize),
+            RuntimePrimValue::U16(val) => Ok(val as usize),
+            RuntimePrimValue::U32(val) => Ok(val as usize),
+            RuntimePrimValue::U64(val) => Ok(val as usize),
+            RuntimePrimValue::NativeUInt(val) => Ok(val as usize),
+            RuntimePrimValue::I8(val) if val >= 0 => Ok(val as usize),
+            RuntimePrimValue::I16(val) if val >= 0 => Ok(val as usize),
+            RuntimePrimValue::I32(val) if val >= 0 => Ok(val as usize),
+            RuntimePrimValue::I64(val) if val >= 0 => Ok(val as usize),
+            RuntimePrimValue::NativeInt(val) if val >= 0 => Ok(val as usize),
+            other => Err(Error::ValueNotConvertibleToIndex(other)),
+        }
+    }
+
     fn type_name(&self) -> &'static str {
         match self {
             RuntimePrimValue::Bool(_) => "bool",
