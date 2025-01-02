@@ -21,3 +21,6 @@ pub use running_log::RunningLog;
 
 mod fishing;
 pub use fishing::FishingUI;
+
+mod pathfinding;
+pub use pathfinding::PathfindingUI;

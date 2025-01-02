@@ -1,6 +1,6 @@
 use crate::{
-    game_action::InputState, Error, FishingUI, GameAction, RunningLog,
-    TuiDrawRate, X11Handler,
+    game_action::InputState, Error, FishingUI, GameAction, PathfindingUI,
+    RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -50,6 +50,7 @@ struct TuiBuffers {
     running_log: RunningLog,
     draw_rate: TuiDrawRate,
     fishing: FishingUI,
+    pathfinding: PathfindingUI,
 }
 
 #[allow(unused)]
@@ -108,6 +109,7 @@ impl TuiBuffers {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(reader, per_frame_reader)?,
+            pathfinding: PathfindingUI::new(reader)?,
         })
     }
 
@@ -116,6 +118,7 @@ impl TuiBuffers {
             Box::new(&mut self.running_log),
             Box::new(&mut self.draw_rate),
             Box::new(&mut self.fishing),
+            Box::new(&mut self.pathfinding),
         ]
     }
 }
@@ -151,7 +154,8 @@ impl StardewBot {
         layout.cycle_next();
         layout.switch_to_buffer(0);
         layout.split_horizontally(None, Some(45));
-        layout.switch_to_buffer(2);
+        //layout.switch_to_buffer(2);
+        layout.switch_to_buffer(3);
 
         Ok(Self {
             tui_globals,
