@@ -1,7 +1,7 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{CorElementType, RuntimePrimValue, RuntimeType};
+use crate::{CorElementType, OpIndex, RuntimePrimValue, RuntimeType};
 
 #[derive(Error)]
 pub enum Error {
@@ -268,7 +268,7 @@ pub enum Error {
     VMExecutionError(#[from] crate::VMExecutionError),
 
     #[error("Invalid reference from expression {from} to {to}")]
-    InvalidReference { from: usize, to: usize },
+    InvalidReference { from: OpIndex, to: OpIndex },
 
     #[error("Value '{0}' not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue),

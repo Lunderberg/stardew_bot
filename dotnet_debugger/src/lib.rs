@@ -47,6 +47,9 @@ pub use static_value_cache::*;
 
 pub mod extensions;
 
+mod op_index;
+pub use op_index::OpIndex;
+
 pub mod symbolic_expr;
 pub use symbolic_expr::{SymbolicExpr, SymbolicType};
 

@@ -9,7 +9,7 @@ use memory_reader::Pointer;
 
 use crate::{
     runtime_type::RuntimePrimType, virtual_machine::Instruction, Error,
-    MethodTable, RuntimePrimValue, TypedPointer, VirtualMachine,
+    MethodTable, OpIndex, RuntimePrimValue, TypedPointer, VirtualMachine,
 };
 
 pub struct PhysicalSequence {
@@ -44,9 +44,6 @@ pub enum Expr {
     Tuple(Vec<Value>),
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-pub struct OpIndex(usize);
-
 impl Expr {
     fn remap(
         &self,
@@ -59,8 +56,8 @@ impl Expr {
                     .get(op_index)
                     .cloned()
                     .ok_or_else(|| Error::InvalidReference {
-                        from: current_index.0,
-                        to: op_index.0,
+                        from: current_index,
+                        to: *op_index,
                     })?
                     .into(),
                 other => *other,
@@ -119,7 +116,7 @@ impl PhysicalSequence {
     fn push_impl(&mut self, op: Expr) -> Value {
         let index = self.ops.len();
         self.ops.push(op);
-        OpIndex(index).into()
+        OpIndex::new(index).into()
     }
 
     pub fn push<T>(&mut self, value: T) -> Value
@@ -171,7 +168,7 @@ impl PhysicalSequence {
         self.ops
             .iter()
             .enumerate()
-            .map(|(i, expr)| (OpIndex(i), expr.clone()))
+            .map(|(i, expr)| (OpIndex::new(i), expr.clone()))
     }
 
     pub fn simplify(self) -> Result<Self, Error> {
@@ -257,7 +254,7 @@ impl PhysicalSequence {
             let mut reachable = HashSet::new();
             let mut to_visit = Vec::new();
 
-            let start = OpIndex(self.ops.len() - 1);
+            let start = OpIndex::new(self.ops.len());
             to_visit.push(start);
             reachable.insert(start);
 
@@ -322,7 +319,7 @@ impl PhysicalSequence {
             if let Expr::Tuple(tuple) = &self.ops[self.ops.len() - 1] {
                 (self.ops.len() - 1, Either::Left(tuple.iter().cloned()))
             } else {
-                let value: Value = OpIndex(self.ops.len() - 1).into();
+                let value: Value = OpIndex::new(self.ops.len() - 1).into();
                 (self.ops.len(), Either::Right(std::iter::once(value)))
             };
         let output_indices: HashMap<OpIndex, usize> = iter_outputs
@@ -340,7 +337,7 @@ impl PhysicalSequence {
         let mut next_free_index = num_outputs;
 
         for (op_index, op) in self.ops.iter().take(num_ops).enumerate() {
-            let op_index = OpIndex(op_index);
+            let op_index = OpIndex::new(op_index);
             match op {
                 Expr::Add { lhs, rhs } => {
                     let lhs_instruction = match lhs {
@@ -477,12 +474,6 @@ impl PhysicalSequence {
         }
 
         Ok(VirtualMachine::new(instructions, num_outputs))
-    }
-}
-
-impl Display for OpIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "[{}]", self.0)
     }
 }
 
