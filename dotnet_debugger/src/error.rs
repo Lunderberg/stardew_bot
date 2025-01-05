@@ -199,6 +199,20 @@ pub enum Error {
     IndexAccessRequiresArray(RuntimeType),
 
     #[error(
+        "The SymbolicOperation::NumArrayElements operation \
+         returns the number of elements in an array.  \
+         However, it was applied to an object of type {0}."
+    )]
+    ArrayLengthRequiresArray(RuntimeType),
+
+    #[error(
+        "The SymbolicOperation::ArrayExtent operation \
+         returns the extent of a multi-dimensional array..  \
+         However, it was applied to an object of type {0}."
+    )]
+    ArrayExtentRequiresMultiDimensionalArray(RuntimeType),
+
+    #[error(
         "The SymbolicOperation::IndexAccess(indices) operation \
          requires one index for each rank of the array being accessed.  \
          However, {num_provided} indices were provided \

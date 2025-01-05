@@ -20,6 +20,8 @@ pub enum SymbolicExpr {
     IndexAccess(IndexAccess),
     Downcast(Downcast),
     Tuple(Tuple),
+    NumArrayElements(NumArrayElements),
+    ArrayExtent(ArrayExtent),
 }
 
 #[derive(Clone)]
@@ -56,6 +58,17 @@ pub struct Downcast {
 #[derive(Clone)]
 pub struct Tuple {
     pub items: Vec<SymbolicExpr>,
+}
+
+#[derive(Clone)]
+pub struct NumArrayElements {
+    pub array: Box<SymbolicExpr>,
+}
+
+#[derive(Clone)]
+pub struct ArrayExtent {
+    pub array: Box<SymbolicExpr>,
+    pub dim: Box<SymbolicExpr>,
 }
 
 impl SymbolicType {
@@ -467,6 +480,26 @@ impl SymbolicExpr {
                     ))
                 }
             }
+
+            SymbolicExpr::NumArrayElements(NumArrayElements { array }) => {
+                let array = array.simplify(reader)?;
+                let expr = NumArrayElements {
+                    array: Box::new(array),
+                }
+                .into();
+                Ok((expr, RuntimePrimType::U64.into()))
+            }
+            SymbolicExpr::ArrayExtent(ArrayExtent { array, dim }) => {
+                let array = array.simplify(reader)?;
+                let dim = dim.simplify(reader)?;
+                let expr = ArrayExtent {
+                    array: Box::new(array),
+                    dim: Box::new(dim),
+                }
+                .into();
+                Ok((expr, RuntimePrimType::U32.into()))
+            }
+
             SymbolicExpr::Tuple(_) => {
                 Err(Error::TupleExpressionOnlySupportedAtTopLevel)
             }
@@ -660,6 +693,46 @@ impl SymbolicExpr {
 
                 Ok((expr, expr_type))
             }
+            SymbolicExpr::NumArrayElements(NumArrayElements { array }) => {
+                let (array, array_type) =
+                    array.collect_physical_ops_and_infer_type(ops, reader)?;
+                match array_type {
+                    RuntimeType::Array { .. }
+                    | RuntimeType::MultiDimArray { .. } => {
+                        let num_elements_ptr = ops.add(array, Pointer::SIZE);
+                        let expr = ops
+                            .read_value(num_elements_ptr, RuntimePrimType::U64);
+                        Ok((expr, RuntimePrimType::U64.into()))
+                    }
+
+                    other => Err(Error::ArrayLengthRequiresArray(other)),
+                }
+            }
+            SymbolicExpr::ArrayExtent(ArrayExtent { array, dim }) => {
+                let (array, array_type) =
+                    array.collect_physical_ops_and_infer_type(ops, reader)?;
+                let dim = dim.collect_physical_ops(ops, reader)?;
+
+                match array_type {
+                    RuntimeType::MultiDimArray { .. } => {
+                        // TODO: Assert that `dim < rank`.  Will
+                        // require implementing support for runtime
+                        // assertions.
+                        let dim_offset =
+                            ops.mul(dim, RuntimePrimType::U32.size_bytes());
+                        let offset =
+                            ops.add(dim_offset, RuntimeArray::HEADER_SIZE);
+                        let extent_ptr = ops.add(array, offset);
+                        let extent =
+                            ops.read_value(extent_ptr, RuntimePrimType::U32);
+                        Ok((extent, RuntimePrimType::U32.into()))
+                    }
+                    other => Err(
+                        Error::ArrayExtentRequiresMultiDimensionalArray(other),
+                    ),
+                }
+            }
+
             SymbolicExpr::Tuple(_) => {
                 Err(Error::TupleExpressionOnlySupportedAtTopLevel)
             }
@@ -704,6 +777,9 @@ impl Display for SymbolicExpr {
             SymbolicExpr::FieldAccess(expr) => write!(f, "{expr}"),
             SymbolicExpr::IndexAccess(expr) => write!(f, "{expr}"),
             SymbolicExpr::Downcast(expr) => write!(f, "{expr}"),
+            SymbolicExpr::NumArrayElements(expr) => write!(f, "{expr}"),
+            SymbolicExpr::ArrayExtent(expr) => write!(f, "{expr}"),
+
             SymbolicExpr::Tuple(tuple) => {
                 write!(f, "[")?;
                 for (i, item) in tuple.items.iter().enumerate() {
@@ -764,6 +840,16 @@ impl Display for IndexAccess {
 
         write!(f, "\u{200B}]")?;
         Ok(())
+    }
+}
+impl Display for NumArrayElements {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}\u{200B}.len()", self.array)
+    }
+}
+impl Display for ArrayExtent {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}\u{200B}.extent({})", self.array, self.dim)
     }
 }
 impl Display for Downcast {

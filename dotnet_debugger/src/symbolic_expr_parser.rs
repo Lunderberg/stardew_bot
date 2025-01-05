@@ -272,6 +272,25 @@ impl<'a> SymbolicParser<'a> {
                     }
                     .into())
                 }
+                "len" => {
+                    let _ = self.expect_function_arguments(0, 0)?;
+                    Ok(symbolic_expr::NumArrayElements {
+                        array: Box::new(obj),
+                    }
+                    .into())
+                }
+                "extent" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let dim = args
+                        .into_iter()
+                        .next()
+                        .expect("Protected by length check");
+                    Ok(symbolic_expr::ArrayExtent {
+                        array: Box::new(obj),
+                        dim: Box::new(dim),
+                    }
+                    .into())
+                }
                 _ => Err(ParseError::UnknownOperator {
                     name: field.text.to_string(),
                 }
