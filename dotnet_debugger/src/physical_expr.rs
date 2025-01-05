@@ -12,47 +12,47 @@ use crate::{
     MethodTable, OpIndex, RuntimePrimValue, TypedPointer, VirtualMachine,
 };
 
-pub struct PhysicalSequence {
-    ops: Vec<Expr>,
+pub struct PhysicalGraph {
+    ops: Vec<PhysicalExpr>,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone, Copy, From)]
-pub enum Value {
+pub enum PhysicalValue {
     Int(usize),
     Ptr(Pointer),
     Result(OpIndex),
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
-pub enum Expr {
+pub enum PhysicalExpr {
     Add {
-        lhs: Value,
-        rhs: Value,
+        lhs: PhysicalValue,
+        rhs: PhysicalValue,
     },
     Mul {
-        lhs: Value,
-        rhs: Value,
+        lhs: PhysicalValue,
+        rhs: PhysicalValue,
     },
     Downcast {
-        obj: Value,
+        obj: PhysicalValue,
         ty: TypedPointer<MethodTable>,
     },
     ReadValue {
-        ptr: Value,
+        ptr: PhysicalValue,
         prim_type: RuntimePrimType,
     },
-    Tuple(Vec<Value>),
+    Tuple(Vec<PhysicalValue>),
 }
 
-impl Expr {
+impl PhysicalExpr {
     fn remap(
         &self,
         current_index: OpIndex,
-        map: &HashMap<OpIndex, Value>,
+        map: &HashMap<OpIndex, PhysicalValue>,
     ) -> Result<Self, Error> {
-        let remap = |value: &Value| -> Result<Value, Error> {
+        let remap = |value: &PhysicalValue| -> Result<PhysicalValue, Error> {
             Ok(match value {
-                Value::Result(op_index) => map
+                PhysicalValue::Result(op_index) => map
                     .get(op_index)
                     .cloned()
                     .ok_or_else(|| Error::InvalidReference {
@@ -65,23 +65,25 @@ impl Expr {
         };
 
         let new_op = match self {
-            Expr::Add { lhs, rhs } => Expr::Add {
+            PhysicalExpr::Add { lhs, rhs } => PhysicalExpr::Add {
                 lhs: remap(lhs)?,
                 rhs: remap(rhs)?,
             },
-            Expr::Mul { lhs, rhs } => Expr::Mul {
+            PhysicalExpr::Mul { lhs, rhs } => PhysicalExpr::Mul {
                 lhs: remap(lhs)?,
                 rhs: remap(rhs)?,
             },
-            Expr::Downcast { obj, ty } => Expr::Downcast {
+            PhysicalExpr::Downcast { obj, ty } => PhysicalExpr::Downcast {
                 obj: remap(obj)?,
                 ty: *ty,
             },
-            Expr::ReadValue { ptr, prim_type } => Expr::ReadValue {
-                ptr: remap(ptr)?,
-                prim_type: *prim_type,
-            },
-            Expr::Tuple(vec) => Expr::Tuple(
+            PhysicalExpr::ReadValue { ptr, prim_type } => {
+                PhysicalExpr::ReadValue {
+                    ptr: remap(ptr)?,
+                    prim_type: *prim_type,
+                }
+            }
+            PhysicalExpr::Tuple(vec) => PhysicalExpr::Tuple(
                 vec.into_iter().map(remap).collect::<Result<_, _>>()?,
             ),
         };
@@ -90,81 +92,81 @@ impl Expr {
     }
 
     fn visit_upstream_producers(&self, mut callback: impl FnMut(OpIndex)) {
-        let mut value_callback = |value: &Value| {
-            if let Value::Result(op_index) = value {
+        let mut value_callback = |value: &PhysicalValue| {
+            if let PhysicalValue::Result(op_index) = value {
                 callback(*op_index);
             }
         };
 
         match self {
-            Expr::Add { lhs, rhs } | Expr::Mul { lhs, rhs } => {
+            PhysicalExpr::Add { lhs, rhs } | PhysicalExpr::Mul { lhs, rhs } => {
                 value_callback(lhs);
                 value_callback(rhs);
             }
-            Expr::Downcast { obj, .. } => value_callback(obj),
-            Expr::ReadValue { ptr, .. } => value_callback(ptr),
-            Expr::Tuple(vec) => vec.iter().for_each(value_callback),
+            PhysicalExpr::Downcast { obj, .. } => value_callback(obj),
+            PhysicalExpr::ReadValue { ptr, .. } => value_callback(ptr),
+            PhysicalExpr::Tuple(vec) => vec.iter().for_each(value_callback),
         }
     }
 }
 
-impl PhysicalSequence {
+impl PhysicalGraph {
     pub fn new() -> Self {
         Self { ops: Vec::new() }
     }
 
-    fn push_impl(&mut self, op: Expr) -> Value {
+    fn push_impl(&mut self, op: PhysicalExpr) -> PhysicalValue {
         let index = self.ops.len();
         self.ops.push(op);
         OpIndex::new(index).into()
     }
 
-    pub fn push<T>(&mut self, value: T) -> Value
+    pub fn push<T>(&mut self, value: T) -> PhysicalValue
     where
-        T: Into<Expr>,
+        T: Into<PhysicalExpr>,
     {
         self.push_impl(value.into())
     }
 
     pub fn add(
         &mut self,
-        lhs: impl Into<Value>,
-        rhs: impl Into<Value>,
-    ) -> Value {
+        lhs: impl Into<PhysicalValue>,
+        rhs: impl Into<PhysicalValue>,
+    ) -> PhysicalValue {
         let lhs = lhs.into();
         let rhs = rhs.into();
-        self.push_impl(Expr::Add { lhs, rhs })
+        self.push_impl(PhysicalExpr::Add { lhs, rhs })
     }
 
     pub fn mul(
         &mut self,
-        lhs: impl Into<Value>,
-        rhs: impl Into<Value>,
-    ) -> Value {
+        lhs: impl Into<PhysicalValue>,
+        rhs: impl Into<PhysicalValue>,
+    ) -> PhysicalValue {
         let lhs = lhs.into();
         let rhs = rhs.into();
-        self.push_impl(Expr::Mul { lhs, rhs })
+        self.push_impl(PhysicalExpr::Mul { lhs, rhs })
     }
 
     pub fn downcast(
         &mut self,
-        obj: impl Into<Value>,
+        obj: impl Into<PhysicalValue>,
         ty: TypedPointer<MethodTable>,
-    ) -> Value {
+    ) -> PhysicalValue {
         let obj = obj.into();
-        self.push_impl(Expr::Downcast { obj, ty })
+        self.push_impl(PhysicalExpr::Downcast { obj, ty })
     }
 
     pub fn read_value(
         &mut self,
-        ptr: impl Into<Value>,
+        ptr: impl Into<PhysicalValue>,
         prim_type: RuntimePrimType,
-    ) -> Value {
+    ) -> PhysicalValue {
         let ptr = ptr.into();
-        self.push_impl(Expr::ReadValue { ptr, prim_type })
+        self.push_impl(PhysicalExpr::ReadValue { ptr, prim_type })
     }
 
-    fn iter_ops(&self) -> impl Iterator<Item = (OpIndex, Expr)> + '_ {
+    fn iter_ops(&self) -> impl Iterator<Item = (OpIndex, PhysicalExpr)> + '_ {
         self.ops
             .iter()
             .enumerate()
@@ -172,69 +174,71 @@ impl PhysicalSequence {
     }
 
     pub fn simplify(self) -> Result<Self, Error> {
-        let mut prev_index_lookup: HashMap<OpIndex, Value> = HashMap::new();
+        let mut prev_index_lookup: HashMap<OpIndex, PhysicalValue> =
+            HashMap::new();
         let mut builder = Self::new();
 
         for (prev_index, op) in self.iter_ops() {
             let new_op = op.remap(prev_index, &prev_index_lookup)?;
             let mut value = builder.push(new_op);
 
-            let mut do_simplify_step = |value: &Value| -> Option<Value> {
-                let &Value::Result(index) = value else {
-                    return None;
-                };
-                let op = &builder[index];
-                match op {
-                    // Constant-folding, lhs and rhs are known
-                    &Expr::Add {
-                        lhs: Value::Int(a),
-                        rhs: Value::Int(b),
-                    } => Some(Value::Int(a + b)),
+            let mut do_simplify_step =
+                |value: &PhysicalValue| -> Option<PhysicalValue> {
+                    let &PhysicalValue::Result(index) = value else {
+                        return None;
+                    };
+                    let op = &builder[index];
+                    match op {
+                        // Constant-folding, lhs and rhs are known
+                        &PhysicalExpr::Add {
+                            lhs: PhysicalValue::Int(a),
+                            rhs: PhysicalValue::Int(b),
+                        } => Some(PhysicalValue::Int(a + b)),
 
-                    &Expr::Mul {
-                        lhs: Value::Int(a),
-                        rhs: Value::Int(b),
-                    } => Some(Value::Int(a * b)),
+                        &PhysicalExpr::Mul {
+                            lhs: PhysicalValue::Int(a),
+                            rhs: PhysicalValue::Int(b),
+                        } => Some(PhysicalValue::Int(a * b)),
 
-                    // lhs + 0 => lhs
-                    &Expr::Add {
-                        lhs,
-                        rhs: Value::Int(0),
-                    } => Some(lhs),
-
-                    // 0 + rhs => rhs
-                    &Expr::Add {
-                        lhs: Value::Int(0),
-                        rhs,
-                    } => Some(rhs),
-
-                    // lhs * 1 => lhs
-                    &Expr::Mul {
-                        lhs,
-                        rhs: Value::Int(1),
-                    } => Some(lhs),
-
-                    // 1 * rhs => rhs
-                    &Expr::Mul {
-                        lhs: Value::Int(1),
-                        rhs,
-                    } => Some(rhs),
-
-                    // lhs + a + b => lhs + (a+b)
-                    &Expr::Add {
-                        lhs: Value::Result(lhs),
-                        rhs: Value::Int(b),
-                    } => match &builder[lhs] {
-                        &Expr::Add {
+                        // lhs + 0 => lhs
+                        &PhysicalExpr::Add {
                             lhs,
-                            rhs: Value::Int(a),
-                        } => Some(builder.add(lhs, a + b)),
-                        _ => None,
-                    },
+                            rhs: PhysicalValue::Int(0),
+                        } => Some(lhs),
 
-                    _ => None,
-                }
-            };
+                        // 0 + rhs => rhs
+                        &PhysicalExpr::Add {
+                            lhs: PhysicalValue::Int(0),
+                            rhs,
+                        } => Some(rhs),
+
+                        // lhs * 1 => lhs
+                        &PhysicalExpr::Mul {
+                            lhs,
+                            rhs: PhysicalValue::Int(1),
+                        } => Some(lhs),
+
+                        // 1 * rhs => rhs
+                        &PhysicalExpr::Mul {
+                            lhs: PhysicalValue::Int(1),
+                            rhs,
+                        } => Some(rhs),
+
+                        // lhs + a + b => lhs + (a+b)
+                        &PhysicalExpr::Add {
+                            lhs: PhysicalValue::Result(lhs),
+                            rhs: PhysicalValue::Int(b),
+                        } => match &builder[lhs] {
+                            &PhysicalExpr::Add {
+                                lhs,
+                                rhs: PhysicalValue::Int(a),
+                            } => Some(builder.add(lhs, a + b)),
+                            _ => None,
+                        },
+
+                        _ => None,
+                    }
+                };
 
             while let Some(simplified) = do_simplify_step(&value) {
                 value = simplified;
@@ -247,7 +251,8 @@ impl PhysicalSequence {
     }
 
     pub fn dead_code_elimination(self) -> Result<Self, Error> {
-        let mut prev_index_lookup: HashMap<OpIndex, Value> = HashMap::new();
+        let mut prev_index_lookup: HashMap<OpIndex, PhysicalValue> =
+            HashMap::new();
         let mut builder = Self::new();
 
         let reachable = {
@@ -284,8 +289,10 @@ impl PhysicalSequence {
     pub fn eliminate_common_subexpresssions(self) -> Result<Self, Error> {
         let mut builder = Self::new();
 
-        let mut prev_index_lookup: HashMap<OpIndex, Value> = HashMap::new();
-        let mut dedup_lookup: HashMap<Expr, Value> = HashMap::new();
+        let mut prev_index_lookup: HashMap<OpIndex, PhysicalValue> =
+            HashMap::new();
+        let mut dedup_lookup: HashMap<PhysicalExpr, PhysicalValue> =
+            HashMap::new();
 
         for (prev_index, op) in self.iter_ops() {
             let new_op = op.remap(prev_index, &prev_index_lookup)?;
@@ -304,27 +311,28 @@ impl PhysicalSequence {
     }
 }
 
-impl<T> From<Vec<T>> for Expr
+impl<T> From<Vec<T>> for PhysicalExpr
 where
-    T: Into<Value>,
+    T: Into<PhysicalValue>,
 {
     fn from(value: Vec<T>) -> Self {
-        Expr::Tuple(value.into_iter().map(Into::into).collect())
+        PhysicalExpr::Tuple(value.into_iter().map(Into::into).collect())
     }
 }
 
-impl PhysicalSequence {
+impl PhysicalGraph {
     pub(crate) fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
-        let (num_ops, iter_outputs) =
-            if let Expr::Tuple(tuple) = &self.ops[self.ops.len() - 1] {
-                (self.ops.len() - 1, Either::Left(tuple.iter().cloned()))
-            } else {
-                let value: Value = OpIndex::new(self.ops.len() - 1).into();
-                (self.ops.len(), Either::Right(std::iter::once(value)))
-            };
+        let (num_ops, iter_outputs) = if let PhysicalExpr::Tuple(tuple) =
+            &self.ops[self.ops.len() - 1]
+        {
+            (self.ops.len() - 1, Either::Left(tuple.iter().cloned()))
+        } else {
+            let value: PhysicalValue = OpIndex::new(self.ops.len() - 1).into();
+            (self.ops.len(), Either::Right(std::iter::once(value)))
+        };
         let output_indices: HashMap<OpIndex, usize> = iter_outputs
             .map(|output| match output {
-                Value::Result(op_index) => op_index,
+                PhysicalValue::Result(op_index) => op_index,
                 other => panic!("Output of {other} not yet handled"),
             })
             .enumerate()
@@ -339,12 +347,12 @@ impl PhysicalSequence {
         for (op_index, op) in self.ops.iter().take(num_ops).enumerate() {
             let op_index = OpIndex::new(op_index);
             match op {
-                Expr::Add { lhs, rhs } => {
+                PhysicalExpr::Add { lhs, rhs } => {
                     let lhs_instruction = match lhs {
-                        &Value::Ptr(ptr) => Instruction::Const {
+                        &PhysicalValue::Ptr(ptr) => Instruction::Const {
                             value: RuntimePrimValue::Ptr(ptr),
                         },
-                        Value::Result(op_index) => {
+                        PhysicalValue::Result(op_index) => {
                             let index = *currently_stored.get(op_index).expect(
                                 "Internal error, \
                                  {op_index} not located anywhere",
@@ -352,7 +360,7 @@ impl PhysicalSequence {
                             Instruction::RestoreValue { index }
                         }
 
-                        Value::Int(value) => panic!(
+                        PhysicalValue::Int(value) => panic!(
                             "LHS of add should be a pointer, \
                              but was instead {value}"
                         ),
@@ -360,26 +368,28 @@ impl PhysicalSequence {
                     instructions.push(lhs_instruction);
 
                     let rhs_instruction = match rhs {
-                        &Value::Int(offset) => Instruction::StaticOffset {
-                            byte_offset: offset,
-                        },
-                        Value::Result(op_index) => {
+                        &PhysicalValue::Int(offset) => {
+                            Instruction::StaticOffset {
+                                byte_offset: offset,
+                            }
+                        }
+                        PhysicalValue::Result(op_index) => {
                             let index = *currently_stored.get(op_index).expect(
                                 "Internal error, \
                                  {op_index} not located anywhere",
                             );
                             Instruction::DynamicOffset { index }
                         }
-                        Value::Ptr(pointer) => panic!(
+                        PhysicalValue::Ptr(pointer) => panic!(
                             "RHS of add should be byte offset, \
                              but was instead {pointer}"
                         ),
                     };
                     instructions.push(rhs_instruction);
                 }
-                Expr::Mul { lhs, rhs } => {
+                PhysicalExpr::Mul { lhs, rhs } => {
                     let lhs_instruction = match lhs {
-                        Value::Result(op_index) => {
+                        PhysicalValue::Result(op_index) => {
                             let index = *currently_stored.get(op_index).expect(
                                 "Internal error, \
                                  {op_index} not located anywhere",
@@ -387,12 +397,12 @@ impl PhysicalSequence {
                             Instruction::RestoreValue { index }
                         }
 
-                        Value::Ptr(ptr) => panic!(
+                        PhysicalValue::Ptr(ptr) => panic!(
                             "LHS of multiply should be output of previous op, \
                              but was instead {ptr}"
                         ),
 
-                        Value::Int(value) => panic!(
+                        PhysicalValue::Int(value) => panic!(
                             "LHS of multiply should be a pointer, \
                              but was instead {value}"
                         ),
@@ -400,26 +410,26 @@ impl PhysicalSequence {
                     instructions.push(lhs_instruction);
 
                     let rhs_instruction = match rhs {
-                        &Value::Int(factor) => {
+                        &PhysicalValue::Int(factor) => {
                             Instruction::StaticScale { factor }
                         }
-                        Value::Ptr(ptr) => panic!(
+                        PhysicalValue::Ptr(ptr) => panic!(
                             "RHS of multiply should be a static value, \
                              but was instead {ptr}"
                         ),
-                        Value::Result(op_index) => panic!(
+                        PhysicalValue::Result(op_index) => panic!(
                             "RHS of multiply should be a static value, \
                              but was instead {op_index}"
                         ),
                     };
                     instructions.push(rhs_instruction);
                 }
-                &Expr::Downcast { obj, ty } => {
+                &PhysicalExpr::Downcast { obj, ty } => {
                     let obj_instruction = match obj {
-                        Value::Ptr(ptr) => Instruction::Const {
+                        PhysicalValue::Ptr(ptr) => Instruction::Const {
                             value: RuntimePrimValue::Ptr(ptr),
                         },
-                        Value::Result(op_index) => {
+                        PhysicalValue::Result(op_index) => {
                             let index =
                                 *currently_stored.get(&op_index).expect(
                                     "Internal error, \
@@ -427,7 +437,7 @@ impl PhysicalSequence {
                                 );
                             Instruction::RestoreValue { index }
                         }
-                        Value::Int(value) => panic!(
+                        PhysicalValue::Int(value) => panic!(
                             "LHS of downcast should be a pointer, \
                              but was instead {value}"
                         ),
@@ -435,12 +445,12 @@ impl PhysicalSequence {
                     instructions.push(obj_instruction);
                     instructions.push(Instruction::Downcast { ty });
                 }
-                &Expr::ReadValue { ptr, prim_type } => {
+                &PhysicalExpr::ReadValue { ptr, prim_type } => {
                     let obj_instruction = match ptr {
-                        Value::Ptr(ptr) => Instruction::Const {
+                        PhysicalValue::Ptr(ptr) => Instruction::Const {
                             value: RuntimePrimValue::Ptr(ptr),
                         },
-                        Value::Result(op_index) => {
+                        PhysicalValue::Result(op_index) => {
                             let index =
                                 *currently_stored.get(&op_index).expect(
                                     "Internal error, \
@@ -448,7 +458,7 @@ impl PhysicalSequence {
                                 );
                             Instruction::RestoreValue { index }
                         }
-                        Value::Int(value) => panic!(
+                        PhysicalValue::Int(value) => panic!(
                             "LHS of ReadValue should be a pointer, \
                              but was instead {value}"
                         ),
@@ -456,7 +466,7 @@ impl PhysicalSequence {
                     instructions.push(obj_instruction);
                     instructions.push(Instruction::Read { ty: prim_type });
                 }
-                Expr::Tuple(_) => {
+                PhysicalExpr::Tuple(_) => {
                     panic!("Tuple should only appear at top-level")
                 }
             }
@@ -477,26 +487,28 @@ impl PhysicalSequence {
     }
 }
 
-impl Display for Value {
+impl Display for PhysicalValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Value::Int(value) => write!(f, "{value}"),
-            Value::Ptr(pointer) => write!(f, "{pointer}"),
-            Value::Result(op_index) => write!(f, "{op_index}"),
+            PhysicalValue::Int(value) => write!(f, "{value}"),
+            PhysicalValue::Ptr(pointer) => write!(f, "{pointer}"),
+            PhysicalValue::Result(op_index) => write!(f, "{op_index}"),
         }
     }
 }
 
-impl Display for Expr {
+impl Display for PhysicalExpr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Expr::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}")?,
-            Expr::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}")?,
-            Expr::Downcast { obj, ty } => write!(f, "{obj}.downcast({ty})")?,
-            Expr::ReadValue { ptr, prim_type } => {
+            PhysicalExpr::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}")?,
+            PhysicalExpr::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}")?,
+            PhysicalExpr::Downcast { obj, ty } => {
+                write!(f, "{obj}.downcast({ty})")?
+            }
+            PhysicalExpr::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")?
             }
-            Expr::Tuple(vec) => {
+            PhysicalExpr::Tuple(vec) => {
                 write!(f, "[")?;
                 for (vec_i, input) in vec.iter().enumerate() {
                     if vec_i > 0 {
@@ -511,7 +523,7 @@ impl Display for Expr {
     }
 }
 
-impl Display for PhysicalSequence {
+impl Display for PhysicalGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         for (i_output, op) in self.ops.iter().enumerate() {
             writeln!(f, "[{i_output}] <- {op}")?;
@@ -520,8 +532,8 @@ impl Display for PhysicalSequence {
     }
 }
 
-impl std::ops::Index<OpIndex> for PhysicalSequence {
-    type Output = Expr;
+impl std::ops::Index<OpIndex> for PhysicalGraph {
+    type Output = PhysicalExpr;
 
     fn index(&self, index: OpIndex) -> &Self::Output {
         &self.ops[index.0]

@@ -3,7 +3,7 @@ use std::{fmt::Display, ops::Deref};
 use derive_more::derive::From;
 use itertools::Itertools as _;
 
-use crate::physical_expr::{PhysicalSequence, Value as PhysicalValue};
+use crate::physical_expr::{PhysicalGraph, PhysicalValue};
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, FieldDescription,
     MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeType,
@@ -332,7 +332,8 @@ impl SymbolicExpr {
         reader: CachedReader<'_>,
     ) -> Result<VirtualMachine, Error> {
         let expr = self.simplify(reader)?;
-        let seq = expr.to_physical_sequence(reader)?;
+
+        let seq = expr.to_physical_graph(reader)?;
 
         let seq = seq.simplify()?;
         let seq = seq.eliminate_common_subexpresssions()?;
@@ -506,11 +507,11 @@ impl SymbolicExpr {
         }
     }
 
-    pub(crate) fn to_physical_sequence(
+    pub(crate) fn to_physical_graph(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<PhysicalSequence, Error> {
-        let mut ops = PhysicalSequence::new();
+    ) -> Result<PhysicalGraph, Error> {
+        let mut ops = PhysicalGraph::new();
 
         match self {
             Self::Tuple(Tuple { items }) => {
@@ -530,7 +531,7 @@ impl SymbolicExpr {
 
     pub(crate) fn collect_physical_ops(
         &self,
-        ops: &mut PhysicalSequence,
+        ops: &mut PhysicalGraph,
         reader: CachedReader<'_>,
     ) -> Result<PhysicalValue, Error> {
         let (item, _runtime_type) =
@@ -541,7 +542,7 @@ impl SymbolicExpr {
 
     pub(crate) fn collect_physical_ops_and_infer_type(
         &self,
-        ops: &mut PhysicalSequence,
+        ops: &mut PhysicalGraph,
         reader: CachedReader<'_>,
     ) -> Result<(PhysicalValue, RuntimeType), Error> {
         match self {
