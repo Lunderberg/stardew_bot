@@ -3,11 +3,11 @@ use std::{fmt::Display, ops::Deref};
 use derive_more::derive::From;
 use itertools::Itertools as _;
 
+use crate::physical_expr::{PhysicalSequence, Value as PhysicalValue};
 use crate::{
-    physical_expr::PhysicalSequence, runtime_type::RuntimePrimType,
-    CachedReader, Error, FieldDescription, MethodTable, RuntimeArray,
-    RuntimeMultiDimArray, RuntimeType, SymbolicParser, TypedPointer,
-    VirtualMachine,
+    runtime_type::RuntimePrimType, CachedReader, Error, FieldDescription,
+    MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeType,
+    SymbolicParser, TypedPointer, VirtualMachine,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
@@ -532,7 +532,7 @@ impl SymbolicExpr {
         &self,
         ops: &mut PhysicalSequence,
         reader: CachedReader<'_>,
-    ) -> Result<crate::physical_expr::Value, Error> {
+    ) -> Result<PhysicalValue, Error> {
         let (item, _runtime_type) =
             self.collect_physical_ops_and_infer_type(ops, reader)?;
 
@@ -543,18 +543,17 @@ impl SymbolicExpr {
         &self,
         ops: &mut PhysicalSequence,
         reader: CachedReader<'_>,
-    ) -> Result<(crate::physical_expr::Value, RuntimeType), Error> {
-        use crate::physical_expr::Value;
+    ) -> Result<(PhysicalValue, RuntimeType), Error> {
         match self {
             &SymbolicExpr::Int(value) => {
-                let expr = Value::Int(value);
+                let expr = PhysicalValue::Int(value);
                 let runtime_type = RuntimePrimType::NativeUInt.into();
                 Ok((expr, runtime_type))
             }
             SymbolicExpr::StaticField(static_field) => {
                 let runtime_type = static_field.runtime_type(reader)?;
                 let location = static_field.location(reader)?;
-                let expr = Value::Ptr(location);
+                let expr = PhysicalValue::Ptr(location);
 
                 let expr = if let Some(prim_type) = runtime_type.storage_type()
                 {
@@ -604,7 +603,7 @@ impl SymbolicExpr {
                 let (element_type, header_size_bytes, shape): (
                     _,
                     _,
-                    Vec<crate::physical_expr::Value>,
+                    Vec<PhysicalValue>,
                 ) = match array_type {
                     RuntimeType::Array { element_type } => {
                         let header_size_bytes = RuntimeArray::HEADER_SIZE;
@@ -655,9 +654,8 @@ impl SymbolicExpr {
                 let expr = {
                     let first_element = ops.add(expr, header_size_bytes);
                     let item_offset = {
-                        let mut flat_index: crate::physical_expr::Value =
-                            0.into();
-                        let mut stride: crate::physical_expr::Value = 1.into();
+                        let mut flat_index: PhysicalValue = 0.into();
+                        let mut stride: PhysicalValue = 1.into();
                         for (i, dim) in
                             indices.into_iter().zip(shape.into_iter()).rev()
                         {
