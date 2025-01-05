@@ -14,6 +14,13 @@ pub struct RuntimeMultiDimArray {
 }
 
 impl RuntimeMultiDimArray {
+    pub fn header_size(rank: usize) -> usize {
+        // The header used by normal arrays, followed by the shape
+        // (`rank` values of type u32), followed by the lower bounds
+        // (another `rank` values of type u32).
+        RuntimeArrayHeader::SIZE + 2 * rank * std::mem::size_of::<u32>()
+    }
+
     pub fn read(ptr: Pointer, reader: &MemoryReader) -> Result<Self, Error> {
         // Without the rank, we don't know the exact size of the
         // header for a multi-dimensional array.  The multi-dim array
@@ -58,11 +65,7 @@ impl RuntimeMultiDimArray {
         // need to be re-read at this point.
         let rank = method_table.get_ee_class(reader)?.multi_dim_rank() as usize;
 
-        // The header used by normal arrays, followed by the shape
-        // (`rank` values of type u32), followed by the lower bounds
-        // (another `rank` values of type u32).
-        let full_header_size =
-            RuntimeArrayHeader::SIZE + 2 * rank * std::mem::size_of::<u32>();
+        let full_header_size = Self::header_size(rank);
 
         let bytes = if full_header_size <= SHORT_READ {
             bytes
