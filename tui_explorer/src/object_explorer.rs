@@ -82,7 +82,7 @@ enum ObjectTreeNode {
     },
     DisplayList(Vec<ObjectTreeNode>),
     ListItem {
-        index: usize,
+        indices: Option<Vec<usize>>,
         value: Box<ObjectTreeNode>,
     },
 }
@@ -756,8 +756,12 @@ impl ObjectExplorer {
                         let expr = expr.access_field(field_name.clone());
                         Ok(expr)
                     }
-                    ObjectTreeNode::ListItem { index, .. } => {
-                        let expr = expr.access_index(*index);
+                    ObjectTreeNode::ListItem { indices, .. } => {
+                        let expr = if let Some(indices) = indices {
+                            expr.access_indices(indices.clone())
+                        } else {
+                            expr
+                        };
                         Ok(expr)
                     }
                     ObjectTreeNode::Value { .. } => todo!(),
@@ -769,6 +773,29 @@ impl ObjectExplorer {
             },
         )
     }
+}
+
+/// Given a linear index into a multi-dimensional array, split it into
+/// indices along each dimension.
+///
+/// * `flat_index`: The position of an element, following a row-major
+///   traversal of the multi-dimensional array.
+///
+/// * `shape`: The shape of the multi-dimensional array.
+///
+/// Returns a list of indices, of the same
+fn split_index(flat_index: usize, shape: &[usize]) -> Vec<usize> {
+    let mut stride = shape.iter().product::<usize>();
+    let mut indices = Vec::new();
+    let mut remaining_index = flat_index;
+
+    for extent in shape.iter() {
+        stride /= extent;
+        indices.push(remaining_index / stride);
+        remaining_index %= stride;
+    }
+
+    indices
 }
 
 impl ObjectTreeNode {
@@ -1052,11 +1079,10 @@ impl ObjectTreeNode {
                                 reader,
                                 display_options,
                                 prefetch,
-                                // 0,
                             )?;
 
                             let node = ObjectTreeNode::ListItem {
-                                index,
+                                indices: Some(vec![index]),
                                 value: Box::new(value),
                             };
 
@@ -1083,7 +1109,8 @@ impl ObjectTreeNode {
                     let shape = array.shape();
                     let rank = shape.len();
                     assert!(rank > 0);
-                    let mut nested_list = vec![Vec::new(); shape.len()];
+                    let mut nested_list: Vec<Vec<ObjectTreeNode>> =
+                        vec![Vec::new(); shape.len()];
                     let mut output = None;
 
                     for index in 0..array.num_elements() {
@@ -1096,8 +1123,10 @@ impl ObjectTreeNode {
                             prefetch,
                         )?;
 
+                        let indices = split_index(index, &shape);
+
                         let node = ObjectTreeNode::ListItem {
-                            index: nested_list.last().unwrap().len(),
+                            indices: Some(indices),
                             value: Box::new(value),
                         };
 
@@ -1113,9 +1142,8 @@ impl ObjectTreeNode {
                                         display_expanded,
                                     });
                                 } else {
-                                    let index = nested_list[dim - 1].len();
                                     let item = ObjectTreeNode::ListItem {
-                                        index,
+                                        indices: None,
                                         value: Box::new(
                                             ObjectTreeNode::Array {
                                                 items,
