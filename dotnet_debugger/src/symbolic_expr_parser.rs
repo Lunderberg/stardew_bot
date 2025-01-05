@@ -110,10 +110,10 @@ impl<'a> SymbolicParser<'a> {
         loop {
             if let Some(field) = self.try_field_name()? {
                 obj = self.generate_field_access_or_operation(obj, field)?;
-            } else if let Some(index) = self.try_container_access()? {
+            } else if let Some(indices) = self.try_container_access()? {
                 obj = symbolic_expr::IndexAccess {
                     obj: Box::new(obj),
-                    index: Box::new(index),
+                    indices,
                 }
                 .into();
             } else {
@@ -324,7 +324,9 @@ impl<'a> SymbolicParser<'a> {
         Ok((type_args, args))
     }
 
-    fn try_container_access(&mut self) -> Result<Option<SymbolicExpr>, Error> {
+    fn try_container_access(
+        &mut self,
+    ) -> Result<Option<Vec<SymbolicExpr>>, Error> {
         if self
             .tokens
             .next_if(|token| {
@@ -335,14 +337,36 @@ impl<'a> SymbolicParser<'a> {
             return Ok(None);
         }
 
-        let expr = self.next_expr()?;
+        let mut indices = Vec::new();
+
+        loop {
+            // Closing bracket without a trailing comma
+            if self
+                .tokens
+                .peek()?
+                .map(|peek| peek.kind.is_punct(Punctuation::RightSquareBracket))
+                .unwrap_or(false)
+            {
+                break;
+            }
+
+            indices.push(self.next_expr()?);
+
+            if self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+                .is_none()
+            {
+                break;
+            }
+        }
 
         self.expect_punct(
             "closing ] of index",
             Punctuation::RightSquareBracket,
         )?;
 
-        Ok(Some(expr))
+        Ok(Some(indices))
     }
 
     fn expect_ident(&mut self, desc: &'static str) -> Result<Token<'a>, Error> {

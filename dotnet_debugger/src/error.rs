@@ -192,11 +192,22 @@ pub enum Error {
     FieldAccessRequiresClassOrStruct(RuntimeType),
 
     #[error(
-        "The SymbolicOperation::IndexAccess(index) operation \
-         accesses an element of an arry.  \
+        "The SymbolicOperation::IndexAccess(indices) operation \
+         accesses an element of an array.  \
          However, it was applied to an object of type {0}."
     )]
     IndexAccessRequiresArray(RuntimeType),
+
+    #[error(
+        "The SymbolicOperation::IndexAccess(indices) operation \
+         requires one index for each rank of the array being accessed.  \
+         However, {num_provided} indices were provided \
+         to access an array of rank {num_expected}."
+    )]
+    IncorrectNumberOfIndices {
+        num_provided: usize,
+        num_expected: usize,
+    },
 
     #[error(
         "The SymbolicOperation::Downcast operation \

@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::Deref};
 
 use derive_more::derive::From;
 use itertools::Itertools as _;
@@ -6,7 +6,8 @@ use itertools::Itertools as _;
 use crate::{
     physical_expr::PhysicalSequence, runtime_type::RuntimePrimType,
     CachedReader, Error, FieldDescription, MethodTable, RuntimeArray,
-    RuntimeType, SymbolicParser, TypedPointer, VirtualMachine,
+    RuntimeMultiDimArray, RuntimeType, SymbolicParser, TypedPointer,
+    VirtualMachine,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
@@ -43,7 +44,7 @@ pub struct FieldAccess {
 #[derive(Clone)]
 pub struct IndexAccess {
     pub obj: Box<SymbolicExpr>,
-    pub index: Box<SymbolicExpr>,
+    pub indices: Vec<SymbolicExpr>,
 }
 
 #[derive(Clone)]
@@ -196,11 +197,6 @@ trait RuntimeTypeExt {
     fn method_table_for_downcast(
         &self,
     ) -> Result<TypedPointer<MethodTable>, Error>;
-
-    fn as_array_type(
-        self,
-        gen_name: impl FnOnce() -> String,
-    ) -> Result<RuntimeType, Error>;
 }
 impl RuntimeTypeExt for RuntimeType {
     fn method_table_for_field_access(
@@ -224,19 +220,6 @@ impl RuntimeTypeExt for RuntimeType {
             }
             _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
         }
-    }
-
-    fn as_array_type(
-        self,
-        gen_name: impl FnOnce() -> String,
-    ) -> Result<RuntimeType, Error> {
-        match self {
-            RuntimeType::Array { element_type } => Ok(element_type),
-            //RuntimeType::MultiDimArray { element_type, rank } => todo!(),
-            _ => Err(Error::IndexAccessRequiresArray(self.clone())),
-        }?
-        .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name()))
-        .map(|boxed| *boxed)
     }
 }
 
@@ -313,7 +296,20 @@ impl SymbolicExpr {
         let index = index.into();
         IndexAccess {
             obj: Box::new(self),
-            index: Box::new(index),
+            indices: vec![index],
+        }
+        .into()
+    }
+
+    pub fn access_indices<Iter>(self, indices: Iter) -> Self
+    where
+        Iter: IntoIterator,
+        Iter::Item: Into<SymbolicExpr>,
+    {
+        let indices = indices.into_iter().map(Into::into).collect();
+        IndexAccess {
+            obj: Box::new(self),
+            indices,
         }
         .into()
     }
@@ -383,19 +379,50 @@ impl SymbolicExpr {
                 .into();
                 Ok((expr, field_type))
             }
-            SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
+            SymbolicExpr::IndexAccess(IndexAccess { obj, indices }) => {
                 let (obj, obj_type) = obj.simplify_and_infer_type(reader)?;
-                let (index, _) = index.simplify_and_infer_type(reader)?;
+                let indices = indices
+                    .into_iter()
+                    .map(|index| index.simplify(reader))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                let element_type =
-                    obj_type.as_array_type(|| format!("{obj}"))?;
+                match obj_type {
+                    RuntimeType::Array { .. } if indices.len() != 1 => {
+                        Err(Error::IncorrectNumberOfIndices {
+                            num_provided: indices.len(),
+                            num_expected: 1,
+                        })
+                    }
+                    RuntimeType::MultiDimArray { rank, .. }
+                        if indices.len() != rank =>
+                    {
+                        Err(Error::IncorrectNumberOfIndices {
+                            num_provided: indices.len(),
+                            num_expected: rank,
+                        })
+                    }
+                    RuntimeType::MultiDimArray { element_type, .. }
+                    | RuntimeType::Array { element_type } => {
+                        let element_type = element_type
+                            .ok_or_else(|| {
+                                Error::UnexpectedNullMethodTable(format!(
+                                    "{obj}"
+                                ))
+                            })?
+                            .deref()
+                            .clone();
 
-                let expr = IndexAccess {
-                    obj: Box::new(obj),
-                    index: Box::new(index),
+                        let expr = IndexAccess {
+                            obj: Box::new(obj),
+                            indices,
+                        }
+                        .into();
+
+                        Ok((expr, element_type))
+                    }
+
+                    other => Err(Error::IndexAccessRequiresArray(other)),
                 }
-                .into();
-                Ok((expr, element_type))
             }
             SymbolicExpr::Downcast(Downcast { obj, ty }) => {
                 let (obj, obj_type) = obj.simplify_and_infer_type(reader)?;
@@ -535,19 +562,83 @@ impl SymbolicExpr {
 
                 Ok((expr, field_type))
             }
-            SymbolicExpr::IndexAccess(IndexAccess { obj, index }) => {
+            SymbolicExpr::IndexAccess(IndexAccess { obj, indices }) => {
                 let (expr, array_type) =
                     obj.collect_physical_ops_and_infer_type(ops, reader)?;
-                let element_index = index.collect_physical_ops(ops, reader)?;
+                let indices = indices
+                    .iter()
+                    .map(|index| index.collect_physical_ops(ops, reader))
+                    .collect::<Result<Vec<_>, _>>()?;
 
-                let element_type =
-                    array_type.as_array_type(|| format!("{obj}"))?;
+                let (element_type, header_size_bytes, shape): (
+                    _,
+                    _,
+                    Vec<crate::physical_expr::Value>,
+                ) = match array_type {
+                    RuntimeType::Array { element_type } => {
+                        let header_size_bytes = RuntimeArray::HEADER_SIZE;
+                        let num_elements_ptr = ops.add(expr, Pointer::SIZE);
+                        let num_elements = ops
+                            .read_value(num_elements_ptr, RuntimePrimType::U64);
+                        let shape = vec![num_elements];
+                        Ok((element_type, header_size_bytes, shape))
+                    }
+                    RuntimeType::MultiDimArray { element_type, rank } => {
+                        let shape_start =
+                            ops.add(expr, RuntimeArray::HEADER_SIZE);
+                        let shape = (0..rank)
+                            .map(|i| {
+                                let extent_ptr = ops.add(
+                                    shape_start,
+                                    i * RuntimePrimType::U32.size_bytes(),
+                                );
+                                let extent = ops.read_value(
+                                    extent_ptr,
+                                    RuntimePrimType::U32,
+                                );
+                                extent
+                            })
+                            .collect();
+                        let header_size_bytes =
+                            RuntimeMultiDimArray::header_size(rank);
 
-                let expr = ops.add(expr, RuntimeArray::HEADER_SIZE);
+                        Ok((element_type, header_size_bytes, shape))
+                    }
+                    other => Err(Error::IndexAccessRequiresArray(other)),
+                }?;
+
+                if shape.len() != indices.len() {
+                    return Err(Error::IncorrectNumberOfIndices {
+                        num_provided: indices.len(),
+                        num_expected: shape.len(),
+                    });
+                }
+
+                let element_type = element_type
+                    .ok_or_else(|| {
+                        Error::UnexpectedNullMethodTable(format!("{obj}"))
+                    })?
+                    .deref()
+                    .clone();
+
                 let expr = {
-                    let offset =
-                        ops.mul(element_index, element_type.size_bytes());
-                    ops.add(expr, offset)
+                    let first_element = ops.add(expr, header_size_bytes);
+                    let item_offset = {
+                        let mut flat_index: crate::physical_expr::Value =
+                            0.into();
+                        let mut stride: crate::physical_expr::Value = 1.into();
+                        for (i, dim) in
+                            indices.into_iter().zip(shape.into_iter()).rev()
+                        {
+                            let offset = ops.mul(stride, i);
+                            flat_index = ops.add(flat_index, offset);
+                            stride = ops.mul(stride, dim);
+                        }
+                        flat_index
+                    };
+                    let byte_offset =
+                        ops.mul(item_offset, element_type.size_bytes());
+                    ops.add(first_element, byte_offset)
                 };
 
                 let expr = if let Some(prim_type) = element_type.storage_type()
@@ -664,7 +755,17 @@ impl Display for FieldAccess {
 }
 impl Display for IndexAccess {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}[\u{200B}{}\u{200B}]", self.obj, self.index)
+        write!(f, "{}[\u{200B}", self.obj)?;
+
+        for (i, index) in self.indices.iter().enumerate() {
+            if i > 0 {
+                write!(f, ", ")?;
+            }
+            write!(f, "{index}")?;
+        }
+
+        write!(f, "\u{200B}]")?;
+        Ok(())
     }
 }
 impl Display for Downcast {
