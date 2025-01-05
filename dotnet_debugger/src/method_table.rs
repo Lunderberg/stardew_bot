@@ -245,7 +245,7 @@ impl MethodTable {
             let ee_class = self.get_ee_class(reader)?;
             let element_type = ee_class.element_type()?;
             if let CorElementType::Prim(prim) = element_type {
-                Ok(RuntimeType::Prim(prim))
+                Ok(prim.into())
             } else {
                 Err(Error::ExpectedPrimType(element_type))
             }

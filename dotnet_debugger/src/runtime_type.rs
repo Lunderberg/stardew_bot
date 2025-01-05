@@ -114,7 +114,7 @@ impl RuntimeType {
         match self {
             RuntimeType::Prim(prim) => {
                 let prim = prim.parse(bytes)?;
-                Ok(RuntimeValue::Prim(prim))
+                Ok(prim.into())
             }
             RuntimeType::Class { .. } => {
                 // The RuntimeType holds a pointer to the
@@ -272,8 +272,9 @@ impl RuntimePrimType {
         if provided >= expected {
             Ok(&bytes[..expected])
         } else {
+            let runtime_type = (*self).into();
             Err(Error::InsufficientBytesForValue {
-                runtime_type: RuntimeType::Prim(*self),
+                runtime_type,
                 provided,
                 expected,
             })
@@ -371,6 +372,12 @@ impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
             dll_unpacker::SignaturePrimType::NativeInt => Self::NativeInt,
             dll_unpacker::SignaturePrimType::NativeUInt => Self::NativeUInt,
         }
+    }
+}
+
+impl From<RuntimePrimType> for RuntimeType {
+    fn from(prim: RuntimePrimType) -> Self {
+        RuntimeType::Prim(prim)
     }
 }
 

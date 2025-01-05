@@ -37,7 +37,7 @@ impl TypeDescription {
         _reader: &MemoryReader,
     ) -> Result<RuntimeType, Error> {
         match self.element_type() {
-            CorElementType::Prim(prim) => Ok(RuntimeType::Prim(prim)),
+            CorElementType::Prim(prim) => Ok(prim.into()),
             CorElementType::End => todo!(),
             CorElementType::Void => todo!(),
 

@@ -356,8 +356,7 @@ impl SymbolicExpr {
     ) -> Result<(Self, RuntimeType), Error> {
         match self {
             SymbolicExpr::Int(_) => {
-                let runtime_type =
-                    RuntimeType::Prim(RuntimePrimType::NativeUInt);
+                let runtime_type = RuntimePrimType::NativeUInt.into();
                 Ok((self, runtime_type))
             }
             SymbolicExpr::StaticField(static_field) => {
@@ -516,8 +515,7 @@ impl SymbolicExpr {
         match self {
             &SymbolicExpr::Int(value) => {
                 let expr = Value::Int(value);
-                let runtime_type =
-                    RuntimeType::Prim(RuntimePrimType::NativeUInt);
+                let runtime_type = RuntimePrimType::NativeUInt.into();
                 Ok((expr, runtime_type))
             }
             SymbolicExpr::StaticField(static_field) => {

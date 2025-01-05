@@ -3,7 +3,7 @@ use memory_reader::{MemoryReader, Pointer};
 use crate::runtime_type::RuntimePrimType;
 use crate::{
     Error, MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeObject,
-    RuntimeString, RuntimeType, TypedPointer,
+    RuntimeString, TypedPointer,
 };
 
 /// A value read out from the remote process.  This only handles
@@ -125,7 +125,7 @@ impl RuntimePrimValue {
             Ok(&bytes[..expected])
         } else {
             Err(Error::InsufficientBytesForValue {
-                runtime_type: RuntimeType::Prim(runtime_type),
+                runtime_type: runtime_type.into(),
                 provided,
                 expected,
             })
@@ -219,6 +219,12 @@ impl RuntimePrimValue {
         let ptr: TypedPointer<RuntimeString> = ptr.into();
         let runtime_string = ptr.read(reader)?;
         Ok(runtime_string.into())
+    }
+}
+
+impl From<RuntimePrimValue> for RuntimeValue {
+    fn from(prim: RuntimePrimValue) -> Self {
+        RuntimeValue::Prim(prim)
     }
 }
 

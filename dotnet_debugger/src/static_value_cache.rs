@@ -13,6 +13,7 @@ use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
+use crate::runtime_type::RuntimePrimType;
 use crate::{
     extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
     TypeHandle,
@@ -332,7 +333,7 @@ impl<'a> CachedReader<'a> {
 
         let runtime_type: RuntimeType = 'runtime_type: {
             if let CorElementType::Prim(prim) = desc.cor_element_type()? {
-                break 'runtime_type RuntimeType::Prim(prim);
+                break 'runtime_type prim.into();
             }
 
             let parent = self.method_table(ptr_mtable_of_parent)?;
@@ -516,7 +517,8 @@ impl<'a> CachedReader<'a> {
             SignatureType::Prim(prim) => {
                 // This case should already have been handled
                 // by checking the field description.
-                RuntimeType::Prim(prim.into())
+                let prim: RuntimePrimType = prim.into();
+                prim.into()
             }
 
             SignatureType::ValueType { index, .. } => {
@@ -777,9 +779,7 @@ impl<'a> CachedReader<'a> {
                     }
                     TypeHandle::TypeDescription(type_desc) => {
                         match type_desc.element_type() {
-                            CorElementType::Prim(prim) => {
-                                RuntimeType::Prim(prim)
-                            }
+                            CorElementType::Prim(prim) => prim.into(),
                             CorElementType::Var => {
                                 todo!(
                                     "Signature type {sig_type}, \
