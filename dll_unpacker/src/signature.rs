@@ -701,8 +701,15 @@ impl std::fmt::Display for SignatureType<'_> {
                 write!(f, "_M{index}")
             }
             SignatureType::SizeArray(ty) => write!(f, "{ty}[]"),
-            SignatureType::MultiDimArray { element_type, .. } => {
-                write!(f, "{element_type}[]")
+            SignatureType::MultiDimArray {
+                element_type, rank, ..
+            } => {
+                write!(f, "{element_type}[")?;
+                for _ in 0..rank.saturating_sub(1) {
+                    write!(f, ",")?;
+                }
+                write!(f, "]")?;
+                Ok(())
             }
             SignatureType::Class { index, metadata }
             | SignatureType::ValueType { index, metadata } => {
