@@ -364,10 +364,15 @@ impl<'a> CachedReader<'a> {
             RuntimeType::ValueType { .. } => true,
             RuntimeType::String => true,
             RuntimeType::Class { method_table } => method_table.is_some(),
-            RuntimeType::Array { element_type }
-            | RuntimeType::MultiDimArray { element_type, .. } => {
-                element_type.is_some()
+            RuntimeType::Array {
+                element_type,
+                component_size,
             }
+            | RuntimeType::MultiDimArray {
+                element_type,
+                component_size,
+                ..
+            } => element_type.is_some() && component_size.is_some(),
         };
 
         if is_complete {
@@ -562,6 +567,15 @@ impl<'a> CachedReader<'a> {
                 let generic_method_table_ptr =
                     self.method_table_by_metadata(module_ptr, index)?;
 
+                if generic_method_table_ptr.is_none()
+                    && is_value_type
+                    && !allow_missing
+                {
+                    return Err(Error::GenericMethodTableNotFound(format!(
+                        "{sig_type}"
+                    )));
+                }
+
                 let ptr_to_loader_module = type_args
                     .iter()
                     .next()
@@ -619,15 +633,6 @@ impl<'a> CachedReader<'a> {
                 let parent_generic_types = self
                     .method_table(ptr_mtable_of_parent)?
                     .generic_types(self)?;
-
-                if generic_method_table_ptr.is_none()
-                    && is_value_type
-                    && !allow_missing
-                {
-                    return Err(Error::GenericMethodTableNotFound(format!(
-                        "{sig_type}"
-                    )));
-                }
 
                 generic_method_table_ptr
                         .into_iter()
@@ -746,17 +751,6 @@ impl<'a> CachedReader<'a> {
                 // table.
                 RuntimeType::String
             }
-            SignatureType::SizeArray(element_type) => {
-                let element_type = self
-                    .signature_type_to_runtime_type(
-                        module_ptr,
-                        ptr_mtable_of_parent,
-                        *element_type,
-                        true,
-                    )?
-                    .map(Box::new);
-                RuntimeType::Array { element_type }
-            }
             SignatureType::GenericVarFromType(var_index) => {
                 let generic_types = self
                     .method_table(ptr_mtable_of_parent)?
@@ -799,18 +793,44 @@ impl<'a> CachedReader<'a> {
 
                 runtime_type
             }
+
+            SignatureType::SizeArray(element_type) => {
+                let element_type = self.signature_type_to_runtime_type(
+                    module_ptr,
+                    ptr_mtable_of_parent,
+                    *element_type,
+                    true,
+                )?;
+
+                let component_size =
+                    self.component_size(&element_type, None)?;
+
+                let element_type = element_type.map(Box::new);
+                RuntimeType::Array {
+                    element_type,
+                    component_size,
+                }
+            }
+
             SignatureType::MultiDimArray {
                 element_type, rank, ..
             } => {
-                let element_type = self
-                    .signature_type_to_runtime_type(
-                        module_ptr,
-                        ptr_mtable_of_parent,
-                        *element_type,
-                        true,
-                    )?
-                    .map(Box::new);
-                RuntimeType::MultiDimArray { element_type, rank }
+                let element_type = self.signature_type_to_runtime_type(
+                    module_ptr,
+                    ptr_mtable_of_parent,
+                    *element_type,
+                    true,
+                )?;
+
+                let component_size =
+                    self.component_size(&element_type, Some(rank))?;
+
+                let element_type = element_type.map(Box::new);
+                RuntimeType::MultiDimArray {
+                    element_type,
+                    rank,
+                    component_size,
+                }
             }
             SignatureType::Object => {
                 let method_table =
@@ -824,6 +844,74 @@ impl<'a> CachedReader<'a> {
         };
 
         Ok(Some(runtime_type))
+    }
+
+    /// Returns the size (in bytes) of the elements contained in an
+    /// array, or a multi-dimensional array.
+    fn component_size(
+        &self,
+        element_type: &Option<RuntimeType>,
+        rank: Option<usize>,
+    ) -> Result<Option<usize>, Error> {
+        let Some(element_type) = element_type.as_ref() else {
+            return Ok(None);
+        };
+
+        let element_method_table_ptr = match element_type {
+            RuntimeType::Prim(prim) => {
+                return Ok(Some(prim.size_bytes()));
+            }
+            RuntimeType::Class { .. }
+            | RuntimeType::String
+            | RuntimeType::Array { .. }
+            | RuntimeType::MultiDimArray { .. } => {
+                return Ok(Some(Pointer::SIZE));
+            }
+
+            RuntimeType::ValueType {
+                method_table: None, ..
+            } => {
+                return Ok(None);
+            }
+
+            RuntimeType::ValueType {
+                method_table: Some(ptr),
+                ..
+            } => *ptr,
+        };
+
+        let element_method_table =
+            self.method_table(element_method_table_ptr)?;
+
+        let module = self.runtime_module(element_method_table.module())?;
+
+        let opt_loaded_types = module.loaded_types(self.reader)?;
+        let Some(loaded_types) = opt_loaded_types else {
+            return Ok(None);
+        };
+
+        for res_type_handle_ptr in
+            loaded_types.iter_method_tables(self.reader)?
+        {
+            let type_handle_ptr = res_type_handle_ptr?;
+            let type_handle = self.type_handle(type_handle_ptr)?;
+            if let TypeHandle::MethodTable(array_method_table) = type_handle {
+                let is_correct_array = array_method_table.array_element_type()
+                    == Some(element_method_table_ptr)
+                    && rank
+                        == array_method_table.multi_dim_rank(self.reader)?;
+                if is_correct_array {
+                    return Ok(Some(
+                        array_method_table.component_size().expect(
+                            "Both array and N-d array \
+                             have a component size",
+                        ),
+                    ));
+                }
+            }
+        }
+
+        Ok(None)
     }
 
     pub fn field_to_type_name(

@@ -1,6 +1,8 @@
 use itertools::Itertools;
 
-use dotnet_debugger::{RuntimePrimValue, SymbolicExpr, VirtualMachine};
+use dotnet_debugger::{
+    symbolic_expr::SymbolicGraph, RuntimePrimValue, VirtualMachine,
+};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},
@@ -22,7 +24,7 @@ pub struct LiveVariableDisplay {
 }
 
 struct LiveVariable {
-    symbolic_chain: SymbolicExpr,
+    symbolic_graph: SymbolicGraph,
     virtual_machine: VirtualMachine,
     most_recent_value: Option<RuntimePrimValue>,
 }
@@ -76,14 +78,14 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         globals: &'a TuiGlobals,
         side_effects: &'a mut WidgetSideEffects,
     ) -> Result<(), Error> {
-        side_effects.into_iter::<SymbolicExpr>().try_for_each(
-            |symbolic_chain| {
+        side_effects.into_iter::<SymbolicGraph>().try_for_each(
+            |symbolic_graph| {
                 let reader = globals.cached_reader();
 
-                let symbolic_chain = symbolic_chain.simplify(reader)?;
-                let virtual_machine = symbolic_chain.clone().compile(reader)?;
+                let symbolic_graph = symbolic_graph.simplify(reader)?;
+                let virtual_machine = symbolic_graph.compile(reader)?;
                 let live_var = LiveVariable {
-                    symbolic_chain,
+                    symbolic_graph,
                     virtual_machine,
                     most_recent_value: None,
                 };
@@ -107,7 +109,7 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         let exprs = self
             .live_variables
             .iter()
-            .map(|live_var| format!("{}", live_var.symbolic_chain))
+            .map(|live_var| format!("{}", live_var.symbolic_graph))
             .collect::<Vec<_>>();
 
         let rows = self.live_variables.iter().zip(exprs.iter()).map(

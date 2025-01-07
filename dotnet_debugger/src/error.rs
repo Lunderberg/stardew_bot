@@ -1,7 +1,10 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{CorElementType, OpIndex, RuntimePrimValue, RuntimeType};
+use crate::{
+    symbolic_expr::SymbolicValue, CorElementType, OpIndex, RuntimePrimValue,
+    RuntimeType, SymbolicExpr,
+};
 
 #[derive(Error)]
 pub enum Error {
@@ -267,11 +270,30 @@ pub enum Error {
     #[error("dotnet_debugger::VMExecutionError( {0} )")]
     VMExecutionError(#[from] crate::VMExecutionError),
 
+    #[error("Unable to find inferred type for operation {0}")]
+    InferredTypeNotFound(SymbolicValue),
+
     #[error("Invalid reference from expression {from} to {to}")]
     InvalidReference { from: OpIndex, to: OpIndex },
 
     #[error("Value '{0}' not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue),
+
+    #[error("Cannot access array without a known component size")]
+    AttemptedAccessOfArrayTypeWithUnknownComponentSize,
+
+    #[error("Cannot add values with types {lhs} and {rhs}")]
+    InvalidOperandsForAddition { lhs: RuntimeType, rhs: RuntimeType },
+
+    #[error("Cannot multiply values with types {lhs} and {rhs}")]
+    InvalidOperandsForMultiplication { lhs: RuntimeType, rhs: RuntimeType },
+
+    #[error(
+        "Symbolic expression must be lowered \
+         prior to generating VM instruction, \
+         but encountered {0}."
+    )]
+    SymbolicExpressionRequiresLowering(SymbolicExpr),
 }
 
 impl std::fmt::Debug for Error {

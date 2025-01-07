@@ -64,6 +64,7 @@ pub enum RuntimeType {
     /// if-array-then-sz-array bit.
     Array {
         element_type: Option<Box<RuntimeType>>,
+        component_size: Option<usize>,
     },
 
     /// A multi-dimensional array
@@ -81,8 +82,9 @@ pub enum RuntimeType {
     /// additional 4-byte size of its only dimension and a 4-byte
     /// lower bound of that dimension.
     MultiDimArray {
-        element_type: Option<Box<RuntimeType>>,
         rank: usize,
+        element_type: Option<Box<RuntimeType>>,
+        component_size: Option<usize>,
     },
 }
 
@@ -214,6 +216,22 @@ impl RuntimePrimType {
         }
     }
 
+    pub fn is_integer(&self) -> bool {
+        matches!(
+            self,
+            RuntimePrimType::U8
+                | RuntimePrimType::U16
+                | RuntimePrimType::U32
+                | RuntimePrimType::U64
+                | RuntimePrimType::NativeUInt
+                | RuntimePrimType::I8
+                | RuntimePrimType::I16
+                | RuntimePrimType::I32
+                | RuntimePrimType::I64
+                | RuntimePrimType::NativeInt
+        )
+    }
+
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimePrimValue, Error> {
         let bytes = self.truncate_to_length(bytes)?;
         match self {
@@ -300,14 +318,16 @@ impl std::fmt::Display for RuntimeType {
             }
             RuntimeType::Class { .. } => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),
-            RuntimeType::Array { element_type } => {
+            RuntimeType::Array { element_type, .. } => {
                 match element_type {
                     Some(ty) => write!(f, "{ty}")?,
                     None => write!(f, "(not-yet-loaded)")?,
                 }
                 write!(f, "[]")
             }
-            RuntimeType::MultiDimArray { element_type, rank } => {
+            RuntimeType::MultiDimArray {
+                element_type, rank, ..
+            } => {
                 match element_type {
                     Some(ty) => write!(f, "{ty}")?,
                     None => write!(f, "(not-yet-loaded)")?,

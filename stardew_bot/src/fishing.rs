@@ -1,6 +1,8 @@
 use std::ops::Range;
 
-use dotnet_debugger::{CachedReader, SymbolicExpr};
+use dotnet_debugger::{
+    symbolic_expr::SymbolicGraph, CachedReader, VMResults, ValueToken,
+};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -14,10 +16,7 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{
-    per_frame_reader::ValueToken, Error, ExpressionsToRead, GameAction,
-    PerFrameValues,
-};
+use crate::{Error, GameAction};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -143,11 +142,11 @@ struct FishingState {
 impl FishingUI {
     pub fn new(
         reader: CachedReader<'_>,
-        per_frame_reader: &mut ExpressionsToRead,
+        per_frame_reader: &mut SymbolicGraph,
     ) -> Result<Self, Error> {
         let mut register = |value: &str| -> Result<ValueToken, Error> {
-            let expr = SymbolicExpr::parse(value, reader)?;
-            let token = per_frame_reader.register(expr);
+            let expr = per_frame_reader.parse(value, reader)?;
+            let token = per_frame_reader.mark_output(expr);
             Ok(token)
         };
 
@@ -241,7 +240,7 @@ impl FishingUI {
 
     fn current_state(
         &self,
-        values: &PerFrameValues,
+        values: &VMResults,
     ) -> Result<Option<FishingState>, dotnet_debugger::Error> {
         let minigame_in_progress: bool = values[self.minigame_in_progress]
             .map_or(Ok(false), TryInto::try_into)?;
@@ -380,7 +379,7 @@ impl WidgetWindow<Error> for FishingUI {
         side_effects: &'a mut tui_utils::WidgetSideEffects,
     ) -> Result<(), Error> {
         let values = globals
-            .get::<PerFrameValues>()
+            .get::<VMResults>()
             .expect("Generated for each frame");
 
         let get_bool = |token: ValueToken| -> Result<bool, Error> {
@@ -447,7 +446,7 @@ impl WidgetWindow<Error> for FishingUI {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         let values = globals
-            .get::<PerFrameValues>()
+            .get::<VMResults>()
             .expect("Generated for each frame");
 
         let get_bool = |token: ValueToken| -> bool {

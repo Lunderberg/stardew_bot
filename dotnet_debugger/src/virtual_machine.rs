@@ -8,7 +8,7 @@ use thiserror::Error;
 
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, MethodTable,
-    RuntimePrimValue, TypedPointer,
+    RuntimePrimValue, TypedPointer, ValueToken,
 };
 
 pub struct VirtualMachine {
@@ -21,6 +21,8 @@ pub struct VirtualMachine {
     /// The number of additional temporary values to allocate.
     num_temporaries: usize,
 }
+
+pub struct VMResults(Vec<Option<RuntimePrimValue>>);
 
 #[derive(Clone)]
 pub enum Instruction {
@@ -36,15 +38,19 @@ pub enum Instruction {
     // Increment the value of the register by `byte_offset`
     StaticOffset { byte_offset: usize },
 
-    // Convert the value of the register to `usize`
-    AsIndex,
-
     // Scale the register by the specified value
     StaticScale { factor: usize },
 
     // Increment the value of the register by the value stored in
     // vm.values[index].
     DynamicOffset { index: usize },
+
+    // Scale the value of the register by the value stored in
+    // vm.values[index].
+    DynamicScale { index: usize },
+
+    // Convert the value of the register to `usize`
+    AsIndex,
 
     // Downcast a type.  Assumes the register contains a pointer to an
     // object.  If the object is of type `ty`, then the register is
@@ -83,6 +89,13 @@ pub enum VMExecutionError {
          but location {0} was empty."
     )]
     DynamicOffsetWasEmpty(usize),
+
+    #[error(
+        "DynamicScale requires the index \
+         to have been previously computed, \
+         but location {0} was empty."
+    )]
+    DynamicScaleWasEmpty(usize),
 
     #[error(
         "DynamicOffset requires the index \
@@ -124,6 +137,10 @@ impl VirtualMachine {
             num_outputs,
             num_temporaries: num_values - num_outputs,
         }
+    }
+
+    pub fn num_instructions(&self) -> usize {
+        self.instructions.len()
     }
 
     pub(crate) fn remove_unnecessary_restore_value(self) -> Self {
@@ -237,7 +254,7 @@ impl VirtualMachine {
     pub fn evaluate(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<Vec<Option<RuntimePrimValue>>, Error> {
+    ) -> Result<VMResults, Error> {
         let mut register = None;
         let mut values = vec![None; self.num_outputs + self.num_temporaries];
 
@@ -268,13 +285,10 @@ impl VirtualMachine {
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             Some(RuntimePrimValue::Ptr(ptr + *offset))
                         }
-                        Some(other) => {
-                            return Err(
-                                VMExecutionError::OffsetAppliedToNonPointer(
-                                    other.runtime_type(),
-                                )
-                                .into(),
-                            );
+                        Some(value) => {
+                            let lhs = value.as_isize()?;
+                            let rhs = *offset as isize;
+                            Some(RuntimePrimValue::NativeInt(lhs + rhs))
                         }
                     };
                 }
@@ -301,13 +315,34 @@ impl VirtualMachine {
                             }?;
                             Some(RuntimePrimValue::Ptr(ptr + offset))
                         }
-                        Some(other) => {
-                            return Err(
-                                VMExecutionError::OffsetAppliedToNonPointer(
-                                    other.runtime_type(),
-                                )
-                                .into(),
-                            );
+                        Some(value) => {
+                            let lhs = value.as_isize()?;
+                            let rhs = match values[*index] {
+                                Some(value) => Ok(value.as_isize()?),
+                                None => Err(
+                                    VMExecutionError::DynamicOffsetWasEmpty(
+                                        *index,
+                                    ),
+                                ),
+                            }?;
+                            Some(RuntimePrimValue::NativeInt(lhs + rhs))
+                        }
+                    }
+                }
+                Instruction::DynamicScale { index } => {
+                    register = match register {
+                        None => None,
+                        Some(value) => {
+                            let lhs = value.as_usize()?;
+                            let rhs = match values[*index] {
+                                Some(value) => Ok(value.as_usize()?),
+                                None => {
+                                    Err(VMExecutionError::DynamicScaleWasEmpty(
+                                        *index,
+                                    ))
+                                }
+                            }?;
+                            Some(RuntimePrimValue::NativeUInt(lhs * rhs))
                         }
                     }
                 }
@@ -359,7 +394,8 @@ impl VirtualMachine {
         }
 
         values.truncate(self.num_outputs);
-        Ok(values)
+
+        Ok(VMResults(values))
     }
 
     // TODO: Remove this method.  Initially implemented as part of
@@ -416,9 +452,51 @@ impl Display for Instruction {
             Instruction::DynamicOffset { index } => {
                 write!(f, "DynamicOffset({index})")
             }
+            Instruction::DynamicScale { index } => {
+                write!(f, "DynamicScale({index})")
+            }
             Instruction::Downcast { ty } => write!(f, "Downcast({ty})"),
             Instruction::Read { ty } => write!(f, "Read({ty})"),
             Instruction::AsIndex => write!(f, "AsIndex"),
         }
+    }
+}
+
+impl IntoIterator for VMResults {
+    type Item = <Vec<Option<RuntimePrimValue>> as IntoIterator>::Item;
+
+    type IntoIter = <Vec<Option<RuntimePrimValue>> as IntoIterator>::IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.0.into_iter()
+    }
+}
+
+impl std::ops::Deref for VMResults {
+    type Target = Vec<Option<RuntimePrimValue>>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+impl std::ops::DerefMut for VMResults {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl std::ops::Index<usize> for VMResults {
+    type Output = Option<RuntimePrimValue>;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl std::ops::Index<ValueToken> for VMResults {
+    type Output = Option<RuntimePrimValue>;
+
+    fn index(&self, index: ValueToken) -> &Self::Output {
+        &self.0[index.0]
     }
 }

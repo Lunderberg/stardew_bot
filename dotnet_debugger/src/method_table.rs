@@ -239,6 +239,7 @@ impl MethodTable {
                 .runtime_type(reader)?;
             Ok(RuntimeType::Array {
                 element_type: Some(Box::new(element_type)),
+                component_size: self.component_size(),
             })
         } else if self.is_multi_dim_array() {
             let reader = reader.borrow();
@@ -254,6 +255,7 @@ impl MethodTable {
             Ok(RuntimeType::MultiDimArray {
                 element_type: Some(Box::new(element_type)),
                 rank,
+                component_size: self.component_size(),
             })
         } else if self.is_prim_type() {
             let reader = reader.borrow();

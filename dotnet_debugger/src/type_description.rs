@@ -17,8 +17,13 @@ pub enum TypeHandle {
 }
 
 pub struct PrintableTypeHandle<'a> {
-    ty: &'a TypeHandle,
+    ty: TypeHandleRef<'a>,
     reader: CachedReader<'a>,
+}
+
+enum TypeHandleRef<'a> {
+    MethodTable(&'a MethodTable),
+    TypeDescription(&'a TypeDescription),
 }
 
 impl TypeDescription {
@@ -97,7 +102,52 @@ impl TypeHandle {
         &'a self,
         reader: CachedReader<'a>,
     ) -> PrintableTypeHandle<'a> {
-        PrintableTypeHandle { ty: self, reader }
+        PrintableTypeHandle {
+            ty: self.into(),
+            reader,
+        }
+    }
+}
+
+impl<'a> TypeHandleRef<'a> {
+    fn print(
+        &self,
+        fmt: &mut std::fmt::Formatter<'_>,
+        reader: CachedReader,
+    ) -> Result<(), Error> {
+        match self {
+            Self::MethodTable(method_table) => {
+                Self::print_method_table(method_table, fmt, reader)?;
+            }
+            Self::TypeDescription(type_desc) => {
+                match type_desc.element_type() {
+                    CorElementType::Prim(prim) => {
+                        write!(fmt, "{prim}")?;
+                    }
+                    CorElementType::Var => {
+                        let type_index = type_desc.index().unwrap();
+                        write!(fmt, "_T{type_index}")?;
+                    }
+                    CorElementType::ByRef => {
+                        let arg_ptr = type_desc.type_param().unwrap();
+                        let arg = arg_ptr.read(reader.borrow())?;
+                        write!(fmt, "&{}", arg.printable(reader))?;
+                    }
+
+                    CorElementType::FunctionPtr => {
+                        // A dynamic-sized FnPtrTypeDesc
+                        write!(fmt, "Function pointer")?;
+                    }
+
+                    CorElementType::MethodType => {
+                        write!(fmt, "Method")?;
+                    }
+
+                    other => todo!("Pretty-printing for {other}"),
+                }
+            }
+        }
+        Ok(())
     }
 
     fn print_method_table(
@@ -105,10 +155,8 @@ impl TypeHandle {
         fmt: &mut std::fmt::Formatter<'_>,
         reader: CachedReader,
     ) -> Result<(), Error> {
-        match method_table.runtime_type(reader)? {
-            RuntimeType::Prim(prim) => {
-                write!(fmt, "{prim}")?;
-            }
+        let runtime_type = method_table.runtime_type(reader)?;
+        match runtime_type {
             RuntimeType::Class { .. } | RuntimeType::ValueType { .. } => {
                 let row = reader
                     .runtime_module(method_table.module())?
@@ -144,55 +192,59 @@ impl TypeHandle {
                 }
             }
 
-            RuntimeType::String => {
-                write!(fmt, "String")?;
-            }
-            RuntimeType::Array { .. } => {
-                write!(fmt, "Array")?;
-            }
-
-            RuntimeType::MultiDimArray { .. } => {
-                write!(fmt, "MultiDimArray")?;
+            other => {
+                Self::print_runtime_type(&other, fmt, reader)?;
             }
         }
         Ok(())
     }
 
-    fn print(
-        &self,
+    fn print_runtime_type(
+        runtime_type: &RuntimeType,
         fmt: &mut std::fmt::Formatter<'_>,
         reader: CachedReader,
     ) -> Result<(), Error> {
-        match self {
-            TypeHandle::MethodTable(method_table) => {
+        match runtime_type {
+            RuntimeType::Prim(prim) => {
+                write!(fmt, "{prim}")?;
+            }
+            RuntimeType::ValueType {
+                method_table: None, ..
+            } => {
+                write!(fmt, "(delayed-load-struct)")?;
+            }
+            RuntimeType::Class { method_table: None } => {
+                write!(fmt, "(delayed-load-class)")?;
+            }
+            RuntimeType::ValueType {
+                method_table: Some(ptr),
+                ..
+            }
+            | RuntimeType::Class {
+                method_table: Some(ptr),
+            } => {
+                let method_table = reader.method_table(*ptr)?;
                 Self::print_method_table(method_table, fmt, reader)?;
             }
-            TypeHandle::TypeDescription(type_desc) => {
-                match type_desc.element_type() {
-                    CorElementType::Prim(prim) => {
-                        write!(fmt, "{prim}")?;
-                    }
-                    CorElementType::Var => {
-                        let type_index = type_desc.index().unwrap();
-                        write!(fmt, "_T{type_index}")?;
-                    }
-                    CorElementType::ByRef => {
-                        let arg_ptr = type_desc.type_param().unwrap();
-                        let arg = arg_ptr.read(reader.borrow())?;
-                        write!(fmt, "&{}", arg.printable(reader))?;
-                    }
-
-                    CorElementType::FunctionPtr => {
-                        // A dynamic-sized FnPtrTypeDesc
-                        write!(fmt, "Function pointer")?;
-                    }
-
-                    CorElementType::MethodType => {
-                        write!(fmt, "Method")?;
-                    }
-
-                    other => todo!("Pretty-printing for {other}"),
+            RuntimeType::String => {
+                write!(fmt, "String")?;
+            }
+            RuntimeType::Array { element_type, .. } => {
+                write!(fmt, "Array<")?;
+                if let Some(ty) = element_type {
+                    Self::print_runtime_type(ty, fmt, reader)?;
                 }
+                write!(fmt, ">")?;
+            }
+            RuntimeType::MultiDimArray {
+                element_type, rank, ..
+            } => {
+                write!(fmt, "MultiDimArray<{rank}")?;
+                if let Some(ty) = element_type {
+                    write!(fmt, ", ")?;
+                    Self::print_runtime_type(ty, fmt, reader)?;
+                }
+                write!(fmt, ">")?;
             }
         }
         Ok(())
@@ -245,6 +297,19 @@ impl std::fmt::Display for PrintableTypeHandle<'_> {
             Err(Error::FmtError { err }) => Err(err),
             Err(err) => {
                 write!(fmt, "PrintErr: {err}")
+            }
+        }
+    }
+}
+
+impl<'a> From<&'a TypeHandle> for TypeHandleRef<'a> {
+    fn from(handle: &'a TypeHandle) -> Self {
+        match handle {
+            TypeHandle::MethodTable(method_table) => {
+                Self::MethodTable(method_table)
+            }
+            TypeHandle::TypeDescription(type_description) => {
+                Self::TypeDescription(type_description)
             }
         }
     }

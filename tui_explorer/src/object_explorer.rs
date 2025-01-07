@@ -11,8 +11,9 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    symbolic_expr, CachedReader, FieldContainer, FieldDescription, MethodTable,
-    RuntimeType, RuntimeValue, SymbolicExpr, SymbolicType, TypedPointer,
+    symbolic_expr::{SymbolicGraph, SymbolicValue},
+    CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
+    RuntimeValue, SymbolicType, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 use tui_utils::{
@@ -691,8 +692,10 @@ impl ObjectExplorer {
     fn expr_of_selected_node(
         &self,
         reader: CachedReader<'_>,
-    ) -> Result<SymbolicExpr, Error> {
+    ) -> Result<SymbolicGraph, Error> {
         let node_chain = self.selected_node_chain()?;
+
+        let mut graph = SymbolicGraph::new();
 
         let static_field = {
             let ObjectTreeNode::Object { class_name, .. } = &node_chain
@@ -713,19 +716,19 @@ impl ObjectExplorer {
                 panic!("Outermost node should be static field");
             };
 
-            symbolic_expr::StaticField {
-                class: SymbolicType {
-                    namespace: class_name.namespace.clone(),
-                    name: class_name.name.clone(),
-                    generics: Vec::new(),
-                },
-                field_name: field_name.clone(),
-            }
+            let class = SymbolicType {
+                namespace: class_name.namespace.clone(),
+                name: class_name.name.clone(),
+                generics: Vec::new(),
+            };
+            let field_name = field_name.clone();
+
+            graph.static_field(class, field_name)
         };
 
-        node_chain.into_iter().skip(2).try_fold(
-            static_field.into(),
-            |expr, node| -> Result<SymbolicExpr, _> {
+        let output: SymbolicValue = node_chain.into_iter().skip(2).try_fold(
+            static_field,
+            |expr, node| -> Result<SymbolicValue, Error> {
                 match node {
                     ObjectTreeNode::Field {
                         ptr_mtable_of_parent,
@@ -746,19 +749,22 @@ impl ObjectExplorer {
                             // `PhysicalAccessOperation`, so we can just
                             // apply downcast all the time and remove it
                             // later.
-                            expr.downcast(get_symbolic_type(
-                                ptr_mtable_of_parent,
-                                reader,
-                            )?)
+                            graph.downcast(
+                                expr,
+                                get_symbolic_type(
+                                    ptr_mtable_of_parent,
+                                    reader,
+                                )?,
+                            )
                         } else {
                             expr
                         };
-                        let expr = expr.access_field(field_name.clone());
+                        let expr = graph.access_field(expr, field_name.clone());
                         Ok(expr)
                     }
                     ObjectTreeNode::ListItem { indices, .. } => {
                         let expr = if let Some(indices) = indices {
-                            expr.access_indices(indices.clone())
+                            graph.access_indices(expr, indices.iter().cloned())
                         } else {
                             expr
                         };
@@ -771,7 +777,11 @@ impl ObjectExplorer {
                     ObjectTreeNode::DisplayList(_) => todo!(),
                 }
             },
-        )
+        )?;
+
+        graph.mark_output(output);
+
+        Ok(graph)
     }
 }
 

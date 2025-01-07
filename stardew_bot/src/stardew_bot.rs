@@ -1,11 +1,12 @@
 use crate::{
-    game_action::InputState, per_frame_reader::PerFrameReader, Error,
-    ExpressionsToRead, FishingUI, GameAction, RunningLog, TuiDrawRate,
-    X11Handler,
+    game_action::InputState, Error, FishingUI, GameAction, RunningLog,
+    TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
-use dotnet_debugger::CachedReader;
+use dotnet_debugger::{
+    symbolic_expr::SymbolicGraph, CachedReader, VirtualMachine,
+};
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -28,7 +29,7 @@ pub struct StardewBot {
 
     /// Collected values that should be read out from the remote
     /// process at the start of each frame.
-    per_frame_reader: PerFrameReader,
+    per_frame_reader: VirtualMachine,
 
     /// Previous frame's per-widget timers
     widget_timing_stats: Vec<WidgetTimingStatistics>,
@@ -101,7 +102,7 @@ pub(crate) struct WidgetTimingStatistics {
 impl TuiBuffers {
     fn new(
         reader: CachedReader<'_>,
-        per_frame_reader: &mut ExpressionsToRead,
+        per_frame_reader: &mut SymbolicGraph,
     ) -> Result<Self, Error> {
         Ok(Self {
             running_log: RunningLog::new(100),
@@ -131,7 +132,7 @@ impl StardewBot {
         let stardew_window =
             x11_handler.find_window_blocking("Stardew Valley")?;
 
-        let mut expressions_to_read = ExpressionsToRead::default();
+        let mut expressions_to_read = SymbolicGraph::default();
 
         let mut buffers = TuiBuffers::new(
             tui_globals.cached_reader(),
@@ -267,7 +268,7 @@ impl StardewBot {
     pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
         let per_frame_values = self
             .per_frame_reader
-            .read(self.tui_globals.cached_reader())?;
+            .evaluate(self.tui_globals.cached_reader())?;
         self.tui_globals.insert(per_frame_values);
         Ok(())
     }

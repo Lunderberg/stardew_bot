@@ -267,15 +267,21 @@ impl std::fmt::Display for RuntimeValue {
     }
 }
 
-macro_rules! prim_value_into {
-    ($variant:ident, $into:ty) => {
-        impl TryInto<$into> for RuntimePrimValue {
+macro_rules! prim_value_conversions {
+    ($variant:ident, $prim:ty) => {
+        impl From<$prim> for RuntimePrimValue {
+            fn from(value: $prim) -> Self {
+                Self::$variant(value)
+            }
+        }
+
+        impl TryInto<$prim> for RuntimePrimValue {
             type Error = Error;
-            fn try_into(self) -> Result<$into, Self::Error> {
+            fn try_into(self) -> Result<$prim, Self::Error> {
                 match self {
                     Self::$variant(value) => Ok(value),
                     other => Err(Error::UnexpectedRuntimeValue {
-                        expected: stringify!($into),
+                        expected: stringify!($prim),
                         actual: other.type_name(),
                     }),
                 }
@@ -283,17 +289,17 @@ macro_rules! prim_value_into {
         }
     };
 }
-prim_value_into!(Bool, bool);
-prim_value_into!(U8, u8);
-prim_value_into!(U16, u16);
-prim_value_into!(U32, u32);
-prim_value_into!(U64, u64);
-prim_value_into!(NativeUInt, usize);
-prim_value_into!(I8, i8);
-prim_value_into!(I16, i16);
-prim_value_into!(I32, i32);
-prim_value_into!(I64, i64);
-prim_value_into!(NativeInt, isize);
-prim_value_into!(F32, f32);
-prim_value_into!(F64, f64);
-prim_value_into!(Ptr, Pointer);
+prim_value_conversions!(Bool, bool);
+prim_value_conversions!(U8, u8);
+prim_value_conversions!(U16, u16);
+prim_value_conversions!(U32, u32);
+prim_value_conversions!(U64, u64);
+prim_value_conversions!(NativeUInt, usize);
+prim_value_conversions!(I8, i8);
+prim_value_conversions!(I16, i16);
+prim_value_conversions!(I32, i32);
+prim_value_conversions!(I64, i64);
+prim_value_conversions!(NativeInt, isize);
+prim_value_conversions!(F32, f32);
+prim_value_conversions!(F64, f64);
+prim_value_conversions!(Ptr, Pointer);

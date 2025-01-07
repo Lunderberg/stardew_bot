@@ -51,12 +51,10 @@ mod op_index;
 pub use op_index::OpIndex;
 
 pub mod symbolic_expr;
-pub use symbolic_expr::{SymbolicExpr, SymbolicType};
-
-pub(crate) mod physical_expr;
+pub use symbolic_expr::{SymbolicExpr, SymbolicType, ValueToken};
 
 pub(crate) mod virtual_machine;
-pub use virtual_machine::{VMExecutionError, VirtualMachine};
+pub use virtual_machine::{VMExecutionError, VMResults, VirtualMachine};
 
 mod symbolic_expr_parser;
 pub(crate) use symbolic_expr_parser::*;

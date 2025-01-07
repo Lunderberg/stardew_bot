@@ -3,13 +3,13 @@ use std::ops::Range;
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::symbolic_expr;
-use crate::symbolic_expr::{SymbolicExpr, SymbolicType};
+use crate::symbolic_expr::{SymbolicGraph, SymbolicType, SymbolicValue};
 use crate::{CachedReader, Error};
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
     reader: CachedReader<'a>,
+    graph: &'a mut SymbolicGraph,
 }
 
 /// Errors in parsing the symbolic chain.  There are enough of these
@@ -89,20 +89,28 @@ impl TokenKind {
 }
 
 impl<'a> SymbolicParser<'a> {
-    pub(crate) fn new(text: &'a str, reader: CachedReader<'a>) -> Self {
+    pub(crate) fn new(
+        text: &'a str,
+        reader: CachedReader<'a>,
+        graph: &'a mut SymbolicGraph,
+    ) -> Self {
         let tokens = SymbolicTokenizer::new(text);
-        Self { tokens, reader }
+        Self {
+            tokens,
+            reader,
+            graph,
+        }
     }
 
-    pub fn parse_expr(&mut self) -> Result<SymbolicExpr, Error> {
+    pub fn parse_expr(&mut self) -> Result<SymbolicValue, Error> {
         let expr = self.next_expr()?;
         self.expect_end_of_string()?;
         Ok(expr)
     }
 
-    fn next_expr(&mut self) -> Result<SymbolicExpr, Error> {
-        if let Some(index) = self.try_int()? {
-            return Ok(index.into());
+    fn next_expr(&mut self) -> Result<SymbolicValue, Error> {
+        if let Some(value) = self.try_int()? {
+            return Ok(SymbolicValue::Int(value));
         }
 
         let mut obj = self.next_static_field()?;
@@ -111,11 +119,7 @@ impl<'a> SymbolicParser<'a> {
             if let Some(field) = self.try_field_name()? {
                 obj = self.generate_field_access_or_operation(obj, field)?;
             } else if let Some(indices) = self.try_container_access()? {
-                obj = symbolic_expr::IndexAccess {
-                    obj: Box::new(obj),
-                    indices,
-                }
-                .into();
+                obj = self.graph.access_indices(obj, indices);
             } else {
                 break;
             }
@@ -148,7 +152,7 @@ impl<'a> SymbolicParser<'a> {
         Ok(opt_index)
     }
 
-    fn next_static_field(&mut self) -> Result<SymbolicExpr, Error> {
+    fn next_static_field(&mut self) -> Result<SymbolicValue, Error> {
         let class = self.leading_type()?;
         let field_name = self
             .try_field_name()?
@@ -156,9 +160,7 @@ impl<'a> SymbolicParser<'a> {
             .text
             .to_string();
 
-        let static_field = symbolic_expr::StaticField { class, field_name };
-
-        Ok(static_field.into())
+        Ok(self.graph.static_field(class, field_name))
     }
 
     fn leading_type(&mut self) -> Result<SymbolicType, Error> {
@@ -245,9 +247,9 @@ impl<'a> SymbolicParser<'a> {
 
     fn generate_field_access_or_operation(
         &mut self,
-        obj: SymbolicExpr,
+        obj: SymbolicValue,
         field: Token<'a>,
-    ) -> Result<SymbolicExpr, Error> {
+    ) -> Result<SymbolicValue, Error> {
         let is_operation = self
             .tokens
             .peek()?
@@ -266,18 +268,11 @@ impl<'a> SymbolicParser<'a> {
                         .into_iter()
                         .next()
                         .expect("Protected by length check");
-                    Ok(symbolic_expr::Downcast {
-                        obj: Box::new(obj),
-                        ty,
-                    }
-                    .into())
+                    Ok(self.graph.downcast(obj, ty))
                 }
                 "len" => {
                     let _ = self.expect_function_arguments(0, 0)?;
-                    Ok(symbolic_expr::NumArrayElements {
-                        array: Box::new(obj),
-                    }
-                    .into())
+                    Ok(self.graph.num_array_elements(obj))
                 }
                 "extent" => {
                     let (_, args) = self.expect_function_arguments(0, 1)?;
@@ -285,11 +280,7 @@ impl<'a> SymbolicParser<'a> {
                         .into_iter()
                         .next()
                         .expect("Protected by length check");
-                    Ok(symbolic_expr::ArrayExtent {
-                        array: Box::new(obj),
-                        dim: Box::new(dim),
-                    }
-                    .into())
+                    Ok(self.graph.array_extent(obj, dim))
                 }
                 _ => Err(ParseError::UnknownOperator {
                     name: field.text.to_string(),
@@ -297,11 +288,7 @@ impl<'a> SymbolicParser<'a> {
                 .into()),
             }
         } else {
-            Ok(symbolic_expr::FieldAccess {
-                obj: Box::new(obj),
-                field: field.text.to_string(),
-            }
-            .into())
+            Ok(self.graph.access_field(obj, field.text.to_string()))
         }
     }
 
@@ -309,7 +296,7 @@ impl<'a> SymbolicParser<'a> {
         &mut self,
         num_type_args: usize,
         num_args: usize,
-    ) -> Result<(Vec<SymbolicType>, Vec<SymbolicExpr>), Error> {
+    ) -> Result<(Vec<SymbolicType>, Vec<SymbolicValue>), Error> {
         let mut type_args = Vec::new();
         if num_type_args > 0 {
             self.expect_punct(
@@ -345,7 +332,7 @@ impl<'a> SymbolicParser<'a> {
 
     fn try_container_access(
         &mut self,
-    ) -> Result<Option<Vec<SymbolicExpr>>, Error> {
+    ) -> Result<Option<Vec<SymbolicValue>>, Error> {
         if self
             .tokens
             .next_if(|token| {
