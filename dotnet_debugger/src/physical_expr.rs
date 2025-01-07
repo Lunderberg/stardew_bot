@@ -212,6 +212,18 @@ impl PhysicalGraph {
                             rhs,
                         } => Some(rhs),
 
+                        // 0 * rhs => 0
+                        PhysicalExpr::Mul {
+                            rhs: PhysicalValue::Int(0),
+                            ..
+                        } => Some(PhysicalValue::Int(0)),
+
+                        // lhs * 0 => 0
+                        PhysicalExpr::Mul {
+                            lhs: PhysicalValue::Int(0),
+                            ..
+                        } => Some(PhysicalValue::Int(0)),
+
                         // lhs * 1 => lhs
                         &PhysicalExpr::Mul {
                             lhs,
@@ -224,6 +236,18 @@ impl PhysicalGraph {
                             rhs,
                         } => Some(rhs),
 
+                        // const + rhs => rhs + const
+                        &PhysicalExpr::Add {
+                            lhs: lhs @ PhysicalValue::Int(_),
+                            rhs,
+                        } => Some(builder.add(rhs, lhs)),
+
+                        // const * rhs => rhs * const
+                        &PhysicalExpr::Mul {
+                            lhs: lhs @ PhysicalValue::Int(_),
+                            rhs,
+                        } => Some(builder.mul(rhs, lhs)),
+
                         // lhs + a + b => lhs + (a+b)
                         &PhysicalExpr::Add {
                             lhs: PhysicalValue::Result(lhs),
@@ -233,6 +257,18 @@ impl PhysicalGraph {
                                 lhs,
                                 rhs: PhysicalValue::Int(a),
                             } => Some(builder.add(lhs, a + b)),
+                            _ => None,
+                        },
+
+                        // lhs * a * b => lhs * (a*b)
+                        &PhysicalExpr::Mul {
+                            lhs: PhysicalValue::Result(lhs),
+                            rhs: PhysicalValue::Int(b),
+                        } => match &builder[lhs] {
+                            &PhysicalExpr::Mul {
+                                lhs,
+                                rhs: PhysicalValue::Int(a),
+                            } => Some(builder.mul(lhs, a * b)),
                             _ => None,
                         },
 
