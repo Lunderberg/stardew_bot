@@ -212,6 +212,18 @@ impl MethodTable {
         type_flag == 0x00080000
     }
 
+    pub fn multi_dim_rank(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<Option<usize>, Error> {
+        self.is_multi_dim_array()
+            .then(|| {
+                self.get_ee_class(reader.borrow())
+                    .map(|ee_class| ee_class.multi_dim_rank())
+            })
+            .transpose()
+    }
+
     pub fn runtime_type(
         &self,
         reader: impl Borrow<MemoryReader>,
@@ -230,7 +242,10 @@ impl MethodTable {
             })
         } else if self.is_multi_dim_array() {
             let reader = reader.borrow();
-            let rank = self.get_ee_class(reader)?.multi_dim_rank() as usize;
+            let rank = self.multi_dim_rank(reader)?.expect(
+                "Multi-dim rank is always present \
+                 for multi-dim array",
+            );
             let element_type = self
                 .array_element_type()
                 .expect("Returns Some(_) for multi-dim array")
@@ -553,7 +568,7 @@ impl EEClass {
         base_size_padding: {u8, 51..52},
 
         // This field is only available for multi-dimensional array.
-        multi_dim_rank: {u8, 56..57},
+        raw_multi_dim_rank: {u8, 56..57},
     }
 
     pub fn collect_annotations(
@@ -600,6 +615,10 @@ impl EEClass {
     pub fn element_type(&self) -> Result<CorElementType, Error> {
         let norm_type: u8 = self.norm_type();
         norm_type.try_into()
+    }
+
+    pub fn multi_dim_rank(&self) -> usize {
+        self.raw_multi_dim_rank() as usize
     }
 }
 
