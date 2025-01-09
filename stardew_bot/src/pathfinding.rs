@@ -29,6 +29,9 @@ struct GameLocation {
     /// this location.
     name: String,
 
+    /// The size of the room.
+    shape: Rectangle,
+
     /// Tiles that connect to other rooms.  Standing on a warp moves
     /// the player to the room/location specified by the warp.
     warps: Vec<Warp>,
@@ -40,6 +43,11 @@ struct Warp {
     location: Tile,
     target: Tile,
     target_room: String,
+}
+
+struct Rectangle {
+    width: usize,
+    height: usize,
 }
 
 struct Tile {
@@ -101,11 +109,12 @@ impl PathfindingUI {
         struct StaticLocationFields {
             index: usize,
             name: String,
+            shape: Rectangle,
             num_warps: usize,
             water_tiles_shape: Option<(usize, usize)>,
         }
 
-        const FIELDS_PER_LOCATION: usize = 4;
+        const FIELDS_PER_LOCATION: usize = 6;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -118,6 +127,19 @@ impl PathfindingUI {
                 let name = {
                     let field = graph.access_field(location, "name");
                     graph.access_field(field, "value")
+                };
+
+                let (width, height) = {
+                    let field = graph.access_field(location, "map");
+                    let field = graph.access_field(field, "m_layers");
+                    let field = graph.access_field(field, "_items");
+                    let field = graph.access_index(field, 0);
+                    let field = graph.access_field(field, "m_layerSize");
+
+                    let width = graph.access_field(field, "Width");
+                    let height = graph.access_field(field, "Height");
+
+                    (width, height)
                 };
 
                 let num_warps = {
@@ -141,11 +163,18 @@ impl PathfindingUI {
                 let water_tiles_width = graph.array_extent(water_tiles, 0);
                 let water_tiles_height = graph.array_extent(water_tiles, 1);
 
-                [name, num_warps, water_tiles_width, water_tiles_height]
-                    .into_iter()
-                    .for_each(|expr| {
-                        graph.mark_output(expr);
-                    });
+                [
+                    name,
+                    width,
+                    height,
+                    num_warps,
+                    water_tiles_width,
+                    water_tiles_height,
+                ]
+                .into_iter()
+                .for_each(|expr| {
+                    graph.mark_output(expr);
+                });
             });
 
             let vm = graph.compile(reader)?;
@@ -155,12 +184,23 @@ impl PathfindingUI {
                 .chunks_exact(FIELDS_PER_LOCATION)
                 .enumerate()
                 .map(|(index, chunk)| {
-                    let name = chunk[0].unwrap().read_string_ptr(&reader)?;
-                    let num_warps = chunk[1].unwrap().as_usize()?;
+                    let mut next = {
+                        let mut iter_chunk = chunk.iter();
+                        move || iter_chunk.next().unwrap()
+                    };
+
+                    let name = next().unwrap().read_string_ptr(&reader)?;
+                    let shape = {
+                        let width = next().unwrap().as_usize()?;
+                        let height = next().unwrap().as_usize()?;
+                        Rectangle { width, height }
+                    };
+
+                    let num_warps = next().unwrap().as_usize()?;
 
                     let water_tiles_shape = {
-                        let width = chunk[2];
-                        let height = chunk[3];
+                        let width = next();
+                        let height = next();
                         if width.is_some() && height.is_some() {
                             let width = width.unwrap().as_usize()?;
                             let height = height.unwrap().as_usize()?;
@@ -174,6 +214,7 @@ impl PathfindingUI {
                     Ok(StaticLocationFields {
                         index,
                         name,
+                        shape,
                         num_warps,
                         water_tiles_shape,
                     })
@@ -246,7 +287,6 @@ impl PathfindingUI {
         let locations = static_location_fields
             .into_iter()
             .map(|loc| -> Result<_, Error> {
-                let name = loc.name;
                 let num_warps = loc.num_warps;
 
                 let warps = (0..num_warps)
@@ -288,7 +328,8 @@ impl PathfindingUI {
                     .transpose()?;
 
                 Ok(GameLocation {
-                    name,
+                    name: loc.name,
+                    shape: loc.shape,
                     warps,
                     water_tiles,
                 })
@@ -327,6 +368,15 @@ impl WidgetWindow<Error> for PathfindingUI {
             .map(|loc| loc.name.len())
             .max()
             .unwrap_or(0);
+
+        let loc_rows = self.locations.iter().map(|loc| {
+            let name = Cell::new(loc.name.as_str());
+            let shape = Cell::new(format!(
+                "({}, {})",
+                loc.shape.width, loc.shape.height
+            ));
+            Row::new([name, shape])
+        });
 
         let water_rows = self.locations.iter().flat_map(|loc| {
             let name = Cell::new(loc.name.as_str());
@@ -384,7 +434,10 @@ impl WidgetWindow<Error> for PathfindingUI {
             })
         });
 
-        let rows = water_rows.chain(warp_rows);
+        let rows = std::iter::empty()
+            .chain(loc_rows)
+            .chain(water_rows)
+            .chain(warp_rows);
 
         let table = Table::new(
             rows,
