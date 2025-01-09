@@ -28,6 +28,9 @@ pub enum Error {
 
     #[error("Expected non-empty value from PhysicalAccessChain")]
     ExpectedNoneEmptyValue,
+
+    #[error("Unrecognized item index {0} used as resource clump")]
+    UnrecognizedResourceClump(i32),
 }
 
 impl std::fmt::Debug for Error {

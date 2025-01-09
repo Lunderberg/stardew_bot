@@ -2,8 +2,8 @@ use memory_reader::Pointer;
 use thiserror::Error;
 
 use crate::{
-    symbolic_expr::SymbolicValue, CorElementType, OpIndex, RuntimePrimValue,
-    RuntimeType, SymbolicExpr,
+    runtime_type::RuntimePrimType, symbolic_expr::SymbolicValue,
+    CorElementType, OpIndex, RuntimePrimValue, RuntimeType, SymbolicExpr,
 };
 
 #[derive(Error)]
@@ -276,8 +276,8 @@ pub enum Error {
     #[error("Invalid reference from expression {from} to {to}")]
     InvalidReference { from: OpIndex, to: OpIndex },
 
-    #[error("Value '{0}' not convertible to an index")]
-    ValueNotConvertibleToIndex(RuntimePrimValue),
+    #[error("Value '{0}' of type {1} not convertible to an index")]
+    ValueNotConvertibleToIndex(RuntimePrimValue, RuntimePrimType),
 
     #[error("Cannot access array without a known component size")]
     AttemptedAccessOfArrayTypeWithUnknownComponentSize,

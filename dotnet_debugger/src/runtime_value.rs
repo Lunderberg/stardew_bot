@@ -171,7 +171,10 @@ impl RuntimePrimValue {
             RuntimePrimValue::I32(val) => Ok(val as isize),
             RuntimePrimValue::I64(val) => Ok(val as isize),
             RuntimePrimValue::NativeInt(val) => Ok(val),
-            other => Err(Error::ValueNotConvertibleToIndex(other)),
+            other => Err(Error::ValueNotConvertibleToIndex(
+                other,
+                other.runtime_type(),
+            )),
         }
     }
 
@@ -187,7 +190,10 @@ impl RuntimePrimValue {
             RuntimePrimValue::I32(val) if val >= 0 => Ok(val as usize),
             RuntimePrimValue::I64(val) if val >= 0 => Ok(val as usize),
             RuntimePrimValue::NativeInt(val) if val >= 0 => Ok(val as usize),
-            other => Err(Error::ValueNotConvertibleToIndex(other)),
+            other => Err(Error::ValueNotConvertibleToIndex(
+                other,
+                other.runtime_type(),
+            )),
         }
     }
 

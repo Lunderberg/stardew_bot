@@ -396,11 +396,18 @@ impl SymbolicGraph {
     pub fn access_field(
         &mut self,
         obj: impl Into<SymbolicValue>,
-        field: impl Into<String>,
+        field: impl AsRef<str>,
     ) -> SymbolicValue {
-        let obj = obj.into();
-        let field = field.into();
-        self.push(SymbolicExpr::FieldAccess { obj, field })
+        let mut obj = obj.into();
+        let field = field.as_ref();
+
+        for subfield in field.split(".") {
+            obj = self.push(SymbolicExpr::FieldAccess {
+                obj,
+                field: subfield.into(),
+            });
+        }
+        obj
     }
 
     pub fn access_index(

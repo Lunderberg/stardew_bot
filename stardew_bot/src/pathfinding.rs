@@ -36,6 +36,8 @@ struct GameLocation {
     /// the player to the room/location specified by the warp.
     warps: Vec<Warp>,
 
+    resource_clumps: Vec<ResourceClump>,
+
     water_tiles: Option<(usize, usize, Vec<bool>)>,
 }
 
@@ -43,6 +45,19 @@ struct Warp {
     location: Tile,
     target: Tile,
     target_room: String,
+}
+
+struct ResourceClump {
+    location: Position,
+    shape: Rectangle,
+    kind: ResourceClumpKind,
+}
+
+enum ResourceClumpKind {
+    Stump,
+    Boulder,
+    Meterorite,
+    MineBoulder,
 }
 
 struct Rectangle {
@@ -111,10 +126,11 @@ impl PathfindingUI {
             name: String,
             shape: Rectangle,
             num_warps: usize,
+            num_resource_clumps: usize,
             water_tiles_shape: Option<(usize, usize)>,
         }
 
-        const FIELDS_PER_LOCATION: usize = 6;
+        const FIELDS_PER_LOCATION: usize = 7;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -124,15 +140,11 @@ impl PathfindingUI {
             (0..num_locations).for_each(|i| {
                 let location = graph.access_index(location_list, i);
 
-                let name = {
-                    let field = graph.access_field(location, "name");
-                    graph.access_field(field, "value")
-                };
+                let name = graph.access_field(location, "name.value");
 
                 let (width, height) = {
-                    let field = graph.access_field(location, "map");
-                    let field = graph.access_field(field, "m_layers");
-                    let field = graph.access_field(field, "_items");
+                    let field =
+                        graph.access_field(location, "map.m_layers._items");
                     let field = graph.access_index(field, 0);
                     let field = graph.access_field(field, "m_layerSize");
 
@@ -142,11 +154,11 @@ impl PathfindingUI {
                     (width, height)
                 };
 
-                let num_warps = {
-                    let a = graph.access_field(location, "warps");
-                    let b = graph.access_field(a, "count");
-                    graph.access_field(b, "value")
-                };
+                let num_warps =
+                    graph.access_field(location, "warps.count.value");
+
+                let num_resource_clumps =
+                    graph.access_field(location, "resourceClumps.list._size");
 
                 let water_tiles = {
                     let field = graph.access_field(location, "waterTiles");
@@ -163,16 +175,16 @@ impl PathfindingUI {
                 let water_tiles_width = graph.array_extent(water_tiles, 0);
                 let water_tiles_height = graph.array_extent(water_tiles, 1);
 
-                [
+                let fields: [_; FIELDS_PER_LOCATION] = [
                     name,
                     width,
                     height,
                     num_warps,
+                    num_resource_clumps,
                     water_tiles_width,
                     water_tiles_height,
-                ]
-                .into_iter()
-                .for_each(|expr| {
+                ];
+                fields.into_iter().for_each(|expr| {
                     graph.mark_output(expr);
                 });
             });
@@ -198,6 +210,8 @@ impl PathfindingUI {
 
                     let num_warps = next().unwrap().as_usize()?;
 
+                    let num_resource_clumps = next().unwrap().as_usize()?;
+
                     let water_tiles_shape = {
                         let width = next();
                         let height = next();
@@ -216,6 +230,7 @@ impl PathfindingUI {
                         name,
                         shape,
                         num_warps,
+                        num_resource_clumps,
                         water_tiles_shape,
                     })
                 })
@@ -229,20 +244,14 @@ impl PathfindingUI {
                 graph.parse(&format!("{location_list}._items"), reader)?;
 
             static_location_fields.iter().for_each(|loc| {
-                let num_warps = loc.num_warps;
-
                 let location = graph.access_index(location_list, loc.index);
 
-                let warps = {
-                    let field = graph.access_field(location, "warps");
-                    let field = graph.access_field(field, "array");
-                    let field = graph.access_field(field, "value");
-                    let field = graph.access_field(field, "elements");
-                    let field = graph.access_field(field, "_items");
-                    field
-                };
+                let warps = graph.access_field(
+                    location,
+                    "warps.array.value.elements._items",
+                );
 
-                for i_warp in 0..num_warps {
+                for i_warp in 0..loc.num_warps {
                     let warp = {
                         let element = graph.access_index(warps, i_warp);
                         graph.access_field(element, "value")
@@ -257,10 +266,29 @@ impl PathfindingUI {
                         });
                 }
 
-                let water_tiles = {
-                    let field = graph.access_field(location, "waterTiles");
-                    graph.access_field(field, "waterTiles")
-                };
+                let resource_clumps =
+                    graph.access_field(location, "resourceClumps.list._items");
+
+                for i_clump in 0..loc.num_resource_clumps {
+                    let clump = graph.access_index(resource_clumps, i_clump);
+
+                    let right = graph.access_field(clump, "netTile.value.X");
+                    let down = graph.access_field(clump, "netTile.value.Y");
+                    let width = graph.access_field(clump, "width.value");
+                    let height = graph.access_field(clump, "height.value");
+
+                    let kind_index =
+                        graph.access_field(clump, "parentSheetIndex.value");
+
+                    [right, down, width, height, kind_index]
+                        .into_iter()
+                        .for_each(|expr| {
+                            graph.mark_output(expr);
+                        });
+                }
+
+                let water_tiles =
+                    graph.access_field(location, "waterTiles.waterTiles");
                 if let Some((width, height)) = loc.water_tiles_shape {
                     (0..width).cartesian_product(0..height).for_each(
                         |(i, j)| {
@@ -287,9 +315,7 @@ impl PathfindingUI {
         let locations = static_location_fields
             .into_iter()
             .map(|loc| -> Result<_, Error> {
-                let num_warps = loc.num_warps;
-
-                let warps = (0..num_warps)
+                let warps = (0..loc.num_warps)
                     .map(|_| -> Result<_, Error> {
                         let x = next_value().unwrap();
                         let y = next_value().unwrap();
@@ -316,6 +342,33 @@ impl PathfindingUI {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let resource_clumps = (0..loc.num_resource_clumps)
+                    .map(|_| -> Result<_, Error> {
+                        let location = {
+                            let right = next_value().unwrap().try_into()?;
+                            let down = next_value().unwrap().try_into()?;
+                            Position { right, down }
+                        };
+                        let shape = {
+                            let width = next_value().unwrap().as_usize()?;
+                            let height = next_value().unwrap().as_usize()?;
+                            Rectangle { width, height }
+                        };
+
+                        let kind: ResourceClumpKind = {
+                            let index: i32 =
+                                next_value().unwrap().try_into()?;
+                            index.try_into()?
+                        };
+
+                        Ok(ResourceClump {
+                            location,
+                            shape,
+                            kind,
+                        })
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
                 let water_tiles = loc
                     .water_tiles_shape
                     .map(|(width, height)| -> Result<_, Error> {
@@ -331,6 +384,7 @@ impl PathfindingUI {
                     name: loc.name,
                     shape: loc.shape,
                     warps,
+                    resource_clumps,
                     water_tiles,
                 })
             })
@@ -466,14 +520,14 @@ impl WidgetWindow<Error> for PathfindingUI {
             .iter()
             .find(|loc| loc.name == self.current_location);
         if let Some(loc) = current_room {
-            if let Some((width, height, tiles)) = &loc.water_tiles {
-                assert!(width * height == tiles.len());
-                Canvas::default()
-                    .block(Block::new().title(loc.name.as_ref()))
-                    .marker(Marker::HalfBlock)
-                    .x_bounds([0.0, *width as f64])
-                    .y_bounds([0.0, *height as f64])
-                    .paint(|ctx| {
+            Canvas::default()
+                .block(Block::new().title(loc.name.as_ref()))
+                .marker(Marker::HalfBlock)
+                .x_bounds([0.0, loc.shape.width as f64])
+                .y_bounds([0.0, loc.shape.height as f64])
+                .paint(|ctx| {
+                    if let Some((width, height, tiles)) = &loc.water_tiles {
+                        assert!(width * height == tiles.len());
                         let points = tiles
                             .iter()
                             .enumerate()
@@ -491,9 +545,49 @@ impl WidgetWindow<Error> for PathfindingUI {
                             coords: &points,
                             color: Color::Blue,
                         });
-                    })
-                    .render(draw_area, buf);
-            }
+                    }
+
+                    {
+                        loc.resource_clumps
+                            .iter()
+                            .map(|clump| ratatui::widgets::canvas::Rectangle {
+                                x: clump.location.right as f64,
+                                y: (loc.shape.height as f64)
+                                    - (clump.location.down as f64),
+                                width: clump.shape.width as f64,
+                                height: clump.shape.height as f64,
+                                color: match clump.kind {
+                                    ResourceClumpKind::Stump => Color::Yellow,
+                                    ResourceClumpKind::Boulder => {
+                                        Color::DarkGray
+                                    }
+                                    ResourceClumpKind::Meterorite => {
+                                        Color::Magenta
+                                    }
+                                    ResourceClumpKind::MineBoulder => {
+                                        Color::Gray
+                                    }
+                                },
+                            })
+                            .for_each(|rect| ctx.draw(&rect));
+                    }
+                })
+                .render(draw_area, buf);
+        }
+    }
+}
+
+impl TryFrom<i32> for ResourceClumpKind {
+    type Error = Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            600 | 602 => Ok(Self::Stump),
+            672 => Ok(Self::Boulder),
+            622 => Ok(Self::Meterorite),
+            752 | 754 | 756 | 758 => Ok(Self::MineBoulder),
+
+            other => Err(Error::UnrecognizedResourceClump(other)),
         }
     }
 }
