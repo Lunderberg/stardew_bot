@@ -31,6 +31,9 @@ pub enum Error {
 
     #[error("Unrecognized item index {0} used as resource clump")]
     UnrecognizedResourceClump(i32),
+
+    #[error("Tree kind '{0}' did not correspond to any known tree.")]
+    UnrecognizedTreeKind(String),
 }
 
 impl std::fmt::Debug for Error {

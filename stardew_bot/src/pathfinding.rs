@@ -40,7 +40,14 @@ struct GameLocation {
     /// stumps/boulders that require iron tools to break.
     resource_clumps: Vec<ResourceClump>,
 
+    /// Bushes, which include decorative (and berry-yielding) bushes,
+    /// player-planted tea tree bushes, and walnut bushes.
     bushes: Vec<Bush>,
+
+    /// Trees.  This includes the small 1x1 stumps left behind after
+    /// chopping down a tree, but not the larger 2x2 stumps made
+    /// during worldgen.
+    trees: Vec<Tree>,
 
     /// Which tiles have water.
     water_tiles: Option<(usize, usize, Vec<bool>)>,
@@ -67,7 +74,31 @@ enum ResourceClumpKind {
 
 struct Bush {
     size: usize,
-    location: Position,
+    position: Position,
+}
+
+struct Tree {
+    position: Position,
+    #[allow(dead_code)]
+    kind: TreeKind,
+    #[allow(dead_code)]
+    growth_stage: i32,
+    #[allow(dead_code)]
+    has_seed: bool,
+    #[allow(dead_code)]
+    is_stump: bool,
+}
+
+enum TreeKind {
+    Oak,
+    Maple,
+    Pine,
+    DesertPalm,
+    IslandPalm,
+    Mushroom,
+    Mahogany,
+    Mystic,
+    GreenRain,
 }
 
 struct Rectangle {
@@ -80,6 +111,7 @@ struct Tile {
     down: isize,
 }
 
+#[derive(PartialEq, Clone, Copy)]
 struct Position {
     right: f32,
     down: f32,
@@ -137,11 +169,12 @@ impl PathfindingUI {
             shape: Rectangle,
             num_warps: usize,
             num_resource_clumps: usize,
+            num_features: usize,
             num_large_features: usize,
             water_tiles_shape: Option<(usize, usize)>,
         }
 
-        const FIELDS_PER_LOCATION: usize = 8;
+        const FIELDS_PER_LOCATION: usize = 9;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -171,6 +204,14 @@ impl PathfindingUI {
                 let num_resource_clumps =
                     graph.access_field(location, "resourceClumps.list._size");
 
+                let num_features = {
+                    let entries = graph.access_field(
+                        location,
+                        "terrainFeatures.dict._entries",
+                    );
+                    graph.num_array_elements(entries)
+                };
+
                 let num_large_features = graph
                     .access_field(location, "largeTerrainFeatures.list._size");
 
@@ -195,6 +236,7 @@ impl PathfindingUI {
                     height,
                     num_warps,
                     num_resource_clumps,
+                    num_features,
                     num_large_features,
                     water_tiles_width,
                     water_tiles_height,
@@ -224,9 +266,11 @@ impl PathfindingUI {
                     };
 
                     let num_warps = next().unwrap().as_usize()?;
-
                     let num_resource_clumps = next().unwrap().as_usize()?;
-
+                    let num_features = next()
+                        .map(|value| value.as_usize())
+                        .transpose()?
+                        .unwrap_or(0);
                     let num_large_features = next().unwrap().as_usize()?;
 
                     let water_tiles_shape = {
@@ -248,6 +292,7 @@ impl PathfindingUI {
                         shape,
                         num_warps,
                         num_resource_clumps,
+                        num_features,
                         num_large_features,
                         water_tiles_shape,
                     })
@@ -306,10 +351,65 @@ impl PathfindingUI {
                 }
 
                 let features = graph
+                    .access_field(location, "terrainFeatures.dict._entries");
+                for i in 0..loc.num_features {
+                    let feature = graph.access_index(features, i);
+
+                    let right = graph.access_field(feature, "key.X");
+                    let down = graph.access_field(feature, "key.Y");
+
+                    let obj = graph.access_field(feature, "value.value");
+
+                    let grass_health = {
+                        let grass = graph.downcast(
+                            obj,
+                            SymbolicType {
+                                namespace: Some(
+                                    "StardewValley.TerrainFeatures".into(),
+                                ),
+                                name: "Grass".into(),
+                                generics: Vec::new(),
+                            },
+                        );
+                        graph.access_field(grass, "grassBladeHealth")
+                    };
+
+                    let tree_fields = {
+                        let tree = graph.downcast(
+                            obj,
+                            SymbolicType {
+                                namespace: Some(
+                                    "StardewValley.TerrainFeatures".into(),
+                                ),
+                                name: "Tree".into(),
+                                generics: Vec::new(),
+                            },
+                        );
+                        // treeType looks like an integer, but has
+                        // been converted to a string.
+                        let tree_type =
+                            graph.access_field(tree, "treeType.value");
+                        let growth_stage =
+                            graph.access_field(tree, "growthStage.value");
+                        let has_seed =
+                            graph.access_field(tree, "hasSeed.value");
+                        let is_stump = graph.access_field(tree, "stump.value");
+                        [tree_type, growth_stage, has_seed, is_stump]
+                    };
+
+                    [right, down, grass_health]
+                        .into_iter()
+                        .chain(tree_fields)
+                        .for_each(|expr| {
+                            graph.mark_output(expr);
+                        });
+                }
+
+                let large_features = graph
                     .access_field(location, "largeTerrainFeatures.list._items");
                 for i in 0..loc.num_large_features {
                     let feature = {
-                        let field = graph.access_index(features, i);
+                        let field = graph.access_index(large_features, i);
                         graph.downcast(
                             field,
                             SymbolicType {
@@ -413,6 +513,47 @@ impl PathfindingUI {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let mut trees = Vec::new();
+                let mut grass = Vec::new();
+                for _ in 0..loc.num_features {
+                    let position = {
+                        let right = next_value().unwrap().try_into()?;
+                        let down = next_value().unwrap().try_into()?;
+                        Position { right, down }
+                    };
+                    let grass_health: Option<i32> =
+                        next_value().map(TryInto::try_into).transpose()?;
+                    let tree = {
+                        let tree_type = next_value();
+                        let growth_stage = next_value();
+                        let has_seed = next_value();
+                        let is_stump = next_value();
+                        if tree_type.is_some() {
+                            Some(Tree {
+                                position,
+                                kind: tree_type
+                                    .unwrap()
+                                    .read_string_ptr(&reader)?
+                                    .parse()?,
+                                growth_stage: growth_stage
+                                    .unwrap()
+                                    .try_into()?,
+                                has_seed: has_seed.unwrap().try_into()?,
+                                is_stump: is_stump.unwrap().try_into()?,
+                            })
+                        } else {
+                            None
+                        }
+                    };
+
+                    if let Some(tree) = tree {
+                        trees.push(tree);
+                    }
+                    if let Some(_) = grass_health {
+                        grass.push(position);
+                    }
+                }
+
                 let bushes = (0..loc.num_large_features)
                     .filter_map(|_| {
                         let size = next_value();
@@ -440,7 +581,10 @@ impl PathfindingUI {
                             };
                             Position { right, down }
                         };
-                        Some(Ok(Bush { size, location }))
+                        Some(Ok(Bush {
+                            size,
+                            position: location,
+                        }))
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
@@ -461,6 +605,7 @@ impl PathfindingUI {
                     warps,
                     resource_clumps,
                     bushes,
+                    trees,
                     water_tiles,
                 })
             })
@@ -643,14 +788,32 @@ impl WidgetWindow<Error> for PathfindingUI {
                     loc.bushes
                         .iter()
                         .map(|bush| CanvasRectangle {
-                            x: bush.location.right as f64,
+                            x: bush.position.right as f64,
                             y: (loc.shape.height as f64)
-                                - (bush.location.down as f64),
+                                - (bush.position.down as f64),
                             width: bush.width() as f64,
                             height: 1.0,
                             color: Color::Green,
                         })
                         .for_each(|rect| ctx.draw(&rect));
+
+                    {
+                        let trees = loc
+                            .trees
+                            .iter()
+                            .map(|tree| {
+                                (
+                                    tree.position.right as f64,
+                                    (loc.shape.height as f64)
+                                        - (tree.position.down as f64),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        ctx.draw(&Points {
+                            coords: &trees,
+                            color: Color::Rgb(133, 74, 5),
+                        });
+                    }
                 })
                 .render(draw_area, buf);
         }
@@ -681,6 +844,30 @@ impl TryFrom<i32> for ResourceClumpKind {
             752 | 754 | 756 | 758 => Ok(Self::MineBoulder),
 
             other => Err(Error::UnrecognizedResourceClump(other)),
+        }
+    }
+}
+
+impl std::str::FromStr for TreeKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "1" => Ok(Self::Oak),
+            "2" => Ok(Self::Maple),
+            "3" => Ok(Self::Pine),
+            "6" => Ok(Self::DesertPalm),
+            "9" => Ok(Self::IslandPalm),
+            "7" => Ok(Self::Mushroom),
+            "8" => Ok(Self::Mahogany),
+            "13" => Ok(Self::Mystic),
+            "10" | "11" | "12" => Ok(Self::GreenRain),
+            "4" | "5" => panic!(
+                "Are the 'winterTree1' and 'winterTree2' values \
+                 actually used?"
+            ),
+
+            other => Err(Error::UnrecognizedTreeKind(other.to_string())),
         }
     }
 }
