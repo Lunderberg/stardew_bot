@@ -8,7 +8,7 @@ use ratatui::{
     symbols::Marker,
     text::Text,
     widgets::{
-        canvas::{Canvas, Points},
+        canvas::{Canvas, Points, Rectangle as CanvasRectangle},
         Block, Cell, Row, Table, Widget as _,
     },
 };
@@ -36,8 +36,13 @@ struct GameLocation {
     /// the player to the room/location specified by the warp.
     warps: Vec<Warp>,
 
+    /// Larger groups of resources.  On the farm, for example, the
+    /// stumps/boulders that require iron tools to break.
     resource_clumps: Vec<ResourceClump>,
 
+    bushes: Vec<Bush>,
+
+    /// Which tiles have water.
     water_tiles: Option<(usize, usize, Vec<bool>)>,
 }
 
@@ -58,6 +63,11 @@ enum ResourceClumpKind {
     Boulder,
     Meterorite,
     MineBoulder,
+}
+
+struct Bush {
+    size: usize,
+    location: Position,
 }
 
 struct Rectangle {
@@ -127,10 +137,11 @@ impl PathfindingUI {
             shape: Rectangle,
             num_warps: usize,
             num_resource_clumps: usize,
+            num_large_features: usize,
             water_tiles_shape: Option<(usize, usize)>,
         }
 
-        const FIELDS_PER_LOCATION: usize = 7;
+        const FIELDS_PER_LOCATION: usize = 8;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -160,6 +171,9 @@ impl PathfindingUI {
                 let num_resource_clumps =
                     graph.access_field(location, "resourceClumps.list._size");
 
+                let num_large_features = graph
+                    .access_field(location, "largeTerrainFeatures.list._size");
+
                 let water_tiles = {
                     let field = graph.access_field(location, "waterTiles");
                     let field = graph.downcast(
@@ -181,6 +195,7 @@ impl PathfindingUI {
                     height,
                     num_warps,
                     num_resource_clumps,
+                    num_large_features,
                     water_tiles_width,
                     water_tiles_height,
                 ];
@@ -212,6 +227,8 @@ impl PathfindingUI {
 
                     let num_resource_clumps = next().unwrap().as_usize()?;
 
+                    let num_large_features = next().unwrap().as_usize()?;
+
                     let water_tiles_shape = {
                         let width = next();
                         let height = next();
@@ -231,6 +248,7 @@ impl PathfindingUI {
                         shape,
                         num_warps,
                         num_resource_clumps,
+                        num_large_features,
                         water_tiles_shape,
                     })
                 })
@@ -285,6 +303,32 @@ impl PathfindingUI {
                         .for_each(|expr| {
                             graph.mark_output(expr);
                         });
+                }
+
+                let features = graph
+                    .access_field(location, "largeTerrainFeatures.list._items");
+                for i in 0..loc.num_large_features {
+                    let feature = {
+                        let field = graph.access_index(features, i);
+                        graph.downcast(
+                            field,
+                            SymbolicType {
+                                namespace: Some(
+                                    "StardewValley.TerrainFeatures".into(),
+                                ),
+                                name: "Bush".into(),
+                                generics: Vec::new(),
+                            },
+                        )
+                    };
+                    let size = graph.access_field(feature, "size.value");
+                    let right =
+                        graph.access_field(feature, "netTilePosition.value.X");
+                    let down =
+                        graph.access_field(feature, "netTilePosition.value.Y");
+                    [size, right, down].into_iter().for_each(|expr| {
+                        graph.mark_output(expr);
+                    });
                 }
 
                 let water_tiles =
@@ -369,6 +413,37 @@ impl PathfindingUI {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let bushes = (0..loc.num_large_features)
+                    .filter_map(|_| {
+                        let size = next_value();
+                        let right = next_value();
+                        let down = next_value();
+
+                        let size = match size?.as_usize() {
+                            Ok(val) => val,
+                            Err(err) => {
+                                return Some(Err(err));
+                            }
+                        };
+                        let location = {
+                            let right = match right?.try_into() {
+                                Ok(val) => val,
+                                Err(err) => {
+                                    return Some(Err(err));
+                                }
+                            };
+                            let down = match down?.try_into() {
+                                Ok(val) => val,
+                                Err(err) => {
+                                    return Some(Err(err));
+                                }
+                            };
+                            Position { right, down }
+                        };
+                        Some(Ok(Bush { size, location }))
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+
                 let water_tiles = loc
                     .water_tiles_shape
                     .map(|(width, height)| -> Result<_, Error> {
@@ -385,6 +460,7 @@ impl PathfindingUI {
                     shape: loc.shape,
                     warps,
                     resource_clumps,
+                    bushes,
                     water_tiles,
                 })
             })
@@ -547,32 +623,49 @@ impl WidgetWindow<Error> for PathfindingUI {
                         });
                     }
 
-                    {
-                        loc.resource_clumps
-                            .iter()
-                            .map(|clump| ratatui::widgets::canvas::Rectangle {
-                                x: clump.location.right as f64,
-                                y: (loc.shape.height as f64)
-                                    - (clump.location.down as f64),
-                                width: clump.shape.width as f64,
-                                height: clump.shape.height as f64,
-                                color: match clump.kind {
-                                    ResourceClumpKind::Stump => Color::Yellow,
-                                    ResourceClumpKind::Boulder => {
-                                        Color::DarkGray
-                                    }
-                                    ResourceClumpKind::Meterorite => {
-                                        Color::Magenta
-                                    }
-                                    ResourceClumpKind::MineBoulder => {
-                                        Color::Gray
-                                    }
-                                },
-                            })
-                            .for_each(|rect| ctx.draw(&rect));
-                    }
+                    loc.resource_clumps
+                        .iter()
+                        .map(|clump| CanvasRectangle {
+                            x: clump.location.right as f64,
+                            y: (loc.shape.height as f64)
+                                - (clump.location.down as f64),
+                            width: clump.shape.width as f64,
+                            height: clump.shape.height as f64,
+                            color: match clump.kind {
+                                ResourceClumpKind::Stump => Color::Yellow,
+                                ResourceClumpKind::Boulder => Color::DarkGray,
+                                ResourceClumpKind::Meterorite => Color::Magenta,
+                                ResourceClumpKind::MineBoulder => Color::Gray,
+                            },
+                        })
+                        .for_each(|rect| ctx.draw(&rect));
+
+                    loc.bushes
+                        .iter()
+                        .map(|bush| CanvasRectangle {
+                            x: bush.location.right as f64,
+                            y: (loc.shape.height as f64)
+                                - (bush.location.down as f64),
+                            width: bush.width() as f64,
+                            height: 1.0,
+                            color: Color::Green,
+                        })
+                        .for_each(|rect| ctx.draw(&rect));
                 })
                 .render(draw_area, buf);
+        }
+    }
+}
+
+impl Bush {
+    fn width(&self) -> usize {
+        match self.size {
+            0 => 1, // Small bush, 1x1
+            1 => 2, // Medium bush, 1x2
+            2 => 3, // Large bush, 1x3
+            3 => 1, // Green tea bush, 1x1
+            4 => 3, // Walnut bush, 1x3
+            _ => 0, // Should be unreachable
         }
     }
 }
