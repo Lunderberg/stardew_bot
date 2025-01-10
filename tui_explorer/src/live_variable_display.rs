@@ -109,7 +109,15 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         let exprs = self
             .live_variables
             .iter()
-            .map(|live_var| format!("{}", live_var.symbolic_graph))
+            .map(|live_var| {
+                let output_token = live_var
+                    .symbolic_graph
+                    .iter_outputs()
+                    .next()
+                    .expect("Live variable has exactly one output")
+                    .0;
+                format!("{}", live_var.symbolic_graph.print(output_token))
+            })
             .collect::<Vec<_>>();
 
         let rows = self.live_variables.iter().zip(exprs.iter()).map(

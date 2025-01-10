@@ -350,6 +350,20 @@ impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
     }
 }
 
+pub trait Printable<'a> {
+    fn top_level_value(self, graph: &'a SymbolicGraph) -> &'a SymbolicValue;
+}
+impl<'a> Printable<'a> for ValueToken {
+    fn top_level_value(self, graph: &'a SymbolicGraph) -> &'a SymbolicValue {
+        &graph.outputs[self.0]
+    }
+}
+impl<'a, 'b: 'a> Printable<'a> for &'b SymbolicValue {
+    fn top_level_value(self, _: &'a SymbolicGraph) -> &'a SymbolicValue {
+        self
+    }
+}
+
 impl SymbolicGraph {
     pub fn new() -> Self {
         Self {
@@ -387,7 +401,8 @@ impl SymbolicGraph {
         ValueToken(index)
     }
 
-    pub fn print<'a>(&'a self, value: &'a SymbolicValue) -> ExprPrinter<'a> {
+    pub fn print<'a>(&'a self, value: impl Printable<'a>) -> ExprPrinter<'a> {
+        let value = value.top_level_value(self);
         ExprPrinter { graph: self, value }
     }
 
@@ -526,7 +541,7 @@ impl SymbolicGraph {
             .map(|(i, op)| (OpIndex::new(i), op))
     }
 
-    fn iter_outputs(
+    pub fn iter_outputs(
         &self,
     ) -> impl Iterator<Item = (ValueToken, SymbolicValue)> + '_ {
         self.outputs
