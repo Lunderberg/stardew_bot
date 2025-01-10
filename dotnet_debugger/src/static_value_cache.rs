@@ -452,7 +452,9 @@ impl<'a> CachedReader<'a> {
                     if method_table.token() == Some(type_def_index)
                         && method_table.has_generics()
                     {
-                        let generics = method_table.generic_types(self)?;
+                        let generics: Vec<_> = method_table
+                            .generic_types_excluding_base_class(self)?
+                            .collect();
                         generics.len() == type_args.len()
                             && generics
                                 .into_iter()
