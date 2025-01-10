@@ -1784,7 +1784,6 @@ impl WidgetWindow<Error> for ObjectExplorer {
                 match self.expr_of_selected_node(globals.cached_reader()) {
                     Ok(chain) => {
                         side_effects.broadcast(chain);
-                        //side_effects.live_variable = Some(chain);
                     }
                     Err(err) => side_effects.add_log(format!("Err: {err}")),
                 }
