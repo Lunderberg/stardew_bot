@@ -132,6 +132,12 @@ pub struct StaticField {
     pub field_name: String,
 }
 
+#[derive(Clone, Copy)]
+pub struct ExprPrinter<'a> {
+    graph: &'a SymbolicGraph,
+    value: &'a SymbolicValue,
+}
+
 impl SymbolicType {
     pub(crate) fn method_table(
         &self,
@@ -381,6 +387,10 @@ impl SymbolicGraph {
         ValueToken(index)
     }
 
+    pub fn print<'a>(&'a self, value: &'a SymbolicValue) -> ExprPrinter<'a> {
+        ExprPrinter { graph: self, value }
+    }
+
     //////////////////////////////////////////////////
     ////          Symbolic Operations              ///
     //////////////////////////////////////////////////
@@ -571,7 +581,9 @@ impl SymbolicGraph {
                     let obj_type = lookup_type(&(*obj).into())?;
 
                     let method_table_ptr = obj_type
-                        .method_table_for_field_access(|| format!("{obj}"))?;
+                        .method_table_for_field_access(|| {
+                            format!("{}", self.print(obj))
+                        })?;
                     let field_type = reader
                         .find_field_type(method_table_ptr, field.as_str())?;
                     field_type
@@ -605,7 +617,8 @@ impl SymbolicGraph {
                                 .map(|ty| ty.deref().clone())
                                 .ok_or_else(|| {
                                     Error::UnexpectedNullMethodTable(format!(
-                                        "{array}"
+                                        "{}",
+                                        self.print(array)
                                     ))
                                 })
                         }
@@ -986,6 +999,7 @@ impl SymbolicGraph {
         for (symbolic_index, op) in self.iter_ops() {
             let physical_index = op.to_physical_expr(
                 reader,
+                self,
                 &mut builder,
                 symbolic_index,
                 &prev_value_lookup,
@@ -1335,6 +1349,7 @@ impl SymbolicExpr {
     fn to_physical_expr(
         &self,
         reader: CachedReader<'_>,
+        original: &SymbolicGraph,
         builder: &mut SymbolicGraph,
         symbolic_index: OpIndex,
         prev_value_lookup: &HashMap<OpIndex, SymbolicValue>,
@@ -1376,8 +1391,10 @@ impl SymbolicExpr {
             SymbolicExpr::FieldAccess { obj, field } => {
                 let (expr, obj_type) = lookup_prev(obj)?;
 
-                let method_table_ptr = obj_type
-                    .method_table_for_field_access(|| format!("{obj}"))?;
+                let method_table_ptr =
+                    obj_type.method_table_for_field_access(|| {
+                        format!("{}", original.print(obj))
+                    })?;
                 let (parent_of_field, field_description) =
                     reader.find_field(method_table_ptr, field.as_str())?;
                 let field_type = reader.field_to_runtime_type(
@@ -1475,7 +1492,10 @@ impl SymbolicExpr {
                 }
 
                 let element_type = element_type.as_ref().ok_or_else(|| {
-                    Error::UnexpectedNullMethodTable(format!("{obj}"))
+                    Error::UnexpectedNullMethodTable(format!(
+                        "{}",
+                        original.print(obj)
+                    ))
                 })?;
 
                 let component_size = component_size.as_ref().ok_or(
@@ -1640,6 +1660,84 @@ impl Display for SymbolicExpr {
                 write!(f, "{obj}.downcast({ty})")
             }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
+                write!(f, "{ptr}.read::<{prim_type}>()")
+            }
+        }
+    }
+}
+
+impl<'a> ExprPrinter<'a> {
+    fn with_value(self, value: &'a SymbolicValue) -> ExprPrinter<'a> {
+        ExprPrinter {
+            graph: self.graph,
+            value,
+        }
+    }
+}
+
+impl<'a> Display for ExprPrinter<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let expr = match self.value {
+            SymbolicValue::Int(int) => {
+                return write!(f, "{int}");
+            }
+            SymbolicValue::Ptr(ptr) => {
+                return write!(f, "{ptr}");
+            }
+            SymbolicValue::Result(op_index) => &self.graph[*op_index],
+        };
+
+        match expr {
+            SymbolicExpr::StaticField(static_field) => {
+                write!(f, "{static_field}")
+            }
+            SymbolicExpr::FieldAccess { obj, field } => {
+                let obj = self.with_value(obj);
+                write!(f, "{obj}\u{200B}.{field}")
+            }
+            SymbolicExpr::IndexAccess { obj, indices } => {
+                let obj = self.with_value(obj);
+                write!(f, "{obj}[\u{200B}")?;
+
+                for (i, index) in indices.iter().enumerate() {
+                    let index = self.with_value(index);
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{index}")?;
+                }
+
+                write!(f, "\u{200B}]")
+            }
+            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+                let obj = self.with_value(obj);
+                write!(f, "{obj}.as<\u{200B}{ty}\u{200B}>()")
+            }
+            SymbolicExpr::NumArrayElements { array } => {
+                let array = self.with_value(array);
+                write!(f, "{array}\u{200B}.len()")
+            }
+            SymbolicExpr::ArrayExtent { array, dim } => {
+                let array = self.with_value(array);
+                let dim = self.with_value(dim);
+                write!(f, "{array}\u{200B}.extent({dim})")
+            }
+            SymbolicExpr::Add { lhs, rhs } => {
+                let lhs = self.with_value(lhs);
+                let rhs = self.with_value(rhs);
+                write!(f, "{lhs} + {rhs}")
+            }
+            SymbolicExpr::Mul { lhs, rhs } => {
+                let lhs = self.with_value(lhs);
+                let rhs = self.with_value(rhs);
+                write!(f, "{lhs}*{rhs}")
+            }
+            SymbolicExpr::PhysicalDowncast { obj, ty } => {
+                let obj = self.with_value(obj);
+                write!(f, "{obj}.downcast({ty})")
+            }
+            SymbolicExpr::ReadValue { ptr, prim_type } => {
+                let ptr = self.with_value(ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
         }
