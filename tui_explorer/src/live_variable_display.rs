@@ -120,7 +120,7 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
             })
             .collect::<Vec<_>>();
 
-        let rows = self.live_variables.iter().zip(exprs.iter()).map(
+        let rows = self.live_variables.iter().zip(exprs.iter()).rev().map(
             |(live_var, expr)| {
                 let name_lines: Vec<_> = std::iter::empty()
                     .chain(std::iter::once(0))
