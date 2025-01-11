@@ -49,6 +49,8 @@ struct GameLocation {
     /// during worldgen.
     trees: Vec<Tree>,
 
+    litter: Vec<Litter>,
+
     /// Which tiles have water.
     water_tiles: Option<(usize, usize, Vec<bool>)>,
 }
@@ -99,6 +101,18 @@ enum TreeKind {
     Mahogany,
     Mystic,
     GreenRain,
+}
+
+struct Litter {
+    position: Position,
+    kind: LitterKind,
+}
+
+#[derive(PartialEq, Eq)]
+enum LitterKind {
+    Stone,
+    Wood,
+    Fiber,
 }
 
 struct Rectangle {
@@ -171,10 +185,11 @@ impl PathfindingUI {
             num_resource_clumps: usize,
             num_features: usize,
             num_large_features: usize,
+            num_objects: usize,
             water_tiles_shape: Option<(usize, usize)>,
         }
 
-        const FIELDS_PER_LOCATION: usize = 9;
+        const FIELDS_PER_LOCATION: usize = 10;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -215,6 +230,14 @@ impl PathfindingUI {
                 let num_large_features = graph
                     .access_field(location, "largeTerrainFeatures.list._size");
 
+                let num_objects = {
+                    let array = graph.access_field(
+                        location,
+                        "objects.compositeDict._entries",
+                    );
+                    graph.num_array_elements(array)
+                };
+
                 let water_tiles = {
                     let field = graph.access_field(location, "waterTiles");
                     let field = graph.downcast(
@@ -238,6 +261,7 @@ impl PathfindingUI {
                     num_resource_clumps,
                     num_features,
                     num_large_features,
+                    num_objects,
                     water_tiles_width,
                     water_tiles_height,
                 ];
@@ -273,6 +297,11 @@ impl PathfindingUI {
                         .unwrap_or(0);
                     let num_large_features = next().unwrap().as_usize()?;
 
+                    let num_objects = next()
+                        .map(|value| value.as_usize())
+                        .transpose()?
+                        .unwrap_or(0);
+
                     let water_tiles_shape = {
                         let width = next();
                         let height = next();
@@ -294,6 +323,7 @@ impl PathfindingUI {
                         num_resource_clumps,
                         num_features,
                         num_large_features,
+                        num_objects,
                         water_tiles_shape,
                     })
                 })
@@ -429,6 +459,28 @@ impl PathfindingUI {
                     [size, right, down].into_iter().for_each(|expr| {
                         graph.mark_output(expr);
                     });
+                }
+
+                let objects = graph
+                    .access_field(location, "objects.compositeDict._entries");
+                for i in 0..loc.num_objects {
+                    let object = graph.access_index(objects, i);
+
+                    let right = graph
+                        .access_field(object, "value.tileLocation.value.X");
+                    let down = graph
+                        .access_field(object, "value.tileLocation.value.Y");
+
+                    let category =
+                        graph.access_field(object, "value.category.value");
+                    let name =
+                        graph.access_field(object, "value.netName.value");
+
+                    [right, down, category, name].into_iter().for_each(
+                        |expr| {
+                            graph.mark_output(expr);
+                        },
+                    );
                 }
 
                 let water_tiles =
@@ -588,6 +640,46 @@ impl PathfindingUI {
                     })
                     .collect::<Result<Vec<_>, _>>()?;
 
+                let mut litter = Vec::new();
+                for _ in 0..loc.num_objects {
+                    let right = next_value();
+                    let down = next_value();
+                    let category = next_value();
+                    let name = next_value();
+                    let opt_litter = category
+                        .map(|value| value.as_isize())
+                        .transpose()?
+                        .filter(|category| *category == -999)
+                        .map(|_| -> Result<_, Error> {
+                            let name =
+                                name.unwrap().read_string_ptr(&reader)?;
+                            let kind = if name == "Twig" {
+                                Some(LitterKind::Wood)
+                            } else if name == "Stone" {
+                                Some(LitterKind::Stone)
+                            } else if name.to_lowercase().contains("weeds") {
+                                Some(LitterKind::Fiber)
+                            } else {
+                                None
+                            };
+                            Ok(kind)
+                        })
+                        .transpose()?
+                        .flatten()
+                        .map(|kind| -> Result<_, Error> {
+                            let position = {
+                                let right = right.unwrap().try_into()?;
+                                let down = down.unwrap().try_into()?;
+                                Position { right, down }
+                            };
+                            Ok(Litter { position, kind })
+                        })
+                        .transpose()?;
+                    if let Some(obj) = opt_litter {
+                        litter.push(obj);
+                    }
+                }
+
                 let water_tiles = loc
                     .water_tiles_shape
                     .map(|(width, height)| -> Result<_, Error> {
@@ -606,6 +698,7 @@ impl PathfindingUI {
                     resource_clumps,
                     bushes,
                     trees,
+                    litter,
                     water_tiles,
                 })
             })
@@ -780,7 +873,9 @@ impl WidgetWindow<Error> for PathfindingUI {
                                 ResourceClumpKind::Stump => Color::Yellow,
                                 ResourceClumpKind::Boulder => Color::DarkGray,
                                 ResourceClumpKind::Meterorite => Color::Magenta,
-                                ResourceClumpKind::MineBoulder => Color::Gray,
+                                ResourceClumpKind::MineBoulder => {
+                                    Color::DarkGray
+                                }
                             },
                         })
                         .for_each(|rect| ctx.draw(&rect));
@@ -812,6 +907,30 @@ impl WidgetWindow<Error> for PathfindingUI {
                         ctx.draw(&Points {
                             coords: &trees,
                             color: Color::Rgb(133, 74, 5),
+                        });
+                    }
+
+                    for (litter_kind, color) in [
+                        (LitterKind::Stone, Color::DarkGray),
+                        (LitterKind::Wood, Color::Rgb(97, 25, 0)),
+                        (LitterKind::Fiber, Color::LightGreen),
+                    ] {
+                        let litter = loc
+                            .litter
+                            .iter()
+                            .filter(|obj| obj.kind == litter_kind)
+                            .map(|obj| obj.position)
+                            .map(|pos| {
+                                (
+                                    pos.right as f64,
+                                    (loc.shape.height as f64)
+                                        - (pos.down as f64),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        ctx.draw(&Points {
+                            coords: &litter,
+                            color,
                         });
                     }
                 })
