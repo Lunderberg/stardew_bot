@@ -52,7 +52,7 @@ struct GameLocation {
     litter: Vec<Litter>,
 
     /// Which tiles have water.
-    water_tiles: Option<(usize, usize, Vec<bool>)>,
+    water_tiles: Option<Vec<bool>>,
 }
 
 struct Warp {
@@ -186,10 +186,10 @@ impl PathfindingUI {
             num_features: usize,
             num_large_features: usize,
             num_objects: usize,
-            water_tiles_shape: Option<(usize, usize)>,
+            has_water_tiles: bool,
         }
 
-        const FIELDS_PER_LOCATION: usize = 10;
+        const FIELDS_PER_LOCATION: usize = 9;
 
         let static_location_fields: Vec<StaticLocationFields> = {
             let mut graph = SymbolicGraph::new();
@@ -250,8 +250,6 @@ impl PathfindingUI {
                     );
                     graph.access_field(field, "waterTiles")
                 };
-                let water_tiles_width = graph.array_extent(water_tiles, 0);
-                let water_tiles_height = graph.array_extent(water_tiles, 1);
 
                 let fields: [_; FIELDS_PER_LOCATION] = [
                     name,
@@ -262,8 +260,7 @@ impl PathfindingUI {
                     num_features,
                     num_large_features,
                     num_objects,
-                    water_tiles_width,
-                    water_tiles_height,
+                    water_tiles,
                 ];
                 fields.into_iter().for_each(|expr| {
                     graph.mark_output(expr);
@@ -302,18 +299,7 @@ impl PathfindingUI {
                         .transpose()?
                         .unwrap_or(0);
 
-                    let water_tiles_shape = {
-                        let width = next();
-                        let height = next();
-                        if width.is_some() && height.is_some() {
-                            let width = width.unwrap().as_usize()?;
-                            let height = height.unwrap().as_usize()?;
-
-                            Some((width, height))
-                        } else {
-                            None
-                        }
-                    };
+                    let has_water_tiles = next().is_some();
 
                     Ok(StaticLocationFields {
                         index,
@@ -324,7 +310,7 @@ impl PathfindingUI {
                         num_features,
                         num_large_features,
                         num_objects,
-                        water_tiles_shape,
+                        has_water_tiles,
                     })
                 })
                 .collect::<Result<Vec<_>, Error>>()?
@@ -485,16 +471,16 @@ impl PathfindingUI {
 
                 let water_tiles =
                     graph.access_field(location, "waterTiles.waterTiles");
-                if let Some((width, height)) = loc.water_tiles_shape {
-                    (0..width).cartesian_product(0..height).for_each(
-                        |(i, j)| {
+                if loc.has_water_tiles {
+                    (0..loc.shape.width)
+                        .cartesian_product(0..loc.shape.height)
+                        .for_each(|(i, j)| {
                             let element =
                                 graph.access_indices(water_tiles, vec![i, j]);
                             let element =
                                 graph.access_field(element, "isWater");
                             graph.mark_output(element);
-                        },
-                    );
+                        });
                 }
             });
             let vm = graph.compile(reader)?;
@@ -681,13 +667,13 @@ impl PathfindingUI {
                 }
 
                 let water_tiles = loc
-                    .water_tiles_shape
-                    .map(|(width, height)| -> Result<_, Error> {
-                        let is_water = (0..width)
-                            .cartesian_product(0..height)
+                    .has_water_tiles
+                    .then(|| -> Result<_, Error> {
+                        let is_water = (0..loc.shape.width)
+                            .cartesian_product(0..loc.shape.height)
                             .map(|(_i, _j)| next_value().unwrap().try_into())
                             .collect::<Result<Vec<_>, _>>()?;
-                        Ok((width, height, is_water))
+                        Ok(is_water)
                     })
                     .transpose()?;
 
@@ -751,7 +737,8 @@ impl WidgetWindow<Error> for PathfindingUI {
             loc.water_tiles
                 .as_ref()
                 .into_iter()
-                .flat_map(|(width, height, is_water)| {
+                .flat_map(|is_water| {
+                    let Rectangle { width, height } = loc.shape;
                     assert!(width * height == is_water.len());
                     is_water
                         .iter()
@@ -840,7 +827,8 @@ impl WidgetWindow<Error> for PathfindingUI {
                 .x_bounds([0.0, loc.shape.width as f64])
                 .y_bounds([0.0, loc.shape.height as f64])
                 .paint(|ctx| {
-                    if let Some((width, height, tiles)) = &loc.water_tiles {
+                    if let Some(tiles) = &loc.water_tiles {
+                        let Rectangle { width, height } = loc.shape;
                         assert!(width * height == tiles.len());
                         let points = tiles
                             .iter()
