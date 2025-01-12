@@ -1,8 +1,6 @@
 use itertools::Itertools;
 
-use dotnet_debugger::{
-    symbolic_expr::SymbolicGraph, RuntimePrimValue, VirtualMachine,
-};
+use dotnet_debugger::{RuntimePrimValue, SymbolicGraph, VirtualMachine};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},

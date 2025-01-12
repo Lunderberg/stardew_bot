@@ -3,7 +3,7 @@ use std::ops::Range;
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::symbolic_expr::{SymbolicGraph, SymbolicType, SymbolicValue};
+use super::expr::{SymbolicGraph, SymbolicType, SymbolicValue};
 use crate::{CachedReader, Error};
 
 pub(crate) struct SymbolicParser<'a> {

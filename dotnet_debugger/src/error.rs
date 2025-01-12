@@ -2,8 +2,8 @@ use memory_reader::Pointer;
 use thiserror::Error;
 
 use crate::{
-    runtime_type::RuntimePrimType, symbolic_expr::SymbolicValue,
-    CorElementType, OpIndex, RuntimePrimValue, RuntimeType, SymbolicExpr,
+    runtime_type::RuntimePrimType, CorElementType, OpIndex, RuntimePrimValue,
+    RuntimeType, SymbolicExpr,
 };
 
 #[derive(Error)]
@@ -27,7 +27,7 @@ pub enum Error {
     },
 
     #[error("dotnet_debugger::ParseError( {0} )")]
-    ParseError(#[from] crate::ParseError),
+    ParseError(#[from] crate::bytecode::ParseError),
 
     #[error("Could not find pointer to .NET Module '{0}'")]
     ModulePointerNotFound(String),
@@ -271,7 +271,7 @@ pub enum Error {
     VMExecutionError(#[from] crate::VMExecutionError),
 
     #[error("Unable to find inferred type for operation {0}")]
-    InferredTypeNotFound(SymbolicValue),
+    InferredTypeNotFound(crate::bytecode::SymbolicValue),
 
     #[error("Invalid reference from expression {from} to {to}")]
     InvalidReference { from: OpIndex, to: OpIndex },

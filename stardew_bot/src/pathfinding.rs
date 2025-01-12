@@ -1,6 +1,4 @@
-use dotnet_debugger::{
-    symbolic_expr::SymbolicGraph, CachedReader, SymbolicType,
-};
+use dotnet_debugger::{CachedReader, SymbolicGraph, SymbolicType};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,

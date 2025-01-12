@@ -4,9 +4,7 @@ use crate::{
 };
 
 use crossterm::event::Event;
-use dotnet_debugger::{
-    symbolic_expr::SymbolicGraph, CachedReader, VirtualMachine,
-};
+use dotnet_debugger::{CachedReader, SymbolicGraph, VirtualMachine};
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{

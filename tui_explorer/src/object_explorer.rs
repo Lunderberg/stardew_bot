@@ -11,9 +11,8 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    symbolic_expr::{SymbolicGraph, SymbolicValue},
     CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
-    RuntimeValue, SymbolicType, TypedPointer,
+    RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue, TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 use tui_utils::{

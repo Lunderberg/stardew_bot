@@ -11,11 +11,11 @@ use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
 use crate::{
+    bytecode::virtual_machine::{Instruction, VMArg},
     runtime_type::RuntimePrimType,
-    virtual_machine::{Instruction, VMArg},
     CachedReader, Error, FieldDescription, MethodTable, OpIndex, RuntimeArray,
-    RuntimeMultiDimArray, RuntimePrimValue, RuntimeType, SymbolicParser,
-    TypedPointer, VirtualMachine,
+    RuntimeMultiDimArray, RuntimePrimValue, RuntimeType, TypedPointer,
+    VirtualMachine,
 };
 
 #[derive(Default, Clone)]
@@ -415,7 +415,7 @@ impl SymbolicGraph {
         text: &str,
         reader: CachedReader,
     ) -> Result<SymbolicValue, Error> {
-        let mut parser = SymbolicParser::new(text, reader, self);
+        let mut parser = super::SymbolicParser::new(text, reader, self);
         parser.parse_expr()
     }
 

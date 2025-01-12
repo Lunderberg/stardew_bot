@@ -47,14 +47,8 @@ pub use static_value_cache::*;
 
 pub mod extensions;
 
-mod op_index;
-pub use op_index::OpIndex;
-
-pub mod symbolic_expr;
-pub use symbolic_expr::{SymbolicExpr, SymbolicType, ValueToken};
-
-pub(crate) mod virtual_machine;
-pub use virtual_machine::{VMExecutionError, VMResults, VirtualMachine};
-
-mod symbolic_expr_parser;
-pub(crate) use symbolic_expr_parser::*;
+pub(crate) mod bytecode;
+pub use bytecode::{
+    OpIndex, SymbolicExpr, SymbolicGraph, SymbolicType, SymbolicValue,
+    VMExecutionError, VMResults, ValueToken, VirtualMachine,
+};

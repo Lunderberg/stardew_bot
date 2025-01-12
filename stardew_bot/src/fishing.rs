@@ -1,8 +1,6 @@
 use std::ops::Range;
 
-use dotnet_debugger::{
-    symbolic_expr::SymbolicGraph, CachedReader, VMResults, ValueToken,
-};
+use dotnet_debugger::{CachedReader, SymbolicGraph, VMResults, ValueToken};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
