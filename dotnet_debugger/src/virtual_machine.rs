@@ -52,20 +52,6 @@ pub enum Instruction {
     // storing the result back to the register.
     Mul(VMArg),
 
-    // Increment the value of the register by `byte_offset`
-    StaticOffset { byte_offset: usize },
-
-    // Scale the register by the specified value
-    StaticScale { factor: usize },
-
-    // Increment the value of the register by the value stored in
-    // vm.values[index].
-    DynamicOffset { index: usize },
-
-    // Scale the value of the register by the value stored in
-    // vm.values[index].
-    DynamicScale { index: usize },
-
     // Downcast a type.  Assumes the register contains a pointer to an
     // object.  If the object is of type `ty`, then the register is
     // unchanged.  If the object is not of type `ty`, then the
@@ -135,11 +121,10 @@ impl VirtualMachine {
     pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
         let num_values = instructions
             .iter()
-            .filter_map(|instruction| match instruction {
-                Instruction::SaveValue { index }
-                | Instruction::RestoreValue { index }
-                | Instruction::DynamicOffset { index } => Some(*index + 1),
-                _ => None,
+            .flat_map(|instruction| {
+                instruction
+                    .input_indices()
+                    .chain(instruction.output_indices())
             })
             .map(|index| index + 1)
             .max()
@@ -196,13 +181,7 @@ impl VirtualMachine {
         let used: HashSet<_> = self
             .instructions
             .iter()
-            .filter_map(|inst| match inst {
-                Instruction::RestoreValue { index } => Some(*index),
-                Instruction::DynamicOffset { index } => Some(*index),
-                Instruction::Add(VMArg::SavedValue { index }) => Some(*index),
-                Instruction::Mul(VMArg::SavedValue { index }) => Some(*index),
-                _ => None,
-            })
+            .flat_map(|inst| inst.input_indices())
             .collect();
 
         for inst in self.instructions.into_iter() {
@@ -264,10 +243,6 @@ impl VirtualMachine {
                 Instruction::Mul(VMArg::SavedValue { index }) => {
                     let index = do_remap(index);
                     Instruction::Mul(VMArg::SavedValue { index })
-                }
-                Instruction::DynamicOffset { index } => {
-                    let index = do_remap(index);
-                    Instruction::DynamicOffset { index }
                 }
                 other => other,
             })
@@ -362,75 +337,6 @@ impl VirtualMachine {
                         _ => None,
                     };
                 }
-                Instruction::StaticOffset {
-                    byte_offset: offset,
-                } => {
-                    register = match register {
-                        None => None,
-                        Some(RuntimePrimValue::Ptr(ptr)) => {
-                            Some(RuntimePrimValue::Ptr(ptr + *offset))
-                        }
-                        Some(value) => {
-                            let lhs = value.as_isize()?;
-                            let rhs = *offset as isize;
-                            Some(RuntimePrimValue::NativeInt(lhs + rhs))
-                        }
-                    };
-                }
-                Instruction::StaticScale { factor } => {
-                    register = match register {
-                        None => None,
-                        Some(value) => {
-                            let offset = value.as_usize()?;
-                            Some(RuntimePrimValue::NativeUInt(offset * factor))
-                        }
-                    };
-                }
-                Instruction::DynamicOffset { index } => {
-                    register = match register {
-                        None => None,
-                        Some(RuntimePrimValue::Ptr(ptr)) => {
-                            let offset = match values[*index] {
-                                Some(value) => Ok(value.as_usize()?),
-                                None => Err(
-                                    VMExecutionError::DynamicOffsetWasEmpty(
-                                        *index,
-                                    ),
-                                ),
-                            }?;
-                            Some(RuntimePrimValue::Ptr(ptr + offset))
-                        }
-                        Some(value) => {
-                            let lhs = value.as_isize()?;
-                            let rhs = match values[*index] {
-                                Some(value) => Ok(value.as_isize()?),
-                                None => Err(
-                                    VMExecutionError::DynamicOffsetWasEmpty(
-                                        *index,
-                                    ),
-                                ),
-                            }?;
-                            Some(RuntimePrimValue::NativeInt(lhs + rhs))
-                        }
-                    }
-                }
-                Instruction::DynamicScale { index } => {
-                    register = match register {
-                        None => None,
-                        Some(value) => {
-                            let lhs = value.as_usize()?;
-                            let rhs = match values[*index] {
-                                Some(value) => Ok(value.as_usize()?),
-                                None => {
-                                    Err(VMExecutionError::DynamicScaleWasEmpty(
-                                        *index,
-                                    ))
-                                }
-                            }?;
-                            Some(RuntimePrimValue::NativeUInt(lhs * rhs))
-                        }
-                    }
-                }
                 Instruction::Downcast { ty } => {
                     register = match register {
                         None => None,
@@ -499,6 +405,40 @@ impl VirtualMachine {
     }
 }
 
+impl Instruction {
+    fn input_indices(&self) -> impl Iterator<Item = usize> {
+        let opt_index = match self {
+            Instruction::SaveValue { index }
+            | Instruction::Add(VMArg::SavedValue { index })
+            | Instruction::Mul(VMArg::SavedValue { index }) => Some(*index),
+
+            Instruction::RestoreValue { .. }
+            | Instruction::Add(_)
+            | Instruction::Mul(_)
+            | Instruction::Const { .. }
+            | Instruction::PrimCast(_)
+            | Instruction::Downcast { .. }
+            | Instruction::Read { .. } => None,
+        };
+        opt_index.into_iter()
+    }
+
+    fn output_indices(&self) -> impl Iterator<Item = usize> {
+        let opt_index = match self {
+            Instruction::RestoreValue { index } => Some(*index),
+
+            Instruction::SaveValue { .. }
+            | Instruction::Add(_)
+            | Instruction::Mul(_)
+            | Instruction::Const { .. }
+            | Instruction::PrimCast(_)
+            | Instruction::Downcast { .. }
+            | Instruction::Read { .. } => None,
+        };
+        opt_index.into_iter()
+    }
+}
+
 impl std::fmt::Debug for VMExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self}")
@@ -538,18 +478,6 @@ impl Display for Instruction {
             Instruction::Const { value } => write!(f, "Const({value})"),
             Instruction::Add(value) => write!(f, "Add({value})"),
             Instruction::Mul(value) => write!(f, "Mul({value})"),
-            Instruction::StaticOffset { byte_offset } => {
-                write!(f, "StaticOffset({byte_offset})")
-            }
-            Instruction::StaticScale { factor } => {
-                write!(f, "StaticScale({factor})")
-            }
-            Instruction::DynamicOffset { index } => {
-                write!(f, "DynamicOffset({index})")
-            }
-            Instruction::DynamicScale { index } => {
-                write!(f, "DynamicScale({index})")
-            }
             Instruction::PrimCast(prim_type) => {
                 write!(f, "PrimCast({prim_type})")
             }
