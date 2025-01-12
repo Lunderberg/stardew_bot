@@ -487,7 +487,10 @@ impl SymbolicGraph {
         Iter::Item: Into<SymbolicValue>,
     {
         let obj = obj.into();
-        let indices = indices.into_iter().map(Into::into).collect();
+        let indices = indices
+            .into_iter()
+            .map(|index| self.prim_cast(index, RuntimePrimType::NativeUInt))
+            .collect();
         self.push(SymbolicExpr::IndexAccess { obj, indices })
     }
 
@@ -800,30 +803,36 @@ impl SymbolicGraph {
     pub fn simplify(&self, reader: CachedReader) -> Result<Self, Error> {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
-        let runtime_type_lookup = self.infer_types(reader)?;
+        let old_runtime_types = self.infer_types(reader)?;
+
+        let mut new_runtime_types: HashMap<OpIndex, RuntimeType> =
+            HashMap::new();
         let mut builder = Self::new();
 
         for (old_index, op) in self.iter_ops() {
             let op = op.clone().remap(old_index, &prev_index_lookup)?;
             let mut value = builder.push(op);
 
-            let lookup_prev = |prev_value: SymbolicValue| -> Result<_, Error> {
-                let value = match prev_value {
-                    SymbolicValue::Result(prev_index) => prev_index_lookup
-                        .get(&prev_index)
-                        .ok_or_else(|| Error::InvalidReference {
-                            from: old_index,
-                            to: prev_index,
-                        })?
-                        .clone(),
-                    other => other,
+            let lookup_type =
+                |new_value: SymbolicValue| -> Result<RuntimeType, Error> {
+                    match new_value {
+                        SymbolicValue::Int(_) => {
+                            Ok(RuntimePrimType::NativeUInt.into())
+                        }
+                        SymbolicValue::Ptr(_) => {
+                            Ok(RuntimePrimType::Ptr.into())
+                        }
+                        SymbolicValue::Result(op_index) => {
+                            Ok(new_runtime_types
+                                .get(&op_index)
+                                .ok_or_else(|| Error::InvalidReference {
+                                    from: old_index,
+                                    to: op_index,
+                                })?
+                                .clone())
+                        }
+                    }
                 };
-                let runtime_type = runtime_type_lookup
-                    .get(&prev_value)
-                    .ok_or_else(|| Error::InferredTypeNotFound(prev_value))?;
-
-                Ok((value, runtime_type))
-            };
 
             let mut do_simplify_step = |index: OpIndex| -> Result<
                 Option<SymbolicValue>,
@@ -832,7 +841,7 @@ impl SymbolicGraph {
                 Ok(match &builder[index] {
                     // Remove unnecessary downcasts
                     SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                        let (obj, obj_type) = lookup_prev(*obj)?;
+                        let obj_type = lookup_type(*obj)?;
 
                         let static_method_table_ptr =
                             obj_type.method_table_for_downcast()?;
@@ -846,7 +855,7 @@ impl SymbolicGraph {
                             // Static type is the same, or superclass of
                             // the desired runtime type.  This downcast
                             // can be simplified away.
-                            Some(obj)
+                            Some(*obj)
                         } else if reader
                             .method_table(static_method_table_ptr)?
                             .is_interface()
@@ -871,10 +880,10 @@ impl SymbolicGraph {
 
                     // Remove unnecessary PrimCast
                     SymbolicExpr::PrimCast { value, prim_type } => {
-                        let (value, value_type) = lookup_prev(*value)?;
+                        let value_type = lookup_type(*value)?;
 
-                        if value_type == prim_type {
-                            Some(value)
+                        if value_type == *prim_type {
+                            Some(*value)
                         } else {
                             None
                         }
@@ -976,6 +985,12 @@ impl SymbolicGraph {
             }
 
             prev_index_lookup.insert(old_index, value);
+            if let SymbolicValue::Result(new_index) = value {
+                let runtime_type = old_runtime_types
+                    .get(&SymbolicValue::Result(old_index))
+                    .expect("All indices should have known type");
+                new_runtime_types.insert(new_index, runtime_type.clone());
+            }
         }
 
         builder.mark_new_outputs(&self.outputs, &prev_index_lookup);
