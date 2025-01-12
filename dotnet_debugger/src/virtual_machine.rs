@@ -66,9 +66,6 @@ pub enum Instruction {
     // vm.values[index].
     DynamicScale { index: usize },
 
-    // Convert the value of the register to `usize`
-    AsIndex,
-
     // Downcast a type.  Assumes the register contains a pointer to an
     // object.  If the object is of type `ty`, then the register is
     // unchanged.  If the object is not of type `ty`, then the
@@ -144,10 +141,15 @@ impl VirtualMachine {
                 | Instruction::DynamicOffset { index } => Some(*index + 1),
                 _ => None,
             })
+            .map(|index| index + 1)
             .max()
             .unwrap_or(0);
 
-        assert!(num_values >= num_outputs);
+        assert!(
+            num_values >= num_outputs,
+            "Virtual machine has {num_outputs}, \
+             but only found instructions for writing to {num_values}"
+        );
 
         Self {
             instructions,
@@ -360,14 +362,6 @@ impl VirtualMachine {
                         _ => None,
                     };
                 }
-                Instruction::AsIndex => {
-                    register = match register {
-                        None => None,
-                        Some(value) => Some(RuntimePrimValue::NativeUInt(
-                            value.as_usize()?,
-                        )),
-                    };
-                }
                 Instruction::StaticOffset {
                     byte_offset: offset,
                 } => {
@@ -561,7 +555,6 @@ impl Display for Instruction {
             }
             Instruction::Downcast { ty } => write!(f, "Downcast({ty})"),
             Instruction::Read { ty } => write!(f, "Read({ty})"),
-            Instruction::AsIndex => write!(f, "AsIndex"),
         }
     }
 }

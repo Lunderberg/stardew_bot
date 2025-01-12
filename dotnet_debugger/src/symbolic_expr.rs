@@ -1115,7 +1115,7 @@ impl SymbolicGraph {
             })
             .collect();
 
-        let num_outputs = output_indices.len();
+        let num_outputs = self.outputs.len();
 
         let mut instructions = Vec::new();
         let mut currently_stored: HashMap<OpIndex, usize> = HashMap::new();
