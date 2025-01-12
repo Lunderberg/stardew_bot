@@ -435,9 +435,11 @@ impl SymbolicGraph {
 
     pub fn static_field(
         &mut self,
-        class: SymbolicType,
-        field_name: String,
+        class: impl Into<SymbolicType>,
+        field_name: impl Into<String>,
     ) -> SymbolicValue {
+        let class = class.into();
+        let field_name = field_name.into();
         self.push(StaticField { class, field_name })
     }
 
@@ -491,9 +493,10 @@ impl SymbolicGraph {
     pub fn downcast(
         &mut self,
         obj: impl Into<SymbolicValue>,
-        ty: SymbolicType,
+        ty: impl Into<SymbolicType>,
     ) -> SymbolicValue {
         let obj = obj.into();
+        let ty = ty.into();
         self.push(SymbolicExpr::SymbolicDowncast { obj, ty })
     }
 
@@ -1819,6 +1822,18 @@ impl<'a> Display for ExprPrinter<'a> {
                 let ptr = self.with_value(ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
+        }
+    }
+}
+
+impl<T> From<T> for SymbolicType
+where
+    T: Into<String>,
+{
+    fn from(full_name: T) -> Self {
+        Self {
+            full_name: full_name.into(),
+            generics: Vec::new(),
         }
     }
 }

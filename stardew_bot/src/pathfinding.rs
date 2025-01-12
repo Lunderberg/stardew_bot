@@ -1,4 +1,4 @@
-use dotnet_debugger::{CachedReader, SymbolicGraph, SymbolicType};
+use dotnet_debugger::{CachedReader, SymbolicGraph};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -238,13 +238,8 @@ impl PathfindingUI {
 
                 let water_tiles = {
                     let field = graph.access_field(location, "waterTiles");
-                    let field = graph.downcast(
-                        field,
-                        SymbolicType {
-                            full_name: "StardewValley.WaterTiles".into(),
-                            generics: Vec::new(),
-                        },
-                    );
+                    let field =
+                        graph.downcast(field, "StardewValley.WaterTiles");
                     graph.access_field(field, "waterTiles")
                 };
 
@@ -374,27 +369,17 @@ impl PathfindingUI {
                     let obj = graph.access_field(feature, "value.value");
 
                     let grass_health = {
-                        let grass =
-                            graph.downcast(
-                                obj,
-                                SymbolicType {
-                                    full_name:
-                                        "StardewValley.TerrainFeatures.Grass"
-                                            .into(),
-                                    generics: Vec::new(),
-                                },
-                            );
+                        let grass = graph.downcast(
+                            obj,
+                            "StardewValley.TerrainFeatures.Grass",
+                        );
                         graph.access_field(grass, "grassBladeHealth")
                     };
 
                     let tree_fields = {
                         let tree = graph.downcast(
                             obj,
-                            SymbolicType {
-                                full_name: "StardewValley.TerrainFeatures.Tree"
-                                    .into(),
-                                generics: Vec::new(),
-                            },
+                            "StardewValley.TerrainFeatures.Tree",
                         );
                         // treeType looks like an integer, but has
                         // been converted to a string.
@@ -423,11 +408,7 @@ impl PathfindingUI {
                         let field = graph.access_index(large_features, i);
                         graph.downcast(
                             field,
-                            SymbolicType {
-                                full_name: "StardewValley.TerrainFeatures.Bush"
-                                    .into(),
-                                generics: Vec::new(),
-                            },
+                            "StardewValley.TerrainFeatures.Bush",
                         )
                     };
                     let size = graph.access_field(feature, "size.value");
