@@ -690,9 +690,11 @@ impl SymbolicGraph {
                     }
                 }
                 SymbolicExpr::NumArrayElements { .. } => {
-                    RuntimePrimType::U64.into()
+                    RuntimePrimType::NativeUInt.into()
                 }
-                SymbolicExpr::ArrayExtent { .. } => RuntimePrimType::U32.into(),
+                SymbolicExpr::ArrayExtent { .. } => {
+                    RuntimePrimType::NativeUInt.into()
+                }
 
                 SymbolicExpr::Add { lhs, rhs } => {
                     let lhs_type = lookup_type(lhs)?;
@@ -1695,6 +1697,8 @@ impl SymbolicExpr {
                             builder.add(array, Pointer::SIZE);
                         let expr = builder
                             .read_value(num_elements_ptr, RuntimePrimType::U64);
+                        let expr = builder
+                            .prim_cast(expr, RuntimePrimType::NativeUInt);
                         Ok(expr)
                     }
 
@@ -1719,6 +1723,8 @@ impl SymbolicExpr {
                         let extent_ptr = builder.add(array, offset);
                         let extent = builder
                             .read_value(extent_ptr, RuntimePrimType::U32);
+                        let extent = builder
+                            .prim_cast(extent, RuntimePrimType::NativeUInt);
                         Ok(extent)
                     }
                     other => {
