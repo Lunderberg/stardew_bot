@@ -127,8 +127,8 @@ pub enum SymbolicValue {
 
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub struct SymbolicType {
-    pub namespace: Option<String>,
-    pub name: String,
+    /// The full name of the type, including the namespace, if any.
+    pub full_name: String,
     pub generics: Vec<SymbolicType>,
 }
 
@@ -150,10 +150,7 @@ impl SymbolicType {
         reader: CachedReader<'_>,
     ) -> Result<TypedPointer<MethodTable>, Error> {
         let method_table_ptr = reader
-            .method_table_by_name(
-                self.namespace.as_ref().map(|s| s.as_str()).unwrap_or(""),
-                &self.name,
-            )?
+            .method_table_by_name(&self.full_name)?
             .ok_or_else(|| {
                 Error::UnexpectedNullMethodTable(format!("{}", self))
             })?;
@@ -225,26 +222,22 @@ impl SymbolicType {
     }
 
     pub(crate) fn try_prim_type(&self) -> Option<RuntimePrimType> {
-        if self.namespace.is_none() && self.generics.is_empty() {
-            match self.name.as_str() {
-                "bool" => Some(RuntimePrimType::Bool),
-                "char" => Some(RuntimePrimType::Char),
-                "u8" => Some(RuntimePrimType::U8),
-                "u16" => Some(RuntimePrimType::U16),
-                "u32" => Some(RuntimePrimType::U32),
-                "u64" => Some(RuntimePrimType::U64),
-                "usize" => Some(RuntimePrimType::NativeUInt),
-                "i8" => Some(RuntimePrimType::I8),
-                "i16" => Some(RuntimePrimType::I16),
-                "i32" => Some(RuntimePrimType::I32),
-                "i64" => Some(RuntimePrimType::I64),
-                "isize" => Some(RuntimePrimType::NativeInt),
-                "f32" => Some(RuntimePrimType::F32),
-                "f64" => Some(RuntimePrimType::F64),
-                _ => None,
-            }
-        } else {
-            None
+        match self.full_name.as_str() {
+            "bool" => Some(RuntimePrimType::Bool),
+            "char" => Some(RuntimePrimType::Char),
+            "u8" => Some(RuntimePrimType::U8),
+            "u16" => Some(RuntimePrimType::U16),
+            "u32" => Some(RuntimePrimType::U32),
+            "u64" => Some(RuntimePrimType::U64),
+            "usize" => Some(RuntimePrimType::NativeUInt),
+            "i8" => Some(RuntimePrimType::I8),
+            "i16" => Some(RuntimePrimType::I16),
+            "i32" => Some(RuntimePrimType::I32),
+            "i64" => Some(RuntimePrimType::I64),
+            "isize" => Some(RuntimePrimType::NativeInt),
+            "f32" => Some(RuntimePrimType::F32),
+            "f64" => Some(RuntimePrimType::F64),
+            _ => None,
         }
     }
 }
@@ -1842,10 +1835,7 @@ impl Display for SymbolicValue {
 
 impl Display for SymbolicType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(namespace) = &self.namespace {
-            write!(f, "{namespace}.")?;
-        }
-        write!(f, "{}", self.name)?;
+        write!(f, "{}", self.full_name)?;
 
         if !self.generics.is_empty() {
             write!(f, "<\u{200B}")?;

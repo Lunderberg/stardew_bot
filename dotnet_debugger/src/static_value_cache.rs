@@ -437,7 +437,7 @@ impl<'a> CachedReader<'a> {
             },
             SignatureType::Object => {
                 let object_method_table_ptr = self
-                    .method_table_by_name("System", "Object")?
+                    .method_table_by_name("System.Object")?
                     .ok_or(Error::MethodTableOfSystemObjectShouldBeLoaded)?;
                 type_handle_ptr.as_method_table()
                     == Some(object_method_table_ptr)
@@ -836,7 +836,7 @@ impl<'a> CachedReader<'a> {
             }
             SignatureType::Object => {
                 let method_table =
-                    self.method_table_by_name("System", "Object")?;
+                    self.method_table_by_name("System.Object")?;
                 RuntimeType::Class { method_table }
             }
 
@@ -1015,26 +1015,18 @@ impl<'a> CachedReader<'a> {
             .cloned()
     }
 
+    /// Look up the method table for a class/ValueType.
+    ///
+    /// * `full_name`: The full name of the type, including the namespace.
     pub fn method_table_by_name(
         &self,
-        namespace: &str,
-        name: &str,
+        full_name: &str,
     ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
-        // I'd rather avoid the string formatting and memory
-        // allocation, but using `(namespace,name)` doesn't work with
-        // the Borrow trait.  There's some known workarounds [0,1] in
-        // case this becomes a bottleneck, but they would be more
-        // hassle than I'd want at the moment.
-        //
-        // [0] https://users.rust-lang.org/t/efficient-multi-string-hashmap-keys/51944
-        // [1] https://users.rust-lang.org/t/the-borrow-trait-and-structs-as-hashmap-keys/18634
-        let lookup_key = format!("{namespace}.{name}");
-
-        if let Some(value) = self.state.method_table_by_name.get(&lookup_key) {
+        if let Some(value) = self.state.method_table_by_name.get(full_name) {
             Ok(Some(*value))
         } else {
             self.init_method_table_by_name()?;
-            Ok(self.state.method_table_by_name.get(&lookup_key).copied())
+            Ok(self.state.method_table_by_name.get(full_name).copied())
         }
     }
 

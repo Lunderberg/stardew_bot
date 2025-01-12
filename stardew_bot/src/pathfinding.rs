@@ -241,8 +241,7 @@ impl PathfindingUI {
                     let field = graph.downcast(
                         field,
                         SymbolicType {
-                            namespace: Some("StardewValley".into()),
-                            name: "WaterTiles".into(),
+                            full_name: "StardewValley.WaterTiles".into(),
                             generics: Vec::new(),
                         },
                     );
@@ -375,16 +374,16 @@ impl PathfindingUI {
                     let obj = graph.access_field(feature, "value.value");
 
                     let grass_health = {
-                        let grass = graph.downcast(
-                            obj,
-                            SymbolicType {
-                                namespace: Some(
-                                    "StardewValley.TerrainFeatures".into(),
-                                ),
-                                name: "Grass".into(),
-                                generics: Vec::new(),
-                            },
-                        );
+                        let grass =
+                            graph.downcast(
+                                obj,
+                                SymbolicType {
+                                    full_name:
+                                        "StardewValley.TerrainFeatures.Grass"
+                                            .into(),
+                                    generics: Vec::new(),
+                                },
+                            );
                         graph.access_field(grass, "grassBladeHealth")
                     };
 
@@ -392,10 +391,8 @@ impl PathfindingUI {
                         let tree = graph.downcast(
                             obj,
                             SymbolicType {
-                                namespace: Some(
-                                    "StardewValley.TerrainFeatures".into(),
-                                ),
-                                name: "Tree".into(),
+                                full_name: "StardewValley.TerrainFeatures.Tree"
+                                    .into(),
                                 generics: Vec::new(),
                             },
                         );
@@ -427,10 +424,8 @@ impl PathfindingUI {
                         graph.downcast(
                             field,
                             SymbolicType {
-                                namespace: Some(
-                                    "StardewValley.TerrainFeatures".into(),
-                                ),
-                                name: "Bush".into(),
+                                full_name: "StardewValley.TerrainFeatures.Bush"
+                                    .into(),
                                 generics: Vec::new(),
                             },
                         )

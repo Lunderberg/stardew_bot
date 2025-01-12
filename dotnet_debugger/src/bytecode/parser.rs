@@ -184,10 +184,12 @@ impl<'a> SymbolicParser<'a> {
             let name = name_token.text;
 
             if self.is_valid_class(&namespace, name)? {
+                let full_name = namespace
+                    .into_iter()
+                    .chain(std::iter::once(name))
+                    .join(".");
                 return Ok(SymbolicType {
-                    namespace: (!namespace.is_empty())
-                        .then(|| namespace.iter().join(".")),
-                    name: name.to_string(),
+                    full_name,
                     generics: Vec::new(),
                 });
             }
@@ -428,10 +430,11 @@ impl<'a> SymbolicParser<'a> {
 
         let generics = self.try_generic_type_list()?;
 
+        let full_name =
+            namespace.into_iter().chain(std::iter::once(name)).join(".");
+
         Ok(SymbolicType {
-            namespace: (!namespace.is_empty())
-                .then(|| namespace.iter().join(".")),
-            name: name.to_string(),
+            full_name,
             generics,
         })
     }

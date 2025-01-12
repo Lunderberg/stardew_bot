@@ -366,6 +366,9 @@ fn get_symbolic_type(
 
     let name = type_def.name()?.to_string();
 
+    let full_name =
+        namespace.into_iter().chain(std::iter::once(name)).join(".");
+
     let generics = if method_table.has_generics() {
         method_table
             .generic_types_excluding_base_class(&reader)?
@@ -384,8 +387,7 @@ fn get_symbolic_type(
     };
 
     Ok(SymbolicType {
-        namespace,
-        name,
+        full_name,
         generics,
     })
 }
@@ -716,8 +718,11 @@ impl ObjectExplorer {
             };
 
             let class = SymbolicType {
-                namespace: class_name.namespace.clone(),
-                name: class_name.name.clone(),
+                full_name: if let Some(namespace) = &class_name.namespace {
+                    format!("{namespace}.{}", class_name.name)
+                } else {
+                    class_name.name.clone()
+                },
                 generics: Vec::new(),
             };
             let field_name = field_name.clone();
