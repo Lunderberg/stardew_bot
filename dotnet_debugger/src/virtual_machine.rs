@@ -24,6 +24,12 @@ pub struct VirtualMachine {
 
 pub struct VMResults(Vec<Option<RuntimePrimValue>>);
 
+#[derive(Clone, Copy)]
+pub enum VMArg {
+    Const(RuntimePrimValue),
+    SavedValue { index: usize },
+}
+
 #[derive(Clone)]
 pub enum Instruction {
     // Write the current value of the register into vm.values[index]
@@ -37,6 +43,14 @@ pub enum Instruction {
 
     // Cast the value in the register to the specified type.
     PrimCast(RuntimePrimType),
+
+    // Increment the register by the value specified in the argument,
+    // storing the result back to the register.
+    Add(VMArg),
+
+    // Multiply the register by the value specified in the argument,
+    // storing the result back to the register.
+    Mul(VMArg),
 
     // Increment the value of the register by `byte_offset`
     StaticOffset { byte_offset: usize },
@@ -183,6 +197,8 @@ impl VirtualMachine {
             .filter_map(|inst| match inst {
                 Instruction::RestoreValue { index } => Some(*index),
                 Instruction::DynamicOffset { index } => Some(*index),
+                Instruction::Add(VMArg::SavedValue { index }) => Some(*index),
+                Instruction::Mul(VMArg::SavedValue { index }) => Some(*index),
                 _ => None,
             })
             .collect();
@@ -239,6 +255,14 @@ impl VirtualMachine {
                     let index = do_remap(index);
                     Instruction::RestoreValue { index }
                 }
+                Instruction::Add(VMArg::SavedValue { index }) => {
+                    let index = do_remap(index);
+                    Instruction::Add(VMArg::SavedValue { index })
+                }
+                Instruction::Mul(VMArg::SavedValue { index }) => {
+                    let index = do_remap(index);
+                    Instruction::Mul(VMArg::SavedValue { index })
+                }
                 Instruction::DynamicOffset { index } => {
                     let index = do_remap(index);
                     Instruction::DynamicOffset { index }
@@ -261,6 +285,15 @@ impl VirtualMachine {
         let mut register = None;
         let mut values = vec![None; self.num_outputs + self.num_temporaries];
 
+        macro_rules! arg_to_value {
+            ($arg:expr) => {
+                match $arg {
+                    VMArg::Const(prim) => Some(prim),
+                    VMArg::SavedValue { index } => values[*index].as_ref(),
+                }
+            };
+        }
+
         for instruction in &self.instructions {
             match instruction {
                 Instruction::SaveValue { index } => {
@@ -276,6 +309,56 @@ impl VirtualMachine {
                     register = register
                         .map(|value| value.prim_cast(*prim_type))
                         .transpose()?;
+                }
+                Instruction::Add(value) => {
+                    let arg = arg_to_value!(value);
+                    register = match (register, arg) {
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::NativeUInt(a + b)),
+                                (
+                                    RuntimePrimValue::Ptr(a),
+                                    &RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::Ptr(a + b)),
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    &RuntimePrimValue::Ptr(b),
+                                ) => Ok(RuntimePrimValue::Ptr(b + a)),
+                                (lhs, rhs) => {
+                                    Err(Error::InvalidOperandsForAddition {
+                                        lhs: lhs.runtime_type().into(),
+                                        rhs: rhs.runtime_type().into(),
+                                    })
+                                }
+                            }?;
+                            Some(res)
+                        }
+                        _ => None,
+                    };
+                }
+                Instruction::Mul(value) => {
+                    let arg = arg_to_value!(value);
+                    register = match (register, arg) {
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::NativeUInt(a * b)),
+                                (lhs, rhs) => Err(
+                                    Error::InvalidOperandsForMultiplication {
+                                        lhs: lhs.runtime_type().into(),
+                                        rhs: rhs.runtime_type().into(),
+                                    },
+                                ),
+                            }?;
+                            Some(res)
+                        }
+                        _ => None,
+                    };
                 }
                 Instruction::AsIndex => {
                     register = match register {
@@ -443,6 +526,14 @@ impl Display for VirtualMachine {
         Ok(())
     }
 }
+impl Display for VMArg {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            VMArg::Const(prim) => write!(f, "{prim}"),
+            VMArg::SavedValue { index } => write!(f, "*{index}"),
+        }
+    }
+}
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -451,6 +542,8 @@ impl Display for Instruction {
                 write!(f, "RestoreValue({index})")
             }
             Instruction::Const { value } => write!(f, "Const({value})"),
+            Instruction::Add(value) => write!(f, "Add({value})"),
+            Instruction::Mul(value) => write!(f, "Mul({value})"),
             Instruction::StaticOffset { byte_offset } => {
                 write!(f, "StaticOffset({byte_offset})")
             }

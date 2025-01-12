@@ -11,8 +11,9 @@ use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_type::RuntimePrimType, virtual_machine::Instruction, CachedReader,
-    Error, FieldDescription, MethodTable, OpIndex, RuntimeArray,
+    runtime_type::RuntimePrimType,
+    virtual_machine::{Instruction, VMArg},
+    CachedReader, Error, FieldDescription, MethodTable, OpIndex, RuntimeArray,
     RuntimeMultiDimArray, RuntimePrimValue, RuntimeType, SymbolicParser,
     TypedPointer, VirtualMachine,
 };
@@ -1140,85 +1141,35 @@ impl SymbolicGraph {
             };
         }
 
+        macro_rules! value_to_arg {
+            ($arg:expr) => {
+                match $arg {
+                    &SymbolicValue::Int(value) => {
+                        VMArg::Const(RuntimePrimValue::NativeUInt(value))
+                    }
+                    &SymbolicValue::Ptr(ptr) => {
+                        VMArg::Const(RuntimePrimValue::Ptr(ptr))
+                    }
+                    SymbolicValue::Result(op_index) => {
+                        let index = *currently_stored.get(&op_index).expect(
+                            "Internal error, \
+                             {op_index} not located anywhere",
+                        );
+                        VMArg::SavedValue { index }
+                    }
+                }
+            };
+        }
+
         for (op_index, op) in self.iter_ops() {
             match op {
                 SymbolicExpr::Add { lhs, rhs } => {
-                    let lhs_instruction = match lhs {
-                        &SymbolicValue::Ptr(ptr) => Instruction::Const {
-                            value: RuntimePrimValue::Ptr(ptr),
-                        },
-                        &SymbolicValue::Int(value) => Instruction::Const {
-                            value: RuntimePrimValue::NativeUInt(value),
-                        },
-                        SymbolicValue::Result(op_index) => {
-                            let index =
-                                *currently_stored.get(&op_index).expect(
-                                    "Internal error, \
-                                 {op_index} not located anywhere",
-                                );
-                            Instruction::RestoreValue { index }
-                        }
-                    };
-                    instructions.push(lhs_instruction);
-
-                    let rhs_instruction = match rhs {
-                        &SymbolicValue::Int(offset) => {
-                            Instruction::StaticOffset {
-                                byte_offset: offset,
-                            }
-                        }
-                        SymbolicValue::Result(op_index) => {
-                            let index =
-                                *currently_stored.get(&op_index).expect(
-                                    "Internal error, \
-                                 {op_index} not located anywhere",
-                                );
-                            Instruction::DynamicOffset { index }
-                        }
-                        SymbolicValue::Ptr(pointer) => panic!(
-                            "RHS of add should be byte offset, \
-                             but was instead {pointer}"
-                        ),
-                    };
-                    instructions.push(rhs_instruction);
+                    instructions.push(value_to_register!(lhs));
+                    instructions.push(Instruction::Add(value_to_arg!(rhs)));
                 }
                 SymbolicExpr::Mul { lhs, rhs } => {
-                    let lhs_instruction = match lhs {
-                        SymbolicValue::Result(op_index) => {
-                            let index =
-                                *currently_stored.get(&op_index).expect(
-                                    "Internal error, \
-                                 {op_index} not located anywhere",
-                                );
-                            Instruction::RestoreValue { index }
-                        }
-
-                        SymbolicValue::Ptr(ptr) => panic!(
-                            "LHS of multiply should be output of previous op, \
-                             but was instead {ptr}"
-                        ),
-
-                        SymbolicValue::Int(value) => panic!(
-                            "LHS of multiply should be a pointer, \
-                             but was instead {value}"
-                        ),
-                    };
-                    instructions.push(lhs_instruction);
-
-                    let rhs_instruction = match rhs {
-                        &SymbolicValue::Int(factor) => {
-                            Instruction::StaticScale { factor }
-                        }
-                        SymbolicValue::Ptr(ptr) => panic!(
-                            "RHS of multiply should be a static value, \
-                             but was instead {ptr}"
-                        ),
-                        SymbolicValue::Result(op_index) => panic!(
-                            "RHS of multiply should be a static value, \
-                             but was instead {op_index}"
-                        ),
-                    };
-                    instructions.push(rhs_instruction);
+                    instructions.push(value_to_register!(lhs));
+                    instructions.push(Instruction::Mul(value_to_arg!(rhs)));
                 }
                 SymbolicExpr::PrimCast { value, prim_type } => {
                     instructions.push(value_to_register!(value));
@@ -1550,6 +1501,10 @@ impl SymbolicExpr {
                                 num_elements_ptr,
                                 RuntimePrimType::U64,
                             );
+                            let num_elements = builder.prim_cast(
+                                num_elements,
+                                RuntimePrimType::NativeUInt,
+                            );
                             let shape = vec![num_elements];
                             Ok((
                                 element_type,
@@ -1577,7 +1532,10 @@ impl SymbolicExpr {
                                         extent_ptr,
                                         RuntimePrimType::U32,
                                     );
-                                    extent
+                                    builder.prim_cast(
+                                        extent,
+                                        RuntimePrimType::NativeUInt,
+                                    )
                                 })
                                 .collect();
                             let header_size_bytes =
