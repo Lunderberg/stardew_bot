@@ -92,6 +92,11 @@ pub enum SymbolicExpr {
         rhs: SymbolicValue,
     },
 
+    PrimCast {
+        value: SymbolicValue,
+        prim_type: RuntimePrimType,
+    },
+
     /// Downcast into a subclass.
     ///
     /// If the downcast is successful, the result is the same pointer
@@ -216,6 +221,30 @@ impl SymbolicType {
             })??;
 
         Ok(instantiated_generic.ptr())
+    }
+
+    pub(crate) fn try_prim_type(&self) -> Option<RuntimePrimType> {
+        if self.namespace.is_none() && self.generics.is_empty() {
+            match self.name.as_str() {
+                "bool" => Some(RuntimePrimType::Bool),
+                "char" => Some(RuntimePrimType::Char),
+                "u8" => Some(RuntimePrimType::U8),
+                "u16" => Some(RuntimePrimType::U16),
+                "u32" => Some(RuntimePrimType::U32),
+                "u64" => Some(RuntimePrimType::U64),
+                "usize" => Some(RuntimePrimType::NativeUInt),
+                "i8" => Some(RuntimePrimType::I8),
+                "i16" => Some(RuntimePrimType::I16),
+                "i32" => Some(RuntimePrimType::I32),
+                "i64" => Some(RuntimePrimType::I64),
+                "isize" => Some(RuntimePrimType::NativeInt),
+                "f32" => Some(RuntimePrimType::F32),
+                "f64" => Some(RuntimePrimType::F64),
+                _ => None,
+            }
+        } else {
+            None
+        }
     }
 }
 
@@ -441,7 +470,7 @@ impl SymbolicGraph {
         index: impl Into<SymbolicValue>,
     ) -> SymbolicValue {
         let obj = obj.into();
-        let index = index.into();
+        let index = self.prim_cast(index, RuntimePrimType::NativeUInt);
         self.push(SymbolicExpr::IndexAccess {
             obj,
             indices: vec![index],
@@ -511,6 +540,15 @@ impl SymbolicGraph {
         let lhs = lhs.into();
         let rhs = rhs.into();
         self.push(SymbolicExpr::Mul { lhs, rhs })
+    }
+
+    pub fn prim_cast(
+        &mut self,
+        value: impl Into<SymbolicValue>,
+        prim_type: RuntimePrimType,
+    ) -> SymbolicValue {
+        let value = value.into();
+        self.push(SymbolicExpr::PrimCast { value, prim_type })
     }
 
     pub fn physical_downcast(
@@ -699,6 +737,7 @@ impl SymbolicGraph {
                     }?
                     .into()
                 }
+                SymbolicExpr::PrimCast { prim_type, .. } => (*prim_type).into(),
                 SymbolicExpr::PhysicalDowncast { .. } => {
                     RuntimePrimType::Ptr.into()
                 }
@@ -827,6 +866,17 @@ impl SymbolicGraph {
                                 format!("{obj_type}"),
                                 format!("{ty}"),
                             ));
+                        }
+                    }
+
+                    // Remove unnecessary PrimCast
+                    SymbolicExpr::PrimCast { value, prim_type } => {
+                        let (value, value_type) = lookup_prev(*value)?;
+
+                        if value_type == prim_type {
+                            Some(value)
+                        } else {
+                            None
                         }
                     }
 
@@ -1053,6 +1103,26 @@ impl SymbolicGraph {
         let mut currently_stored: HashMap<OpIndex, usize> = HashMap::new();
         let mut next_free_index = num_outputs;
 
+        macro_rules! value_to_register {
+            ($arg:expr) => {
+                match $arg {
+                    &SymbolicValue::Int(value) => Instruction::Const {
+                        value: RuntimePrimValue::NativeUInt(value),
+                    },
+                    &SymbolicValue::Ptr(ptr) => Instruction::Const {
+                        value: RuntimePrimValue::Ptr(ptr),
+                    },
+                    SymbolicValue::Result(op_index) => {
+                        let index = *currently_stored.get(&op_index).expect(
+                            "Internal error, \
+                             {op_index} not located anywhere",
+                        );
+                        Instruction::RestoreValue { index }
+                    }
+                }
+            };
+        }
+
         for (op_index, op) in self.iter_ops() {
             match op {
                 SymbolicExpr::Add { lhs, rhs } => {
@@ -1132,6 +1202,10 @@ impl SymbolicGraph {
                         ),
                     };
                     instructions.push(rhs_instruction);
+                }
+                SymbolicExpr::PrimCast { value, prim_type } => {
+                    instructions.push(value_to_register!(value));
+                    instructions.push(Instruction::PrimCast(*prim_type));
                 }
                 &SymbolicExpr::PhysicalDowncast { obj, ty } => {
                     let obj_instruction = match obj {
@@ -1293,8 +1367,12 @@ impl SymbolicExpr {
                     .collect::<Result<_, _>>()?;
                 SymbolicExpr::IndexAccess { obj, indices }
             }
+            SymbolicExpr::PrimCast { value, prim_type } => {
+                let value = remap(value)?;
+                SymbolicExpr::PrimCast { value, prim_type }
+            }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                let obj = remap(obj.into())?;
+                let obj = remap(obj)?;
                 SymbolicExpr::SymbolicDowncast { obj, ty }.into()
             }
             SymbolicExpr::NumArrayElements { array } => {
@@ -1339,6 +1417,7 @@ impl SymbolicExpr {
                 callback(*obj);
                 indices.iter().for_each(|index| callback(*index));
             }
+            SymbolicExpr::PrimCast { value, .. } => callback(*value),
             SymbolicExpr::SymbolicDowncast { obj, .. } => callback(*obj),
             SymbolicExpr::NumArrayElements { array } => {
                 callback(*array);
@@ -1586,6 +1665,12 @@ impl SymbolicExpr {
 
                 Ok(expr)
             }
+            SymbolicExpr::PrimCast { value, prim_type } => {
+                let (value, _) = lookup_prev(value)?;
+                let expr = builder.prim_cast(value, *prim_type);
+
+                Ok(expr)
+            }
             SymbolicExpr::NumArrayElements { array } => {
                 let (array, array_type) = lookup_prev(array)?;
                 match array_type {
@@ -1674,6 +1759,9 @@ impl Display for SymbolicExpr {
             SymbolicExpr::PhysicalDowncast { obj, ty } => {
                 write!(f, "{obj}.downcast({ty})")
             }
+            SymbolicExpr::PrimCast { value, prim_type } => {
+                write!(f, "{value}.as::<{prim_type}>()")
+            }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
@@ -1750,6 +1838,10 @@ impl<'a> Display for ExprPrinter<'a> {
             SymbolicExpr::PhysicalDowncast { obj, ty } => {
                 let obj = self.with_value(obj);
                 write!(f, "{obj}.downcast({ty})")
+            }
+            SymbolicExpr::PrimCast { value, prim_type } => {
+                let value = self.with_value(value);
+                write!(f, "{value}.as::<{prim_type}>()")
             }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(ptr);

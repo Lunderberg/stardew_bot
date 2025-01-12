@@ -294,6 +294,16 @@ pub enum Error {
          but encountered {0}."
     )]
     SymbolicExpressionRequiresLowering(SymbolicExpr),
+
+    #[error(
+        "Value '{value}' of type {} \
+         not convertible to {prim_type}",
+        value.runtime_type(),
+    )]
+    InvalidPrimCast {
+        value: RuntimePrimValue,
+        prim_type: RuntimePrimType,
+    },
 }
 
 impl std::fmt::Debug for Error {

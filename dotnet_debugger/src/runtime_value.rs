@@ -152,6 +152,59 @@ impl RuntimePrimValue {
         }
     }
 
+    pub fn prim_cast(self, prim_type: RuntimePrimType) -> Result<Self, Error> {
+        use RuntimePrimType as Type;
+        match (prim_type, self) {
+            (Type::Bool, Self::Bool(_))
+            | (Type::Char, Self::Char(_))
+            | (Type::U8, Self::U8(_))
+            | (Type::U16, Self::U16(_))
+            | (Type::U32, Self::U32(_))
+            | (Type::U64, Self::U64(_))
+            | (Type::NativeUInt, Self::NativeUInt(_))
+            | (Type::I8, Self::I8(_))
+            | (Type::I16, Self::I16(_))
+            | (Type::I32, Self::I32(_))
+            | (Type::I64, Self::I64(_))
+            | (Type::NativeInt, Self::NativeInt(_))
+            | (Type::F32, Self::F32(_))
+            | (Type::F64, Self::F64(_))
+            | (Type::Ptr, Self::Ptr(_)) => Ok(self),
+
+            (Type::NativeUInt, Self::U8(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::U16(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::U32(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::U64(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::I8(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::I16(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::I32(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::I64(value)) => Ok((value as usize).into()),
+            (Type::NativeUInt, Self::NativeInt(value)) => {
+                Ok((value as usize).into())
+            }
+
+            (Type::NativeInt, Self::U8(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::U16(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::U32(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::U64(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::NativeUInt(value)) => {
+                Ok((value as isize).into())
+            }
+            (Type::NativeInt, Self::I8(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::I16(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::I32(value)) => Ok((value as isize).into()),
+            (Type::NativeInt, Self::I64(value)) => Ok((value as isize).into()),
+
+            (Type::F32, Self::F64(value)) => Ok((value as f32).into()),
+
+            (Type::F64, Self::F32(value)) => Ok((value as f64).into()),
+
+            (prim_type, value) => {
+                Err(Error::InvalidPrimCast { value, prim_type })
+            }
+        }
+    }
+
     pub fn as_type<T>(self) -> Result<T, <Self as TryInto<T>>::Error>
     where
         Self: TryInto<T>,

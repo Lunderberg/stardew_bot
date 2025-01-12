@@ -401,6 +401,21 @@ impl From<RuntimePrimType> for RuntimeType {
     }
 }
 
+impl std::cmp::PartialEq<RuntimeType> for RuntimePrimType {
+    fn eq(&self, other: &RuntimeType) -> bool {
+        match other {
+            RuntimeType::Prim(other) => other == self,
+            _ => false,
+        }
+    }
+}
+
+impl std::cmp::PartialEq<RuntimePrimType> for RuntimeType {
+    fn eq(&self, other: &RuntimePrimType) -> bool {
+        other == self
+    }
+}
+
 impl std::cmp::PartialEq<dll_unpacker::SignaturePrimType> for RuntimePrimType {
     fn eq(&self, other: &dll_unpacker::SignaturePrimType) -> bool {
         let other: Self = (*other).into();

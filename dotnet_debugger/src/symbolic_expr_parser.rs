@@ -268,7 +268,12 @@ impl<'a> SymbolicParser<'a> {
                         .into_iter()
                         .next()
                         .expect("Protected by length check");
-                    Ok(self.graph.downcast(obj, ty))
+                    let expr = if let Some(prim_type) = ty.try_prim_type() {
+                        self.graph.prim_cast(obj, prim_type)
+                    } else {
+                        self.graph.downcast(obj, ty)
+                    };
+                    Ok(expr)
                 }
                 "len" => {
                     let _ = self.expect_function_arguments(0, 0)?;

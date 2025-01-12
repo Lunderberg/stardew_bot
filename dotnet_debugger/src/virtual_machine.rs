@@ -35,6 +35,9 @@ pub enum Instruction {
     // Overwrite the register with a pointer.
     Const { value: RuntimePrimValue },
 
+    // Cast the value in the register to the specified type.
+    PrimCast(RuntimePrimType),
+
     // Increment the value of the register by `byte_offset`
     StaticOffset { byte_offset: usize },
 
@@ -269,6 +272,11 @@ impl VirtualMachine {
                 Instruction::Const { value } => {
                     register = Some(*value);
                 }
+                Instruction::PrimCast(prim_type) => {
+                    register = register
+                        .map(|value| value.prim_cast(*prim_type))
+                        .transpose()?;
+                }
                 Instruction::AsIndex => {
                     register = match register {
                         None => None,
@@ -454,6 +462,9 @@ impl Display for Instruction {
             }
             Instruction::DynamicScale { index } => {
                 write!(f, "DynamicScale({index})")
+            }
+            Instruction::PrimCast(prim_type) => {
+                write!(f, "PrimCast({prim_type})")
             }
             Instruction::Downcast { ty } => write!(f, "Downcast({ty})"),
             Instruction::Read { ty } => write!(f, "Read({ty})"),
