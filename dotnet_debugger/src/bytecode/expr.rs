@@ -1431,23 +1431,35 @@ impl SymbolicExpr {
             Ok((phys_value, runtime_type))
         };
 
+        macro_rules! read_value_if_required {
+            ($ptr:expr, $runtime_type:expr) => {
+                if let Some(prim_type) = $runtime_type.storage_type() {
+                    // The majority of fields should be read out after
+                    // their location has been determined.
+                    builder.read_value($ptr, prim_type)
+                } else {
+                    // The exception are ValueType fields.  These
+                    // require additional FieldAccess operations to
+                    // locate the primitive types within the composite
+                    // ValueType, and must be kept as a pointer until
+                    // then.
+                    $ptr
+                }
+            };
+        }
+
         match self {
             SymbolicExpr::StaticField(static_field) => {
                 let runtime_type = static_field.runtime_type(reader)?;
-                let location = static_field.location(reader)?;
+                let ptr = static_field.location(reader)?;
 
-                let expr = SymbolicValue::Ptr(location);
-                let expr = if let Some(prim_type) = runtime_type.storage_type()
-                {
-                    builder.read_value(expr, prim_type)
-                } else {
-                    expr
-                };
+                let ptr = SymbolicValue::Ptr(ptr);
+                let expr = read_value_if_required!(ptr, runtime_type);
 
                 Ok(expr)
             }
             SymbolicExpr::FieldAccess { obj, field } => {
-                let (expr, obj_type) = lookup_prev(obj)?;
+                let (ptr, obj_type) = lookup_prev(obj)?;
 
                 let method_table_ptr =
                     obj_type.method_table_for_field_access(|| {
@@ -1460,21 +1472,22 @@ impl SymbolicExpr {
                     &field_description,
                 )?;
 
-                let expr = if matches!(obj_type, RuntimeType::Class { .. }) {
-                    builder.add(expr, Pointer::SIZE)
+                // The `field_description.offset()` is relative to the
+                // location of the first data member, regardless of
+                // whether the object is a Class or ValueType
+                // instance.  However, Class instances have an
+                // additional pointer to their method table, prior to
+                // the first data member.
+                let ptr = if matches!(obj_type, RuntimeType::Class { .. }) {
+                    builder.add(ptr, Pointer::SIZE)
                 } else {
-                    expr
+                    ptr
                 };
 
-                let expr = builder.add(expr, field_description.offset());
+                let ptr = builder.add(ptr, field_description.offset());
+                let value = read_value_if_required!(ptr, field_type);
 
-                let expr = if let Some(prim_type) = field_type.storage_type() {
-                    builder.read_value(expr, prim_type)
-                } else {
-                    expr
-                };
-
-                Ok(expr)
+                Ok(value)
             }
             SymbolicExpr::IndexAccess { obj, indices } => {
                 let (array, array_type) = lookup_prev(obj)?;
@@ -1567,7 +1580,7 @@ impl SymbolicExpr {
                     Error::AttemptedAccessOfArrayTypeWithUnknownComponentSize,
                 )?;
 
-                let expr = {
+                let ptr = {
                     let first_element = builder.add(array, header_size_bytes);
                     let byte_offset = {
                         let strides = {
@@ -1595,14 +1608,9 @@ impl SymbolicExpr {
                     builder.add(first_element, byte_offset)
                 };
 
-                let expr = if let Some(prim_type) = element_type.storage_type()
-                {
-                    builder.read_value(expr, prim_type)
-                } else {
-                    expr
-                };
+                let value = read_value_if_required!(ptr, element_type);
 
-                Ok(expr)
+                Ok(value)
             }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
                 let (obj, obj_type) = lookup_prev(obj)?;
