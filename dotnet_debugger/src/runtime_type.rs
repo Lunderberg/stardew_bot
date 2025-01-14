@@ -183,6 +183,20 @@ impl RuntimeType {
             RuntimeType::MultiDimArray { .. } => Some(RuntimePrimType::Ptr),
         }
     }
+
+    /// Some types may be represented as either a bytecode, or a named
+    /// type.  This function returns the corresponding named type for
+    /// builtin instances.
+    pub(crate) fn builtin_class_name(&self) -> Option<&'static str> {
+        match self {
+            RuntimeType::Prim(prim) => prim.builtin_class_name(),
+            RuntimeType::String => Some("System.Private.CoreLib.String"),
+            RuntimeType::ValueType { .. }
+            | RuntimeType::Class { .. }
+            | RuntimeType::Array { .. }
+            | RuntimeType::MultiDimArray { .. } => None,
+        }
+    }
 }
 
 impl RuntimePrimType {
@@ -230,6 +244,31 @@ impl RuntimePrimType {
                 | RuntimePrimType::I64
                 | RuntimePrimType::NativeInt
         )
+    }
+
+    /// Some types may be represented as either a bytecode, or a named
+    /// type.  This function returns the corresponding named type for
+    /// builtin instances.
+    fn builtin_class_name(&self) -> Option<&'static str> {
+        match self {
+            RuntimePrimType::Bool => Some("System.Private.CoreLib.Boolean"),
+            RuntimePrimType::Char => Some("System.Private.CoreLib.Char"),
+            RuntimePrimType::U8 => Some("System.Private.CoreLib.Byte"),
+            RuntimePrimType::U16 => Some("System.Private.CoreLib.UInt16"),
+            RuntimePrimType::U32 => Some("System.Private.CoreLib.UInt32"),
+            RuntimePrimType::U64 => Some("System.Private.CoreLib.UInt64"),
+            RuntimePrimType::NativeUInt => {
+                Some("System.Private.CoreLib.UIntPtr")
+            }
+            RuntimePrimType::I8 => Some("System.Private.CoreLib.SByte"),
+            RuntimePrimType::I16 => Some("System.Private.CoreLib.Int16"),
+            RuntimePrimType::I32 => Some("System.Private.CoreLib.Int32"),
+            RuntimePrimType::I64 => Some("System.Private.CoreLib.Int64"),
+            RuntimePrimType::NativeInt => Some("System.Private.CoreLib.IntPtr"),
+            RuntimePrimType::F32 => Some("System.Private.CoreLib.Single"),
+            RuntimePrimType::F64 => Some("System.Private.CoreLib.Double"),
+            RuntimePrimType::Ptr => None,
+        }
     }
 
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimePrimValue, Error> {

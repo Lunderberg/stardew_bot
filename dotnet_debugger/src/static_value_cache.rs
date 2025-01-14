@@ -804,8 +804,11 @@ impl<'a> CachedReader<'a> {
                     true,
                 )?;
 
-                let component_size =
-                    self.component_size(&element_type, None)?;
+                let component_size = element_type
+                    .as_ref()
+                    .map(|ty| self.component_size(ty, None))
+                    .transpose()?
+                    .flatten();
 
                 let element_type = element_type.map(Box::new);
                 RuntimeType::Array {
@@ -824,8 +827,11 @@ impl<'a> CachedReader<'a> {
                     true,
                 )?;
 
-                let component_size =
-                    self.component_size(&element_type, Some(rank))?;
+                let component_size = element_type
+                    .as_ref()
+                    .map(|ty| self.component_size(ty, Some(rank)))
+                    .transpose()?
+                    .flatten();
 
                 let element_type = element_type.map(Box::new);
                 RuntimeType::MultiDimArray {
@@ -848,38 +854,52 @@ impl<'a> CachedReader<'a> {
         Ok(Some(runtime_type))
     }
 
-    /// Returns the size (in bytes) of the elements contained in an
-    /// array, or a multi-dimensional array.
-    fn component_size(
+    fn find_array_method_table(
         &self,
-        element_type: &Option<RuntimeType>,
+        element_type: &RuntimeType,
         rank: Option<usize>,
-    ) -> Result<Option<usize>, Error> {
-        let Some(element_type) = element_type.as_ref() else {
+    ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
+        let opt_element_method_table_ptr: Option<TypedPointer<MethodTable>> =
+            if let Some(builtin_name) = element_type.builtin_class_name() {
+                self.method_table_by_name(builtin_name)?
+            } else {
+                match element_type {
+                    RuntimeType::Prim(_) => {
+                        // With the exception of RuntimePrimType::Ptr,
+                        // all primitive types have a builtin name
+                        // within the class library.
+                        None
+                    }
+                    RuntimeType::ValueType { method_table, .. } => {
+                        *method_table
+                    }
+                    RuntimeType::Class { method_table } => *method_table,
+                    RuntimeType::String => {
+                        unreachable!("Handled with builtin_class_name")
+                    }
+                    RuntimeType::Array {
+                        element_type: Some(element_type),
+                        ..
+                    } => self.find_array_method_table(element_type, None)?,
+                    RuntimeType::MultiDimArray {
+                        element_type: Some(element_type),
+                        rank,
+                        ..
+                    } => {
+                        self.find_array_method_table(element_type, Some(*rank))?
+                    }
+                    RuntimeType::Array {
+                        element_type: None, ..
+                    }
+                    | RuntimeType::MultiDimArray {
+                        element_type: None, ..
+                    } => None,
+                }
+            };
+
+        let Some(element_method_table_ptr) = opt_element_method_table_ptr
+        else {
             return Ok(None);
-        };
-
-        let element_method_table_ptr = match element_type {
-            RuntimeType::Prim(prim) => {
-                return Ok(Some(prim.size_bytes()));
-            }
-            RuntimeType::Class { .. }
-            | RuntimeType::String
-            | RuntimeType::Array { .. }
-            | RuntimeType::MultiDimArray { .. } => {
-                return Ok(Some(Pointer::SIZE));
-            }
-
-            RuntimeType::ValueType {
-                method_table: None, ..
-            } => {
-                return Ok(None);
-            }
-
-            RuntimeType::ValueType {
-                method_table: Some(ptr),
-                ..
-            } => *ptr,
         };
 
         let element_method_table =
@@ -887,33 +907,42 @@ impl<'a> CachedReader<'a> {
 
         let module = self.runtime_module(element_method_table.module())?;
 
-        let opt_loaded_types = module.loaded_types(self.reader)?;
+        let opt_loaded_types = module.loaded_types(self)?;
         let Some(loaded_types) = opt_loaded_types else {
             return Ok(None);
         };
 
-        for res_type_handle_ptr in
-            loaded_types.iter_method_tables(self.reader)?
-        {
+        for res_type_handle_ptr in loaded_types.iter_method_tables(self)? {
             let type_handle_ptr = res_type_handle_ptr?;
             let type_handle = self.type_handle(type_handle_ptr)?;
-            if let TypeHandle::MethodTable(array_method_table) = type_handle {
-                let is_correct_array = array_method_table.array_element_type()
+            if let TypeHandle::MethodTable(loaded_type) = type_handle {
+                let is_correct_array = loaded_type.array_element_type()
                     == Some(element_method_table_ptr)
-                    && rank
-                        == array_method_table.multi_dim_rank(self.reader)?;
+                    && rank == loaded_type.multi_dim_rank(self.reader)?;
                 if is_correct_array {
-                    return Ok(Some(
-                        array_method_table.component_size().expect(
-                            "Both array and N-d array \
-                             have a component size",
-                        ),
-                    ));
+                    return Ok(Some(loaded_type.ptr()));
                 }
             }
         }
 
         Ok(None)
+    }
+
+    /// Returns the size (in bytes) of the elements contained in an
+    /// array, or a multi-dimensional array.
+    fn component_size(
+        &self,
+        element_type: &RuntimeType,
+        rank: Option<usize>,
+    ) -> Result<Option<usize>, Error> {
+        let array_method_table_ptr =
+            self.find_array_method_table(element_type, rank)?;
+        let Some(array_method_table_ptr) = array_method_table_ptr else {
+            return Ok(None);
+        };
+        let array_method_table = self.method_table(array_method_table_ptr)?;
+        let component_size = array_method_table.component_size();
+        Ok(component_size)
     }
 
     pub fn field_to_type_name(
