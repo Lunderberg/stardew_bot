@@ -1131,23 +1131,26 @@ impl SymbolicGraph {
         let mut next_free_index = num_outputs;
 
         macro_rules! value_to_register {
-            ($arg:expr) => {
-                match $arg {
-                    &SymbolicValue::Int(value) => Instruction::Const {
-                        value: RuntimePrimValue::NativeUInt(value),
-                    },
-                    &SymbolicValue::Ptr(ptr) => Instruction::Const {
-                        value: RuntimePrimValue::Ptr(ptr),
-                    },
+            ($arg:expr) => {{
+                let vm_arg: VMArg = match $arg {
+                    &SymbolicValue::Int(value) => {
+                        RuntimePrimValue::NativeUInt(value).into()
+                    }
+
+                    &SymbolicValue::Ptr(ptr) => {
+                        RuntimePrimValue::Ptr(ptr).into()
+                    }
+
                     SymbolicValue::Result(op_index) => {
                         let index = *currently_stored.get(&op_index).expect(
                             "Internal error, \
                              {op_index} not located anywhere",
                         );
-                        Instruction::RestoreValue { index }
+                        VMArg::SavedValue { index }
                     }
-                }
-            };
+                };
+                Instruction::LoadToRegister(vm_arg)
+            }};
         }
 
         macro_rules! value_to_arg {
@@ -1184,47 +1187,13 @@ impl SymbolicGraph {
                     instructions.push(value_to_register!(value));
                     instructions.push(Instruction::PrimCast(*prim_type));
                 }
-                &SymbolicExpr::PhysicalDowncast { obj, ty } => {
-                    let obj_instruction = match obj {
-                        SymbolicValue::Ptr(ptr) => Instruction::Const {
-                            value: RuntimePrimValue::Ptr(ptr),
-                        },
-                        SymbolicValue::Result(op_index) => {
-                            let index =
-                                *currently_stored.get(&op_index).expect(
-                                    "Internal error, \
-                                     {op_index} not located anywhere",
-                                );
-                            Instruction::RestoreValue { index }
-                        }
-                        SymbolicValue::Int(value) => panic!(
-                            "LHS of downcast should be a pointer, \
-                             but was instead {value}"
-                        ),
-                    };
-                    instructions.push(obj_instruction);
-                    instructions.push(Instruction::Downcast { ty });
+                SymbolicExpr::PhysicalDowncast { obj, ty } => {
+                    instructions.push(value_to_register!(obj));
+                    instructions.push(Instruction::Downcast { ty: *ty });
                 }
-                &SymbolicExpr::ReadValue { ptr, prim_type } => {
-                    let obj_instruction = match ptr {
-                        SymbolicValue::Ptr(ptr) => Instruction::Const {
-                            value: RuntimePrimValue::Ptr(ptr),
-                        },
-                        SymbolicValue::Result(op_index) => {
-                            let index =
-                                *currently_stored.get(&op_index).expect(
-                                    "Internal error, \
-                                     {op_index} not located anywhere",
-                                );
-                            Instruction::RestoreValue { index }
-                        }
-                        SymbolicValue::Int(value) => panic!(
-                            "LHS of ReadValue should be a pointer, \
-                             but was instead {value}"
-                        ),
-                    };
-                    instructions.push(obj_instruction);
-                    instructions.push(Instruction::Read { ty: prim_type });
+                SymbolicExpr::ReadValue { ptr, prim_type } => {
+                    instructions.push(value_to_register!(ptr));
+                    instructions.push(Instruction::Read { ty: *prim_type });
                 }
                 symbolic @ (SymbolicExpr::StaticField(_)
                 | SymbolicExpr::FieldAccess { .. }
@@ -1259,7 +1228,7 @@ impl SymbolicGraph {
                 SymbolicValue::Ptr(ptr) => Some(ptr.into()),
             };
             if let Some(value) = constant {
-                instructions.push(Instruction::Const { value });
+                instructions.push(Instruction::LoadToRegister(value.into()));
                 instructions.push(Instruction::SaveValue { index: output.0 });
             }
         }

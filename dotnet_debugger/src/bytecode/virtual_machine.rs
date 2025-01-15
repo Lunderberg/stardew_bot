@@ -35,11 +35,9 @@ pub enum Instruction {
     // Write the current value of the register into vm.values[index]
     SaveValue { index: usize },
 
-    // Read from vm.values[index] into the register
-    RestoreValue { index: usize },
-
-    // Overwrite the register with a pointer.
-    Const { value: RuntimePrimValue },
+    // Load the constant, or previously saved value, into the
+    // register.
+    LoadToRegister(VMArg),
 
     // Cast the value in the register to the specified type.
     PrimCast(RuntimePrimType),
@@ -157,7 +155,7 @@ impl VirtualMachine {
                     value_in_register = Some(index);
                     instructions.push(inst);
                 }
-                Instruction::RestoreValue { index } => {
+                Instruction::LoadToRegister(VMArg::SavedValue { index }) => {
                     if value_in_register != Some(index) {
                         instructions.push(inst);
                     }
@@ -232,9 +230,9 @@ impl VirtualMachine {
                     let index = do_remap(index);
                     Instruction::SaveValue { index }
                 }
-                Instruction::RestoreValue { index } => {
+                Instruction::LoadToRegister(VMArg::SavedValue { index }) => {
                     let index = do_remap(index);
-                    Instruction::RestoreValue { index }
+                    Instruction::LoadToRegister(VMArg::SavedValue { index })
                 }
                 Instruction::Add(VMArg::SavedValue { index }) => {
                     let index = do_remap(index);
@@ -259,7 +257,7 @@ impl VirtualMachine {
         &self,
         reader: CachedReader<'_>,
     ) -> Result<VMResults, Error> {
-        let mut register = None;
+        let mut register: Option<RuntimePrimValue> = None;
         let mut values = vec![None; self.num_outputs + self.num_temporaries];
 
         macro_rules! arg_to_value {
@@ -276,11 +274,8 @@ impl VirtualMachine {
                 Instruction::SaveValue { index } => {
                     values[*index] = register;
                 }
-                Instruction::RestoreValue { index } => {
-                    register = values[*index];
-                }
-                Instruction::Const { value } => {
-                    register = Some(*value);
+                Instruction::LoadToRegister(value) => {
+                    register = arg_to_value!(value).cloned();
                 }
                 Instruction::PrimCast(prim_type) => {
                     register = register
@@ -408,14 +403,16 @@ impl VirtualMachine {
 impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = usize> {
         let opt_index = match self {
-            Instruction::SaveValue { index }
-            | Instruction::Add(VMArg::SavedValue { index })
-            | Instruction::Mul(VMArg::SavedValue { index }) => Some(*index),
+            Instruction::Add(VMArg::SavedValue { index })
+            | Instruction::Mul(VMArg::SavedValue { index })
+            | Instruction::LoadToRegister(VMArg::SavedValue { index }) => {
+                Some(*index)
+            }
 
-            Instruction::RestoreValue { .. }
+            Instruction::SaveValue { .. }
             | Instruction::Add(_)
             | Instruction::Mul(_)
-            | Instruction::Const { .. }
+            | Instruction::LoadToRegister(_)
             | Instruction::PrimCast(_)
             | Instruction::Downcast { .. }
             | Instruction::Read { .. } => None,
@@ -425,17 +422,22 @@ impl Instruction {
 
     fn output_indices(&self) -> impl Iterator<Item = usize> {
         let opt_index = match self {
-            Instruction::RestoreValue { index } => Some(*index),
+            Instruction::SaveValue { index } => Some(*index),
 
-            Instruction::SaveValue { .. }
-            | Instruction::Add(_)
+            Instruction::Add(_)
             | Instruction::Mul(_)
-            | Instruction::Const { .. }
+            | Instruction::LoadToRegister(_)
             | Instruction::PrimCast(_)
             | Instruction::Downcast { .. }
             | Instruction::Read { .. } => None,
         };
         opt_index.into_iter()
+    }
+}
+
+impl From<RuntimePrimValue> for VMArg {
+    fn from(value: RuntimePrimValue) -> Self {
+        VMArg::Const(value)
     }
 }
 
@@ -472,10 +474,9 @@ impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Instruction::SaveValue { index } => write!(f, "SaveValue({index})"),
-            Instruction::RestoreValue { index } => {
-                write!(f, "RestoreValue({index})")
+            Instruction::LoadToRegister(value) => {
+                write!(f, "LoadToRegister({value})")
             }
-            Instruction::Const { value } => write!(f, "Const({value})"),
             Instruction::Add(value) => write!(f, "Add({value})"),
             Instruction::Mul(value) => write!(f, "Mul({value})"),
             Instruction::PrimCast(prim_type) => {
