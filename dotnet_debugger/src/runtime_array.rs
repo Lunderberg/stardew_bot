@@ -42,8 +42,7 @@ impl RuntimeArray {
     }
 
     pub fn size_bytes(&self) -> usize {
-        let stride = self.element_type.size_bytes();
-        Self::HEADER_SIZE + self.num_elements * stride
+        Self::HEADER_SIZE + self.num_elements * self.stride
     }
 
     pub fn num_elements(&self) -> usize {
