@@ -279,9 +279,6 @@ pub enum Error {
     #[error("Value '{0}' of type {1} not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue, RuntimePrimType),
 
-    #[error("Cannot access array without a known component size")]
-    AttemptedAccessOfArrayTypeWithUnknownComponentSize,
-
     #[error("Cannot add values with types {lhs} and {rhs}")]
     InvalidOperandsForAddition { lhs: RuntimeType, rhs: RuntimeType },
 

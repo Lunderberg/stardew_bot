@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
-    ops::Deref,
 };
 
 use derive_more::derive::From;
@@ -663,18 +662,32 @@ impl SymbolicGraph {
                                 num_expected: *rank,
                             });
                         }
-                        RuntimeType::MultiDimArray { element_type, .. }
-                        | RuntimeType::Array { element_type, .. } => {
-                            element_type
-                                .as_ref()
-                                .map(|ty| ty.deref().clone())
-                                .ok_or_else(|| {
-                                    Error::UnexpectedNullMethodTable(format!(
-                                        "{}",
-                                        self.print(array)
-                                    ))
-                                })
+                        RuntimeType::MultiDimArray {
+                            method_table: None,
+                            ..
                         }
+                        | RuntimeType::Array {
+                            method_table: None, ..
+                        } => {
+                            return Err(Error::UnexpectedNullMethodTable(
+                                format!("{}", self.print(array)),
+                            ));
+                        }
+                        RuntimeType::MultiDimArray {
+                            method_table: Some(ptr),
+                            ..
+                        }
+                        | RuntimeType::Array {
+                            method_table: Some(ptr),
+                            ..
+                        } => {
+                            let method_table = reader.method_table(*ptr)?;
+                            method_table
+                                .array_element_type()
+                                .ok_or(Error::ArrayMissingElementType)
+                                .and_then(|ptr| reader.runtime_type(ptr))
+                        }
+
                         other => {
                             Err(Error::IndexAccessRequiresArray(other.clone()))
                         }
@@ -1497,70 +1510,75 @@ impl SymbolicExpr {
                     .map(|index| lookup_prev(index).map(|(value, _)| value))
                     .collect::<Result<Vec<_>, _>>()?;
 
-                let (element_type, header_size_bytes, shape, component_size) =
-                    match array_type {
-                        RuntimeType::Array {
-                            element_type,
-                            component_size,
-                        } => {
-                            let header_size_bytes = RuntimeArray::HEADER_SIZE;
-                            let num_elements_ptr =
-                                builder.add(array, Pointer::SIZE);
-                            let num_elements = builder.read_value(
-                                num_elements_ptr,
-                                RuntimePrimType::U64,
-                            );
-                            let num_elements = builder.prim_cast(
-                                num_elements,
-                                RuntimePrimType::NativeUInt,
-                            );
-                            let shape = vec![num_elements];
-                            Ok((
-                                element_type,
-                                header_size_bytes,
-                                shape,
-                                component_size,
+                let (element_type, component_size) = match array_type {
+                    RuntimeType::Array { method_table, .. }
+                    | RuntimeType::MultiDimArray { method_table, .. } => {
+                        let method_table = method_table.ok_or_else(|| {
+                            Error::UnexpectedNullMethodTable(format!(
+                                "{}",
+                                original.print(obj)
                             ))
-                        }
-                        RuntimeType::MultiDimArray {
-                            element_type,
-                            rank,
-                            component_size,
-                        } => {
-                            let rank = *rank;
+                        })?;
+                        let method_table = reader.method_table(method_table)?;
+                        let component_size = method_table
+                            .component_size()
+                            .ok_or(Error::ArrayMissingComponentSize)?;
+                        let element_type = method_table
+                            .array_element_type()
+                            .ok_or(Error::ArrayMissingElementType)
+                            .and_then(|ptr| reader.runtime_type(ptr))?;
 
-                            let shape_start =
-                                builder.add(array, RuntimeArray::HEADER_SIZE);
-                            let shape = (0..rank)
-                                .map(|i| {
-                                    let extent_ptr = builder.add(
-                                        shape_start,
-                                        i * RuntimePrimType::U32.size_bytes(),
-                                    );
-                                    let extent = builder.read_value(
-                                        extent_ptr,
-                                        RuntimePrimType::U32,
-                                    );
-                                    builder.prim_cast(
-                                        extent,
-                                        RuntimePrimType::NativeUInt,
-                                    )
-                                })
-                                .collect();
-                            let header_size_bytes =
-                                RuntimeMultiDimArray::header_size(rank);
+                        Ok((element_type, component_size))
+                    }
+                    other => {
+                        Err(Error::IndexAccessRequiresArray(other.clone()))
+                    }
+                }?;
 
-                            Ok((
-                                element_type,
-                                header_size_bytes,
-                                shape,
-                                component_size,
-                            ))
-                        }
-                        other => {
-                            Err(Error::IndexAccessRequiresArray(other.clone()))
-                        }
-                    }?;
+                let (header_size_bytes, shape) = match array_type {
+                    RuntimeType::Array { .. } => {
+                        let header_size_bytes = RuntimeArray::HEADER_SIZE;
+                        let num_elements_ptr =
+                            builder.add(array, Pointer::SIZE);
+                        let num_elements = builder
+                            .read_value(num_elements_ptr, RuntimePrimType::U64);
+                        let num_elements = builder.prim_cast(
+                            num_elements,
+                            RuntimePrimType::NativeUInt,
+                        );
+                        let shape = vec![num_elements];
+                        Ok((header_size_bytes, shape))
+                    }
+                    RuntimeType::MultiDimArray { rank, .. } => {
+                        let rank = *rank;
+
+                        let shape_start =
+                            builder.add(array, RuntimeArray::HEADER_SIZE);
+                        let shape = (0..rank)
+                            .map(|i| {
+                                let extent_ptr = builder.add(
+                                    shape_start,
+                                    i * RuntimePrimType::U32.size_bytes(),
+                                );
+                                let extent = builder.read_value(
+                                    extent_ptr,
+                                    RuntimePrimType::U32,
+                                );
+                                builder.prim_cast(
+                                    extent,
+                                    RuntimePrimType::NativeUInt,
+                                )
+                            })
+                            .collect();
+                        let header_size_bytes =
+                            RuntimeMultiDimArray::header_size(rank);
+
+                        Ok((header_size_bytes, shape))
+                    }
+                    other => {
+                        Err(Error::IndexAccessRequiresArray(other.clone()))
+                    }
+                }?;
 
                 if shape.len() != indices.len() {
                     return Err(Error::IncorrectNumberOfIndices {
@@ -1569,24 +1587,13 @@ impl SymbolicExpr {
                     });
                 }
 
-                let element_type = element_type.as_ref().ok_or_else(|| {
-                    Error::UnexpectedNullMethodTable(format!(
-                        "{}",
-                        original.print(obj)
-                    ))
-                })?;
-
-                let component_size = component_size.as_ref().ok_or(
-                    Error::AttemptedAccessOfArrayTypeWithUnknownComponentSize,
-                )?;
-
                 let ptr = {
                     let first_element = builder.add(array, header_size_bytes);
                     let byte_offset = {
                         let strides = {
                             let mut strides = Vec::new();
                             let mut cum_prod: SymbolicValue =
-                                (*component_size).into();
+                                component_size.into();
                             for dim in shape.into_iter().rev() {
                                 strides.push(cum_prod);
                                 cum_prod = builder.mul(cum_prod, dim);

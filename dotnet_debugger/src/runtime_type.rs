@@ -63,8 +63,7 @@ pub enum RuntimeType {
     /// table as having the is-array bit set, along with the
     /// if-array-then-sz-array bit.
     Array {
-        element_type: Option<Box<RuntimeType>>,
-        component_size: Option<usize>,
+        method_table: Option<TypedPointer<MethodTable>>,
     },
 
     /// A multi-dimensional array
@@ -82,9 +81,8 @@ pub enum RuntimeType {
     /// additional 4-byte size of its only dimension and a 4-byte
     /// lower bound of that dimension.
     MultiDimArray {
+        method_table: Option<TypedPointer<MethodTable>>,
         rank: usize,
-        element_type: Option<Box<RuntimeType>>,
-        component_size: Option<usize>,
     },
 }
 
@@ -357,26 +355,28 @@ impl std::fmt::Display for RuntimeType {
             }
             RuntimeType::Class { .. } => write!(f, "Object"),
             RuntimeType::String => write!(f, "String"),
-            RuntimeType::Array { element_type, .. } => {
-                match element_type {
-                    Some(ty) => write!(f, "{ty}")?,
-                    None => write!(f, "(not-yet-loaded)")?,
-                }
-                write!(f, "[]")
+            RuntimeType::Array {
+                method_table: None, ..
+            } => {
+                write!(f, "array(unknown vtable)")
+            }
+            RuntimeType::Array {
+                method_table: Some(method_table),
+                ..
+            } => {
+                write!(f, "array(vtable {method_table})")
             }
             RuntimeType::MultiDimArray {
-                element_type, rank, ..
+                method_table: None,
+                rank,
             } => {
-                match element_type {
-                    Some(ty) => write!(f, "{ty}")?,
-                    None => write!(f, "(not-yet-loaded)")?,
-                }
-                write!(f, "[")?;
-
-                for _ in 0..*rank - 1 {
-                    write!(f, ",")?;
-                }
-                write!(f, "]")
+                write!(f, "array_nd({rank}, unknown vtable)")
+            }
+            RuntimeType::MultiDimArray {
+                method_table: Some(method_table),
+                rank,
+            } => {
+                write!(f, "array({rank}, vtable {method_table})")
             }
         }
     }

@@ -231,15 +231,8 @@ impl MethodTable {
         if let Some(ty) = self.local_runtime_type() {
             Ok(ty)
         } else if self.is_array() {
-            let reader = reader.borrow();
-            let element_type = self
-                .array_element_type()
-                .expect("Returns Some(_) for multi-dim array")
-                .read(reader)?
-                .runtime_type(reader)?;
             Ok(RuntimeType::Array {
-                element_type: Some(Box::new(element_type)),
-                component_size: self.component_size(),
+                method_table: Some(self.ptr()),
             })
         } else if self.is_multi_dim_array() {
             let reader = reader.borrow();
@@ -247,15 +240,9 @@ impl MethodTable {
                 "Multi-dim rank is always present \
                  for multi-dim array",
             );
-            let element_type = self
-                .array_element_type()
-                .expect("Returns Some(_) for multi-dim array")
-                .read(reader)?
-                .runtime_type(reader)?;
             Ok(RuntimeType::MultiDimArray {
-                element_type: Some(Box::new(element_type)),
+                method_table: Some(self.ptr()),
                 rank,
-                component_size: self.component_size(),
             })
         } else if self.is_prim_type() {
             let reader = reader.borrow();

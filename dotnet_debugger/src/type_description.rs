@@ -229,20 +229,28 @@ impl<'a> TypeHandleRef<'a> {
             RuntimeType::String => {
                 write!(fmt, "String")?;
             }
-            RuntimeType::Array { element_type, .. } => {
+            RuntimeType::Array { method_table, .. } => {
                 write!(fmt, "Array<")?;
-                if let Some(ty) = element_type {
-                    Self::print_runtime_type(ty, fmt, reader)?;
+                if let Some(ptr) = method_table {
+                    let method_table = reader.method_table(*ptr)?;
+                    let element_type = method_table
+                        .array_element_type()
+                        .ok_or(Error::ArrayMissingElementType)?;
+                    let runtime_type = reader.runtime_type(element_type)?;
+                    Self::print_runtime_type(&runtime_type, fmt, reader)?;
                 }
                 write!(fmt, ">")?;
             }
-            RuntimeType::MultiDimArray {
-                element_type, rank, ..
-            } => {
+            RuntimeType::MultiDimArray { method_table, rank } => {
                 write!(fmt, "MultiDimArray<{rank}")?;
-                if let Some(ty) = element_type {
+                if let Some(ptr) = method_table {
                     write!(fmt, ", ")?;
-                    Self::print_runtime_type(ty, fmt, reader)?;
+                    let method_table = reader.method_table(*ptr)?;
+                    let element_type = method_table
+                        .array_element_type()
+                        .ok_or(Error::ArrayMissingElementType)?;
+                    let runtime_type = reader.runtime_type(element_type)?;
+                    Self::print_runtime_type(&runtime_type, fmt, reader)?;
                 }
                 write!(fmt, ">")?;
             }

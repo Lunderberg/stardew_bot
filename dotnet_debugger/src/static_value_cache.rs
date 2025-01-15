@@ -36,6 +36,8 @@ pub struct StaticValueCache {
     runtime_module_vtable: OnceCell<Pointer>,
     runtime_module_layout: OnceCell<RuntimeModuleLayout>,
 
+    runtime_type: FrozenMap<TypedPointer<MethodTable>, Box<RuntimeType>>,
+
     field_descriptions:
         FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
     runtime_module_by_name: FrozenMap<String, Box<TypedPointer<RuntimeModule>>>,
@@ -153,6 +155,19 @@ impl<'a> CachedReader<'a> {
         self.state
             .type_handles
             .try_insert(ptr, || ptr.read(self.reader))
+    }
+
+    pub fn runtime_type(
+        &self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<RuntimeType, Error> {
+        self.state
+            .runtime_type
+            .try_insert(ptr, || {
+                let method_table = self.method_table(ptr)?;
+                method_table.runtime_type(self)
+            })
+            .cloned()
     }
 
     pub fn runtime_module(
@@ -363,16 +378,11 @@ impl<'a> CachedReader<'a> {
             RuntimeType::Prim(..) => true,
             RuntimeType::ValueType { .. } => true,
             RuntimeType::String => true,
-            RuntimeType::Class { method_table } => method_table.is_some(),
-            RuntimeType::Array {
-                element_type,
-                component_size,
+            RuntimeType::Class { method_table }
+            | RuntimeType::Array { method_table, .. }
+            | RuntimeType::MultiDimArray { method_table, .. } => {
+                method_table.is_some()
             }
-            | RuntimeType::MultiDimArray {
-                element_type,
-                component_size,
-                ..
-            } => element_type.is_some() && component_size.is_some(),
         };
 
         if is_complete {
@@ -804,16 +814,14 @@ impl<'a> CachedReader<'a> {
                     true,
                 )?;
 
-                let component_size = element_type
+                let array_method_table = element_type
                     .as_ref()
-                    .map(|ty| self.component_size(ty, None))
+                    .map(|ty| self.find_array_method_table(ty, None))
                     .transpose()?
                     .flatten();
 
-                let element_type = element_type.map(Box::new);
                 RuntimeType::Array {
-                    element_type,
-                    component_size,
+                    method_table: array_method_table,
                 }
             }
 
@@ -827,17 +835,15 @@ impl<'a> CachedReader<'a> {
                     true,
                 )?;
 
-                let component_size = element_type
+                let array_method_table = element_type
                     .as_ref()
-                    .map(|ty| self.component_size(ty, Some(rank)))
+                    .map(|ty| self.find_array_method_table(ty, Some(rank)))
                     .transpose()?
                     .flatten();
 
-                let element_type = element_type.map(Box::new);
                 RuntimeType::MultiDimArray {
-                    element_type,
+                    method_table: array_method_table,
                     rank,
-                    component_size,
                 }
             }
             SignatureType::Object => {
@@ -870,30 +876,15 @@ impl<'a> CachedReader<'a> {
                         // within the class library.
                         None
                     }
-                    RuntimeType::ValueType { method_table, .. } => {
+                    RuntimeType::ValueType { method_table, .. }
+                    | RuntimeType::Class { method_table }
+                    | RuntimeType::Array { method_table, .. }
+                    | RuntimeType::MultiDimArray { method_table, .. } => {
                         *method_table
                     }
-                    RuntimeType::Class { method_table } => *method_table,
                     RuntimeType::String => {
                         unreachable!("Handled with builtin_class_name")
                     }
-                    RuntimeType::Array {
-                        element_type: Some(element_type),
-                        ..
-                    } => self.find_array_method_table(element_type, None)?,
-                    RuntimeType::MultiDimArray {
-                        element_type: Some(element_type),
-                        rank,
-                        ..
-                    } => {
-                        self.find_array_method_table(element_type, Some(*rank))?
-                    }
-                    RuntimeType::Array {
-                        element_type: None, ..
-                    }
-                    | RuntimeType::MultiDimArray {
-                        element_type: None, ..
-                    } => None,
                 }
             };
 
@@ -926,23 +917,6 @@ impl<'a> CachedReader<'a> {
         }
 
         Ok(None)
-    }
-
-    /// Returns the size (in bytes) of the elements contained in an
-    /// array, or a multi-dimensional array.
-    fn component_size(
-        &self,
-        element_type: &RuntimeType,
-        rank: Option<usize>,
-    ) -> Result<Option<usize>, Error> {
-        let array_method_table_ptr =
-            self.find_array_method_table(element_type, rank)?;
-        let Some(array_method_table_ptr) = array_method_table_ptr else {
-            return Ok(None);
-        };
-        let array_method_table = self.method_table(array_method_table_ptr)?;
-        let component_size = array_method_table.component_size();
-        Ok(component_size)
     }
 
     pub fn field_to_type_name(
