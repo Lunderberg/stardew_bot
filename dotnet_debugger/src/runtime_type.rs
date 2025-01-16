@@ -195,6 +195,29 @@ impl RuntimeType {
             | RuntimeType::MultiDimArray { .. } => None,
         }
     }
+
+    pub(crate) fn method_table_for_field_access(
+        &self,
+        gen_name: impl FnOnce() -> String,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        match self {
+            RuntimeType::ValueType { method_table, .. }
+            | RuntimeType::Class { method_table } => method_table
+                .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name())),
+            _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
+        }
+    }
+
+    pub(crate) fn method_table_for_downcast(
+        &self,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        match self {
+            RuntimeType::Class { method_table } => {
+                method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
+            }
+            _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
+        }
+    }
 }
 
 impl RuntimePrimType {

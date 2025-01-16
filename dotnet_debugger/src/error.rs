@@ -285,6 +285,12 @@ pub enum Error {
     #[error("Cannot multiply values with types {lhs} and {rhs}")]
     InvalidOperandsForMultiplication { lhs: RuntimeType, rhs: RuntimeType },
 
+    #[error("Downcast requires pointer argument, but received {0}")]
+    InvalidOperandForPhysicalDowncast(RuntimeType),
+
+    #[error("ReadValue requires pointer argument, but received {0}")]
+    InvalidOperandForReadValue(RuntimeType),
+
     #[error(
         "Symbolic expression must be lowered \
          prior to generating VM instruction, \

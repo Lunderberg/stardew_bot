@@ -17,6 +17,8 @@ use crate::{
     VirtualMachine,
 };
 
+use super::{GraphRewrite, TypeInference};
+
 #[derive(Default, Clone)]
 pub struct SymbolicGraph {
     ops: Vec<SymbolicExpr>,
@@ -264,7 +266,7 @@ impl StaticField {
         Ok((base_method_table_ptr, field))
     }
 
-    fn runtime_type(
+    pub(crate) fn runtime_type(
         &self,
         reader: CachedReader<'_>,
     ) -> Result<RuntimeType, Error> {
@@ -287,88 +289,6 @@ impl StaticField {
             field.location(module, crate::FieldContainer::Static, &reader)?;
 
         Ok(location)
-    }
-}
-
-trait RuntimeTypeExt {
-    fn method_table_for_field_access(
-        &self,
-        gen_name: impl FnOnce() -> String,
-    ) -> Result<TypedPointer<MethodTable>, Error>;
-
-    fn method_table_for_downcast(
-        &self,
-    ) -> Result<TypedPointer<MethodTable>, Error>;
-}
-impl RuntimeTypeExt for RuntimeType {
-    fn method_table_for_field_access(
-        &self,
-        gen_name: impl FnOnce() -> String,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
-        match self {
-            RuntimeType::ValueType { method_table, .. }
-            | RuntimeType::Class { method_table } => method_table
-                .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name())),
-            _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
-        }
-    }
-
-    fn method_table_for_downcast(
-        &self,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
-        match self {
-            RuntimeType::Class { method_table } => {
-                method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
-            }
-            _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
-        }
-    }
-}
-
-trait CachedReaderExt<'a> {
-    fn find_field(
-        &self,
-        method_table_ptr: TypedPointer<MethodTable>,
-        field_name: &str,
-    ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error>;
-
-    fn find_field_type(
-        &self,
-        method_table_ptr: TypedPointer<MethodTable>,
-        field_name: &str,
-    ) -> Result<RuntimeType, Error>;
-}
-impl<'a> CachedReaderExt<'a> for CachedReader<'a> {
-    fn find_field(
-        &self,
-        method_table_ptr: TypedPointer<MethodTable>,
-        field_name: &str,
-    ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error> {
-        self.iter_instance_fields(method_table_ptr)?
-            .find(|(_, field)| {
-                self.field_to_name(field)
-                    .map(|name| name == field_name)
-                    .unwrap_or(false)
-            })
-            .ok_or_else(|| match self.method_table_to_name(method_table_ptr) {
-                Ok(class_name) => Error::NoSuchInstanceField {
-                    class_name: class_name.to_string(),
-                    field_name: field_name.to_string(),
-                },
-                Err(err) => err,
-            })
-    }
-
-    fn find_field_type(
-        &self,
-        method_table_ptr: TypedPointer<MethodTable>,
-        field_name: &str,
-    ) -> Result<RuntimeType, Error> {
-        let (parent_of_field, field) =
-            self.find_field(method_table_ptr, field_name)?;
-        let runtime_type =
-            self.field_to_runtime_type(parent_of_field, &field)?;
-        Ok(runtime_type)
     }
 }
 
@@ -636,8 +556,10 @@ impl SymbolicGraph {
                         .method_table_for_field_access(|| {
                             format!("{}", self.print(obj))
                         })?;
-                    let field_type = reader
-                        .find_field_type(method_table_ptr, field.as_str())?;
+                    let field_type = reader.field_by_name_to_runtime_type(
+                        method_table_ptr,
+                        field.as_str(),
+                    )?;
                     field_type
                 }
                 SymbolicExpr::IndexAccess {
@@ -770,7 +692,9 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    pub fn validate(&self) -> Result<(), Error> {
+    pub fn validate(&self, reader: CachedReader<'_>) -> Result<(), Error> {
+        let type_inference = TypeInference::new(reader);
+
         for (index, op) in self.iter_ops() {
             let mut result = Ok(());
             op.visit_input_values(|input_value| {
@@ -784,6 +708,8 @@ impl SymbolicGraph {
                 }
             });
             result?;
+
+            type_inference.lookup_type(self, index.into())?;
         }
 
         Ok(())
@@ -812,197 +738,18 @@ impl SymbolicGraph {
         }
     }
 
-    pub fn simplify(&self, reader: CachedReader) -> Result<Self, Error> {
+    pub fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
-            HashMap::new();
-        let old_runtime_types = self.infer_types(reader)?;
-
-        let mut new_runtime_types: HashMap<OpIndex, RuntimeType> =
             HashMap::new();
         let mut builder = Self::new();
 
         for (old_index, op) in self.iter_ops() {
             let op = op.clone().remap(old_index, &prev_index_lookup)?;
-            let mut value = builder.push(op);
 
-            let lookup_type =
-                |new_value: SymbolicValue| -> Result<RuntimeType, Error> {
-                    match new_value {
-                        SymbolicValue::Int(_) => {
-                            Ok(RuntimePrimType::NativeUInt.into())
-                        }
-                        SymbolicValue::Ptr(_) => {
-                            Ok(RuntimePrimType::Ptr.into())
-                        }
-                        SymbolicValue::Result(op_index) => {
-                            Ok(new_runtime_types
-                                .get(&op_index)
-                                .ok_or_else(|| Error::InvalidReference {
-                                    from: old_index,
-                                    to: op_index,
-                                })?
-                                .clone())
-                        }
-                    }
-                };
-
-            let mut do_simplify_step = |index: OpIndex| -> Result<
-                Option<SymbolicValue>,
-                Error,
-            > {
-                Ok(match &builder[index] {
-                    // Remove unnecessary downcasts
-                    SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                        let obj_type = lookup_type(*obj)?;
-
-                        let static_method_table_ptr =
-                            obj_type.method_table_for_downcast()?;
-                        let target_method_table_ptr =
-                            ty.method_table(reader)?;
-
-                        if reader.is_base_of(
-                            target_method_table_ptr,
-                            static_method_table_ptr,
-                        )? {
-                            // Static type is the same, or superclass of
-                            // the desired runtime type.  This downcast
-                            // can be simplified away.
-                            Some(*obj)
-                        } else if reader
-                            .method_table(static_method_table_ptr)?
-                            .is_interface()
-                            || reader.is_base_of(
-                                static_method_table_ptr,
-                                target_method_table_ptr,
-                            )?
-                        {
-                            // Target type is a subclass of the
-                            // statically-known type.  The downcast must
-                            // be retained.
-                            None
-                        } else {
-                            // Types are in separate hierachies.  This
-                            // downcast is illegal.
-                            return Err(Error::DowncastRequiresRelatedClasses(
-                                format!("{obj_type}"),
-                                format!("{ty}"),
-                            ));
-                        }
-                    }
-
-                    // Remove unnecessary PrimCast
-                    SymbolicExpr::PrimCast { value, prim_type } => {
-                        let value_type = lookup_type(*value)?;
-
-                        if value_type == *prim_type {
-                            Some(*value)
-                        } else {
-                            None
-                        }
-                    }
-
-                    // Constant-folding, lhs and rhs are known
-                    &SymbolicExpr::Add {
-                        lhs: SymbolicValue::Int(a),
-                        rhs: SymbolicValue::Int(b),
-                    } => Some(SymbolicValue::Int(a + b)),
-
-                    &SymbolicExpr::Mul {
-                        lhs: SymbolicValue::Int(a),
-                        rhs: SymbolicValue::Int(b),
-                    } => Some(SymbolicValue::Int(a * b)),
-
-                    // lhs + 0 => lhs
-                    &SymbolicExpr::Add {
-                        lhs,
-                        rhs: SymbolicValue::Int(0),
-                    } => Some(lhs),
-
-                    // 0 + rhs => rhs
-                    &SymbolicExpr::Add {
-                        lhs: SymbolicValue::Int(0),
-                        rhs,
-                    } => Some(rhs),
-
-                    // 0 * rhs => 0
-                    SymbolicExpr::Mul {
-                        rhs: SymbolicValue::Int(0),
-                        ..
-                    } => Some(SymbolicValue::Int(0)),
-
-                    // lhs * 0 => 0
-                    SymbolicExpr::Mul {
-                        lhs: SymbolicValue::Int(0),
-                        ..
-                    } => Some(SymbolicValue::Int(0)),
-
-                    // lhs * 1 => lhs
-                    &SymbolicExpr::Mul {
-                        lhs,
-                        rhs: SymbolicValue::Int(1),
-                    } => Some(lhs),
-
-                    // 1 * rhs => rhs
-                    &SymbolicExpr::Mul {
-                        lhs: SymbolicValue::Int(1),
-                        rhs,
-                    } => Some(rhs),
-
-                    // const + rhs => rhs + const
-                    &SymbolicExpr::Add {
-                        lhs: lhs @ SymbolicValue::Int(_),
-                        rhs,
-                    } => Some(builder.add(rhs, lhs)),
-
-                    // const * rhs => rhs * const
-                    &SymbolicExpr::Mul {
-                        lhs: lhs @ SymbolicValue::Int(_),
-                        rhs,
-                    } => Some(builder.mul(rhs, lhs)),
-
-                    // lhs + a + b => lhs + (a+b)
-                    &SymbolicExpr::Add {
-                        lhs: SymbolicValue::Result(lhs),
-                        rhs: SymbolicValue::Int(b),
-                    } => match &builder[lhs] {
-                        &SymbolicExpr::Add {
-                            lhs,
-                            rhs: SymbolicValue::Int(a),
-                        } => Some(builder.add(lhs, a + b)),
-                        _ => None,
-                    },
-
-                    // lhs * a * b => lhs * (a*b)
-                    &SymbolicExpr::Mul {
-                        lhs: SymbolicValue::Result(lhs),
-                        rhs: SymbolicValue::Int(b),
-                    } => match &builder[lhs] {
-                        &SymbolicExpr::Mul {
-                            lhs,
-                            rhs: SymbolicValue::Int(a),
-                        } => Some(builder.mul(lhs, a * b)),
-                        _ => None,
-                    },
-
-                    _ => None,
-                })
-            };
-
-            while let SymbolicValue::Result(index) = value {
-                if let Some(simplified) = do_simplify_step(index)? {
-                    value = simplified;
-                } else {
-                    break;
-                }
-            }
-
+            let value = rewriter
+                .rewrite(&mut builder, &op)?
+                .unwrap_or_else(|| builder.push(op));
             prev_index_lookup.insert(old_index, value);
-            if let SymbolicValue::Result(new_index) = value {
-                let runtime_type = old_runtime_types
-                    .get(&SymbolicValue::Result(old_index))
-                    .expect("All indices should have known type");
-                new_runtime_types.insert(new_index, runtime_type.clone());
-            }
         }
 
         builder.mark_new_outputs(&self.outputs, &prev_index_lookup);
@@ -1244,23 +991,25 @@ impl SymbolicGraph {
 
         // Symbolic expressions, in terms of class/field names.
         let expr = expr.eliminate_common_subexpresssions()?;
-        expr.validate()?;
+        expr.validate(reader)?;
         let expr = expr.dead_code_elimination()?;
-        expr.validate()?;
-        let expr = expr.simplify(reader)?;
-        expr.validate()?;
+        expr.validate(reader)?;
+        let expr = expr.rewrite(super::RemoveUnusedDowncast::new(reader))?;
+        expr.validate(reader)?;
 
         // Physical expressions, in terms of pointer/offsets.
-        let seq = expr.to_physical_graph(reader)?;
-        seq.validate()?;
-        let seq = seq.simplify(reader)?;
-        seq.validate()?;
-        let seq = seq.eliminate_common_subexpresssions()?;
-        seq.validate()?;
-        let seq = seq.dead_code_elimination()?;
+        let expr = expr.to_physical_graph(reader)?;
+        expr.validate(reader)?;
+        let expr = expr.rewrite(super::ConstantFold)?;
+        expr.validate(reader)?;
+        let expr = expr.rewrite(super::RemoveUnusedPrimcast::new(reader))?;
+        expr.validate(reader)?;
+        let expr = expr.eliminate_common_subexpresssions()?;
+        expr.validate(reader)?;
+        let expr = expr.dead_code_elimination()?;
 
         // Virtual machine, in terms of sequential operations.
-        let vm = seq.to_virtual_machine()?;
+        let vm = expr.to_virtual_machine()?;
         let vm = vm.remove_unnecessary_restore_value();
         let vm = vm.remove_unnecessary_save_value();
         let vm = vm.remap_temporary_indices();
@@ -1353,7 +1102,10 @@ impl SymbolicExpr {
         Ok(new_op)
     }
 
-    fn visit_input_values(&self, mut callback: impl FnMut(SymbolicValue)) {
+    pub(crate) fn visit_input_values(
+        &self,
+        mut callback: impl FnMut(SymbolicValue),
+    ) {
         match self {
             SymbolicExpr::StaticField(_) => {}
             SymbolicExpr::FieldAccess { obj, .. } => {
@@ -1447,8 +1199,8 @@ impl SymbolicExpr {
                     obj_type.method_table_for_field_access(|| {
                         format!("{}", original.print(obj))
                     })?;
-                let (parent_of_field, field_description) =
-                    reader.find_field(method_table_ptr, field.as_str())?;
+                let (parent_of_field, field_description) = reader
+                    .find_field_by_name(method_table_ptr, field.as_str())?;
                 let field_type = reader.field_to_runtime_type(
                     parent_of_field,
                     &field_description,

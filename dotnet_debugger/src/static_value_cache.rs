@@ -325,6 +325,38 @@ impl<'a> CachedReader<'a> {
         }
     }
 
+    pub fn find_field_by_name(
+        &self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        field_name: &str,
+    ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error> {
+        self.iter_instance_fields(method_table_ptr)?
+            .find(|(_, field)| {
+                self.field_to_name(field)
+                    .map(|name| name == field_name)
+                    .unwrap_or(false)
+            })
+            .ok_or_else(|| match self.method_table_to_name(method_table_ptr) {
+                Ok(class_name) => Error::NoSuchInstanceField {
+                    class_name: class_name.to_string(),
+                    field_name: field_name.to_string(),
+                },
+                Err(err) => err,
+            })
+    }
+
+    pub fn field_by_name_to_runtime_type(
+        &self,
+        method_table_ptr: TypedPointer<MethodTable>,
+        field_name: &str,
+    ) -> Result<RuntimeType, Error> {
+        let (parent_of_field, field_desc) =
+            self.find_field_by_name(method_table_ptr, field_name)?;
+        let runtime_type =
+            self.field_to_runtime_type(parent_of_field, &field_desc)?;
+        Ok(runtime_type)
+    }
+
     pub fn field_to_runtime_type(
         &self,
         ptr_mtable_of_parent: TypedPointer<MethodTable>,
