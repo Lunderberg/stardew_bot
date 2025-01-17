@@ -17,7 +17,7 @@ impl<'a> RemoveUnusedPrimcast<'a> {
 }
 
 impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
-    fn rewrite(
+    fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &SymbolicExpr,

@@ -5,7 +5,7 @@ use super::{GraphRewrite, SymbolicExpr, SymbolicGraph, SymbolicValue};
 pub struct ConstantFold;
 
 impl GraphRewrite for ConstantFold {
-    fn rewrite(
+    fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &SymbolicExpr,

@@ -738,6 +738,14 @@ impl SymbolicGraph {
         }
     }
 
+    pub fn simplify(&self, reader: CachedReader<'_>) -> Result<Self, Error> {
+        let rewriter = super::RemoveUnusedDowncast::new(reader)
+            .then(super::ConstantFold)
+            .then(super::RemoveUnusedPrimcast::new(reader))
+            .apply_recursively();
+        self.rewrite(rewriter)
+    }
+
     pub fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
@@ -747,7 +755,7 @@ impl SymbolicGraph {
             let op = op.clone().remap(old_index, &prev_index_lookup)?;
 
             let value = rewriter
-                .rewrite(&mut builder, &op)?
+                .rewrite_expr(&mut builder, &op)?
                 .unwrap_or_else(|| builder.push(op));
             prev_index_lookup.insert(old_index, value);
         }

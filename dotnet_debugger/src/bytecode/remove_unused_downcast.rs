@@ -19,7 +19,7 @@ impl<'a> RemoveUnusedDowncast<'a> {
 }
 
 impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
-    fn rewrite(
+    fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &SymbolicExpr,

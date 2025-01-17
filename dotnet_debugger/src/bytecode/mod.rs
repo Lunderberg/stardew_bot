@@ -15,6 +15,12 @@ pub use remove_unused_downcast::RemoveUnusedDowncast;
 mod remove_unused_primcast;
 pub use remove_unused_primcast::RemoveUnusedPrimcast;
 
+mod recursive_rewrite;
+pub use recursive_rewrite::RecursiveRewrite;
+
+mod sequential_rewrite;
+pub use sequential_rewrite::SequentialRewrite;
+
 mod type_inference;
 pub use type_inference::TypeInference;
 
