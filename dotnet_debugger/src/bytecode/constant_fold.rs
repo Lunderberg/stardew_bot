@@ -10,7 +10,7 @@ impl GraphRewrite for ConstantFold {
         graph: &mut SymbolicGraph,
         expr: &SymbolicExpr,
     ) -> Result<Option<SymbolicValue>, Error> {
-        Ok(match expr {
+        let opt_value = match expr {
             &SymbolicExpr::Add {
                 lhs: SymbolicValue::Int(a),
                 rhs: SymbolicValue::Int(b),
@@ -94,6 +94,8 @@ impl GraphRewrite for ConstantFold {
             },
 
             _ => None,
-        })
+        };
+
+        Ok(opt_value)
     }
 }

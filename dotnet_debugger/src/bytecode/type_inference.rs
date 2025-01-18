@@ -166,18 +166,25 @@ impl<'a> TypeInference<'a> {
                 | SymbolicExpr::NumArrayElements { .. } => {
                     RuntimeType::Prim(RuntimePrimType::NativeUInt)
                 }
+                SymbolicExpr::PointerCast { ty, .. } => ty.clone(),
                 SymbolicExpr::Add { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs);
                     let rhs_type = expect_cache(*rhs);
                     match (lhs_type, rhs_type) {
                         (
-                            RuntimeType::Prim(RuntimePrimType::Ptr),
+                            ptr,
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                         )
                         | (
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            RuntimeType::Prim(RuntimePrimType::Ptr),
-                        ) => Ok(RuntimePrimType::Ptr),
+                            ptr,
+                        ) if matches!(
+                            ptr.storage_type(),
+                            Some(RuntimePrimType::Ptr)
+                        ) =>
+                        {
+                            Ok(RuntimePrimType::Ptr)
+                        }
 
                         (
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),

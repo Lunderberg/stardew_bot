@@ -21,6 +21,12 @@ pub use recursive_rewrite::RecursiveRewrite;
 mod sequential_rewrite;
 pub use sequential_rewrite::SequentialRewrite;
 
+mod lower_symbolic_expr;
+pub use lower_symbolic_expr::LowerSymbolicExpr;
+
+mod remove_unused_pointer_cast;
+pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
+
 mod type_inference;
 pub use type_inference::TypeInference;
 

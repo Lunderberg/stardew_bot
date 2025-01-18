@@ -18,7 +18,7 @@ use crate::{
 /// would refer to the method table of `BaseClass`.
 ///
 /// So in absence of a better name, calling it `RuntimeType` for now.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
     ValueType {

@@ -12,9 +12,8 @@ use memory_reader::Pointer;
 use crate::{
     bytecode::virtual_machine::{Instruction, VMArg},
     runtime_type::RuntimePrimType,
-    CachedReader, Error, FieldDescription, MethodTable, OpIndex, RuntimeArray,
-    RuntimeMultiDimArray, RuntimePrimValue, RuntimeType, TypedPointer,
-    VirtualMachine,
+    CachedReader, Error, FieldDescription, MethodTable, OpIndex,
+    RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
 };
 
 use super::{GraphRewrite, TypeInference};
@@ -28,7 +27,7 @@ pub struct SymbolicGraph {
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueToken(pub(crate) usize);
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SymbolicExpr {
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
@@ -79,6 +78,9 @@ pub enum SymbolicExpr {
         dim: SymbolicValue,
     },
 
+    /// Cast a pointer to another pointer type.
+    PointerCast { ptr: SymbolicValue, ty: RuntimeType },
+
     /// Perform addition of the LHS and RHS.
     ///
     /// This operation is used for both pointer arithmetic and numeric
@@ -119,21 +121,21 @@ pub enum SymbolicExpr {
     },
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, From)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
 pub enum SymbolicValue {
     Int(usize),
     Ptr(Pointer),
     Result(OpIndex),
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct SymbolicType {
     /// The full name of the type, including the namespace, if any.
     pub full_name: String,
     pub generics: Vec<SymbolicType>,
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StaticField {
     pub class: SymbolicType,
     pub field_name: String,
@@ -279,7 +281,10 @@ impl StaticField {
         Ok(base_type)
     }
 
-    fn location(&self, reader: CachedReader<'_>) -> Result<Pointer, Error> {
+    pub(crate) fn location(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<Pointer, Error> {
         let (base_method_table_ptr, field) =
             self.method_table_and_field(reader)?;
 
@@ -437,6 +442,15 @@ impl SymbolicGraph {
         self.push(SymbolicExpr::ArrayExtent { array, dim })
     }
 
+    pub fn pointer_cast(
+        &mut self,
+        ptr: impl Into<SymbolicValue>,
+        ty: RuntimeType,
+    ) -> SymbolicValue {
+        let ptr = ptr.into();
+        self.push(SymbolicExpr::PointerCast { ptr, ty })
+    }
+
     //////////////////////////////////////////////////
     ////          Physical Operations              ///
     //////////////////////////////////////////////////
@@ -506,187 +520,6 @@ impl SymbolicGraph {
             .cloned()
             .enumerate()
             .map(|(i, op_index)| (ValueToken(i), op_index))
-    }
-
-    fn infer_types(
-        &self,
-        reader: CachedReader,
-    ) -> Result<HashMap<SymbolicValue, RuntimeType>, Error> {
-        let mut output = HashMap::<SymbolicValue, RuntimeType>::new();
-
-        for (index, op) in self.iter_ops() {
-            op.visit_input_values(|value| {
-                let opt_runtime_type: Option<RuntimeType> = match value {
-                    SymbolicValue::Int(_) => {
-                        Some(RuntimePrimType::NativeUInt.into())
-                    }
-                    SymbolicValue::Ptr(_) => Some(RuntimePrimType::Ptr.into()),
-                    SymbolicValue::Result(_) => None,
-                };
-
-                if let Some(ty) = opt_runtime_type {
-                    output.entry(value).or_insert(ty);
-                }
-            });
-
-            let lookup_type =
-                |prev_value: &SymbolicValue| -> Result<&RuntimeType, Error> {
-                    output.get(prev_value).ok_or_else(|| {
-                        let op_index = match prev_value {
-                            SymbolicValue::Result(op_index) => op_index,
-                            _ => {
-                                unreachable!("Handled in .visit_input_values()")
-                            }
-                        };
-                        Error::InvalidReference {
-                            from: index,
-                            to: *op_index,
-                        }
-                    })
-                };
-
-            let runtime_type = match op {
-                SymbolicExpr::StaticField(static_field) => {
-                    static_field.runtime_type(reader)?
-                }
-                SymbolicExpr::FieldAccess { obj, field } => {
-                    let obj_type = lookup_type(&(*obj).into())?;
-
-                    let method_table_ptr = obj_type
-                        .method_table_for_field_access(|| {
-                            format!("{}", self.print(obj))
-                        })?;
-                    let field_type = reader.field_by_name_to_runtime_type(
-                        method_table_ptr,
-                        field.as_str(),
-                    )?;
-                    field_type
-                }
-                SymbolicExpr::IndexAccess {
-                    obj: array,
-                    indices,
-                } => {
-                    let array_type = lookup_type(&(*array).into())?;
-                    let num_indices = indices.len();
-
-                    match array_type {
-                        RuntimeType::Array { .. } if num_indices != 1 => {
-                            Err(Error::IncorrectNumberOfIndices {
-                                num_provided: num_indices,
-                                num_expected: 1,
-                            })
-                        }
-                        RuntimeType::MultiDimArray { rank, .. }
-                            if num_indices != *rank =>
-                        {
-                            return Err(Error::IncorrectNumberOfIndices {
-                                num_provided: num_indices,
-                                num_expected: *rank,
-                            });
-                        }
-                        RuntimeType::MultiDimArray {
-                            method_table: None,
-                            ..
-                        }
-                        | RuntimeType::Array {
-                            method_table: None, ..
-                        } => {
-                            return Err(Error::UnexpectedNullMethodTable(
-                                format!("{}", self.print(array)),
-                            ));
-                        }
-                        RuntimeType::MultiDimArray {
-                            method_table: Some(ptr),
-                            ..
-                        }
-                        | RuntimeType::Array {
-                            method_table: Some(ptr),
-                            ..
-                        } => {
-                            let method_table = reader.method_table(*ptr)?;
-                            method_table
-                                .array_element_type()
-                                .ok_or(Error::ArrayMissingElementType)
-                                .and_then(|ptr| reader.runtime_type(ptr))
-                        }
-
-                        other => {
-                            Err(Error::IndexAccessRequiresArray(other.clone()))
-                        }
-                    }?
-                }
-                SymbolicExpr::SymbolicDowncast { ty, .. } => {
-                    let method_table = ty.method_table(reader)?;
-                    RuntimeType::Class {
-                        method_table: Some(method_table),
-                    }
-                }
-                SymbolicExpr::NumArrayElements { .. } => {
-                    RuntimePrimType::NativeUInt.into()
-                }
-                SymbolicExpr::ArrayExtent { .. } => {
-                    RuntimePrimType::NativeUInt.into()
-                }
-
-                SymbolicExpr::Add { lhs, rhs } => {
-                    let lhs_type = lookup_type(lhs)?;
-                    let rhs_type = lookup_type(rhs)?;
-                    match (lhs_type, rhs_type) {
-                        (
-                            RuntimeType::Prim(RuntimePrimType::Ptr),
-                            RuntimeType::Prim(prim_rhs),
-                        ) if prim_rhs.is_integer() => Ok(RuntimePrimType::Ptr),
-                        (
-                            RuntimeType::Prim(prim_lhs),
-                            RuntimeType::Prim(RuntimePrimType::Ptr),
-                        ) if prim_lhs.is_integer() => Ok(RuntimePrimType::Ptr),
-                        (
-                            RuntimeType::Prim(prim_lhs),
-                            RuntimeType::Prim(prim_rhs),
-                        ) if prim_lhs.is_integer() && prim_rhs.is_integer() => {
-                            Ok(RuntimePrimType::NativeUInt)
-                        }
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForAddition {
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
-                    .into()
-                }
-                SymbolicExpr::Mul { lhs, rhs } => {
-                    let lhs_type = lookup_type(lhs)?;
-                    let rhs_type = lookup_type(rhs)?;
-                    match (lhs_type, rhs_type) {
-                        (
-                            RuntimeType::Prim(prim_lhs),
-                            RuntimeType::Prim(prim_rhs),
-                        ) if prim_lhs.is_integer() && prim_rhs.is_integer() => {
-                            Ok(RuntimePrimType::NativeUInt)
-                        }
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForMultiplication {
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
-                    .into()
-                }
-                SymbolicExpr::PrimCast { prim_type, .. } => (*prim_type).into(),
-                SymbolicExpr::PhysicalDowncast { .. } => {
-                    RuntimePrimType::Ptr.into()
-                }
-                SymbolicExpr::ReadValue { prim_type, .. } => {
-                    (*prim_type).into()
-                }
-            };
-
-            output.insert(index.into(), runtime_type);
-        }
-
-        Ok(output)
     }
 
     //////////////////////////////////////////////////////////////////
@@ -834,42 +667,6 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    pub fn to_physical_graph(
-        &self,
-        reader: CachedReader<'_>,
-    ) -> Result<Self, Error> {
-        let runtime_type_lookup = self.infer_types(reader)?;
-
-        let mut builder = Self::new();
-        let mut prev_value_lookup = HashMap::<OpIndex, SymbolicValue>::new();
-
-        for (symbolic_index, op) in self.iter_ops() {
-            let physical_index = op.to_physical_expr(
-                reader,
-                self,
-                &mut builder,
-                symbolic_index,
-                &prev_value_lookup,
-                &runtime_type_lookup,
-            )?;
-            prev_value_lookup.insert(symbolic_index, physical_index);
-        }
-
-        for (symbolic_token, symbolic_output) in self.iter_outputs() {
-            let physical_output = match symbolic_output {
-                SymbolicValue::Result(op_index) => prev_value_lookup
-                    .get(&op_index)
-                    .expect("All outputs should be processed by this point")
-                    .clone(),
-                other => other,
-            };
-            let output_token = builder.mark_output(physical_output);
-            assert!(symbolic_token == output_token);
-        }
-
-        Ok(builder)
-    }
-
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
         let output_indices: HashMap<OpIndex, ValueToken> = self
             .iter_outputs()
@@ -950,6 +747,9 @@ impl SymbolicGraph {
                     instructions.push(value_to_register!(ptr));
                     instructions.push(Instruction::Read { ty: *prim_type });
                 }
+                SymbolicExpr::PointerCast { ptr, .. } => {
+                    instructions.push(value_to_register!(ptr));
+                }
                 symbolic @ (SymbolicExpr::StaticField(_)
                 | SymbolicExpr::FieldAccess { .. }
                 | SymbolicExpr::SymbolicDowncast { .. }
@@ -997,21 +797,21 @@ impl SymbolicGraph {
     ) -> Result<VirtualMachine, Error> {
         let expr = self.clone();
 
-        // Symbolic expressions, in terms of class/field names.
         let expr = expr.eliminate_common_subexpresssions()?;
         expr.validate(reader)?;
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
-        let expr = expr.rewrite(super::RemoveUnusedDowncast::new(reader))?;
+
+        let rewriter = super::RemoveUnusedDowncast::new(reader)
+            .then(super::ConstantFold)
+            .then(super::RemoveUnusedPrimcast::new(reader))
+            .then(super::LowerSymbolicExpr::new(reader))
+            .then(super::RemoveUnusedPointerCast)
+            .apply_recursively();
+
+        let expr = expr.rewrite(rewriter)?;
         expr.validate(reader)?;
 
-        // Physical expressions, in terms of pointer/offsets.
-        let expr = expr.to_physical_graph(reader)?;
-        expr.validate(reader)?;
-        let expr = expr.rewrite(super::ConstantFold)?;
-        expr.validate(reader)?;
-        let expr = expr.rewrite(super::RemoveUnusedPrimcast::new(reader))?;
-        expr.validate(reader)?;
         let expr = expr.eliminate_common_subexpresssions()?;
         expr.validate(reader)?;
         let expr = expr.dead_code_elimination()?;
@@ -1036,7 +836,104 @@ impl SymbolicValue {
 }
 
 impl SymbolicExpr {
-    fn remap(
+    pub(crate) fn try_remap(
+        &self,
+        map: &HashMap<OpIndex, SymbolicValue>,
+    ) -> Option<Self> {
+        let remap = |value: &SymbolicValue| -> Option<SymbolicValue> {
+            match value {
+                SymbolicValue::Result(index) => map.get(&index).cloned(),
+                _ => None,
+            }
+        };
+
+        match self {
+            SymbolicExpr::StaticField(_) => None,
+            SymbolicExpr::FieldAccess { obj, field } => {
+                remap(obj).map(|obj| SymbolicExpr::FieldAccess {
+                    obj,
+                    field: field.clone(),
+                })
+            }
+            SymbolicExpr::IndexAccess { obj, indices } => {
+                let opt_obj = remap(obj);
+                let requires_remap = opt_obj.is_some()
+                    || indices.iter().any(|index| remap(index).is_some());
+                requires_remap.then(|| {
+                    let obj = opt_obj.unwrap_or_else(|| *obj);
+                    let indices = indices
+                        .iter()
+                        .map(|index| remap(index).unwrap_or_else(|| *index))
+                        .collect::<Vec<_>>();
+                    SymbolicExpr::IndexAccess { obj, indices }
+                })
+            }
+            SymbolicExpr::PrimCast { value, prim_type } => {
+                remap(value).map(|value| SymbolicExpr::PrimCast {
+                    value,
+                    prim_type: prim_type.clone(),
+                })
+            }
+            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+                remap(obj).map(|obj| SymbolicExpr::SymbolicDowncast {
+                    obj,
+                    ty: ty.clone(),
+                })
+            }
+            SymbolicExpr::NumArrayElements { array } => remap(array)
+                .map(|array| SymbolicExpr::NumArrayElements { array }),
+            SymbolicExpr::ArrayExtent { array, dim } => {
+                let opt_array = remap(array);
+                let opt_dim = remap(dim);
+                let requires_remap = opt_array.is_some() || opt_dim.is_some();
+                (requires_remap).then(|| {
+                    let array = opt_array.unwrap_or_else(|| *array);
+                    let dim = opt_array.unwrap_or_else(|| *dim);
+                    SymbolicExpr::ArrayExtent { array, dim }
+                })
+            }
+            SymbolicExpr::PointerCast { ptr, ty } => {
+                remap(ptr).map(|ptr| SymbolicExpr::PointerCast {
+                    ptr,
+                    ty: ty.clone(),
+                })
+            }
+            SymbolicExpr::Add { lhs, rhs } => {
+                let opt_lhs = remap(lhs);
+                let opt_rhs = remap(rhs);
+                let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
+                requires_remap.then(|| {
+                    let lhs = opt_lhs.unwrap_or_else(|| *lhs);
+                    let rhs = opt_rhs.unwrap_or_else(|| *rhs);
+                    SymbolicExpr::Add { lhs, rhs }
+                })
+            }
+            SymbolicExpr::Mul { lhs, rhs } => {
+                let opt_lhs = remap(lhs);
+                let opt_rhs = remap(rhs);
+                let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
+                requires_remap.then(|| {
+                    let lhs = opt_lhs.unwrap_or_else(|| *lhs);
+                    let rhs = opt_rhs.unwrap_or_else(|| *rhs);
+                    SymbolicExpr::Mul { lhs, rhs }
+                })
+            }
+            SymbolicExpr::PhysicalDowncast { obj, ty } => {
+                remap(obj).map(|obj| SymbolicExpr::PhysicalDowncast {
+                    obj,
+                    ty: ty.clone(),
+                })
+            }
+            SymbolicExpr::ReadValue { ptr, prim_type } => {
+                remap(ptr).map(|ptr| SymbolicExpr::ReadValue {
+                    ptr,
+                    prim_type: prim_type.clone(),
+                })
+            }
+        }
+    }
+
+    pub(crate) fn remap(
         self,
         current_index: OpIndex,
         map: &HashMap<OpIndex, SymbolicValue>,
@@ -1087,6 +984,10 @@ impl SymbolicExpr {
                 let dim = remap(dim)?;
                 SymbolicExpr::ArrayExtent { array, dim }
             }
+            SymbolicExpr::PointerCast { ptr, ty } => {
+                let ptr = remap(ptr)?;
+                SymbolicExpr::PointerCast { ptr, ty }
+            }
             SymbolicExpr::Add { lhs, rhs } => {
                 let lhs = remap(lhs)?;
                 let rhs = remap(rhs)?;
@@ -1132,6 +1033,7 @@ impl SymbolicExpr {
                 callback(*array);
                 callback(*dim);
             }
+            SymbolicExpr::PointerCast { ptr, .. } => callback(*ptr),
             SymbolicExpr::Add { lhs, rhs } | SymbolicExpr::Mul { lhs, rhs } => {
                 callback(*lhs);
                 callback(*rhs)
@@ -1142,301 +1044,6 @@ impl SymbolicExpr {
             }
             SymbolicExpr::ReadValue { ptr, .. } => {
                 callback(*ptr);
-            }
-        }
-    }
-
-    fn to_physical_expr(
-        &self,
-        reader: CachedReader<'_>,
-        original: &SymbolicGraph,
-        builder: &mut SymbolicGraph,
-        symbolic_index: OpIndex,
-        prev_value_lookup: &HashMap<OpIndex, SymbolicValue>,
-        runtime_type_lookup: &HashMap<SymbolicValue, RuntimeType>,
-    ) -> Result<SymbolicValue, Error> {
-        let lookup_prev = |sym_value: &SymbolicValue| -> Result<_, Error> {
-            let phys_value = match *sym_value {
-                SymbolicValue::Result(old_index) => prev_value_lookup
-                    .get(&old_index)
-                    .ok_or_else(|| Error::InvalidReference {
-                        from: symbolic_index,
-                        to: old_index,
-                    })?
-                    .clone(),
-                other => other,
-            };
-            let runtime_type = runtime_type_lookup
-                .get(sym_value)
-                .ok_or_else(|| Error::InferredTypeNotFound(*sym_value))?;
-
-            Ok((phys_value, runtime_type))
-        };
-
-        macro_rules! read_value_if_required {
-            ($ptr:expr, $runtime_type:expr) => {
-                if let Some(prim_type) = $runtime_type.storage_type() {
-                    // The majority of fields should be read out after
-                    // their location has been determined.
-                    builder.read_value($ptr, prim_type)
-                } else {
-                    // The exception are ValueType fields.  These
-                    // require additional FieldAccess operations to
-                    // locate the primitive types within the composite
-                    // ValueType, and must be kept as a pointer until
-                    // then.
-                    $ptr
-                }
-            };
-        }
-
-        match self {
-            SymbolicExpr::StaticField(static_field) => {
-                let runtime_type = static_field.runtime_type(reader)?;
-                let ptr = static_field.location(reader)?;
-
-                let ptr = SymbolicValue::Ptr(ptr);
-                let expr = read_value_if_required!(ptr, runtime_type);
-
-                Ok(expr)
-            }
-            SymbolicExpr::FieldAccess { obj, field } => {
-                let (ptr, obj_type) = lookup_prev(obj)?;
-
-                let method_table_ptr =
-                    obj_type.method_table_for_field_access(|| {
-                        format!("{}", original.print(obj))
-                    })?;
-                let (parent_of_field, field_description) = reader
-                    .find_field_by_name(method_table_ptr, field.as_str())?;
-                let field_type = reader.field_to_runtime_type(
-                    parent_of_field,
-                    &field_description,
-                )?;
-
-                // The `field_description.offset()` is relative to the
-                // location of the first data member, regardless of
-                // whether the object is a Class or ValueType
-                // instance.  However, Class instances have an
-                // additional pointer to their method table, prior to
-                // the first data member.
-                let ptr = if matches!(obj_type, RuntimeType::Class { .. }) {
-                    builder.add(ptr, Pointer::SIZE)
-                } else {
-                    ptr
-                };
-
-                let ptr = builder.add(ptr, field_description.offset());
-                let value = read_value_if_required!(ptr, field_type);
-
-                Ok(value)
-            }
-            SymbolicExpr::IndexAccess { obj, indices } => {
-                let (array, array_type) = lookup_prev(obj)?;
-
-                let indices = indices
-                    .iter()
-                    .map(|index| lookup_prev(index).map(|(value, _)| value))
-                    .collect::<Result<Vec<_>, _>>()?;
-
-                let (element_type, component_size) = match array_type {
-                    RuntimeType::Array { method_table, .. }
-                    | RuntimeType::MultiDimArray { method_table, .. } => {
-                        let method_table = method_table.ok_or_else(|| {
-                            Error::UnexpectedNullMethodTable(format!(
-                                "{}",
-                                original.print(obj)
-                            ))
-                        })?;
-                        let method_table = reader.method_table(method_table)?;
-                        let component_size = method_table
-                            .component_size()
-                            .ok_or(Error::ArrayMissingComponentSize)?;
-                        let element_type = method_table
-                            .array_element_type()
-                            .ok_or(Error::ArrayMissingElementType)
-                            .and_then(|ptr| reader.runtime_type(ptr))?;
-
-                        Ok((element_type, component_size))
-                    }
-                    other => {
-                        Err(Error::IndexAccessRequiresArray(other.clone()))
-                    }
-                }?;
-
-                let (header_size_bytes, shape) = match array_type {
-                    RuntimeType::Array { .. } => {
-                        let header_size_bytes = RuntimeArray::HEADER_SIZE;
-                        let num_elements_ptr =
-                            builder.add(array, Pointer::SIZE);
-                        let num_elements = builder
-                            .read_value(num_elements_ptr, RuntimePrimType::U64);
-                        let num_elements = builder.prim_cast(
-                            num_elements,
-                            RuntimePrimType::NativeUInt,
-                        );
-                        let shape = vec![num_elements];
-                        Ok((header_size_bytes, shape))
-                    }
-                    RuntimeType::MultiDimArray { rank, .. } => {
-                        let rank = *rank;
-
-                        let shape_start =
-                            builder.add(array, RuntimeArray::HEADER_SIZE);
-                        let shape = (0..rank)
-                            .map(|i| {
-                                let extent_ptr = builder.add(
-                                    shape_start,
-                                    i * RuntimePrimType::U32.size_bytes(),
-                                );
-                                let extent = builder.read_value(
-                                    extent_ptr,
-                                    RuntimePrimType::U32,
-                                );
-                                builder.prim_cast(
-                                    extent,
-                                    RuntimePrimType::NativeUInt,
-                                )
-                            })
-                            .collect();
-                        let header_size_bytes =
-                            RuntimeMultiDimArray::header_size(rank);
-
-                        Ok((header_size_bytes, shape))
-                    }
-                    other => {
-                        Err(Error::IndexAccessRequiresArray(other.clone()))
-                    }
-                }?;
-
-                if shape.len() != indices.len() {
-                    return Err(Error::IncorrectNumberOfIndices {
-                        num_provided: indices.len(),
-                        num_expected: shape.len(),
-                    });
-                }
-
-                let ptr = {
-                    let first_element = builder.add(array, header_size_bytes);
-                    let byte_offset = {
-                        let strides = {
-                            let mut strides = Vec::new();
-                            let mut cum_prod: SymbolicValue =
-                                component_size.into();
-                            for dim in shape.into_iter().rev() {
-                                strides.push(cum_prod);
-                                cum_prod = builder.mul(cum_prod, dim);
-                            }
-                            strides.reverse();
-                            strides
-                        };
-
-                        let mut total_offset: SymbolicValue = 0.into();
-                        for (stride, index) in
-                            strides.into_iter().zip(indices.into_iter())
-                        {
-                            let axis_offset = builder.mul(stride, index);
-                            total_offset =
-                                builder.add(total_offset, axis_offset);
-                        }
-                        total_offset
-                    };
-                    builder.add(first_element, byte_offset)
-                };
-
-                let value = read_value_if_required!(ptr, element_type);
-
-                Ok(value)
-            }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                let (obj, obj_type) = lookup_prev(obj)?;
-
-                let static_method_table_ptr =
-                    obj_type.method_table_for_downcast()?;
-                let target_method_table_ptr = ty.method_table(reader)?;
-                let is_valid_downcast = reader
-                    .method_table(static_method_table_ptr)?
-                    .is_interface()
-                    || reader.is_base_of(
-                        target_method_table_ptr,
-                        static_method_table_ptr,
-                    )?
-                    || reader.is_base_of(
-                        static_method_table_ptr,
-                        target_method_table_ptr,
-                    )?;
-                if !is_valid_downcast {
-                    // Types are in separate hierachies.  This
-                    // downcast is illegal.
-                    return Err(Error::DowncastRequiresRelatedClasses(
-                        format!("{obj_type}"),
-                        format!("{ty}"),
-                    ));
-                }
-
-                let target_method_table_ptr = ty.method_table(reader)?;
-                let expr =
-                    builder.physical_downcast(obj, target_method_table_ptr);
-
-                Ok(expr)
-            }
-            SymbolicExpr::PrimCast { value, prim_type } => {
-                let (value, _) = lookup_prev(value)?;
-                let expr = builder.prim_cast(value, *prim_type);
-
-                Ok(expr)
-            }
-            SymbolicExpr::NumArrayElements { array } => {
-                let (array, array_type) = lookup_prev(array)?;
-                match array_type {
-                    RuntimeType::Array { .. }
-                    | RuntimeType::MultiDimArray { .. } => {
-                        let num_elements_ptr =
-                            builder.add(array, Pointer::SIZE);
-                        let expr = builder
-                            .read_value(num_elements_ptr, RuntimePrimType::U64);
-                        let expr = builder
-                            .prim_cast(expr, RuntimePrimType::NativeUInt);
-                        Ok(expr)
-                    }
-
-                    other => {
-                        Err(Error::ArrayLengthRequiresArray(other.clone()))
-                    }
-                }
-            }
-            SymbolicExpr::ArrayExtent { array, dim } => {
-                let (array, array_type) = lookup_prev(array)?;
-                let dim = lookup_prev(dim)?.0;
-
-                match array_type {
-                    RuntimeType::MultiDimArray { .. } => {
-                        // TODO: Assert that `dim < rank`.  Will
-                        // require implementing support for runtime
-                        // assertions.
-                        let dim_offset =
-                            builder.mul(dim, RuntimePrimType::U32.size_bytes());
-                        let offset =
-                            builder.add(dim_offset, RuntimeArray::HEADER_SIZE);
-                        let extent_ptr = builder.add(array, offset);
-                        let extent = builder
-                            .read_value(extent_ptr, RuntimePrimType::U32);
-                        let extent = builder
-                            .prim_cast(extent, RuntimePrimType::NativeUInt);
-                        Ok(extent)
-                    }
-                    other => {
-                        Err(Error::ArrayExtentRequiresMultiDimensionalArray(
-                            other.clone(),
-                        ))
-                    }
-                }
-            }
-            other @ (SymbolicExpr::Add { .. }
-            | SymbolicExpr::Mul { .. }
-            | SymbolicExpr::PhysicalDowncast { .. }
-            | SymbolicExpr::ReadValue { .. }) => {
-                Ok(builder.push(other.clone()))
             }
         }
     }
@@ -1471,6 +1078,10 @@ impl Display for SymbolicExpr {
                 write!(f, "{array}\u{200B}.extent({dim})")
             }
 
+            SymbolicExpr::PointerCast { ptr, ty } => {
+                write!(f, "{ptr}\u{200B}.ptr_cast({ty})")
+            }
+
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
             // parser.
             SymbolicExpr::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
@@ -1479,7 +1090,7 @@ impl Display for SymbolicExpr {
                 write!(f, "{obj}.downcast({ty})")
             }
             SymbolicExpr::PrimCast { value, prim_type } => {
-                write!(f, "{value}.as::<{prim_type}>()")
+                write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
@@ -1544,6 +1155,10 @@ impl<'a> Display for ExprPrinter<'a> {
                 let dim = self.with_value(dim);
                 write!(f, "{array}\u{200B}.extent({dim})")
             }
+            SymbolicExpr::PointerCast { ptr, ty } => {
+                let ptr = self.with_value(ptr);
+                write!(f, "{ptr}\u{200B}.ptr_cast<{ty}>()")
+            }
             SymbolicExpr::Add { lhs, rhs } => {
                 let lhs = self.with_value(lhs);
                 let rhs = self.with_value(rhs);
@@ -1560,7 +1175,7 @@ impl<'a> Display for ExprPrinter<'a> {
             }
             SymbolicExpr::PrimCast { value, prim_type } => {
                 let value = self.with_value(value);
-                write!(f, "{value}.as::<{prim_type}>()")
+                write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(ptr);
