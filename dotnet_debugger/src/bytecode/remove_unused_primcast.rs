@@ -1,20 +1,11 @@
-use crate::{CachedReader, Error};
+use crate::Error;
 
 use super::{
-    GraphRewrite, SymbolicExpr, SymbolicGraph, SymbolicValue, TypeInference,
+    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    SymbolicValue,
 };
 
-pub struct RemoveUnusedPrimcast<'a> {
-    type_inference: TypeInference<'a>,
-}
-
-impl<'a> RemoveUnusedPrimcast<'a> {
-    pub fn new(reader: CachedReader<'a>) -> Self {
-        Self {
-            type_inference: TypeInference::new(reader),
-        }
-    }
-}
+pub struct RemoveUnusedPrimcast<'a>(pub &'a Analysis<'a>);
 
 impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
     fn rewrite_expr(
@@ -24,8 +15,7 @@ impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             SymbolicExpr::PrimCast { value, prim_type } => {
-                let value_type =
-                    self.type_inference.lookup_type(graph, *value)?;
+                let value_type = self.0.infer_type(graph, *value)?;
                 (value_type == prim_type).then(|| *value)
             }
 

@@ -16,7 +16,7 @@ use crate::{
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
 };
 
-use super::{GraphRewrite, TypeInference};
+use super::{graph_rewrite::Analysis, GraphRewrite, TypeInference};
 
 #[derive(Default, Clone)]
 pub struct SymbolicGraph {
@@ -148,10 +148,12 @@ pub struct ExprPrinter<'a> {
 }
 
 impl SymbolicType {
-    pub(crate) fn method_table(
+    pub(crate) fn method_table<'a>(
         &self,
-        reader: CachedReader<'_>,
+        reader: impl Into<CachedReader<'a>>,
     ) -> Result<TypedPointer<MethodTable>, Error> {
+        let reader = reader.into();
+
         let method_table_ptr = reader
             .method_table_by_name(&self.full_name)?
             .ok_or_else(|| {
@@ -542,7 +544,7 @@ impl SymbolicGraph {
             });
             result?;
 
-            type_inference.lookup_type(self, index.into())?;
+            type_inference.infer_type(self, index.into())?;
         }
 
         Ok(())
@@ -572,9 +574,10 @@ impl SymbolicGraph {
     }
 
     pub fn simplify(&self, reader: CachedReader<'_>) -> Result<Self, Error> {
-        let rewriter = super::RemoveUnusedDowncast::new(reader)
+        let analysis = Analysis::new(reader);
+        let rewriter = super::RemoveUnusedDowncast(&analysis)
             .then(super::ConstantFold)
-            .then(super::RemoveUnusedPrimcast::new(reader))
+            .then(super::RemoveUnusedPrimcast(&analysis))
             .apply_recursively();
         self.rewrite(rewriter)
     }
@@ -802,10 +805,11 @@ impl SymbolicGraph {
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
 
-        let rewriter = super::RemoveUnusedDowncast::new(reader)
+        let analysis = Analysis::new(reader);
+        let rewriter = super::RemoveUnusedDowncast(&analysis)
             .then(super::ConstantFold)
-            .then(super::RemoveUnusedPrimcast::new(reader))
-            .then(super::LowerSymbolicExpr::new(reader))
+            .then(super::RemoveUnusedPrimcast(&analysis))
+            .then(super::LowerSymbolicExpr(&analysis))
             .then(super::RemoveUnusedPointerCast)
             .apply_recursively();
 

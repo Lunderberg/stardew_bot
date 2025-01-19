@@ -1,27 +1,16 @@
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_type::RuntimePrimType, CachedReader, Error, RuntimeArray,
-    RuntimeMultiDimArray, RuntimeType,
+    runtime_type::RuntimePrimType, Error, RuntimeArray, RuntimeMultiDimArray,
+    RuntimeType,
 };
 
 use super::{
-    GraphRewrite, SymbolicExpr, SymbolicGraph, SymbolicValue, TypeInference,
+    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    SymbolicValue,
 };
 
-pub struct LowerSymbolicExpr<'a> {
-    reader: CachedReader<'a>,
-    type_inference: TypeInference<'a>,
-}
-
-impl<'a> LowerSymbolicExpr<'a> {
-    pub fn new(reader: CachedReader<'a>) -> Self {
-        Self {
-            reader,
-            type_inference: TypeInference::new(reader),
-        }
-    }
-}
+pub struct LowerSymbolicExpr<'a>(pub &'a Analysis<'a>);
 
 impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
     fn rewrite_expr(
@@ -53,10 +42,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }};
         }
 
+        let reader = self.0.reader();
+
         let opt_value = match expr {
             SymbolicExpr::StaticField(static_field) => {
-                let runtime_type = static_field.runtime_type(self.reader)?;
-                let ptr = static_field.location(self.reader)?;
+                let runtime_type = static_field.runtime_type(reader)?;
+                let ptr = static_field.location(reader)?;
 
                 let ptr = SymbolicValue::Ptr(ptr);
                 let expr = read_value_if_required!(ptr, runtime_type);
@@ -65,16 +56,15 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }
             SymbolicExpr::FieldAccess { obj, field } => {
                 let obj = *obj;
-                let obj_type = self.type_inference.lookup_type(graph, obj)?;
+                let obj_type = self.0.infer_type(graph, obj)?;
 
                 let method_table_ptr =
                     obj_type.method_table_for_field_access(|| {
                         format!("{}", graph.print(&obj))
                     })?;
-                let (parent_of_field, field_description) = self
-                    .reader
+                let (parent_of_field, field_description) = reader
                     .find_field_by_name(method_table_ptr, field.as_str())?;
-                let field_type = self.reader.field_to_runtime_type(
+                let field_type = reader.field_to_runtime_type(
                     parent_of_field,
                     &field_description,
                 )?;
@@ -99,8 +89,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }
             SymbolicExpr::IndexAccess { obj, indices } => {
                 let array = *obj;
-                let array_type =
-                    self.type_inference.lookup_type(graph, array)?;
+                let array_type = self.0.infer_type(graph, array)?;
 
                 let (element_type, component_size) = match array_type {
                     RuntimeType::Array { method_table, .. }
@@ -111,15 +100,14 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                                 graph.print(obj)
                             ))
                         })?;
-                        let method_table =
-                            self.reader.method_table(method_table)?;
+                        let method_table = reader.method_table(method_table)?;
                         let component_size = method_table
                             .component_size()
                             .ok_or(Error::ArrayMissingComponentSize)?;
                         let element_type = method_table
                             .array_element_type()
                             .ok_or(Error::ArrayMissingElementType)
-                            .and_then(|ptr| self.reader.runtime_type(ptr))?;
+                            .and_then(|ptr| reader.runtime_type(ptr))?;
 
                         Ok((element_type, component_size))
                     }
@@ -213,20 +201,19 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
                 let obj = *obj;
-                let obj_type = self.type_inference.lookup_type(graph, obj)?;
+                let obj_type = self.0.infer_type(graph, obj)?;
 
                 let static_method_table_ptr =
                     obj_type.method_table_for_downcast()?;
-                let target_method_table_ptr = ty.method_table(self.reader)?;
-                let is_valid_downcast = self
-                    .reader
+                let target_method_table_ptr = ty.method_table(reader)?;
+                let is_valid_downcast = reader
                     .method_table(static_method_table_ptr)?
                     .is_interface()
-                    || self.reader.is_base_of(
+                    || reader.is_base_of(
                         target_method_table_ptr,
                         static_method_table_ptr,
                     )?
-                    || self.reader.is_base_of(
+                    || reader.is_base_of(
                         static_method_table_ptr,
                         target_method_table_ptr,
                     )?;
@@ -239,7 +226,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                     ));
                 }
 
-                let target_method_table_ptr = ty.method_table(self.reader)?;
+                let target_method_table_ptr = ty.method_table(reader)?;
                 let ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
                 let ptr = graph.physical_downcast(ptr, target_method_table_ptr);
                 let expr = graph.pointer_cast(
@@ -253,8 +240,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }
             SymbolicExpr::NumArrayElements { array } => {
                 let array = *array;
-                let array_type =
-                    self.type_inference.lookup_type(graph, array)?;
+                let array_type = self.0.infer_type(graph, array)?;
                 let expr = match array_type {
                     RuntimeType::Array { .. }
                     | RuntimeType::MultiDimArray { .. } => {
@@ -277,8 +263,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             SymbolicExpr::ArrayExtent { array, dim } => {
                 let array = *array;
                 let dim = *dim;
-                let array_type =
-                    self.type_inference.lookup_type(graph, array)?;
+                let array_type = self.0.infer_type(graph, array)?;
 
                 let expr = match array_type {
                     RuntimeType::MultiDimArray { .. } => {

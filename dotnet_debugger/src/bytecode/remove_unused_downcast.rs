@@ -1,22 +1,11 @@
-use crate::{CachedReader, Error};
+use crate::Error;
 
 use super::{
-    GraphRewrite, SymbolicExpr, SymbolicGraph, SymbolicValue, TypeInference,
+    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    SymbolicValue,
 };
 
-pub struct RemoveUnusedDowncast<'a> {
-    reader: CachedReader<'a>,
-    type_inference: TypeInference<'a>,
-}
-
-impl<'a> RemoveUnusedDowncast<'a> {
-    pub fn new(reader: CachedReader<'a>) -> Self {
-        Self {
-            reader,
-            type_inference: TypeInference::new(reader),
-        }
-    }
-}
+pub struct RemoveUnusedDowncast<'a>(pub &'a Analysis<'a>);
 
 impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
     fn rewrite_expr(
@@ -26,13 +15,15 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                let obj_type = self.type_inference.lookup_type(graph, *obj)?;
+                let obj_type = self.0.infer_type(graph, *obj)?;
+
+                let reader = self.0.reader();
 
                 let static_method_table_ptr =
                     obj_type.method_table_for_downcast()?;
-                let target_method_table_ptr = ty.method_table(self.reader)?;
+                let target_method_table_ptr = ty.method_table(reader)?;
 
-                if self.reader.is_base_of(
+                if reader.is_base_of(
                     target_method_table_ptr,
                     static_method_table_ptr,
                 )? {
@@ -40,11 +31,10 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
                     // the desired runtime type.  This downcast
                     // can be simplified away.
                     Some(*obj)
-                } else if self
-                    .reader
+                } else if reader
                     .method_table(static_method_table_ptr)?
                     .is_interface()
-                    || self.reader.is_base_of(
+                    || reader.is_base_of(
                         static_method_table_ptr,
                         target_method_table_ptr,
                     )?

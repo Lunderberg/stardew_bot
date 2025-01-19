@@ -19,7 +19,7 @@ impl<'a> TypeInference<'a> {
         }
     }
 
-    pub fn lookup_type(
+    pub fn infer_type(
         &'a self,
         graph: &SymbolicGraph,
         value: SymbolicValue,
