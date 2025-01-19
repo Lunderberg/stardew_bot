@@ -800,9 +800,9 @@ impl SymbolicGraph {
     ) -> Result<VirtualMachine, Error> {
         let expr = self.clone();
 
-        let expr = expr.eliminate_common_subexpresssions()?;
-        expr.validate(reader)?;
         let expr = expr.dead_code_elimination()?;
+        expr.validate(reader)?;
+        let expr = expr.eliminate_common_subexpresssions()?;
         expr.validate(reader)?;
 
         let analysis = Analysis::new(reader);
@@ -816,9 +816,10 @@ impl SymbolicGraph {
         let expr = expr.rewrite(rewriter)?;
         expr.validate(reader)?;
 
+        let expr = expr.dead_code_elimination()?;
+        expr.validate(reader)?;
         let expr = expr.eliminate_common_subexpresssions()?;
         expr.validate(reader)?;
-        let expr = expr.dead_code_elimination()?;
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine()?;
