@@ -4,11 +4,10 @@ use itertools::Itertools as _;
 use thiserror::Error;
 
 use super::expr::{SymbolicGraph, SymbolicType, SymbolicValue};
-use crate::{CachedReader, Error};
+use crate::Error;
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
-    reader: CachedReader<'a>,
     graph: &'a mut SymbolicGraph,
 }
 
@@ -89,17 +88,9 @@ impl TokenKind {
 }
 
 impl<'a> SymbolicParser<'a> {
-    pub(crate) fn new(
-        text: &'a str,
-        reader: CachedReader<'a>,
-        graph: &'a mut SymbolicGraph,
-    ) -> Self {
+    pub(crate) fn new(text: &'a str, graph: &'a mut SymbolicGraph) -> Self {
         let tokens = SymbolicTokenizer::new(text);
-        Self {
-            tokens,
-            reader,
-            graph,
-        }
+        Self { tokens, graph }
     }
 
     pub fn parse_expr(&mut self) -> Result<SymbolicValue, Error> {
@@ -153,84 +144,14 @@ impl<'a> SymbolicParser<'a> {
     }
 
     fn next_static_field(&mut self) -> Result<SymbolicValue, Error> {
-        let class = self.leading_type()?;
-        let field_name = self
-            .try_field_name()?
-            .ok_or(ParseError::UnexpectedEndOfString("static field name"))?
-            .text
-            .to_string();
+        let class = self.expect_ident("class and static field")?.text;
+        self.expect_punct(
+            "'.' between class and static field name",
+            Punctuation::Period,
+        )?;
+        let field_name = self.expect_ident("static field name")?.text;
 
         Ok(self.graph.static_field(class, field_name))
-    }
-
-    fn leading_type(&mut self) -> Result<SymbolicType, Error> {
-        // The display of static fields is done similar to C#, which
-        // uses the same syntax for specifying static fields, and for
-        // specifying
-        //
-        // For example, `A.B.C.D` could be class `B` within namespace
-        // `A`, which has a static field `C`, and a subfield `D`.
-        // Alternatively, it could be class `C` within namespace
-        // `A.B`, which has a static field `C`.
-        //
-        // Within the CLR, this ambiguity is handled by explicitly
-        // specifying both the name and the namespace as separate
-        // fields, but the printed-out format (and C# itself) is
-        // ambiguous without additional information.
-        let mut namespace = Vec::new();
-
-        loop {
-            let name_token = self.expect_ident("class and static field")?;
-            let name = name_token.text;
-
-            if self.is_valid_class(&namespace, name)? {
-                let full_name = namespace
-                    .into_iter()
-                    .chain(std::iter::once(name))
-                    .join(".");
-                return Ok(SymbolicType {
-                    full_name,
-                    generics: Vec::new(),
-                });
-            }
-
-            namespace.push(name);
-            self.expect_punct(
-                "period separating namespace/name of static field",
-                Punctuation::Period,
-            )?;
-        }
-    }
-
-    fn is_valid_class(
-        &self,
-        namespace: &[&str],
-        name: &str,
-    ) -> Result<bool, Error> {
-        // Because the symbolic access chain may be written with
-        // spaces between the components of a namespace, we cannot
-        // just compare the namespace of a slice with the metadata's
-        // namespace.
-        //
-        // Could avoid the allocation/copy with a custom comparison,
-        // but I don't expect this to be a bottleneck.
-        let namespace = namespace.iter().join(".");
-
-        for res_module_ptr in self.reader.iter_known_modules() {
-            let module_ptr = res_module_ptr?;
-            let module = self.reader.runtime_module(module_ptr)?;
-            let metadata = module.metadata(self.reader)?;
-            for row in metadata.type_def_table().iter_rows() {
-                let row_namespace = row.namespace()?;
-                let row_name = row.name()?;
-
-                if row_namespace == namespace && row_name == name {
-                    return Ok(true);
-                }
-            }
-        }
-
-        Ok(false)
     }
 
     fn try_field_name(&mut self) -> Result<Option<Token<'a>>, Error> {

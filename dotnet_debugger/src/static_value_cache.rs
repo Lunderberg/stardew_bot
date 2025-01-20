@@ -1,6 +1,7 @@
 use std::borrow::Borrow;
 use std::cell::OnceCell;
 use std::cmp::Reverse;
+use std::collections::HashSet;
 use std::ops::{Deref, Range};
 
 use elsa::FrozenMap;
@@ -37,6 +38,8 @@ pub struct StaticValueCache {
     runtime_module_layout: OnceCell<RuntimeModuleLayout>,
 
     runtime_type: FrozenMap<TypedPointer<MethodTable>, Box<RuntimeType>>,
+
+    names_from_metadata: OnceCell<HashSet<String>>,
 
     field_descriptions:
         FrozenMap<TypedPointer<MethodTable>, Box<Option<FieldDescriptions>>>,
@@ -1063,6 +1066,28 @@ impl<'a> CachedReader<'a> {
             self.init_method_table_by_name()?;
             Ok(self.state.method_table_by_name.get(full_name).copied())
         }
+    }
+
+    pub fn class_exists(&self, full_name: &str) -> Result<bool, Error> {
+        let all_names = self.state.names_from_metadata.or_try_init(|| {
+            self.iter_known_modules()
+                .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
+                .and_map_ok(|module| module.metadata(self.reader))
+                .and_flat_map_ok(|metadata| {
+                    Ok(metadata.type_def_table().iter_rows().map(
+                        |row| -> Result<_, Error> {
+                            let namespace = row.namespace()?;
+                            let name = row.name()?;
+                            let full_name = format!("{namespace}.{name}");
+                            Ok(full_name)
+                        },
+                    ))
+                })
+                .collect()
+        })?;
+
+        let class_exists = all_names.contains(full_name);
+        Ok(class_exists)
     }
 
     fn method_table_by_metadata(

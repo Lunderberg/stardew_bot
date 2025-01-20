@@ -156,7 +156,7 @@ impl PathfindingUI {
             ]
             .into_iter()
             .try_for_each(|expr| -> Result<_, Error> {
-                let expr = graph.parse(expr, reader)?;
+                let expr = graph.parse(expr)?;
                 graph.mark_output(expr);
                 Ok(())
             })?;
@@ -193,7 +193,7 @@ impl PathfindingUI {
             let mut graph = SymbolicGraph::new();
 
             let location_list =
-                graph.parse(&format!("{location_list}._items"), reader)?;
+                graph.parse(&format!("{location_list}._items"))?;
             (0..num_locations).for_each(|i| {
                 let location = graph.access_index(location_list, i);
 
@@ -312,7 +312,7 @@ impl PathfindingUI {
             let mut graph = SymbolicGraph::new();
 
             let location_list =
-                graph.parse(&format!("{location_list}._items"), reader)?;
+                graph.parse(&format!("{location_list}._items"))?;
 
             static_location_fields.iter().for_each(|loc| {
                 let location = graph.access_index(location_list, loc.index);

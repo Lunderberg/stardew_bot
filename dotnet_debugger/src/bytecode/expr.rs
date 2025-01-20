@@ -158,7 +158,10 @@ impl SymbolicType {
             .method_table_by_name(&self.full_name)?
             .ok_or_else(|| {
                 Error::UnexpectedNullMethodTable(format!("{}", self))
-            })?;
+            })
+            .unwrap()
+            //?
+            ;
 
         if self.generics.is_empty() {
             return Ok(method_table_ptr);
@@ -329,12 +332,8 @@ impl SymbolicGraph {
         self.outputs.len()
     }
 
-    pub fn parse(
-        &mut self,
-        text: &str,
-        reader: CachedReader,
-    ) -> Result<SymbolicValue, Error> {
-        let mut parser = super::SymbolicParser::new(text, reader, self);
+    pub fn parse(&mut self, text: &str) -> Result<SymbolicValue, Error> {
+        let mut parser = super::SymbolicParser::new(text, self);
         parser.parse_expr()
     }
 
@@ -800,14 +799,35 @@ impl SymbolicGraph {
     ) -> Result<VirtualMachine, Error> {
         let expr = self.clone();
 
+        // The display of static fields is done similar to C#, which
+        // uses the same syntax for specifying static fields, and for
+        // specifying namespaces.
+        //
+        // For example, `A.B.C.D` could be class `B` within namespace
+        // `A`, which has a static field `C`, and a subfield `D`.
+        // Alternatively, it could be class `C` within namespace
+        // `A.B`, which has a static field `C`.
+        //
+        // Within the CLR, this ambiguity is handled by explicitly
+        // specifying both the name and the namespace as separate
+        // fields, but the printed-out format (and C# itself) is
+        // ambiguous without additional information.  Here, it is
+        // handled while lowering, by identifying how many elements
+        // are required to produce some "namespace.name" of a valid
+        // class.
+        let expr = expr.rewrite(
+            super::IdentifyStaticField(&Analysis::new(reader))
+                .apply_recursively(),
+        )?;
+
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
         let expr = expr.eliminate_common_subexpresssions()?;
         expr.validate(reader)?;
 
         let analysis = Analysis::new(reader);
-        let rewriter = super::RemoveUnusedDowncast(&analysis)
-            .then(super::ConstantFold)
+        let rewriter = super::ConstantFold
+            .then(super::RemoveUnusedDowncast(&analysis))
             .then(super::RemoveUnusedPrimcast(&analysis))
             .then(super::LowerSymbolicExpr(&analysis))
             .then(super::RemoveUnusedPointerCast)

@@ -6,6 +6,9 @@ pub use expr::{
 mod graph_rewrite;
 pub use graph_rewrite::GraphRewrite;
 
+mod identify_static_field;
+pub use identify_static_field::IdentifyStaticField;
+
 mod constant_fold;
 pub use constant_fold::ConstantFold;
 

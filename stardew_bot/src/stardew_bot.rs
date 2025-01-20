@@ -106,7 +106,7 @@ impl TuiBuffers {
         Ok(Self {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
-            fishing: FishingUI::new(reader, per_frame_reader)?,
+            fishing: FishingUI::new(per_frame_reader)?,
             pathfinding: PathfindingUI::new(reader)?,
         })
     }

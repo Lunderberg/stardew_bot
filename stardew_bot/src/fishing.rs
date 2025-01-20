@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use dotnet_debugger::{CachedReader, SymbolicGraph, VMResults, ValueToken};
+use dotnet_debugger::{SymbolicGraph, VMResults, ValueToken};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -138,12 +138,9 @@ struct FishingState {
 }
 
 impl FishingUI {
-    pub fn new(
-        reader: CachedReader<'_>,
-        per_frame_reader: &mut SymbolicGraph,
-    ) -> Result<Self, Error> {
+    pub fn new(per_frame_reader: &mut SymbolicGraph) -> Result<Self, Error> {
         let mut register = |value: &str| -> Result<ValueToken, Error> {
-            let expr = per_frame_reader.parse(value, reader)?;
+            let expr = per_frame_reader.parse(value)?;
             let token = per_frame_reader.mark_output(expr);
             Ok(token)
         };
