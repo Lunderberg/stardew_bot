@@ -10,8 +10,7 @@ fn print_expanded_graph() {
     let item = graph.access_index(array, active_index);
     graph.mark_output(item);
 
-    let printed = format!("{}", graph.printer().expand_all_expressions())
-        .replace('\u{200B}', "");
+    let printed = format!("{}", graph.printer().expand_all_expressions());
     let expected = "\
     [0] <- class_name.field_name\n\
     [1] <- [0].subfield\n\
@@ -38,7 +37,7 @@ fn print_compact_graph() {
     let item = graph.access_index(array, active_index);
     graph.mark_output(item);
 
-    let printed = format!("{graph}").replace('\u{200B}', "");
+    let printed = format!("{graph}");
     let expected = "\
     [1] <- class_name.field_name.subfield\n\
     [6] (output #0) <- [1].list._items[[1].active_index.prim_cast::<usize>()]\n\

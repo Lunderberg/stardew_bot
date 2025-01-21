@@ -158,6 +158,13 @@ pub struct ExprPrinter<'a> {
     value: SymbolicValue,
     is_top_level: bool,
     display_inline: DisplayInlineExpr<'a>,
+    insert_zero_width_space_at_breakpoint: bool,
+}
+
+#[derive(Clone, Copy)]
+pub struct TypePrinter<'a> {
+    ty: &'a SymbolicType,
+    insert_zero_width_space_at_breakpoint: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -394,6 +401,7 @@ impl SymbolicGraph {
             graph: self,
             value,
             is_top_level: true,
+            insert_zero_width_space_at_breakpoint: false,
             display_inline: DisplayInlineExpr::All,
         }
     }
@@ -1082,7 +1090,9 @@ impl ExprKind {
 impl Display for ExprKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExprKind::StaticField(expr) => write!(f, "{expr}"),
+            ExprKind::StaticField(StaticField { class, field_name }) => {
+                write!(f, "{class}\u{200B}.{field_name}")
+            }
             ExprKind::FieldAccess { obj, field } => {
                 write!(f, "{obj}\u{200B}.{field}")
             }
@@ -1218,6 +1228,24 @@ impl<'a> ExprPrinter<'a> {
             ..self
         }
     }
+
+    pub fn insert_zero_width_space_at_breakpoint(self) -> Self {
+        Self {
+            insert_zero_width_space_at_breakpoint: true,
+            ..self
+        }
+    }
+}
+
+struct MaybeZeroWidthSpace(bool);
+impl Display for MaybeZeroWidthSpace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 {
+            write!(f, "\u{200B}")
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl<'a> Display for ExprPrinter<'a> {
@@ -1244,17 +1272,20 @@ impl<'a> Display for ExprPrinter<'a> {
             return write!(f, "{op_index}");
         }
 
+        let sep =
+            MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
+
         match self.graph[op_index].as_ref() {
-            ExprKind::StaticField(static_field) => {
-                write!(f, "{static_field}")
+            ExprKind::StaticField(StaticField { class, field_name }) => {
+                write!(f, "{class}{sep}.{field_name}")
             }
             ExprKind::FieldAccess { obj, field } => {
                 let obj = self.with_value(*obj);
-                write!(f, "{obj}\u{200B}.{field}")
+                write!(f, "{obj}{sep}.{field}")
             }
             ExprKind::IndexAccess { obj, indices } => {
                 let obj = self.with_value(*obj);
-                write!(f, "{obj}[\u{200B}")?;
+                write!(f, "{obj}[{sep}")?;
 
                 for (i, index) in indices.iter().enumerate() {
                     let index = self.with_value(*index);
@@ -1264,24 +1295,29 @@ impl<'a> Display for ExprPrinter<'a> {
                     write!(f, "{index}")?;
                 }
 
-                write!(f, "\u{200B}]")
+                write!(f, "{sep}]")
             }
             ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj = self.with_value(*obj);
-                write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
+                let ty = TypePrinter {
+                    ty,
+                    insert_zero_width_space_at_breakpoint: self
+                        .insert_zero_width_space_at_breakpoint,
+                };
+                write!(f, "{obj}.as::<{sep}{ty}{sep}>()")
             }
             ExprKind::NumArrayElements { array } => {
                 let array = self.with_value(*array);
-                write!(f, "{array}\u{200B}.len()")
+                write!(f, "{array}{sep}.len()")
             }
             ExprKind::ArrayExtent { array, dim } => {
                 let array = self.with_value(*array);
                 let dim = self.with_value(*dim);
-                write!(f, "{array}\u{200B}.extent({dim})")
+                write!(f, "{array}{sep}.extent({dim})")
             }
             ExprKind::PointerCast { ptr, ty } => {
                 let ptr = self.with_value(*ptr);
-                write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
+                write!(f, "{ptr}{sep}.ptr_cast::<{ty}>()")
             }
             ExprKind::Add { lhs, rhs } => {
                 let lhs = self.with_value(*lhs);
@@ -1350,15 +1386,22 @@ impl Display for SymbolicValue {
     }
 }
 
-impl Display for SymbolicType {
+impl<'a> Display for TypePrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.full_name)?;
+        let SymbolicType {
+            full_name,
+            generics,
+        } = &self.ty;
+        let sep =
+            MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
-        if !self.generics.is_empty() {
-            write!(f, "<\u{200B}")?;
-            for (i, generic) in self.generics.iter().enumerate() {
+        write!(f, "{full_name}")?;
+
+        if !generics.is_empty() {
+            write!(f, "<{sep}")?;
+            for (i, generic) in generics.iter().enumerate() {
                 if i > 0 {
-                    write!(f, ",\u{200B} ")?;
+                    write!(f, ", {sep}")?;
                 }
                 write!(f, "{generic}")?;
             }
@@ -1369,15 +1412,19 @@ impl Display for SymbolicType {
     }
 }
 
-impl From<StaticField> for ExprKind {
-    fn from(static_field: StaticField) -> Self {
-        ExprKind::StaticField(static_field)
+impl Display for SymbolicType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let printer = TypePrinter {
+            ty: self,
+            insert_zero_width_space_at_breakpoint: false,
+        };
+        write!(f, "{printer}")
     }
 }
 
-impl Display for StaticField {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}\u{200B}.{}", self.class, self.field_name)
+impl From<StaticField> for ExprKind {
+    fn from(static_field: StaticField) -> Self {
+        ExprKind::StaticField(static_field)
     }
 }
 

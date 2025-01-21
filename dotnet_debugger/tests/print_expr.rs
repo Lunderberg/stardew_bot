@@ -1,4 +1,4 @@
-use dotnet_debugger::{SymbolicGraph, SymbolicValue};
+use dotnet_debugger::{SymbolicGraph, SymbolicType, SymbolicValue};
 
 fn check_printed_expr(
     expected: &str,
@@ -7,7 +7,7 @@ fn check_printed_expr(
     let mut graph = SymbolicGraph::new();
     let value = graph_builder(&mut graph);
 
-    let printed = format!("{}", graph.print(value)).replace('\u{200B}', "");
+    let printed = format!("{}", graph.print(value));
 
     assert_eq!(printed, expected);
 }
@@ -17,6 +17,18 @@ fn print_static_field() {
     check_printed_expr("class_name.field_name", |graph| {
         graph.static_field("class_name", "field_name")
     });
+}
+
+#[test]
+fn print_static_field_with_zwsp() {
+    let mut graph = SymbolicGraph::new();
+    let value = graph.static_field("class_name", "field_name");
+    let printed = format!(
+        "{}",
+        graph.print(value).insert_zero_width_space_at_breakpoint()
+    );
+    let expected = "class_name\u{200B}.field_name";
+    assert_eq!(printed, expected);
 }
 
 #[test]
@@ -58,4 +70,49 @@ fn print_multi_dim_array_extent() {
         let obj = graph.static_field("class_name", "field_name");
         graph.array_extent(obj, 0)
     });
+}
+
+#[test]
+fn print_downcast() {
+    check_printed_expr(
+        "class_name.field_name.as::<other_class<arg1, arg2>>()",
+        |graph| {
+            let obj = graph.static_field("class_name", "field_name");
+            graph.downcast(
+                obj,
+                SymbolicType {
+                    full_name: "other_class".into(),
+                    generics: vec!["arg1".into(), "arg2".into()],
+                },
+            )
+        },
+    );
+}
+
+#[test]
+fn print_downcast_with_zwsp() {
+    let mut graph = SymbolicGraph::new();
+
+    let value = {
+        let obj = graph.static_field("class_name", "field_name");
+        let field = graph.access_field(obj, "subfield");
+        graph.downcast(
+            field,
+            SymbolicType {
+                full_name: "other_class".into(),
+                generics: vec!["arg1".into(), "arg2".into()],
+            },
+        )
+    };
+    let printed = format!(
+        "{}",
+        graph.print(value).insert_zero_width_space_at_breakpoint()
+    );
+    let expected = "class_name\u{200B}\
+                    .field_name\u{200B}\
+                    .subfield\
+                    .as::<\u{200B}\
+                    other_class<\u{200B}arg1, \u{200B}arg2>\
+                    \u{200B}>()";
+    assert_eq!(printed, expected);
 }

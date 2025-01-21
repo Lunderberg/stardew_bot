@@ -114,7 +114,13 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
                     .next()
                     .expect("Live variable has exactly one output")
                     .0;
-                format!("{}", live_var.symbolic_graph.print(output_token))
+                format!(
+                    "{}",
+                    live_var
+                        .symbolic_graph
+                        .print(output_token)
+                        .insert_zero_width_space_at_breakpoint()
+                )
             })
             .collect::<Vec<_>>();
 
