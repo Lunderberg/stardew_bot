@@ -1,7 +1,7 @@
 use crate::{bytecode::expr::StaticField, Error};
 
 use super::{
-    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
     SymbolicValue,
 };
 
@@ -11,19 +11,19 @@ impl<'a> GraphRewrite for IdentifyStaticField<'a> {
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error> {
-        let SymbolicExpr::FieldAccess {
+        let ExprKind::FieldAccess {
             obj: SymbolicValue::Result(obj_index),
             field: subfield_name,
         } = expr
         else {
             return Ok(None);
         };
-        let SymbolicExpr::StaticField(StaticField {
+        let ExprKind::StaticField(StaticField {
             class: symbolic_type,
             field_name,
-        }) = &graph[*obj_index]
+        }) = graph[*obj_index].as_ref()
         else {
             return Ok(None);
         };

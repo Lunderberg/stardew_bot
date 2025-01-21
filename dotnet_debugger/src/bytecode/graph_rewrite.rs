@@ -1,7 +1,7 @@
 use crate::{CachedReader, Error, RuntimeType};
 
 use super::{
-    RecursiveRewrite, SequentialRewrite, SymbolicExpr, SymbolicGraph,
+    ExprKind, RecursiveRewrite, SequentialRewrite, SymbolicGraph,
     SymbolicValue, TypeInference,
 };
 
@@ -9,7 +9,7 @@ pub trait GraphRewrite {
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error>;
 
     fn apply_recursively(self) -> impl GraphRewrite

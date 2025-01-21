@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
     SymbolicValue,
 };
 
@@ -16,7 +16,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         macro_rules! read_value_if_required {
             ($ptr:expr, $runtime_type:expr) => {{
@@ -45,7 +45,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
         let reader = self.0.reader();
 
         let opt_value = match expr {
-            SymbolicExpr::StaticField(static_field) => {
+            ExprKind::StaticField(static_field) => {
                 let runtime_type = static_field.runtime_type(reader)?;
                 let ptr = static_field.location(reader)?;
 
@@ -54,7 +54,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(expr)
             }
-            SymbolicExpr::FieldAccess { obj, field } => {
+            ExprKind::FieldAccess { obj, field } => {
                 let obj = *obj;
                 let obj_type = self.0.infer_type(graph, obj)?;
 
@@ -87,7 +87,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(value)
             }
-            SymbolicExpr::IndexAccess { obj, indices } => {
+            ExprKind::IndexAccess { obj, indices } => {
                 let array = *obj;
                 let array_type = self.0.infer_type(graph, array)?;
 
@@ -199,7 +199,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(value)
             }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+            ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj = *obj;
                 let obj_type = self.0.infer_type(graph, obj)?;
 
@@ -238,7 +238,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(expr)
             }
-            SymbolicExpr::NumArrayElements { array } => {
+            ExprKind::NumArrayElements { array } => {
                 let array = *array;
                 let array_type = self.0.infer_type(graph, array)?;
                 let expr = match array_type {
@@ -260,7 +260,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(expr)
             }
-            SymbolicExpr::ArrayExtent { array, dim } => {
+            ExprKind::ArrayExtent { array, dim } => {
                 let array = *array;
                 let dim = *dim;
                 let array_type = self.0.infer_type(graph, array)?;

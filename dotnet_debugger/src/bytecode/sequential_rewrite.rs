@@ -1,6 +1,6 @@
 use crate::Error;
 
-use super::{GraphRewrite, SymbolicExpr, SymbolicGraph, SymbolicValue};
+use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
 
 pub struct SequentialRewrite<First, Second> {
     first: First,
@@ -21,7 +21,7 @@ where
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error> {
         if let Some(new_value) = self.first.rewrite_expr(graph, expr)? {
             Ok(Some(new_value))

@@ -1,7 +1,7 @@
 use crate::Error;
 
 use super::{
-    graph_rewrite::Analysis, GraphRewrite, SymbolicExpr, SymbolicGraph,
+    graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
     SymbolicValue,
 };
 
@@ -11,10 +11,10 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+            ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj_type = self.0.infer_type(graph, *obj)?;
 
                 let reader = self.0.reader();

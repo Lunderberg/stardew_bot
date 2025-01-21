@@ -20,15 +20,20 @@ use super::{graph_rewrite::Analysis, GraphRewrite, TypeInference};
 
 #[derive(Default, Clone)]
 pub struct SymbolicGraph {
-    ops: Vec<SymbolicExpr>,
+    ops: Vec<Expr>,
     outputs: Vec<SymbolicValue>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ValueToken(pub(crate) usize);
 
+#[derive(Clone)]
+pub struct Expr {
+    pub(crate) kind: ExprKind,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum SymbolicExpr {
+pub enum ExprKind {
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
     ///
@@ -335,7 +340,7 @@ impl SymbolicGraph {
         parser.parse_expr()
     }
 
-    pub fn push(&mut self, op: impl Into<SymbolicExpr>) -> SymbolicValue {
+    pub fn push(&mut self, op: impl Into<Expr>) -> SymbolicValue {
         let op_index = OpIndex::new(self.ops.len());
         self.ops.push(op.into());
         op_index.into()
@@ -355,7 +360,11 @@ impl SymbolicGraph {
     pub fn is_equivalent_to(&self, other: &Self) -> bool {
         self.ops.len() == other.ops.len()
             && self.outputs.len() == other.outputs.len()
-            && self.ops.iter().zip(other.ops.iter()).all(|(a, b)| a == b)
+            && self
+                .ops
+                .iter()
+                .zip(other.ops.iter())
+                .all(|(a, b)| a.kind == b.kind)
             && self
                 .outputs
                 .iter()
@@ -386,7 +395,7 @@ impl SymbolicGraph {
         let field = field.as_ref();
 
         for subfield in field.split(".") {
-            obj = self.push(SymbolicExpr::FieldAccess {
+            obj = self.push(ExprKind::FieldAccess {
                 obj,
                 field: subfield.into(),
             });
@@ -401,7 +410,7 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let obj = obj.into();
         let index = self.prim_cast(index, RuntimePrimType::NativeUInt);
-        self.push(SymbolicExpr::IndexAccess {
+        self.push(ExprKind::IndexAccess {
             obj,
             indices: vec![index],
         })
@@ -421,7 +430,7 @@ impl SymbolicGraph {
             .into_iter()
             .map(|index| self.prim_cast(index, RuntimePrimType::NativeUInt))
             .collect();
-        self.push(SymbolicExpr::IndexAccess { obj, indices })
+        self.push(ExprKind::IndexAccess { obj, indices })
     }
 
     pub fn downcast(
@@ -431,7 +440,7 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let obj = obj.into();
         let ty = ty.into();
-        self.push(SymbolicExpr::SymbolicDowncast { obj, ty })
+        self.push(ExprKind::SymbolicDowncast { obj, ty })
     }
 
     pub fn num_array_elements(
@@ -439,7 +448,7 @@ impl SymbolicGraph {
         array: impl Into<SymbolicValue>,
     ) -> SymbolicValue {
         let array = array.into();
-        self.push(SymbolicExpr::NumArrayElements { array })
+        self.push(ExprKind::NumArrayElements { array })
     }
 
     pub fn array_extent(
@@ -449,7 +458,7 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let array = array.into();
         let dim = dim.into();
-        self.push(SymbolicExpr::ArrayExtent { array, dim })
+        self.push(ExprKind::ArrayExtent { array, dim })
     }
 
     pub fn pointer_cast(
@@ -458,7 +467,7 @@ impl SymbolicGraph {
         ty: RuntimeType,
     ) -> SymbolicValue {
         let ptr = ptr.into();
-        self.push(SymbolicExpr::PointerCast { ptr, ty })
+        self.push(ExprKind::PointerCast { ptr, ty })
     }
 
     //////////////////////////////////////////////////
@@ -472,7 +481,7 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let lhs = lhs.into();
         let rhs = rhs.into();
-        self.push(SymbolicExpr::Add { lhs, rhs })
+        self.push(ExprKind::Add { lhs, rhs })
     }
 
     pub fn mul(
@@ -482,7 +491,7 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let lhs = lhs.into();
         let rhs = rhs.into();
-        self.push(SymbolicExpr::Mul { lhs, rhs })
+        self.push(ExprKind::Mul { lhs, rhs })
     }
 
     pub fn prim_cast(
@@ -491,7 +500,7 @@ impl SymbolicGraph {
         prim_type: RuntimePrimType,
     ) -> SymbolicValue {
         let value = value.into();
-        self.push(SymbolicExpr::PrimCast { value, prim_type })
+        self.push(ExprKind::PrimCast { value, prim_type })
     }
 
     pub fn physical_downcast(
@@ -500,7 +509,7 @@ impl SymbolicGraph {
         ty: TypedPointer<MethodTable>,
     ) -> SymbolicValue {
         let obj = obj.into();
-        self.push(SymbolicExpr::PhysicalDowncast { obj, ty })
+        self.push(ExprKind::PhysicalDowncast { obj, ty })
     }
 
     pub fn read_value(
@@ -509,13 +518,13 @@ impl SymbolicGraph {
         prim_type: RuntimePrimType,
     ) -> SymbolicValue {
         let ptr = ptr.into();
-        self.push(SymbolicExpr::ReadValue { ptr, prim_type })
+        self.push(ExprKind::ReadValue { ptr, prim_type })
     }
 
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    fn iter_ops(&self) -> impl Iterator<Item = (OpIndex, &SymbolicExpr)> + '_ {
+    fn iter_ops(&self) -> impl Iterator<Item = (OpIndex, &Expr)> + '_ {
         self.ops
             .iter()
             .enumerate()
@@ -596,11 +605,19 @@ impl SymbolicGraph {
         let mut builder = Self::new();
 
         for (old_index, op) in self.iter_ops() {
-            let op = op.clone().remap(old_index, &prev_index_lookup)?;
+            let opt_remapped = op.kind.try_remap(&prev_index_lookup);
+            let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
 
             let value = rewriter
-                .rewrite_expr(&mut builder, &op)?
-                .unwrap_or_else(|| builder.push(op));
+                .rewrite_expr(&mut builder, kind)?
+                .unwrap_or_else(|| {
+                    let expr: Expr = if let Some(remapped) = opt_remapped {
+                        remapped.into()
+                    } else {
+                        op.clone()
+                    };
+                    builder.push(expr)
+                });
             prev_index_lookup.insert(old_index, value);
         }
 
@@ -638,8 +655,11 @@ impl SymbolicGraph {
 
         for (prev_index, op) in self.iter_ops() {
             if reachable.contains(&prev_index) {
-                let op = op.clone().remap(prev_index, &prev_index_lookup)?;
-                let new_index = builder.push(op);
+                let kind = op
+                    .kind
+                    .try_remap(&prev_index_lookup)
+                    .unwrap_or_else(|| op.kind.clone());
+                let new_index = builder.push(kind);
                 prev_index_lookup.insert(prev_index, new_index);
             }
         }
@@ -654,17 +674,20 @@ impl SymbolicGraph {
 
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
-        let mut dedup_lookup: HashMap<SymbolicExpr, SymbolicValue> =
-            HashMap::new();
+        let mut dedup_lookup: HashMap<ExprKind, SymbolicValue> = HashMap::new();
 
         for (prev_index, op) in self.iter_ops() {
-            let new_op = op.clone().remap(prev_index, &prev_index_lookup)?;
+            let new_kind = op
+                .kind
+                .try_remap(&prev_index_lookup)
+                .unwrap_or_else(|| op.kind.clone());
 
-            let new_index = if let Some(new_index) = dedup_lookup.get(&new_op) {
+            let new_index = if let Some(new_index) = dedup_lookup.get(&new_kind)
+            {
                 *new_index
             } else {
-                let new_index = builder.push(new_op.clone());
-                dedup_lookup.insert(new_op, new_index);
+                let new_index = builder.push(new_kind.clone());
+                dedup_lookup.insert(new_kind, new_index);
                 new_index
             };
             prev_index_lookup.insert(prev_index, new_index);
@@ -737,36 +760,36 @@ impl SymbolicGraph {
         }
 
         for (op_index, op) in self.iter_ops() {
-            match op {
-                SymbolicExpr::Add { lhs, rhs } => {
+            match op.as_ref() {
+                ExprKind::Add { lhs, rhs } => {
                     instructions.push(value_to_register!(lhs));
                     instructions.push(Instruction::Add(value_to_arg!(rhs)));
                 }
-                SymbolicExpr::Mul { lhs, rhs } => {
+                ExprKind::Mul { lhs, rhs } => {
                     instructions.push(value_to_register!(lhs));
                     instructions.push(Instruction::Mul(value_to_arg!(rhs)));
                 }
-                SymbolicExpr::PrimCast { value, prim_type } => {
+                ExprKind::PrimCast { value, prim_type } => {
                     instructions.push(value_to_register!(value));
                     instructions.push(Instruction::PrimCast(*prim_type));
                 }
-                SymbolicExpr::PhysicalDowncast { obj, ty } => {
+                ExprKind::PhysicalDowncast { obj, ty } => {
                     instructions.push(value_to_register!(obj));
                     instructions.push(Instruction::Downcast { ty: *ty });
                 }
-                SymbolicExpr::ReadValue { ptr, prim_type } => {
+                ExprKind::ReadValue { ptr, prim_type } => {
                     instructions.push(value_to_register!(ptr));
                     instructions.push(Instruction::Read { ty: *prim_type });
                 }
-                SymbolicExpr::PointerCast { ptr, .. } => {
+                ExprKind::PointerCast { ptr, .. } => {
                     instructions.push(value_to_register!(ptr));
                 }
-                symbolic @ (SymbolicExpr::StaticField(_)
-                | SymbolicExpr::FieldAccess { .. }
-                | SymbolicExpr::SymbolicDowncast { .. }
-                | SymbolicExpr::IndexAccess { .. }
-                | SymbolicExpr::NumArrayElements { .. }
-                | SymbolicExpr::ArrayExtent { .. }) => {
+                symbolic @ (ExprKind::StaticField(_)
+                | ExprKind::FieldAccess { .. }
+                | ExprKind::SymbolicDowncast { .. }
+                | ExprKind::IndexAccess { .. }
+                | ExprKind::NumArrayElements { .. }
+                | ExprKind::ArrayExtent { .. }) => {
                     return Err(Error::SymbolicExpressionRequiresLowering(
                         symbolic.clone(),
                     ));
@@ -869,7 +892,16 @@ impl SymbolicValue {
     }
 }
 
-impl SymbolicExpr {
+impl Expr {
+    pub(crate) fn visit_input_values(
+        &self,
+        callback: impl FnMut(SymbolicValue),
+    ) {
+        self.kind.visit_input_values(callback)
+    }
+}
+
+impl ExprKind {
     pub(crate) fn try_remap(
         &self,
         map: &HashMap<OpIndex, SymbolicValue>,
@@ -882,14 +914,14 @@ impl SymbolicExpr {
         };
 
         match self {
-            SymbolicExpr::StaticField(_) => None,
-            SymbolicExpr::FieldAccess { obj, field } => {
-                remap(obj).map(|obj| SymbolicExpr::FieldAccess {
+            ExprKind::StaticField(_) => None,
+            ExprKind::FieldAccess { obj, field } => {
+                remap(obj).map(|obj| ExprKind::FieldAccess {
                     obj,
                     field: field.clone(),
                 })
             }
-            SymbolicExpr::IndexAccess { obj, indices } => {
+            ExprKind::IndexAccess { obj, indices } => {
                 let opt_obj = remap(obj);
                 let requires_remap = opt_obj.is_some()
                     || indices.iter().any(|index| remap(index).is_some());
@@ -899,150 +931,73 @@ impl SymbolicExpr {
                         .iter()
                         .map(|index| remap(index).unwrap_or_else(|| *index))
                         .collect::<Vec<_>>();
-                    SymbolicExpr::IndexAccess { obj, indices }
+                    ExprKind::IndexAccess { obj, indices }
                 })
             }
-            SymbolicExpr::PrimCast { value, prim_type } => {
-                remap(value).map(|value| SymbolicExpr::PrimCast {
+            ExprKind::PrimCast { value, prim_type } => {
+                remap(value).map(|value| ExprKind::PrimCast {
                     value,
                     prim_type: prim_type.clone(),
                 })
             }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                remap(obj).map(|obj| SymbolicExpr::SymbolicDowncast {
+            ExprKind::SymbolicDowncast { obj, ty } => {
+                remap(obj).map(|obj| ExprKind::SymbolicDowncast {
                     obj,
                     ty: ty.clone(),
                 })
             }
-            SymbolicExpr::NumArrayElements { array } => remap(array)
-                .map(|array| SymbolicExpr::NumArrayElements { array }),
-            SymbolicExpr::ArrayExtent { array, dim } => {
+            ExprKind::NumArrayElements { array } => {
+                remap(array).map(|array| ExprKind::NumArrayElements { array })
+            }
+            ExprKind::ArrayExtent { array, dim } => {
                 let opt_array = remap(array);
                 let opt_dim = remap(dim);
                 let requires_remap = opt_array.is_some() || opt_dim.is_some();
                 (requires_remap).then(|| {
                     let array = opt_array.unwrap_or_else(|| *array);
                     let dim = opt_array.unwrap_or_else(|| *dim);
-                    SymbolicExpr::ArrayExtent { array, dim }
+                    ExprKind::ArrayExtent { array, dim }
                 })
             }
-            SymbolicExpr::PointerCast { ptr, ty } => {
-                remap(ptr).map(|ptr| SymbolicExpr::PointerCast {
+            ExprKind::PointerCast { ptr, ty } => {
+                remap(ptr).map(|ptr| ExprKind::PointerCast {
                     ptr,
                     ty: ty.clone(),
                 })
             }
-            SymbolicExpr::Add { lhs, rhs } => {
+            ExprKind::Add { lhs, rhs } => {
                 let opt_lhs = remap(lhs);
                 let opt_rhs = remap(rhs);
                 let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
                 requires_remap.then(|| {
                     let lhs = opt_lhs.unwrap_or_else(|| *lhs);
                     let rhs = opt_rhs.unwrap_or_else(|| *rhs);
-                    SymbolicExpr::Add { lhs, rhs }
+                    ExprKind::Add { lhs, rhs }
                 })
             }
-            SymbolicExpr::Mul { lhs, rhs } => {
+            ExprKind::Mul { lhs, rhs } => {
                 let opt_lhs = remap(lhs);
                 let opt_rhs = remap(rhs);
                 let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
                 requires_remap.then(|| {
                     let lhs = opt_lhs.unwrap_or_else(|| *lhs);
                     let rhs = opt_rhs.unwrap_or_else(|| *rhs);
-                    SymbolicExpr::Mul { lhs, rhs }
+                    ExprKind::Mul { lhs, rhs }
                 })
             }
-            SymbolicExpr::PhysicalDowncast { obj, ty } => {
-                remap(obj).map(|obj| SymbolicExpr::PhysicalDowncast {
+            ExprKind::PhysicalDowncast { obj, ty } => {
+                remap(obj).map(|obj| ExprKind::PhysicalDowncast {
                     obj,
                     ty: ty.clone(),
                 })
             }
-            SymbolicExpr::ReadValue { ptr, prim_type } => {
-                remap(ptr).map(|ptr| SymbolicExpr::ReadValue {
+            ExprKind::ReadValue { ptr, prim_type } => {
+                remap(ptr).map(|ptr| ExprKind::ReadValue {
                     ptr,
                     prim_type: prim_type.clone(),
                 })
             }
         }
-    }
-
-    pub(crate) fn remap(
-        self,
-        current_index: OpIndex,
-        map: &HashMap<OpIndex, SymbolicValue>,
-    ) -> Result<Self, Error> {
-        let remap =
-            |prev_value: SymbolicValue| -> Result<SymbolicValue, Error> {
-                match prev_value {
-                    SymbolicValue::Result(prev_index) => Ok(map
-                        .get(&prev_index)
-                        .cloned()
-                        .ok_or_else(|| Error::InvalidReference {
-                            from: current_index,
-                            to: prev_index,
-                        })?
-                        .into()),
-                    other => Ok(other),
-                }
-            };
-
-        let new_op = match self {
-            static_field @ SymbolicExpr::StaticField(_) => static_field,
-            SymbolicExpr::FieldAccess { obj, field } => {
-                let obj = remap(obj)?;
-                SymbolicExpr::FieldAccess { obj, field }
-            }
-            SymbolicExpr::IndexAccess { obj, indices } => {
-                let obj = remap(obj.into())?;
-                let indices = indices
-                    .into_iter()
-                    .map(|index| remap(index.into()))
-                    .collect::<Result<_, _>>()?;
-                SymbolicExpr::IndexAccess { obj, indices }
-            }
-            SymbolicExpr::PrimCast { value, prim_type } => {
-                let value = remap(value)?;
-                SymbolicExpr::PrimCast { value, prim_type }
-            }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                let obj = remap(obj)?;
-                SymbolicExpr::SymbolicDowncast { obj, ty }.into()
-            }
-            SymbolicExpr::NumArrayElements { array } => {
-                let array = remap(array)?;
-                SymbolicExpr::NumArrayElements { array }
-            }
-            SymbolicExpr::ArrayExtent { array, dim } => {
-                let array = remap(array)?;
-                let dim = remap(dim)?;
-                SymbolicExpr::ArrayExtent { array, dim }
-            }
-            SymbolicExpr::PointerCast { ptr, ty } => {
-                let ptr = remap(ptr)?;
-                SymbolicExpr::PointerCast { ptr, ty }
-            }
-            SymbolicExpr::Add { lhs, rhs } => {
-                let lhs = remap(lhs)?;
-                let rhs = remap(rhs)?;
-                SymbolicExpr::Add { lhs, rhs }
-            }
-            SymbolicExpr::Mul { lhs, rhs } => {
-                let lhs = remap(lhs)?;
-                let rhs = remap(rhs)?;
-                SymbolicExpr::Mul { lhs, rhs }
-            }
-            SymbolicExpr::PhysicalDowncast { obj, ty } => {
-                let obj = remap(obj)?;
-                SymbolicExpr::PhysicalDowncast { obj, ty }
-            }
-            SymbolicExpr::ReadValue { ptr, prim_type } => {
-                let ptr = remap(ptr)?;
-                SymbolicExpr::ReadValue { ptr, prim_type }
-            }
-        };
-
-        Ok(new_op)
     }
 
     pub(crate) fn visit_input_values(
@@ -1050,47 +1005,47 @@ impl SymbolicExpr {
         mut callback: impl FnMut(SymbolicValue),
     ) {
         match self {
-            SymbolicExpr::StaticField(_) => {}
-            SymbolicExpr::FieldAccess { obj, .. } => {
+            ExprKind::StaticField(_) => {}
+            ExprKind::FieldAccess { obj, .. } => {
                 callback(*obj);
             }
-            SymbolicExpr::IndexAccess { obj, indices } => {
+            ExprKind::IndexAccess { obj, indices } => {
                 callback(*obj);
                 indices.iter().for_each(|index| callback(*index));
             }
-            SymbolicExpr::PrimCast { value, .. } => callback(*value),
-            SymbolicExpr::SymbolicDowncast { obj, .. } => callback(*obj),
-            SymbolicExpr::NumArrayElements { array } => {
+            ExprKind::PrimCast { value, .. } => callback(*value),
+            ExprKind::SymbolicDowncast { obj, .. } => callback(*obj),
+            ExprKind::NumArrayElements { array } => {
                 callback(*array);
             }
-            SymbolicExpr::ArrayExtent { array, dim } => {
+            ExprKind::ArrayExtent { array, dim } => {
                 callback(*array);
                 callback(*dim);
             }
-            SymbolicExpr::PointerCast { ptr, .. } => callback(*ptr),
-            SymbolicExpr::Add { lhs, rhs } | SymbolicExpr::Mul { lhs, rhs } => {
+            ExprKind::PointerCast { ptr, .. } => callback(*ptr),
+            ExprKind::Add { lhs, rhs } | ExprKind::Mul { lhs, rhs } => {
                 callback(*lhs);
                 callback(*rhs)
             }
 
-            SymbolicExpr::PhysicalDowncast { obj, .. } => {
+            ExprKind::PhysicalDowncast { obj, .. } => {
                 callback(*obj);
             }
-            SymbolicExpr::ReadValue { ptr, .. } => {
+            ExprKind::ReadValue { ptr, .. } => {
                 callback(*ptr);
             }
         }
     }
 }
 
-impl Display for SymbolicExpr {
+impl Display for ExprKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SymbolicExpr::StaticField(expr) => write!(f, "{expr}"),
-            SymbolicExpr::FieldAccess { obj, field } => {
+            ExprKind::StaticField(expr) => write!(f, "{expr}"),
+            ExprKind::FieldAccess { obj, field } => {
                 write!(f, "{obj}\u{200B}.{field}")
             }
-            SymbolicExpr::IndexAccess { obj, indices } => {
+            ExprKind::IndexAccess { obj, indices } => {
                 write!(f, "{obj}[\u{200B}")?;
 
                 for (i, index) in indices.iter().enumerate() {
@@ -1102,31 +1057,31 @@ impl Display for SymbolicExpr {
 
                 write!(f, "\u{200B}]")
             }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+            ExprKind::SymbolicDowncast { obj, ty } => {
                 write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
             }
-            SymbolicExpr::NumArrayElements { array } => {
+            ExprKind::NumArrayElements { array } => {
                 write!(f, "{array}\u{200B}.len()")
             }
-            SymbolicExpr::ArrayExtent { array, dim } => {
+            ExprKind::ArrayExtent { array, dim } => {
                 write!(f, "{array}\u{200B}.extent({dim})")
             }
 
-            SymbolicExpr::PointerCast { ptr, ty } => {
+            ExprKind::PointerCast { ptr, ty } => {
                 write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
             }
 
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
             // parser.
-            SymbolicExpr::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
-            SymbolicExpr::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
-            SymbolicExpr::PhysicalDowncast { obj, ty } => {
+            ExprKind::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
+            ExprKind::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
+            ExprKind::PhysicalDowncast { obj, ty } => {
                 write!(f, "{obj}.downcast({ty})")
             }
-            SymbolicExpr::PrimCast { value, prim_type } => {
+            ExprKind::PrimCast { value, prim_type } => {
                 write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
-            SymbolicExpr::ReadValue { ptr, prim_type } => {
+            ExprKind::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
         }
@@ -1154,15 +1109,15 @@ impl<'a> Display for ExprPrinter<'a> {
             SymbolicValue::Result(op_index) => &self.graph[op_index],
         };
 
-        match expr {
-            SymbolicExpr::StaticField(static_field) => {
+        match expr.as_ref() {
+            ExprKind::StaticField(static_field) => {
                 write!(f, "{static_field}")
             }
-            SymbolicExpr::FieldAccess { obj, field } => {
+            ExprKind::FieldAccess { obj, field } => {
                 let obj = self.with_value(*obj);
                 write!(f, "{obj}\u{200B}.{field}")
             }
-            SymbolicExpr::IndexAccess { obj, indices } => {
+            ExprKind::IndexAccess { obj, indices } => {
                 let obj = self.with_value(*obj);
                 write!(f, "{obj}[\u{200B}")?;
 
@@ -1176,46 +1131,65 @@ impl<'a> Display for ExprPrinter<'a> {
 
                 write!(f, "\u{200B}]")
             }
-            SymbolicExpr::SymbolicDowncast { obj, ty } => {
+            ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj = self.with_value(*obj);
                 write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
             }
-            SymbolicExpr::NumArrayElements { array } => {
+            ExprKind::NumArrayElements { array } => {
                 let array = self.with_value(*array);
                 write!(f, "{array}\u{200B}.len()")
             }
-            SymbolicExpr::ArrayExtent { array, dim } => {
+            ExprKind::ArrayExtent { array, dim } => {
                 let array = self.with_value(*array);
                 let dim = self.with_value(*dim);
                 write!(f, "{array}\u{200B}.extent({dim})")
             }
-            SymbolicExpr::PointerCast { ptr, ty } => {
+            ExprKind::PointerCast { ptr, ty } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
             }
-            SymbolicExpr::Add { lhs, rhs } => {
+            ExprKind::Add { lhs, rhs } => {
                 let lhs = self.with_value(*lhs);
                 let rhs = self.with_value(*rhs);
                 write!(f, "{lhs} + {rhs}")
             }
-            SymbolicExpr::Mul { lhs, rhs } => {
+            ExprKind::Mul { lhs, rhs } => {
                 let lhs = self.with_value(*lhs);
                 let rhs = self.with_value(*rhs);
                 write!(f, "{lhs}*{rhs}")
             }
-            SymbolicExpr::PhysicalDowncast { obj, ty } => {
+            ExprKind::PhysicalDowncast { obj, ty } => {
                 let obj = self.with_value(*obj);
                 write!(f, "{obj}.downcast::<{ty}>()")
             }
-            SymbolicExpr::PrimCast { value, prim_type } => {
+            ExprKind::PrimCast { value, prim_type } => {
                 let value = self.with_value(*value);
                 write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
-            SymbolicExpr::ReadValue { ptr, prim_type } => {
+            ExprKind::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
         }
+    }
+}
+
+impl From<ExprKind> for Expr {
+    fn from(kind: ExprKind) -> Self {
+        Expr { kind }
+    }
+}
+
+impl From<StaticField> for Expr {
+    fn from(value: StaticField) -> Self {
+        let kind: ExprKind = value.into();
+        kind.into()
+    }
+}
+
+impl AsRef<ExprKind> for Expr {
+    fn as_ref(&self) -> &ExprKind {
+        &self.kind
     }
 }
 
@@ -1260,9 +1234,9 @@ impl Display for SymbolicType {
     }
 }
 
-impl From<StaticField> for SymbolicExpr {
+impl From<StaticField> for ExprKind {
     fn from(static_field: StaticField) -> Self {
-        SymbolicExpr::StaticField(static_field)
+        ExprKind::StaticField(static_field)
     }
 }
 
@@ -1289,14 +1263,14 @@ impl Display for SymbolicGraph {
             if let Some(i) = output_lookup.get(&index) {
                 write!(f, "(output #{i}) ")?;
             }
-            writeln!(f, "<- {op}")?;
+            writeln!(f, "<- {}", op.kind)?;
         }
         Ok(())
     }
 }
 
 impl std::ops::Index<OpIndex> for SymbolicGraph {
-    type Output = SymbolicExpr;
+    type Output = Expr;
 
     fn index(&self, index: OpIndex) -> &Self::Output {
         &self.ops[index.0]

@@ -49,6 +49,6 @@ pub mod extensions;
 
 pub(crate) mod bytecode;
 pub use bytecode::{
-    OpIndex, SymbolicExpr, SymbolicGraph, SymbolicType, SymbolicValue,
+    ExprKind, OpIndex, SymbolicGraph, SymbolicType, SymbolicValue,
     VMExecutionError, VMResults, ValueToken, VirtualMachine,
 };

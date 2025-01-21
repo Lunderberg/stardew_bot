@@ -4,7 +4,7 @@ use elsa::FrozenMap;
 
 use crate::{runtime_type::RuntimePrimType, CachedReader, Error, RuntimeType};
 
-use super::{OpIndex, SymbolicExpr, SymbolicGraph, SymbolicValue};
+use super::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
 pub struct TypeInference<'a> {
     reader: CachedReader<'a>,
@@ -84,11 +84,11 @@ impl<'a> TypeInference<'a> {
                 }
             };
 
-            let inferred_type = match &graph[index_to_infer] {
-                SymbolicExpr::StaticField(static_field) => {
+            let inferred_type = match graph[index_to_infer].as_ref() {
+                ExprKind::StaticField(static_field) => {
                     static_field.runtime_type(self.reader)?
                 }
-                SymbolicExpr::FieldAccess { obj, field } => {
+                ExprKind::FieldAccess { obj, field } => {
                     let obj_type = expect_cache(*obj);
 
                     let method_table_ptr = obj_type
@@ -102,13 +102,13 @@ impl<'a> TypeInference<'a> {
                         )?;
                     field_type
                 }
-                SymbolicExpr::SymbolicDowncast { ty, .. } => {
+                ExprKind::SymbolicDowncast { ty, .. } => {
                     let method_table = ty.method_table(self.reader)?;
                     RuntimeType::Class {
                         method_table: Some(method_table),
                     }
                 }
-                SymbolicExpr::IndexAccess {
+                ExprKind::IndexAccess {
                     obj: array,
                     indices,
                 } => {
@@ -162,12 +162,12 @@ impl<'a> TypeInference<'a> {
                         }
                     }?
                 }
-                SymbolicExpr::ArrayExtent { .. }
-                | SymbolicExpr::NumArrayElements { .. } => {
+                ExprKind::ArrayExtent { .. }
+                | ExprKind::NumArrayElements { .. } => {
                     RuntimeType::Prim(RuntimePrimType::NativeUInt)
                 }
-                SymbolicExpr::PointerCast { ty, .. } => ty.clone(),
-                SymbolicExpr::Add { lhs, rhs } => {
+                ExprKind::PointerCast { ty, .. } => ty.clone(),
+                ExprKind::Add { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs);
                     let rhs_type = expect_cache(*rhs);
                     match (lhs_type, rhs_type) {
@@ -200,7 +200,7 @@ impl<'a> TypeInference<'a> {
                     }?
                     .into()
                 }
-                SymbolicExpr::Mul { lhs, rhs } => {
+                ExprKind::Mul { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs);
                     let rhs_type = expect_cache(*rhs);
                     match (lhs_type, rhs_type) {
@@ -217,8 +217,8 @@ impl<'a> TypeInference<'a> {
                     }?
                     .into()
                 }
-                SymbolicExpr::PrimCast { prim_type, .. } => (*prim_type).into(),
-                SymbolicExpr::PhysicalDowncast { obj, .. } => {
+                ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
+                ExprKind::PhysicalDowncast { obj, .. } => {
                     let obj_type = expect_cache(*obj);
                     match obj_type {
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
@@ -228,7 +228,7 @@ impl<'a> TypeInference<'a> {
                     }?;
                     RuntimePrimType::Ptr.into()
                 }
-                SymbolicExpr::ReadValue { ptr, prim_type } => {
+                ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr_type = expect_cache(*ptr);
                     match ptr_type {
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),

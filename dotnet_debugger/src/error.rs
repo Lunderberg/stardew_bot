@@ -2,8 +2,8 @@ use memory_reader::Pointer;
 use thiserror::Error;
 
 use crate::{
-    runtime_type::RuntimePrimType, CorElementType, OpIndex, RuntimePrimValue,
-    RuntimeType, SymbolicExpr,
+    runtime_type::RuntimePrimType, CorElementType, ExprKind, OpIndex,
+    RuntimePrimValue, RuntimeType,
 };
 
 #[derive(Error)]
@@ -296,7 +296,7 @@ pub enum Error {
          prior to generating VM instruction, \
          but encountered {0}."
     )]
-    SymbolicExpressionRequiresLowering(SymbolicExpr),
+    SymbolicExpressionRequiresLowering(ExprKind),
 
     #[error(
         "Value '{value}' of type {} \

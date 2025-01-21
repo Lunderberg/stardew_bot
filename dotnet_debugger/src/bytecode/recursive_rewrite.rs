@@ -2,9 +2,7 @@ use std::collections::HashMap;
 
 use crate::Error;
 
-use super::{
-    GraphRewrite, OpIndex, SymbolicExpr, SymbolicGraph, SymbolicValue,
-};
+use super::{ExprKind, GraphRewrite, OpIndex, SymbolicGraph, SymbolicValue};
 
 pub struct RecursiveRewrite<Inner> {
     inner: Inner,
@@ -23,7 +21,7 @@ where
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
-        expr: &SymbolicExpr,
+        expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error> {
         // All nodes currently in the output graph have been fully
         // simplified.  If a rewrite produces a known node, then it
@@ -44,7 +42,7 @@ where
         while validated_nodes < graph.num_operations() {
             let index = OpIndex(validated_nodes);
             let intermediate_expr = {
-                let mut expr = graph[index].clone();
+                let mut expr: ExprKind = graph[index].kind.clone();
                 while let Some(remapped) = expr.try_remap(&lookup_simplified) {
                     expr = remapped;
                 }
@@ -55,7 +53,7 @@ where
                 .inner
                 .rewrite_expr(graph, &intermediate_expr)?
                 .or_else(|| {
-                    (intermediate_expr != graph[index])
+                    (intermediate_expr != graph[index].kind)
                         .then(|| graph.push(intermediate_expr))
                 });
 

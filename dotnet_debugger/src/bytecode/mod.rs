@@ -1,6 +1,6 @@
 mod expr;
 pub use expr::{
-    SymbolicExpr, SymbolicGraph, SymbolicType, SymbolicValue, ValueToken,
+    ExprKind, SymbolicGraph, SymbolicType, SymbolicValue, ValueToken,
 };
 
 mod graph_rewrite;
