@@ -30,6 +30,7 @@ pub struct ValueToken(pub(crate) usize);
 #[derive(Clone)]
 pub struct Expr {
     pub(crate) kind: ExprKind,
+    pub(crate) name: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -146,10 +147,24 @@ pub struct StaticField {
     pub field_name: String,
 }
 
+pub struct GraphPrinter<'a> {
+    graph: &'a SymbolicGraph,
+    expand_all_expressions: bool,
+}
+
 #[derive(Clone, Copy)]
 pub struct ExprPrinter<'a> {
     graph: &'a SymbolicGraph,
     value: SymbolicValue,
+    is_top_level: bool,
+    display_inline: DisplayInlineExpr<'a>,
+}
+
+#[derive(Clone, Copy)]
+enum DisplayInlineExpr<'a> {
+    All,
+    Some(&'a HashSet<OpIndex>),
+    None,
 }
 
 impl SymbolicType {
@@ -346,15 +361,41 @@ impl SymbolicGraph {
         op_index.into()
     }
 
+    pub fn name(&mut self, value: SymbolicValue, name: impl Into<String>) {
+        match value {
+            SymbolicValue::Result(op_index) => {
+                self.ops[op_index.0].name = Some(name.into());
+            }
+            SymbolicValue::Int(_) | SymbolicValue::Ptr(_) => {
+                // Currently, constants are stored in-line at their
+                // point-of-use, and can't be named.  If constants are
+                // ever moved to be represented as their own nodes,
+                // then they should be name-able.
+            }
+        }
+    }
+
     pub fn mark_output(&mut self, value: SymbolicValue) -> ValueToken {
         let index = self.outputs.len();
         self.outputs.push(value);
         ValueToken(index)
     }
 
+    pub fn printer<'a>(&'a self) -> GraphPrinter<'a> {
+        GraphPrinter {
+            graph: self,
+            expand_all_expressions: false,
+        }
+    }
+
     pub fn print<'a>(&'a self, value: impl Printable) -> ExprPrinter<'a> {
         let value = value.top_level_value(self);
-        ExprPrinter { graph: self, value }
+        ExprPrinter {
+            graph: self,
+            value,
+            is_top_level: true,
+            display_inline: DisplayInlineExpr::All,
+        }
     }
 
     pub fn is_equivalent_to(&self, other: &Self) -> bool {
@@ -1088,28 +1129,122 @@ impl Display for ExprKind {
     }
 }
 
+impl<'a> GraphPrinter<'a> {
+    pub fn expand_all_expressions(self) -> Self {
+        Self {
+            expand_all_expressions: true,
+            ..self
+        }
+    }
+
+    fn display(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let output_lookup: HashMap<_, _> = self
+            .graph
+            .outputs
+            .iter()
+            .cloned()
+            .enumerate()
+            .filter_map(|(i, value)| {
+                value.as_op_index().map(|op_index| (op_index, i))
+            })
+            .collect();
+
+        let inlinable_expressions: Option<HashSet<OpIndex>>;
+
+        let display_inline = if self.expand_all_expressions {
+            DisplayInlineExpr::None
+        } else {
+            let mut num_usage = vec![0; self.graph.ops.len()];
+            self.graph.ops.iter().for_each(|op| {
+                op.visit_input_values(|input_value| {
+                    if let SymbolicValue::Result(prev_index) = input_value {
+                        num_usage[prev_index.0] += 1;
+                    }
+                })
+            });
+            inlinable_expressions = Some(
+                self.graph
+                    .iter_ops()
+                    .filter(|(index, _)| num_usage[index.0] == 1)
+                    .filter(|(_, op)| op.name.is_none())
+                    .map(|(index, _)| index)
+                    .collect(),
+            );
+            DisplayInlineExpr::Some(inlinable_expressions.as_ref().unwrap())
+        };
+
+        for (index, _op) in self.graph.iter_ops() {
+            let is_inline = match display_inline {
+                DisplayInlineExpr::All => true,
+                DisplayInlineExpr::Some(set) => set.contains(&index),
+                DisplayInlineExpr::None => false,
+            };
+
+            if !is_inline {
+                write!(fmt, "{index} ")?;
+                if let Some(i) = output_lookup.get(&index) {
+                    write!(fmt, "(output #{i}) ")?;
+                }
+
+                let expr_printer = self
+                    .graph
+                    .print(SymbolicValue::Result(index))
+                    .display_inline(display_inline);
+                writeln!(fmt, "<- {expr_printer}")?;
+            }
+        }
+        Ok(())
+    }
+}
+
+impl<'a> Display for GraphPrinter<'a> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.display(fmt)
+    }
+}
+
 impl<'a> ExprPrinter<'a> {
-    fn with_value(self, value: SymbolicValue) -> ExprPrinter<'a> {
-        ExprPrinter {
-            graph: self.graph,
+    fn with_value(self, value: SymbolicValue) -> Self {
+        Self {
             value,
+            is_top_level: false,
+            ..self
+        }
+    }
+
+    fn display_inline(self, display_inline: DisplayInlineExpr<'a>) -> Self {
+        Self {
+            display_inline,
+            ..self
         }
     }
 }
 
 impl<'a> Display for ExprPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let expr = match self.value {
+        let op_index = match self.value {
             SymbolicValue::Int(int) => {
                 return write!(f, "{int}");
             }
             SymbolicValue::Ptr(ptr) => {
                 return write!(f, "{ptr}");
             }
-            SymbolicValue::Result(op_index) => &self.graph[op_index],
+            SymbolicValue::Result(op_index) => op_index,
         };
 
-        match expr.as_ref() {
+        let display_full_expr = self.is_top_level
+            || match self.display_inline {
+                DisplayInlineExpr::All => true,
+                DisplayInlineExpr::Some(inlinable) => {
+                    inlinable.contains(&op_index)
+                }
+                DisplayInlineExpr::None => false,
+            };
+        if !display_full_expr {
+            return write!(f, "{op_index}");
+        }
+
+        match self.graph[op_index].as_ref() {
             ExprKind::StaticField(static_field) => {
                 write!(f, "{static_field}")
             }
@@ -1176,7 +1311,7 @@ impl<'a> Display for ExprPrinter<'a> {
 
 impl From<ExprKind> for Expr {
     fn from(kind: ExprKind) -> Self {
-        Expr { kind }
+        Expr { kind, name: None }
     }
 }
 
@@ -1248,24 +1383,7 @@ impl Display for StaticField {
 
 impl Display for SymbolicGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let output_lookup: HashMap<_, _> = self
-            .outputs
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, value)| {
-                value.as_op_index().map(|op_index| (op_index, i))
-            })
-            .collect();
-
-        for (index, op) in self.iter_ops() {
-            write!(f, "{index} ")?;
-            if let Some(i) = output_lookup.get(&index) {
-                write!(f, "(output #{i}) ")?;
-            }
-            writeln!(f, "<- {}", op.kind)?;
-        }
-        Ok(())
+        write!(f, "{}", self.printer())
     }
 }
 
