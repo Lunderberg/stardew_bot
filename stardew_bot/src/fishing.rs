@@ -149,11 +149,11 @@ impl FishingUI {
 
         let fishing_rod = "StardewValley.Game1\
                            ._player\
-                           .as<StardewValley.Farmer>()\
+                           .as::<StardewValley.Farmer>()\
                            .netItems.value.Items\
                            .array.value.elements._items\
                            [StardewValley.Game1._player.currentToolIndex.value].value\
-                           .as<StardewValley.Tools.FishingRod>()";
+                           .as::<StardewValley.Tools.FishingRod>()";
 
         let is_timing_cast = register(&format!("{fishing_rod}.isTimingCast"))?;
         let casting_power = register(&format!("{fishing_rod}.castingPower"))?;
@@ -181,7 +181,7 @@ impl FishingUI {
 
         let minigame = "StardewValley.Game1\
                         ._activeClickableMenu\
-                        .as<StardewValley.Menus.BobberBar>()";
+                        .as::<StardewValley.Menus.BobberBar>()";
 
         let fish_difficulty = register(&format!("{minigame}.difficulty"))?;
         let fish_position = register(&format!("{minigame}.bobberPosition"))?;

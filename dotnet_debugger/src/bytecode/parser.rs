@@ -18,6 +18,16 @@ pub enum ParseError {
     #[error("Unexpected {c:?} at byte {byte_index}")]
     UnexpectedChar { c: char, byte_index: usize },
 
+    #[error(
+        "Expected {expected:?} at byte {byte_index},\
+         but found {actual:?}"
+    )]
+    UnexpectedCharWithKnown {
+        expected: char,
+        actual: char,
+        byte_index: usize,
+    },
+
     #[error("Expected {0}, but found end of string")]
     UnexpectedEndOfString(&'static str),
 
@@ -45,6 +55,12 @@ pub enum ParseError {
         byte_index: usize,
         kind: TokenKind,
     },
+
+    #[error(
+        "Expected primitive type argument to .prim_type, \
+             but found {0}"
+    )]
+    ExpectedPrimType(SymbolicType),
 }
 
 struct SymbolicTokenizer<'a> {
@@ -72,6 +88,7 @@ pub enum Punctuation {
     Comma,
     LeftParen,
     RightParen,
+    DoubleColon,
     LeftAngleBracket,
     RightAngleBracket,
     LeftSquareBracket,
@@ -177,21 +194,26 @@ impl<'a> SymbolicParser<'a> {
             .tokens
             .peek()?
             .map(|peek| {
-                peek.kind.is_punct(Punctuation::LeftAngleBracket)
+                peek.kind.is_punct(Punctuation::DoubleColon)
                     || peek.kind.is_punct(Punctuation::LeftParen)
             })
             .unwrap_or(false);
 
         if is_operation {
             match field.text {
-                "as" => {
+                "as" | "prim_cast" => {
                     let (type_args, _) =
                         self.expect_function_arguments(1, 0)?;
                     let ty = type_args
                         .into_iter()
                         .next()
                         .expect("Protected by length check");
-                    let expr = if let Some(prim_type) = ty.try_prim_type() {
+                    let expr = if field.text == "prim_cast" {
+                        let prim_type = ty
+                            .try_prim_type()
+                            .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                        self.graph.prim_cast(obj, prim_type)
+                    } else if let Some(prim_type) = ty.try_prim_type() {
                         self.graph.prim_cast(obj, prim_type)
                     } else {
                         self.graph.downcast(obj, ty)
@@ -228,7 +250,12 @@ impl<'a> SymbolicParser<'a> {
         let mut type_args = Vec::new();
         if num_type_args > 0 {
             self.expect_punct(
-                "'<' to start list of type arguments",
+                "'::<' to start list of type arguments",
+                Punctuation::DoubleColon,
+            )?;
+
+            self.expect_punct(
+                "'::<' to start list of type arguments",
                 Punctuation::LeftAngleBracket,
             )?;
 
@@ -485,6 +512,27 @@ impl<'a> SymbolicTokenizer<'a> {
             '>' => TokenKind::Punct(Punctuation::RightAngleBracket),
             '[' => TokenKind::Punct(Punctuation::LeftSquareBracket),
             ']' => TokenKind::Punct(Punctuation::RightSquareBracket),
+            ':' => {
+                let (next_loc, next) = self.text[start..]
+                    .char_indices()
+                    .skip(1)
+                    .next()
+                    .ok_or_else(|| {
+                        ParseError::UnexpectedEndOfString(
+                            "Second ':' of '::' token",
+                        )
+                    })?;
+                if next != ':' {
+                    return Err(ParseError::UnexpectedCharWithKnown {
+                        expected: ':',
+                        actual: next,
+                        byte_index: next_loc,
+                    }
+                    .into());
+                }
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoubleColon)
+            }
             '0'..='9' => {
                 let mut value = 0;
                 let mut index = None;

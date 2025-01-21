@@ -16,7 +16,7 @@ mod cor_element_type;
 pub use cor_element_type::CorElementType;
 
 mod runtime_type;
-pub use runtime_type::RuntimeType;
+pub use runtime_type::{RuntimePrimType, RuntimeType};
 
 mod runtime_value;
 pub use runtime_value::{RuntimePrimValue, RuntimeValue};

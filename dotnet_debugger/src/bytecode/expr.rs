@@ -158,10 +158,7 @@ impl SymbolicType {
             .method_table_by_name(&self.full_name)?
             .ok_or_else(|| {
                 Error::UnexpectedNullMethodTable(format!("{}", self))
-            })
-            .unwrap()
-            //?
-            ;
+            })?;
 
         if self.generics.is_empty() {
             return Ok(method_table_ptr);
@@ -245,6 +242,7 @@ impl SymbolicType {
             "isize" => Some(RuntimePrimType::NativeInt),
             "f32" => Some(RuntimePrimType::F32),
             "f64" => Some(RuntimePrimType::F64),
+            "ptr" | "Ptr" => Some(RuntimePrimType::Ptr),
             _ => None,
         }
     }
@@ -352,6 +350,17 @@ impl SymbolicGraph {
     pub fn print<'a>(&'a self, value: impl Printable<'a>) -> ExprPrinter<'a> {
         let value = value.top_level_value(self);
         ExprPrinter { graph: self, value }
+    }
+
+    pub fn is_equivalent_to(&self, other: &Self) -> bool {
+        self.ops.len() == other.ops.len()
+            && self.outputs.len() == other.outputs.len()
+            && self.ops.iter().zip(other.ops.iter()).all(|(a, b)| a == b)
+            && self
+                .outputs
+                .iter()
+                .zip(other.outputs.iter())
+                .all(|(a, b)| a == b)
     }
 
     //////////////////////////////////////////////////
@@ -1094,7 +1103,7 @@ impl Display for SymbolicExpr {
                 write!(f, "\u{200B}]")
             }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                write!(f, "{obj}.as<\u{200B}{ty}\u{200B}>()")
+                write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
             }
             SymbolicExpr::NumArrayElements { array } => {
                 write!(f, "{array}\u{200B}.len()")
@@ -1104,7 +1113,7 @@ impl Display for SymbolicExpr {
             }
 
             SymbolicExpr::PointerCast { ptr, ty } => {
-                write!(f, "{ptr}\u{200B}.ptr_cast({ty})")
+                write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
             }
 
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
@@ -1169,7 +1178,7 @@ impl<'a> Display for ExprPrinter<'a> {
             }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
                 let obj = self.with_value(obj);
-                write!(f, "{obj}.as<\u{200B}{ty}\u{200B}>()")
+                write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
             }
             SymbolicExpr::NumArrayElements { array } => {
                 let array = self.with_value(array);
@@ -1182,7 +1191,7 @@ impl<'a> Display for ExprPrinter<'a> {
             }
             SymbolicExpr::PointerCast { ptr, ty } => {
                 let ptr = self.with_value(ptr);
-                write!(f, "{ptr}\u{200B}.ptr_cast<{ty}>()")
+                write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
             }
             SymbolicExpr::Add { lhs, rhs } => {
                 let lhs = self.with_value(lhs);
@@ -1196,7 +1205,7 @@ impl<'a> Display for ExprPrinter<'a> {
             }
             SymbolicExpr::PhysicalDowncast { obj, ty } => {
                 let obj = self.with_value(obj);
-                write!(f, "{obj}.downcast({ty})")
+                write!(f, "{obj}.downcast::<{ty}>()")
             }
             SymbolicExpr::PrimCast { value, prim_type } => {
                 let value = self.with_value(value);
