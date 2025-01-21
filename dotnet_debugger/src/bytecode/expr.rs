@@ -162,9 +162,15 @@ pub struct ExprPrinter<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct TypePrinter<'a> {
+struct TypePrinter<'a> {
     ty: &'a SymbolicType,
     insert_zero_width_space_at_breakpoint: bool,
+}
+
+#[derive(Clone, Copy)]
+struct IndexPrinter<'a> {
+    graph: &'a SymbolicGraph,
+    index: OpIndex,
 }
 
 #[derive(Clone, Copy)]
@@ -404,6 +410,10 @@ impl SymbolicGraph {
             insert_zero_width_space_at_breakpoint: false,
             display_inline: DisplayInlineExpr::All,
         }
+    }
+
+    fn print_index<'a>(&'a self, index: OpIndex) -> IndexPrinter<'a> {
+        IndexPrinter { graph: self, index }
     }
 
     pub fn is_equivalent_to(&self, other: &Self) -> bool {
@@ -1160,7 +1170,6 @@ impl<'a> GraphPrinter<'a> {
             .collect();
 
         let inlinable_expressions: Option<HashSet<OpIndex>>;
-
         let display_inline = if self.expand_all_expressions {
             DisplayInlineExpr::None
         } else {
@@ -1191,16 +1200,17 @@ impl<'a> GraphPrinter<'a> {
             };
 
             if !is_inline {
-                write!(fmt, "{index} ")?;
-                if let Some(i) = output_lookup.get(&index) {
-                    write!(fmt, "(output #{i}) ")?;
-                }
-
+                let index_printer = self.graph.print_index(index);
                 let expr_printer = self
                     .graph
                     .print(SymbolicValue::Result(index))
                     .display_inline(display_inline);
-                writeln!(fmt, "<- {expr_printer}")?;
+
+                write!(fmt, "let {index_printer} ")?;
+                if let Some(i) = output_lookup.get(&index) {
+                    write!(fmt, "(output #{i}) ")?;
+                }
+                writeln!(fmt, "= {expr_printer};")?;
             }
         }
         Ok(())
@@ -1248,6 +1258,16 @@ impl Display for MaybeZeroWidthSpace {
     }
 }
 
+impl<'a> Display for IndexPrinter<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if let Some(name) = self.graph[self.index].name.as_ref() {
+            write!(f, "{name}")
+        } else {
+            write!(f, "_{}", self.index.0)
+        }
+    }
+}
+
 impl<'a> Display for ExprPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let op_index = match self.value {
@@ -1269,7 +1289,8 @@ impl<'a> Display for ExprPrinter<'a> {
                 DisplayInlineExpr::None => false,
             };
         if !display_full_expr {
-            return write!(f, "{op_index}");
+            let index = self.graph.print_index(op_index);
+            return write!(f, "{index}");
         }
 
         let sep =

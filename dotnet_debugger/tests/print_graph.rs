@@ -12,13 +12,13 @@ fn print_expanded_graph() {
 
     let printed = format!("{}", graph.printer().expand_all_expressions());
     let expected = "\
-    [0] <- class_name.field_name\n\
-    [1] <- [0].subfield\n\
-    [2] <- [1].active_index\n\
-    [3] <- [1].list\n\
-    [4] <- [3]._items\n\
-    [5] <- [2].prim_cast::<usize>()\n\
-    [6] (output #0) <- [4][[5]]\n\
+    let _0 = class_name.field_name;\n\
+    let _1 = _0.subfield;\n\
+    let _2 = _1.active_index;\n\
+    let _3 = _1.list;\n\
+    let _4 = _3._items;\n\
+    let _5 = _2.prim_cast::<usize>();\n\
+    let _6 (output #0) = _4[_5];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
@@ -39,8 +39,63 @@ fn print_compact_graph() {
 
     let printed = format!("{graph}");
     let expected = "\
-    [1] <- class_name.field_name.subfield\n\
-    [6] (output #0) <- [1].list._items[[1].active_index.prim_cast::<usize>()]\n\
+    let _1 = class_name.field_name.subfield;\n\
+    let _6 (output #0) = _1.list._items[_1.active_index.prim_cast::<usize>()];\n\
+    ";
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_named_object() {
+    // An object may be given an explicit name.  That name should be
+    // used when printing the SymbolicGraph.
+
+    let mut graph = SymbolicGraph::new();
+    let obj = graph.static_field("class_name", "field_name");
+    let subfield = graph.access_field(obj, "subfield");
+    graph.name(subfield, "obj");
+    let active_index = graph.access_field(subfield, "active_index");
+    let array = graph.access_field(subfield, "list._items");
+    let item = graph.access_index(array, active_index);
+    graph.mark_output(item);
+
+    let printed = format!("{graph}");
+    let expected = "\
+    let obj = class_name.field_name.subfield;\n\
+    let _6 (output #0) = obj.list._items[obj.active_index.prim_cast::<usize>()];\n\
+    ";
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_named_intermediate_object() {
+    // An intermediate expression may be given an explicit name.  Even
+    // though the compact view would usually display these as inline
+    // expressions, named intermediates should always be displayed.
+
+    let mut graph = SymbolicGraph::new();
+    let obj = graph.static_field("class_name", "field_name");
+    let subfield = graph.access_field(obj, "subfield");
+    graph.name(subfield, "obj");
+    let active_index = graph.access_field(subfield, "active_index");
+    graph.name(active_index, "index");
+    let array = graph.access_field(subfield, "list._items");
+    let item = graph.access_index(array, active_index);
+    graph.mark_output(item);
+
+    let printed = format!("{graph}");
+    let expected = "\
+    let obj = class_name.field_name.subfield;\n\
+    let index = obj.active_index;\n\
+    let _6 (output #0) = obj.list._items[index.prim_cast::<usize>()];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
