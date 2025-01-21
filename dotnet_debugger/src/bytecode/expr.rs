@@ -144,7 +144,7 @@ pub struct StaticField {
 #[derive(Clone, Copy)]
 pub struct ExprPrinter<'a> {
     graph: &'a SymbolicGraph,
-    value: &'a SymbolicValue,
+    value: SymbolicValue,
 }
 
 impl SymbolicType {
@@ -300,16 +300,16 @@ impl StaticField {
     }
 }
 
-pub trait Printable<'a> {
-    fn top_level_value(self, graph: &'a SymbolicGraph) -> &'a SymbolicValue;
+pub trait Printable {
+    fn top_level_value(self, graph: &SymbolicGraph) -> SymbolicValue;
 }
-impl<'a> Printable<'a> for ValueToken {
-    fn top_level_value(self, graph: &'a SymbolicGraph) -> &'a SymbolicValue {
-        &graph.outputs[self.0]
+impl Printable for ValueToken {
+    fn top_level_value(self, graph: &SymbolicGraph) -> SymbolicValue {
+        graph.outputs[self.0]
     }
 }
-impl<'a, 'b: 'a> Printable<'a> for &'b SymbolicValue {
-    fn top_level_value(self, _: &'a SymbolicGraph) -> &'a SymbolicValue {
+impl Printable for SymbolicValue {
+    fn top_level_value(self, _: &SymbolicGraph) -> SymbolicValue {
         self
     }
 }
@@ -347,7 +347,7 @@ impl SymbolicGraph {
         ValueToken(index)
     }
 
-    pub fn print<'a>(&'a self, value: impl Printable<'a>) -> ExprPrinter<'a> {
+    pub fn print<'a>(&'a self, value: impl Printable) -> ExprPrinter<'a> {
         let value = value.top_level_value(self);
         ExprPrinter { graph: self, value }
     }
@@ -1134,7 +1134,7 @@ impl Display for SymbolicExpr {
 }
 
 impl<'a> ExprPrinter<'a> {
-    fn with_value(self, value: &'a SymbolicValue) -> ExprPrinter<'a> {
+    fn with_value(self, value: SymbolicValue) -> ExprPrinter<'a> {
         ExprPrinter {
             graph: self.graph,
             value,
@@ -1151,7 +1151,7 @@ impl<'a> Display for ExprPrinter<'a> {
             SymbolicValue::Ptr(ptr) => {
                 return write!(f, "{ptr}");
             }
-            SymbolicValue::Result(op_index) => &self.graph[*op_index],
+            SymbolicValue::Result(op_index) => &self.graph[op_index],
         };
 
         match expr {
@@ -1159,15 +1159,15 @@ impl<'a> Display for ExprPrinter<'a> {
                 write!(f, "{static_field}")
             }
             SymbolicExpr::FieldAccess { obj, field } => {
-                let obj = self.with_value(obj);
+                let obj = self.with_value(*obj);
                 write!(f, "{obj}\u{200B}.{field}")
             }
             SymbolicExpr::IndexAccess { obj, indices } => {
-                let obj = self.with_value(obj);
+                let obj = self.with_value(*obj);
                 write!(f, "{obj}[\u{200B}")?;
 
                 for (i, index) in indices.iter().enumerate() {
-                    let index = self.with_value(index);
+                    let index = self.with_value(*index);
                     if i > 0 {
                         write!(f, ", ")?;
                     }
@@ -1177,42 +1177,42 @@ impl<'a> Display for ExprPrinter<'a> {
                 write!(f, "\u{200B}]")
             }
             SymbolicExpr::SymbolicDowncast { obj, ty } => {
-                let obj = self.with_value(obj);
+                let obj = self.with_value(*obj);
                 write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")
             }
             SymbolicExpr::NumArrayElements { array } => {
-                let array = self.with_value(array);
+                let array = self.with_value(*array);
                 write!(f, "{array}\u{200B}.len()")
             }
             SymbolicExpr::ArrayExtent { array, dim } => {
-                let array = self.with_value(array);
-                let dim = self.with_value(dim);
+                let array = self.with_value(*array);
+                let dim = self.with_value(*dim);
                 write!(f, "{array}\u{200B}.extent({dim})")
             }
             SymbolicExpr::PointerCast { ptr, ty } => {
-                let ptr = self.with_value(ptr);
+                let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
             }
             SymbolicExpr::Add { lhs, rhs } => {
-                let lhs = self.with_value(lhs);
-                let rhs = self.with_value(rhs);
+                let lhs = self.with_value(*lhs);
+                let rhs = self.with_value(*rhs);
                 write!(f, "{lhs} + {rhs}")
             }
             SymbolicExpr::Mul { lhs, rhs } => {
-                let lhs = self.with_value(lhs);
-                let rhs = self.with_value(rhs);
+                let lhs = self.with_value(*lhs);
+                let rhs = self.with_value(*rhs);
                 write!(f, "{lhs}*{rhs}")
             }
             SymbolicExpr::PhysicalDowncast { obj, ty } => {
-                let obj = self.with_value(obj);
+                let obj = self.with_value(*obj);
                 write!(f, "{obj}.downcast::<{ty}>()")
             }
             SymbolicExpr::PrimCast { value, prim_type } => {
-                let value = self.with_value(value);
+                let value = self.with_value(*value);
                 write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
             SymbolicExpr::ReadValue { ptr, prim_type } => {
-                let ptr = self.with_value(ptr);
+                let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
         }

@@ -93,7 +93,7 @@ impl<'a> TypeInference<'a> {
 
                     let method_table_ptr = obj_type
                         .method_table_for_field_access(|| {
-                            format!("{}", graph.print(obj))
+                            format!("{}", graph.print(*obj))
                         })?;
                     let field_type =
                         self.reader.field_by_name_to_runtime_type(
@@ -138,7 +138,7 @@ impl<'a> TypeInference<'a> {
                             method_table: None, ..
                         } => {
                             return Err(Error::UnexpectedNullMethodTable(
-                                format!("{}", graph.print(array)),
+                                format!("{}", graph.print(*array)),
                             ));
                         }
                         RuntimeType::MultiDimArray {

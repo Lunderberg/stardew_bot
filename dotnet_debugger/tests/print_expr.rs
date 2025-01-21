@@ -7,7 +7,7 @@ fn check_printed_expr(
     let mut graph = SymbolicGraph::new();
     let value = graph_builder(&mut graph);
 
-    let printed = format!("{}", graph.print(&value)).replace('\u{200B}', "");
+    let printed = format!("{}", graph.print(value)).replace('\u{200B}', "");
 
     assert_eq!(printed, expected);
 }

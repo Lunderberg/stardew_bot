@@ -60,7 +60,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 let method_table_ptr =
                     obj_type.method_table_for_field_access(|| {
-                        format!("{}", graph.print(&obj))
+                        format!("{}", graph.print(obj))
                     })?;
                 let (parent_of_field, field_description) = reader
                     .find_field_by_name(method_table_ptr, field.as_str())?;
@@ -97,7 +97,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                         let method_table = method_table.ok_or_else(|| {
                             Error::UnexpectedNullMethodTable(format!(
                                 "{}",
-                                graph.print(obj)
+                                graph.print(*obj)
                             ))
                         })?;
                         let method_table = reader.method_table(method_table)?;
