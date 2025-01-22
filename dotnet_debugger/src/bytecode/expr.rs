@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::{collections::HashMap, fmt::Display};
 
 use derive_more::derive::From;
 use itertools::Itertools as _;
@@ -211,13 +208,6 @@ struct IndexPrinter<'a> {
     graph: &'a SymbolicGraph,
     index: OpIndex,
     requires_name_prefix: bool,
-}
-
-#[derive(Clone, Copy)]
-enum DisplayInlineExpr<'a> {
-    All,
-    Some(&'a HashSet<OpIndex>),
-    None,
 }
 
 impl SymbolicType {
