@@ -16,11 +16,11 @@ fn require_identical_graph(
         graph
     };
 
-    // TODO: Improve this method so that it doesn't require operations
-    // to appear in the same order.  Maybe walk backwards from the
-    // outputs, tracking which expressions are re-used (since the
-    // presence or absence of re-use has semantic meaning).
-    assert!(parsed.is_equivalent_to(&expected));
+    assert!(parsed
+        .graph_comparison(&expected)
+        .order_dependent(true)
+        .compare_names(true)
+        .apply());
 }
 
 #[test]

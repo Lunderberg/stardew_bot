@@ -210,6 +210,13 @@ struct IndexPrinter<'a> {
     requires_name_prefix: bool,
 }
 
+pub struct GraphComparison<'a> {
+    lhs: &'a SymbolicGraph,
+    rhs: &'a SymbolicGraph,
+    order_dependent: bool,
+    compare_names: bool,
+}
+
 impl SymbolicType {
     pub(crate) fn method_table<'a>(
         &self,
@@ -443,19 +450,16 @@ impl SymbolicGraph {
         }
     }
 
-    pub fn is_equivalent_to(&self, other: &Self) -> bool {
-        self.ops.len() == other.ops.len()
-            && self.outputs.len() == other.outputs.len()
-            && self
-                .ops
-                .iter()
-                .zip(other.ops.iter())
-                .all(|(a, b)| a.kind == b.kind)
-            && self
-                .outputs
-                .iter()
-                .zip(other.outputs.iter())
-                .all(|(a, b)| a == b)
+    pub fn graph_comparison<'a>(
+        &'a self,
+        rhs: &'a Self,
+    ) -> GraphComparison<'a> {
+        GraphComparison {
+            lhs: self,
+            rhs,
+            order_dependent: false,
+            compare_names: false,
+        }
     }
 
     //////////////////////////////////////////////////
@@ -1129,6 +1133,264 @@ impl ExprKind {
                 callback(*ptr);
             }
         }
+    }
+}
+
+impl<'a> GraphComparison<'a> {
+    pub fn order_dependent(self, order_dependent: bool) -> Self {
+        Self {
+            order_dependent,
+            ..self
+        }
+    }
+
+    pub fn compare_names(self, compare_names: bool) -> Self {
+        Self {
+            compare_names,
+            ..self
+        }
+    }
+
+    pub fn apply(&self) -> bool {
+        if self.order_dependent {
+            self.order_dependent_comparison()
+        } else {
+            self.order_independent_comparison()
+        }
+    }
+
+    fn order_dependent_comparison(&self) -> bool {
+        let lhs = self.lhs;
+        let rhs = self.rhs;
+        lhs.ops.len() == rhs.ops.len()
+            && lhs.outputs.len() == rhs.outputs.len()
+            && lhs.ops.iter().zip(rhs.ops.iter()).all(|(a, b)| {
+                a.kind == b.kind && (!self.compare_names || a.name == b.name)
+            })
+            && lhs
+                .outputs
+                .iter()
+                .zip(rhs.outputs.iter())
+                .all(|(a, b)| a == b)
+    }
+
+    fn order_independent_comparison(&self) -> bool {
+        let lhs = self.lhs;
+        let rhs = self.rhs;
+
+        if lhs.outputs.len() != rhs.outputs.len() {
+            return false;
+        }
+
+        let mut lhs_index_to_rhs = HashMap::<OpIndex, OpIndex>::new();
+        let mut rhs_index_to_lhs = HashMap::<OpIndex, OpIndex>::new();
+
+        let mut to_visit = Vec::<(OpIndex, OpIndex)>::new();
+
+        macro_rules! equivalent_value {
+            ($lhs:expr,$rhs:expr) => {{
+                let lhs: &SymbolicValue = $lhs;
+                let rhs: &SymbolicValue = $rhs;
+
+                match (*lhs, *rhs) {
+                    (
+                        SymbolicValue::Result(lhs_index),
+                        SymbolicValue::Result(rhs_index),
+                    ) => {
+                        if let Some(prev_rhs) = lhs_index_to_rhs.get(&lhs_index)
+                        {
+                            rhs_index == *prev_rhs
+                        } else if let Some(prev_lhs) =
+                            rhs_index_to_lhs.get(&rhs_index)
+                        {
+                            lhs_index == *prev_lhs
+                        } else {
+                            to_visit.push((lhs_index, rhs_index));
+                            lhs_index_to_rhs.insert(lhs_index, rhs_index);
+                            rhs_index_to_lhs.insert(rhs_index, lhs_index);
+                            true
+                        }
+                    }
+
+                    (other_lhs, other_rhs) => other_lhs == other_rhs,
+                }
+            }};
+        }
+
+        for (lhs_output, rhs_output) in lhs.outputs.iter().zip(&rhs.outputs) {
+            if !equivalent_value!(lhs_output, rhs_output) {
+                return false;
+            }
+        }
+
+        while let Some((lhs_index, rhs_index)) = to_visit.pop() {
+            if self.compare_names && lhs[lhs_index].name != rhs[rhs_index].name
+            {
+                return false;
+            }
+
+            let lhs_kind = &lhs[lhs_index].kind;
+            let rhs_kind = &rhs[rhs_index].kind;
+
+            let is_match = match lhs_kind {
+                ExprKind::StaticField(StaticField {
+                    class: lhs_class,
+                    field_name: lhs_field,
+                }) => match rhs_kind {
+                    ExprKind::StaticField(StaticField {
+                        class: rhs_class,
+                        field_name: rhs_field,
+                    }) => lhs_class == rhs_class && lhs_field == rhs_field,
+                    _ => false,
+                },
+                ExprKind::FieldAccess {
+                    obj: lhs_obj,
+                    field: lhs_field,
+                } => match rhs_kind {
+                    ExprKind::FieldAccess {
+                        obj: rhs_obj,
+                        field: rhs_field,
+                    } => {
+                        equivalent_value!(lhs_obj, rhs_obj)
+                            && lhs_field == rhs_field
+                    }
+                    _ => false,
+                },
+                ExprKind::SymbolicDowncast {
+                    obj: lhs_obj,
+                    ty: lhs_ty,
+                } => match rhs_kind {
+                    ExprKind::SymbolicDowncast {
+                        obj: rhs_obj,
+                        ty: rhs_ty,
+                    } => {
+                        equivalent_value!(lhs_obj, rhs_obj) && lhs_ty == rhs_ty
+                    }
+                    _ => false,
+                },
+                ExprKind::IndexAccess {
+                    obj: lhs_obj,
+                    indices: lhs_indices,
+                } => match rhs_kind {
+                    ExprKind::IndexAccess {
+                        obj: rhs_obj,
+                        indices: rhs_indices,
+                    } => {
+                        equivalent_value!(lhs_obj, rhs_obj)
+                            && lhs_indices.len() == rhs_indices.len()
+                            && lhs_indices.iter().zip(rhs_indices.iter()).all(
+                                |(lhs_index, rhs_index)| {
+                                    equivalent_value!(lhs_index, rhs_index)
+                                },
+                            )
+                    }
+                    _ => false,
+                },
+                ExprKind::NumArrayElements { array: lhs_array } => {
+                    match rhs_kind {
+                        ExprKind::NumArrayElements { array: rhs_array } => {
+                            equivalent_value!(lhs_array, rhs_array)
+                        }
+                        _ => false,
+                    }
+                }
+                ExprKind::ArrayExtent {
+                    array: lhs_array,
+                    dim: lhs_dim,
+                } => match rhs_kind {
+                    ExprKind::ArrayExtent {
+                        array: rhs_array,
+                        dim: rhs_dim,
+                    } => {
+                        equivalent_value!(lhs_array, rhs_array)
+                            && equivalent_value!(lhs_dim, rhs_dim)
+                    }
+                    _ => false,
+                },
+                ExprKind::PointerCast {
+                    ptr: lhs_ptr,
+                    ty: lhs_ty,
+                } => match rhs_kind {
+                    ExprKind::PointerCast {
+                        ptr: rhs_ptr,
+                        ty: rhs_ty,
+                    } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr) && lhs_ty == rhs_ty
+                    }
+                    _ => false,
+                },
+                ExprKind::Add {
+                    lhs: lhs_lhs,
+                    rhs: lhs_rhs,
+                } => match rhs_kind {
+                    ExprKind::Add {
+                        lhs: rhs_lhs,
+                        rhs: rhs_rhs,
+                    } => {
+                        equivalent_value!(lhs_lhs, rhs_lhs)
+                            && equivalent_value!(lhs_rhs, rhs_rhs)
+                    }
+                    _ => false,
+                },
+                ExprKind::Mul {
+                    lhs: lhs_lhs,
+                    rhs: lhs_rhs,
+                } => match rhs_kind {
+                    ExprKind::Mul {
+                        lhs: rhs_lhs,
+                        rhs: rhs_rhs,
+                    } => {
+                        equivalent_value!(lhs_lhs, rhs_lhs)
+                            && equivalent_value!(lhs_rhs, rhs_rhs)
+                    }
+                    _ => false,
+                },
+                ExprKind::PrimCast {
+                    value: lhs_value,
+                    prim_type: lhs_prim_type,
+                } => match rhs_kind {
+                    ExprKind::PrimCast {
+                        value: rhs_value,
+                        prim_type: rhs_prim_type,
+                    } => {
+                        equivalent_value!(lhs_value, rhs_value)
+                            && lhs_prim_type == rhs_prim_type
+                    }
+                    _ => false,
+                },
+                ExprKind::PhysicalDowncast {
+                    obj: lhs_obj,
+                    ty: lhs_ty,
+                } => match rhs_kind {
+                    ExprKind::PhysicalDowncast {
+                        obj: rhs_obj,
+                        ty: rhs_ty,
+                    } => {
+                        equivalent_value!(lhs_obj, rhs_obj) && lhs_ty == rhs_ty
+                    }
+                    _ => false,
+                },
+                ExprKind::ReadValue {
+                    ptr: lhs_ptr,
+                    prim_type: lhs_prim_type,
+                } => match rhs_kind {
+                    ExprKind::ReadValue {
+                        ptr: rhs_ptr,
+                        prim_type: rhs_prim_type,
+                    } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr)
+                            && lhs_prim_type == rhs_prim_type
+                    }
+                    _ => false,
+                },
+            };
+
+            if !is_match {
+                return false;
+            }
+        }
+
+        true
     }
 }
 
