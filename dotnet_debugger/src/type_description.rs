@@ -3,8 +3,8 @@ use std::borrow::Borrow;
 use memory_reader::{MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    unpack_fields, CachedReader, CorElementType, Error, MethodTable,
-    ReadTypedPointer, RuntimeType, TypedPointer,
+    runtime_type::DotNetType, unpack_fields, CachedReader, CorElementType,
+    Error, MethodTable, ReadTypedPointer, RuntimeType, TypedPointer,
 };
 
 pub struct TypeDescription {
@@ -157,7 +157,9 @@ impl<'a> TypeHandleRef<'a> {
     ) -> Result<(), Error> {
         let runtime_type = method_table.runtime_type(reader)?;
         match runtime_type {
-            RuntimeType::Class { .. } | RuntimeType::ValueType { .. } => {
+            RuntimeType::DotNet(
+                DotNetType::Class { .. } | DotNetType::ValueType { .. },
+            ) => {
                 let row = reader
                     .runtime_module(method_table.module())?
                     .metadata(&reader)?
@@ -208,28 +210,31 @@ impl<'a> TypeHandleRef<'a> {
             RuntimeType::Prim(prim) => {
                 write!(fmt, "{prim}")?;
             }
-            RuntimeType::ValueType {
-                method_table: None, ..
-            } => {
+            RuntimeType::DotNet(DotNetType::ValueType {
+                method_table: None,
+                ..
+            }) => {
                 write!(fmt, "(delayed-load-struct)")?;
             }
-            RuntimeType::Class { method_table: None } => {
+            RuntimeType::DotNet(DotNetType::Class { method_table: None }) => {
                 write!(fmt, "(delayed-load-class)")?;
             }
-            RuntimeType::ValueType {
-                method_table: Some(ptr),
-                ..
-            }
-            | RuntimeType::Class {
-                method_table: Some(ptr),
-            } => {
+            RuntimeType::DotNet(
+                DotNetType::ValueType {
+                    method_table: Some(ptr),
+                    ..
+                }
+                | DotNetType::Class {
+                    method_table: Some(ptr),
+                },
+            ) => {
                 let method_table = reader.method_table(*ptr)?;
                 Self::print_method_table(method_table, fmt, reader)?;
             }
-            RuntimeType::String => {
+            RuntimeType::DotNet(DotNetType::String) => {
                 write!(fmt, "String")?;
             }
-            RuntimeType::Array { method_table, .. } => {
+            RuntimeType::DotNet(DotNetType::Array { method_table, .. }) => {
                 write!(fmt, "Array<")?;
                 if let Some(ptr) = method_table {
                     let method_table = reader.method_table(*ptr)?;
@@ -241,7 +246,10 @@ impl<'a> TypeHandleRef<'a> {
                 }
                 write!(fmt, ">")?;
             }
-            RuntimeType::MultiDimArray { method_table, rank } => {
+            RuntimeType::DotNet(DotNetType::MultiDimArray {
+                method_table,
+                rank,
+            }) => {
                 write!(fmt, "MultiDimArray<{rank}")?;
                 if let Some(ptr) = method_table {
                     write!(fmt, ", ")?;

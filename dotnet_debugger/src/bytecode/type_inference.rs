@@ -2,7 +2,10 @@ use std::collections::HashSet;
 
 use elsa::FrozenMap;
 
-use crate::{runtime_type::RuntimePrimType, CachedReader, Error, RuntimeType};
+use crate::{
+    runtime_type::{DotNetType, RuntimePrimType},
+    CachedReader, Error, RuntimeType,
+};
 
 use super::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
@@ -104,9 +107,10 @@ impl<'a> TypeInference<'a> {
                 }
                 ExprKind::SymbolicDowncast { ty, .. } => {
                     let method_table = ty.method_table(self.reader)?;
-                    RuntimeType::Class {
+                    DotNetType::Class {
                         method_table: Some(method_table),
                     }
+                    .into()
                 }
                 ExprKind::IndexAccess {
                     obj: array,
@@ -116,39 +120,46 @@ impl<'a> TypeInference<'a> {
                     let num_indices = indices.len();
 
                     match array_type {
-                        RuntimeType::Array { .. } if num_indices != 1 => {
+                        RuntimeType::DotNet(DotNetType::Array { .. })
+                            if num_indices != 1 =>
+                        {
                             Err(Error::IncorrectNumberOfIndices {
                                 num_provided: num_indices,
                                 num_expected: 1,
                             })
                         }
-                        RuntimeType::MultiDimArray { rank, .. }
-                            if num_indices != *rank =>
-                        {
+                        RuntimeType::DotNet(DotNetType::MultiDimArray {
+                            rank,
+                            ..
+                        }) if num_indices != *rank => {
                             return Err(Error::IncorrectNumberOfIndices {
                                 num_provided: num_indices,
                                 num_expected: *rank,
                             });
                         }
-                        RuntimeType::MultiDimArray {
-                            method_table: None,
-                            ..
-                        }
-                        | RuntimeType::Array {
-                            method_table: None, ..
-                        } => {
+                        RuntimeType::DotNet(
+                            DotNetType::MultiDimArray {
+                                method_table: None,
+                                ..
+                            }
+                            | DotNetType::Array {
+                                method_table: None, ..
+                            },
+                        ) => {
                             return Err(Error::UnexpectedNullMethodTable(
                                 format!("{}", graph.print(*array)),
                             ));
                         }
-                        RuntimeType::MultiDimArray {
-                            method_table: Some(ptr),
-                            ..
-                        }
-                        | RuntimeType::Array {
-                            method_table: Some(ptr),
-                            ..
-                        } => {
+                        RuntimeType::DotNet(
+                            DotNetType::MultiDimArray {
+                                method_table: Some(ptr),
+                                ..
+                            }
+                            | DotNetType::Array {
+                                method_table: Some(ptr),
+                                ..
+                            },
+                        ) => {
                             let method_table =
                                 self.reader.method_table(*ptr)?;
                             method_table

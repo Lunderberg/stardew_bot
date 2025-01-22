@@ -1,7 +1,7 @@
 use std::ops::Range;
 
 use dotnet_debugger::{
-    FieldContainer, RuntimeObject, RuntimeType, TypedPointer,
+    DotNetType, FieldContainer, RuntimeObject, RuntimeType, TypedPointer,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools as _;
@@ -566,7 +566,7 @@ impl TuiExplorerBuilder {
 
                         if !matches!(
                             runtime_type,
-                            RuntimeType::ValueType { .. }
+                            RuntimeType::DotNet(DotNetType::ValueType { .. })
                         ) {
                             let bytes = reader.read_bytes(byte_range)?;
                             let value = runtime_type.parse(&bytes)?;

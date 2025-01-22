@@ -21,6 +21,34 @@ use crate::{
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
+    DotNet(DotNetType),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum RuntimePrimType {
+    Bool,
+    Char,
+
+    U8,
+    U16,
+    U32,
+    U64,
+    NativeUInt,
+
+    I8,
+    I16,
+    I32,
+    I64,
+    NativeInt,
+
+    F32,
+    F64,
+
+    Ptr,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum DotNetType {
     ValueType {
         /// The MethodTable used to unpack the struct.  This must be
         /// determined from the parent type, since structs do not have
@@ -86,29 +114,6 @@ pub enum RuntimeType {
     },
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum RuntimePrimType {
-    Bool,
-    Char,
-
-    U8,
-    U16,
-    U32,
-    U64,
-    NativeUInt,
-
-    I8,
-    I16,
-    I32,
-    I64,
-    NativeInt,
-
-    F32,
-    F64,
-
-    Ptr,
-}
-
 impl RuntimeType {
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
         match self {
@@ -116,7 +121,7 @@ impl RuntimeType {
                 let prim = prim.parse(bytes)?;
                 Ok(prim.into())
             }
-            RuntimeType::Class { .. } => {
+            RuntimeType::DotNet(DotNetType::Class { .. }) => {
                 // The RuntimeType holds a pointer to the
                 // statically-known type, while the object holds a
                 // pointer to the instance's type.  For example,
@@ -129,18 +134,18 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Object(ptr.into()))
             }
-            RuntimeType::ValueType { .. } => {
+            RuntimeType::DotNet(DotNetType::ValueType { .. }) => {
                 Err(Error::ValueTypeRequiresContextualParsing)
             }
-            RuntimeType::String => {
+            RuntimeType::DotNet(DotNetType::String) => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::String(ptr.into()))
             }
-            RuntimeType::Array { .. } => {
+            RuntimeType::DotNet(DotNetType::Array { .. }) => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::Array(ptr.into()))
             }
-            RuntimeType::MultiDimArray { .. } => {
+            RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::MultiDimArray(ptr.into()))
             }
@@ -150,11 +155,13 @@ impl RuntimeType {
     pub fn size_bytes(&self) -> usize {
         match self {
             RuntimeType::Prim(prim) => prim.size_bytes(),
-            RuntimeType::ValueType { size, .. } => *size,
-            RuntimeType::Class { .. }
-            | RuntimeType::String
-            | RuntimeType::Array { .. }
-            | RuntimeType::MultiDimArray { .. } => Pointer::SIZE,
+            RuntimeType::DotNet(DotNetType::ValueType { size, .. }) => *size,
+            RuntimeType::DotNet(DotNetType::Class { .. })
+            | RuntimeType::DotNet(DotNetType::String)
+            | RuntimeType::DotNet(DotNetType::Array { .. })
+            | RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
+                Pointer::SIZE
+            }
         }
     }
 
@@ -163,22 +170,30 @@ impl RuntimeType {
     pub fn stored_as_ptr(&self) -> bool {
         match self {
             RuntimeType::Prim(_) => false,
-            RuntimeType::ValueType { .. } => false,
-            RuntimeType::Class { .. } => true,
-            RuntimeType::String => true,
-            RuntimeType::Array { .. } => true,
-            RuntimeType::MultiDimArray { .. } => true,
+            RuntimeType::DotNet(DotNetType::ValueType { .. }) => false,
+            RuntimeType::DotNet(DotNetType::Class { .. }) => true,
+            RuntimeType::DotNet(DotNetType::String) => true,
+            RuntimeType::DotNet(DotNetType::Array { .. }) => true,
+            RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => true,
         }
     }
 
     pub fn storage_type(&self) -> Option<RuntimePrimType> {
         match self {
             RuntimeType::Prim(prim_type) => Some(*prim_type),
-            RuntimeType::ValueType { .. } => None,
-            RuntimeType::Class { .. } => Some(RuntimePrimType::Ptr),
-            RuntimeType::String => Some(RuntimePrimType::Ptr),
-            RuntimeType::Array { .. } => Some(RuntimePrimType::Ptr),
-            RuntimeType::MultiDimArray { .. } => Some(RuntimePrimType::Ptr),
+            RuntimeType::DotNet(DotNetType::ValueType { .. }) => None,
+            RuntimeType::DotNet(DotNetType::Class { .. }) => {
+                Some(RuntimePrimType::Ptr)
+            }
+            RuntimeType::DotNet(DotNetType::String) => {
+                Some(RuntimePrimType::Ptr)
+            }
+            RuntimeType::DotNet(DotNetType::Array { .. }) => {
+                Some(RuntimePrimType::Ptr)
+            }
+            RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
+                Some(RuntimePrimType::Ptr)
+            }
         }
     }
 
@@ -188,11 +203,13 @@ impl RuntimeType {
     pub(crate) fn builtin_class_name(&self) -> Option<&'static str> {
         match self {
             RuntimeType::Prim(prim) => prim.builtin_class_name(),
-            RuntimeType::String => Some("System.Private.CoreLib.String"),
-            RuntimeType::ValueType { .. }
-            | RuntimeType::Class { .. }
-            | RuntimeType::Array { .. }
-            | RuntimeType::MultiDimArray { .. } => None,
+            RuntimeType::DotNet(DotNetType::String) => {
+                Some("System.Private.CoreLib.String")
+            }
+            RuntimeType::DotNet(DotNetType::ValueType { .. })
+            | RuntimeType::DotNet(DotNetType::Class { .. })
+            | RuntimeType::DotNet(DotNetType::Array { .. })
+            | RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => None,
         }
     }
 
@@ -201,9 +218,13 @@ impl RuntimeType {
         gen_name: impl FnOnce() -> String,
     ) -> Result<TypedPointer<MethodTable>, Error> {
         match self {
-            RuntimeType::ValueType { method_table, .. }
-            | RuntimeType::Class { method_table } => method_table
-                .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name())),
+            RuntimeType::DotNet(DotNetType::ValueType {
+                method_table, ..
+            })
+            | RuntimeType::DotNet(DotNetType::Class { method_table }) => {
+                method_table
+                    .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name()))
+            }
             _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
         }
     }
@@ -212,7 +233,7 @@ impl RuntimeType {
         &self,
     ) -> Result<TypedPointer<MethodTable>, Error> {
         match self {
-            RuntimeType::Class { method_table } => {
+            RuntimeType::DotNet(DotNetType::Class { method_table }) => {
                 method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
             }
             _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
@@ -364,41 +385,44 @@ impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeType::Prim(prim) => write!(f, "{prim}"),
-            RuntimeType::ValueType {
+            RuntimeType::DotNet(DotNetType::ValueType {
                 method_table: Some(method_table),
                 size,
-            } => {
+            }) => {
                 write!(f, "struct({size} bytes, vtable {method_table})")
             }
-            RuntimeType::ValueType {
+            RuntimeType::DotNet(DotNetType::ValueType {
                 method_table: None,
                 size,
-            } => {
+            }) => {
                 write!(f, "struct({size} bytes, unknown vtable)")
             }
-            RuntimeType::Class { .. } => write!(f, "Object"),
-            RuntimeType::String => write!(f, "String"),
-            RuntimeType::Array {
-                method_table: None, ..
-            } => {
+            RuntimeType::DotNet(DotNetType::Class { .. }) => {
+                write!(f, "Object")
+            }
+            RuntimeType::DotNet(DotNetType::String) => write!(f, "String"),
+            RuntimeType::DotNet(DotNetType::Array {
+                method_table: None,
+                ..
+            }) => {
                 write!(f, "array(unknown vtable)")
             }
-            RuntimeType::Array {
+            RuntimeType::DotNet(DotNetType::Array {
                 method_table: Some(method_table),
                 ..
-            } => {
+            }) => {
                 write!(f, "array(vtable {method_table})")
             }
-            RuntimeType::MultiDimArray {
+            RuntimeType::DotNet(DotNetType::MultiDimArray {
                 method_table: None,
                 rank,
-            } => {
+            }) => {
                 write!(f, "array_nd({rank}, unknown vtable)")
             }
-            RuntimeType::MultiDimArray {
+            RuntimeType::DotNet(DotNetType::MultiDimArray {
                 method_table: Some(method_table),
                 rank,
-            } => {
+            }) => {
                 write!(f, "array({rank}, vtable {method_table})")
             }
         }
@@ -460,6 +484,12 @@ impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
 impl From<RuntimePrimType> for RuntimeType {
     fn from(prim: RuntimePrimType) -> Self {
         RuntimeType::Prim(prim)
+    }
+}
+
+impl From<DotNetType> for RuntimeType {
+    fn from(dot_net_type: DotNetType) -> Self {
+        RuntimeType::DotNet(dot_net_type)
     }
 }
 

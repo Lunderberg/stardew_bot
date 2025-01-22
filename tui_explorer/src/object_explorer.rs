@@ -11,8 +11,9 @@ use ratatui::{
 };
 
 use dotnet_debugger::{
-    CachedReader, FieldContainer, FieldDescription, MethodTable, RuntimeType,
-    RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue, TypedPointer,
+    CachedReader, DotNetType, FieldContainer, FieldDescription, MethodTable,
+    RuntimeType, RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue,
+    TypedPointer,
 };
 use memory_reader::{OwnedBytes, Pointer};
 use tui_utils::{
@@ -824,10 +825,12 @@ impl ObjectTreeNode {
 
         let node = match runtime_type {
             RuntimeType::Prim(_)
-            | RuntimeType::Class { .. }
-            | RuntimeType::String
-            | RuntimeType::Array { .. }
-            | RuntimeType::MultiDimArray { .. } => {
+            | RuntimeType::DotNet(
+                DotNetType::Class { .. }
+                | DotNetType::String
+                | DotNetType::Array { .. }
+                | DotNetType::MultiDimArray { .. },
+            ) => {
                 let opt_bytes = prefetch
                     .iter()
                     .find(|bytes| bytes.contains_range(location.clone()));
@@ -845,16 +848,17 @@ impl ObjectTreeNode {
                 }
             }
 
-            RuntimeType::ValueType {
-                method_table: None, ..
-            } => {
+            RuntimeType::DotNet(DotNetType::ValueType {
+                method_table: None,
+                ..
+            }) => {
                 return Err(Error::MissingMethodTableOfValueType);
             }
 
-            RuntimeType::ValueType {
+            RuntimeType::DotNet(DotNetType::ValueType {
                 method_table: Some(field_method_table),
                 ..
-            } => {
+            }) => {
                 let class_name = get_class_name(field_method_table, reader)?;
 
                 let fields = reader
@@ -992,17 +996,19 @@ impl ObjectTreeNode {
                 let ptr: Pointer = ptr.into();
                 let runtime_type = method_table.runtime_type(reader)?;
                 let opt_value = match runtime_type {
-                    RuntimeType::String => {
+                    RuntimeType::DotNet(DotNetType::String) => {
                         Some(RuntimeValue::String(ptr.into()))
                     }
 
-                    RuntimeType::Array { .. } => {
+                    RuntimeType::DotNet(DotNetType::Array { .. }) => {
                         Some(RuntimeValue::Array(ptr.into()))
                     }
                     RuntimeType::Prim(_)
-                    | RuntimeType::ValueType { .. }
-                    | RuntimeType::Class { .. }
-                    | RuntimeType::MultiDimArray { .. } => None,
+                    | RuntimeType::DotNet(
+                        DotNetType::ValueType { .. }
+                        | DotNetType::Class { .. }
+                        | DotNetType::MultiDimArray { .. },
+                    ) => None,
                 };
                 if let Some(value) = opt_value {
                     *self = ObjectTreeNode::Value {

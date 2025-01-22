@@ -14,7 +14,7 @@ use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
 
-use crate::runtime_type::RuntimePrimType;
+use crate::runtime_type::{DotNetType, RuntimePrimType};
 use crate::{
     extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
     TypeHandle,
@@ -411,13 +411,13 @@ impl<'a> CachedReader<'a> {
 
         let is_complete = match &runtime_type {
             RuntimeType::Prim(..) => true,
-            RuntimeType::ValueType { .. } => true,
-            RuntimeType::String => true,
-            RuntimeType::Class { method_table }
-            | RuntimeType::Array { method_table, .. }
-            | RuntimeType::MultiDimArray { method_table, .. } => {
-                method_table.is_some()
-            }
+            RuntimeType::DotNet(DotNetType::ValueType { .. }) => true,
+            RuntimeType::DotNet(DotNetType::String) => true,
+            RuntimeType::DotNet(
+                DotNetType::Class { method_table }
+                | DotNetType::Array { method_table, .. }
+                | DotNetType::MultiDimArray { method_table, .. },
+            ) => method_table.is_some(),
         };
 
         if is_complete {
@@ -597,12 +597,12 @@ impl<'a> CachedReader<'a> {
                     })
                     .transpose()?
                     .unwrap_or(0);
-                RuntimeType::ValueType { method_table, size }
+                DotNetType::ValueType { method_table, size }.into()
             }
             SignatureType::Class { index, .. } => {
                 let method_table =
                     self.method_table_by_metadata(module_ptr, index)?;
-                RuntimeType::Class { method_table }
+                DotNetType::Class { method_table }.into()
             }
 
             SignatureType::GenericInst {
@@ -758,14 +758,14 @@ impl<'a> CachedReader<'a> {
                                            }).join(", ")
                                    ))
                                } else if is_value_type && allow_missing {
-                                   Ok(RuntimeType::ValueType {
+                                   Ok(DotNetType::ValueType {
                                        method_table: None,
                                        size: 0,
-                                   })
+                                   }.into())
                                } else {
-                                   Ok(RuntimeType::Class {
+                                   Ok(DotNetType::Class {
                                         method_table: None,
-                                    })
+                                    }.into())
                                }
                             },
                             |method_table_ptr: TypedPointer<MethodTable>|
@@ -774,14 +774,14 @@ impl<'a> CachedReader<'a> {
                                     let size = self
                                         .method_table(method_table_ptr)?
                                         .base_size();
-                                    RuntimeType::ValueType {
+                                    DotNetType::ValueType {
                                         method_table: Some(method_table_ptr),
                                         size,
-                                    }
+                                    }.into()
                                 } else {
-                                    RuntimeType::Class {
+                                    DotNetType::Class {
                                         method_table: Some(method_table_ptr),
-                                    }
+                                    }.into()
                                 };
                                 Ok(runtime_type)
                             },
@@ -796,7 +796,7 @@ impl<'a> CachedReader<'a> {
                 // more convenient than identifying strings by
                 // the use of the `System.String` method
                 // table.
-                RuntimeType::String
+                DotNetType::String.into()
             }
             SignatureType::GenericVarFromType(var_index) => {
                 let generic_types = self
@@ -855,9 +855,10 @@ impl<'a> CachedReader<'a> {
                     .transpose()?
                     .flatten();
 
-                RuntimeType::Array {
+                DotNetType::Array {
                     method_table: array_method_table,
                 }
+                .into()
             }
 
             SignatureType::MultiDimArray {
@@ -876,15 +877,16 @@ impl<'a> CachedReader<'a> {
                     .transpose()?
                     .flatten();
 
-                RuntimeType::MultiDimArray {
+                DotNetType::MultiDimArray {
                     method_table: array_method_table,
                     rank,
                 }
+                .into()
             }
             SignatureType::Object => {
                 let method_table =
                     self.method_table_by_name("System.Object")?;
-                RuntimeType::Class { method_table }
+                DotNetType::Class { method_table }.into()
             }
 
             other => {
@@ -911,13 +913,13 @@ impl<'a> CachedReader<'a> {
                         // within the class library.
                         None
                     }
-                    RuntimeType::ValueType { method_table, .. }
-                    | RuntimeType::Class { method_table }
-                    | RuntimeType::Array { method_table, .. }
-                    | RuntimeType::MultiDimArray { method_table, .. } => {
-                        *method_table
-                    }
-                    RuntimeType::String => {
+                    RuntimeType::DotNet(
+                        DotNetType::ValueType { method_table, .. }
+                        | DotNetType::Class { method_table }
+                        | DotNetType::Array { method_table, .. }
+                        | DotNetType::MultiDimArray { method_table, .. },
+                    ) => *method_table,
+                    RuntimeType::DotNet(DotNetType::String) => {
                         unreachable!("Handled with builtin_class_name")
                     }
                 }

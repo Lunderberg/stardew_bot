@@ -134,14 +134,14 @@ fn default_comparison_ignores_name() {
     let lhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_name");
+        graph.name(obj, "some_name").unwrap();
         graph.mark_output(obj);
         graph
     };
     let rhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_other_name");
+        graph.name(obj, "some_other_name").unwrap();
         graph.mark_output(obj);
         graph
     };
@@ -154,14 +154,14 @@ fn name_dependent_comparison_may_be_applied() {
     let lhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_name");
+        graph.name(obj, "some_name").unwrap();
         graph.mark_output(obj);
         graph
     };
     let rhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_other_name");
+        graph.name(obj, "some_other_name").unwrap();
         graph.mark_output(obj);
         graph
     };
@@ -174,14 +174,14 @@ fn comparison_may_be_order_and_name_dependent() {
     let lhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_name");
+        graph.name(obj, "some_name").unwrap();
         graph.mark_output(obj);
         graph
     };
     let rhs = {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
-        graph.name(obj, "some_other_name");
+        graph.name(obj, "some_other_name").unwrap();
         graph.mark_output(obj);
         graph
     };

@@ -8,8 +8,9 @@ use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    unpack_fields, CorElementType, Error, FieldDescription, FieldDescriptions,
-    ReadTypedPointer, RuntimeModule, RuntimeType, TypeHandle, TypedPointer,
+    runtime_type::DotNetType, unpack_fields, CorElementType, Error,
+    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
+    RuntimeType, TypeHandle, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -118,11 +119,14 @@ impl MethodTable {
         let type_flag = flags & 0x000F0000;
 
         if type_flag == 0 && self.component_size() == Some(2) {
-            Some(RuntimeType::String)
+            Some(DotNetType::String.into())
         } else if type_flag == 0 {
-            Some(RuntimeType::Class {
-                method_table: Some(self.ptr()),
-            })
+            Some(
+                DotNetType::Class {
+                    method_table: Some(self.ptr()),
+                }
+                .into(),
+            )
         } else if type_flag == 0x000A0000 {
             // This is a dyanamically-sized 1-d array.
             None
@@ -132,10 +136,13 @@ impl MethodTable {
             // metadata to unpack.
             None
         } else if type_flag == 0x00040000 || type_flag == 0x00050000 {
-            Some(RuntimeType::ValueType {
-                method_table: Some(self.ptr()),
-                size: self.base_size(),
-            })
+            Some(
+                DotNetType::ValueType {
+                    method_table: Some(self.ptr()),
+                    size: self.base_size(),
+                }
+                .into(),
+            )
         } else if type_flag == 0x00070000 {
             // This is a RuntimePrimType, but which primitive type
             // cannot be determined solely from the MethodTable.
@@ -146,18 +153,24 @@ impl MethodTable {
             // This is a primitive type, but not a "true
             // primitive" type.  I think this just means that it's
             // a user-defined enum.
-            Some(RuntimeType::ValueType {
-                method_table: Some(self.ptr()),
-                size: self.base_size(),
-            })
+            Some(
+                DotNetType::ValueType {
+                    method_table: Some(self.ptr()),
+                    size: self.base_size(),
+                }
+                .into(),
+            )
         } else if type_flag == 0x000C0000 {
             // This is the method table for an interface.  Since I'm
             // only interested in the fields, this doesn't given any
             // useful information, but is valid.  Treating it as if it
             // is a Class, for now.
-            Some(RuntimeType::Class {
-                method_table: Some(self.ptr()),
-            })
+            Some(
+                DotNetType::Class {
+                    method_table: Some(self.ptr()),
+                }
+                .into(),
+            )
         } else {
             None
         }
@@ -186,7 +199,10 @@ impl MethodTable {
     }
 
     pub fn is_string(&self) -> bool {
-        matches!(self.local_runtime_type(), Some(RuntimeType::String))
+        matches!(
+            self.local_runtime_type(),
+            Some(RuntimeType::DotNet(DotNetType::String))
+        )
     }
 
     pub fn is_prim_type(&self) -> bool {
@@ -231,19 +247,21 @@ impl MethodTable {
         if let Some(ty) = self.local_runtime_type() {
             Ok(ty)
         } else if self.is_array() {
-            Ok(RuntimeType::Array {
+            Ok(DotNetType::Array {
                 method_table: Some(self.ptr()),
-            })
+            }
+            .into())
         } else if self.is_multi_dim_array() {
             let reader = reader.borrow();
             let rank = self.multi_dim_rank(reader)?.expect(
                 "Multi-dim rank is always present \
                  for multi-dim array",
             );
-            Ok(RuntimeType::MultiDimArray {
+            Ok(DotNetType::MultiDimArray {
                 method_table: Some(self.ptr()),
                 rank,
-            })
+            }
+            .into())
         } else if self.is_prim_type() {
             let reader = reader.borrow();
             let ee_class = self.get_ee_class(reader)?;

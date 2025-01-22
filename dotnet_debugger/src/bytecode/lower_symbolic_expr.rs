@@ -1,8 +1,8 @@
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_type::RuntimePrimType, Error, RuntimeArray, RuntimeMultiDimArray,
-    RuntimeType,
+    runtime_type::{DotNetType, RuntimePrimType},
+    Error, RuntimeArray, RuntimeMultiDimArray, RuntimeType,
 };
 
 use super::{
@@ -76,7 +76,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 // additional pointer to their method table, prior to
                 // the first data member.
                 let ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
-                let ptr = if matches!(obj_type, RuntimeType::Class { .. }) {
+                let ptr = if matches!(
+                    obj_type,
+                    RuntimeType::DotNet(DotNetType::Class { .. })
+                ) {
                     graph.add(ptr, Pointer::SIZE)
                 } else {
                     ptr
@@ -92,8 +95,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let array_type = self.0.infer_type(graph, array)?;
 
                 let (element_type, component_size) = match array_type {
-                    RuntimeType::Array { method_table, .. }
-                    | RuntimeType::MultiDimArray { method_table, .. } => {
+                    RuntimeType::DotNet(
+                        DotNetType::Array { method_table, .. }
+                        | DotNetType::MultiDimArray { method_table, .. },
+                    ) => {
                         let method_table = method_table.ok_or_else(|| {
                             Error::UnexpectedNullMethodTable(format!(
                                 "{}",
@@ -117,7 +122,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 }?;
 
                 let (header_size_bytes, shape) = match array_type {
-                    RuntimeType::Array { .. } => {
+                    RuntimeType::DotNet(DotNetType::Array { .. }) => {
                         let header_size_bytes = RuntimeArray::HEADER_SIZE;
                         let num_elements_ptr = graph.add(array, Pointer::SIZE);
                         let num_elements = graph
@@ -129,7 +134,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                         let shape = vec![num_elements];
                         Ok((header_size_bytes, shape))
                     }
-                    RuntimeType::MultiDimArray { rank, .. } => {
+                    RuntimeType::DotNet(DotNetType::MultiDimArray {
+                        rank,
+                        ..
+                    }) => {
                         let rank = *rank;
 
                         let shape_start =
@@ -231,9 +239,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let ptr = graph.physical_downcast(ptr, target_method_table_ptr);
                 let expr = graph.pointer_cast(
                     ptr,
-                    RuntimeType::Class {
+                    DotNetType::Class {
                         method_table: Some(target_method_table_ptr),
-                    },
+                    }
+                    .into(),
                 );
 
                 Some(expr)
@@ -242,8 +251,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let array = *array;
                 let array_type = self.0.infer_type(graph, array)?;
                 let expr = match array_type {
-                    RuntimeType::Array { .. }
-                    | RuntimeType::MultiDimArray { .. } => {
+                    RuntimeType::DotNet(
+                        DotNetType::Array { .. }
+                        | DotNetType::MultiDimArray { .. },
+                    ) => {
                         let ptr = graph.prim_cast(array, RuntimePrimType::Ptr);
                         let num_elements_ptr = graph.add(ptr, Pointer::SIZE);
                         let expr = graph
@@ -266,7 +277,9 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let array_type = self.0.infer_type(graph, array)?;
 
                 let expr = match array_type {
-                    RuntimeType::MultiDimArray { .. } => {
+                    RuntimeType::DotNet(DotNetType::MultiDimArray {
+                        ..
+                    }) => {
                         // TODO: Assert that `dim < rank`.  Will
                         // require implementing support for runtime
                         // assertions.
