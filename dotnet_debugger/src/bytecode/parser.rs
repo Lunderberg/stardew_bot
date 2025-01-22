@@ -1,4 +1,4 @@
-use std::ops::Range;
+use std::{collections::HashMap, ops::Range};
 
 use itertools::Itertools as _;
 use thiserror::Error;
@@ -8,6 +8,7 @@ use crate::Error;
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
+    identifiers: HashMap<&'a str, SymbolicValue>,
     graph: &'a mut SymbolicGraph,
 }
 
@@ -80,6 +81,7 @@ pub enum TokenKind {
     Ident,
     Int(usize),
     Punct(Punctuation),
+    Keyword(Keyword),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,6 +95,13 @@ pub enum Punctuation {
     RightAngleBracket,
     LeftSquareBracket,
     RightSquareBracket,
+    Semicolon,
+    SingleEquals,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum Keyword {
+    Let,
 }
 
 impl TokenKind {
@@ -107,7 +116,11 @@ impl TokenKind {
 impl<'a> SymbolicParser<'a> {
     pub(crate) fn new(text: &'a str, graph: &'a mut SymbolicGraph) -> Self {
         let tokens = SymbolicTokenizer::new(text);
-        Self { tokens, graph }
+        Self {
+            tokens,
+            identifiers: HashMap::new(),
+            graph,
+        }
     }
 
     pub fn parse_expr(&mut self) -> Result<SymbolicValue, Error> {
@@ -117,11 +130,36 @@ impl<'a> SymbolicParser<'a> {
     }
 
     fn next_expr(&mut self) -> Result<SymbolicValue, Error> {
+        while let Some(keyword) = self.try_keyword()? {
+            match keyword {
+                Keyword::Let => self.expect_assignment()?,
+            }
+        }
+
         if let Some(value) = self.try_int()? {
             return Ok(SymbolicValue::Int(value));
         }
 
-        let mut obj = self.next_static_field()?;
+        let opt_var_name = self
+            .tokens
+            .next_if(|token| {
+                matches!(token.kind, TokenKind::Ident)
+                    && self.identifiers.contains_key(token.text)
+            })?
+            .map(|token| token.text);
+
+        let mut obj = if let Some(var_name) = opt_var_name {
+            self.identifiers
+                .get(var_name)
+                .cloned()
+                .expect("Unreachable due to earlier check on self.identifiers")
+        } else {
+            // TODO: Implement a way to specify a static field, even if
+            // the leading identifier would otherwise resolve to a
+            // variable definition.  Maybe with a leading . to specify the
+            // global scope?
+            self.next_static_field()?
+        };
 
         loop {
             if let Some(field) = self.try_field_name()? {
@@ -148,6 +186,18 @@ impl<'a> SymbolicParser<'a> {
         }
     }
 
+    fn try_keyword(&mut self) -> Result<Option<Keyword>, Error> {
+        let opt_keyword = self
+            .tokens
+            .next_if(|token| matches!(token.kind, TokenKind::Keyword(_)))?
+            .map(|token| match token.kind {
+                TokenKind::Keyword(keyword) => keyword,
+                _ => unreachable!("Handled by earlier check"),
+            });
+
+        Ok(opt_keyword)
+    }
+
     fn try_int(&mut self) -> Result<Option<usize>, Error> {
         let opt_index = self
             .tokens
@@ -158,6 +208,23 @@ impl<'a> SymbolicParser<'a> {
             });
 
         Ok(opt_index)
+    }
+
+    fn expect_assignment(&mut self) -> Result<(), Error> {
+        let var_name = self.expect_ident("variable name")?.text;
+        self.expect_punct(
+            "'=' after varabile name in assignment",
+            Punctuation::SingleEquals,
+        )?;
+        let expr = self.next_expr()?;
+        self.expect_punct(
+            "';' after variable assignment",
+            Punctuation::Semicolon,
+        )?;
+
+        self.identifiers.insert(var_name, expr);
+
+        Ok(())
     }
 
     fn next_static_field(&mut self) -> Result<SymbolicValue, Error> {
@@ -450,6 +517,15 @@ impl<'a> SymbolicParser<'a> {
     }
 }
 
+impl Keyword {
+    fn from_string(ident: &str) -> Option<Self> {
+        match ident {
+            "let" => Some(Keyword::Let),
+            _ => None,
+        }
+    }
+}
+
 impl<'a> SymbolicTokenizer<'a> {
     fn new(text: &'a str) -> Self {
         Self {
@@ -512,6 +588,8 @@ impl<'a> SymbolicTokenizer<'a> {
             '>' => TokenKind::Punct(Punctuation::RightAngleBracket),
             '[' => TokenKind::Punct(Punctuation::LeftSquareBracket),
             ']' => TokenKind::Punct(Punctuation::RightSquareBracket),
+            ';' => TokenKind::Punct(Punctuation::Semicolon),
+            '=' => TokenKind::Punct(Punctuation::SingleEquals),
             ':' => {
                 let (next_loc, next) = self.text[start..]
                     .char_indices()
@@ -561,7 +639,10 @@ impl<'a> SymbolicTokenizer<'a> {
                     })
                     .map(|(i, _)| i)
                     .unwrap_or_else(|| self.text.len() - start);
-                TokenKind::Ident
+
+                Keyword::from_string(&self.text[start..start + num_bytes])
+                    .map(|keyword| TokenKind::Keyword(keyword))
+                    .unwrap_or(TokenKind::Ident)
             }
             _ => {
                 return Err(ParseError::UnexpectedChar {

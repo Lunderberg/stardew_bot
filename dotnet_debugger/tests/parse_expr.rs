@@ -118,11 +118,26 @@ fn parse_array_extent_dynamic_dim() {
 
 #[test]
 fn parse_array_prim_cast() {
-    // TODO: Parse prim_cast
     require_identical_graph("class_name.static_field.as::<Ptr>()", |graph| {
         let obj = graph.static_field("class_name", "static_field");
         graph.prim_cast(obj, RuntimePrimType::Ptr);
     });
+}
+
+#[test]
+fn parse_shared_expression() {
+    require_identical_graph(
+        "let _0 = class_name.field_name;\n\
+         let _1 = _0.active_slot;\n\
+         _0.items[_1]\
+         ",
+        |graph| {
+            let inventory = graph.static_field("class_name", "field_name");
+            let active_slot = graph.access_field(inventory, "active_slot");
+            let items = graph.access_field(inventory, "items");
+            graph.access_index(items, active_slot);
+        },
+    );
 }
 
 // #[test]
