@@ -116,3 +116,31 @@ fn print_downcast_with_zwsp() {
                     \u{200B}>()";
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_field_access() {
+    check_printed_expr(
+        "class_name.static_field_name.instance_field_name",
+        |graph| {
+            let obj = graph.static_field("class_name", "static_field_name");
+            graph.access_field(obj, "instance_field_name")
+        },
+    );
+}
+
+#[test]
+fn expression_printing_ignores_unreachable_nodes() {
+    // When printing a specific expression, only inputs that
+    // contribute to that expression should be printed.
+    check_printed_expr(
+        "class_name.static_field_name.instance_field_name",
+        |graph| {
+            let obj = graph.static_field("class_name", "static_field_name");
+            let other_field =
+                graph.access_field(obj, "other_instance_field_name");
+            graph.access_field(other_field, "x");
+            graph.access_field(other_field, "y");
+            graph.access_field(obj, "instance_field_name")
+        },
+    );
+}
