@@ -142,5 +142,19 @@ fn expression_printing_ignores_unreachable_nodes() {
             graph.access_field(other_field, "y");
             graph.access_field(obj, "instance_field_name")
         },
+    )
+}
+
+#[test]
+fn print_shared_expression() {
+    check_printed_expr(
+        "let _0 = class_name.field_name;\n\
+         _0.x + _0.y",
+        |graph| {
+            let point = graph.static_field("class_name", "field_name");
+            let x = graph.access_field(point, "x");
+            let y = graph.access_field(point, "y");
+            graph.add(x, y)
+        },
     );
 }
