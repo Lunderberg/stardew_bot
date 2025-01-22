@@ -307,6 +307,13 @@ pub enum Error {
         value: RuntimePrimValue,
         prim_type: RuntimePrimType,
     },
+
+    #[error(
+        "Invalid node name: '{0}'.  \
+         Node names beginning with underscore \
+         followed by a digit are reserved for internal use."
+    )]
+    AttemptedUseOfReservedName(String),
 }
 
 impl std::fmt::Debug for Error {

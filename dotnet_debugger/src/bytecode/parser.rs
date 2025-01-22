@@ -222,6 +222,24 @@ impl<'a> SymbolicParser<'a> {
             Punctuation::Semicolon,
         )?;
 
+        if SymbolicGraph::is_reserved_name(var_name) {
+            // The variable name is a reserved name.  It may be an
+            // anonymous placeholder, or it may be an actual name,
+            // prefixed by `_{index}_` to avoid ambiguity.
+
+            let mut char_iter = var_name.char_indices().peekable();
+            char_iter.next();
+            while let Some(_) = char_iter.next_if(|(_, c)| c.is_ascii_digit()) {
+            }
+            char_iter.next();
+
+            if let Some((char_index, _)) = char_iter.next() {
+                self.graph.name(expr, &var_name[char_index..])?;
+            }
+        } else {
+            self.graph.name(expr, var_name)?;
+        }
+
         self.identifiers.insert(var_name, expr);
 
         Ok(())

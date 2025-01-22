@@ -57,7 +57,7 @@ fn print_named_object() {
     let mut graph = SymbolicGraph::new();
     let obj = graph.static_field("class_name", "field_name");
     let subfield = graph.access_field(obj, "subfield");
-    graph.name(subfield, "obj");
+    graph.name(subfield, "obj").unwrap();
     let active_index = graph.access_field(subfield, "active_index");
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
@@ -84,9 +84,9 @@ fn print_named_intermediate_object() {
     let mut graph = SymbolicGraph::new();
     let obj = graph.static_field("class_name", "field_name");
     let subfield = graph.access_field(obj, "subfield");
-    graph.name(subfield, "obj");
+    graph.name(subfield, "obj").unwrap();
     let active_index = graph.access_field(subfield, "active_index");
-    graph.name(active_index, "index");
+    graph.name(active_index, "index").unwrap();
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
     graph.mark_output(item);
@@ -119,9 +119,9 @@ fn print_with_duplicate_names() {
     let mut graph = SymbolicGraph::new();
     let obj = graph.static_field("class_name", "field_name");
     let subfield = graph.access_field(obj, "subfield");
-    graph.name(subfield, "obj");
+    graph.name(subfield, "obj").unwrap();
     let active_index = graph.access_field(subfield, "active_index");
-    graph.name(active_index, "obj");
+    graph.name(active_index, "obj").unwrap();
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
     graph.mark_output(item);

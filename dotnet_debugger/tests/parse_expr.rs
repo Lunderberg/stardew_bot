@@ -16,6 +16,9 @@ fn require_identical_graph(
         graph
     };
 
+    println!("----------- Parsed -------------\n{parsed}");
+    println!("----------- Expected -------------\n{expected}");
+
     assert!(parsed
         .graph_comparison(&expected)
         .order_dependent(true)
@@ -126,6 +129,11 @@ fn parse_array_prim_cast() {
 
 #[test]
 fn parse_shared_expression() {
+    // If an expression is shared, it will be printed as a variable
+    // binding, followed by usage of that binding.  These anonymous
+    // variables consist of an underscore followed by an instruction
+    // index.  This pattern should be recognized, and should not
+    // produce named nodes in the parsed graph.
     require_identical_graph(
         "let _0 = class_name.field_name;\n\
          let _1 = _0.active_slot;\n\
@@ -133,9 +141,53 @@ fn parse_shared_expression() {
          ",
         |graph| {
             let inventory = graph.static_field("class_name", "field_name");
-            let active_slot = graph.access_field(inventory, "active_slot");
+            let index = graph.access_field(inventory, "active_slot");
             let items = graph.access_field(inventory, "items");
-            graph.access_index(items, active_slot);
+            graph.access_index(items, index);
+        },
+    );
+}
+
+#[test]
+fn parse_named_expression() {
+    // An expression may have an explicit name.  When parsing a
+    // variable name, any name that is not an anonymous variable
+    // should result in a named node in the parsed graph.
+    require_identical_graph(
+        "let _0 = class_name.field_name;\n\
+         let index = _0.active_slot;\n\
+         _0.items[index]\
+         ",
+        |graph| {
+            let inventory = graph.static_field("class_name", "field_name");
+            let index = graph.access_field(inventory, "active_slot");
+            graph.name(index, "index").unwrap();
+            let items = graph.access_field(inventory, "items");
+            graph.access_index(items, index);
+        },
+    );
+}
+
+#[test]
+fn parse_named_expressions_with_same_name() {
+    // Variable names are for human readability, and may be repeated
+    // within an expression.  To avoid ambiguity when printing, these
+    // duplicate variable names are prefixed with `_{i}_`.  When
+    // parsing, this prefix should be stripped from the variable name.
+    require_identical_graph(
+        "let _0_obj = class_name.static_field;\n\
+         let _1_obj = _0_obj.instance_field0;\n\
+         let _2_obj = _1_obj.instance_field1;\n\
+         _2_obj.instance_field2\
+         ",
+        |graph| {
+            let obj = graph.static_field("class_name", "static_field");
+            graph.name(obj, "obj").unwrap();
+            let obj = graph.access_field(obj, "instance_field0");
+            graph.name(obj, "obj").unwrap();
+            let obj = graph.access_field(obj, "instance_field1");
+            graph.name(obj, "obj").unwrap();
+            graph.access_field(obj, "instance_field2");
         },
     );
 }

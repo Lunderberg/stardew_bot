@@ -411,10 +411,28 @@ impl SymbolicGraph {
         op_index.into()
     }
 
-    pub fn name(&mut self, value: SymbolicValue, name: impl Into<String>) {
+    pub fn is_reserved_name(name: &str) -> bool {
+        name.starts_with('_')
+            && name
+                .chars()
+                .skip(1)
+                .next()
+                .map(|c| c.is_ascii_digit())
+                .unwrap_or(true)
+    }
+
+    pub fn name(
+        &mut self,
+        value: SymbolicValue,
+        name: impl Into<String>,
+    ) -> Result<(), Error> {
         match value {
             SymbolicValue::Result(op_index) => {
-                self.ops[op_index.0].name = Some(name.into());
+                let name = name.into();
+                if Self::is_reserved_name(name.as_str()) {
+                    return Err(Error::AttemptedUseOfReservedName(name));
+                }
+                self.ops[op_index.0].name = Some(name);
             }
             SymbolicValue::Int(_) | SymbolicValue::Ptr(_) => {
                 // Currently, constants are stored in-line at their
@@ -423,6 +441,7 @@ impl SymbolicGraph {
                 // then they should be name-able.
             }
         }
+        Ok(())
     }
 
     pub fn mark_output(&mut self, value: SymbolicValue) -> ValueToken {
