@@ -149,7 +149,45 @@ pub struct StaticField {
 
 pub struct GraphPrinter<'a> {
     graph: &'a SymbolicGraph,
+
+    /// If true, expand all expressions into non-nested expressions.
+    /// If false, only expand expressions if necessary for unambiguous
+    /// representation of the underlying expression.
+    ///
+    /// As an example of this ambiguity, consider the expression `(x +
+    /// y) + (x + y)`.  Since `(x + y)` shows up multiple times, it
+    /// could be evaluated either once or twice.  When using
+    /// `GraphPrinter`, all subexpressions on the right-hand side of
+    /// an assignment are distinct.
+    ///
+    /// Two evaluations, printed with `expand_all_expressions: true`
+    ///     let _0 = x + y;
+    ///     let _1 = x + y;
+    ///     let _2 = _0 + _1;
+    ///
+    /// Two evaluations, printed with `expand_all_expressions: false`
+    ///     let _2 = (x + y) + (x + y);
+    ///
+    /// One evaluation, printed with `expand_all_expressions: true`
+    ///     let _0 = x + y;
+    ///     let _1 = _0 + _0;
+    ///
+    /// One evaluation, printed with `expand_all_expressions: false`.
+    /// The expression is still expanded into two separate
+    /// assignments, to avoid ambiguity with the earlier case.
+    ///     let _0 = x + y;
+    ///     let _1 = _0 + _0;
     expand_all_expressions: bool,
+
+    /// The subgraph to be printed.  If it contains a value, only
+    /// nodes that are used by the specified value will be printed.
+    /// Otherwise, all nodes will be printed.
+    root_subgraph_node: Option<SymbolicValue>,
+
+    /// If true, insert zero-width spaces at locations that would be
+    /// convenient for line breaks to be inserted.  If false, do not
+    /// insert the zero-width spaces.
+    insert_zero_width_space_at_breakpoint: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -157,7 +195,8 @@ pub struct ExprPrinter<'a> {
     graph: &'a SymbolicGraph,
     value: SymbolicValue,
     is_top_level: bool,
-    display_inline: DisplayInlineExpr<'a>,
+    inline_expr: &'a [bool],
+    requires_name_prefix: &'a [bool],
     insert_zero_width_space_at_breakpoint: bool,
 }
 
@@ -171,6 +210,7 @@ struct TypePrinter<'a> {
 struct IndexPrinter<'a> {
     graph: &'a SymbolicGraph,
     index: OpIndex,
+    requires_name_prefix: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -398,22 +438,19 @@ impl SymbolicGraph {
         GraphPrinter {
             graph: self,
             expand_all_expressions: false,
-        }
-    }
-
-    pub fn print<'a>(&'a self, value: impl Printable) -> ExprPrinter<'a> {
-        let value = value.top_level_value(self);
-        ExprPrinter {
-            graph: self,
-            value,
-            is_top_level: true,
+            root_subgraph_node: None,
             insert_zero_width_space_at_breakpoint: false,
-            display_inline: DisplayInlineExpr::All,
         }
     }
 
-    fn print_index<'a>(&'a self, index: OpIndex) -> IndexPrinter<'a> {
-        IndexPrinter { graph: self, index }
+    pub fn print<'a>(&'a self, value: impl Printable) -> GraphPrinter<'a> {
+        let value = value.top_level_value(self);
+        GraphPrinter {
+            graph: self,
+            root_subgraph_node: Some(value),
+            expand_all_expressions: false,
+            insert_zero_width_space_at_breakpoint: false,
+        }
     }
 
     pub fn is_equivalent_to(&self, other: &Self) -> bool {
@@ -685,35 +722,43 @@ impl SymbolicGraph {
         Ok(builder)
     }
 
+    fn reachable(
+        &self,
+        initial: impl IntoIterator<Item = SymbolicValue>,
+    ) -> Vec<bool> {
+        let mut to_visit: Vec<_> = initial
+            .into_iter()
+            .filter_map(|value| value.as_op_index())
+            .collect();
+
+        let mut reachable = vec![false; self.ops.len()];
+        for index in &to_visit {
+            reachable[index.0] = true;
+        }
+
+        while let Some(visiting) = to_visit.pop() {
+            self[visiting].visit_input_values(|upstream| {
+                if let SymbolicValue::Result(upstream) = upstream {
+                    if !reachable[upstream.0] {
+                        reachable[upstream.0] = true;
+                        to_visit.push(upstream);
+                    }
+                }
+            })
+        }
+
+        reachable
+    }
+
     pub fn dead_code_elimination(self) -> Result<Self, Error> {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
 
-        let reachable = {
-            let mut to_visit: Vec<_> = self
-                .outputs
-                .iter()
-                .filter_map(|value| value.as_op_index())
-                .collect();
-            let mut reachable: HashSet<_> = to_visit.iter().cloned().collect();
-
-            while let Some(visiting) = to_visit.pop() {
-                self[visiting].visit_input_values(|upstream| {
-                    if let SymbolicValue::Result(upstream) = upstream {
-                        if !reachable.contains(&upstream) {
-                            reachable.insert(upstream);
-                            to_visit.push(upstream);
-                        }
-                    }
-                });
-            }
-
-            reachable
-        };
+        let reachable = self.reachable(self.outputs.iter().cloned());
 
         for (prev_index, op) in self.iter_ops() {
-            if reachable.contains(&prev_index) {
+            if reachable[prev_index.0] {
                 let kind = op
                     .kind
                     .try_remap(&prev_index_lookup)
@@ -1157,6 +1202,13 @@ impl<'a> GraphPrinter<'a> {
         }
     }
 
+    pub fn insert_zero_width_space_at_breakpoint(self) -> Self {
+        Self {
+            insert_zero_width_space_at_breakpoint: true,
+            ..self
+        }
+    }
+
     fn display(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let output_lookup: HashMap<_, _> = self
             .graph
@@ -1169,42 +1221,71 @@ impl<'a> GraphPrinter<'a> {
             })
             .collect();
 
-        let inlinable_expressions: Option<HashSet<OpIndex>>;
-        let display_inline = if self.expand_all_expressions {
-            DisplayInlineExpr::None
+        let reachable = if let Some(root_node) = self.root_subgraph_node {
+            self.graph.reachable(std::iter::once(root_node))
+        } else {
+            vec![true; self.graph.ops.len()]
+        };
+
+        let inline_expr: Vec<bool> = if self.expand_all_expressions {
+            vec![false; self.graph.ops.len()]
         } else {
             let mut num_usage = vec![0; self.graph.ops.len()];
-            self.graph.ops.iter().for_each(|op| {
-                op.visit_input_values(|input_value| {
-                    if let SymbolicValue::Result(prev_index) = input_value {
-                        num_usage[prev_index.0] += 1;
+            self.graph
+                .iter_ops()
+                .filter(|(index, _)| reachable[index.0])
+                .for_each(|(_, op)| {
+                    op.visit_input_values(|input_value| {
+                        if let SymbolicValue::Result(prev_index) = input_value {
+                            num_usage[prev_index.0] += 1;
+                        }
+                    })
+                });
+            num_usage
+                .into_iter()
+                .zip(self.graph.ops.iter())
+                .map(|(count, op)| count == 1 && op.name.is_none())
+                .collect()
+        };
+
+        let requires_name_prefix = {
+            let mut requires_name_prefix = vec![false; self.graph.ops.len()];
+            let mut name_lookup: HashMap<&str, OpIndex> = HashMap::new();
+            for (index, op) in self.graph.iter_ops() {
+                if let Some(name) = op.name.as_ref().map(|name| name.as_str()) {
+                    if let Some(prev_index) = name_lookup.get(name) {
+                        requires_name_prefix[index.0] = true;
+                        requires_name_prefix[prev_index.0] = true;
+                    } else {
+                        name_lookup.insert(name, index);
                     }
-                })
-            });
-            inlinable_expressions = Some(
-                self.graph
-                    .iter_ops()
-                    .filter(|(index, _)| num_usage[index.0] == 1)
-                    .filter(|(_, op)| op.name.is_none())
-                    .map(|(index, _)| index)
-                    .collect(),
-            );
-            DisplayInlineExpr::Some(inlinable_expressions.as_ref().unwrap())
+                }
+            }
+
+            requires_name_prefix
+        };
+
+        let make_expr_printer = |value: SymbolicValue| ExprPrinter {
+            graph: self.graph,
+            value,
+            is_top_level: true,
+            inline_expr: &inline_expr,
+            requires_name_prefix: &requires_name_prefix,
+            insert_zero_width_space_at_breakpoint: self
+                .insert_zero_width_space_at_breakpoint,
         };
 
         for (index, _op) in self.graph.iter_ops() {
-            let is_inline = match display_inline {
-                DisplayInlineExpr::All => true,
-                DisplayInlineExpr::Some(set) => set.contains(&index),
-                DisplayInlineExpr::None => false,
-            };
-
-            if !is_inline {
-                let index_printer = self.graph.print_index(index);
-                let expr_printer = self
-                    .graph
-                    .print(SymbolicValue::Result(index))
-                    .display_inline(display_inline);
+            if reachable[index.0]
+                && !inline_expr[index.0]
+                && self.root_subgraph_node != Some(SymbolicValue::Result(index))
+            {
+                let index_printer = IndexPrinter {
+                    graph: self.graph,
+                    index,
+                    requires_name_prefix: requires_name_prefix[index.0],
+                };
+                let expr_printer = make_expr_printer(index.into());
 
                 write!(fmt, "let {index_printer} ")?;
                 if let Some(i) = output_lookup.get(&index) {
@@ -1213,6 +1294,12 @@ impl<'a> GraphPrinter<'a> {
                 writeln!(fmt, "= {expr_printer};")?;
             }
         }
+
+        if let Some(root_node) = self.root_subgraph_node {
+            let expr_printer = make_expr_printer(root_node);
+            write!(fmt, "{expr_printer}")?;
+        }
+
         Ok(())
     }
 }
@@ -1231,20 +1318,6 @@ impl<'a> ExprPrinter<'a> {
             ..self
         }
     }
-
-    fn display_inline(self, display_inline: DisplayInlineExpr<'a>) -> Self {
-        Self {
-            display_inline,
-            ..self
-        }
-    }
-
-    pub fn insert_zero_width_space_at_breakpoint(self) -> Self {
-        Self {
-            insert_zero_width_space_at_breakpoint: true,
-            ..self
-        }
-    }
 }
 
 struct MaybeZeroWidthSpace(bool);
@@ -1260,10 +1333,15 @@ impl Display for MaybeZeroWidthSpace {
 
 impl<'a> Display for IndexPrinter<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let index = self.index.0;
         if let Some(name) = self.graph[self.index].name.as_ref() {
-            write!(f, "{name}")
+            if self.requires_name_prefix {
+                write!(f, "_{index}_{name}")
+            } else {
+                write!(f, "{name}")
+            }
         } else {
-            write!(f, "_{}", self.index.0)
+            write!(f, "_{index}")
         }
     }
 }
@@ -1280,16 +1358,14 @@ impl<'a> Display for ExprPrinter<'a> {
             SymbolicValue::Result(op_index) => op_index,
         };
 
-        let display_full_expr = self.is_top_level
-            || match self.display_inline {
-                DisplayInlineExpr::All => true,
-                DisplayInlineExpr::Some(inlinable) => {
-                    inlinable.contains(&op_index)
-                }
-                DisplayInlineExpr::None => false,
-            };
+        let display_full_expr =
+            self.is_top_level || self.inline_expr[op_index.0];
         if !display_full_expr {
-            let index = self.graph.print_index(op_index);
+            let index = IndexPrinter {
+                graph: self.graph,
+                index: op_index,
+                requires_name_prefix: self.requires_name_prefix[op_index.0],
+            };
             return write!(f, "{index}");
         }
 
