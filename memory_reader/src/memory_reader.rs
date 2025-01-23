@@ -40,6 +40,15 @@ impl MemoryReader {
         .collect()
     }
 
+    pub fn read_exact(
+        &self,
+        pointer: impl Into<Pointer>,
+        output: &mut [u8],
+    ) -> Result<()> {
+        let pointer = pointer.into();
+        pointer.read_exact(self.pid, output)
+    }
+
     pub fn read_byte_array<const N: usize>(
         &self,
         pointer: impl Into<Pointer>,

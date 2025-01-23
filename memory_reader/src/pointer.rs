@@ -92,7 +92,7 @@ impl Pointer {
         Ok(buffer)
     }
 
-    fn read_exact(&self, pid: u32, buffer: &mut [u8]) -> Result<()> {
+    pub fn read_exact(&self, pid: u32, buffer: &mut [u8]) -> Result<()> {
         if self.is_null() {
             return Err(Error::MemoryReadNullPointer);
         }

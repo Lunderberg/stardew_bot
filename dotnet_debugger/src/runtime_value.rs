@@ -36,7 +36,7 @@ pub enum RuntimeValue {
     MultiDimArray(TypedPointer<RuntimeMultiDimArray>),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub enum RuntimePrimValue {
     Bool(bool),
 

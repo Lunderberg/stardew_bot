@@ -115,6 +115,61 @@ pub enum VMExecutionError {
     ReadAppliedToNonPointer(RuntimePrimValue),
 }
 
+pub trait VMReader {
+    fn read_bytes(
+        &mut self,
+        loc: Pointer,
+        output: &mut [u8],
+    ) -> Result<(), Error>;
+
+    // TODO: Remove the need for this method.  Would be better for
+    // everything to be implemented/implementable in terms of
+    // `read_bytes`.
+    fn is_dotnet_base_class_of(
+        &mut self,
+        parent_class_ptr: TypedPointer<MethodTable>,
+        child_class_ptr: TypedPointer<MethodTable>,
+    ) -> Result<bool, Error>;
+}
+
+impl VMReader for CachedReader<'_> {
+    fn read_bytes(
+        &mut self,
+        loc: Pointer,
+        output: &mut [u8],
+    ) -> Result<(), Error> {
+        let reader: &memory_reader::MemoryReader = self.as_ref();
+        Ok(reader.read_exact(loc, output)?)
+    }
+
+    fn is_dotnet_base_class_of(
+        &mut self,
+        parent_class_ptr: TypedPointer<MethodTable>,
+        child_class_ptr: TypedPointer<MethodTable>,
+    ) -> Result<bool, Error> {
+        self.is_base_of(parent_class_ptr, child_class_ptr)
+    }
+}
+
+struct DummyReader;
+impl VMReader for DummyReader {
+    fn read_bytes(
+        &mut self,
+        _loc: Pointer,
+        _output: &mut [u8],
+    ) -> Result<(), Error> {
+        Err(Error::ReadOccurredDuringLocalVMEvaluation)
+    }
+
+    fn is_dotnet_base_class_of(
+        &mut self,
+        _parent_class_ptr: TypedPointer<MethodTable>,
+        _child_class_ptr: TypedPointer<MethodTable>,
+    ) -> Result<bool, Error> {
+        Err(Error::ReadOccurredDuringLocalVMEvaluation)
+    }
+}
+
 impl VirtualMachine {
     pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
         let num_values = instructions
@@ -253,9 +308,14 @@ impl VirtualMachine {
         }
     }
 
+    /// Evaluate the virtual machine, raising an error if any instructions attempt to read to
+    pub fn local_eval(&self) -> Result<VMResults, Error> {
+        self.evaluate(DummyReader)
+    }
+
     pub fn evaluate(
         &self,
-        reader: CachedReader<'_>,
+        mut reader: impl VMReader,
     ) -> Result<VMResults, Error> {
         let mut register: Option<RuntimePrimValue> = None;
         let mut values = vec![None; self.num_outputs + self.num_temporaries];
@@ -336,10 +396,16 @@ impl VirtualMachine {
                     register = match register {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
-                            let actual_type_ptr: Pointer =
-                                reader.read_byte_array(ptr)?.into();
+                            let actual_type_ptr: Pointer = {
+                                let mut arr = [0; Pointer::SIZE];
+                                reader.read_bytes(ptr, &mut arr)?;
+                                arr.into()
+                            };
                             reader
-                                .is_base_of(*ty, actual_type_ptr.into())?
+                                .is_dotnet_base_class_of(
+                                    *ty,
+                                    actual_type_ptr.into(),
+                                )?
                                 .then(|| RuntimePrimValue::Ptr(ptr))
                         }
                         Some(other) => {
@@ -356,8 +422,11 @@ impl VirtualMachine {
                     register = match register {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
-                            let bytes = reader
-                                .read_bytes(ptr..ptr + ty.size_bytes())?;
+                            let bytes = {
+                                let mut vec = vec![0; ty.size_bytes()];
+                                reader.read_bytes(ptr, &mut vec)?;
+                                vec
+                            };
                             let prim_value = ty.parse(&bytes)?;
                             match prim_value {
                                 RuntimePrimValue::Ptr(ptr) if ptr.is_null() => {

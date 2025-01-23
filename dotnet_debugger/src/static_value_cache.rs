@@ -1487,6 +1487,12 @@ impl<'a> Deref for CachedReader<'a> {
     }
 }
 
+impl<'a> AsRef<MemoryReader> for CachedReader<'a> {
+    fn as_ref(&self) -> &MemoryReader {
+        &self.reader
+    }
+}
+
 impl<'a> Borrow<MemoryReader> for CachedReader<'a> {
     fn borrow(&self) -> &MemoryReader {
         self.reader

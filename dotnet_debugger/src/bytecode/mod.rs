@@ -40,4 +40,6 @@ mod op_index;
 pub use op_index::OpIndex;
 
 pub(crate) mod virtual_machine;
-pub use virtual_machine::{VMExecutionError, VMResults, VirtualMachine};
+pub use virtual_machine::{
+    Instruction, VMArg, VMExecutionError, VMResults, VirtualMachine,
+};

@@ -320,6 +320,9 @@ pub enum Error {
          where only .NET types are expected."
     )]
     UnexpectedRustTypeInDotNet,
+
+    #[error("Local evaluation of VM may not perform any reads.")]
+    ReadOccurredDuringLocalVMEvaluation,
 }
 
 impl std::fmt::Debug for Error {
