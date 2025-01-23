@@ -32,17 +32,23 @@ pub struct VMResults(Vec<Option<RuntimePrimValue>>);
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum VMArg {
     Const(RuntimePrimValue),
-    SavedValue { index: usize },
+    SavedValue(StackIndex),
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct InstructionIndex(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StackIndex(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // If the register contains true, jump to the specified
     // instruction.  Otherwise, continue to the next instruction.
-    ConditionalJump { dest: usize },
+    ConditionalJump(InstructionIndex),
 
     // Write the current value of the register into vm.values[index]
-    SaveValue { index: usize },
+    SaveValue(StackIndex),
 
     // Load the constant, or previously saved value, into the
     // register.
@@ -81,7 +87,7 @@ pub enum Instruction {
     // Read(RuntimeType::Ptr), followed by a boolean check IsBaseOf.
     // That way, multiple type checks on the same object can share the
     // same Read of the method table pointer.
-    Downcast { ty: TypedPointer<MethodTable> },
+    Downcast(TypedPointer<MethodTable>),
 
     // Read a value.
     //
@@ -92,7 +98,7 @@ pub enum Instruction {
     // Cast operator the operates on a subset of those bytes.  This
     // would allow access of multiple fields of an object to share the
     // same read.
-    Read { ty: RuntimePrimType },
+    Read(RuntimePrimType),
 }
 
 #[derive(Error)]
@@ -165,7 +171,7 @@ impl VirtualMachineBuilder {
                     .input_indices()
                     .chain(instruction.output_indices())
             })
-            .map(|index| index + 1)
+            .map(|index| index.0 + 1)
             .max()
             .unwrap_or(0);
 
@@ -294,7 +300,7 @@ impl VirtualMachine {
             .zip(instructions_to_keep.iter())
             .filter_map(|(inst, keep_instruction)| {
                 keep_instruction.then(|| match inst {
-                    Instruction::ConditionalJump { dest } => {
+                    Instruction::ConditionalJump(InstructionIndex(dest)) => {
                         let offset = index_offset[dest];
                         let dest = dest.checked_sub(offset)
                             .expect(
@@ -304,7 +310,7 @@ impl VirtualMachine {
                                  as that would imply more instructions being removed \
                                  than had been present up to that point."
                             );
-                        Instruction::ConditionalJump { dest }
+                        Instruction::ConditionalJump(InstructionIndex(dest))
                     }
                     other => other,
                 })
@@ -318,11 +324,11 @@ impl VirtualMachine {
     }
 
     pub(crate) fn remove_unnecessary_restore_value(self) -> Self {
-        let jump_destinations: HashSet<usize> = self
+        let jump_destinations: HashSet<InstructionIndex> = self
             .instructions
             .iter()
             .filter_map(|inst| match inst {
-                Instruction::ConditionalJump { dest } => Some(*dest),
+                Instruction::ConditionalJump(dest) => Some(*dest),
                 _ => None,
             })
             .collect();
@@ -332,18 +338,19 @@ impl VirtualMachine {
             .iter()
             .enumerate()
             .scan(None, |value_in_register, (inst_index, inst)| {
+                let inst_index = InstructionIndex(inst_index);
                 if jump_destinations.contains(&inst_index) {
                     *value_in_register = None;
                 }
 
                 let is_required = match inst {
-                    Instruction::SaveValue { index } => {
+                    Instruction::SaveValue(index) => {
                         *value_in_register = Some(index);
                         true
                     }
-                    Instruction::LoadToRegister(VMArg::SavedValue {
-                        index,
-                    }) => *value_in_register != Some(index),
+                    Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
+                        *value_in_register != Some(index)
+                    }
                     _ => {
                         *value_in_register = None;
                         true
@@ -366,31 +373,30 @@ impl VirtualMachine {
         // flow-control analysis.  But if that ever becomes necessary,
         // it would probably mean that the DCE at the expression level
         // has an issue.
-        let used_anywhere: HashSet<usize> = self
+        let used_anywhere: HashSet<StackIndex> = self
             .instructions
             .iter()
             .flat_map(|inst| inst.input_indices())
-            .chain(0..self.num_outputs)
+            .chain((0..self.num_outputs).map(StackIndex))
             .collect();
 
-        let initial_state: HashSet<usize> = (0..self.num_outputs).collect();
+        let initial_state: HashSet<StackIndex> =
+            (0..self.num_outputs).map(StackIndex).collect();
         let mut required_instructions: Vec<bool> = self
             .instructions
             .iter()
             .rev()
             .scan(initial_state, |used_later, inst| {
                 let is_required = match inst {
-                    Instruction::SaveValue { index } => {
-                        used_later.contains(index)
-                    }
+                    Instruction::SaveValue(index) => used_later.contains(index),
                     _ => true,
                 };
 
                 match inst {
-                    Instruction::ConditionalJump { .. } => {
+                    Instruction::ConditionalJump(_) => {
                         *used_later = used_anywhere.clone();
                     }
-                    Instruction::SaveValue { index } => {
+                    Instruction::SaveValue(index) => {
                         used_later.remove(index);
                     }
                     _ => inst.input_indices().for_each(|index| {
@@ -406,7 +412,10 @@ impl VirtualMachine {
     }
 
     pub(crate) fn remap_temporary_indices(self) -> Self {
-        let mut remap: HashMap<usize, usize> = HashMap::new();
+        let mut remap: HashMap<StackIndex, StackIndex> = (0..self.num_outputs)
+            .map(StackIndex)
+            .map(|output| (output, output))
+            .collect();
 
         // TODO: After the last usage of an index, allow it to be
         // reused for a different temporary value.
@@ -414,13 +423,11 @@ impl VirtualMachine {
         // TODO: If all occurrences of a temporary value are before
         // the write of an output index, allow the output index to be
         // used as a temporary.
-        let mut do_remap = |index: usize| -> usize {
-            if index < self.num_outputs {
-                index
-            } else if let Some(new_index) = remap.get(&index) {
+        let mut do_remap = |index: StackIndex| -> StackIndex {
+            if let Some(new_index) = remap.get(&index) {
                 *new_index
             } else {
-                let new_index = self.num_outputs + remap.len();
+                let new_index = StackIndex(remap.len());
                 remap.insert(index, new_index);
                 new_index
             }
@@ -430,33 +437,33 @@ impl VirtualMachine {
             .instructions
             .into_iter()
             .map(|inst| match inst {
-                Instruction::SaveValue { index } => {
+                Instruction::SaveValue(index) => {
                     let index = do_remap(index);
-                    Instruction::SaveValue { index }
+                    Instruction::SaveValue(index)
                 }
-                Instruction::LoadToRegister(VMArg::SavedValue { index }) => {
+                Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::LoadToRegister(VMArg::SavedValue { index })
+                    Instruction::LoadToRegister(VMArg::SavedValue(index))
                 }
-                Instruction::Add(VMArg::SavedValue { index }) => {
+                Instruction::Add(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::Add(VMArg::SavedValue { index })
+                    Instruction::Add(VMArg::SavedValue(index))
                 }
-                Instruction::Sub(VMArg::SavedValue { index }) => {
+                Instruction::Sub(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::Sub(VMArg::SavedValue { index })
+                    Instruction::Sub(VMArg::SavedValue(index))
                 }
-                Instruction::Mul(VMArg::SavedValue { index }) => {
+                Instruction::Mul(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::Mul(VMArg::SavedValue { index })
+                    Instruction::Mul(VMArg::SavedValue(index))
                 }
-                Instruction::Equal(VMArg::SavedValue { index }) => {
+                Instruction::Equal(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::Equal(VMArg::SavedValue { index })
+                    Instruction::Equal(VMArg::SavedValue(index))
                 }
-                Instruction::GreaterThan(VMArg::SavedValue { index }) => {
+                Instruction::GreaterThan(VMArg::SavedValue(index)) => {
                     let index = do_remap(index);
-                    Instruction::GreaterThan(VMArg::SavedValue { index })
+                    Instruction::GreaterThan(VMArg::SavedValue(index))
                 }
                 other => other,
             })
@@ -485,18 +492,18 @@ impl VirtualMachine {
             ($arg:expr) => {
                 match $arg {
                     VMArg::Const(prim) => Some(prim),
-                    VMArg::SavedValue { index } => values[*index].as_ref(),
+                    VMArg::SavedValue(index) => values[index.0].as_ref(),
                 }
             };
         }
 
-        let mut current_instruction = 0;
-        while current_instruction < self.instructions.len() {
-            let instruction = &self.instructions[current_instruction];
-            current_instruction += 1;
+        let mut current_instruction = InstructionIndex(0);
+        while current_instruction.0 < self.instructions.len() {
+            let instruction = &self.instructions[current_instruction.0];
+            current_instruction.0 += 1;
 
             match instruction {
-                Instruction::ConditionalJump { dest } => {
+                Instruction::ConditionalJump(dest) => {
                     let should_jump = register
                         .map(|val| match val {
                             RuntimePrimValue::Bool(val) => val,
@@ -521,8 +528,8 @@ impl VirtualMachine {
                     }
                 }
 
-                Instruction::SaveValue { index } => {
-                    values[*index] = register;
+                Instruction::SaveValue(index) => {
+                    values[index.0] = register;
                 }
                 Instruction::LoadToRegister(value) => {
                     register = arg_to_value!(value).cloned();
@@ -645,7 +652,7 @@ impl VirtualMachine {
                         _ => None,
                     };
                 }
-                Instruction::Downcast { ty } => {
+                Instruction::Downcast(ty) => {
                     register = match register {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
@@ -671,7 +678,7 @@ impl VirtualMachine {
                         }
                     };
                 }
-                Instruction::Read { ty } => {
+                Instruction::Read(ty) => {
                     register = match register {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
@@ -723,14 +730,14 @@ impl VirtualMachine {
 }
 
 impl Instruction {
-    fn input_indices(&self) -> impl Iterator<Item = usize> {
+    fn input_indices(&self) -> impl Iterator<Item = StackIndex> {
         let opt_index = match self {
-            Instruction::Add(VMArg::SavedValue { index })
-            | Instruction::Sub(VMArg::SavedValue { index })
-            | Instruction::Mul(VMArg::SavedValue { index })
-            | Instruction::Equal(VMArg::SavedValue { index })
-            | Instruction::GreaterThan(VMArg::SavedValue { index })
-            | Instruction::LoadToRegister(VMArg::SavedValue { index }) => {
+            Instruction::Add(VMArg::SavedValue(index))
+            | Instruction::Sub(VMArg::SavedValue(index))
+            | Instruction::Mul(VMArg::SavedValue(index))
+            | Instruction::Equal(VMArg::SavedValue(index))
+            | Instruction::GreaterThan(VMArg::SavedValue(index))
+            | Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
                 Some(*index)
             }
 
@@ -749,9 +756,9 @@ impl Instruction {
         opt_index.into_iter()
     }
 
-    fn output_indices(&self) -> impl Iterator<Item = usize> {
+    fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
         let opt_index = match self {
-            Instruction::SaveValue { index } => Some(*index),
+            Instruction::SaveValue(index) => Some(*index),
 
             Instruction::ConditionalJump { .. }
             | Instruction::Add(_)
@@ -799,17 +806,28 @@ impl Display for VMArg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             VMArg::Const(prim) => write!(f, "{prim}"),
-            VMArg::SavedValue { index } => write!(f, "*{index}"),
+            VMArg::SavedValue(index) => write!(f, "{index}"),
         }
     }
 }
+impl Display for InstructionIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "op_{}", self.0)
+    }
+}
+impl Display for StackIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "stack[pc + {}]", self.0)
+    }
+}
+
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instruction::ConditionalJump { dest } => {
+            Instruction::ConditionalJump(dest) => {
                 write!(f, "ConditionalJump({dest})")
             }
-            Instruction::SaveValue { index } => write!(f, "SaveValue({index})"),
+            Instruction::SaveValue(index) => write!(f, "SaveValue({index})"),
             Instruction::LoadToRegister(value) => {
                 write!(f, "LoadToRegister({value})")
             }
@@ -823,8 +841,8 @@ impl Display for Instruction {
             Instruction::PrimCast(prim_type) => {
                 write!(f, "PrimCast({prim_type})")
             }
-            Instruction::Downcast { ty } => write!(f, "Downcast({ty})"),
-            Instruction::Read { ty } => write!(f, "Read({ty})"),
+            Instruction::Downcast(ty) => write!(f, "Downcast({ty})"),
+            Instruction::Read(ty) => write!(f, "Read({ty})"),
         }
     }
 }
@@ -876,13 +894,13 @@ mod tests {
     fn load_just_after_save_is_unnecessary() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 0 },
-            Instruction::LoadToRegister(VMArg::SavedValue { index: 0 }),
+            Instruction::SaveValue(StackIndex(0)),
+            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
             Instruction::Add(VMArg::Const(1usize.into())),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
             Instruction::Add(VMArg::Const(1usize.into())),
         ];
 
@@ -898,10 +916,10 @@ mod tests {
     fn jump_may_cause_load_just_after_save_to_become_necessary() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 0 },
-            Instruction::LoadToRegister(VMArg::SavedValue { index: 0 }),
+            Instruction::SaveValue(StackIndex(0)),
+            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
             Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump { dest: 2 },
+            Instruction::ConditionalJump(InstructionIndex(2)),
         ];
         let expected = before.clone();
 
@@ -917,16 +935,16 @@ mod tests {
     fn removing_unnecessary_loads_may_reindex_jump_destination() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 0 },
-            Instruction::LoadToRegister(VMArg::SavedValue { index: 0 }),
+            Instruction::SaveValue(StackIndex(0)),
+            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
             Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump { dest: 3 },
+            Instruction::ConditionalJump(InstructionIndex(3)),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
             Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump { dest: 2 },
+            Instruction::ConditionalJump(InstructionIndex(2)),
         ];
 
         let after = VirtualMachine::builder(before)
@@ -941,14 +959,14 @@ mod tests {
     fn save_without_load_is_unnecessary() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 1 },
+            Instruction::SaveValue(StackIndex(1)),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
         ];
 
         let after = VirtualMachine::builder(before)
@@ -963,18 +981,18 @@ mod tests {
     fn removing_unnecessary_saves_may_reindex_jump_destination() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 1 },
+            Instruction::SaveValue(StackIndex(1)),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
             Instruction::Equal(VMArg::Const(0usize.into())),
-            Instruction::ConditionalJump { dest: 2 },
+            Instruction::ConditionalJump(InstructionIndex(2)),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
             Instruction::Equal(VMArg::Const(0usize.into())),
-            Instruction::ConditionalJump { dest: 1 },
+            Instruction::ConditionalJump(InstructionIndex(1)),
         ];
 
         let after = VirtualMachine::builder(before)
@@ -989,9 +1007,9 @@ mod tests {
     fn save_to_output_index_is_necessary() {
         let before = vec![
             Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue { index: 1 },
+            Instruction::SaveValue(StackIndex(1)),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
         ];
         let expected = before.clone();
 
@@ -1010,20 +1028,20 @@ mod tests {
             Instruction::LoadToRegister(VMArg::Const(5usize.into())),
             // This SaveValue to index 1 is required, since the
             // following Add instruction reads from it.
-            Instruction::SaveValue { index: 1 },
-            Instruction::Add(VMArg::SavedValue { index: 1 }),
+            Instruction::SaveValue(StackIndex(1)),
+            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
             // This SaveValue to index 1 is unnecessary, since nothing
             // reads from it at a later point.
-            Instruction::SaveValue { index: 1 },
+            Instruction::SaveValue(StackIndex(1)),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            Instruction::SaveValue { index: 1 },
-            Instruction::Add(VMArg::SavedValue { index: 1 }),
+            Instruction::SaveValue(StackIndex(1)),
+            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
             Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(0)),
         ];
 
         let after = VirtualMachine::builder(before)
@@ -1040,20 +1058,20 @@ mod tests {
             // This SaveValue to index 1 is required, since it is
             // immediately overwritten.
             Instruction::LoadToRegister(VMArg::Const(15usize.into())),
-            Instruction::SaveValue { index: 1 },
+            Instruction::SaveValue(StackIndex(1)),
             Instruction::LoadToRegister(VMArg::Const(5usize.into())),
             // This SaveValue to index 1 is required, since the
             // following Add instruction reads from it.
-            Instruction::SaveValue { index: 1 },
-            Instruction::Add(VMArg::SavedValue { index: 1 }),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(1)),
+            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
+            Instruction::SaveValue(StackIndex(0)),
         ];
         let expected = vec![
             Instruction::LoadToRegister(VMArg::Const(15usize.into())),
             Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            Instruction::SaveValue { index: 1 },
-            Instruction::Add(VMArg::SavedValue { index: 1 }),
-            Instruction::SaveValue { index: 0 },
+            Instruction::SaveValue(StackIndex(1)),
+            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
+            Instruction::SaveValue(StackIndex(0)),
         ];
 
         let after = VirtualMachine::builder(before)

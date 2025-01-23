@@ -1,11 +1,14 @@
-use dotnet_debugger::{Instruction, RuntimePrimValue, VMArg, VirtualMachine};
+use dotnet_debugger::{
+    bytecode::virtual_machine::{InstructionIndex, StackIndex},
+    Instruction, RuntimePrimValue, VMArg, VirtualMachine,
+};
 
 #[test]
 fn addition() {
     let instructions = vec![
         Instruction::LoadToRegister(VMArg::Const(1usize.into())),
         Instruction::Add(VMArg::Const(2usize.into())),
-        Instruction::SaveValue { index: 0 },
+        Instruction::SaveValue(StackIndex(0)),
     ];
 
     let vm = VirtualMachine::builder(instructions).build();
@@ -22,22 +25,22 @@ fn triangular_number() {
     let instructions = vec![
         // Initialize cumulative sum
         Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-        Instruction::SaveValue { index: 0 },
+        Instruction::SaveValue(StackIndex(0)),
         // Initialize loop variable
         Instruction::LoadToRegister(VMArg::Const(max_value.into())),
-        Instruction::SaveValue { index: 1 },
+        Instruction::SaveValue(StackIndex(1)),
         // Begining of loop (instruction 4).  Load the cumulative sum
         // and increment by the loop variable.
-        Instruction::LoadToRegister(VMArg::SavedValue { index: 1 }),
-        Instruction::Add(VMArg::SavedValue { index: 0 }),
-        Instruction::SaveValue { index: 0 },
+        Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(1))),
+        Instruction::Add(VMArg::SavedValue(StackIndex(0))),
+        Instruction::SaveValue(StackIndex(0)),
         // Load the loop variable and decrement its value.
-        Instruction::LoadToRegister(VMArg::SavedValue { index: 1 }),
+        Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(1))),
         Instruction::Sub(VMArg::Const(1usize.into())),
-        Instruction::SaveValue { index: 1 },
+        Instruction::SaveValue(StackIndex(1)),
         // Check if the loop should continue
         Instruction::GreaterThan(VMArg::Const(0usize.into())),
-        Instruction::ConditionalJump { dest: 4 },
+        Instruction::ConditionalJump(InstructionIndex(4)),
     ];
 
     let vm = VirtualMachine::builder(instructions).build().simplify();

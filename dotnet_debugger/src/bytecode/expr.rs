@@ -7,7 +7,7 @@ use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
 use crate::{
-    bytecode::virtual_machine::{Instruction, VMArg},
+    bytecode::virtual_machine::{Instruction, StackIndex, VMArg},
     runtime_type::RuntimePrimType,
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
@@ -819,10 +819,12 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
 
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
-        let output_indices: HashMap<OpIndex, ValueToken> = self
+        let output_indices: HashMap<OpIndex, StackIndex> = self
             .iter_outputs()
             .filter_map(|(output, value)| match value {
-                SymbolicValue::Result(op_index) => Some((op_index, output)),
+                SymbolicValue::Result(op_index) => {
+                    Some((op_index, StackIndex(output.0)))
+                }
                 _ => None,
             })
             .collect();
@@ -830,7 +832,7 @@ impl SymbolicGraph {
         let num_outputs = self.outputs.len();
 
         let mut instructions = Vec::new();
-        let mut currently_stored: HashMap<OpIndex, usize> = HashMap::new();
+        let mut currently_stored: HashMap<OpIndex, StackIndex> = HashMap::new();
         let mut next_free_index = num_outputs;
 
         macro_rules! value_to_register {
@@ -849,7 +851,7 @@ impl SymbolicGraph {
                             "Internal error, \
                              {op_index} not located anywhere",
                         );
-                        VMArg::SavedValue { index }
+                        VMArg::SavedValue(index)
                     }
                 };
                 Instruction::LoadToRegister(vm_arg)
@@ -870,7 +872,7 @@ impl SymbolicGraph {
                             "Internal error, \
                              {op_index} not located anywhere",
                         );
-                        VMArg::SavedValue { index }
+                        VMArg::SavedValue(index)
                     }
                 }
             };
@@ -892,11 +894,11 @@ impl SymbolicGraph {
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     instructions.push(value_to_register!(obj));
-                    instructions.push(Instruction::Downcast { ty: *ty });
+                    instructions.push(Instruction::Downcast(*ty));
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
                     instructions.push(value_to_register!(ptr));
-                    instructions.push(Instruction::Read { ty: *prim_type });
+                    instructions.push(Instruction::Read(*prim_type));
                 }
                 ExprKind::PointerCast { ptr, .. } => {
                     instructions.push(value_to_register!(ptr));
@@ -913,17 +915,15 @@ impl SymbolicGraph {
                 }
             }
 
-            let register_index = output_indices
+            let register_index: StackIndex = output_indices
                 .get(&op_index)
-                .map(|token| token.0)
+                .map(|token| *token)
                 .unwrap_or_else(|| {
                     let index = next_free_index;
                     next_free_index += 1;
-                    index
+                    StackIndex(index)
                 });
-            instructions.push(Instruction::SaveValue {
-                index: register_index,
-            });
+            instructions.push(Instruction::SaveValue(register_index));
             currently_stored.insert(op_index, register_index);
         }
 
@@ -935,7 +935,7 @@ impl SymbolicGraph {
             };
             if let Some(value) = constant {
                 instructions.push(Instruction::LoadToRegister(value.into()));
-                instructions.push(Instruction::SaveValue { index: output.0 });
+                instructions.push(Instruction::SaveValue(StackIndex(output.0)));
             }
         }
 

@@ -47,7 +47,7 @@ pub use static_value_cache::*;
 
 pub mod extensions;
 
-pub(crate) mod bytecode;
+pub mod bytecode;
 pub use bytecode::{
     ExprKind, Instruction, OpIndex, SymbolicGraph, SymbolicType, SymbolicValue,
     VMArg, VMExecutionError, VMResults, ValueToken, VirtualMachine,
