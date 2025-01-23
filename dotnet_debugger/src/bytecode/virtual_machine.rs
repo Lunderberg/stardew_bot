@@ -11,6 +11,11 @@ use crate::{
     RuntimePrimValue, TypedPointer, ValueToken,
 };
 
+pub struct VirtualMachineBuilder {
+    instructions: Vec<Instruction>,
+    num_outputs: usize,
+}
+
 pub struct VirtualMachine {
     /// The instructions to execute in the virtual machine.
     instructions: Vec<Instruction>,
@@ -143,6 +148,42 @@ pub enum VMExecutionError {
     InvalidOperandForConditionalJump(RuntimePrimValue),
 }
 
+impl VirtualMachineBuilder {
+    pub fn num_outputs(self, num_outputs: usize) -> Self {
+        Self {
+            num_outputs,
+            ..self
+        }
+    }
+
+    pub fn build(self) -> VirtualMachine {
+        let num_values = self
+            .instructions
+            .iter()
+            .flat_map(|instruction| {
+                instruction
+                    .input_indices()
+                    .chain(instruction.output_indices())
+            })
+            .map(|index| index + 1)
+            .max()
+            .unwrap_or(0);
+
+        assert!(
+            num_values >= self.num_outputs,
+            "Virtual machine has {}, \
+             but only found instructions for writing to {num_values}",
+            self.num_outputs
+        );
+
+        VirtualMachine {
+            instructions: self.instructions,
+            num_outputs: self.num_outputs,
+            num_temporaries: num_values - self.num_outputs,
+        }
+    }
+}
+
 pub trait VMReader {
     fn read_bytes(
         &mut self,
@@ -203,29 +244,15 @@ impl VMReader for DummyReader {
 }
 
 impl VirtualMachine {
-    pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
-        let num_values = instructions
-            .iter()
-            .flat_map(|instruction| {
-                instruction
-                    .input_indices()
-                    .chain(instruction.output_indices())
-            })
-            .map(|index| index + 1)
-            .max()
-            .unwrap_or(0);
-
-        assert!(
-            num_values >= num_outputs,
-            "Virtual machine has {num_outputs}, \
-             but only found instructions for writing to {num_values}"
-        );
-
-        Self {
+    pub fn builder(instructions: Vec<Instruction>) -> VirtualMachineBuilder {
+        VirtualMachineBuilder {
             instructions,
-            num_outputs,
-            num_temporaries: num_values - num_outputs,
+            num_outputs: 1,
         }
+    }
+
+    pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
+        Self::builder(instructions).num_outputs(num_outputs).build()
     }
 
     pub fn num_instructions(&self) -> usize {
@@ -859,7 +886,8 @@ mod tests {
             Instruction::Add(VMArg::Const(1usize.into())),
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_restore_value()
             .instructions;
 
@@ -877,7 +905,8 @@ mod tests {
         ];
         let expected = before.clone();
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_restore_value()
             .instructions;
 
@@ -900,7 +929,8 @@ mod tests {
             Instruction::ConditionalJump { dest: 2 },
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_restore_value()
             .instructions;
 
@@ -921,7 +951,8 @@ mod tests {
             Instruction::SaveValue { index: 0 },
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_save_value()
             .instructions;
 
@@ -946,7 +977,8 @@ mod tests {
             Instruction::ConditionalJump { dest: 1 },
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_save_value()
             .instructions;
 
@@ -963,7 +995,9 @@ mod tests {
         ];
         let expected = before.clone();
 
-        let after = VirtualMachine::new(before, 2)
+        let after = VirtualMachine::builder(before)
+            .num_outputs(2)
+            .build()
             .remove_unnecessary_save_value()
             .instructions;
 
@@ -992,7 +1026,8 @@ mod tests {
             Instruction::SaveValue { index: 0 },
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_save_value()
             .instructions;
 
@@ -1021,7 +1056,8 @@ mod tests {
             Instruction::SaveValue { index: 0 },
         ];
 
-        let after = VirtualMachine::new(before, 1)
+        let after = VirtualMachine::builder(before)
+            .build()
             .remove_unnecessary_save_value()
             .instructions;
 

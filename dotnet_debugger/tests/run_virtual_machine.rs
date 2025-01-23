@@ -8,7 +8,7 @@ fn addition() {
         Instruction::SaveValue { index: 0 },
     ];
 
-    let vm = VirtualMachine::new(instructions, 1);
+    let vm = VirtualMachine::builder(instructions).build();
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
@@ -40,7 +40,7 @@ fn triangular_number() {
         Instruction::ConditionalJump { dest: 4 },
     ];
 
-    let vm = VirtualMachine::new(instructions, 1).simplify();
+    let vm = VirtualMachine::builder(instructions).build().simplify();
 
     let results = vm.local_eval().unwrap();
 
