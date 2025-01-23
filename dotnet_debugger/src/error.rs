@@ -285,6 +285,18 @@ pub enum Error {
     #[error("Cannot multiply values with types {lhs} and {rhs}")]
     InvalidOperandsForMultiplication { lhs: RuntimeType, rhs: RuntimeType },
 
+    #[error(
+        "Cannot perform equality check \
+         for operands with types {lhs} and {rhs}."
+    )]
+    InvalidOperandsForEqualityCheck { lhs: RuntimeType, rhs: RuntimeType },
+
+    #[error(
+        "Cannot compare numeric values \
+         of operands with types {lhs} and {rhs}."
+    )]
+    InvalidOperandsForNumericComparison { lhs: RuntimeType, rhs: RuntimeType },
+
     #[error("Downcast requires pointer argument, but received {0}")]
     InvalidOperandForPhysicalDowncast(RuntimeType),
 
@@ -320,9 +332,6 @@ pub enum Error {
          where only .NET types are expected."
     )]
     UnexpectedRustTypeInDotNet,
-
-    #[error("Local evaluation of VM may not perform any reads.")]
-    ReadOccurredDuringLocalVMEvaluation,
 }
 
 impl std::fmt::Debug for Error {
