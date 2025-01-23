@@ -821,7 +821,7 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<Self, Error> {
-        let location = location..location + runtime_type.size_bytes();
+        let location = location..location + runtime_type.size_bytes()?;
 
         let node = match runtime_type {
             RuntimeType::Prim(_)
@@ -893,6 +893,11 @@ impl ObjectTreeNode {
                     should_read: ShouldReadState::NoRead,
                     contents: Some(Box::new(contents)),
                 }
+            }
+            RuntimeType::Rust(_) => {
+                return Err(
+                    dotnet_debugger::Error::UnexpectedRustTypeInDotNet.into()
+                );
             }
         };
 
@@ -1009,6 +1014,13 @@ impl ObjectTreeNode {
                         | DotNetType::Class { .. }
                         | DotNetType::MultiDimArray { .. },
                     ) => None,
+
+                    RuntimeType::Rust(_) => {
+                        return Err(
+                            dotnet_debugger::Error::UnexpectedRustTypeInDotNet
+                                .into(),
+                        );
+                    }
                 };
                 if let Some(value) = opt_value {
                     *self = ObjectTreeNode::Value {

@@ -22,6 +22,7 @@ use crate::{
 pub enum RuntimeType {
     Prim(RuntimePrimType),
     DotNet(DotNetType),
+    Rust(RustType),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -114,6 +115,11 @@ pub enum DotNetType {
     },
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub enum RustType {
+    Opaque(std::any::TypeId),
+}
+
 impl RuntimeType {
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
         match self {
@@ -149,19 +155,23 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::MultiDimArray(ptr.into()))
             }
+            RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
         }
     }
 
-    pub fn size_bytes(&self) -> usize {
+    pub fn size_bytes(&self) -> Result<usize, Error> {
         match self {
-            RuntimeType::Prim(prim) => prim.size_bytes(),
-            RuntimeType::DotNet(DotNetType::ValueType { size, .. }) => *size,
+            RuntimeType::Prim(prim) => Ok(prim.size_bytes()),
+            RuntimeType::DotNet(DotNetType::ValueType { size, .. }) => {
+                Ok(*size)
+            }
             RuntimeType::DotNet(DotNetType::Class { .. })
             | RuntimeType::DotNet(DotNetType::String)
             | RuntimeType::DotNet(DotNetType::Array { .. })
             | RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
-                Pointer::SIZE
+                Ok(Pointer::SIZE)
             }
+            RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
         }
     }
 
@@ -175,6 +185,7 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::String) => true,
             RuntimeType::DotNet(DotNetType::Array { .. }) => true,
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => true,
+            RuntimeType::Rust(_) => false,
         }
     }
 
@@ -194,6 +205,7 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 Some(RuntimePrimType::Ptr)
             }
+            RuntimeType::Rust(_) => None,
         }
     }
 
@@ -206,10 +218,13 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::String) => {
                 Some("System.Private.CoreLib.String")
             }
-            RuntimeType::DotNet(DotNetType::ValueType { .. })
-            | RuntimeType::DotNet(DotNetType::Class { .. })
-            | RuntimeType::DotNet(DotNetType::Array { .. })
-            | RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => None,
+            RuntimeType::DotNet(
+                DotNetType::ValueType { .. }
+                | DotNetType::Class { .. }
+                | DotNetType::Array { .. }
+                | DotNetType::MultiDimArray { .. },
+            )
+            | RuntimeType::Rust(_) => None,
         }
     }
 
@@ -425,6 +440,7 @@ impl std::fmt::Display for RuntimeType {
             }) => {
                 write!(f, "array({rank}, vtable {method_table})")
             }
+            RuntimeType::Rust(rust_type) => write!(f, "{rust_type}"),
         }
     }
 }
@@ -447,6 +463,14 @@ impl std::fmt::Display for RuntimePrimType {
             RuntimePrimType::F32 => write!(f, "f32"),
             RuntimePrimType::F64 => write!(f, "f64"),
             RuntimePrimType::Ptr => write!(f, "Ptr"),
+        }
+    }
+}
+
+impl std::fmt::Display for RustType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            RustType::Opaque(type_id) => write!(f, "{type_id:?}"),
         }
     }
 }

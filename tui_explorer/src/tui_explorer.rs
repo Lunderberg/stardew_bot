@@ -557,7 +557,7 @@ impl TuiExplorerBuilder {
 
                         let runtime_type = reader
                             .field_to_runtime_type(table.ptr(), &field)?;
-                        let size_bytes = runtime_type.size_bytes();
+                        let size_bytes = runtime_type.size_bytes()?;
                         let byte_range = location..location + size_bytes;
 
                         let ann = annotator

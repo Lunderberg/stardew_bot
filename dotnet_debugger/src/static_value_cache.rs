@@ -410,11 +410,13 @@ impl<'a> CachedReader<'a> {
         };
 
         let is_complete = match &runtime_type {
-            RuntimeType::Prim(..) => true,
-            RuntimeType::DotNet(DotNetType::ValueType { .. }) => true,
-            RuntimeType::DotNet(DotNetType::String) => true,
+            RuntimeType::Prim(_)
+            | RuntimeType::DotNet(DotNetType::String)
+            | RuntimeType::Rust(_) => true,
+
             RuntimeType::DotNet(
                 DotNetType::Class { method_table }
+                | DotNetType::ValueType { method_table, .. }
                 | DotNetType::Array { method_table, .. }
                 | DotNetType::MultiDimArray { method_table, .. },
             ) => method_table.is_some(),
@@ -919,6 +921,9 @@ impl<'a> CachedReader<'a> {
                         | DotNetType::Array { method_table, .. }
                         | DotNetType::MultiDimArray { method_table, .. },
                     ) => *method_table,
+                    RuntimeType::Rust(_) => {
+                        return Err(Error::UnexpectedRustTypeInDotNet);
+                    }
                     RuntimeType::DotNet(DotNetType::String) => {
                         unreachable!("Handled with builtin_class_name")
                     }
@@ -1431,7 +1436,7 @@ impl<'a> CachedReader<'a> {
                                 self,
                             )?;
 
-                            let size = runtime_type.size_bytes();
+                            let size = runtime_type.size_bytes()?;
 
                             Ok(start..start + size)
                         })

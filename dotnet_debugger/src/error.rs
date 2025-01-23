@@ -314,6 +314,12 @@ pub enum Error {
          followed by a digit are reserved for internal use."
     )]
     AttemptedUseOfReservedName(String),
+
+    #[error(
+        "A Rust type appeared in a context \
+         where only .NET types are expected."
+    )]
+    UnexpectedRustTypeInDotNet,
 }
 
 impl std::fmt::Debug for Error {

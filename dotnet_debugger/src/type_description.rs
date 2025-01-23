@@ -262,6 +262,7 @@ impl<'a> TypeHandleRef<'a> {
                 }
                 write!(fmt, ">")?;
             }
+            RuntimeType::Rust(rust_type) => write!(fmt, "{rust_type}")?,
         }
         Ok(())
     }
