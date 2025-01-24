@@ -71,7 +71,7 @@ fn run_native_function() {
     ];
 
     let vm = VirtualMachine::builder(instructions)
-        .with_native_function(
+        .with_raw_native_function(
             |args: &mut [Option<RuntimePrimValue>]|
                          -> Result<Option<RuntimePrimValue>,Error> {
                 assert_eq!(args.len(), 2);
@@ -91,6 +91,83 @@ fn run_native_function() {
                 };
                 Ok(Some(RuntimePrimValue::NativeUInt(lhs+rhs)))
         })
+        .build()
+        .simplify();
+
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0],
+        Some(RuntimePrimValue::NativeUInt(2 * 3 + 5 * 7))
+    );
+}
+
+#[test]
+fn run_wrapped_nullary_native_function() {
+    let instructions = vec![
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            first_arg: StackIndex(0),
+            num_args: 0,
+        },
+        Instruction::SaveValue(StackIndex(0)),
+    ];
+
+    let vm = VirtualMachine::builder(instructions)
+        .with_native_function(|| -> usize { 42 })
+        .build()
+        .simplify();
+
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], Some(RuntimePrimValue::NativeUInt(42)));
+}
+
+#[test]
+fn run_wrapped_nullary_unary_function() {
+    let instructions = vec![
+        Instruction::LoadToRegister(VMArg::Const(7usize.into())),
+        Instruction::SaveValue(StackIndex(0)),
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            first_arg: StackIndex(0),
+            num_args: 1,
+        },
+        Instruction::SaveValue(StackIndex(0)),
+    ];
+
+    let vm = VirtualMachine::builder(instructions)
+        .with_native_function(|val: usize| -> usize { val * val })
+        .build()
+        .simplify();
+
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results[0], Some(RuntimePrimValue::NativeUInt(49)));
+}
+
+#[test]
+fn run_wrapped_binary_native_function() {
+    let instructions = vec![
+        Instruction::LoadToRegister(VMArg::Const(2usize.into())),
+        Instruction::Mul(VMArg::Const(3usize.into())),
+        Instruction::SaveValue(StackIndex(1)),
+        Instruction::LoadToRegister(VMArg::Const(5usize.into())),
+        Instruction::Mul(VMArg::Const(7usize.into())),
+        Instruction::SaveValue(StackIndex(2)),
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            first_arg: StackIndex(1),
+            num_args: 2,
+        },
+        Instruction::SaveValue(StackIndex(0)),
+    ];
+
+    let vm = VirtualMachine::builder(instructions)
+        .with_native_function(|lhs: usize, rhs: usize| -> usize { lhs + rhs })
         .build()
         .simplify();
 

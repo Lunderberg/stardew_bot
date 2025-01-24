@@ -11,7 +11,7 @@ use crate::{
     RuntimePrimValue, TypedPointer, ValueToken,
 };
 
-use super::NativeFunction;
+use super::{native_function::WrappedNativeFunction, NativeFunction};
 
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
@@ -168,6 +168,15 @@ pub enum VMExecutionError {
         .0.runtime_type(),
     )]
     InvalidOperandForConditionalJump(RuntimePrimValue),
+
+    #[error(
+        "Native function expecting {expected} arguments \
+         was provided with {provided} arguments."
+    )]
+    InvalidNumberOfOperandsForNativeFunction {
+        expected: usize,
+        provided: usize,
+    },
 }
 
 impl VirtualMachineBuilder {
@@ -178,11 +187,21 @@ impl VirtualMachineBuilder {
         }
     }
 
-    pub fn with_native_function(
+    pub fn with_raw_native_function(
         mut self,
         func: impl NativeFunction + 'static,
     ) -> Self {
         self.native_functions.push(Box::new(func));
+        self
+    }
+
+    pub fn with_native_function<Func, ArgList>(mut self, func: Func) -> Self
+    where
+        Func: 'static,
+        WrappedNativeFunction<Func, ArgList>: NativeFunction + 'static,
+    {
+        let wrapped = WrappedNativeFunction::<Func, ArgList>::new(func);
+        self.native_functions.push(Box::new(wrapped));
         self
     }
 
