@@ -43,3 +43,6 @@ pub mod virtual_machine;
 pub use virtual_machine::{
     Instruction, VMArg, VMExecutionError, VMResults, VirtualMachine,
 };
+
+mod native_function;
+pub use native_function::NativeFunction;

@@ -11,14 +11,20 @@ use crate::{
     RuntimePrimValue, TypedPointer, ValueToken,
 };
 
+use super::NativeFunction;
+
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
+    native_functions: Vec<Box<dyn NativeFunction>>,
     num_outputs: usize,
 }
 
 pub struct VirtualMachine {
     /// The instructions to execute in the virtual machine.
     instructions: Vec<Instruction>,
+
+    /// Functions in Rust that may be called from the bytecode.
+    native_functions: Vec<Box<dyn NativeFunction>>,
 
     /// The number of output values to produce.
     num_outputs: usize,
@@ -41,6 +47,9 @@ pub struct InstructionIndex(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct StackIndex(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FunctionIndex(pub usize);
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
     // If the register contains true, jump to the specified
@@ -49,6 +58,13 @@ pub enum Instruction {
 
     // Write the current value of the register into vm.values[index]
     SaveValue(StackIndex),
+
+    // Call a native function
+    NativeFunctionCall {
+        index: FunctionIndex,
+        first_arg: StackIndex,
+        num_args: usize,
+    },
 
     // Load the constant, or previously saved value, into the
     // register.
@@ -162,6 +178,14 @@ impl VirtualMachineBuilder {
         }
     }
 
+    pub fn with_native_function(
+        mut self,
+        func: impl NativeFunction + 'static,
+    ) -> Self {
+        self.native_functions.push(Box::new(func));
+        self
+    }
+
     pub fn build(self) -> VirtualMachine {
         let num_values = self
             .instructions
@@ -184,6 +208,7 @@ impl VirtualMachineBuilder {
 
         VirtualMachine {
             instructions: self.instructions,
+            native_functions: self.native_functions,
             num_outputs: self.num_outputs,
             num_temporaries: num_values - self.num_outputs,
         }
@@ -253,6 +278,7 @@ impl VirtualMachine {
     pub fn builder(instructions: Vec<Instruction>) -> VirtualMachineBuilder {
         VirtualMachineBuilder {
             instructions,
+            native_functions: Vec::new(),
             num_outputs: 1,
         }
     }
@@ -486,7 +512,8 @@ impl VirtualMachine {
         mut reader: impl VMReader,
     ) -> Result<VMResults, Error> {
         let mut register: Option<RuntimePrimValue> = None;
-        let mut values = vec![None; self.num_outputs + self.num_temporaries];
+        let mut values: Vec<Option<RuntimePrimValue>> =
+            vec![None; self.num_outputs + self.num_temporaries];
 
         macro_rules! arg_to_value {
             ($arg:expr) => {
@@ -506,22 +533,14 @@ impl VirtualMachine {
                 Instruction::ConditionalJump(dest) => {
                     let should_jump = register
                         .map(|val| match val {
-                            RuntimePrimValue::Bool(val) => val,
-                            RuntimePrimValue::Char(_) => todo!(),
-                            RuntimePrimValue::U8(_) => todo!(),
-                            RuntimePrimValue::U16(_) => todo!(),
-                            RuntimePrimValue::U32(_) => todo!(),
-                            RuntimePrimValue::U64(_) => todo!(),
-                            RuntimePrimValue::NativeUInt(_) => todo!(),
-                            RuntimePrimValue::I8(_) => todo!(),
-                            RuntimePrimValue::I16(_) => todo!(),
-                            RuntimePrimValue::I32(_) => todo!(),
-                            RuntimePrimValue::I64(_) => todo!(),
-                            RuntimePrimValue::NativeInt(_) => todo!(),
-                            RuntimePrimValue::F32(_) => todo!(),
-                            RuntimePrimValue::F64(_) => todo!(),
-                            RuntimePrimValue::Ptr(_) => todo!(),
+                            RuntimePrimValue::Bool(val) => Ok(val),
+                            other => Err(
+                                VMExecutionError::InvalidOperandForConditionalJump(
+                                    other,
+                                ),
+                            ),
                         })
+                        .transpose()?
                         .unwrap_or(false);
                     if should_jump {
                         current_instruction = *dest;
@@ -531,6 +550,19 @@ impl VirtualMachine {
                 Instruction::SaveValue(index) => {
                     values[index.0] = register;
                 }
+
+                Instruction::NativeFunctionCall {
+                    index,
+                    first_arg,
+                    num_args,
+                } => {
+                    let func = &self.native_functions[index.0];
+                    let first_arg = first_arg.0;
+                    let last_arg = first_arg + num_args;
+                    let args = &mut values[first_arg..last_arg];
+                    register = func.apply(args)?;
+                }
+
                 Instruction::LoadToRegister(value) => {
                     register = arg_to_value!(value).cloned();
                 }
@@ -731,18 +763,24 @@ impl VirtualMachine {
 
 impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = StackIndex> {
-        let opt_index = match self {
+        let (first_arg, num_args) = match self {
             Instruction::Add(VMArg::SavedValue(index))
             | Instruction::Sub(VMArg::SavedValue(index))
             | Instruction::Mul(VMArg::SavedValue(index))
             | Instruction::Equal(VMArg::SavedValue(index))
             | Instruction::GreaterThan(VMArg::SavedValue(index))
             | Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
-                Some(*index)
+                (*index, 1)
             }
 
+            Instruction::NativeFunctionCall {
+                first_arg,
+                num_args,
+                ..
+            } => (*first_arg, *num_args),
+
             Instruction::ConditionalJump { .. }
-            | Instruction::SaveValue { .. }
+            | Instruction::SaveValue(_)
             | Instruction::Add(_)
             | Instruction::Sub(_)
             | Instruction::Mul(_)
@@ -750,17 +788,19 @@ impl Instruction {
             | Instruction::GreaterThan(_)
             | Instruction::LoadToRegister(_)
             | Instruction::PrimCast(_)
-            | Instruction::Downcast { .. }
-            | Instruction::Read { .. } => None,
+            | Instruction::Downcast(_)
+            | Instruction::Read(_) => (StackIndex(0), 0),
         };
-        opt_index.into_iter()
+
+        (0..num_args).map(move |offset| StackIndex(first_arg.0 + offset))
     }
 
     fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
         let opt_index = match self {
             Instruction::SaveValue(index) => Some(*index),
 
-            Instruction::ConditionalJump { .. }
+            Instruction::ConditionalJump(_)
+            | Instruction::NativeFunctionCall { .. }
             | Instruction::Add(_)
             | Instruction::Sub(_)
             | Instruction::Mul(_)
@@ -768,8 +808,8 @@ impl Instruction {
             | Instruction::GreaterThan(_)
             | Instruction::LoadToRegister(_)
             | Instruction::PrimCast(_)
-            | Instruction::Downcast { .. }
-            | Instruction::Read { .. } => None,
+            | Instruction::Downcast(_)
+            | Instruction::Read(_) => None,
         };
         opt_index.into_iter()
     }
@@ -820,6 +860,11 @@ impl Display for StackIndex {
         write!(f, "stack[pc + {}]", self.0)
     }
 }
+impl Display for FunctionIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "native_functions[{}]", self.0)
+    }
+}
 
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -828,6 +873,20 @@ impl Display for Instruction {
                 write!(f, "ConditionalJump({dest})")
             }
             Instruction::SaveValue(index) => write!(f, "SaveValue({index})"),
+            Instruction::NativeFunctionCall {
+                index,
+                first_arg,
+                num_args,
+            } => {
+                let last_arg = StackIndex(first_arg.0 + num_args);
+                write!(
+                    f,
+                    "NativeFunctionCall(\
+                     {index}, \
+                     &stack[{first_arg}..{last_arg}\
+                     ]"
+                )
+            }
             Instruction::LoadToRegister(value) => {
                 write!(f, "LoadToRegister({value})")
             }

@@ -1,6 +1,6 @@
 use dotnet_debugger::{
-    bytecode::virtual_machine::{InstructionIndex, StackIndex},
-    Instruction, RuntimePrimValue, VMArg, VirtualMachine,
+    bytecode::virtual_machine::{FunctionIndex, InstructionIndex, StackIndex},
+    Error, Instruction, RuntimePrimValue, VMArg, VirtualMachine,
 };
 
 #[test]
@@ -51,4 +51,54 @@ fn triangular_number() {
 
     let expected = (0..=max_value).sum::<usize>();
     assert_eq!(results[0], Some(RuntimePrimValue::NativeUInt(expected)));
+}
+
+#[test]
+fn run_native_function() {
+    let instructions = vec![
+        Instruction::LoadToRegister(VMArg::Const(2usize.into())),
+        Instruction::Mul(VMArg::Const(3usize.into())),
+        Instruction::SaveValue(StackIndex(1)),
+        Instruction::LoadToRegister(VMArg::Const(5usize.into())),
+        Instruction::Mul(VMArg::Const(7usize.into())),
+        Instruction::SaveValue(StackIndex(2)),
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            first_arg: StackIndex(1),
+            num_args: 2,
+        },
+        Instruction::SaveValue(StackIndex(0)),
+    ];
+
+    let vm = VirtualMachine::builder(instructions)
+        .with_native_function(
+            |args: &mut [Option<RuntimePrimValue>]|
+                         -> Result<Option<RuntimePrimValue>,Error> {
+                assert_eq!(args.len(), 2);
+                let lhs = match args[0].unwrap() {
+                    RuntimePrimValue::NativeUInt(val) => val,
+                    other => panic!(
+                        "Unexpected value {other} of type {}",
+                        other.runtime_type()
+                    ),
+                };
+                let rhs = match args[1].unwrap() {
+                    RuntimePrimValue::NativeUInt(val) => val,
+                    other => panic!(
+                        "Unexpected value {other} of type {}",
+                        other.runtime_type()
+                    ),
+                };
+                Ok(Some(RuntimePrimValue::NativeUInt(lhs+rhs)))
+        })
+        .build()
+        .simplify();
+
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results[0],
+        Some(RuntimePrimValue::NativeUInt(2 * 3 + 5 * 7))
+    );
 }
