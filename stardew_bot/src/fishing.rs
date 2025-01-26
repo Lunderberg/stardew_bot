@@ -387,6 +387,8 @@ impl WidgetWindow<Error> for FishingUI {
                 .try_into()?)
         };
 
+        let is_holding_rod = values[self.casting_power].is_some();
+
         let showing_fish = get_bool(self.showing_fish)?;
         let minigame_in_progress = get_bool(self.minigame_in_progress)?;
         let is_fishing = get_bool(self.is_fishing)?;
@@ -427,7 +429,7 @@ impl WidgetWindow<Error> for FishingUI {
             side_effects.broadcast(GameAction::HoldTool);
         } else if showing_fish {
             side_effects.broadcast(GameAction::HoldTool);
-        } else {
+        } else if is_holding_rod {
             side_effects.broadcast(GameAction::HoldTool);
         }
 
