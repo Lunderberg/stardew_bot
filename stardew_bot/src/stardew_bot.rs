@@ -268,10 +268,18 @@ impl StardewBot {
     }
 
     pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
-        let per_frame_values = self
+        match self
             .per_frame_reader
-            .evaluate(self.tui_globals.cached_reader())?;
-        self.tui_globals.insert(per_frame_values);
+            .evaluate(self.tui_globals.cached_reader())
+        {
+            Ok(per_frame_values) => {
+                self.tui_globals.insert(per_frame_values);
+            }
+            Err(err) => {
+                self.buffers.running_log.add_log(format!("Error: {err}"));
+            }
+        }
+
         Ok(())
     }
 
