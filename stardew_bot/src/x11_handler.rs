@@ -203,7 +203,7 @@ impl X11Handler {
             .collect();
 
         while let Some(window) = stack.pop() {
-            if self.get_title_blocking(window)? == title {
+            if self.get_title_blocking(window)?.starts_with(title) {
                 return Ok(window);
             }
 
