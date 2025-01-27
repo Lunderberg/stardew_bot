@@ -560,6 +560,35 @@ impl<'a> CachedReader<'a> {
         Ok(arg_matches)
     }
 
+    fn ptr_to_loader_module(
+        &self,
+        module_ptr: TypedPointer<RuntimeModule>,
+        sig_type: &SignatureType<'_>,
+    ) -> Result<Option<TypedPointer<RuntimeModule>>, Error> {
+        Ok(match sig_type {
+            SignatureType::Prim(_)
+            | SignatureType::Object
+            | SignatureType::String => {
+                Some(self.runtime_module_by_name("System.Private.CoreLib")?)
+            }
+
+            SignatureType::ValueType { index, .. }
+            | SignatureType::Class { index, .. }
+            | SignatureType::GenericInst { index, .. } => Some(
+                self.module_defining_type(module_ptr, *index)
+                    .map(|(ptr, _)| ptr)?,
+            ),
+
+            SignatureType::SizeArray(element_type)
+            | SignatureType::MultiDimArray { element_type, .. } => {
+                self.ptr_to_loader_module(module_ptr, element_type.as_ref())?
+            }
+
+            SignatureType::GenericVarFromType(_) => None,
+            SignatureType::GenericVarFromMethod(_) => None,
+        })
+    }
+
     fn signature_type_to_runtime_type(
         &self,
         module_ptr: TypedPointer<RuntimeModule>,
@@ -630,27 +659,7 @@ impl<'a> CachedReader<'a> {
                     .iter()
                     .next()
                     .map(|arg| -> Result<_, Error> {
-                        Ok(match arg.as_ref() {
-                            SignatureType::Prim(_)
-                            | SignatureType::Object
-                            | SignatureType::String => {
-                                Some(self.runtime_module_by_name(
-                                    "System.Private.CoreLib",
-                                )?)
-                            }
-                            SignatureType::Class { index, .. }
-                            | SignatureType::ValueType { index, .. }
-                            | SignatureType::GenericInst { index, .. } => Some(
-                                self.module_defining_type(module_ptr, *index)
-                                    .map(|(ptr, _)| ptr)?,
-                            ),
-                            SignatureType::GenericVarFromType(_) => None,
-
-                            _ => todo!(
-                                "Handle case, \
-                                 first argument of {sig_type} is {arg}"
-                            ),
-                        })
+                        self.ptr_to_loader_module(module_ptr, arg.deref())
                     })
                     .expect("Expect at least one arg for GenericInst")?
                     .clone();
