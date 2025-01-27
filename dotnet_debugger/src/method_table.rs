@@ -547,8 +547,18 @@ impl EEClass {
         // https://github.com/dotnet/runtime/commit/8b581cad
         // (2024-01-24)
         let extra_size = 256;
-        let bytes =
-            reader.read_bytes(location..location + base_size + extra_size)?;
+
+        let end_location = {
+            let default_end_loc = location + base_size + extra_size;
+            reader
+                .find_region(|region| {
+                    region.address_range().contains(&location)
+                })
+                .map(|region| region.address_range().end.min(default_end_loc))
+                .unwrap_or(default_end_loc)
+        };
+
+        let bytes = reader.read_bytes(location..end_location)?;
         Ok(Self { bytes })
     }
 
