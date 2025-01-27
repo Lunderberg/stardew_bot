@@ -29,9 +29,8 @@ struct ModuleContents {
 impl RuntimeModuleView {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {
         let modules = reader
-            .iter_known_modules()
-            .map(|res_module_ptr| -> Result<_, Error> {
-                let module_ptr = res_module_ptr?;
+            .iter_known_modules()?
+            .map(|module_ptr| -> Result<_, Error> {
                 let module = reader.runtime_module(module_ptr)?;
                 let name =
                     module.dll_region_info(&reader)?.short_name().to_string();

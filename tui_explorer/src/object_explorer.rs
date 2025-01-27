@@ -1,6 +1,5 @@
 use std::{borrow::Borrow, ops::Range};
 
-use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools;
 use regex::Regex;
 
@@ -477,8 +476,8 @@ impl ObjectExplorer {
         // (e.g. a lot of the compiler-generated fields).
 
         let static_fields = reader
-            .iter_known_modules()
-            .flat_map_ok(|module_ptr| {
+            .iter_known_modules()?
+            .map(|module_ptr| -> Result<_, Error> {
                 let prefetch_statics: Vec<_> = reader
                     .static_value_ranges(module_ptr)
                     .map(|range| reader.read_bytes(range))
@@ -548,6 +547,7 @@ impl ObjectExplorer {
 
                 Ok(iter_static_fields)
             })
+            .flatten_ok()
             .map(|res| res?)
             .filter_map(|res_opt| res_opt.transpose())
             .collect::<Result<Vec<_>, _>>()?

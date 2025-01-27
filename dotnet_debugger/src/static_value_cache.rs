@@ -286,7 +286,8 @@ impl<'a> CachedReader<'a> {
     }
 
     fn init_method_table_by_name(&self) -> Result<(), Error> {
-        self.iter_known_modules()
+        self.iter_known_modules()?
+            .map(Ok)
             .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
             .flat_map_ok(|module| {
                 module.iter_method_table_pointers(self.reader)
@@ -1077,7 +1078,8 @@ impl<'a> CachedReader<'a> {
 
     pub fn class_exists(&self, full_name: &str) -> Result<bool, Error> {
         let all_names = self.state.names_from_metadata.or_try_init(|| {
-            self.iter_known_modules()
+            self.iter_known_modules()?
+                .map(Ok)
                 .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
                 .and_map_ok(|module| module.metadata(self.reader))
                 .and_flat_map_ok(|metadata| {
@@ -1187,11 +1189,19 @@ impl<'a> CachedReader<'a> {
 
     pub fn iter_known_modules(
         &self,
-    ) -> impl Iterator<Item = Result<TypedPointer<RuntimeModule>, Error>> + '_
+    ) -> Result<impl Iterator<Item = TypedPointer<RuntimeModule>> + '_, Error>
     {
-        self.iter_clr_dll_regions()
-            .map(|region| region.short_name().trim_end_matches(".dll"))
-            .map(|name| self.runtime_module_by_name(name))
+        if self.state.runtime_module_by_name.is_empty() {
+            self.init_dlls()?;
+        }
+        let iter = self
+            .state
+            .runtime_module_by_name
+            .clone()
+            .into_tuple_vec()
+            .into_iter()
+            .map(|(_name, ptr)| *ptr.deref());
+        Ok(iter)
     }
 
     pub fn iter_static_fields(

@@ -325,16 +325,10 @@ impl DisplayRow {
 impl MetadataDisplay {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {
         let dll_metadata = reader
-            .iter_known_modules()
-            .sorted_by_key(|res_module_ptr| {
+            .iter_known_modules()?
+            .sorted_by_key(|module_ptr| {
                 let get_name = || -> Result<_, Error> {
-                    let module_ptr = match res_module_ptr {
-                        Ok(ptr) => *ptr,
-                        Err(_) => {
-                            return Err(Error::CannotExpandNullField);
-                        }
-                    };
-                    let module = reader.runtime_module(module_ptr)?;
+                    let module = reader.runtime_module(*module_ptr)?;
                     let metadata = module.metadata(&reader)?;
 
                     let assembly_index = MetadataTableIndex::<Assembly>::new(0);
@@ -349,8 +343,7 @@ impl MetadataDisplay {
                     name,
                 )
             })
-            .map(|res_module_ptr| -> Result<DllMetadata, Error> {
-                let module_ptr = res_module_ptr?;
+            .map(|module_ptr| -> Result<DllMetadata, Error> {
                 let module = reader.runtime_module(module_ptr)?;
                 let metadata = module.metadata(&reader)?;
 

@@ -265,9 +265,8 @@ impl TuiExplorerBuilder {
     ) -> Result<Self, Error> {
         let reader = self.tui_globals.cached_reader();
         let initial_pointer = reader
-            .iter_known_modules()
-            .find_map(|res_module_ptr| {
-                let module_ptr = res_module_ptr.ok()?;
+            .iter_known_modules()?
+            .find_map(|module_ptr| {
                 let module = reader.runtime_module(module_ptr).ok()?;
                 let module_name = module.name(reader).ok()?;
                 (name == module_name).then(|| module.location)
@@ -343,9 +342,8 @@ impl TuiExplorerBuilder {
 
         let mut annotator = Vec::<Annotation>::new();
 
-        reader.iter_known_modules().try_for_each(
-            |res_module_ptr| -> Result<(), Error> {
-                let module_ptr = res_module_ptr?;
+        reader.iter_known_modules()?.try_for_each(
+            |module_ptr| -> Result<(), Error> {
                 let module = reader.runtime_module(module_ptr)?;
 
                 module.collect_annotations(&mut annotator, reader)?;
