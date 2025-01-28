@@ -81,6 +81,14 @@ impl TypeDescription {
             arg_ptr
         })
     }
+
+    fn value_type_method_table(&self) -> Option<TypedPointer<MethodTable>> {
+        matches!(self.element_type(), CorElementType::ValueType).then(|| {
+            let arg_ptr: TypedPointer<MethodTable> =
+                self.bytes.subrange(16..24).unpack().unwrap();
+            arg_ptr
+        })
+    }
 }
 
 impl TypeHandle {
@@ -141,6 +149,14 @@ impl<'a> TypeHandleRef<'a> {
 
                     CorElementType::MethodType => {
                         write!(fmt, "Method")?;
+                    }
+
+                    CorElementType::ValueType => {
+                        let method_table_ptr =
+                            type_desc.value_type_method_table().unwrap();
+                        let method_table =
+                            reader.method_table(method_table_ptr)?;
+                        Self::print_method_table(method_table, fmt, reader)?
                     }
 
                     other => todo!("Pretty-printing for {other}"),
