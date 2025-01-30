@@ -315,21 +315,106 @@ impl FishingState {
 
         let b = 1.0 / 5.0;
         let lambda = b / 2.0;
-        let tau = (lambda * lambda - k).sqrt();
+        let determinant = lambda * lambda - k;
 
         let initial_offset = self.fish_position - self.fish_target_position;
         let initial_velocity = self.fish_velocity;
 
-        let coefficient_of_pos =
-            ((tau - lambda) * initial_offset - initial_velocity) / (2.0 * tau);
-        let coefficient_of_neg =
-            ((tau + lambda) * initial_offset + initial_velocity) / (2.0 * tau);
+        enum Solution {
+            // A*exp(-(lambda+tau)*t) + B*exp(-(lambda-tau)*t)
+            Overdamped {
+                tau: f32,
+                coefficient_of_pos: f32,
+                coefficient_of_neg: f32,
+            },
+
+            // (A*t + B)*exp(-lambda*t)
+            CriticallyDamped {
+                linear_offset: f32,
+                linear_slope: f32,
+            },
+
+            // (A*cos(omega*t) + B*sin(omega*t)) * exp(-lambda*t)
+            Underdamped {
+                omega: f32,
+                cos_coefficient: f32,
+                sin_coefficient: f32,
+            },
+        }
+
+        let solution = {
+            let p0 = initial_offset;
+            let v0 = initial_velocity;
+            if determinant.abs() < 1e-5 {
+                // Critically-damped oscillator, which requires special handling
+                // (p0 + t*(b*p0/2 + v0))*exp(-b*t/2)
+                // (p0 + t*(lambda*p0 + v0))*exp(-lambda*t)
+                Solution::CriticallyDamped {
+                    linear_offset: p0,
+                    linear_slope: lambda * p0 + initial_velocity,
+                }
+            } else if determinant > 0.0 {
+                let tau = determinant.sqrt();
+                let coefficient_of_pos =
+                    ((tau - lambda) * p0 - initial_velocity) / (2.0 * tau);
+                let coefficient_of_neg =
+                    ((tau + lambda) * p0 + initial_velocity) / (2.0 * tau);
+                Solution::Overdamped {
+                    tau,
+                    coefficient_of_pos,
+                    coefficient_of_neg,
+                }
+            } else {
+                let omega = (-determinant).sqrt();
+                let cos_coefficient = p0;
+                let sin_coefficient = (lambda * p0 + v0) / omega;
+
+                Solution::Underdamped {
+                    omega,
+                    cos_coefficient,
+                    sin_coefficient,
+                }
+            }
+        };
 
         let fish_target_position = self.fish_target_position;
 
         move |t: f32| -> f32 {
-            let offset = coefficient_of_pos * (-(lambda + tau) * t).exp()
-                + coefficient_of_neg * (-(lambda - tau) * t).exp();
+            let offset = match solution {
+                Solution::Overdamped {
+                    tau,
+                    coefficient_of_pos,
+                    coefficient_of_neg,
+                } => {
+                    // All fish with a difficulty less than 100
+                    // (i.e. everything except the legendary fish)
+                    coefficient_of_pos * (-(lambda + tau) * t).exp()
+                        + coefficient_of_neg * (-(lambda - tau) * t).exp()
+                }
+                Solution::CriticallyDamped {
+                    linear_offset,
+                    linear_slope,
+                } => {
+                    // Fish with a difficulty of exactly 100 (i.e. the
+                    // Glacerfish, and nothing else)
+                    let linear_term = linear_offset + linear_slope * t;
+                    let exponential_term = (-lambda * t).exp();
+                    linear_term * exponential_term
+                }
+                Solution::Underdamped {
+                    omega,
+                    cos_coefficient,
+                    sin_coefficient,
+                } => {
+                    // Fish with a difficulty greater than 100
+                    // (i.e. the Legend, and nothing else)
+                    let sin_term = sin_coefficient * (omega * t).sin();
+                    let cos_term = cos_coefficient * (omega * t).cos();
+                    let exponential_term = (-lambda * t).exp();
+
+                    (sin_term + cos_term) * exponential_term
+                }
+            };
             let predicted = fish_target_position + offset;
 
             predicted
