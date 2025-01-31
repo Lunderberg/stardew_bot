@@ -133,6 +133,8 @@ impl PathfindingUI {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {
         let location_list = "StardewValley.Game1.game1\
                              ._locations\
+                             .as::<System.Collections.ObjectModel.Collection`1<StardewValley.GameLocation>>()\
+                             .items\
                              .as::<\
                                System.Collections.Generic\
                                .List`1<StardewValley.GameLocation>\
