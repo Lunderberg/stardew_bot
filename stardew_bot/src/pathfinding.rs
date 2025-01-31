@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use dotnet_debugger::{CachedReader, SymbolicGraph};
 use itertools::Itertools as _;
 use ratatui::{
@@ -99,6 +101,10 @@ enum TreeKind {
     Mahogany,
     Mystic,
     GreenRain,
+    // From Stardew Expanded
+    Fir,
+    // From Stardew Expanded
+    Birch,
 }
 
 struct Litter {
@@ -950,7 +956,29 @@ impl std::str::FromStr for TreeKind {
                  actually used?"
             ),
 
+            "FlashShifter.StardewValleyExpandedCP_Fir_Tree" => Ok(Self::Fir),
+            "FlashShifter.StardewValleyExpandedCP_Birch_Tree" => {
+                Ok(Self::Birch)
+            }
             other => Err(Error::UnrecognizedTreeKind(other.to_string())),
+        }
+    }
+}
+
+impl Display for TreeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            TreeKind::Oak => write!(f, "Oak"),
+            TreeKind::Maple => write!(f, "Maple"),
+            TreeKind::Pine => write!(f, "Pine"),
+            TreeKind::DesertPalm => write!(f, "DesertPalm"),
+            TreeKind::IslandPalm => write!(f, "IslandPalm"),
+            TreeKind::Mushroom => write!(f, "Mushroom"),
+            TreeKind::Mahogany => write!(f, "Mahogany"),
+            TreeKind::Mystic => write!(f, "Mystic"),
+            TreeKind::GreenRain => write!(f, "GreenRain"),
+            TreeKind::Fir => write!(f, "Fir"),
+            TreeKind::Birch => write!(f, "Birch"),
         }
     }
 }
