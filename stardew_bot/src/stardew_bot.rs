@@ -1,6 +1,6 @@
 use crate::{
     game_action::InputState, Error, FishingUI, GameAction, PathfindingUI,
-    RunningLog, TuiDrawRate, X11Handler,
+    PlayerStats, RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -49,6 +49,7 @@ struct TuiBuffers {
     draw_rate: TuiDrawRate,
     fishing: FishingUI,
     pathfinding: PathfindingUI,
+    player_stats: PlayerStats,
 }
 
 #[allow(unused)]
@@ -107,6 +108,7 @@ impl TuiBuffers {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(per_frame_reader)?,
+            player_stats: PlayerStats::new(per_frame_reader)?,
             pathfinding: PathfindingUI::new(reader)?,
         })
     }
@@ -116,6 +118,7 @@ impl TuiBuffers {
             Box::new(&mut self.running_log),
             Box::new(&mut self.draw_rate),
             Box::new(&mut self.fishing),
+            Box::new(&mut self.player_stats),
             Box::new(&mut self.pathfinding),
         ]
     }
@@ -150,10 +153,16 @@ impl StardewBot {
         layout.split_vertically(Some(3), None);
         layout.switch_to_buffer(1);
         layout.cycle_next();
-        layout.switch_to_buffer(0);
         layout.split_horizontally(None, Some(45));
-        //layout.switch_to_buffer(2);
+        layout.cycle_next();
+        layout.split_vertically(Some(10), None);
         layout.switch_to_buffer(3);
+        layout.cycle_next();
+        layout.switch_to_buffer(0);
+        layout.cycle_next();
+        layout.cycle_next();
+        layout.switch_to_buffer(2);
+        // layout.switch_to_buffer(3);
 
         Ok(Self {
             tui_globals,

@@ -22,5 +22,8 @@ pub use running_log::RunningLog;
 mod fishing;
 pub use fishing::FishingUI;
 
+mod player_stats;
+pub use player_stats::PlayerStats;
+
 mod pathfinding;
 pub use pathfinding::PathfindingUI;
