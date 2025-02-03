@@ -238,6 +238,7 @@ impl FishingUI {
         values: &VMResults,
     ) -> Result<Option<FishingState>, dotnet_debugger::Error> {
         let minigame_in_progress: bool = values[self.minigame_in_progress]
+            .as_ref()
             .map_or(Ok(false), TryInto::try_into)?;
         // let minigame_in_progress = self
         //     .minigame_in_progress_vm
@@ -249,8 +250,9 @@ impl FishingUI {
         }
 
         //let tick = self.game_tick_vm.read_as::<i32>(reader)?.unwrap_or(-1);
-        let tick: i32 =
-            values[self.game_tick].map_or(Ok(-1), TryInto::try_into)?;
+        let tick: i32 = values[self.game_tick]
+            .as_ref()
+            .map_or(Ok(-1), TryInto::try_into)?;
         if self
             .history
             .last()
@@ -260,35 +262,33 @@ impl FishingUI {
             return Ok(None);
         }
 
-        // let fishing_bar_bottom = self
-        //     .bar_position_vm
-        //     .read_as::<f32>(reader)?
-        //     .unwrap_or(f32::NAN);
         let fishing_bar_bottom: f32 = values[self.bar_position]
+            .as_ref()
             .map_or(Ok(f32::NAN), TryInto::try_into)?;
-        // let fishing_bar_height =
-        //     self.bar_height_vm.read_as::<i32>(reader)?.unwrap_or(-1);
-        let fishing_bar_height: i32 =
-            values[self.bar_height].map_or(Ok(-1), TryInto::try_into)?;
+        let fishing_bar_height: i32 = values[self.bar_height]
+            .as_ref()
+            .map_or(Ok(-1), TryInto::try_into)?;
         let bar_position = fishing_bar_bottom
             ..fishing_bar_bottom + (fishing_bar_height as f32);
-        // let bar_velocity = self
-        //     .bar_velocity_vm
-        //     .read_as::<f32>(reader)?
-        //     .unwrap_or(f32::NAN);
         let bar_velocity: f32 = values[self.bar_velocity]
+            .as_ref()
             .map_or(Ok(f32::NAN), TryInto::try_into)?;
 
-        let fish_in_bar: bool =
-            values[self.bobber_in_bar].map_or(Ok(false), TryInto::try_into)?;
+        let fish_in_bar: bool = values[self.bobber_in_bar]
+            .as_ref()
+            .map_or(Ok(false), TryInto::try_into)?;
         let fish_position: f32 = values[self.fish_position]
+            .as_ref()
             .map_or(Ok(f32::NAN), TryInto::try_into)?;
         let fish_velocity = values[self.fish_velocity]
+            .as_ref()
             .map_or(Ok(f32::NAN), TryInto::try_into)?;
         let fish_target_position: f32 = values[self.fish_target_position]
+            .as_ref()
             .map_or(Ok(-1.0), TryInto::try_into)?;
-        let fish_difficulty: f32 =
-            values[self.fish_difficulty].map_or(Ok(-1.0), TryInto::try_into)?;
+        let fish_difficulty: f32 = values[self.fish_difficulty]
+            .as_ref()
+            .map_or(Ok(-1.0), TryInto::try_into)?;
 
         Ok(Some(FishingState {
             tick,
@@ -463,11 +463,14 @@ impl WidgetWindow<Error> for FishingUI {
             .expect("Generated for each frame");
 
         let get_bool = |token: ValueToken| -> Result<bool, Error> {
-            Ok(values[token].map_or(Ok(false), TryInto::try_into)?)
+            Ok(values[token]
+                .as_ref()
+                .map_or(Ok(false), TryInto::try_into)?)
         };
 
         let get_float = |token: ValueToken| -> Result<f32, Error> {
             Ok(values[token]
+                .as_ref()
                 .ok_or(Error::ExpectedNoneEmptyValue)?
                 .try_into()?)
         };
@@ -533,11 +536,12 @@ impl WidgetWindow<Error> for FishingUI {
 
         let get_bool = |token: ValueToken| -> bool {
             values[token]
+                .as_ref()
                 .map(|val| val.try_into().ok())
                 .flatten()
                 .unwrap_or(false)
         };
-        let get_value = |token: ValueToken| match values[token] {
+        let get_value = |token: ValueToken| match &values[token] {
             Some(value) => Text::raw(format!("{value}")),
             None => Text::raw(""),
         };

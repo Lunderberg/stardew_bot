@@ -70,12 +70,15 @@ impl WidgetWindow<Error> for PlayerStats {
             .get::<VMResults>()
             .expect("Generated for each frame");
 
-        let get_value = |token: ValueToken| match values[token] {
+        let get_value = |token: ValueToken| match &values[token] {
             Some(value) => Text::raw(format!("{value}")),
             None => Text::raw(""),
         };
 
-        let tomorrow_weather = match values[self.tomorrow_weather] {
+        let tomorrow_weather = match values[self.tomorrow_weather]
+            .as_ref()
+            .and_then(|val| val.as_prim())
+        {
             Some(ptr) => match ptr.read_string_ptr(globals.reader()) {
                 Ok(weather) => Text::raw(weather),
                 Err(err) => Text::raw(format!("{err}")),

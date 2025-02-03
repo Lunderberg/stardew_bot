@@ -332,6 +332,18 @@ pub enum Error {
          where only .NET types are expected."
     )]
     UnexpectedRustTypeInDotNet,
+
+    #[error(
+        "Attempted conversion of rust-native object \
+         of type {0:?} into primitive."
+    )]
+    AttemptedConversionOfNativeObject(std::any::TypeId),
+
+    #[error(
+        "Attempted to read rust-native object \
+         of type {0:?} as a pointer to a .NET string."
+    )]
+    AttemptedReadOfNativeObjectAsStringPtr(std::any::TypeId),
 }
 
 impl std::fmt::Debug for Error {

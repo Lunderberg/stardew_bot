@@ -18,7 +18,7 @@ use super::{graph_rewrite::Analysis, GraphRewrite, TypeInference};
 #[derive(Default, Clone)]
 pub struct SymbolicGraph {
     ops: Vec<Expr>,
-    outputs: Vec<SymbolicValue>,
+    num_outputs: usize,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -122,6 +122,13 @@ pub enum ExprKind {
         ptr: SymbolicValue,
         prim_type: RuntimePrimType,
     },
+
+    /// Marks a value to be returned from a function call, or a VM
+    /// evaluation.
+    Output {
+        value: SymbolicValue,
+        slot: StackIndex,
+    },
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
@@ -215,6 +222,12 @@ pub struct GraphComparison<'a> {
     rhs: &'a SymbolicGraph,
     order_dependent: bool,
     compare_names: bool,
+}
+
+impl ValueToken {
+    pub fn forge_new_token_which_may_be_invalid(index: usize) -> Self {
+        Self(index)
+    }
 }
 
 impl SymbolicType {
@@ -375,7 +388,11 @@ pub trait Printable {
 }
 impl Printable for ValueToken {
     fn top_level_value(self, graph: &SymbolicGraph) -> SymbolicValue {
-        graph.outputs[self.0]
+        graph
+            .ops
+            .iter()
+            .find_map(|op| op.as_output_value())
+            .expect("Attempted use of invalid ValueToken {self}")
     }
 }
 impl Printable for SymbolicValue {
@@ -388,7 +405,7 @@ impl SymbolicGraph {
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
-            outputs: Vec::new(),
+            num_outputs: 0,
         }
     }
 
@@ -397,7 +414,7 @@ impl SymbolicGraph {
     }
 
     pub fn num_outputs(&self) -> usize {
-        self.outputs.len()
+        self.num_outputs
     }
 
     pub fn parse(&mut self, text: &str) -> Result<SymbolicValue, Error> {
@@ -445,9 +462,13 @@ impl SymbolicGraph {
     }
 
     pub fn mark_output(&mut self, value: SymbolicValue) -> ValueToken {
-        let index = self.outputs.len();
-        self.outputs.push(value);
-        ValueToken(index)
+        let slot = self.num_outputs;
+        self.num_outputs += 1;
+        self.push(ExprKind::Output {
+            value,
+            slot: StackIndex(slot),
+        });
+        ValueToken(slot)
     }
 
     pub fn printer<'a>(&'a self) -> GraphPrinter<'a> {
@@ -640,16 +661,6 @@ impl SymbolicGraph {
             .map(|(i, op)| (OpIndex::new(i), op))
     }
 
-    pub fn iter_outputs(
-        &self,
-    ) -> impl Iterator<Item = (ValueToken, SymbolicValue)> + '_ {
-        self.outputs
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, op_index)| (ValueToken(i), op_index))
-    }
-
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
@@ -676,29 +687,6 @@ impl SymbolicGraph {
         Ok(())
     }
 
-    fn mark_new_outputs(
-        &mut self,
-        prev_outputs: &[SymbolicValue],
-        remap: &HashMap<OpIndex, SymbolicValue>,
-    ) {
-        for old_value in prev_outputs {
-            let new_value = match old_value {
-                SymbolicValue::Result(old_index) => {
-                    remap.get(old_index).unwrap_or_else(|| {
-                        unreachable!(
-                            "Internal error: \
-                         All indices should be populated at this point, \
-                         but {old_index} did not have a remapped value."
-                        )
-                    })
-                }
-                other => other,
-            };
-
-            self.mark_output(*new_value);
-        }
-    }
-
     pub fn simplify(&self, reader: CachedReader<'_>) -> Result<Self, Error> {
         let analysis = Analysis::new(reader);
         let rewriter = super::RemoveUnusedDowncast(&analysis)
@@ -712,6 +700,7 @@ impl SymbolicGraph {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
+        builder.num_outputs = self.num_outputs;
 
         for (old_index, op) in self.iter_ops() {
             let opt_remapped = op.kind.try_remap(&prev_index_lookup);
@@ -729,8 +718,6 @@ impl SymbolicGraph {
                 });
             prev_index_lookup.insert(old_index, value);
         }
-
-        builder.mark_new_outputs(&self.outputs, &prev_index_lookup);
 
         Ok(builder)
     }
@@ -767,11 +754,15 @@ impl SymbolicGraph {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
+        builder.num_outputs = self.num_outputs;
 
-        let reachable = self.reachable(self.outputs.iter().cloned());
+        let reachable = self
+            .reachable(self.ops.iter().filter_map(|op| op.as_output_value()));
 
         for (prev_index, op) in self.iter_ops() {
-            if reachable[prev_index.0] {
+            if reachable[prev_index.0]
+                || matches!(op.as_ref(), ExprKind::Output { .. })
+            {
                 let kind = op
                     .kind
                     .try_remap(&prev_index_lookup)
@@ -781,13 +772,12 @@ impl SymbolicGraph {
             }
         }
 
-        builder.mark_new_outputs(&self.outputs, &prev_index_lookup);
-
         Ok(builder)
     }
 
     pub fn eliminate_common_subexpresssions(self) -> Result<Self, Error> {
         let mut builder = Self::new();
+        builder.num_outputs = self.num_outputs;
 
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
@@ -810,8 +800,6 @@ impl SymbolicGraph {
             prev_index_lookup.insert(prev_index, new_index);
         }
 
-        builder.mark_new_outputs(&self.outputs, &prev_index_lookup);
-
         Ok(builder)
     }
 
@@ -819,44 +807,9 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
 
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
-        let output_indices: HashMap<OpIndex, StackIndex> = self
-            .iter_outputs()
-            .filter_map(|(output, value)| match value {
-                SymbolicValue::Result(op_index) => {
-                    Some((op_index, StackIndex(output.0)))
-                }
-                _ => None,
-            })
-            .collect();
-
-        let num_outputs = self.outputs.len();
-
         let mut instructions = Vec::new();
-        let mut currently_stored: HashMap<OpIndex, StackIndex> = HashMap::new();
-        let mut next_free_index = num_outputs;
-
-        macro_rules! value_to_register {
-            ($arg:expr) => {{
-                let vm_arg: VMArg = match $arg {
-                    &SymbolicValue::Int(value) => {
-                        RuntimePrimValue::NativeUInt(value).into()
-                    }
-
-                    &SymbolicValue::Ptr(ptr) => {
-                        RuntimePrimValue::Ptr(ptr).into()
-                    }
-
-                    SymbolicValue::Result(op_index) => {
-                        let index = *currently_stored.get(&op_index).expect(
-                            "Internal error, \
-                             {op_index} not located anywhere",
-                        );
-                        VMArg::SavedValue(index)
-                    }
-                };
-                Instruction::LoadToRegister(vm_arg)
-            }};
-        }
+        let mut currently_stored: HashMap<OpIndex, VMArg> = HashMap::new();
+        let mut next_free_index = self.num_outputs;
 
         macro_rules! value_to_arg {
             ($arg:expr) => {
@@ -867,42 +820,78 @@ impl SymbolicGraph {
                     &SymbolicValue::Ptr(ptr) => {
                         VMArg::Const(RuntimePrimValue::Ptr(ptr))
                     }
-                    SymbolicValue::Result(op_index) => {
-                        let index = *currently_stored.get(&op_index).expect(
+                    SymbolicValue::Result(op_index) => currently_stored
+                        .get(&op_index)
+                        .expect(
                             "Internal error, \
                              {op_index} not located anywhere",
-                        );
-                        VMArg::SavedValue(index)
-                    }
+                        )
+                        .clone(),
                 }
             };
         }
 
         for (op_index, op) in self.iter_ops() {
+            let output: StackIndex = match op.as_ref() {
+                ExprKind::Output { slot, .. } => *slot,
+                _ => {
+                    let index = next_free_index;
+                    next_free_index += 1;
+                    StackIndex(index)
+                }
+            };
+
             match op.as_ref() {
                 ExprKind::Add { lhs, rhs } => {
-                    instructions.push(value_to_register!(lhs));
-                    instructions.push(Instruction::Add(value_to_arg!(rhs)));
+                    let lhs = value_to_arg!(lhs);
+                    let rhs = value_to_arg!(rhs);
+                    instructions.push(Instruction::Add { lhs, rhs, output });
+                    currently_stored.insert(op_index, output.into());
                 }
                 ExprKind::Mul { lhs, rhs } => {
-                    instructions.push(value_to_register!(lhs));
-                    instructions.push(Instruction::Mul(value_to_arg!(rhs)));
+                    let lhs = value_to_arg!(lhs);
+                    let rhs = value_to_arg!(rhs);
+                    instructions.push(Instruction::Mul { lhs, rhs, output });
+                    currently_stored.insert(op_index, output.into());
                 }
                 ExprKind::PrimCast { value, prim_type } => {
-                    instructions.push(value_to_register!(value));
-                    instructions.push(Instruction::PrimCast(*prim_type));
+                    let value = value_to_arg!(value);
+                    instructions.push(Instruction::PrimCast {
+                        value,
+                        prim_type: *prim_type,
+                        output,
+                    });
+                    currently_stored.insert(op_index, output.into());
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
-                    instructions.push(value_to_register!(obj));
-                    instructions.push(Instruction::Downcast(*ty));
+                    let obj = value_to_arg!(obj);
+                    instructions.push(Instruction::Downcast {
+                        obj,
+                        subtype: *ty,
+                        output,
+                    });
+                    currently_stored.insert(op_index, output.into());
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
-                    instructions.push(value_to_register!(ptr));
-                    instructions.push(Instruction::Read(*prim_type));
+                    let ptr = value_to_arg!(ptr);
+                    instructions.push(Instruction::Read {
+                        ptr,
+                        prim_type: *prim_type,
+                        output,
+                    });
+                    currently_stored.insert(op_index, output.into());
                 }
                 ExprKind::PointerCast { ptr, .. } => {
-                    instructions.push(value_to_register!(ptr));
+                    let ptr = value_to_arg!(ptr);
+                    instructions.push(Instruction::Copy { value: ptr, output });
+                    currently_stored.insert(op_index, ptr);
                 }
+                ExprKind::Output { value, .. } => {
+                    let value = value_to_arg!(value);
+                    instructions.push(Instruction::Copy { value, output });
+                    currently_stored.insert(op_index, value);
+                }
+
                 symbolic @ (ExprKind::StaticField(_)
                 | ExprKind::FieldAccess { .. }
                 | ExprKind::SymbolicDowncast { .. }
@@ -914,32 +903,9 @@ impl SymbolicGraph {
                     ));
                 }
             }
-
-            let register_index: StackIndex = output_indices
-                .get(&op_index)
-                .map(|token| *token)
-                .unwrap_or_else(|| {
-                    let index = next_free_index;
-                    next_free_index += 1;
-                    StackIndex(index)
-                });
-            instructions.push(Instruction::SaveValue(register_index));
-            currently_stored.insert(op_index, register_index);
         }
 
-        for (output, value) in self.iter_outputs() {
-            let constant: Option<RuntimePrimValue> = match value {
-                SymbolicValue::Result(_) => None,
-                SymbolicValue::Int(value) => Some(value.into()),
-                SymbolicValue::Ptr(ptr) => Some(ptr.into()),
-            };
-            if let Some(value) = constant {
-                instructions.push(Instruction::LoadToRegister(value.into()));
-                instructions.push(Instruction::SaveValue(StackIndex(output.0)));
-            }
-        }
-
-        Ok(VirtualMachine::new(instructions, num_outputs))
+        Ok(VirtualMachine::new(instructions, self.num_outputs))
     }
 
     pub fn compile(
@@ -992,9 +958,7 @@ impl SymbolicGraph {
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine()?;
-        let vm = vm.remove_unnecessary_restore_value();
-        let vm = vm.remove_unnecessary_save_value();
-        let vm = vm.remap_temporary_indices();
+        let vm = vm.simplify();
 
         Ok(vm)
     }
@@ -1015,6 +979,10 @@ impl Expr {
         callback: impl FnMut(SymbolicValue),
     ) {
         self.kind.visit_input_values(callback)
+    }
+
+    pub(crate) fn as_output_value(&self) -> Option<SymbolicValue> {
+        self.kind.as_output_value()
     }
 }
 
@@ -1114,6 +1082,13 @@ impl ExprKind {
                     prim_type: prim_type.clone(),
                 })
             }
+
+            ExprKind::Output { slot, value } => {
+                remap(value).map(|value| ExprKind::Output {
+                    value,
+                    slot: slot.clone(),
+                })
+            }
         }
     }
 
@@ -1151,6 +1126,16 @@ impl ExprKind {
             ExprKind::ReadValue { ptr, .. } => {
                 callback(*ptr);
             }
+            ExprKind::Output { value, .. } => {
+                callback(*value);
+            }
+        }
+    }
+
+    pub(crate) fn as_output_value(&self) -> Option<SymbolicValue> {
+        match self {
+            ExprKind::Output { value, .. } => Some(*value),
+            _ => None,
         }
     }
 }
@@ -1182,22 +1167,17 @@ impl<'a> GraphComparison<'a> {
         let lhs = self.lhs;
         let rhs = self.rhs;
         lhs.ops.len() == rhs.ops.len()
-            && lhs.outputs.len() == rhs.outputs.len()
+            && lhs.num_outputs() == rhs.num_outputs()
             && lhs.ops.iter().zip(rhs.ops.iter()).all(|(a, b)| {
                 a.kind == b.kind && (!self.compare_names || a.name == b.name)
             })
-            && lhs
-                .outputs
-                .iter()
-                .zip(rhs.outputs.iter())
-                .all(|(a, b)| a == b)
     }
 
     fn order_independent_comparison(&self) -> bool {
         let lhs = self.lhs;
         let rhs = self.rhs;
 
-        if lhs.outputs.len() != rhs.outputs.len() {
+        if lhs.num_outputs() != rhs.num_outputs() {
             return false;
         }
 
@@ -1236,9 +1216,28 @@ impl<'a> GraphComparison<'a> {
             }};
         }
 
-        for (lhs_output, rhs_output) in lhs.outputs.iter().zip(&rhs.outputs) {
-            if !equivalent_value!(lhs_output, rhs_output) {
-                return false;
+        {
+            let slot_lookup: HashMap<StackIndex, SymbolicValue> = lhs
+                .ops
+                .iter()
+                .filter_map(|op| match op.as_ref() {
+                    ExprKind::Output { value, slot } => Some((*slot, *value)),
+                    _ => None,
+                })
+                .collect();
+            for rhs_op in rhs.ops.iter() {
+                if let ExprKind::Output {
+                    value: rhs_output,
+                    slot,
+                } = rhs_op.as_ref()
+                {
+                    let Some(lhs_output) = slot_lookup.get(slot) else {
+                        return false;
+                    };
+                    if !equivalent_value!(lhs_output, rhs_output) {
+                        return false;
+                    }
+                }
             }
         }
 
@@ -1402,6 +1401,19 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::Output {
+                    value: lhs_value,
+                    slot: lhs_slot,
+                } => match rhs_kind {
+                    ExprKind::Output {
+                        value: rhs_value,
+                        slot: rhs_slot,
+                    } => {
+                        equivalent_value!(lhs_value, rhs_value)
+                            && lhs_slot == rhs_slot
+                    }
+                    _ => false,
+                },
             };
 
             if !is_match {
@@ -1461,6 +1473,9 @@ impl Display for ExprKind {
             ExprKind::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
+            ExprKind::Output { value, slot } => {
+                write!(f, "output_{slot} = {value};")
+            }
         }
     }
 }
@@ -1481,17 +1496,6 @@ impl<'a> GraphPrinter<'a> {
     }
 
     fn display(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let output_lookup: HashMap<_, _> = self
-            .graph
-            .outputs
-            .iter()
-            .cloned()
-            .enumerate()
-            .filter_map(|(i, value)| {
-                value.as_op_index().map(|op_index| (op_index, i))
-            })
-            .collect();
-
         let reachable = if let Some(root_node) = self.root_subgraph_node {
             self.graph.reachable(std::iter::once(root_node))
         } else {
@@ -1546,7 +1550,7 @@ impl<'a> GraphPrinter<'a> {
                 .insert_zero_width_space_at_breakpoint,
         };
 
-        for (index, _op) in self.graph.iter_ops() {
+        for (index, op) in self.graph.iter_ops() {
             if reachable[index.0]
                 && !inline_expr[index.0]
                 && self.root_subgraph_node != Some(SymbolicValue::Result(index))
@@ -1558,11 +1562,11 @@ impl<'a> GraphPrinter<'a> {
                 };
                 let expr_printer = make_expr_printer(index.into());
 
-                write!(fmt, "let {index_printer} ")?;
-                if let Some(i) = output_lookup.get(&index) {
-                    write!(fmt, "(output #{i}) ")?;
+                if matches!(op.as_ref(), ExprKind::Output { .. }) {
+                    writeln!(fmt, "{expr_printer}")?;
+                } else {
+                    writeln!(fmt, "let {index_printer} = {expr_printer};")?;
                 }
-                writeln!(fmt, "= {expr_printer};")?;
             }
         }
 
@@ -1708,6 +1712,10 @@ impl<'a> Display for ExprPrinter<'a> {
             ExprKind::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
+            }
+            ExprKind::Output { value, slot } => {
+                let value = self.with_value(*value);
+                write!(f, "output_{slot} = {value};")
             }
         }
     }

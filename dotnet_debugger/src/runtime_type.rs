@@ -1,3 +1,4 @@
+use derive_more::derive::From;
 use memory_reader::Pointer;
 
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
 /// would refer to the method table of `BaseClass`.
 ///
 /// So in absence of a better name, calling it `RuntimeType` for now.
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
 pub enum RuntimeType {
     Prim(RuntimePrimType),
     DotNet(DotNetType),
@@ -115,7 +116,7 @@ pub enum DotNetType {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
 pub enum RustType {
     Opaque(std::any::TypeId),
 }
@@ -505,15 +506,9 @@ impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
     }
 }
 
-impl From<RuntimePrimType> for RuntimeType {
-    fn from(prim: RuntimePrimType) -> Self {
-        RuntimeType::Prim(prim)
-    }
-}
-
-impl From<DotNetType> for RuntimeType {
-    fn from(dot_net_type: DotNetType) -> Self {
-        RuntimeType::DotNet(dot_net_type)
+impl From<std::any::TypeId> for RuntimeType {
+    fn from(type_id: std::any::TypeId) -> Self {
+        RuntimeType::Rust(type_id.into())
     }
 }
 

@@ -173,10 +173,12 @@ impl PathfindingUI {
 
             res
         };
-        let num_locations = res[0].unwrap().as_usize()?;
-        let current_location = res[1].unwrap().read_string_ptr(&reader)?;
-        let player_x: f32 = res[2].unwrap().try_into()?;
-        let player_y: f32 = res[3].unwrap().try_into()?;
+        let _num_locations: usize = res.get_as::<usize>(0)?.unwrap();
+        let current_location = res.get(1).unwrap().read_string_ptr(&reader)?;
+        let player_x: f32 = res.get_as::<f32>(2)?.unwrap();
+        let player_y: f32 = res.get_as::<f32>(3)?.unwrap();
+
+        let num_locations = 2;
 
         /// Helper struct to hold the per-location fields that are
         /// read out for every location.  Fields within a location
@@ -276,26 +278,26 @@ impl PathfindingUI {
                 .map(|(index, chunk)| {
                     let mut next = {
                         let mut iter_chunk = chunk.iter();
-                        move || iter_chunk.next().unwrap()
+                        move || iter_chunk.next().unwrap().as_ref()
                     };
 
                     let name = next().unwrap().read_string_ptr(&reader)?;
                     let shape = {
-                        let width = next().unwrap().as_usize()?;
-                        let height = next().unwrap().as_usize()?;
+                        let width = next().unwrap().try_into()?;
+                        let height = next().unwrap().try_into()?;
                         Rectangle { width, height }
                     };
 
-                    let num_warps = next().unwrap().as_usize()?;
-                    let num_resource_clumps = next().unwrap().as_usize()?;
+                    let num_warps = next().unwrap().try_into()?;
+                    let num_resource_clumps = next().unwrap().try_into()?;
                     let num_features = next()
-                        .map(|value| value.as_usize())
+                        .map(|value| value.try_into())
                         .transpose()?
                         .unwrap_or(0);
-                    let num_large_features = next().unwrap().as_usize()?;
+                    let num_large_features = next().unwrap().try_into()?;
 
                     let num_objects = next()
-                        .map(|value| value.as_usize())
+                        .map(|value| value.try_into())
                         .transpose()?
                         .unwrap_or(0);
 
@@ -487,13 +489,13 @@ impl PathfindingUI {
                         let target_y = next_value().unwrap();
                         let target_name = next_value().unwrap();
                         let location = {
-                            let right = x.as_isize()?;
-                            let down = y.as_isize()?;
+                            let right = x.try_into()?;
+                            let down = y.try_into()?;
                             Tile { right, down }
                         };
                         let target = {
-                            let right = target_x.as_isize()?;
-                            let down = target_y.as_isize()?;
+                            let right = target_x.try_into()?;
+                            let down = target_y.try_into()?;
                             Tile { right, down }
                         };
                         let target_room =
@@ -514,8 +516,8 @@ impl PathfindingUI {
                             Position { right, down }
                         };
                         let shape = {
-                            let width = next_value().unwrap().as_usize()?;
-                            let height = next_value().unwrap().as_usize()?;
+                            let width = next_value().unwrap().try_into()?;
+                            let height = next_value().unwrap().try_into()?;
                             Rectangle { width, height }
                         };
 
@@ -580,7 +582,7 @@ impl PathfindingUI {
                         let right = next_value();
                         let down = next_value();
 
-                        let size = match size?.as_usize() {
+                        let size = match size?.try_into() {
                             Ok(val) => val,
                             Err(err) => {
                                 return Some(Err(err));
@@ -615,9 +617,9 @@ impl PathfindingUI {
                     let category = next_value();
                     let name = next_value();
                     let opt_litter = category
-                        .map(|value| value.as_isize())
+                        .map(|value| value.try_into())
                         .transpose()?
-                        .filter(|category| *category == -999)
+                        .filter(|category: &isize| *category == -999)
                         .map(|_| -> Result<_, Error> {
                             let name =
                                 name.unwrap().read_string_ptr(&reader)?;

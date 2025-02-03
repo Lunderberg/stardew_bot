@@ -1,17 +1,15 @@
-use std::{
-    collections::{HashMap, HashSet},
-    fmt::Display,
-};
+use std::{any::Any, collections::HashMap, fmt::Display, ops::Range};
 
+use derive_more::derive::From;
 use memory_reader::Pointer;
 use thiserror::Error;
 
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, MethodTable,
-    RuntimePrimValue, TypedPointer, ValueToken,
+    RuntimePrimValue, RuntimeType, TypedPointer, ValueToken,
 };
 
-use super::{native_function::WrappedNativeFunction, NativeFunction};
+use super::native_function::{NativeFunction, WrappedNativeFunction};
 
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
@@ -33,9 +31,15 @@ pub struct VirtualMachine {
     num_temporaries: usize,
 }
 
-pub struct VMResults(Vec<Option<RuntimePrimValue>>);
+#[derive(Debug, From)]
+pub enum StackValue {
+    Prim(RuntimePrimValue),
+    Any(Box<dyn Any>),
+}
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct VMResults(Vec<Option<StackValue>>);
+
+#[derive(Debug, Clone, Copy, PartialEq, From)]
 pub enum VMArg {
     Const(RuntimePrimValue),
     SavedValue(StackIndex),
@@ -52,47 +56,85 @@ pub struct FunctionIndex(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
+    // Returns a copy of the specified value.  Can be used to copy a
+    // value on the stack, or to store a constant value onto the
+    // stack.
+    Copy {
+        value: VMArg,
+        output: StackIndex,
+    },
+
     // If the register contains true, jump to the specified
     // instruction.  Otherwise, continue to the next instruction.
-    ConditionalJump(InstructionIndex),
-
-    // Write the current value of the register into vm.values[index]
-    SaveValue(StackIndex),
+    ConditionalJump {
+        cond: VMArg,
+        dest: InstructionIndex,
+    },
 
     // Call a native function
     NativeFunctionCall {
         index: FunctionIndex,
         first_arg: StackIndex,
         num_args: usize,
+        output: StackIndex,
     },
 
-    // Load the constant, or previously saved value, into the
-    // register.
-    LoadToRegister(VMArg),
-
     // Cast the value in the register to the specified type.
-    PrimCast(RuntimePrimType),
+    PrimCast {
+        value: VMArg,
+        prim_type: RuntimePrimType,
+        output: StackIndex,
+    },
 
     // Increment the register by the value specified in the argument,
     // storing the result back to the register.
-    Add(VMArg),
+    Add {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
 
     // Decrement the register by the value specified in the argument,
     // storing the result back to the register.
-    Sub(VMArg),
+    Sub {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
 
     // Multiply the register by the value specified in the argument,
     // storing the result back to the register.
-    Mul(VMArg),
+    Mul {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
 
     // Check if the value in the register is equal to the specified
     // argument, storing the resulting boolean back to the register.
-    Equal(VMArg),
+    Equal {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
 
     // Check if the value in the register is greater than the
     // specified argument, storing the resulting boolean back to the
     // register.
-    GreaterThan(VMArg),
+    LessThan {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    // Check if the value in the register is greater than the
+    // specified argument, storing the resulting boolean back to the
+    // register.
+    GreaterThan {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
 
     // Downcast a type.  Assumes the register contains a pointer to an
     // object.  If the object is of type `ty`, then the register is
@@ -103,7 +145,11 @@ pub enum Instruction {
     // Read(RuntimeType::Ptr), followed by a boolean check IsBaseOf.
     // That way, multiple type checks on the same object can share the
     // same Read of the method table pointer.
-    Downcast(TypedPointer<MethodTable>),
+    Downcast {
+        obj: VMArg,
+        subtype: TypedPointer<MethodTable>,
+        output: StackIndex,
+    },
 
     // Read a value.
     //
@@ -114,7 +160,11 @@ pub enum Instruction {
     // Cast operator the operates on a subset of those bytes.  This
     // would allow access of multiple fields of an object to share the
     // same read.
-    Read(RuntimePrimType),
+    Read {
+        ptr: VMArg,
+        prim_type: RuntimePrimType,
+        output: StackIndex,
+    },
 }
 
 #[derive(Error)]
@@ -164,10 +214,9 @@ pub enum VMExecutionError {
     #[error(
         "ConditionalJump requires the register \
          to contain a boolean value.  \
-         However, it contained {0} of type {}.",
-        .0.runtime_type(),
+         However, it contained an instance of type {0}."
     )]
-    InvalidOperandForConditionalJump(RuntimePrimValue),
+    InvalidOperandForConditionalJump(RuntimePrimType),
 
     #[error(
         "Native function expecting {expected} arguments \
@@ -177,6 +226,87 @@ pub enum VMExecutionError {
         expected: usize,
         provided: usize,
     },
+
+    #[error(
+        "Operator {operator} does not support operands \
+         of rust-native type {arg_type:?}"
+    )]
+    OperatorExpectsPrimitiveArgument {
+        operator: &'static str,
+        arg_type: std::any::TypeId,
+    },
+
+    #[error(
+        "Rust-native function expected argument of type {expected:?}, \
+         but received argument of type {actual}."
+    )]
+    InvalidArgumentForNativeFunction {
+        expected: RuntimeType,
+        actual: RuntimeType,
+    },
+}
+
+pub trait NormalizeStackIndex {
+    fn normalize_stack_index(self) -> usize;
+}
+impl NormalizeStackIndex for StackIndex {
+    fn normalize_stack_index(self) -> usize {
+        self.0
+    }
+}
+impl NormalizeStackIndex for usize {
+    fn normalize_stack_index(self) -> usize {
+        self
+    }
+}
+
+impl VMResults {
+    pub fn get(&self, index: impl NormalizeStackIndex) -> Option<&StackValue> {
+        let index = index.normalize_stack_index();
+        self[index].as_ref()
+    }
+
+    pub fn get_as<'a, T>(
+        &'a self,
+        index: impl NormalizeStackIndex,
+    ) -> Result<Option<T>, Error>
+    where
+        &'a StackValue: TryInto<T, Error = Error>,
+    {
+        let index = index.normalize_stack_index();
+        self[index]
+            .as_ref()
+            .map(|value| value.try_into())
+            .transpose()
+    }
+}
+
+impl StackValue {
+    pub fn runtime_type(&self) -> RuntimeType {
+        match self {
+            StackValue::Prim(prim) => prim.runtime_type().into(),
+            StackValue::Any(any) => any.type_id().into(),
+        }
+    }
+
+    pub fn as_prim(&self) -> Option<RuntimePrimValue> {
+        match self {
+            StackValue::Prim(prim) => Some(*prim),
+            StackValue::Any(_) => None,
+        }
+    }
+
+    pub fn read_string_ptr(
+        &self,
+        reader: &memory_reader::MemoryReader,
+    ) -> Result<String, Error> {
+        match self {
+            StackValue::Prim(prim) => prim.read_string_ptr(reader),
+            StackValue::Any(obj) => Err(
+                Error::AttemptedReadOfNativeObjectAsStringPtr(obj.type_id()),
+            ),
+        }
+    }
 }
 
 impl VirtualMachineBuilder {
@@ -187,20 +317,21 @@ impl VirtualMachineBuilder {
         }
     }
 
-    pub fn with_raw_native_function(
-        mut self,
-        func: impl NativeFunction + 'static,
-    ) -> Self {
+    pub fn with_raw_native_function<T>(mut self, func: T) -> Self
+    where
+        T: 'static,
+        T: NativeFunction,
+    {
         self.native_functions.push(Box::new(func));
         self
     }
 
     pub fn with_native_function<Func, ArgList>(mut self, func: Func) -> Self
     where
-        Func: 'static,
-        WrappedNativeFunction<Func, ArgList>: NativeFunction + 'static,
+        WrappedNativeFunction<Func, ArgList>: NativeFunction,
+        WrappedNativeFunction<Func, ArgList>: 'static,
     {
-        let wrapped = WrappedNativeFunction::<Func, ArgList>::new(func);
+        let wrapped = WrappedNativeFunction::new(func);
         self.native_functions.push(Box::new(wrapped));
         self
     }
@@ -311,149 +442,7 @@ impl VirtualMachine {
     }
 
     pub fn simplify(self) -> Self {
-        self.remove_unnecessary_restore_value()
-            .remove_unnecessary_save_value()
-            .remap_temporary_indices()
-    }
-
-    /// Remove instructions that do not match some filter.  As a
-    /// result of this removal, destinations of `ConditionalJump`
-    /// instructions may need to be updated.
-    fn filter_instructions(self, instructions_to_keep: &[bool]) -> Self {
-        assert_eq!(instructions_to_keep.len(), self.instructions.len());
-
-        if instructions_to_keep.iter().all(|value| *value) {
-            // Early bail-out for the common case where no
-            // instructions need to be removed.
-            return self;
-        }
-
-        let index_offset: Vec<usize> = instructions_to_keep
-            .iter()
-            .scan(0, |cumsum, keep_instruction| {
-                let current_value = *cumsum;
-                if !keep_instruction {
-                    *cumsum += 1;
-                }
-                Some(current_value)
-            })
-            .collect();
-
-        let instructions = self
-            .instructions
-            .into_iter()
-            .zip(instructions_to_keep.iter())
-            .filter_map(|(inst, keep_instruction)| {
-                keep_instruction.then(|| match inst {
-                    Instruction::ConditionalJump(InstructionIndex(dest)) => {
-                        let offset = index_offset[dest];
-                        let dest = dest.checked_sub(offset)
-                            .expect(
-                                "Internal error: \
-                                 The offset to an index should never be greater \
-                                 than the index itself, \
-                                 as that would imply more instructions being removed \
-                                 than had been present up to that point."
-                            );
-                        Instruction::ConditionalJump(InstructionIndex(dest))
-                    }
-                    other => other,
-                })
-            })
-            .collect();
-
-        Self {
-            instructions,
-            ..self
-        }
-    }
-
-    pub(crate) fn remove_unnecessary_restore_value(self) -> Self {
-        let jump_destinations: HashSet<InstructionIndex> = self
-            .instructions
-            .iter()
-            .filter_map(|inst| match inst {
-                Instruction::ConditionalJump(dest) => Some(*dest),
-                _ => None,
-            })
-            .collect();
-
-        let required_instructions: Vec<bool> = self
-            .instructions
-            .iter()
-            .enumerate()
-            .scan(None, |value_in_register, (inst_index, inst)| {
-                let inst_index = InstructionIndex(inst_index);
-                if jump_destinations.contains(&inst_index) {
-                    *value_in_register = None;
-                }
-
-                let is_required = match inst {
-                    Instruction::SaveValue(index) => {
-                        *value_in_register = Some(index);
-                        true
-                    }
-                    Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
-                        *value_in_register != Some(index)
-                    }
-                    _ => {
-                        *value_in_register = None;
-                        true
-                    }
-                };
-                Some(is_required)
-            })
-            .collect();
-
-        self.filter_instructions(&required_instructions)
-    }
-
-    pub(crate) fn remove_unnecessary_save_value(self) -> Self {
-        // Values which are accessed at any point within the function.
-        // When walking backwards and encountering a conditional jump,
-        // assume that the destination location may rely on any value
-        // that is read out by any instruction.
-        //
-        // If this ever needs to be improved, could use more in-depth
-        // flow-control analysis.  But if that ever becomes necessary,
-        // it would probably mean that the DCE at the expression level
-        // has an issue.
-        let used_anywhere: HashSet<StackIndex> = self
-            .instructions
-            .iter()
-            .flat_map(|inst| inst.input_indices())
-            .chain((0..self.num_outputs).map(StackIndex))
-            .collect();
-
-        let initial_state: HashSet<StackIndex> =
-            (0..self.num_outputs).map(StackIndex).collect();
-        let mut required_instructions: Vec<bool> = self
-            .instructions
-            .iter()
-            .rev()
-            .scan(initial_state, |used_later, inst| {
-                let is_required = match inst {
-                    Instruction::SaveValue(index) => used_later.contains(index),
-                    _ => true,
-                };
-
-                match inst {
-                    Instruction::ConditionalJump(_) => {
-                        *used_later = used_anywhere.clone();
-                    }
-                    Instruction::SaveValue(index) => {
-                        used_later.remove(index);
-                    }
-                    _ => inst.input_indices().for_each(|index| {
-                        used_later.insert(index);
-                    }),
-                }
-                Some(is_required)
-            })
-            .collect();
-        required_instructions.reverse();
-
-        self.filter_instructions(&required_instructions)
+        self.remap_temporary_indices()
     }
 
     pub(crate) fn remap_temporary_indices(self) -> Self {
@@ -481,36 +470,14 @@ impl VirtualMachine {
         let instructions = self
             .instructions
             .into_iter()
-            .map(|inst| match inst {
-                Instruction::SaveValue(index) => {
-                    let index = do_remap(index);
-                    Instruction::SaveValue(index)
-                }
-                Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::LoadToRegister(VMArg::SavedValue(index))
-                }
-                Instruction::Add(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::Add(VMArg::SavedValue(index))
-                }
-                Instruction::Sub(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::Sub(VMArg::SavedValue(index))
-                }
-                Instruction::Mul(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::Mul(VMArg::SavedValue(index))
-                }
-                Instruction::Equal(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::Equal(VMArg::SavedValue(index))
-                }
-                Instruction::GreaterThan(VMArg::SavedValue(index)) => {
-                    let index = do_remap(index);
-                    Instruction::GreaterThan(VMArg::SavedValue(index))
-                }
-                other => other,
+            .map(|mut inst| {
+                inst.visit_input_indices(|index| {
+                    *index = do_remap(*index);
+                });
+                inst.visit_output_indices(|index| {
+                    *index = do_remap(*index);
+                });
+                inst
             })
             .collect();
 
@@ -530,17 +497,31 @@ impl VirtualMachine {
         &self,
         mut reader: impl VMReader,
     ) -> Result<VMResults, Error> {
-        let mut register: Option<RuntimePrimValue> = None;
-        let mut values: Vec<Option<RuntimePrimValue>> =
-            vec![None; self.num_outputs + self.num_temporaries];
+        let mut values = {
+            let stack_size = self.num_outputs + self.num_temporaries;
+            let stack = (0..stack_size).map(|_| None).collect();
+            VMResults(stack)
+        };
 
-        macro_rules! arg_to_value {
-            ($arg:expr) => {
-                match $arg {
-                    VMArg::Const(prim) => Some(prim),
-                    VMArg::SavedValue(index) => values[index.0].as_ref(),
-                }
-            };
+        macro_rules! arg_to_prim {
+            ($arg:expr, $operator:literal) => {{
+                let prim:Option<RuntimePrimValue> = match $arg {
+                    VMArg::Const(value) => Ok(Some(*value)),
+                    VMArg::SavedValue(index) => {
+                        match &values[*index] {
+                            Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
+                            Some(StackValue::Any(obj)) => Err(
+                                VMExecutionError::OperatorExpectsPrimitiveArgument {
+                                    operator: $operator,
+                                    arg_type: obj.type_id(),
+                                },
+                            ),
+                            None => Ok(None),
+                        }
+                    }
+                }?;
+                prim
+            }};
         }
 
         let mut current_instruction = InstructionIndex(0);
@@ -549,13 +530,19 @@ impl VirtualMachine {
             current_instruction.0 += 1;
 
             match instruction {
-                Instruction::ConditionalJump(dest) => {
-                    let should_jump = register
+                Instruction::Copy { value, output } => {
+                    let value = arg_to_prim!(value, "Copy");
+                    values[*output] = value.map(Into::into);
+                }
+
+                Instruction::ConditionalJump { cond, dest } => {
+                    let cond = arg_to_prim!(cond, "ConditionalJump");
+                    let should_jump = cond
                         .map(|val| match val {
                             RuntimePrimValue::Bool(val) => Ok(val),
                             other => Err(
                                 VMExecutionError::InvalidOperandForConditionalJump(
-                                    other,
+                                    other.runtime_type()
                                 ),
                             ),
                         })
@@ -566,33 +553,33 @@ impl VirtualMachine {
                     }
                 }
 
-                Instruction::SaveValue(index) => {
-                    values[index.0] = register;
-                }
-
-                Instruction::NativeFunctionCall {
+                &Instruction::NativeFunctionCall {
                     index,
                     first_arg,
                     num_args,
+                    output,
                 } => {
-                    let func = &self.native_functions[index.0];
-                    let first_arg = first_arg.0;
                     let last_arg = first_arg + num_args;
                     let args = &mut values[first_arg..last_arg];
-                    register = func.apply(args)?;
+                    values[output] =
+                        self.native_functions[index.0].apply(args)?;
                 }
 
-                Instruction::LoadToRegister(value) => {
-                    register = arg_to_value!(value).cloned();
+                Instruction::PrimCast {
+                    value,
+                    prim_type,
+                    output,
+                } => {
+                    let value = arg_to_prim!(value, "PrimCast");
+                    values[*output] = value
+                        .map(|val| val.prim_cast(*prim_type))
+                        .transpose()?
+                        .map(Into::into);
                 }
-                Instruction::PrimCast(prim_type) => {
-                    register = register
-                        .map(|value| value.prim_cast(*prim_type))
-                        .transpose()?;
-                }
-                Instruction::Add(value) => {
-                    let arg = arg_to_value!(value);
-                    register = match (register, arg) {
+                Instruction::Add { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "Add");
+                    let opt_rhs = arg_to_prim!(rhs, "Add");
+                    values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let res = match (lhs, rhs) {
                                 (
@@ -601,11 +588,11 @@ impl VirtualMachine {
                                 ) => Ok(RuntimePrimValue::NativeUInt(a + b)),
                                 (
                                     RuntimePrimValue::Ptr(a),
-                                    &RuntimePrimValue::NativeUInt(b),
+                                    RuntimePrimValue::NativeUInt(b),
                                 ) => Ok(RuntimePrimValue::Ptr(a + b)),
                                 (
                                     RuntimePrimValue::NativeUInt(a),
-                                    &RuntimePrimValue::Ptr(b),
+                                    RuntimePrimValue::Ptr(b),
                                 ) => Ok(RuntimePrimValue::Ptr(b + a)),
                                 (lhs, rhs) => {
                                     Err(Error::InvalidOperandsForAddition {
@@ -614,14 +601,15 @@ impl VirtualMachine {
                                     })
                                 }
                             }?;
-                            Some(res)
+                            Some(res.into())
                         }
                         _ => None,
                     };
                 }
-                Instruction::Sub(value) => {
-                    let arg = arg_to_value!(value);
-                    register = match (register, arg) {
+                Instruction::Sub { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "Sub");
+                    let opt_rhs = arg_to_prim!(rhs, "Sub");
+                    values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let res = match (lhs, rhs) {
                                 (
@@ -630,7 +618,7 @@ impl VirtualMachine {
                                 ) => Ok(RuntimePrimValue::NativeUInt(a - b)),
                                 (
                                     RuntimePrimValue::Ptr(a),
-                                    &RuntimePrimValue::NativeUInt(b),
+                                    RuntimePrimValue::NativeUInt(b),
                                 ) => Ok(RuntimePrimValue::Ptr(a - b)),
                                 (lhs, rhs) => {
                                     Err(Error::InvalidOperandsForAddition {
@@ -639,14 +627,15 @@ impl VirtualMachine {
                                     })
                                 }
                             }?;
-                            Some(res)
+                            Some(res.into())
                         }
                         _ => None,
                     };
                 }
-                Instruction::Mul(value) => {
-                    let arg = arg_to_value!(value);
-                    register = match (register, arg) {
+                Instruction::Mul { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "Mul");
+                    let opt_rhs = arg_to_prim!(rhs, "Mul");
+                    values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let res = match (lhs, rhs) {
                                 (
@@ -660,17 +649,18 @@ impl VirtualMachine {
                                     },
                                 ),
                             }?;
-                            Some(res)
+                            Some(res.into())
                         }
                         _ => None,
                     };
                 }
-                Instruction::Equal(value) => {
-                    let arg = arg_to_value!(value);
-                    register = match (&register, arg) {
+                Instruction::Equal { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "Equal");
+                    let opt_rhs = arg_to_prim!(rhs, "Equal");
+                    values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
-                            let res = if std::mem::discriminant(lhs)
-                                == std::mem::discriminant(rhs)
+                            let res = if std::mem::discriminant(&lhs)
+                                == std::mem::discriminant(&rhs)
                             {
                                 Ok(RuntimePrimValue::Bool(lhs == rhs))
                             } else {
@@ -679,14 +669,35 @@ impl VirtualMachine {
                                     rhs: rhs.runtime_type().into(),
                                 })
                             }?;
-                            Some(res)
+                            Some(res.into())
                         }
                         _ => None,
                     };
                 }
-                Instruction::GreaterThan(value) => {
-                    let arg = arg_to_value!(value);
-                    register = match (&register, arg) {
+                Instruction::LessThan { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "LessThan");
+                    let opt_rhs = arg_to_prim!(rhs, "LessThan");
+                    values[*output] = match (opt_lhs, opt_rhs) {
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs,rhs) {
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::Bool(a < b)),
+                                _ => Err(Error::InvalidOperandsForNumericComparison {
+                                    lhs: lhs.runtime_type().into(),
+                                    rhs: rhs.runtime_type().into(),
+                                }),
+                            }?;
+                            Some(res.into())
+                        }
+                        _ => None,
+                    };
+                }
+                Instruction::GreaterThan { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "GreaterThan");
+                    let opt_rhs = arg_to_prim!(rhs, "GreaterThan");
+                    values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let res = match (lhs,rhs) {
                                 (
@@ -698,13 +709,18 @@ impl VirtualMachine {
                                     rhs: rhs.runtime_type().into(),
                                 }),
                             }?;
-                            Some(res)
+                            Some(res.into())
                         }
                         _ => None,
                     };
                 }
-                Instruction::Downcast(ty) => {
-                    register = match register {
+                Instruction::Downcast {
+                    obj,
+                    subtype,
+                    output,
+                } => {
+                    let obj = arg_to_prim!(obj, "Downcast");
+                    values[*output] = match obj {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             let actual_type_ptr: Pointer = {
@@ -714,10 +730,10 @@ impl VirtualMachine {
                             };
                             reader
                                 .is_dotnet_base_class_of(
-                                    *ty,
+                                    *subtype,
                                     actual_type_ptr.into(),
                                 )?
-                                .then(|| RuntimePrimValue::Ptr(ptr))
+                                .then(|| RuntimePrimValue::Ptr(ptr).into())
                         }
                         Some(other) => {
                             return Err(
@@ -729,21 +745,26 @@ impl VirtualMachine {
                         }
                     };
                 }
-                Instruction::Read(ty) => {
-                    register = match register {
+                Instruction::Read {
+                    ptr,
+                    prim_type,
+                    output,
+                } => {
+                    let ptr = arg_to_prim!(ptr, "Read");
+                    values[*output] = match ptr {
                         None => None,
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             let bytes = {
-                                let mut vec = vec![0; ty.size_bytes()];
+                                let mut vec = vec![0; prim_type.size_bytes()];
                                 reader.read_bytes(ptr, &mut vec)?;
                                 vec
                             };
-                            let prim_value = ty.parse(&bytes)?;
+                            let prim_value = prim_type.parse(&bytes)?;
                             match prim_value {
                                 RuntimePrimValue::Ptr(ptr) if ptr.is_null() => {
                                     None
                                 }
-                                other => Some(other),
+                                other => Some(other.into()),
                             }
                         }
                         Some(other) => {
@@ -759,84 +780,143 @@ impl VirtualMachine {
             }
         }
 
-        values.truncate(self.num_outputs);
+        values.0.truncate(self.num_outputs);
 
-        Ok(VMResults(values))
+        Ok(values)
     }
 
-    // TODO: Remove this method.  Initially implemented as part of
-    // migration from PhysicalAccessChain.
-    pub fn read_as<T>(
-        &self,
-        reader: CachedReader<'_>,
-    ) -> Result<Option<T>, Error>
-    where
-        RuntimePrimValue: TryInto<T>,
-        Error: From<<RuntimePrimValue as TryInto<T>>::Error>,
-    {
-        Ok(self.evaluate(reader)?[0]
-            .map(|value| value.as_type::<T>())
-            .transpose()?)
-    }
+    // // TODO: Remove this method.  Initially implemented as part of
+    // // migration from PhysicalAccessChain.
+    // pub fn read_as<T>(
+    //     &self,
+    //     reader: CachedReader<'_>,
+    // ) -> Result<Option<T>, Error>
+    // where
+    //     RuntimePrimValue: TryInto<T>,
+    //     Error: From<<RuntimePrimValue as TryInto<T>>::Error>,
+    // {
+    //     Ok(self.evaluate(reader)?[0]
+    //         .map(|value| value.as_type::<T>())
+    //         .transpose()?)
+    // }
 }
 
 impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = StackIndex> {
-        let (first_arg, num_args) = match self {
-            Instruction::Add(VMArg::SavedValue(index))
-            | Instruction::Sub(VMArg::SavedValue(index))
-            | Instruction::Mul(VMArg::SavedValue(index))
-            | Instruction::Equal(VMArg::SavedValue(index))
-            | Instruction::GreaterThan(VMArg::SavedValue(index))
-            | Instruction::LoadToRegister(VMArg::SavedValue(index)) => {
-                (*index, 1)
+        let (lhs, rhs, dyn_args) = match self {
+            // Unary instructions
+            Instruction::Copy { value: arg, .. }
+            | Instruction::ConditionalJump { cond: arg, .. }
+            | Instruction::PrimCast { value: arg, .. }
+            | Instruction::Downcast { obj: arg, .. }
+            | Instruction::Read { ptr: arg, .. } => (Some(*arg), None, None),
+
+            // Binary instructions
+            Instruction::Add { lhs, rhs, .. }
+            | Instruction::Sub { lhs, rhs, .. }
+            | Instruction::Mul { lhs, rhs, .. }
+            | Instruction::Equal { lhs, rhs, .. }
+            | Instruction::LessThan { lhs, rhs, .. }
+            | Instruction::GreaterThan { lhs, rhs, .. } => {
+                (Some(*lhs), Some(*rhs), None)
             }
 
-            Instruction::NativeFunctionCall {
+            // Arbitrary arity instructions
+            &Instruction::NativeFunctionCall {
                 first_arg,
                 num_args,
                 ..
-            } => (*first_arg, *num_args),
-
-            Instruction::ConditionalJump { .. }
-            | Instruction::SaveValue(_)
-            | Instruction::Add(_)
-            | Instruction::Sub(_)
-            | Instruction::Mul(_)
-            | Instruction::Equal(_)
-            | Instruction::GreaterThan(_)
-            | Instruction::LoadToRegister(_)
-            | Instruction::PrimCast(_)
-            | Instruction::Downcast(_)
-            | Instruction::Read(_) => (StackIndex(0), 0),
+            } => (None, None, Some((first_arg, num_args))),
         };
 
-        (0..num_args).map(move |offset| StackIndex(first_arg.0 + offset))
+        std::iter::empty()
+            .chain(lhs)
+            .chain(rhs)
+            .filter_map(|arg| match arg {
+                VMArg::SavedValue(stack_index) => Some(stack_index),
+                VMArg::Const(_) => None,
+            })
+            .chain(dyn_args.into_iter().flat_map(|(first_arg, num_args)| {
+                (0..num_args).map(move |offset| first_arg + offset)
+            }))
+    }
+
+    fn visit_input_indices(
+        &mut self,
+        mut callback: impl FnMut(&mut StackIndex),
+    ) {
+        match self {
+            Instruction::Copy { value: arg, .. }
+            | Instruction::ConditionalJump { cond: arg, .. }
+            | Instruction::PrimCast { value: arg, .. }
+            | Instruction::Downcast { obj: arg, .. }
+            | Instruction::Read { ptr: arg, .. } => {
+                if let VMArg::SavedValue(index) = arg {
+                    callback(index);
+                }
+            }
+
+            Instruction::Add { lhs, rhs, .. }
+            | Instruction::Sub { lhs, rhs, .. }
+            | Instruction::Mul { lhs, rhs, .. }
+            | Instruction::Equal { lhs, rhs, .. }
+            | Instruction::LessThan { lhs, rhs, .. }
+            | Instruction::GreaterThan { lhs, rhs, .. } => {
+                if let VMArg::SavedValue(index) = lhs {
+                    callback(index);
+                }
+                if let VMArg::SavedValue(index) = rhs {
+                    callback(index);
+                }
+            }
+
+            Instruction::NativeFunctionCall { first_arg, .. } => {
+                // TODO: Some form of error handling, since all
+                // arguments should remain as a single block.  Either
+                // that, or update the NativeFunctionCall to have a
+                // vector of VMArg.
+                callback(first_arg);
+            }
+        }
     }
 
     fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
         let opt_index = match self {
-            Instruction::SaveValue(index) => Some(*index),
+            Instruction::ConditionalJump { .. } => None,
 
-            Instruction::ConditionalJump(_)
-            | Instruction::NativeFunctionCall { .. }
-            | Instruction::Add(_)
-            | Instruction::Sub(_)
-            | Instruction::Mul(_)
-            | Instruction::Equal(_)
-            | Instruction::GreaterThan(_)
-            | Instruction::LoadToRegister(_)
-            | Instruction::PrimCast(_)
-            | Instruction::Downcast(_)
-            | Instruction::Read(_) => None,
+            Instruction::Copy { output, .. }
+            | Instruction::NativeFunctionCall { output, .. }
+            | Instruction::PrimCast { output, .. }
+            | Instruction::Add { output, .. }
+            | Instruction::Sub { output, .. }
+            | Instruction::Mul { output, .. }
+            | Instruction::Equal { output, .. }
+            | Instruction::LessThan { output, .. }
+            | Instruction::GreaterThan { output, .. }
+            | Instruction::Downcast { output, .. }
+            | Instruction::Read { output, .. } => Some(*output),
         };
         opt_index.into_iter()
     }
-}
 
-impl From<RuntimePrimValue> for VMArg {
-    fn from(value: RuntimePrimValue) -> Self {
-        VMArg::Const(value)
+    fn visit_output_indices(
+        &mut self,
+        mut callback: impl FnMut(&mut StackIndex),
+    ) {
+        match self {
+            Instruction::Copy { output, .. }
+            | Instruction::NativeFunctionCall { output, .. }
+            | Instruction::PrimCast { output, .. }
+            | Instruction::Add { output, .. }
+            | Instruction::Sub { output, .. }
+            | Instruction::Mul { output, .. }
+            | Instruction::Equal { output, .. }
+            | Instruction::LessThan { output, .. }
+            | Instruction::GreaterThan { output, .. }
+            | Instruction::Downcast { output, .. }
+            | Instruction::Read { output, .. } => callback(output),
+            Instruction::ConditionalJump { .. } => {}
+        }
     }
 }
 
@@ -859,6 +939,16 @@ impl Display for VirtualMachine {
             writeln!(f, "{i}: {instruction}")?;
         }
         Ok(())
+    }
+}
+impl Display for StackValue {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StackValue::Prim(prim) => write!(f, "{prim}"),
+            StackValue::Any(any) => {
+                write!(f, "[rust-native object of type {:?}]", any.type_id())
+            }
+        }
     }
 }
 impl Display for VMArg {
@@ -888,47 +978,63 @@ impl Display for FunctionIndex {
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Instruction::ConditionalJump(dest) => {
-                write!(f, "ConditionalJump({dest})")
+            Instruction::ConditionalJump { cond, dest } => {
+                write!(f, "if {cond} {{ goto {dest} }}")
             }
-            Instruction::SaveValue(index) => write!(f, "SaveValue({index})"),
+            Instruction::Copy { value, output } => {
+                write!(f, "{output} = {value}")
+            }
             Instruction::NativeFunctionCall {
                 index,
                 first_arg,
                 num_args,
+                output,
             } => {
-                let last_arg = StackIndex(first_arg.0 + num_args);
-                write!(
-                    f,
-                    "NativeFunctionCall(\
-                     {index}, \
-                     &stack[{first_arg}..{last_arg}\
-                     ]"
-                )
+                let first_arg = first_arg.0;
+                let last_arg = StackIndex(first_arg + *num_args);
+                write!(f, "{output} = {index}(stack[pc + {first_arg}..pc + {last_arg}])")
             }
-            Instruction::LoadToRegister(value) => {
-                write!(f, "LoadToRegister({value})")
+            Instruction::PrimCast {
+                value,
+                prim_type,
+                output,
+            } => write!(f, "{output} = {value}.prim_cast({prim_type})"),
+            Instruction::Add { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} + {rhs}")
             }
-            Instruction::Add(value) => write!(f, "Add({value})"),
-            Instruction::Sub(value) => write!(f, "Sub({value})"),
-            Instruction::Mul(value) => write!(f, "Mul({value})"),
-            Instruction::Equal(value) => write!(f, "Equal({value})"),
-            Instruction::GreaterThan(value) => {
-                write!(f, "GreaterThan({value})")
+            Instruction::Sub { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} - {rhs}")
             }
-            Instruction::PrimCast(prim_type) => {
-                write!(f, "PrimCast({prim_type})")
+            Instruction::Mul { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs}*{rhs}")
             }
-            Instruction::Downcast(ty) => write!(f, "Downcast({ty})"),
-            Instruction::Read(ty) => write!(f, "Read({ty})"),
+            Instruction::Equal { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} == {rhs}")
+            }
+            Instruction::LessThan { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} < {rhs}")
+            }
+            Instruction::GreaterThan { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} > {rhs}")
+            }
+            Instruction::Downcast {
+                obj,
+                subtype,
+                output,
+            } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
+            Instruction::Read {
+                ptr,
+                prim_type,
+                output,
+            } => write!(f, "{output} = {ptr}.read({prim_type})"),
         }
     }
 }
 
 impl IntoIterator for VMResults {
-    type Item = <Vec<Option<RuntimePrimValue>> as IntoIterator>::Item;
+    type Item = <Vec<Option<StackValue>> as IntoIterator>::Item;
 
-    type IntoIter = <Vec<Option<RuntimePrimValue>> as IntoIterator>::IntoIter;
+    type IntoIter = <Vec<Option<StackValue>> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.0.into_iter()
@@ -936,7 +1042,7 @@ impl IntoIterator for VMResults {
 }
 
 impl std::ops::Deref for VMResults {
-    type Target = Vec<Option<RuntimePrimValue>>;
+    type Target = Vec<Option<StackValue>>;
 
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -949,214 +1055,121 @@ impl std::ops::DerefMut for VMResults {
 }
 
 impl std::ops::Index<usize> for VMResults {
-    type Output = Option<RuntimePrimValue>;
+    type Output = Option<StackValue>;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
 }
 
+impl std::ops::Index<StackIndex> for VMResults {
+    type Output = Option<StackValue>;
+
+    fn index(&self, index: StackIndex) -> &Self::Output {
+        &self.0[index.0]
+    }
+}
+impl std::ops::IndexMut<StackIndex> for VMResults {
+    fn index_mut(&mut self, index: StackIndex) -> &mut Self::Output {
+        &mut self.0[index.0]
+    }
+}
+impl std::ops::Index<std::ops::Range<StackIndex>> for VMResults {
+    type Output = [Option<StackValue>];
+
+    fn index(&self, index: std::ops::Range<StackIndex>) -> &Self::Output {
+        &self.0[index.start.0..index.end.0]
+    }
+}
+
+impl std::ops::IndexMut<Range<StackIndex>> for VMResults {
+    fn index_mut(&mut self, index: Range<StackIndex>) -> &mut Self::Output {
+        &mut self.0[index.start.0..index.end.0]
+    }
+}
+
 impl std::ops::Index<ValueToken> for VMResults {
-    type Output = Option<RuntimePrimValue>;
+    type Output = Option<StackValue>;
 
     fn index(&self, index: ValueToken) -> &Self::Output {
         &self.0[index.0]
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+impl std::ops::Add<usize> for StackIndex {
+    type Output = StackIndex;
 
-    #[test]
-    fn load_just_after_save_is_unnecessary() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
-            Instruction::Add(VMArg::Const(1usize.into())),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::Add(VMArg::Const(1usize.into())),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_restore_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn jump_may_cause_load_just_after_save_to_become_necessary() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
-            Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump(InstructionIndex(2)),
-        ];
-        let expected = before.clone();
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_restore_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn removing_unnecessary_loads_may_reindex_jump_destination() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::LoadToRegister(VMArg::SavedValue(StackIndex(0))),
-            Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump(InstructionIndex(3)),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::Equal(VMArg::Const(1usize.into())),
-            Instruction::ConditionalJump(InstructionIndex(2)),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_restore_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn save_without_load_is_unnecessary() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_save_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn removing_unnecessary_saves_may_reindex_jump_destination() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::Equal(VMArg::Const(0usize.into())),
-            Instruction::ConditionalJump(InstructionIndex(2)),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-            Instruction::Equal(VMArg::Const(0usize.into())),
-            Instruction::ConditionalJump(InstructionIndex(1)),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_save_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn save_to_output_index_is_necessary() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(0usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-        let expected = before.clone();
-
-        let after = VirtualMachine::builder(before)
-            .num_outputs(2)
-            .build()
-            .remove_unnecessary_save_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn unnecessary_save_must_consider_order_of_loads() {
-        let before = vec![
-            Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            // This SaveValue to index 1 is required, since the
-            // following Add instruction reads from it.
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
-            // This SaveValue to index 1 is unnecessary, since nothing
-            // reads from it at a later point.
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
-            Instruction::Add(VMArg::Const(1usize.into())),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_save_value()
-            .instructions;
-
-        assert_eq!(expected, after);
-    }
-
-    #[test]
-    fn save_which_is_rewritten_without_load_is_unnecessary() {
-        let before = vec![
-            // This SaveValue to index 1 is required, since it is
-            // immediately overwritten.
-            Instruction::LoadToRegister(VMArg::Const(15usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            // This SaveValue to index 1 is required, since the
-            // following Add instruction reads from it.
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-        let expected = vec![
-            Instruction::LoadToRegister(VMArg::Const(15usize.into())),
-            Instruction::LoadToRegister(VMArg::Const(5usize.into())),
-            Instruction::SaveValue(StackIndex(1)),
-            Instruction::Add(VMArg::SavedValue(StackIndex(1))),
-            Instruction::SaveValue(StackIndex(0)),
-        ];
-
-        let after = VirtualMachine::builder(before)
-            .build()
-            .remove_unnecessary_save_value()
-            .instructions;
-
-        assert_eq!(expected, after);
+    fn add(self, rhs: usize) -> Self::Output {
+        StackIndex(self.0 + rhs)
     }
 }
+
+impl TryInto<RuntimePrimValue> for StackValue {
+    type Error = Error;
+
+    fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
+        match self {
+            StackValue::Prim(value) => Ok(value),
+            StackValue::Any(any) => {
+                Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
+            }
+        }
+    }
+}
+impl TryInto<RuntimePrimValue> for &'_ StackValue {
+    type Error = Error;
+
+    fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
+        match self {
+            StackValue::Prim(value) => Ok(*value),
+            StackValue::Any(any) => {
+                Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
+            }
+        }
+    }
+}
+
+macro_rules! stack_value_to_prim {
+    ($prim:ty) => {
+        impl TryInto<$prim> for StackValue {
+            type Error = Error;
+
+            fn try_into(self) -> Result<$prim, Self::Error> {
+                match self {
+                    StackValue::Prim(value) => value.try_into(),
+                    StackValue::Any(any) => Err(
+                        Error::AttemptedConversionOfNativeObject(any.type_id()),
+                    ),
+                }
+            }
+        }
+
+        impl TryInto<$prim> for &'_ StackValue {
+            type Error = Error;
+
+            fn try_into(self) -> Result<$prim, Self::Error> {
+                match self {
+                    StackValue::Prim(value) => (*value).try_into(),
+                    StackValue::Any(any) => Err(
+                        Error::AttemptedConversionOfNativeObject(any.type_id()),
+                    ),
+                }
+            }
+        }
+    };
+}
+
+stack_value_to_prim!(bool);
+stack_value_to_prim!(u8);
+stack_value_to_prim!(u16);
+stack_value_to_prim!(u32);
+stack_value_to_prim!(u64);
+stack_value_to_prim!(usize);
+stack_value_to_prim!(i8);
+stack_value_to_prim!(i16);
+stack_value_to_prim!(i32);
+stack_value_to_prim!(i64);
+stack_value_to_prim!(isize);
+stack_value_to_prim!(f32);
+stack_value_to_prim!(f64);
+stack_value_to_prim!(Pointer);

@@ -1,6 +1,8 @@
 use itertools::Itertools;
 
-use dotnet_debugger::{RuntimePrimValue, SymbolicGraph, VirtualMachine};
+use dotnet_debugger::{
+    RuntimePrimValue, SymbolicGraph, ValueToken, VirtualMachine,
+};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},
@@ -63,9 +65,10 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         _side_effects: &'a mut WidgetSideEffects,
     ) -> Result<(), Error> {
         for live_var in self.live_variables.iter_mut() {
-            let value =
-                live_var.virtual_machine.evaluate(globals.cached_reader())?[0];
-            live_var.most_recent_value = value;
+            let values =
+                live_var.virtual_machine.evaluate(globals.cached_reader())?;
+            live_var.most_recent_value =
+                values.get(0).and_then(|val| val.as_prim());
         }
 
         Ok(())
@@ -108,12 +111,8 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
             .live_variables
             .iter()
             .map(|live_var| {
-                let output_token = live_var
-                    .symbolic_graph
-                    .iter_outputs()
-                    .next()
-                    .expect("Live variable has exactly one output")
-                    .0;
+                let output_token =
+                    ValueToken::forge_new_token_which_may_be_invalid(0);
                 format!(
                     "{}",
                     live_var

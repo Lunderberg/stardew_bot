@@ -249,6 +249,10 @@ impl<'a> TypeInference<'a> {
                     }?;
                     (*prim_type).into()
                 }
+                ExprKind::Output { value, .. } => {
+                    let value_type = expect_cache(*value);
+                    value_type.clone()
+                }
             };
 
             self.cache.insert(index_to_infer, Box::new(inferred_type));

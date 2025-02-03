@@ -213,41 +213,11 @@ impl RuntimePrimValue {
     }
 
     pub fn as_isize(self) -> Result<isize, Error> {
-        match self {
-            RuntimePrimValue::U8(val) => Ok(val as isize),
-            RuntimePrimValue::U16(val) => Ok(val as isize),
-            RuntimePrimValue::U32(val) => Ok(val as isize),
-            RuntimePrimValue::U64(val) => Ok(val as isize),
-            RuntimePrimValue::NativeUInt(val) => Ok(val as isize),
-            RuntimePrimValue::I8(val) => Ok(val as isize),
-            RuntimePrimValue::I16(val) => Ok(val as isize),
-            RuntimePrimValue::I32(val) => Ok(val as isize),
-            RuntimePrimValue::I64(val) => Ok(val as isize),
-            RuntimePrimValue::NativeInt(val) => Ok(val),
-            other => Err(Error::ValueNotConvertibleToIndex(
-                other,
-                other.runtime_type(),
-            )),
-        }
+        self.try_into()
     }
 
     pub fn as_usize(self) -> Result<usize, Error> {
-        match self {
-            RuntimePrimValue::U8(val) => Ok(val as usize),
-            RuntimePrimValue::U16(val) => Ok(val as usize),
-            RuntimePrimValue::U32(val) => Ok(val as usize),
-            RuntimePrimValue::U64(val) => Ok(val as usize),
-            RuntimePrimValue::NativeUInt(val) => Ok(val as usize),
-            RuntimePrimValue::I8(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I16(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I32(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::I64(val) if val >= 0 => Ok(val as usize),
-            RuntimePrimValue::NativeInt(val) if val >= 0 => Ok(val as usize),
-            other => Err(Error::ValueNotConvertibleToIndex(
-                other,
-                other.runtime_type(),
-            )),
-        }
+        self.try_into()
     }
 
     fn type_name(&self) -> &'static str {
@@ -326,13 +296,19 @@ impl std::fmt::Display for RuntimeValue {
     }
 }
 
-macro_rules! prim_value_conversions {
+macro_rules! prim_value_from_native_prim {
     ($variant:ident, $prim:ty) => {
         impl From<$prim> for RuntimePrimValue {
             fn from(value: $prim) -> Self {
                 Self::$variant(value)
             }
         }
+    };
+}
+
+macro_rules! prim_value_conversions {
+    ($variant:ident, $prim:ty) => {
+        prim_value_from_native_prim!($variant, $prim);
 
         impl TryInto<$prim> for RuntimePrimValue {
             type Error = Error;
@@ -353,12 +329,56 @@ prim_value_conversions!(U8, u8);
 prim_value_conversions!(U16, u16);
 prim_value_conversions!(U32, u32);
 prim_value_conversions!(U64, u64);
-prim_value_conversions!(NativeUInt, usize);
+prim_value_from_native_prim!(NativeUInt, usize);
 prim_value_conversions!(I8, i8);
 prim_value_conversions!(I16, i16);
 prim_value_conversions!(I32, i32);
 prim_value_conversions!(I64, i64);
-prim_value_conversions!(NativeInt, isize);
+prim_value_from_native_prim!(NativeInt, isize);
 prim_value_conversions!(F32, f32);
 prim_value_conversions!(F64, f64);
 prim_value_conversions!(Ptr, Pointer);
+
+impl TryInto<usize> for RuntimePrimValue {
+    type Error = Error;
+    fn try_into(self) -> Result<usize, Self::Error> {
+        match self {
+            Self::U8(val) => Ok(val as usize),
+            Self::U16(val) => Ok(val as usize),
+            Self::U32(val) => Ok(val as usize),
+            Self::U64(val) => Ok(val as usize),
+            Self::NativeUInt(val) => Ok(val as usize),
+            Self::I8(val) if val >= 0 => Ok(val as usize),
+            Self::I16(val) if val >= 0 => Ok(val as usize),
+            Self::I32(val) if val >= 0 => Ok(val as usize),
+            Self::I64(val) if val >= 0 => Ok(val as usize),
+            Self::NativeInt(val) if val >= 0 => Ok(val as usize),
+            other => Err(Error::ValueNotConvertibleToIndex(
+                other,
+                other.runtime_type(),
+            )),
+        }
+    }
+}
+
+impl TryInto<isize> for RuntimePrimValue {
+    type Error = Error;
+    fn try_into(self) -> Result<isize, Self::Error> {
+        match self {
+            Self::U8(val) => Ok(val as isize),
+            Self::U16(val) => Ok(val as isize),
+            Self::U32(val) => Ok(val as isize),
+            Self::U64(val) => Ok(val as isize),
+            Self::NativeUInt(val) => Ok(val as isize),
+            Self::I8(val) => Ok(val as isize),
+            Self::I16(val) => Ok(val as isize),
+            Self::I32(val) => Ok(val as isize),
+            Self::I64(val) => Ok(val as isize),
+            Self::NativeInt(val) => Ok(val),
+            other => Err(Error::ValueNotConvertibleToIndex(
+                other,
+                other.runtime_type(),
+            )),
+        }
+    }
+}

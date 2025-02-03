@@ -18,7 +18,8 @@ fn print_expanded_graph() {
     let _3 = _1.list;\n\
     let _4 = _3._items;\n\
     let _5 = _2.prim_cast::<usize>();\n\
-    let _6 (output #0) = _4[_5];\n\
+    let _6 = _4[_5];\n\
+    output_stack[pc + 0] = _6;\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
@@ -40,7 +41,7 @@ fn print_compact_graph() {
     let printed = format!("{graph}");
     let expected = "\
     let _1 = class_name.field_name.subfield;\n\
-    let _6 (output #0) = _1.list._items[_1.active_index.prim_cast::<usize>()];\n\
+    output_stack[pc + 0] = _1.list._items[_1.active_index.prim_cast::<usize>()];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
@@ -66,7 +67,7 @@ fn print_named_object() {
     let printed = format!("{graph}");
     let expected = "\
     let obj = class_name.field_name.subfield;\n\
-    let _6 (output #0) = obj.list._items[obj.active_index.prim_cast::<usize>()];\n\
+    output_stack[pc + 0] = obj.list._items[obj.active_index.prim_cast::<usize>()];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
@@ -95,7 +96,7 @@ fn print_named_intermediate_object() {
     let expected = "\
     let obj = class_name.field_name.subfield;\n\
     let index = obj.active_index;\n\
-    let _6 (output #0) = obj.list._items[index.prim_cast::<usize>()];\n\
+    output_stack[pc + 0] = obj.list._items[index.prim_cast::<usize>()];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");
@@ -130,7 +131,7 @@ fn print_with_duplicate_names() {
     let expected = "\
     let _1_obj = class_name.field_name.subfield;\n\
     let _2_obj = _1_obj.active_index;\n\
-    let _6 (output #0) = _1_obj.list._items[_2_obj.prim_cast::<usize>()];\n\
+    output_stack[pc + 0] = _1_obj.list._items[_2_obj.prim_cast::<usize>()];\n\
     ";
 
     println!("-------------- Expected --------------\n{expected}");

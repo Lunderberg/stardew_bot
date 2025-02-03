@@ -48,8 +48,8 @@ struct TuiBuffers {
     running_log: RunningLog,
     draw_rate: TuiDrawRate,
     fishing: FishingUI,
-    pathfinding: PathfindingUI,
     player_stats: PlayerStats,
+    pathfinding: Option<PathfindingUI>,
 }
 
 #[allow(unused)]
@@ -109,7 +109,9 @@ impl TuiBuffers {
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(per_frame_reader)?,
             player_stats: PlayerStats::new(per_frame_reader)?,
-            pathfinding: PathfindingUI::new(reader)?,
+            // pathfinding: PathfindingUI::new(reader)?,
+            // pathfinding: None,
+            pathfinding: Some(PathfindingUI::new(reader)?),
         })
     }
 
@@ -119,7 +121,8 @@ impl TuiBuffers {
             Box::new(&mut self.draw_rate),
             Box::new(&mut self.fishing),
             Box::new(&mut self.player_stats),
-            Box::new(&mut self.pathfinding),
+            // Box::new(&mut self.pathfinding),
+            Box::new(self.pathfinding.as_mut().unwrap()),
         ]
     }
 }

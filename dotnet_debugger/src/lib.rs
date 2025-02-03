@@ -49,6 +49,7 @@ pub mod extensions;
 
 pub mod bytecode;
 pub use bytecode::{
-    ExprKind, Instruction, OpIndex, SymbolicGraph, SymbolicType, SymbolicValue,
-    VMArg, VMExecutionError, VMResults, ValueToken, VirtualMachine,
+    ExprKind, Instruction, OpIndex, RustNativeObject, StackValue,
+    SymbolicGraph, SymbolicType, SymbolicValue, VMArg, VMExecutionError,
+    VMResults, ValueToken, VirtualMachine,
 };
