@@ -1,8 +1,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Once};
+use std::sync::{Arc, LazyLock, Once};
 
 static INIT: Once = Once::new();
-static mut CLOSE_ON_SIGTERM: Option<Arc<AtomicBool>> = None;
+static CLOSE_ON_SIGTERM: LazyLock<Arc<AtomicBool>> =
+    LazyLock::new(|| Arc::new(AtomicBool::new(false)));
 
 pub struct SigintHandler;
 
@@ -15,10 +16,7 @@ impl Default for SigintHandler {
 impl SigintHandler {
     pub fn new() -> Self {
         INIT.call_once(|| {
-            let flag = Arc::new(AtomicBool::new(false));
-            unsafe {
-                CLOSE_ON_SIGTERM = Some(flag.clone());
-            }
+            let flag = &*CLOSE_ON_SIGTERM;
             signal_hook::flag::register_conditional_default(
                 signal_hook::consts::SIGINT,
                 flag.clone(),
@@ -31,14 +29,14 @@ impl SigintHandler {
             .unwrap();
         });
 
-        let flag = unsafe { CLOSE_ON_SIGTERM.as_ref().unwrap() };
+        let flag = &*CLOSE_ON_SIGTERM;
         flag.store(false, Ordering::SeqCst);
 
         Self
     }
 
     pub fn received(&self) -> bool {
-        let flag = unsafe { CLOSE_ON_SIGTERM.as_ref().unwrap() };
+        let flag = &*CLOSE_ON_SIGTERM;
         flag.load(Ordering::SeqCst)
     }
 }
@@ -47,7 +45,7 @@ impl SigintHandler {
 // act as if the default handler is still in effect.
 impl std::ops::Drop for SigintHandler {
     fn drop(&mut self) {
-        let flag = unsafe { CLOSE_ON_SIGTERM.as_ref().unwrap() };
+        let flag = &*CLOSE_ON_SIGTERM;
         flag.store(true, Ordering::SeqCst);
     }
 }
