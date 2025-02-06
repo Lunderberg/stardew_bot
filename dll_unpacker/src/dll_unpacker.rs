@@ -771,7 +771,7 @@ macro_rules! decl_metadata_table {
                 }
 
                 pub fn [< iter_ $plural_field_name >]<'b>(&'b self) -> Result<
-                    impl DoubleEndedIterator<Item=MetadataRow<$field_type>>,
+                    impl DoubleEndedIterator<Item=MetadataRow<'b, $field_type>>,
                     Error,
                 > {
                     let indices = self. [< $field_name _indices >] ();
