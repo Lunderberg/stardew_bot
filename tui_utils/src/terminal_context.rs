@@ -1,6 +1,6 @@
 use std::{
     fmt::Write,
-    panic::PanicInfo,
+    panic::PanicHookInfo,
     sync::{Arc, Mutex},
 };
 
@@ -15,12 +15,12 @@ pub struct TerminalContext {
 
 fn make_panic_hook() -> (
     Arc<Mutex<Option<String>>>,
-    impl Fn(&PanicInfo<'_>) + 'static + Sync + Send,
+    impl Fn(&PanicHookInfo<'_>) + 'static + Sync + Send,
 ) {
     let message_arc: Arc<Mutex<Option<String>>> = Arc::new(Mutex::new(None));
     let message_output = message_arc.clone();
 
-    let callback = move |info: &PanicInfo| {
+    let callback = move |info: &PanicHookInfo| {
         let payload = info.payload();
 
         // Unfortunately, capturing the output of the default hook is
