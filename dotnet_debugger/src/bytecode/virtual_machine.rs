@@ -888,21 +888,6 @@ impl VirtualMachine {
 
         Ok(values)
     }
-
-    // // TODO: Remove this method.  Initially implemented as part of
-    // // migration from PhysicalAccessChain.
-    // pub fn read_as<T>(
-    //     &self,
-    //     reader: CachedReader<'_>,
-    // ) -> Result<Option<T>, Error>
-    // where
-    //     RuntimePrimValue: TryInto<T>,
-    //     Error: From<<RuntimePrimValue as TryInto<T>>::Error>,
-    // {
-    //     Ok(self.evaluate(reader)?[0]
-    //         .map(|value| value.as_type::<T>())
-    //         .transpose()?)
-    // }
 }
 
 impl Instruction {
