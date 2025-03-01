@@ -589,7 +589,8 @@ impl VirtualMachine {
         }
     }
 
-    /// Evaluate the virtual machine, raising an error if any instructions attempt to read to
+    /// Evaluate the virtual machine, raising an error if any
+    /// instructions attempt to read from the remote process.
     pub fn local_eval(&self) -> Result<VMResults, Error> {
         self.evaluate(DummyReader)
     }
