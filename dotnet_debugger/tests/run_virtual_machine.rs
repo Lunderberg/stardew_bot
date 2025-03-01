@@ -98,6 +98,11 @@ fn run_native_function() {
             args: vec![StackIndex(1).into(), StackIndex(2).into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            args: vec![StackIndex(0).into(), VMArg::Const(11usize.into())],
+            output: Some(StackIndex(0)),
+        },
     ];
 
     let vm = VirtualMachine::builder(instructions)
@@ -117,7 +122,7 @@ fn run_native_function() {
     assert_eq!(results.len(), 1);
     assert_eq!(
         results.get_as::<RuntimePrimValue>(0).unwrap(),
-        Some(RuntimePrimValue::NativeUInt(2 * 3 + 5 * 7))
+        Some(RuntimePrimValue::NativeUInt(2 * 3 + 5 * 7 + 11))
     );
 }
 
