@@ -12,7 +12,7 @@ use crate::{
 pub trait NativeFunction {
     fn apply(
         &self,
-        args: &mut [Option<StackValue>],
+        args: &mut [&mut Option<StackValue>],
     ) -> Result<Option<StackValue>, Error>;
 }
 
@@ -20,11 +20,11 @@ pub trait RustNativeObject: Any {}
 
 impl<Func> NativeFunction for Func
 where
-    Func: Fn(&mut [Option<StackValue>]) -> Result<Option<StackValue>, Error>,
+    Func: Fn(&[&mut Option<StackValue>]) -> Result<Option<StackValue>, Error>,
 {
     fn apply(
         &self,
-        args: &mut [Option<StackValue>],
+        args: &mut [&mut Option<StackValue>],
     ) -> Result<Option<StackValue>, Error> {
         self(args)
     }
@@ -265,7 +265,7 @@ macro_rules! impl_wrapped_native_function {
             ) -> Return,
 
         {
-            fn apply(&self, args: &mut [Option<StackValue>])
+            fn apply(&self, args: &mut [&mut Option<StackValue>])
                      -> Result<Option<StackValue>,Error>
             {
                 const N: usize = count_args!( $($arg_type),* );
@@ -284,7 +284,7 @@ macro_rules! impl_wrapped_native_function {
                 // are required for all other cases, so the warning
                 // gets silenced.
                 #[allow(unused_variables, unused_mut)]
-                let mut arg_iter = args.iter_mut();
+                let mut arg_iter = args.into_iter();
                 let result = (self.func)(
                     $({
                         let opt_arg = arg_iter

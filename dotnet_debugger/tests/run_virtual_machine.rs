@@ -103,7 +103,7 @@ fn run_native_function() {
 
     let vm = VirtualMachine::builder(instructions)
         .with_raw_native_function(
-            |args: &mut [Option<StackValue>]|
+            |args: &[&mut Option<StackValue>]|
                          -> Result<Option<StackValue>,Error> {
                 assert_eq!(args.len(), 2);
                 let lhs: usize = args[0].as_ref().unwrap().try_into()?;

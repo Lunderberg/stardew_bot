@@ -560,9 +560,10 @@ impl VirtualMachine {
                     output,
                 } => {
                     let last_arg = first_arg + num_args;
-                    let args = &mut values[first_arg..last_arg];
+                    let mut args: Vec<_> =
+                        values[first_arg..last_arg].iter_mut().collect();
                     values[output] =
-                        self.native_functions[index.0].apply(args)?;
+                        self.native_functions[index.0].apply(&mut args)?;
                 }
 
                 Instruction::PrimCast {
