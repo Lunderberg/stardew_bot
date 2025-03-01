@@ -12,8 +12,8 @@ use dotnet_debugger::{
 #[test]
 fn addition() {
     let instructions = vec![Instruction::Add {
-        lhs: VMArg::Const(1usize.into()),
-        rhs: VMArg::Const(2usize.into()),
+        lhs: 1.into(),
+        rhs: 2.into(),
         output: StackIndex(0),
     }];
 
@@ -34,7 +34,7 @@ fn triangular_number() {
     let instructions = vec![
         // Initialize cumulative sum
         Instruction::Copy {
-            value: VMArg::Const(0usize.into()),
+            value: 0.into(),
             output: StackIndex(0),
         },
         // Initialize loop variable
@@ -45,24 +45,24 @@ fn triangular_number() {
         // Begining of loop (instruction 2).  Increment the cumulative sum
         // and by the loop variable.
         Instruction::Add {
-            lhs: VMArg::SavedValue(StackIndex(0)),
-            rhs: VMArg::SavedValue(StackIndex(1)),
+            lhs: StackIndex(0).into(),
+            rhs: StackIndex(1).into(),
             output: StackIndex(0),
         },
         // Decrement the loop variable, then check if has reached zero.
         Instruction::Sub {
-            lhs: VMArg::SavedValue(StackIndex(1)),
-            rhs: VMArg::Const(1usize.into()),
+            lhs: StackIndex(1).into(),
+            rhs: 1.into(),
             output: StackIndex(1),
         },
         Instruction::GreaterThan {
-            lhs: VMArg::SavedValue(StackIndex(1)),
-            rhs: VMArg::Const(0usize.into()),
+            lhs: StackIndex(1).into(),
+            rhs: 0.into(),
             output: StackIndex(2),
         },
         // Check if the loop should continue
         Instruction::ConditionalJump {
-            cond: VMArg::SavedValue(StackIndex(2)),
+            cond: StackIndex(2).into(),
             dest: InstructionIndex(2),
         },
     ];
@@ -84,13 +84,13 @@ fn triangular_number() {
 fn run_native_function() {
     let instructions = vec![
         Instruction::Mul {
-            lhs: VMArg::Const(2usize.into()),
-            rhs: VMArg::Const(3usize.into()),
+            lhs: 2.into(),
+            rhs: 3.into(),
             output: StackIndex(1),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(5usize.into()),
-            rhs: VMArg::Const(7usize.into()),
+            lhs: 5.into(),
+            rhs: 7.into(),
             output: StackIndex(2),
         },
         Instruction::NativeFunctionCall {
@@ -100,7 +100,7 @@ fn run_native_function() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            args: vec![StackIndex(0).into(), VMArg::Const(11usize.into())],
+            args: vec![StackIndex(0).into(), 11.into()],
             output: Some(StackIndex(0)),
         },
     ];
@@ -152,7 +152,7 @@ fn run_wrapped_nullary_native_function() {
 fn run_wrapped_unary_native_function() {
     let instructions = vec![
         Instruction::Copy {
-            value: VMArg::Const(7usize.into()),
+            value: 7.into(),
             output: StackIndex(0),
         },
         Instruction::NativeFunctionCall {
@@ -180,13 +180,13 @@ fn run_wrapped_unary_native_function() {
 fn run_wrapped_binary_native_function() {
     let instructions = vec![
         Instruction::Mul {
-            lhs: VMArg::Const(2usize.into()),
-            rhs: VMArg::Const(3usize.into()),
+            lhs: 2.into(),
+            rhs: 3.into(),
             output: StackIndex(1),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(5usize.into()),
-            rhs: VMArg::Const(7usize.into()),
+            lhs: 5.into(),
+            rhs: 7.into(),
             output: StackIndex(2),
         },
         Instruction::NativeFunctionCall {
@@ -222,13 +222,13 @@ fn rust_function_returning_rust_object() {
 
     let instructions = vec![
         Instruction::Mul {
-            lhs: VMArg::Const(2usize.into()),
-            rhs: VMArg::Const(3usize.into()),
+            lhs: 2.into(),
+            rhs: 3.into(),
             output: StackIndex(1),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(5usize.into()),
-            rhs: VMArg::Const(7usize.into()),
+            lhs: 5.into(),
+            rhs: 7.into(),
             output: StackIndex(2),
         },
         Instruction::NativeFunctionCall {
@@ -266,13 +266,13 @@ fn rust_function_accepting_rust_object() {
 
     let instructions = vec![
         Instruction::Mul {
-            lhs: VMArg::Const(2usize.into()),
-            rhs: VMArg::Const(3usize.into()),
+            lhs: 2.into(),
+            rhs: 3.into(),
             output: StackIndex(1),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(5usize.into()),
-            rhs: VMArg::Const(7usize.into()),
+            lhs: 5.into(),
+            rhs: 7.into(),
             output: StackIndex(2),
         },
         Instruction::NativeFunctionCall {
@@ -312,13 +312,13 @@ fn rust_function_accepting_mutable_rust_object() {
 
     let instructions = vec![
         Instruction::Mul {
-            lhs: VMArg::Const(2usize.into()),
-            rhs: VMArg::Const(3usize.into()),
+            lhs: 2.into(),
+            rhs: 3.into(),
             output: StackIndex(1),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(5usize.into()),
-            rhs: VMArg::Const(7usize.into()),
+            lhs: 5.into(),
+            rhs: 7.into(),
             output: StackIndex(2),
         },
         Instruction::NativeFunctionCall {
@@ -327,8 +327,8 @@ fn rust_function_accepting_mutable_rust_object() {
             output: Some(StackIndex(0)),
         },
         Instruction::Mul {
-            lhs: VMArg::Const(11usize.into()),
-            rhs: VMArg::Const(13usize.into()),
+            lhs: 11.into(),
+            rhs: 13.into(),
             output: StackIndex(1),
         },
         Instruction::NativeFunctionCall {
@@ -372,19 +372,19 @@ fn rust_function_collecting_triangular_numbers() {
         },
         // Initialize cumulative sum
         Instruction::Copy {
-            value: VMArg::Const(0usize.into()),
+            value: 0.into(),
             output: StackIndex(1),
         },
         // Initialize loop variable
         Instruction::Copy {
-            value: VMArg::Const(0usize.into()),
+            value: 0.into(),
             output: StackIndex(2),
         },
         // Begining of loop (instruction 3).  Increment the cumulative sum
         // and by the loop variable.
         Instruction::Add {
-            lhs: VMArg::SavedValue(StackIndex(1)),
-            rhs: VMArg::SavedValue(StackIndex(2)),
+            lhs: StackIndex(1).into(),
+            rhs: StackIndex(2).into(),
             output: StackIndex(1),
         },
         Instruction::NativeFunctionCall {
@@ -394,18 +394,18 @@ fn rust_function_collecting_triangular_numbers() {
         },
         // Increment the loop variable, then check if has reached the maximum.
         Instruction::Add {
-            lhs: VMArg::SavedValue(StackIndex(2)),
-            rhs: VMArg::Const(1usize.into()),
+            lhs: StackIndex(2).into(),
+            rhs: 1.into(),
             output: StackIndex(2),
         },
         Instruction::LessThan {
-            lhs: VMArg::SavedValue(StackIndex(2)),
-            rhs: VMArg::Const(max_value.into()),
+            lhs: StackIndex(2).into(),
+            rhs: max_value.into(),
             output: StackIndex(3),
         },
         // Check if the loop should continue
         Instruction::ConditionalJump {
-            cond: VMArg::SavedValue(StackIndex(3)),
+            cond: StackIndex(3).into(),
             dest: InstructionIndex(3),
         },
     ];

@@ -1030,6 +1030,12 @@ impl Instruction {
     }
 }
 
+impl From<usize> for VMArg {
+    fn from(value: usize) -> Self {
+        VMArg::Const(RuntimePrimValue::NativeUInt(value))
+    }
+}
+
 impl std::fmt::Debug for VMExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{self}")
