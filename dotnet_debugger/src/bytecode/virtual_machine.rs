@@ -74,9 +74,8 @@ pub enum Instruction {
     // Call a native function
     NativeFunctionCall {
         index: FunctionIndex,
-        first_arg: StackIndex,
-        num_args: usize,
-        output: StackIndex,
+        args: Vec<VMArg>,
+        output: Option<StackIndex>,
     },
 
     // Cast the value in the register to the specified type.
@@ -278,6 +277,108 @@ impl VMResults {
             .as_ref()
             .map(|value| value.try_into())
             .transpose()
+    }
+
+    fn collect_native_function_args<'a>(
+        &'a mut self,
+        args: &[VMArg],
+        scratch: &'a mut Vec<Option<StackValue>>,
+    ) -> Vec<&'a mut Option<StackValue>> {
+        let mut opt_references: Vec<_> =
+            (0..args.len()).map(|_| None).collect();
+
+        struct ArgInfo {
+            arg_index: usize,
+            stack_index: StackIndex,
+        }
+
+        let mut indices: Vec<ArgInfo> = Vec::new();
+
+        let initial_scratch_size = scratch.len();
+
+        args.iter().cloned().enumerate().for_each(
+            |(arg_index, arg)| match arg {
+                VMArg::Const(prim) => {
+                    scratch.push(Some(StackValue::Prim(prim)));
+                }
+                VMArg::SavedValue(stack_index) => {
+                    indices.push(ArgInfo {
+                        arg_index,
+                        stack_index,
+                    });
+                }
+            },
+        );
+
+        {
+            // The scratch space now contains a copy of each constant.
+            // The list of references may now be populated with
+            // references to those constants.  After this point, no
+            // further elements may be pushed onto the scratch vector.
+            let mut remaining_scratch = &mut scratch[initial_scratch_size..];
+            for (i, arg) in args.iter().enumerate() {
+                if matches!(arg, VMArg::Const(_)) {
+                    let (scratch_arg, rest) = remaining_scratch
+                        .split_first_mut()
+                        .expect("Each VMArg::Const exists in the scratch Vec");
+                    opt_references[i] = Some(scratch_arg);
+                    remaining_scratch = rest;
+                }
+            }
+        }
+
+        let mut sort_indices: Vec<_> = (0..indices.len()).collect();
+        sort_indices.sort_by_key(|i| indices[*i].stack_index.0);
+
+        let mut remaining = &mut self.0[..];
+        let mut prev_index: usize = 0;
+
+        for sort_index in sort_indices {
+            let stack_index = indices[sort_index].stack_index;
+            let rel_index = (stack_index.0 + 1)
+                .checked_sub(prev_index)
+                .expect("Internal error, indices should be sorted");
+
+            // The `.split_at_mut_checked` method is the trick
+            // required to turn one mutable reference into several.
+            // Normally, the expression `&mut slice[index]` would
+            // borrow the entire `slice` for the duration of the
+            // element's borrow.  However, `.split_at_mut_checked`
+            // returns two independent borrows, one for each side of
+            // the split.
+            //
+            // This function requires the indices to be unique, such
+            // that each mutable reference is unique.  If the indices
+            // are not unique, then `rel_index` will be zero for the
+            // repeated index.  When `rel_index` is zero,
+            // `lhs.last_mut()` will return `None`, preventing the
+            // duplicate mutable reference from being created.  If
+            // this error occurs at runtime, it means that the
+            // compilation produced an invalid
+            // Instruction::NativeFunctionCall that contained repeated
+            // indices in the argument list.
+            let (lhs, rhs) = remaining
+                .split_at_mut_checked(rel_index)
+                .expect("StackIndex must be in-bound");
+            let ref_at_index =
+                lhs.last_mut().expect("Indices should be unique");
+            let arg_index = indices[sort_index].arg_index;
+            opt_references[arg_index] = Some(ref_at_index);
+            remaining = rhs;
+            prev_index = stack_index.0 + 1;
+        }
+
+        // Now that all `Option<&mut StackValue>` elements have been
+        // populated, they can be unwrapped to produce the
+        // NativeFunction arguments.
+        let references: Vec<_> = opt_references
+            .into_iter()
+            .map(|opt| {
+                opt.expect("All references should be filled at this point")
+            })
+            .collect();
+
+        references
     }
 }
 
@@ -553,17 +654,19 @@ impl VirtualMachine {
                     }
                 }
 
-                &Instruction::NativeFunctionCall {
+                Instruction::NativeFunctionCall {
                     index,
-                    first_arg,
-                    num_args,
+                    args,
                     output,
                 } => {
-                    let last_arg = first_arg + num_args;
-                    let mut args: Vec<_> =
-                        values[first_arg..last_arg].iter_mut().collect();
-                    values[output] =
+                    let mut inline_consts = Vec::new();
+                    let mut args = values
+                        .collect_native_function_args(args, &mut inline_consts);
+                    let result =
                         self.native_functions[index.0].apply(&mut args)?;
+                    if let Some(output) = output {
+                        values[*output] = result;
+                    }
                 }
 
                 Instruction::PrimCast {
@@ -803,7 +906,7 @@ impl VirtualMachine {
 }
 
 impl Instruction {
-    fn input_indices(&self) -> impl Iterator<Item = StackIndex> {
+    fn input_indices(&self) -> impl Iterator<Item = StackIndex> + '_ {
         let (lhs, rhs, dyn_args) = match self {
             // Unary instructions
             Instruction::Copy { value: arg, .. }
@@ -823,23 +926,19 @@ impl Instruction {
             }
 
             // Arbitrary arity instructions
-            &Instruction::NativeFunctionCall {
-                first_arg,
-                num_args,
-                ..
-            } => (None, None, Some((first_arg, num_args))),
+            Instruction::NativeFunctionCall { args, .. } => {
+                (None, None, Some(args.iter().cloned()))
+            }
         };
 
         std::iter::empty()
             .chain(lhs)
             .chain(rhs)
+            .chain(dyn_args.into_iter().flatten())
             .filter_map(|arg| match arg {
                 VMArg::SavedValue(stack_index) => Some(stack_index),
                 VMArg::Const(_) => None,
             })
-            .chain(dyn_args.into_iter().flat_map(|(first_arg, num_args)| {
-                (0..num_args).map(move |offset| first_arg + offset)
-            }))
     }
 
     fn visit_input_indices(
@@ -871,22 +970,27 @@ impl Instruction {
                 }
             }
 
-            Instruction::NativeFunctionCall { first_arg, .. } => {
-                // TODO: Some form of error handling, since all
-                // arguments should remain as a single block.  Either
-                // that, or update the NativeFunctionCall to have a
-                // vector of VMArg.
-                callback(first_arg);
+            Instruction::NativeFunctionCall { args, .. } => {
+                args.iter_mut()
+                    .filter_map(|arg| match arg {
+                        VMArg::SavedValue(index) => Some(index),
+                        VMArg::Const(_) => None,
+                    })
+                    .for_each(|arg| callback(arg));
             }
         }
     }
 
     fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
         let opt_index = match self {
-            Instruction::ConditionalJump { .. } => None,
+            Instruction::NativeFunctionCall { output: None, .. }
+            | Instruction::ConditionalJump { .. } => None,
 
             Instruction::Copy { output, .. }
-            | Instruction::NativeFunctionCall { output, .. }
+            | Instruction::NativeFunctionCall {
+                output: Some(output),
+                ..
+            }
             | Instruction::PrimCast { output, .. }
             | Instruction::Add { output, .. }
             | Instruction::Sub { output, .. }
@@ -906,7 +1010,10 @@ impl Instruction {
     ) {
         match self {
             Instruction::Copy { output, .. }
-            | Instruction::NativeFunctionCall { output, .. }
+            | Instruction::NativeFunctionCall {
+                output: Some(output),
+                ..
+            }
             | Instruction::PrimCast { output, .. }
             | Instruction::Add { output, .. }
             | Instruction::Sub { output, .. }
@@ -916,7 +1023,9 @@ impl Instruction {
             | Instruction::GreaterThan { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. } => callback(output),
-            Instruction::ConditionalJump { .. } => {}
+
+            Instruction::NativeFunctionCall { output: None, .. }
+            | Instruction::ConditionalJump { .. } => {}
         }
     }
 }
@@ -987,13 +1096,20 @@ impl Display for Instruction {
             }
             Instruction::NativeFunctionCall {
                 index,
-                first_arg,
-                num_args,
+                args,
                 output,
             } => {
-                let first_arg = first_arg.0;
-                let last_arg = StackIndex(first_arg + *num_args);
-                write!(f, "{output} = {index}(stack[pc + {first_arg}..pc + {last_arg}])")
+                if let Some(output) = output {
+                    write!(f, "{output} = ")?;
+                }
+                write!(f, "{index}(")?;
+                for (i, arg) in args.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{arg}")?;
+                }
+                write!(f, ")")
             }
             Instruction::PrimCast {
                 value,

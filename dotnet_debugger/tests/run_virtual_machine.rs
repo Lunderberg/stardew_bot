@@ -95,9 +95,8 @@ fn run_native_function() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(1),
-            num_args: 2,
-            output: StackIndex(0),
+            args: vec![StackIndex(1).into(), StackIndex(2).into()],
+            output: Some(StackIndex(0)),
         },
     ];
 
@@ -126,9 +125,8 @@ fn run_native_function() {
 fn run_wrapped_nullary_native_function() {
     let instructions = vec![Instruction::NativeFunctionCall {
         index: FunctionIndex(0),
-        first_arg: StackIndex(0),
-        num_args: 0,
-        output: StackIndex(0),
+        args: vec![],
+        output: Some(StackIndex(0)),
     }];
 
     let vm = VirtualMachine::builder(instructions)
@@ -154,9 +152,8 @@ fn run_wrapped_unary_native_function() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(0),
-            num_args: 1,
-            output: StackIndex(0),
+            args: vec![StackIndex(0).into()],
+            output: Some(StackIndex(0)),
         },
     ];
 
@@ -189,9 +186,8 @@ fn run_wrapped_binary_native_function() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(1),
-            num_args: 2,
-            output: StackIndex(0),
+            args: vec![StackIndex(1).into(), StackIndex(2).into()],
+            output: Some(StackIndex(0)),
         },
     ];
 
@@ -232,9 +228,8 @@ fn rust_function_returning_rust_object() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(1),
-            num_args: 2,
-            output: StackIndex(0),
+            args: vec![StackIndex(1).into(), StackIndex(2).into()],
+            output: Some(StackIndex(0)),
         },
     ];
 
@@ -277,15 +272,13 @@ fn rust_function_accepting_rust_object() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(1),
-            num_args: 2,
-            output: StackIndex(3),
+            args: vec![StackIndex(1).into(), StackIndex(2).into()],
+            output: Some(StackIndex(3)),
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(1),
-            first_arg: StackIndex(3),
-            num_args: 1,
-            output: StackIndex(0),
+            args: vec![StackIndex(3).into()],
+            output: Some(StackIndex(0)),
         },
     ];
 
@@ -325,9 +318,8 @@ fn rust_function_accepting_mutable_rust_object() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(1),
-            num_args: 2,
-            output: StackIndex(0),
+            args: vec![StackIndex(1).into(), StackIndex(2).into()],
+            output: Some(StackIndex(0)),
         },
         Instruction::Mul {
             lhs: VMArg::Const(11usize.into()),
@@ -336,9 +328,8 @@ fn rust_function_accepting_mutable_rust_object() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(1),
-            first_arg: StackIndex(0),
-            num_args: 2,
-            output: StackIndex(2),
+            args: vec![StackIndex(0).into(), StackIndex(1).into()],
+            output: None,
         },
     ];
 
@@ -371,9 +362,8 @@ fn rust_function_collecting_triangular_numbers() {
         // Initialize vector
         Instruction::NativeFunctionCall {
             index: FunctionIndex(0),
-            first_arg: StackIndex(0),
-            num_args: 0,
-            output: StackIndex(0),
+            args: vec![],
+            output: Some(StackIndex(0)),
         },
         // Initialize cumulative sum
         Instruction::Copy {
@@ -394,9 +384,8 @@ fn rust_function_collecting_triangular_numbers() {
         },
         Instruction::NativeFunctionCall {
             index: FunctionIndex(1),
-            first_arg: StackIndex(0),
-            num_args: 2,
-            output: StackIndex(1000),
+            args: vec![StackIndex(0).into(), StackIndex(1).into()],
+            output: None,
         },
         // Increment the loop variable, then check if has reached the maximum.
         Instruction::Add {
