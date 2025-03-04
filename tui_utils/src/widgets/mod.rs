@@ -20,6 +20,3 @@ pub use buffer_selection::{BufferSelection, DrawableBufferSelection};
 
 mod dynamic_layout;
 pub use dynamic_layout::DynamicLayout;
-
-mod indent;
-pub use indent::Indent;

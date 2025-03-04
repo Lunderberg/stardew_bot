@@ -88,6 +88,8 @@ impl<'a> TypeInference<'a> {
             };
 
             let inferred_type = match graph[index_to_infer].as_ref() {
+                ExprKind::Function { .. } => todo!(),
+                ExprKind::FunctionArg(ty) => ty.clone(),
                 ExprKind::StaticField(static_field) => {
                     static_field.runtime_type(self.reader)?
                 }

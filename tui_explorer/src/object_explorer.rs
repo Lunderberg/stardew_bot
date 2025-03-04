@@ -14,13 +14,14 @@ use dotnet_debugger::{
     RuntimeType, RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue,
     TypedPointer,
 };
+use format_utils::Indent;
 use memory_reader::{OwnedBytes, Pointer};
 use tui_utils::{
     extensions::{
         HighlightLine as _, SplitRect as _, WidgetWithScrollbar as _,
     },
     inputs::{KeyBindingMatch, KeySequence},
-    widgets::{Indent, ScrollableState as _, SearchDirection, SearchWindow},
+    widgets::{ScrollableState as _, SearchDirection, SearchWindow},
     TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 

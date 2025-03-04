@@ -8,6 +8,7 @@ members = [
   "dotnet_debugger",
   "iterator_extensions",
   "tui_utils",
+  "format_utils",
 ]
 resolver = "2"
 

@@ -1,8 +1,12 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{
+    collections::{HashMap, HashSet},
+    fmt::Display,
+};
 
 use derive_more::derive::From;
 use itertools::Itertools as _;
 
+use format_utils::Indent;
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
@@ -32,6 +36,17 @@ pub struct Expr {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExprKind {
+    /// A variable argument to a function.
+    FunctionArg(RuntimeType),
+
+    /// A function
+    Function {
+        /// The parameters of the function.  Each parameter must be an
+        /// instance of ExprKind::FunctionArg.
+        params: Vec<SymbolicValue>,
+        outputs: Vec<SymbolicValue>,
+    },
+
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
     ///
@@ -192,6 +207,9 @@ pub struct GraphPrinter<'a> {
     /// convenient for line breaks to be inserted.  If false, do not
     /// insert the zero-width spaces.
     insert_zero_width_space_at_breakpoint: bool,
+
+    /// The number of spaces to indent for the body of functions.
+    indent_width: usize,
 }
 
 #[derive(Clone, Copy)]
@@ -471,12 +489,15 @@ impl SymbolicGraph {
         ValueToken(slot)
     }
 
+    const DEFAULT_INDENT_WIDTH: usize = 4;
+
     pub fn printer<'a>(&'a self) -> GraphPrinter<'a> {
         GraphPrinter {
             graph: self,
             expand_all_expressions: false,
             root_subgraph_node: None,
             insert_zero_width_space_at_breakpoint: false,
+            indent_width: Self::DEFAULT_INDENT_WIDTH,
         }
     }
 
@@ -487,6 +508,7 @@ impl SymbolicGraph {
             root_subgraph_node: Some(value),
             expand_all_expressions: false,
             insert_zero_width_space_at_breakpoint: false,
+            indent_width: Self::DEFAULT_INDENT_WIDTH,
         }
     }
 
@@ -505,6 +527,22 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////
     ////          Symbolic Operations              ///
     //////////////////////////////////////////////////
+
+    pub fn function_arg(
+        &mut self,
+        ty: impl Into<RuntimeType>,
+    ) -> SymbolicValue {
+        let ty = ty.into();
+        self.push(ExprKind::FunctionArg(ty))
+    }
+
+    pub fn function_def(
+        &mut self,
+        params: Vec<SymbolicValue>,
+        outputs: Vec<SymbolicValue>,
+    ) -> SymbolicValue {
+        self.push(ExprKind::Function { params, outputs })
+    }
 
     pub fn static_field(
         &mut self,
@@ -654,7 +692,9 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    fn iter_ops(&self) -> impl Iterator<Item = (OpIndex, &Expr)> + '_ {
+    fn iter_ops(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (OpIndex, &Expr)> + '_ {
         self.ops
             .iter()
             .enumerate()
@@ -842,6 +882,8 @@ impl SymbolicGraph {
             };
 
             match op.as_ref() {
+                ExprKind::Function { .. } => todo!(),
+                ExprKind::FunctionArg(_) => todo!(),
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
@@ -998,8 +1040,29 @@ impl ExprKind {
             }
         };
 
+        let remap_or_no_op = |value: &SymbolicValue| -> SymbolicValue {
+            remap(value).unwrap_or_else(|| *value)
+        };
+
+        let vec_requires_remap = |slice: &[SymbolicValue]| -> bool {
+            slice.iter().any(|item| match item {
+                SymbolicValue::Result(op_index) => map.contains_key(op_index),
+                SymbolicValue::Int(_) => false,
+                SymbolicValue::Ptr(_) => false,
+            })
+        };
+
         match self {
-            ExprKind::StaticField(_) => None,
+            ExprKind::FunctionArg(_) | ExprKind::StaticField(_) => None,
+            ExprKind::Function { params, outputs } => {
+                let requires_remap =
+                    vec_requires_remap(&params) || vec_requires_remap(&outputs);
+                requires_remap.then(|| {
+                    let params = params.iter().map(remap_or_no_op).collect();
+                    let outputs = outputs.iter().map(remap_or_no_op).collect();
+                    ExprKind::Function { params, outputs }
+                })
+            }
             ExprKind::FieldAccess { obj, field } => {
                 remap(obj).map(|obj| ExprKind::FieldAccess {
                     obj,
@@ -1008,14 +1071,11 @@ impl ExprKind {
             }
             ExprKind::IndexAccess { obj, indices } => {
                 let opt_obj = remap(obj);
-                let requires_remap = opt_obj.is_some()
-                    || indices.iter().any(|index| remap(index).is_some());
+                let requires_remap =
+                    opt_obj.is_some() || vec_requires_remap(&indices);
                 requires_remap.then(|| {
                     let obj = opt_obj.unwrap_or_else(|| *obj);
-                    let indices = indices
-                        .iter()
-                        .map(|index| remap(index).unwrap_or_else(|| *index))
-                        .collect::<Vec<_>>();
+                    let indices = indices.iter().map(remap_or_no_op).collect();
                     ExprKind::IndexAccess { obj, indices }
                 })
             }
@@ -1097,7 +1157,10 @@ impl ExprKind {
         mut callback: impl FnMut(SymbolicValue),
     ) {
         match self {
-            ExprKind::StaticField(_) => {}
+            ExprKind::FunctionArg(_) | ExprKind::StaticField(_) => {}
+            ExprKind::Function { outputs, .. } => {
+                outputs.iter().for_each(|output| callback(*output));
+            }
             ExprKind::FieldAccess { obj, .. } => {
                 callback(*obj);
             }
@@ -1251,6 +1314,33 @@ impl<'a> GraphComparison<'a> {
             let rhs_kind = &rhs[rhs_index].kind;
 
             let is_match = match lhs_kind {
+                ExprKind::Function {
+                    params: lhs_params,
+                    outputs: lhs_outputs,
+                } => match rhs_kind {
+                    ExprKind::Function {
+                        params: rhs_params,
+                        outputs: rhs_outputs,
+                    } => {
+                        lhs_params.len() == rhs_params.len()
+                            && lhs_outputs.len() == rhs_outputs.len()
+                            && lhs_params.iter().zip(rhs_params).all(
+                                |(lhs_param, rhs_param)| {
+                                    equivalent_value!(lhs_param, rhs_param)
+                                },
+                            )
+                            && lhs_outputs.iter().zip(rhs_outputs).all(
+                                |(lhs_output, rhs_output)| {
+                                    equivalent_value!(lhs_output, rhs_output)
+                                },
+                            )
+                    }
+                    _ => false,
+                },
+                ExprKind::FunctionArg(lhs_ty) => match rhs_kind {
+                    ExprKind::FunctionArg(rhs_ty) => lhs_ty == rhs_ty,
+                    _ => false,
+                },
                 ExprKind::StaticField(StaticField {
                     class: lhs_class,
                     field_name: lhs_field,
@@ -1428,6 +1518,37 @@ impl<'a> GraphComparison<'a> {
 impl Display for ExprKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            ExprKind::FunctionArg(ty) => {
+                write!(f, "_: {ty}")
+            }
+            ExprKind::Function { params, outputs } => {
+                write!(f, "fn(")?;
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    write!(f, "{param}")?;
+                }
+
+                write!(f, ") {{ ")?;
+
+                if outputs.len() == 1 {
+                    write!(f, "{}", outputs[0])?;
+                } else {
+                    write!(f, "(")?;
+                    for (i, output) in outputs.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        write!(f, "{output}")?;
+                    }
+                    write!(f, ")")?;
+                }
+
+                write!(f, " }}")?;
+
+                Ok(())
+            }
             ExprKind::StaticField(StaticField { class, field_name }) => {
                 write!(f, "{class}\u{200B}.{field_name}")
             }
@@ -1502,24 +1623,131 @@ impl<'a> GraphPrinter<'a> {
             vec![true; self.graph.ops.len()]
         };
 
+        let scope: Vec<Option<OpIndex>> = {
+            let mut scope = vec![None; self.graph.ops.len()];
+            self.graph
+                .iter_ops()
+                .rev()
+                .filter(|(_, op)| matches!(op.kind, ExprKind::Function { .. }))
+                .for_each(|(func_index, op)| {
+                    let ExprKind::Function { params, outputs } = &op.kind
+                    else {
+                        unreachable!("Due to earlier filter")
+                    };
+                    let earliest_param = params
+                        .iter()
+                        .filter_map(|param| param.as_op_index())
+                        .map(|index| index.0)
+                        .min();
+
+                    scope[func_index.0] = Some(func_index);
+
+                    // The `earliest_param` will be None for nullary
+                    // functions.  This allows an early return, since
+                    // nullary functions only own themselves, and do
+                    // not own any operations.
+                    let Some(earliest_param) = earliest_param else {
+                        return;
+                    };
+
+                    // Step 1, walk backwards from the outputs to the inputs
+                    let used_by_outputs: Vec<OpIndex> = {
+                        let mut to_visit = Vec::<OpIndex>::new();
+                        let mut used_by_outputs = HashSet::<OpIndex>::new();
+
+                        macro_rules! mark {
+                            ($value:expr) => {
+                                $value
+                                    .as_op_index()
+                                    .filter(|index| index.0 >= earliest_param)
+                                    .filter(|index| {
+                                        !used_by_outputs.contains(index)
+                                    })
+                                    .into_iter()
+                                    .for_each(|index| {
+                                        to_visit.push(index);
+                                        used_by_outputs.insert(index);
+                                    })
+                            };
+                        }
+
+                        for output in outputs {
+                            mark!(output);
+                        }
+
+                        while let Some(visiting) = to_visit.pop() {
+                            self.graph[visiting]
+                                .visit_input_values(|value| mark!(value));
+                        }
+
+                        used_by_outputs
+                            .into_iter()
+                            .sorted_by_key(|index| index.0)
+                            .collect()
+                    };
+
+                    // Step 2, walk forward from the inputs to the outputs
+                    let mut depend_on_params: HashSet<OpIndex> = params
+                        .iter()
+                        .filter_map(|param| param.as_op_index())
+                        .collect();
+
+                    for index in used_by_outputs {
+                        let mut uses_param = false;
+                        self.graph[index].visit_input_values(|value| {
+                            if let Some(upstream) = value.as_op_index() {
+                                if depend_on_params.contains(&upstream) {
+                                    uses_param = true;
+                                }
+                            }
+                        });
+                        if uses_param {
+                            depend_on_params.insert(index);
+                        }
+                    }
+
+                    // Step 3, if an operation both depends on the
+                    // function parameters and is used for the
+                    // function's output, then it is considered part
+                    // of the function.
+                    depend_on_params.into_iter().for_each(|index| {
+                        scope[index.0] = Some(func_index);
+                    });
+                });
+
+            scope
+        };
+
         let inline_expr: Vec<bool> = if self.expand_all_expressions {
             vec![false; self.graph.ops.len()]
         } else {
             let mut num_usage = vec![0; self.graph.ops.len()];
+            let mut used_by_child_scope = vec![false; self.graph.ops.len()];
             self.graph
                 .iter_ops()
                 .filter(|(index, _)| reachable[index.0])
-                .for_each(|(_, op)| {
+                .for_each(|(downstream_index, op)| {
                     op.visit_input_values(|input_value| {
-                        if let SymbolicValue::Result(prev_index) = input_value {
-                            num_usage[prev_index.0] += 1;
+                        if let SymbolicValue::Result(upstream_index) =
+                            input_value
+                        {
+                            num_usage[upstream_index.0] += 1;
+                            if scope[upstream_index.0]
+                                != scope[downstream_index.0]
+                            {
+                                used_by_child_scope[upstream_index.0] = true;
+                            }
                         }
                     })
                 });
+
             num_usage
                 .into_iter()
                 .zip(self.graph.ops.iter())
-                .map(|(count, op)| count == 1 && op.name.is_none())
+                .zip(used_by_child_scope)
+                .map(|((count, op), uses_parent_scope)| {
+                    count == 1 && op.name.is_none() && !uses_parent_scope
+                })
                 .collect()
         };
 
@@ -1540,40 +1768,242 @@ impl<'a> GraphPrinter<'a> {
             requires_name_prefix
         };
 
-        let make_expr_printer = |value: SymbolicValue| ExprPrinter {
-            graph: self.graph,
-            value,
-            is_top_level: true,
-            inline_expr: &inline_expr,
-            requires_name_prefix: &requires_name_prefix,
-            insert_zero_width_space_at_breakpoint: self
-                .insert_zero_width_space_at_breakpoint,
-        };
+        #[derive(Debug)]
+        struct PrintItem<'a> {
+            kind: PrintItemKind<'a>,
+            indent: Indent,
+        }
+        #[derive(Debug)]
+        enum PrintItemKind<'a> {
+            Op(OpIndex),
+            FunctionOutput(&'a [SymbolicValue]),
+        }
 
-        for (index, op) in self.graph.iter_ops() {
-            if reachable[index.0]
-                && !inline_expr[index.0]
-                && self.root_subgraph_node != Some(SymbolicValue::Result(index))
-            {
-                let index_printer = IndexPrinter {
-                    graph: self.graph,
-                    index,
-                    requires_name_prefix: requires_name_prefix[index.0],
-                };
-                let expr_printer = make_expr_printer(index.into());
+        // A stack of operations to print.  If an operation is not yet
+        // printable, such as an operation that uses a function
+        // argument prior to encountering the function, it will be
+        // moved to `delayed_ops` rather than printed.  After it
+        // becomes printable, it will be pushed back onto the stack.
+        let mut to_print: Vec<PrintItem> = (0..self.graph.ops.len())
+            .rev()
+            .map(|i| PrintItem {
+                kind: PrintItemKind::Op(OpIndex::new(i)),
+                indent: Indent(0),
+            })
+            .collect();
 
-                if matches!(op.as_ref(), ExprKind::Output { .. }) {
-                    writeln!(fmt, "{expr_printer}")?;
-                } else {
-                    writeln!(fmt, "let {index_printer} = {expr_printer};")?;
+        // Track operations that depend on a function argument.  These
+        // shouldn't be printed until encountering the function that
+        // owns them.
+        let mut delayed_ops: Vec<PrintItem> = Vec::new();
+        // Lookup from an operation to the Expr::FunctionArg that it makes use of.
+        //
+        // TODO: Something feels wrong for the order in which these
+        // are looked up.  If there's an expression that uses
+        // arguments from two separate functions, then the expression
+        // is contained within both functions.  On encountering either
+        // function definition, you know that the expression is part
+        // of the innermost function.  But I'm only tracking a single
+        // index here.
+        let mut delayed_op_lookup: HashMap<OpIndex, OpIndex> = HashMap::new();
+
+        #[derive(PartialEq, PartialOrd)]
+        enum DelayedNewline {
+            None,
+            BeforeAssignment,
+            BeforeExpression,
+        }
+
+        let mut delayed_newline = DelayedNewline::None;
+
+        let make_expr_printer =
+            |value: SymbolicValue, is_top_level: bool| ExprPrinter {
+                graph: self.graph,
+                value,
+                is_top_level,
+                inline_expr: &inline_expr,
+                requires_name_prefix: &requires_name_prefix,
+                insert_zero_width_space_at_breakpoint: self
+                    .insert_zero_width_space_at_breakpoint,
+            };
+
+        while let Some(print_item) = to_print.pop() {
+            let indent = print_item.indent;
+            let index = match print_item.kind {
+                PrintItemKind::Op(index) => index,
+                PrintItemKind::FunctionOutput(tuple) => {
+                    match tuple.len() {
+                        0 => {}
+                        1 => {
+                            if delayed_newline
+                                >= DelayedNewline::BeforeExpression
+                            {
+                                write!(fmt, "\n{indent}")?;
+                            } else {
+                                write!(fmt, " ")?;
+                            }
+                            let expr_printer =
+                                make_expr_printer(tuple[0], false);
+                            write!(fmt, "{expr_printer}")?;
+                        }
+                        _ => {
+                            if delayed_newline
+                                >= DelayedNewline::BeforeExpression
+                            {
+                                write!(fmt, "\n{indent}")?;
+                            }
+                            write!(fmt, "(")?;
+                            let item_indent = indent + self.indent_width;
+                            tuple
+                                .iter()
+                                .cloned()
+                                .map(|value| make_expr_printer(value, false))
+                                .try_for_each(|expr_printer| {
+                                    write!(
+                                        fmt,
+                                        "\n{item_indent}{expr_printer},"
+                                    )
+                                })?;
+                            write!(fmt, ")")?;
+
+                            delayed_newline = DelayedNewline::BeforeAssignment;
+                        }
+                    }
+
+                    if delayed_newline >= DelayedNewline::BeforeExpression {
+                        let closing_indent = indent - self.indent_width;
+                        write!(fmt, "\n{closing_indent}")?;
+                    } else {
+                        write!(fmt, " ")?;
+                    }
+
+                    write!(fmt, "}};")?;
+                    continue;
+                }
+            };
+
+            let op = &self.graph[index];
+
+            if !reachable[index.0] {
+                // Only display operations that are reachable when
+                // starting from the displayed node.
+                continue;
+            }
+
+            let mut uses_param = None;
+            if !matches!(op.kind, ExprKind::Function { .. }) {
+                op.visit_input_values(|input| {
+                    if let SymbolicValue::Result(op_index) = input {
+                        if let Some(function_arg) =
+                            delayed_op_lookup.get(&op_index)
+                        {
+                            uses_param = Some(function_arg);
+                        }
+                    }
+                });
+            }
+            if let Some(function_arg) = uses_param {
+                // Depends on a function argument.  Mark it for
+                // printing out later.
+                delayed_ops.push(PrintItem {
+                    indent: indent + self.indent_width,
+                    ..print_item
+                });
+                delayed_op_lookup.insert(index, *function_arg);
+                continue;
+            }
+
+            if inline_expr[index.0] {
+                // Do not provide a separate printout for expressions that
+                // are being displayed inline.
+                continue;
+            }
+
+            let index_printer = IndexPrinter {
+                graph: self.graph,
+                index,
+                requires_name_prefix: requires_name_prefix[index.0],
+            };
+            let expr_printer = make_expr_printer(index.into(), true);
+
+            let is_root_node =
+                Some(SymbolicValue::Result(index)) == self.root_subgraph_node;
+
+            if is_root_node {
+                if delayed_newline >= DelayedNewline::BeforeExpression {
+                    write!(fmt, "\n{indent}")?;
+                }
+
+                write!(fmt, "{expr_printer}")?;
+                continue;
+            }
+
+            match op.as_ref() {
+                ExprKind::FunctionArg(_) => {
+                    delayed_op_lookup.insert(index, index);
+                }
+                ExprKind::Function { params, outputs } => {
+                    if delayed_newline >= DelayedNewline::BeforeExpression {
+                        write!(fmt, "\n{indent}")?;
+                    }
+                    write!(fmt, "let {index_printer} = ")?;
+                    write!(fmt, "fn(")?;
+                    for (i, param) in params.iter().enumerate() {
+                        if i > 0 {
+                            write!(fmt, ", ")?;
+                        }
+                        let param =
+                            expr_printer.with_value(*param).as_top_level();
+                        write!(fmt, "{param}")?;
+                    }
+                    write!(fmt, ") {{")?;
+
+                    to_print.push(PrintItem {
+                        kind: PrintItemKind::FunctionOutput(outputs),
+                        indent: indent + self.indent_width,
+                    });
+
+                    params
+                        .iter()
+                        .filter_map(|param| match param {
+                            SymbolicValue::Result(param_index) => {
+                                Some(param_index)
+                            }
+                            _ => None,
+                        })
+                        .for_each(|param_index| {
+                            delayed_op_lookup.remove(param_index);
+                        });
+
+                    let mut stolen_ops = Vec::new();
+                    std::mem::swap(&mut delayed_ops, &mut stolen_ops);
+                    for delayed in stolen_ops.into_iter().rev() {
+                        if let PrintItemKind::Op(delayed_index) = &delayed.kind
+                        {
+                            delayed_op_lookup.remove(delayed_index);
+                        }
+                        to_print.push(delayed);
+                    }
+                    delayed_newline = DelayedNewline::BeforeAssignment;
+                }
+                ExprKind::Output { .. } => {
+                    if delayed_newline >= DelayedNewline::BeforeAssignment {
+                        write!(fmt, "\n{indent}")?;
+                    }
+                    write!(fmt, "{expr_printer}")?;
+                    delayed_newline = DelayedNewline::BeforeAssignment;
+                }
+                _ => {
+                    if delayed_newline >= DelayedNewline::BeforeAssignment {
+                        write!(fmt, "\n{indent}")?;
+                    }
+                    write!(fmt, "let {index_printer} = {expr_printer};")?;
+                    delayed_newline = DelayedNewline::BeforeExpression;
                 }
             }
         }
 
-        if let Some(root_node) = self.root_subgraph_node {
-            let expr_printer = make_expr_printer(root_node);
-            write!(fmt, "{expr_printer}")?;
-        }
+        assert_eq!(delayed_ops.len(), 0);
 
         Ok(())
     }
@@ -1590,6 +2020,13 @@ impl<'a> ExprPrinter<'a> {
         Self {
             value,
             is_top_level: false,
+            ..self
+        }
+    }
+
+    fn as_top_level(self) -> Self {
+        Self {
+            is_top_level: true,
             ..self
         }
     }
@@ -1633,21 +2070,56 @@ impl<'a> Display for ExprPrinter<'a> {
             SymbolicValue::Result(op_index) => op_index,
         };
 
+        let index_printer = IndexPrinter {
+            graph: self.graph,
+            index: op_index,
+            requires_name_prefix: self.requires_name_prefix[op_index.0],
+        };
+
         let display_full_expr =
             self.is_top_level || self.inline_expr[op_index.0];
         if !display_full_expr {
-            let index = IndexPrinter {
-                graph: self.graph,
-                index: op_index,
-                requires_name_prefix: self.requires_name_prefix[op_index.0],
-            };
-            return write!(f, "{index}");
+            return write!(f, "{index_printer}");
         }
 
         let sep =
             MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
         match self.graph[op_index].as_ref() {
+            ExprKind::Function { params, outputs } => {
+                write!(f, "fn(")?;
+                for (i, param) in params.iter().enumerate() {
+                    if i > 0 {
+                        write!(f, ", ")?;
+                    }
+                    let param = self.with_value(*param).as_top_level();
+                    write!(f, "{param}")?;
+                }
+
+                write!(f, ") {{")?;
+
+                if outputs.len() == 1 {
+                    let output = self.with_value(outputs[0]);
+                    write!(f, "{output}")?;
+                } else {
+                    write!(f, "(")?;
+                    for (i, output) in outputs.iter().enumerate() {
+                        if i > 0 {
+                            write!(f, ", ")?;
+                        }
+                        let output = self.with_value(*output);
+                        write!(f, "{output}")?;
+                    }
+                    write!(f, ")")?;
+                }
+
+                write!(f, "}}")?;
+
+                Ok(())
+            }
+            ExprKind::FunctionArg(ty) => {
+                write!(f, "{index_printer}: {ty}")
+            }
             ExprKind::StaticField(StaticField { class, field_name }) => {
                 write!(f, "{class}{sep}.{field_name}")
             }

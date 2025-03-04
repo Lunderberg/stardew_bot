@@ -15,6 +15,8 @@ elsa = "*"
 iterator_extensions = { path = "../iterator_extensions" }
 memory_reader = { path = "../memory_reader" }
 dll_unpacker = { path = "../dll_unpacker" }
+format_utils = { path = "../format_utils" }
 
 [dev-dependencies]
 paste = "1.0.15"
+indoc = "2"

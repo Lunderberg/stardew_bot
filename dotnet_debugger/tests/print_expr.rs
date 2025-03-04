@@ -1,4 +1,5 @@
 use dotnet_debugger::{SymbolicGraph, SymbolicType, SymbolicValue};
+use indoc::indoc;
 
 fn check_printed_expr(
     expected: &str,
@@ -147,14 +148,14 @@ fn expression_printing_ignores_unreachable_nodes() {
 
 #[test]
 fn print_shared_expression() {
-    check_printed_expr(
-        "let _0 = class_name.field_name;\n\
-         _0.x + _0.y",
-        |graph| {
-            let point = graph.static_field("class_name", "field_name");
-            let x = graph.access_field(point, "x");
-            let y = graph.access_field(point, "y");
-            graph.add(x, y)
-        },
-    );
+    let expected = indoc! {"
+         let _0 = class_name.field_name;
+         _0.x + _0.y"
+    };
+    check_printed_expr(expected, |graph| {
+        let point = graph.static_field("class_name", "field_name");
+        let x = graph.access_field(point, "x");
+        let y = graph.access_field(point, "y");
+        graph.add(x, y)
+    });
 }

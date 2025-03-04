@@ -2,6 +2,7 @@ use std::{borrow::Cow, cmp::Reverse};
 
 use dll_unpacker::{Assembly, MetadataTableIndex, MetadataTableKind};
 use dotnet_debugger::{CachedReader, RuntimeModule, TypedPointer};
+use format_utils::Indent;
 use itertools::Itertools;
 use memory_reader::Pointer;
 use ratatui::{
@@ -13,7 +14,7 @@ use ratatui::{
 use tui_utils::{
     extensions::{SplitRect as _, WidgetWithScrollbar as _},
     inputs::{KeyBindingMatch, KeySequence},
-    widgets::{Indent, ScrollableState as _, SearchDirection, SearchWindow},
+    widgets::{ScrollableState as _, SearchDirection, SearchWindow},
     TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 

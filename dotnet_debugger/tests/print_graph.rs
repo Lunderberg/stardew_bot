@@ -1,4 +1,5 @@
-use dotnet_debugger::SymbolicGraph;
+use dotnet_debugger::{RuntimePrimType, SymbolicGraph};
+use indoc::indoc;
 
 #[test]
 fn print_expanded_graph() {
@@ -11,16 +12,16 @@ fn print_expanded_graph() {
     graph.mark_output(item);
 
     let printed = format!("{}", graph.printer().expand_all_expressions());
-    let expected = "\
-    let _0 = class_name.field_name;\n\
-    let _1 = _0.subfield;\n\
-    let _2 = _1.active_index;\n\
-    let _3 = _1.list;\n\
-    let _4 = _3._items;\n\
-    let _5 = _2.prim_cast::<usize>();\n\
-    let _6 = _4[_5];\n\
-    output_stack[pc + 0] = _6;\n\
-    ";
+    let expected = indoc! {"
+        let _0 = class_name.field_name;
+        let _1 = _0.subfield;
+        let _2 = _1.active_index;
+        let _3 = _1.list;
+        let _4 = _3._items;
+        let _5 = _2.prim_cast::<usize>();
+        let _6 = _4[_5];
+        output_stack[pc + 0] = _6;"
+    };
 
     println!("-------------- Expected --------------\n{expected}");
     println!("-------------- Actual   --------------\n{printed}");
@@ -39,10 +40,10 @@ fn print_compact_graph() {
     graph.mark_output(item);
 
     let printed = format!("{graph}");
-    let expected = "\
-    let _1 = class_name.field_name.subfield;\n\
-    output_stack[pc + 0] = _1.list._items[_1.active_index.prim_cast::<usize>()];\n\
-    ";
+    let expected = indoc! {"
+       let _1 = class_name.field_name.subfield;
+       output_stack[pc + 0] = _1.list._items[_1.active_index.prim_cast::<usize>()];"
+    };
 
     println!("-------------- Expected --------------\n{expected}");
     println!("-------------- Actual   --------------\n{printed}");
@@ -65,10 +66,10 @@ fn print_named_object() {
     graph.mark_output(item);
 
     let printed = format!("{graph}");
-    let expected = "\
-    let obj = class_name.field_name.subfield;\n\
-    output_stack[pc + 0] = obj.list._items[obj.active_index.prim_cast::<usize>()];\n\
-    ";
+    let expected = indoc! {"
+        let obj = class_name.field_name.subfield;
+        output_stack[pc + 0] = obj.list._items[obj.active_index.prim_cast::<usize>()];"
+    };
 
     println!("-------------- Expected --------------\n{expected}");
     println!("-------------- Actual   --------------\n{printed}");
@@ -93,11 +94,11 @@ fn print_named_intermediate_object() {
     graph.mark_output(item);
 
     let printed = format!("{graph}");
-    let expected = "\
-    let obj = class_name.field_name.subfield;\n\
-    let index = obj.active_index;\n\
-    output_stack[pc + 0] = obj.list._items[index.prim_cast::<usize>()];\n\
-    ";
+    let expected = indoc! {"
+       let obj = class_name.field_name.subfield;
+       let index = obj.active_index;
+       output_stack[pc + 0] = obj.list._items[index.prim_cast::<usize>()];"
+    };
 
     println!("-------------- Expected --------------\n{expected}");
     println!("-------------- Actual   --------------\n{printed}");
@@ -128,11 +129,69 @@ fn print_with_duplicate_names() {
     graph.mark_output(item);
 
     let printed = format!("{graph}");
-    let expected = "\
-    let _1_obj = class_name.field_name.subfield;\n\
-    let _2_obj = _1_obj.active_index;\n\
-    output_stack[pc + 0] = _1_obj.list._items[_2_obj.prim_cast::<usize>()];\n\
-    ";
+    let expected = indoc! {"
+        let _1_obj = class_name.field_name.subfield;
+        let _2_obj = _1_obj.active_index;
+        output_stack[pc + 0] = _1_obj.list._items[_2_obj.prim_cast::<usize>()];"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_nullary_function_definition() {
+    let mut graph = SymbolicGraph::new();
+    let obj = graph.static_field("class_name", "field_name");
+    let subfield = graph.access_field(obj, "subfield");
+    let active_index = graph.access_field(subfield, "active_index");
+    let array = graph.access_field(subfield, "list._items");
+    let item = graph.access_index(array, active_index);
+
+    let func = graph.function_def(vec![], vec![item]);
+    graph.name(func, "main").unwrap();
+
+    graph.mark_output(func);
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let _1 = class_name.field_name.subfield;
+        let _6 = _1.list._items[_1.active_index.prim_cast::<usize>()];
+        let main = fn() { _6 };
+        output_stack[pc + 0] = main;"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_unary_function_definition() {
+    let mut graph = SymbolicGraph::new();
+
+    let index = graph.function_arg(RuntimePrimType::NativeUInt);
+    graph.name(index, "index").unwrap();
+
+    let obj = graph.static_field("class_name", "field_name");
+    let subfield = graph.access_field(obj, "subfield");
+    let array = graph.access_field(subfield, "list._items");
+    let item = graph.access_index(array, index);
+
+    let func = graph.function_def(vec![index], vec![item]);
+    graph.name(func, "main").unwrap();
+
+    graph.mark_output(func);
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let _4 = class_name.field_name.subfield.list._items;
+        let main = fn(index: usize) { _4[index.prim_cast::<usize>()] };
+        output_stack[pc + 0] = main;"
+    };
 
     println!("-------------- Expected --------------\n{expected}");
     println!("-------------- Actual   --------------\n{printed}");
