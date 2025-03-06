@@ -34,7 +34,7 @@ impl<'a> GraphRewrite for IdentifyStaticField<'a> {
 
         let class = symbolic_type.full_name.as_ref();
 
-        if self.0.reader().class_exists(class)? {
+        if self.0.reader()?.class_exists(class)? {
             return Ok(None);
         }
 

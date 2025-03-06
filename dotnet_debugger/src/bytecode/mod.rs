@@ -31,7 +31,7 @@ mod remove_unused_pointer_cast;
 pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
 
 mod type_inference;
-pub use type_inference::TypeInference;
+pub use type_inference::{TypeInference, TypeInferenceError};
 
 mod parser;
 pub(crate) use parser::*;

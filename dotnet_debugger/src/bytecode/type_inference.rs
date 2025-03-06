@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use elsa::FrozenMap;
+use thiserror::Error;
 
 use crate::{
     runtime_type::{DotNetType, RuntimePrimType},
@@ -10,16 +11,31 @@ use crate::{
 use super::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
 pub struct TypeInference<'a> {
-    reader: CachedReader<'a>,
+    opt_reader: Option<CachedReader<'a>>,
     cache: FrozenMap<OpIndex, Box<RuntimeType>>,
 }
 
+#[derive(Error)]
+pub enum TypeInferenceError {
+    #[error(
+        "Within a local-only context, \
+         attempted to infer the type of an .NET expression \
+         within a remote process."
+    )]
+    NoRemoteProcess,
+}
+
 impl<'a> TypeInference<'a> {
-    pub fn new(reader: CachedReader<'a>) -> Self {
+    pub fn new(reader: Option<CachedReader<'a>>) -> Self {
+        let opt_reader = reader.into();
         Self {
-            reader,
+            opt_reader,
             cache: Default::default(),
         }
+    }
+
+    fn reader(&self) -> Result<CachedReader<'a>, TypeInferenceError> {
+        self.opt_reader.ok_or(TypeInferenceError::NoRemoteProcess)
     }
 
     pub fn infer_type(
@@ -91,7 +107,8 @@ impl<'a> TypeInference<'a> {
                 ExprKind::Function { .. } => todo!(),
                 ExprKind::FunctionArg(ty) => ty.clone(),
                 ExprKind::StaticField(static_field) => {
-                    static_field.runtime_type(self.reader)?
+                    let reader = self.reader()?;
+                    static_field.runtime_type(reader)?
                 }
                 ExprKind::FieldAccess { obj, field } => {
                     let obj_type = expect_cache(*obj);
@@ -101,14 +118,15 @@ impl<'a> TypeInference<'a> {
                             format!("{}", graph.print(*obj))
                         })?;
                     let field_type =
-                        self.reader.field_by_name_to_runtime_type(
+                        self.reader()?.field_by_name_to_runtime_type(
                             method_table_ptr,
                             field.as_str(),
                         )?;
                     field_type
                 }
                 ExprKind::SymbolicDowncast { ty, .. } => {
-                    let method_table = ty.method_table(self.reader)?;
+                    let reader = self.reader()?;
+                    let method_table = ty.method_table(reader)?;
                     DotNetType::Class {
                         method_table: Some(method_table),
                     }
@@ -162,12 +180,12 @@ impl<'a> TypeInference<'a> {
                                 ..
                             },
                         ) => {
-                            let method_table =
-                                self.reader.method_table(*ptr)?;
+                            let reader = self.reader()?;
+                            let method_table = reader.method_table(*ptr)?;
                             method_table
                                 .array_element_type()
                                 .ok_or(Error::ArrayMissingElementType)
-                                .and_then(|ptr| self.reader.runtime_type(ptr))
+                                .and_then(|ptr| reader.runtime_type(ptr))
                         }
 
                         other => {
@@ -265,5 +283,11 @@ impl<'a> TypeInference<'a> {
              Topologic sort should ensure that \
              all input expressions have their type inferred.",
         ))
+    }
+}
+
+impl std::fmt::Debug for TypeInferenceError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }

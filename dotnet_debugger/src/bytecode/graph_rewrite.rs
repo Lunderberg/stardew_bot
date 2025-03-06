@@ -38,15 +38,16 @@ pub trait GraphRewrite {
 /// Which is probably a bit of overengineering given that type
 /// inference is currently the only analysis performed.
 pub struct Analysis<'a> {
-    reader: CachedReader<'a>,
+    opt_reader: Option<CachedReader<'a>>,
     type_inference: TypeInference<'a>,
 }
 
 impl<'a> Analysis<'a> {
-    pub fn new(reader: CachedReader<'a>) -> Self {
-        let type_inference = TypeInference::new(reader);
+    pub fn new(reader: impl Into<Option<CachedReader<'a>>>) -> Self {
+        let opt_reader = reader.into();
+        let type_inference = TypeInference::new(opt_reader);
         Self {
-            reader,
+            opt_reader,
             type_inference,
         }
     }
@@ -59,7 +60,7 @@ impl<'a> Analysis<'a> {
         self.type_inference.infer_type(graph, value)
     }
 
-    pub fn reader(&'a self) -> CachedReader<'a> {
-        self.reader
+    pub fn reader(&'a self) -> Result<CachedReader<'a>, Error> {
+        Ok(self.opt_reader.unwrap())
     }
 }

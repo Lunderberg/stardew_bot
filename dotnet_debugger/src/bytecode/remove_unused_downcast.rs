@@ -17,7 +17,7 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
             ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj_type = self.0.infer_type(graph, *obj)?;
 
-                let reader = self.0.reader();
+                let reader = self.0.reader()?;
 
                 let static_method_table_ptr =
                     obj_type.method_table_for_downcast()?;

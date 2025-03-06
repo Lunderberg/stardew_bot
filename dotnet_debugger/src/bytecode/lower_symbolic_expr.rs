@@ -42,10 +42,9 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             }};
         }
 
-        let reader = self.0.reader();
-
         let opt_value = match expr {
             ExprKind::StaticField(static_field) => {
+                let reader = self.0.reader()?;
                 let runtime_type = static_field.runtime_type(reader)?;
                 let ptr = static_field.location(reader)?;
 
@@ -62,6 +61,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                     obj_type.method_table_for_field_access(|| {
                         format!("{}", graph.print(obj))
                     })?;
+                let reader = self.0.reader()?;
                 let (parent_of_field, field_description) = reader
                     .find_field_by_name(method_table_ptr, field.as_str())?;
                 let field_type = reader.field_to_runtime_type(
@@ -105,6 +105,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                                 graph.print(*obj)
                             ))
                         })?;
+                        let reader = self.0.reader()?;
                         let method_table = reader.method_table(method_table)?;
                         let component_size = method_table
                             .component_size()
@@ -213,6 +214,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 let static_method_table_ptr =
                     obj_type.method_table_for_downcast()?;
+                let reader = self.0.reader()?;
                 let target_method_table_ptr = ty.method_table(reader)?;
                 let is_valid_downcast = reader
                     .method_table(static_method_table_ptr)?

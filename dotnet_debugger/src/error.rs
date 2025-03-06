@@ -270,6 +270,9 @@ pub enum Error {
     #[error("dotnet_debugger::VMExecutionError( {0} )")]
     VMExecutionError(#[from] crate::VMExecutionError),
 
+    #[error("dotnet_debugger::TypeInferenceError( {0} )")]
+    TypeInferenceError(#[from] crate::TypeInferenceError),
+
     #[error("Unable to find inferred type for operation {0}")]
     InferredTypeNotFound(crate::bytecode::SymbolicValue),
 
@@ -344,6 +347,12 @@ pub enum Error {
          of type {0:?} as a pointer to a .NET string."
     )]
     AttemptedReadOfNativeObjectAsStringPtr(std::any::TypeId),
+
+    #[error(
+        "Analysis routine attempted to inspect remote process, \
+         but cannot do so when running in local mode."
+    )]
+    AnalysisAttemptedToUseMissingRemoteProcess,
 }
 
 impl std::fmt::Debug for Error {

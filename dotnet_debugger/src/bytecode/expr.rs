@@ -39,7 +39,7 @@ pub enum ExprKind {
     /// A variable argument to a function.
     FunctionArg(RuntimeType),
 
-    /// A function
+    /// A function definition
     Function {
         /// The parameters of the function.  Each parameter must be an
         /// instance of ExprKind::FunctionArg.
@@ -479,7 +479,11 @@ impl SymbolicGraph {
         Ok(())
     }
 
-    pub fn mark_output(&mut self, value: SymbolicValue) -> ValueToken {
+    pub fn mark_output(
+        &mut self,
+        value: impl Into<SymbolicValue>,
+    ) -> ValueToken {
+        let value = value.into();
         let slot = self.num_outputs;
         self.num_outputs += 1;
         self.push(ExprKind::Output {
@@ -704,7 +708,10 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    pub fn validate(&self, reader: CachedReader<'_>) -> Result<(), Error> {
+    pub fn validate(
+        &self,
+        reader: Option<CachedReader<'_>>,
+    ) -> Result<(), Error> {
         let type_inference = TypeInference::new(reader);
 
         for (index, op) in self.iter_ops() {
@@ -727,7 +734,10 @@ impl SymbolicGraph {
         Ok(())
     }
 
-    pub fn simplify(&self, reader: CachedReader<'_>) -> Result<Self, Error> {
+    pub fn simplify<'a>(
+        &self,
+        reader: impl Into<Option<CachedReader<'a>>>,
+    ) -> Result<Self, Error> {
         let analysis = Analysis::new(reader);
         let rewriter = super::RemoveUnusedDowncast(&analysis)
             .then(super::ConstantFold)
@@ -950,10 +960,11 @@ impl SymbolicGraph {
         Ok(VirtualMachine::new(instructions, self.num_outputs))
     }
 
-    pub fn compile(
+    pub fn compile<'a>(
         &self,
-        reader: CachedReader<'_>,
+        reader: impl Into<Option<CachedReader<'a>>>,
     ) -> Result<VirtualMachine, Error> {
+        let reader = reader.into();
         let expr = self.clone();
 
         // The display of static fields is done similar to C#, which
