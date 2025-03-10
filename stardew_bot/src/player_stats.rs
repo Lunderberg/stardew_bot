@@ -1,4 +1,3 @@
-use dotnet_debugger::{SymbolicGraph, VMResults, ValueToken};
 use ratatui::{
     layout::Constraint,
     text::Text,
@@ -6,7 +5,10 @@ use ratatui::{
 };
 use tui_utils::WidgetWindow;
 
-use crate::Error;
+use crate::{
+    watch_point_definition::{ValueToken, WatchPointResults},
+    Error, WatchPointDefinition,
+};
 
 pub struct PlayerStats {
     table_state: TableState,
@@ -22,10 +24,12 @@ pub struct PlayerStats {
 }
 
 impl PlayerStats {
-    pub fn new(per_frame_reader: &mut SymbolicGraph) -> Result<Self, Error> {
+    pub fn new(
+        watch_point_spec: &mut WatchPointDefinition,
+    ) -> Result<Self, Error> {
         let mut register = |value: &str| -> Result<ValueToken, Error> {
-            let expr = per_frame_reader.parse(value)?;
-            let token = per_frame_reader.mark_output(expr);
+            let expr = watch_point_spec.parse(value)?;
+            let token = watch_point_spec.mark_output(expr);
             Ok(token)
         };
 
@@ -67,7 +71,7 @@ impl WidgetWindow<Error> for PlayerStats {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         let values = globals
-            .get::<VMResults>()
+            .get::<WatchPointResults>()
             .expect("Generated for each frame");
 
         let get_value = |token: ValueToken| match &values[token] {

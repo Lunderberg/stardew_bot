@@ -1,7 +1,5 @@
 mod expr;
-pub use expr::{
-    ExprKind, SymbolicGraph, SymbolicType, SymbolicValue, ValueToken,
-};
+pub use expr::{ExprKind, SymbolicGraph, SymbolicType, SymbolicValue};
 
 mod graph_rewrite;
 pub use graph_rewrite::GraphRewrite;

@@ -51,5 +51,5 @@ pub mod bytecode;
 pub use bytecode::{
     ExprKind, Instruction, OpIndex, RustNativeObject, StackValue,
     SymbolicGraph, SymbolicType, SymbolicValue, TypeInferenceError, VMArg,
-    VMExecutionError, VMResults, ValueToken, VirtualMachine,
+    VMExecutionError, VMResults, VirtualMachine,
 };

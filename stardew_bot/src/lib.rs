@@ -1,6 +1,9 @@
 mod stardew_bot;
 pub use stardew_bot::*;
 
+mod watch_point_definition;
+pub(crate) use watch_point_definition::WatchPointDefinition;
+
 mod error;
 pub use error::Error;
 

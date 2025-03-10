@@ -21,9 +21,32 @@ use crate::{
 /// So in absence of a better name, calling it `RuntimeType` for now.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
 pub enum RuntimeType {
+    // Primitive types.  These have a direct representation within the
+    // .NET process, can be parsed from a contiguous chunk of bytes,
+    // and have a value that can be represented in `RuntimePrimValue`.
     Prim(RuntimePrimType),
+
+    // Composite types in .NET.  These are represented within the .NET
+    // process, and may contain internal member variables, either of
+    // primitive types or of other .NET types.  While each .NET object
+    // exists at a specific memory location in the remote process,
+    // they do not necessarily occuply a contiguous memory range, and
+    // may contain pointers to their internal members.
     DotNet(DotNetType),
+
+    // A native Rust type, exposed for use in the VM.  These types do
+    // not have a representation in the .NET process.  They can only
+    // be produced as the output of a native Rust function.
     Rust(RustType),
+
+    // A function, typically defined using
+    // `SymbolicGraph::function_def`.  These represent functions that
+    // may be evaluated over the course of the VM's execution.
+    //
+    // TODO: Represent native Rust functions as nodes within the
+    // graph, rather than as extra free-floating functions within the
+    // VirtualMachine.  This will allow them to be type-checked.
+    Function(FunctionType),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -121,6 +144,12 @@ pub enum RustType {
     Opaque(std::any::TypeId),
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct FunctionType {
+    pub(crate) params: Vec<RuntimeType>,
+    pub(crate) outputs: Vec<RuntimeType>,
+}
+
 impl RuntimeType {
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
         match self {
@@ -157,6 +186,9 @@ impl RuntimeType {
                 Ok(RuntimeValue::MultiDimArray(ptr.into()))
             }
             RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
+            RuntimeType::Function(_) => {
+                Err(Error::UnexpectedFunctionTypeInDotNet)
+            }
         }
     }
 
@@ -173,6 +205,9 @@ impl RuntimeType {
                 Ok(Pointer::SIZE)
             }
             RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
+            RuntimeType::Function(_) => {
+                Err(Error::UnexpectedFunctionTypeInDotNet)
+            }
         }
     }
 
@@ -186,7 +221,7 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::String) => true,
             RuntimeType::DotNet(DotNetType::Array { .. }) => true,
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => true,
-            RuntimeType::Rust(_) => false,
+            RuntimeType::Rust(_) | RuntimeType::Function(_) => false,
         }
     }
 
@@ -206,7 +241,7 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 Some(RuntimePrimType::Ptr)
             }
-            RuntimeType::Rust(_) => None,
+            RuntimeType::Rust(_) | RuntimeType::Function(_) => None,
         }
     }
 
@@ -225,7 +260,8 @@ impl RuntimeType {
                 | DotNetType::Array { .. }
                 | DotNetType::MultiDimArray { .. },
             )
-            | RuntimeType::Rust(_) => None,
+            | RuntimeType::Rust(_)
+            | RuntimeType::Function(_) => None,
         }
     }
 
@@ -253,6 +289,43 @@ impl RuntimeType {
                 method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
             }
             _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
+        }
+    }
+
+    /// Returns true if the type signature is complete.  If false,
+    /// unpacking the same .NET type signature at a later time may
+    /// produce a more defined RuntimeType.
+    ///
+    /// For example, suppose there exists a member variable with type
+    /// `Array<MyType>`.  On encountering the member variable, at
+    /// least one instance of `Array<MyType>` has been constructed, so
+    /// the method table of `Array<MyType>` must have been
+    /// instantiated by the .NET runtime.  However, there may not have
+    /// been any instances of `MyType` constructed, so the method
+    /// table of `MyType` may not yet have been instantiated.  In this
+    /// case, it is represented as an array of unspecified element
+    /// type.  Such a representation is incomplete, as unpacking the
+    /// same signature at a later time could result in an array of
+    /// known element type.
+    ///
+    /// This is used when caching type information, to ensure that the cache is only used when the type information is known.
+    pub(crate) fn is_complete(&self) -> bool {
+        match self {
+            RuntimeType::Prim(_)
+            | RuntimeType::DotNet(DotNetType::String)
+            | RuntimeType::Rust(_) => true,
+
+            RuntimeType::Function(FunctionType { params, outputs }) => params
+                .iter()
+                .chain(outputs.iter())
+                .all(|ty| ty.is_complete()),
+
+            RuntimeType::DotNet(
+                DotNetType::Class { method_table }
+                | DotNetType::ValueType { method_table, .. }
+                | DotNetType::Array { method_table, .. }
+                | DotNetType::MultiDimArray { method_table, .. },
+            ) => method_table.is_some(),
         }
     }
 }
@@ -442,6 +515,7 @@ impl std::fmt::Display for RuntimeType {
                 write!(f, "array({rank}, vtable {method_table})")
             }
             RuntimeType::Rust(rust_type) => write!(f, "{rust_type}"),
+            RuntimeType::Function(func_type) => write!(f, "{func_type}"),
         }
     }
 }
@@ -473,6 +547,32 @@ impl std::fmt::Display for RustType {
         match self {
             RustType::Opaque(type_id) => write!(f, "{type_id:?}"),
         }
+    }
+}
+
+impl std::fmt::Display for FunctionType {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let write_tuple = |fmt: &mut std::fmt::Formatter,
+                           tuple: &[RuntimeType]|
+         -> std::fmt::Result {
+            write!(fmt, "(")?;
+            tuple.iter().enumerate().try_for_each(|(i, element)| {
+                if i > 0 {
+                    write!(fmt, ", ")?;
+                }
+                write!(fmt, "{element}")
+            })?;
+            write!(fmt, ")")?;
+            Ok(())
+        };
+
+        write!(fmt, "Fn")?;
+        write_tuple(fmt, &self.params)?;
+
+        write!(fmt, " -> ")?;
+        write_tuple(fmt, &self.outputs)?;
+
+        Ok(())
     }
 }
 

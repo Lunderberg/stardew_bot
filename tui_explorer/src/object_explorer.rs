@@ -785,7 +785,9 @@ impl ObjectExplorer {
             },
         )?;
 
-        graph.mark_output(output);
+        let main_func = graph.function_def(vec![], vec![output]);
+        graph.name(main_func, "main")?;
+        graph.mark_extern_func(main_func)?;
 
         Ok(graph)
     }
@@ -898,6 +900,12 @@ impl ObjectTreeNode {
             RuntimeType::Rust(_) => {
                 return Err(
                     dotnet_debugger::Error::UnexpectedRustTypeInDotNet.into()
+                );
+            }
+            RuntimeType::Function(_) => {
+                return Err(
+                    dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
+                        .into(),
                 );
             }
         };
@@ -1019,6 +1027,13 @@ impl ObjectTreeNode {
                     RuntimeType::Rust(_) => {
                         return Err(
                             dotnet_debugger::Error::UnexpectedRustTypeInDotNet
+                                .into(),
+                        );
+                    }
+
+                    RuntimeType::Function(_) => {
+                        return Err(
+                            dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
                                 .into(),
                         );
                     }

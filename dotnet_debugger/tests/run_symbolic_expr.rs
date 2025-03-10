@@ -3,7 +3,9 @@ use dotnet_debugger::SymbolicGraph;
 #[test]
 fn eval_integer_literal() {
     let mut graph = SymbolicGraph::new();
-    graph.mark_output(42);
+    let func = graph.function_def(vec![], vec![42.into()]);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
 
     let vm = graph.compile(None).unwrap();
     let results = vm.local_eval().unwrap();
@@ -16,7 +18,9 @@ fn eval_integer_literal() {
 fn eval_integer_addition() {
     let mut graph = SymbolicGraph::new();
     let sum = graph.add(5, 7);
-    graph.mark_output(sum);
+    let func = graph.function_def(vec![], vec![sum]);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
 
     let vm = graph.compile(None).unwrap();
     let results = vm.local_eval().unwrap();
@@ -29,7 +33,9 @@ fn eval_integer_addition() {
 fn eval_integer_multiplication() {
     let mut graph = SymbolicGraph::new();
     let prod = graph.mul(5, 7);
-    graph.mark_output(prod);
+    let func = graph.function_def(vec![], vec![prod]);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
 
     let vm = graph.compile(None).unwrap();
     let results = vm.local_eval().unwrap();
@@ -44,7 +50,9 @@ fn eval_nested_integer_expression() {
     let lhs = graph.add(2, 3);
     let rhs = graph.add(5, 7);
     let prod = graph.mul(lhs, rhs);
-    graph.mark_output(prod);
+    let func = graph.function_def(vec![], vec![prod]);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
 
     let vm = graph.compile(None).unwrap();
     let results = vm.local_eval().unwrap();

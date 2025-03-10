@@ -1,10 +1,11 @@
 use crate::{
-    game_action::InputState, Error, FishingUI, GameAction, PathfindingUI,
-    PlayerStats, RunningLog, TuiDrawRate, X11Handler,
+    game_action::InputState, watch_point_definition::WatchPoint, Error,
+    FishingUI, GameAction, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
+    WatchPointDefinition, X11Handler,
 };
 
 use crossterm::event::Event;
-use dotnet_debugger::{CachedReader, SymbolicGraph, VirtualMachine};
+use dotnet_debugger::CachedReader;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -27,7 +28,7 @@ pub struct StardewBot {
 
     /// Collected values that should be read out from the remote
     /// process at the start of each frame.
-    per_frame_reader: VirtualMachine,
+    watch_point: WatchPoint,
 
     /// Previous frame's per-widget timers
     widget_timing_stats: Vec<WidgetTimingStatistics>,
@@ -102,15 +103,13 @@ pub(crate) struct WidgetTimingStatistics {
 impl TuiBuffers {
     fn new(
         reader: CachedReader<'_>,
-        per_frame_reader: &mut SymbolicGraph,
+        watch_point_spec: &mut WatchPointDefinition,
     ) -> Result<Self, Error> {
         Ok(Self {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
-            fishing: FishingUI::new(per_frame_reader)?,
-            player_stats: PlayerStats::new(per_frame_reader)?,
-            // pathfinding: PathfindingUI::new(reader)?,
-            // pathfinding: None,
+            fishing: FishingUI::new(watch_point_spec)?,
+            player_stats: PlayerStats::new(watch_point_spec)?,
             pathfinding: Some(PathfindingUI::new(reader)?),
         })
     }
@@ -139,14 +138,14 @@ impl StardewBot {
         let stardew_window =
             x11_handler.find_window_blocking("Stardew Valley")?;
 
-        let mut expressions_to_read = SymbolicGraph::default();
+        let mut watch_point_spec = WatchPointDefinition::default();
 
         let mut buffers = TuiBuffers::new(
             tui_globals.cached_reader(),
-            &mut expressions_to_read,
+            &mut watch_point_spec,
         )?;
-        let per_frame_reader =
-            expressions_to_read.compile(tui_globals.cached_reader())?;
+        let watch_point =
+            watch_point_spec.finalize(tui_globals.cached_reader())?;
 
         buffers
             .running_log
@@ -171,7 +170,7 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
-            per_frame_reader,
+            watch_point,
             widget_timing_stats: Vec::new(),
             input_state: InputState::default(),
             x11_handler,
@@ -280,10 +279,7 @@ impl StardewBot {
     }
 
     pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
-        match self
-            .per_frame_reader
-            .evaluate(self.tui_globals.cached_reader())
-        {
+        match self.watch_point.evaluate(self.tui_globals.cached_reader()) {
             Ok(per_frame_values) => {
                 self.tui_globals.insert(per_frame_values);
             }

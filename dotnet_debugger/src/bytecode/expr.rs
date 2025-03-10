@@ -22,11 +22,8 @@ use super::{graph_rewrite::Analysis, GraphRewrite, TypeInference};
 #[derive(Default, Clone)]
 pub struct SymbolicGraph {
     ops: Vec<Expr>,
-    num_outputs: usize,
+    extern_funcs: Vec<OpIndex>,
 }
-
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
-pub struct ValueToken(pub(crate) usize);
 
 #[derive(Clone)]
 pub struct Expr {
@@ -137,13 +134,6 @@ pub enum ExprKind {
         ptr: SymbolicValue,
         prim_type: RuntimePrimType,
     },
-
-    /// Marks a value to be returned from a function call, or a VM
-    /// evaluation.
-    Output {
-        value: SymbolicValue,
-        slot: StackIndex,
-    },
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
@@ -240,12 +230,6 @@ pub struct GraphComparison<'a> {
     rhs: &'a SymbolicGraph,
     order_dependent: bool,
     compare_names: bool,
-}
-
-impl ValueToken {
-    pub fn forge_new_token_which_may_be_invalid(index: usize) -> Self {
-        Self(index)
-    }
 }
 
 impl SymbolicType {
@@ -401,38 +385,16 @@ impl StaticField {
     }
 }
 
-pub trait Printable {
-    fn top_level_value(self, graph: &SymbolicGraph) -> SymbolicValue;
-}
-impl Printable for ValueToken {
-    fn top_level_value(self, graph: &SymbolicGraph) -> SymbolicValue {
-        graph
-            .ops
-            .iter()
-            .find_map(|op| op.as_output_value())
-            .expect("Attempted use of invalid ValueToken {self}")
-    }
-}
-impl Printable for SymbolicValue {
-    fn top_level_value(self, _: &SymbolicGraph) -> SymbolicValue {
-        self
-    }
-}
-
 impl SymbolicGraph {
     pub fn new() -> Self {
         Self {
             ops: Vec::new(),
-            num_outputs: 0,
+            extern_funcs: Vec::new(),
         }
     }
 
     pub fn num_operations(&self) -> usize {
         self.ops.len()
-    }
-
-    pub fn num_outputs(&self) -> usize {
-        self.num_outputs
     }
 
     pub fn parse(&mut self, text: &str) -> Result<SymbolicValue, Error> {
@@ -479,18 +441,27 @@ impl SymbolicGraph {
         Ok(())
     }
 
-    pub fn mark_output(
+    pub fn mark_extern_func(
         &mut self,
         value: impl Into<SymbolicValue>,
-    ) -> ValueToken {
-        let value = value.into();
-        let slot = self.num_outputs;
-        self.num_outputs += 1;
-        self.push(ExprKind::Output {
-            value,
-            slot: StackIndex(slot),
-        });
-        ValueToken(slot)
+    ) -> Result<(), Error> {
+        let index = value
+            .into()
+            .as_op_index()
+            .ok_or(Error::AttemptedToMarkNonFunctionAsExternFunc)?;
+
+        let node = &self[index];
+
+        if !matches!(node.kind, ExprKind::Function { .. }) {
+            return Err(Error::AttemptedToMarkNonFunctionAsExternFunc);
+        }
+
+        if node.name.is_none() {
+            return Err(Error::ExternalFunctionMustBeNamed);
+        }
+
+        self.extern_funcs.push(index);
+        Ok(())
     }
 
     const DEFAULT_INDENT_WIDTH: usize = 4;
@@ -505,8 +476,7 @@ impl SymbolicGraph {
         }
     }
 
-    pub fn print<'a>(&'a self, value: impl Printable) -> GraphPrinter<'a> {
-        let value = value.top_level_value(self);
+    pub fn print<'a>(&'a self, value: SymbolicValue) -> GraphPrinter<'a> {
         GraphPrinter {
             graph: self,
             root_subgraph_node: Some(value),
@@ -746,11 +716,28 @@ impl SymbolicGraph {
         self.rewrite(rewriter)
     }
 
+    fn remap_extern_funcs(
+        &self,
+        lookup: &HashMap<OpIndex, SymbolicValue>,
+    ) -> Result<Vec<OpIndex>, Error> {
+        self.extern_funcs
+            .iter()
+            .map(|old_index| {
+                let new_value = lookup
+                    .get(old_index)
+                    .expect("All operations have been visited");
+                let new_index = new_value
+                    .as_op_index()
+                    .ok_or(Error::AttemptedToMarkNonFunctionAsExternFunc)?;
+                Ok(new_index)
+            })
+            .collect()
+    }
+
     pub fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
-        builder.num_outputs = self.num_outputs;
 
         for (old_index, op) in self.iter_ops() {
             let opt_remapped = op.kind.try_remap(&prev_index_lookup);
@@ -768,6 +755,8 @@ impl SymbolicGraph {
                 });
             prev_index_lookup.insert(old_index, value);
         }
+
+        builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
 
         Ok(builder)
     }
@@ -804,15 +793,12 @@ impl SymbolicGraph {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
-        builder.num_outputs = self.num_outputs;
 
-        let reachable = self
-            .reachable(self.ops.iter().filter_map(|op| op.as_output_value()));
+        let reachable =
+            self.reachable(self.extern_funcs.iter().cloned().map(Into::into));
 
         for (prev_index, op) in self.iter_ops() {
-            if reachable[prev_index.0]
-                || matches!(op.as_ref(), ExprKind::Output { .. })
-            {
+            if reachable[prev_index.0] {
                 let kind = op
                     .kind
                     .try_remap(&prev_index_lookup)
@@ -822,12 +808,13 @@ impl SymbolicGraph {
             }
         }
 
+        builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
+
         Ok(builder)
     }
 
     pub fn eliminate_common_subexpresssions(self) -> Result<Self, Error> {
         let mut builder = Self::new();
-        builder.num_outputs = self.num_outputs;
 
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
@@ -850,6 +837,8 @@ impl SymbolicGraph {
             prev_index_lookup.insert(prev_index, new_index);
         }
 
+        builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
+
         Ok(builder)
     }
 
@@ -859,7 +848,54 @@ impl SymbolicGraph {
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
         let mut instructions = Vec::new();
         let mut currently_stored: HashMap<OpIndex, VMArg> = HashMap::new();
-        let mut next_free_index = self.num_outputs;
+
+        assert!(!self.extern_funcs.is_empty());
+
+        if self.extern_funcs.len() > 1 {
+            todo!("Handle VMs with multiple functions");
+        }
+
+        let main_func_index = self.extern_funcs[0];
+        let main_func = &self[main_func_index];
+
+        let ExprKind::Function { params, outputs } = &main_func.kind else {
+            panic!(
+                "Internal error, \
+                 `extern_funcs` should only point to functions."
+            )
+        };
+        if !params.is_empty() {
+            todo!("Handle extern functions with parameters");
+        }
+
+        let mut next_free_index = outputs.len();
+
+        let output_lookup: HashMap<OpIndex, StackIndex> = {
+            let mut output_lookup = HashMap::new();
+            for (i, output) in outputs.iter().cloned().enumerate() {
+                let stack_index = StackIndex(i);
+                match output {
+                    SymbolicValue::Result(op_index) => {
+                        output_lookup.insert(op_index, stack_index);
+                    }
+                    SymbolicValue::Int(value) => {
+                        let value = RuntimePrimValue::NativeUInt(value).into();
+                        instructions.push(Instruction::Copy {
+                            value,
+                            output: stack_index,
+                        });
+                    }
+                    SymbolicValue::Ptr(ptr) => {
+                        let value = RuntimePrimValue::Ptr(ptr).into();
+                        instructions.push(Instruction::Copy {
+                            value,
+                            output: stack_index,
+                        });
+                    }
+                }
+            }
+            output_lookup
+        };
 
         macro_rules! value_to_arg {
             ($arg:expr) => {
@@ -882,66 +918,72 @@ impl SymbolicGraph {
         }
 
         for (op_index, op) in self.iter_ops() {
-            let output: StackIndex = match op.as_ref() {
-                ExprKind::Output { slot, .. } => *slot,
-                _ => {
+            let op_output: StackIndex =
+                output_lookup.get(&op_index).cloned().unwrap_or_else(|| {
                     let index = next_free_index;
                     next_free_index += 1;
                     StackIndex(index)
-                }
-            };
+                });
 
             match op.as_ref() {
-                ExprKind::Function { .. } => todo!(),
+                ExprKind::Function { .. } => {
+                    assert!(op_index == main_func_index);
+                }
                 ExprKind::FunctionArg(_) => todo!(),
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
-                    instructions.push(Instruction::Add { lhs, rhs, output });
-                    currently_stored.insert(op_index, output.into());
+                    instructions.push(Instruction::Add {
+                        lhs,
+                        rhs,
+                        output: op_output,
+                    });
+                    currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::Mul { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
-                    instructions.push(Instruction::Mul { lhs, rhs, output });
-                    currently_stored.insert(op_index, output.into());
+                    instructions.push(Instruction::Mul {
+                        lhs,
+                        rhs,
+                        output: op_output,
+                    });
+                    currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PrimCast { value, prim_type } => {
                     let value = value_to_arg!(value);
                     instructions.push(Instruction::PrimCast {
                         value,
                         prim_type: *prim_type,
-                        output,
+                        output: op_output,
                     });
-                    currently_stored.insert(op_index, output.into());
+                    currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     let obj = value_to_arg!(obj);
                     instructions.push(Instruction::Downcast {
                         obj,
                         subtype: *ty,
-                        output,
+                        output: op_output,
                     });
-                    currently_stored.insert(op_index, output.into());
+                    currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr = value_to_arg!(ptr);
                     instructions.push(Instruction::Read {
                         ptr,
                         prim_type: *prim_type,
-                        output,
+                        output: op_output,
                     });
-                    currently_stored.insert(op_index, output.into());
+                    currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PointerCast { ptr, .. } => {
                     let ptr = value_to_arg!(ptr);
-                    instructions.push(Instruction::Copy { value: ptr, output });
+                    instructions.push(Instruction::Copy {
+                        value: ptr,
+                        output: op_output,
+                    });
                     currently_stored.insert(op_index, ptr);
-                }
-                ExprKind::Output { value, .. } => {
-                    let value = value_to_arg!(value);
-                    instructions.push(Instruction::Copy { value, output });
-                    currently_stored.insert(op_index, value);
                 }
 
                 symbolic @ (ExprKind::StaticField(_)
@@ -957,7 +999,7 @@ impl SymbolicGraph {
             }
         }
 
-        Ok(VirtualMachine::new(instructions, self.num_outputs))
+        Ok(VirtualMachine::new(instructions, outputs.len()))
     }
 
     pub fn compile<'a>(
@@ -1032,10 +1074,6 @@ impl Expr {
         callback: impl FnMut(SymbolicValue),
     ) {
         self.kind.visit_input_values(callback)
-    }
-
-    pub(crate) fn as_output_value(&self) -> Option<SymbolicValue> {
-        self.kind.as_output_value()
     }
 }
 
@@ -1153,13 +1191,6 @@ impl ExprKind {
                     prim_type: prim_type.clone(),
                 })
             }
-
-            ExprKind::Output { slot, value } => {
-                remap(value).map(|value| ExprKind::Output {
-                    value,
-                    slot: slot.clone(),
-                })
-            }
         }
     }
 
@@ -1200,16 +1231,6 @@ impl ExprKind {
             ExprKind::ReadValue { ptr, .. } => {
                 callback(*ptr);
             }
-            ExprKind::Output { value, .. } => {
-                callback(*value);
-            }
-        }
-    }
-
-    pub(crate) fn as_output_value(&self) -> Option<SymbolicValue> {
-        match self {
-            ExprKind::Output { value, .. } => Some(*value),
-            _ => None,
         }
     }
 }
@@ -1241,17 +1262,22 @@ impl<'a> GraphComparison<'a> {
         let lhs = self.lhs;
         let rhs = self.rhs;
         lhs.ops.len() == rhs.ops.len()
-            && lhs.num_outputs() == rhs.num_outputs()
+            && lhs.extern_funcs.len() == rhs.extern_funcs.len()
             && lhs.ops.iter().zip(rhs.ops.iter()).all(|(a, b)| {
                 a.kind == b.kind && (!self.compare_names || a.name == b.name)
             })
+            && lhs
+                .extern_funcs
+                .iter()
+                .zip(rhs.extern_funcs.iter())
+                .all(|(a, b)| a == b)
     }
 
     fn order_independent_comparison(&self) -> bool {
         let lhs = self.lhs;
         let rhs = self.rhs;
 
-        if lhs.num_outputs() != rhs.num_outputs() {
+        if lhs.extern_funcs.len() != rhs.extern_funcs.len() {
             return false;
         }
 
@@ -1290,28 +1316,16 @@ impl<'a> GraphComparison<'a> {
             }};
         }
 
+        for (lhs_extern_func, rhs_extern_func) in lhs
+            .extern_funcs
+            .iter()
+            .cloned()
+            .zip(rhs.extern_funcs.iter().cloned())
         {
-            let slot_lookup: HashMap<StackIndex, SymbolicValue> = lhs
-                .ops
-                .iter()
-                .filter_map(|op| match op.as_ref() {
-                    ExprKind::Output { value, slot } => Some((*slot, *value)),
-                    _ => None,
-                })
-                .collect();
-            for rhs_op in rhs.ops.iter() {
-                if let ExprKind::Output {
-                    value: rhs_output,
-                    slot,
-                } = rhs_op.as_ref()
-                {
-                    let Some(lhs_output) = slot_lookup.get(slot) else {
-                        return false;
-                    };
-                    if !equivalent_value!(lhs_output, rhs_output) {
-                        return false;
-                    }
-                }
+            let lhs_extern_func: SymbolicValue = lhs_extern_func.into();
+            let rhs_extern_func: SymbolicValue = rhs_extern_func.into();
+            if !equivalent_value!(&lhs_extern_func, &rhs_extern_func) {
+                return false;
             }
         }
 
@@ -1502,19 +1516,6 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
-                ExprKind::Output {
-                    value: lhs_value,
-                    slot: lhs_slot,
-                } => match rhs_kind {
-                    ExprKind::Output {
-                        value: rhs_value,
-                        slot: rhs_slot,
-                    } => {
-                        equivalent_value!(lhs_value, rhs_value)
-                            && lhs_slot == rhs_slot
-                    }
-                    _ => false,
-                },
             };
 
             if !is_match {
@@ -1604,9 +1605,6 @@ impl Display for ExprKind {
             }
             ExprKind::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
-            }
-            ExprKind::Output { value, slot } => {
-                write!(f, "output_{slot} = {value};")
             }
         }
     }
@@ -1787,7 +1785,10 @@ impl<'a> GraphPrinter<'a> {
         #[derive(Debug)]
         enum PrintItemKind<'a> {
             Op(OpIndex),
-            FunctionOutput(&'a [SymbolicValue]),
+            FunctionOutput {
+                outputs: &'a [SymbolicValue],
+                is_extern_func: bool,
+            },
         }
 
         // A stack of operations to print.  If an operation is not yet
@@ -1838,12 +1839,18 @@ impl<'a> GraphPrinter<'a> {
                     .insert_zero_width_space_at_breakpoint,
             };
 
+        let extern_func_lookup: HashSet<OpIndex> =
+            self.graph.extern_funcs.iter().cloned().collect();
+
         while let Some(print_item) = to_print.pop() {
             let indent = print_item.indent;
             let index = match print_item.kind {
                 PrintItemKind::Op(index) => index,
-                PrintItemKind::FunctionOutput(tuple) => {
-                    match tuple.len() {
+                PrintItemKind::FunctionOutput {
+                    outputs,
+                    is_extern_func,
+                } => {
+                    match outputs.len() {
                         0 => {}
                         1 => {
                             if delayed_newline
@@ -1854,7 +1861,7 @@ impl<'a> GraphPrinter<'a> {
                                 write!(fmt, " ")?;
                             }
                             let expr_printer =
-                                make_expr_printer(tuple[0], false);
+                                make_expr_printer(outputs[0], false);
                             write!(fmt, "{expr_printer}")?;
                         }
                         _ => {
@@ -1865,7 +1872,7 @@ impl<'a> GraphPrinter<'a> {
                             }
                             write!(fmt, "(")?;
                             let item_indent = indent + self.indent_width;
-                            tuple
+                            outputs
                                 .iter()
                                 .cloned()
                                 .map(|value| make_expr_printer(value, false))
@@ -1888,7 +1895,10 @@ impl<'a> GraphPrinter<'a> {
                         write!(fmt, " ")?;
                     }
 
-                    write!(fmt, "}};")?;
+                    write!(fmt, "}}")?;
+                    if !is_extern_func {
+                        write!(fmt, ";")?;
+                    }
                     continue;
                 }
             };
@@ -1957,8 +1967,15 @@ impl<'a> GraphPrinter<'a> {
                     if delayed_newline >= DelayedNewline::BeforeExpression {
                         write!(fmt, "\n{indent}")?;
                     }
-                    write!(fmt, "let {index_printer} = ")?;
-                    write!(fmt, "fn(")?;
+
+                    let is_extern_func = extern_func_lookup.contains(&index);
+
+                    if is_extern_func {
+                        write!(fmt, "pub fn {index_printer}(")?;
+                    } else {
+                        write!(fmt, "let {index_printer} = ")?;
+                        write!(fmt, "fn(")?;
+                    }
                     for (i, param) in params.iter().enumerate() {
                         if i > 0 {
                             write!(fmt, ", ")?;
@@ -1970,7 +1987,10 @@ impl<'a> GraphPrinter<'a> {
                     write!(fmt, ") {{")?;
 
                     to_print.push(PrintItem {
-                        kind: PrintItemKind::FunctionOutput(outputs),
+                        kind: PrintItemKind::FunctionOutput {
+                            outputs,
+                            is_extern_func,
+                        },
                         indent: indent + self.indent_width,
                     });
 
@@ -1995,13 +2015,6 @@ impl<'a> GraphPrinter<'a> {
                         }
                         to_print.push(delayed);
                     }
-                    delayed_newline = DelayedNewline::BeforeAssignment;
-                }
-                ExprKind::Output { .. } => {
-                    if delayed_newline >= DelayedNewline::BeforeAssignment {
-                        write!(fmt, "\n{indent}")?;
-                    }
-                    write!(fmt, "{expr_printer}")?;
                     delayed_newline = DelayedNewline::BeforeAssignment;
                 }
                 _ => {
@@ -2195,10 +2208,6 @@ impl<'a> Display for ExprPrinter<'a> {
             ExprKind::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
-            }
-            ExprKind::Output { value, slot } => {
-                let value = self.with_value(*value);
-                write!(f, "output_{slot} = {value};")
             }
         }
     }

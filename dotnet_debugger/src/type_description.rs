@@ -3,8 +3,9 @@ use std::borrow::Borrow;
 use memory_reader::{MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    runtime_type::DotNetType, unpack_fields, CachedReader, CorElementType,
-    Error, MethodTable, ReadTypedPointer, RuntimeType, TypedPointer,
+    runtime_type::{DotNetType, FunctionType},
+    unpack_fields, CachedReader, CorElementType, Error, MethodTable,
+    ReadTypedPointer, RuntimeType, TypedPointer,
 };
 
 pub struct TypeDescription {
@@ -279,6 +280,27 @@ impl<'a> TypeHandleRef<'a> {
                 write!(fmt, ">")?;
             }
             RuntimeType::Rust(rust_type) => write!(fmt, "{rust_type}")?,
+            RuntimeType::Function(FunctionType { params, outputs }) => {
+                let write_tuple = |fmt: &mut std::fmt::Formatter,
+                                   tuple: &[RuntimeType]|
+                 -> Result<(), Error> {
+                    write!(fmt, "(")?;
+                    tuple.iter().enumerate().try_for_each(|(i, element)| {
+                        if i > 0 {
+                            write!(fmt, ", ")?;
+                        }
+                        Self::print_runtime_type(element, fmt, reader)
+                    })?;
+                    write!(fmt, ")")?;
+                    Ok(())
+                };
+
+                write!(fmt, "Fn")?;
+                write_tuple(fmt, params)?;
+
+                write!(fmt, " -> ")?;
+                write_tuple(fmt, outputs)?;
+            }
         }
         Ok(())
     }

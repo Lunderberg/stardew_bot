@@ -1,6 +1,5 @@
 use std::ops::Range;
 
-use dotnet_debugger::{SymbolicGraph, VMResults, ValueToken};
 use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
@@ -14,7 +13,10 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{Error, GameAction};
+use crate::{
+    watch_point_definition::{ValueToken, WatchPointResults},
+    Error, GameAction, WatchPointDefinition,
+};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -138,10 +140,12 @@ struct FishingState {
 }
 
 impl FishingUI {
-    pub fn new(per_frame_reader: &mut SymbolicGraph) -> Result<Self, Error> {
+    pub fn new(
+        watch_point_spec: &mut WatchPointDefinition,
+    ) -> Result<Self, Error> {
         let mut register = |value: &str| -> Result<ValueToken, Error> {
-            let expr = per_frame_reader.parse(value)?;
-            let token = per_frame_reader.mark_output(expr);
+            let expr = watch_point_spec.parse(value)?;
+            let token = watch_point_spec.mark_output(expr);
             Ok(token)
         };
 
@@ -235,7 +239,7 @@ impl FishingUI {
 
     fn current_state(
         &self,
-        values: &VMResults,
+        values: &WatchPointResults,
     ) -> Result<Option<FishingState>, dotnet_debugger::Error> {
         let minigame_in_progress: bool = values[self.minigame_in_progress]
             .as_ref()
@@ -459,7 +463,7 @@ impl WidgetWindow<Error> for FishingUI {
         side_effects: &'a mut tui_utils::WidgetSideEffects,
     ) -> Result<(), Error> {
         let values = globals
-            .get::<VMResults>()
+            .get::<WatchPointResults>()
             .expect("Generated for each frame");
 
         let get_bool = |token: ValueToken| -> Result<bool, Error> {
@@ -531,7 +535,7 @@ impl WidgetWindow<Error> for FishingUI {
         buf: &mut ratatui::prelude::Buffer,
     ) {
         let values = globals
-            .get::<VMResults>()
+            .get::<WatchPointResults>()
             .expect("Generated for each frame");
 
         let get_bool = |token: ValueToken| -> bool {

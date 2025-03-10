@@ -1,8 +1,6 @@
 use itertools::Itertools;
 
-use dotnet_debugger::{
-    RuntimePrimValue, SymbolicGraph, ValueToken, VirtualMachine,
-};
+use dotnet_debugger::{RuntimePrimValue, SymbolicGraph, VirtualMachine};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},
@@ -111,13 +109,11 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
             .live_variables
             .iter()
             .map(|live_var| {
-                let output_token =
-                    ValueToken::forge_new_token_which_may_be_invalid(0);
                 format!(
                     "{}",
                     live_var
                         .symbolic_graph
-                        .print(output_token)
+                        .printer()
                         .insert_zero_width_space_at_breakpoint()
                 )
             })

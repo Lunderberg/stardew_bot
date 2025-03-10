@@ -156,18 +156,19 @@ impl PathfindingUI {
 
         let res = {
             let mut graph = SymbolicGraph::new();
-            [
+            let outputs = [
                 format!("{location_list}._size").as_str(),
                 current_location,
                 player_x,
                 player_y,
             ]
             .into_iter()
-            .try_for_each(|expr| -> Result<_, Error> {
-                let expr = graph.parse(expr)?;
-                graph.mark_output(expr);
-                Ok(())
-            })?;
+            .map(|expr| graph.parse(expr))
+            .collect::<Result<Vec<_>, _>>()?;
+            let main_func = graph.function_def(vec![], outputs);
+            graph.name(main_func, "main")?;
+            graph.mark_extern_func(main_func)?;
+
             let vm = graph.compile(reader)?;
             let res = vm.evaluate(reader)?;
 
@@ -204,70 +205,75 @@ impl PathfindingUI {
 
             let location_list =
                 graph.parse(&format!("{location_list}._items"))?;
-            (0..num_locations).for_each(|i| {
-                let location = graph.access_index(location_list, i);
+            let outputs: Vec<_> = (0..num_locations)
+                .flat_map(|i| {
+                    let location = graph.access_index(location_list, i);
 
-                let name = graph.access_field(location, "name.value");
+                    let name = graph.access_field(location, "name.value");
 
-                let (width, height) = {
-                    let field =
-                        graph.access_field(location, "map.m_layers._items");
-                    let field = graph.access_index(field, 0);
-                    let field = graph.access_field(field, "m_layerSize");
+                    let (width, height) = {
+                        let field =
+                            graph.access_field(location, "map.m_layers._items");
+                        let field = graph.access_index(field, 0);
+                        let field = graph.access_field(field, "m_layerSize");
 
-                    let width = graph.access_field(field, "Width");
-                    let height = graph.access_field(field, "Height");
+                        let width = graph.access_field(field, "Width");
+                        let height = graph.access_field(field, "Height");
 
-                    (width, height)
-                };
+                        (width, height)
+                    };
 
-                let num_warps =
-                    graph.access_field(location, "warps.count.value");
+                    let num_warps =
+                        graph.access_field(location, "warps.count.value");
 
-                let num_resource_clumps =
-                    graph.access_field(location, "resourceClumps.list._size");
+                    let num_resource_clumps = graph
+                        .access_field(location, "resourceClumps.list._size");
 
-                let num_features = {
-                    let entries = graph.access_field(
+                    let num_features = {
+                        let entries = graph.access_field(
+                            location,
+                            "terrainFeatures.dict._entries",
+                        );
+                        graph.num_array_elements(entries)
+                    };
+
+                    let num_large_features = graph.access_field(
                         location,
-                        "terrainFeatures.dict._entries",
+                        "largeTerrainFeatures.list._size",
                     );
-                    graph.num_array_elements(entries)
-                };
 
-                let num_large_features = graph
-                    .access_field(location, "largeTerrainFeatures.list._size");
+                    let num_objects = {
+                        let array = graph.access_field(
+                            location,
+                            "objects.compositeDict._entries",
+                        );
+                        graph.num_array_elements(array)
+                    };
 
-                let num_objects = {
-                    let array = graph.access_field(
-                        location,
-                        "objects.compositeDict._entries",
-                    );
-                    graph.num_array_elements(array)
-                };
+                    let water_tiles = {
+                        let field = graph.access_field(location, "waterTiles");
+                        let field =
+                            graph.downcast(field, "StardewValley.WaterTiles");
+                        graph.access_field(field, "waterTiles")
+                    };
 
-                let water_tiles = {
-                    let field = graph.access_field(location, "waterTiles");
-                    let field =
-                        graph.downcast(field, "StardewValley.WaterTiles");
-                    graph.access_field(field, "waterTiles")
-                };
+                    [
+                        name,
+                        width,
+                        height,
+                        num_warps,
+                        num_resource_clumps,
+                        num_features,
+                        num_large_features,
+                        num_objects,
+                        water_tiles,
+                    ]
+                })
+                .collect();
 
-                let fields: [_; FIELDS_PER_LOCATION] = [
-                    name,
-                    width,
-                    height,
-                    num_warps,
-                    num_resource_clumps,
-                    num_features,
-                    num_large_features,
-                    num_objects,
-                    water_tiles,
-                ];
-                fields.into_iter().for_each(|expr| {
-                    graph.mark_output(expr);
-                });
-            });
+            let main_func = graph.function_def(vec![], outputs);
+            graph.name(main_func, "main")?;
+            graph.mark_extern_func(main_func)?;
 
             let vm = graph.compile(reader)?;
             let values = vm.evaluate(reader)?;
@@ -324,149 +330,194 @@ impl PathfindingUI {
             let location_list =
                 graph.parse(&format!("{location_list}._items"))?;
 
-            static_location_fields.iter().for_each(|loc| {
-                let location = graph.access_index(location_list, loc.index);
+            let outputs = static_location_fields
+                .iter()
+                .flat_map(|loc| {
+                    let location = graph.access_index(location_list, loc.index);
 
-                let warps = graph.access_field(
-                    location,
-                    "warps.array.value.elements._items",
-                );
-
-                for i_warp in 0..loc.num_warps {
-                    let warp = {
-                        let element = graph.access_index(warps, i_warp);
-                        graph.access_field(element, "value")
-                    };
-
-                    ["x", "y", "targetX", "targetY", "targetName"]
-                        .into_iter()
-                        .for_each(|name| {
-                            let field = graph.access_field(warp, name);
-                            let field = graph.access_field(field, "value");
-                            graph.mark_output(field);
-                        });
-                }
-
-                let resource_clumps =
-                    graph.access_field(location, "resourceClumps.list._items");
-
-                for i_clump in 0..loc.num_resource_clumps {
-                    let clump = graph.access_index(resource_clumps, i_clump);
-
-                    let right = graph.access_field(clump, "netTile.value.X");
-                    let down = graph.access_field(clump, "netTile.value.Y");
-                    let width = graph.access_field(clump, "width.value");
-                    let height = graph.access_field(clump, "height.value");
-
-                    let kind_index =
-                        graph.access_field(clump, "parentSheetIndex.value");
-
-                    [right, down, width, height, kind_index]
-                        .into_iter()
-                        .for_each(|expr| {
-                            graph.mark_output(expr);
-                        });
-                }
-
-                let features = graph
-                    .access_field(location, "terrainFeatures.dict._entries");
-                for i in 0..loc.num_features {
-                    let feature = graph.access_index(features, i);
-
-                    let right = graph.access_field(feature, "key.X");
-                    let down = graph.access_field(feature, "key.Y");
-
-                    let obj = graph.access_field(feature, "value.value");
-
-                    let grass_health = {
-                        let grass = graph.downcast(
-                            obj,
-                            "StardewValley.TerrainFeatures.Grass",
-                        );
-                        graph.access_field(grass, "grassBladeHealth")
-                    };
-
-                    let tree_fields = {
-                        let tree = graph.downcast(
-                            obj,
-                            "StardewValley.TerrainFeatures.Tree",
-                        );
-                        // treeType looks like an integer, but has
-                        // been converted to a string.
-                        let tree_type =
-                            graph.access_field(tree, "treeType.value");
-                        let growth_stage =
-                            graph.access_field(tree, "growthStage.value");
-                        let has_seed =
-                            graph.access_field(tree, "hasSeed.value");
-                        let is_stump = graph.access_field(tree, "stump.value");
-                        [tree_type, growth_stage, has_seed, is_stump]
-                    };
-
-                    [right, down, grass_health]
-                        .into_iter()
-                        .chain(tree_fields)
-                        .for_each(|expr| {
-                            graph.mark_output(expr);
-                        });
-                }
-
-                let large_features = graph
-                    .access_field(location, "largeTerrainFeatures.list._items");
-                for i in 0..loc.num_large_features {
-                    let feature = {
-                        let field = graph.access_index(large_features, i);
-                        graph.downcast(
-                            field,
-                            "StardewValley.TerrainFeatures.Bush",
-                        )
-                    };
-                    let size = graph.access_field(feature, "size.value");
-                    let right =
-                        graph.access_field(feature, "netTilePosition.value.X");
-                    let down =
-                        graph.access_field(feature, "netTilePosition.value.Y");
-                    [size, right, down].into_iter().for_each(|expr| {
-                        graph.mark_output(expr);
-                    });
-                }
-
-                let objects = graph
-                    .access_field(location, "objects.compositeDict._entries");
-                for i in 0..loc.num_objects {
-                    let object = graph.access_index(objects, i);
-
-                    let right = graph
-                        .access_field(object, "value.tileLocation.value.X");
-                    let down = graph
-                        .access_field(object, "value.tileLocation.value.Y");
-
-                    let category =
-                        graph.access_field(object, "value.category.value");
-                    let name =
-                        graph.access_field(object, "value.netName.value");
-
-                    [right, down, category, name].into_iter().for_each(
-                        |expr| {
-                            graph.mark_output(expr);
-                        },
+                    let warps = graph.access_field(
+                        location,
+                        "warps.array.value.elements._items",
                     );
-                }
 
-                let water_tiles =
-                    graph.access_field(location, "waterTiles.waterTiles");
-                if loc.has_water_tiles {
-                    (0..loc.shape.width)
+                    let warp_fields = (0..loc.num_warps)
+                        .flat_map(|i_warp| {
+                            let warp = {
+                                let element = graph.access_index(warps, i_warp);
+                                graph.access_field(element, "value")
+                            };
+
+                            ["x", "y", "targetX", "targetY", "targetName"]
+                                .into_iter()
+                                .map(|name| {
+                                    let field = graph.access_field(warp, name);
+                                    let field =
+                                        graph.access_field(field, "value");
+                                    field
+                                })
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    let resource_clumps = graph
+                        .access_field(location, "resourceClumps.list._items");
+
+                    let clump_fields = (0..loc.num_resource_clumps)
+                        .flat_map(|i_clump| {
+                            let clump =
+                                graph.access_index(resource_clumps, i_clump);
+
+                            let right =
+                                graph.access_field(clump, "netTile.value.X");
+                            let down =
+                                graph.access_field(clump, "netTile.value.Y");
+                            let width =
+                                graph.access_field(clump, "width.value");
+                            let height =
+                                graph.access_field(clump, "height.value");
+
+                            let kind_index = graph
+                                .access_field(clump, "parentSheetIndex.value");
+
+                            [right, down, width, height, kind_index]
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    let features = graph.access_field(
+                        location,
+                        "terrainFeatures.dict._entries",
+                    );
+                    let feature_fields = (0..loc.num_features)
+                        .flat_map(|i| {
+                            let feature = graph.access_index(features, i);
+
+                            let right = graph.access_field(feature, "key.X");
+                            let down = graph.access_field(feature, "key.Y");
+
+                            let obj =
+                                graph.access_field(feature, "value.value");
+
+                            let grass_health = {
+                                let grass = graph.downcast(
+                                    obj,
+                                    "StardewValley.TerrainFeatures.Grass",
+                                );
+                                graph.access_field(grass, "grassBladeHealth")
+                            };
+
+                            let tree_fields = {
+                                let tree = graph.downcast(
+                                    obj,
+                                    "StardewValley.TerrainFeatures.Tree",
+                                );
+                                // treeType looks like an integer, but has
+                                // been converted to a string.
+                                let tree_type =
+                                    graph.access_field(tree, "treeType.value");
+                                let growth_stage = graph
+                                    .access_field(tree, "growthStage.value");
+                                let has_seed =
+                                    graph.access_field(tree, "hasSeed.value");
+                                let is_stump =
+                                    graph.access_field(tree, "stump.value");
+                                [tree_type, growth_stage, has_seed, is_stump]
+                            };
+
+                            [right, down, grass_health]
+                                .into_iter()
+                                .chain(tree_fields)
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    let large_features = graph.access_field(
+                        location,
+                        "largeTerrainFeatures.list._items",
+                    );
+                    let large_feature_fields = (0..loc.num_large_features)
+                        .flat_map(|i| {
+                            let feature = {
+                                let field =
+                                    graph.access_index(large_features, i);
+                                graph.downcast(
+                                    field,
+                                    "StardewValley.TerrainFeatures.Bush",
+                                )
+                            };
+                            let size =
+                                graph.access_field(feature, "size.value");
+                            let right = graph.access_field(
+                                feature,
+                                "netTilePosition.value.X",
+                            );
+                            let down = graph.access_field(
+                                feature,
+                                "netTilePosition.value.Y",
+                            );
+                            [size, right, down]
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    let objects = graph.access_field(
+                        location,
+                        "objects.compositeDict._entries",
+                    );
+                    let object_fields = (0..loc.num_objects)
+                        .flat_map(|i| {
+                            let object = graph.access_index(objects, i);
+
+                            let right = graph.access_field(
+                                object,
+                                "value.tileLocation.value.X",
+                            );
+                            let down = graph.access_field(
+                                object,
+                                "value.tileLocation.value.Y",
+                            );
+
+                            let category = graph
+                                .access_field(object, "value.category.value");
+                            let name = graph
+                                .access_field(object, "value.netName.value");
+
+                            [right, down, category, name]
+                        })
+                        .collect::<Vec<_>>()
+                        .into_iter();
+
+                    let water_tiles =
+                        graph.access_field(location, "waterTiles.waterTiles");
+                    let water_tile_fields = (0..loc.shape.width)
                         .cartesian_product(0..loc.shape.height)
-                        .for_each(|(i, j)| {
+                        .filter(|_| loc.has_water_tiles)
+                        .map(|(i, j)| {
                             let element =
                                 graph.access_indices(water_tiles, vec![i, j]);
                             let element =
                                 graph.access_field(element, "isWater");
-                            graph.mark_output(element);
+                            element
                         });
-                }
-            });
+
+                    std::iter::empty()
+                        .chain(warp_fields)
+                        .chain(clump_fields)
+                        .chain(feature_fields)
+                        .chain(large_feature_fields)
+                        .chain(object_fields)
+                        .chain(water_tile_fields)
+                        .collect::<Vec<_>>()
+                        .into_iter()
+                })
+                .collect();
+
+            let main_func = graph.function_def(vec![], outputs);
+            graph.name(main_func, "main")?;
+            graph.mark_extern_func(main_func)?;
+
             let vm = graph.compile(reader)?;
             let values = vm.evaluate(reader)?;
             values.into_iter()

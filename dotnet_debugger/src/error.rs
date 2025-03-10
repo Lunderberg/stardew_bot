@@ -331,10 +331,16 @@ pub enum Error {
     AttemptedUseOfReservedName(String),
 
     #[error(
-        "A Rust type appeared in a context \
+        "A RustType appeared in a context \
          where only .NET types are expected."
     )]
     UnexpectedRustTypeInDotNet,
+
+    #[error(
+        "A FunctionType appeared in a context \
+         where only .NET types are expected."
+    )]
+    UnexpectedFunctionTypeInDotNet,
 
     #[error(
         "Attempted conversion of rust-native object \
@@ -353,6 +359,15 @@ pub enum Error {
          but cannot do so when running in local mode."
     )]
     AnalysisAttemptedToUseMissingRemoteProcess,
+
+    #[error(
+        "The mark_extern_func() function \
+         may only be called on a function definition"
+    )]
+    AttemptedToMarkNonFunctionAsExternFunc,
+
+    #[error("Functions marked as external must have an explicit name")]
+    ExternalFunctionMustBeNamed,
 }
 
 impl std::fmt::Debug for Error {

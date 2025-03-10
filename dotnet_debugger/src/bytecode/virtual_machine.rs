@@ -6,7 +6,7 @@ use thiserror::Error;
 
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, MethodTable,
-    RuntimePrimValue, RuntimeType, TypedPointer, ValueToken,
+    RuntimePrimValue, RuntimeType, TypedPointer,
 };
 
 use super::native_function::{NativeFunction, WrappedNativeFunction};
@@ -607,7 +607,8 @@ impl VirtualMachine {
 
         macro_rules! arg_to_prim {
             ($arg:expr, $operator:literal) => {{
-                let prim:Option<RuntimePrimValue> = match $arg {
+                let arg: &VMArg = $arg;
+                let prim:Option<RuntimePrimValue> = match arg {
                     VMArg::Const(value) => Ok(Some(*value)),
                     VMArg::SavedValue(index) => {
                         match &values[*index] {
@@ -1194,14 +1195,6 @@ impl std::ops::Index<std::ops::Range<StackIndex>> for VMResults {
 impl std::ops::IndexMut<Range<StackIndex>> for VMResults {
     fn index_mut(&mut self, index: Range<StackIndex>) -> &mut Self::Output {
         &mut self.0[index.start.0..index.end.0]
-    }
-}
-
-impl std::ops::Index<ValueToken> for VMResults {
-    type Output = Option<StackValue>;
-
-    fn index(&self, index: ValueToken) -> &Self::Output {
-        &self.0[index.0]
     }
 }
 
