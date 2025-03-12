@@ -204,3 +204,52 @@ fn parse_named_expressions_with_same_name() {
 //         },
 //     );
 // }
+
+#[test]
+fn parse_top_level_function() {
+    require_identical_graph("pub fn main() { 42 }", |graph| {
+        let func = graph.function_def(vec![], vec![42.into()]);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    });
+}
+
+#[test]
+fn parse_function_with_arg() {
+    require_identical_graph(
+        "let arr = class_name.static_field;
+         fn main(index: usize) { arr[index] }",
+        |graph| {
+            let arr = graph.static_field("class_name", "static_field");
+            graph.name(arr, "arr").unwrap();
+            let index = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(index, "index").unwrap();
+            let item = graph.access_index(arr, index);
+            let func = graph.function_def(vec![index], vec![item]);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_function_with_multiple_returns() {
+    require_identical_graph(
+        "let arr1 = class_name.static_field1;
+         let arr2 = class_name.static_field2;
+         fn main(index: usize) {
+               (arr1[index], arr2[index])
+        }",
+        |graph| {
+            let arr1 = graph.static_field("class_name", "static_field1");
+            graph.name(arr1, "arr1").unwrap();
+            let arr2 = graph.static_field("class_name", "static_field2");
+            graph.name(arr2, "arr2").unwrap();
+            let index = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(index, "index").unwrap();
+            let item1 = graph.access_index(arr1, index);
+            let item2 = graph.access_index(arr2, index);
+            let func = graph.function_def(vec![index], vec![item1, item2]);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}

@@ -218,3 +218,22 @@ fn comparison_may_be_order_and_name_dependent() {
         .compare_names(true)
         .apply());
 }
+
+#[test]
+fn comparison_depends_on_function_visibility() {
+    let lhs = {
+        let mut graph = SymbolicGraph::new();
+        let func = graph.function_def(vec![], vec![42.into()]);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+        graph
+    };
+    let rhs = {
+        let mut graph = SymbolicGraph::new();
+        let func = graph.function_def(vec![], vec![42.into()]);
+        graph.name(func, "main").unwrap();
+        graph
+    };
+
+    assert!(!lhs.graph_comparison(&rhs).apply());
+}

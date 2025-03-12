@@ -20,7 +20,7 @@ pub enum ParseError {
     UnexpectedChar { c: char, byte_index: usize },
 
     #[error(
-        "Expected {expected:?} at byte {byte_index},\
+        "Expected {expected:?} at byte {byte_index}, \
          but found {actual:?}"
     )]
     UnexpectedCharWithKnown {
@@ -90,24 +90,36 @@ pub enum Punctuation {
     Comma,
     LeftParen,
     RightParen,
+    Colon,
     DoubleColon,
     LeftAngleBracket,
     RightAngleBracket,
     LeftSquareBracket,
     RightSquareBracket,
+    LeftBrace,
+    RightBrace,
     Semicolon,
     SingleEquals,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     Let,
+    Public,
+    Function,
 }
 
 impl TokenKind {
     fn is_punct(&self, punct: Punctuation) -> bool {
         match self {
             Self::Punct(p) => *p == punct,
+            _ => false,
+        }
+    }
+
+    fn is_keyword(&self, keyword: Keyword) -> bool {
+        match self {
+            Self::Keyword(k) => *k == keyword,
             _ => false,
         }
     }
@@ -124,16 +136,22 @@ impl<'a> SymbolicParser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<SymbolicValue, Error> {
-        let expr = self.next_expr()?;
+        let expr = self.expect_expr()?;
         self.expect_end_of_string()?;
         Ok(expr)
     }
 
-    fn next_expr(&mut self) -> Result<SymbolicValue, Error> {
-        while let Some(keyword) = self.try_keyword()? {
+    fn expect_expr(&mut self) -> Result<SymbolicValue, Error> {
+        while let Some(keyword) = self.peek_keyword()? {
             match keyword {
                 Keyword::Let => self.expect_assignment()?,
-            }
+                Keyword::Function | Keyword::Public => {
+                    let opt_func = self.expect_function()?;
+                    if let Some(func) = opt_func {
+                        return Ok(func);
+                    }
+                }
+            };
         }
 
         if let Some(value) = self.try_int()? {
@@ -186,6 +204,19 @@ impl<'a> SymbolicParser<'a> {
         }
     }
 
+    fn peek_keyword(&mut self) -> Result<Option<Keyword>, Error> {
+        let opt_keyword = self
+            .tokens
+            .peek()?
+            .map(|token| match token.kind {
+                TokenKind::Keyword(keyword) => Some(keyword),
+                _ => None,
+            })
+            .flatten();
+
+        Ok(opt_keyword)
+    }
+
     fn try_keyword(&mut self) -> Result<Option<Keyword>, Error> {
         let opt_keyword = self
             .tokens
@@ -210,39 +241,195 @@ impl<'a> SymbolicParser<'a> {
         Ok(opt_index)
     }
 
-    fn expect_assignment(&mut self) -> Result<(), Error> {
-        let var_name = self.expect_ident("variable name")?.text;
-        self.expect_punct(
-            "'=' after varabile name in assignment",
-            Punctuation::SingleEquals,
-        )?;
-        let expr = self.next_expr()?;
-        self.expect_punct(
-            "';' after variable assignment",
-            Punctuation::Semicolon,
-        )?;
+    fn define_identifier(
+        &mut self,
+        name: &'a str,
+        value: SymbolicValue,
+    ) -> Result<(), Error> {
+        let name = name.into();
 
-        if SymbolicGraph::is_reserved_name(var_name) {
+        if SymbolicGraph::is_reserved_name(name) {
             // The variable name is a reserved name.  It may be an
             // anonymous placeholder, or it may be an actual name,
             // prefixed by `_{index}_` to avoid ambiguity.
 
-            let mut char_iter = var_name.char_indices().peekable();
+            let mut char_iter = name.char_indices().peekable();
             char_iter.next();
             while let Some(_) = char_iter.next_if(|(_, c)| c.is_ascii_digit()) {
             }
             char_iter.next();
 
             if let Some((char_index, _)) = char_iter.next() {
-                self.graph.name(expr, &var_name[char_index..])?;
+                self.graph.name(value, &name[char_index..])?;
             }
         } else {
-            self.graph.name(expr, var_name)?;
+            self.graph.name(value, name)?;
         }
 
-        self.identifiers.insert(var_name, expr);
+        self.identifiers.insert(name, value);
 
         Ok(())
+    }
+
+    fn expect_assignment(&mut self) -> Result<(), Error> {
+        self.expect_keyword(
+            "'let' at start of variable binding",
+            Keyword::Let,
+        )?;
+        let var_name = self.expect_ident("variable name")?.text;
+        self.expect_punct(
+            "'=' after variable name in assignment",
+            Punctuation::SingleEquals,
+        )?;
+        let expr = self.expect_expr()?;
+        self.expect_punct(
+            "';' after variable assignment",
+            Punctuation::Semicolon,
+        )?;
+
+        self.define_identifier(var_name, expr)?;
+
+        Ok(())
+    }
+
+    /// Parses a function definition at the point
+    ///
+    /// If the function is named, then it gets treated as a Let
+    /// binding, and `expect_function` returns `None`.  If the
+    /// function is anonymous, then it gets treated as an expression,
+    /// and this function returns `Some(func)`.
+    fn expect_function(&mut self) -> Result<Option<SymbolicValue>, Error> {
+        let is_extern = self
+            .tokens
+            .next_if(|token| token.kind.is_keyword(Keyword::Public))?
+            .is_some();
+
+        self.expect_keyword(
+            "'fn' keyword at start of function",
+            Keyword::Function,
+        )?;
+
+        let opt_name = self.try_ident()?.map(|token| token.text);
+
+        self.expect_punct(
+            "'(' to start function arguments",
+            Punctuation::LeftParen,
+        )?;
+
+        let mut params = Vec::new();
+        loop {
+            if self
+                .tokens
+                .peek()?
+                .map(|peek| peek.kind.is_punct(Punctuation::RightParen))
+                .unwrap_or(false)
+            {
+                break;
+            }
+
+            let param = self.expect_function_param()?;
+            params.push(param);
+
+            if self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+                .is_none()
+            {
+                break;
+            }
+        }
+
+        self.expect_punct(
+            "closing ')' of function parameter list",
+            Punctuation::RightParen,
+        )?;
+
+        self.expect_punct(
+            "opening '{' of function definition",
+            Punctuation::LeftBrace,
+        )?;
+
+        // TODO: Consume statements inside the function
+        // while let Some(keyword) = self.try_keyword()? {
+        //     match keyword {
+        //         Keyword::Let => self.expect_assignment()?,
+        //         Keyword::Public => self.expect_function()?,
+        //         Keyword::Function => self.expect_function_definition()?,
+        //     }
+        // }
+
+        let mut outputs = Vec::new();
+        if self
+            .tokens
+            .next_if(|token| token.kind.is_punct(Punctuation::LeftParen))?
+            .is_none()
+        {
+            // No parentheses, single return value
+            outputs.push(self.expect_expr()?);
+        } else {
+            // Multiple parentheses, multiple return types
+            loop {
+                if self
+                    .tokens
+                    .peek()?
+                    .map(|peek| peek.kind.is_punct(Punctuation::RightParen))
+                    .unwrap_or(false)
+                {
+                    break;
+                }
+
+                let output = self.expect_expr()?;
+                outputs.push(output);
+
+                if self
+                    .tokens
+                    .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+                    .is_none()
+                {
+                    break;
+                }
+            }
+            self.expect_punct(
+                "closing ')' of function return type list",
+                Punctuation::RightParen,
+            )?;
+        }
+
+        self.expect_punct(
+            "closing '}' of function body",
+            Punctuation::RightBrace,
+        )?;
+
+        let func = self.graph.function_def(params, outputs);
+        if let Some(name) = opt_name {
+            self.graph.name(func, name)?;
+        }
+        if is_extern {
+            self.graph.mark_extern_func(func)?;
+        }
+
+        // TODO: Roll back any changes to the identifiers.
+
+        if let Some(name) = opt_name {
+            self.define_identifier(name, func)?;
+            Ok(Some(func))
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn expect_function_param(&mut self) -> Result<SymbolicValue, Error> {
+        let param_name = self.expect_ident("function parameter")?.text;
+
+        self.expect_punct("':' after variable name", Punctuation::Colon)?;
+        let ty = self.expect_type()?;
+
+        let ty = ty.try_prim_type().expect("TODO: Non-primitive params");
+
+        let arg = self.graph.function_arg(ty);
+        self.graph.name(arg, param_name)?;
+        self.identifiers.insert(param_name, arg);
+        Ok(arg)
     }
 
     fn next_static_field(&mut self) -> Result<SymbolicValue, Error> {
@@ -360,7 +547,7 @@ impl<'a> SymbolicParser<'a> {
             Punctuation::LeftParen,
         )?;
         for _ in 0..num_args {
-            args.push(self.next_expr()?);
+            args.push(self.expect_expr()?);
         }
         self.expect_punct(
             "right ( to finish method arguments",
@@ -396,7 +583,7 @@ impl<'a> SymbolicParser<'a> {
                 break;
             }
 
-            indices.push(self.next_expr()?);
+            indices.push(self.expect_expr()?);
 
             if self
                 .tokens
@@ -415,8 +602,27 @@ impl<'a> SymbolicParser<'a> {
         Ok(Some(indices))
     }
 
+    fn try_ident(&mut self) -> Result<Option<Token<'a>>, Error> {
+        self.tokens
+            .next_if(|token| matches!(token.kind, TokenKind::Ident))
+    }
+
     fn expect_ident(&mut self, desc: &'static str) -> Result<Token<'a>, Error> {
         self.expect_kind(desc, |kind| matches!(kind, TokenKind::Ident))
+    }
+
+    fn expect_keyword(
+        &mut self,
+        desc: &'static str,
+        expected_keyword: Keyword,
+    ) -> Result<Token<'a>, Error> {
+        self.expect_kind(desc, |kind| {
+            if let TokenKind::Keyword(token_keyword) = kind {
+                expected_keyword == *token_keyword
+            } else {
+                false
+            }
+        })
     }
 
     fn expect_punct(
@@ -539,6 +745,8 @@ impl Keyword {
     fn from_string(ident: &str) -> Option<Self> {
         match ident {
             "let" => Some(Keyword::Let),
+            "pub" => Some(Keyword::Public),
+            "fn" => Some(Keyword::Function),
             _ => None,
         }
     }
@@ -606,6 +814,8 @@ impl<'a> SymbolicTokenizer<'a> {
             '>' => TokenKind::Punct(Punctuation::RightAngleBracket),
             '[' => TokenKind::Punct(Punctuation::LeftSquareBracket),
             ']' => TokenKind::Punct(Punctuation::RightSquareBracket),
+            '{' => TokenKind::Punct(Punctuation::LeftBrace),
+            '}' => TokenKind::Punct(Punctuation::RightBrace),
             ';' => TokenKind::Punct(Punctuation::Semicolon),
             '=' => TokenKind::Punct(Punctuation::SingleEquals),
             ':' => {
@@ -618,16 +828,12 @@ impl<'a> SymbolicTokenizer<'a> {
                             "Second ':' of '::' token",
                         )
                     })?;
-                if next != ':' {
-                    return Err(ParseError::UnexpectedCharWithKnown {
-                        expected: ':',
-                        actual: next,
-                        byte_index: next_loc,
-                    }
-                    .into());
+                if next == ':' {
+                    num_bytes = 2;
+                    TokenKind::Punct(Punctuation::DoubleColon)
+                } else {
+                    TokenKind::Punct(Punctuation::Colon)
                 }
-                num_bytes = 2;
-                TokenKind::Punct(Punctuation::DoubleColon)
             }
             '0'..='9' => {
                 let mut value = 0;
