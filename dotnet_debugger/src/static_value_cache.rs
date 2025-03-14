@@ -924,6 +924,9 @@ impl<'a> CachedReader<'a> {
                     RuntimeType::Function(_) => {
                         return Err(Error::UnexpectedFunctionTypeInDotNet);
                     }
+                    RuntimeType::Tuple(_) => {
+                        return Err(Error::UnexpectedTupleTypeInDotNet);
+                    }
                     RuntimeType::DotNet(DotNetType::String) => {
                         unreachable!("Handled with builtin_class_name")
                     }

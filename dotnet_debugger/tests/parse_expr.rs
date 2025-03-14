@@ -208,7 +208,7 @@ fn parse_named_expressions_with_same_name() {
 #[test]
 fn parse_top_level_function() {
     require_identical_graph("pub fn main() { 42 }", |graph| {
-        let func = graph.function_def(vec![], vec![42.into()]);
+        let func = graph.function_def(vec![], 42.into());
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
     });
@@ -225,7 +225,7 @@ fn parse_function_with_arg() {
             let index = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(index, "index").unwrap();
             let item = graph.access_index(arr, index);
-            let func = graph.function_def(vec![index], vec![item]);
+            let func = graph.function_def(vec![index], item);
             graph.name(func, "main").unwrap();
         },
     );
@@ -248,7 +248,136 @@ fn parse_function_with_multiple_returns() {
             graph.name(index, "index").unwrap();
             let item1 = graph.access_index(arr1, index);
             let item2 = graph.access_index(arr2, index);
-            let func = graph.function_def(vec![index], vec![item1, item2]);
+
+            let tuple = graph.tuple(vec![item1, item2]);
+            let func = graph.function_def(vec![index], tuple);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_addition() {
+    require_identical_graph("fn main(a: usize, b: usize) { a+b }", |graph| {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+        let sum = graph.add(a, b);
+        let func = graph.function_def(vec![a, b], sum);
+        graph.name(func, "main").unwrap();
+    });
+}
+
+#[test]
+fn parse_multiplication() {
+    require_identical_graph("fn main(a: usize, b: usize) { a*b }", |graph| {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+        let prod = graph.mul(a, b);
+        let func = graph.function_def(vec![a, b], prod);
+        graph.name(func, "main").unwrap();
+    });
+}
+
+#[test]
+fn parse_repeated_addition() {
+    require_identical_graph(
+        "fn main(a: usize, b: usize) { a+b+a+b }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let sum = graph.add(a, b);
+            let sum = graph.add(sum, a);
+            let sum = graph.add(sum, b);
+
+            let func = graph.function_def(vec![a, b], sum);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_repeated_multiplication() {
+    require_identical_graph(
+        "fn main(a: usize, b: usize) { a*b*a*b }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let prod = graph.mul(a, b);
+            let prod = graph.mul(prod, a);
+            let prod = graph.mul(prod, b);
+
+            let func = graph.function_def(vec![a, b], prod);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_mixed_operators_with_precedence() {
+    require_identical_graph(
+        "fn main(a: usize, b: usize) { a*b + b*a }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let lhs = graph.mul(a, b);
+            let rhs = graph.mul(b, a);
+            let sum = graph.add(lhs, rhs);
+
+            let func = graph.function_def(vec![a, b], sum);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_mixed_operators_with_parentheses() {
+    require_identical_graph(
+        "fn main(a: usize, b: usize) { a + (a+b)*(b+a) }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let lhs = graph.add(a, b);
+            let rhs = graph.add(b, a);
+            let prod = graph.mul(lhs, rhs);
+            let sum = graph.add(a, prod);
+
+            let func = graph.function_def(vec![a, b], sum);
+            graph.name(func, "main").unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_mixed_operators_with_leading_parentheses() {
+    require_identical_graph(
+        "fn main(a: usize, b: usize) { (a+b)*(b+a) }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let lhs = graph.add(a, b);
+            let rhs = graph.add(b, a);
+            let prod = graph.mul(lhs, rhs);
+
+            let func = graph.function_def(vec![a, b], prod);
             graph.name(func, "main").unwrap();
         },
     );

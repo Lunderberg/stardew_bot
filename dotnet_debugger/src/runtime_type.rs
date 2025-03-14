@@ -47,6 +47,9 @@ pub enum RuntimeType {
     // graph, rather than as extra free-floating functions within the
     // VirtualMachine.  This will allow them to be type-checked.
     Function(FunctionType),
+
+    // A tuple of return values.
+    Tuple(TupleType),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -147,8 +150,11 @@ pub enum RustType {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionType {
     pub(crate) params: Vec<RuntimeType>,
-    pub(crate) outputs: Vec<RuntimeType>,
+    pub(crate) output: Box<RuntimeType>,
 }
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct TupleType(pub(crate) Vec<RuntimeType>);
 
 impl RuntimeType {
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
@@ -189,6 +195,7 @@ impl RuntimeType {
             RuntimeType::Function(_) => {
                 Err(Error::UnexpectedFunctionTypeInDotNet)
             }
+            RuntimeType::Tuple(_) => Err(Error::UnexpectedTupleTypeInDotNet),
         }
     }
 
@@ -208,6 +215,7 @@ impl RuntimeType {
             RuntimeType::Function(_) => {
                 Err(Error::UnexpectedFunctionTypeInDotNet)
             }
+            RuntimeType::Tuple(_) => Err(Error::UnexpectedTupleTypeInDotNet),
         }
     }
 
@@ -221,7 +229,9 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::String) => true,
             RuntimeType::DotNet(DotNetType::Array { .. }) => true,
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => true,
-            RuntimeType::Rust(_) | RuntimeType::Function(_) => false,
+            RuntimeType::Rust(_)
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_) => false,
         }
     }
 
@@ -241,7 +251,9 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 Some(RuntimePrimType::Ptr)
             }
-            RuntimeType::Rust(_) | RuntimeType::Function(_) => None,
+            RuntimeType::Rust(_)
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_) => None,
         }
     }
 
@@ -261,7 +273,8 @@ impl RuntimeType {
                 | DotNetType::MultiDimArray { .. },
             )
             | RuntimeType::Rust(_)
-            | RuntimeType::Function(_) => None,
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_) => None,
         }
     }
 
@@ -315,10 +328,9 @@ impl RuntimeType {
             | RuntimeType::DotNet(DotNetType::String)
             | RuntimeType::Rust(_) => true,
 
-            RuntimeType::Function(FunctionType { params, outputs }) => params
-                .iter()
-                .chain(outputs.iter())
-                .all(|ty| ty.is_complete()),
+            RuntimeType::Function(FunctionType { params, output }) => {
+                params.iter().all(|ty| ty.is_complete()) && output.is_complete()
+            }
 
             RuntimeType::DotNet(
                 DotNetType::Class { method_table }
@@ -326,6 +338,10 @@ impl RuntimeType {
                 | DotNetType::Array { method_table, .. }
                 | DotNetType::MultiDimArray { method_table, .. },
             ) => method_table.is_some(),
+
+            RuntimeType::Tuple(TupleType(elements)) => {
+                elements.iter().all(|ty| ty.is_complete())
+            }
         }
     }
 }
@@ -516,6 +532,7 @@ impl std::fmt::Display for RuntimeType {
             }
             RuntimeType::Rust(rust_type) => write!(f, "{rust_type}"),
             RuntimeType::Function(func_type) => write!(f, "{func_type}"),
+            RuntimeType::Tuple(tuple_type) => write!(f, "{tuple_type}"),
         }
     }
 }
@@ -569,9 +586,22 @@ impl std::fmt::Display for FunctionType {
         write!(fmt, "Fn")?;
         write_tuple(fmt, &self.params)?;
 
-        write!(fmt, " -> ")?;
-        write_tuple(fmt, &self.outputs)?;
+        write!(fmt, " -> {}", self.output)?;
 
+        Ok(())
+    }
+}
+
+impl std::fmt::Display for TupleType {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "(")?;
+        for (i, element) in self.0.iter().enumerate() {
+            if i > 0 {
+                write!(fmt, ", ")?;
+            }
+            write!(fmt, "{element}")?;
+        }
+        write!(fmt, ")")?;
         Ok(())
     }
 }

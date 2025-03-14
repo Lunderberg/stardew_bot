@@ -343,6 +343,12 @@ pub enum Error {
     UnexpectedFunctionTypeInDotNet,
 
     #[error(
+        "A TupleType appeared in a context \
+         where only .NET types are expected."
+    )]
+    UnexpectedTupleTypeInDotNet,
+
+    #[error(
         "Attempted conversion of rust-native object \
          of type {0:?} into primitive."
     )]

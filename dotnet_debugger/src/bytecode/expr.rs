@@ -41,8 +41,10 @@ pub enum ExprKind {
         /// The parameters of the function.  Each parameter must be an
         /// instance of ExprKind::FunctionArg.
         params: Vec<SymbolicValue>,
-        outputs: Vec<SymbolicValue>,
+        output: SymbolicValue,
     },
+
+    Tuple(Vec<SymbolicValue>),
 
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
@@ -55,7 +57,10 @@ pub enum ExprKind {
     ///
     /// These are lowered to pointer arithmetic, performed relative to
     /// the location of the class or struct.
-    FieldAccess { obj: SymbolicValue, field: String },
+    FieldAccess {
+        obj: SymbolicValue,
+        field: String,
+    },
 
     /// Downcast an object to a subclass.  After downcasting, fields
     /// of the subclass may be accessed.
@@ -82,7 +87,9 @@ pub enum ExprKind {
     ///
     /// This is lowered into pointer arithmetic and memory accesses,
     /// to locate and read the number of elements of the array.
-    NumArrayElements { array: SymbolicValue },
+    NumArrayElements {
+        array: SymbolicValue,
+    },
 
     /// Returns the number of elements of a multi-dimensional array.
     ///
@@ -94,7 +101,10 @@ pub enum ExprKind {
     },
 
     /// Cast a pointer to another pointer type.
-    PointerCast { ptr: SymbolicValue, ty: RuntimeType },
+    PointerCast {
+        ptr: SymbolicValue,
+        ty: RuntimeType,
+    },
 
     /// Perform addition of the LHS and RHS.
     ///
@@ -513,9 +523,13 @@ impl SymbolicGraph {
     pub fn function_def(
         &mut self,
         params: Vec<SymbolicValue>,
-        outputs: Vec<SymbolicValue>,
+        output: SymbolicValue,
     ) -> SymbolicValue {
-        self.push(ExprKind::Function { params, outputs })
+        self.push(ExprKind::Function { params, output })
+    }
+
+    pub fn tuple(&mut self, elements: Vec<SymbolicValue>) -> SymbolicValue {
+        self.push(ExprKind::Tuple(elements))
     }
 
     pub fn static_field(
@@ -858,15 +872,25 @@ impl SymbolicGraph {
         let main_func_index = self.extern_funcs[0];
         let main_func = &self[main_func_index];
 
-        let ExprKind::Function { params, outputs } = &main_func.kind else {
+        let ExprKind::Function { params, output } = &main_func.kind else {
             panic!(
                 "Internal error, \
                  `extern_funcs` should only point to functions."
             )
         };
+        let output = *output;
+
         if !params.is_empty() {
             todo!("Handle extern functions with parameters");
         }
+
+        let outputs = match output {
+            SymbolicValue::Result(op_index) => match &self[op_index].kind {
+                ExprKind::Tuple(values) => values.clone(),
+                _ => vec![output],
+            },
+            _ => vec![output],
+        };
 
         let mut next_free_index = outputs.len();
 
@@ -930,6 +954,21 @@ impl SymbolicGraph {
                     assert!(op_index == main_func_index);
                 }
                 ExprKind::FunctionArg(_) => todo!(),
+                ExprKind::Tuple(_) => {
+                    // Eventually I should put something here, but I
+                    // think this will just barely work for the
+                    // current use cases.  A tuple of function outputs
+                    // is assigned the appropriate StackIndex values
+                    // for each tuple element.  When encountering
+                    // those operations, their output was written to
+                    // the appropriate output index.  So now, when
+                    // encountering the tuple itself, I just
+                    // do...nothing.
+                    //
+                    // This will break horribly if tuples are used in
+                    // any other context, but thankfully I don't yet
+                    // support any other contexts.
+                }
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
@@ -1103,13 +1142,22 @@ impl ExprKind {
 
         match self {
             ExprKind::FunctionArg(_) | ExprKind::StaticField(_) => None,
-            ExprKind::Function { params, outputs } => {
+            ExprKind::Function { params, output } => {
+                let opt_output = remap(output);
                 let requires_remap =
-                    vec_requires_remap(&params) || vec_requires_remap(&outputs);
+                    opt_output.is_some() || vec_requires_remap(&params);
                 requires_remap.then(|| {
                     let params = params.iter().map(remap_or_no_op).collect();
-                    let outputs = outputs.iter().map(remap_or_no_op).collect();
-                    ExprKind::Function { params, outputs }
+                    let output = opt_output.unwrap_or_else(|| *output);
+                    ExprKind::Function { params, output }
+                })
+            }
+            ExprKind::Tuple(elements) => {
+                let requires_remap = vec_requires_remap(elements);
+                requires_remap.then(|| {
+                    let elements =
+                        elements.iter().map(remap_or_no_op).collect();
+                    ExprKind::Tuple(elements)
                 })
             }
             ExprKind::FieldAccess { obj, field } => {
@@ -1200,8 +1248,11 @@ impl ExprKind {
     ) {
         match self {
             ExprKind::FunctionArg(_) | ExprKind::StaticField(_) => {}
-            ExprKind::Function { outputs, .. } => {
-                outputs.iter().for_each(|output| callback(*output));
+            ExprKind::Function { output, .. } => {
+                callback(*output);
+            }
+            ExprKind::Tuple(elements) => {
+                elements.iter().for_each(|element| callback(*element));
             }
             ExprKind::FieldAccess { obj, .. } => {
                 callback(*obj);
@@ -1341,29 +1392,35 @@ impl<'a> GraphComparison<'a> {
             let is_match = match lhs_kind {
                 ExprKind::Function {
                     params: lhs_params,
-                    outputs: lhs_outputs,
+                    output: lhs_output,
                 } => match rhs_kind {
                     ExprKind::Function {
                         params: rhs_params,
-                        outputs: rhs_outputs,
+                        output: rhs_output,
                     } => {
                         lhs_params.len() == rhs_params.len()
-                            && lhs_outputs.len() == rhs_outputs.len()
                             && lhs_params.iter().zip(rhs_params).all(
                                 |(lhs_param, rhs_param)| {
                                     equivalent_value!(lhs_param, rhs_param)
                                 },
                             )
-                            && lhs_outputs.iter().zip(rhs_outputs).all(
-                                |(lhs_output, rhs_output)| {
-                                    equivalent_value!(lhs_output, rhs_output)
-                                },
-                            )
+                            && equivalent_value!(lhs_output, rhs_output)
                     }
                     _ => false,
                 },
                 ExprKind::FunctionArg(lhs_ty) => match rhs_kind {
                     ExprKind::FunctionArg(rhs_ty) => lhs_ty == rhs_ty,
+                    _ => false,
+                },
+                ExprKind::Tuple(lhs_tuple) => match rhs_kind {
+                    ExprKind::Tuple(rhs_tuple) => {
+                        lhs_tuple.len() == rhs_tuple.len()
+                            && lhs_tuple.iter().zip(rhs_tuple).all(
+                                |(lhs_element, rhs_element)| {
+                                    equivalent_value!(lhs_element, rhs_element)
+                                },
+                            )
+                    }
                     _ => false,
                 },
                 ExprKind::StaticField(StaticField {
@@ -1529,38 +1586,34 @@ impl<'a> GraphComparison<'a> {
 
 impl Display for ExprKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let write_tuple = |f: &mut std::fmt::Formatter<'_>,
+                           tuple: &[SymbolicValue]|
+         -> std::fmt::Result {
+            write!(f, "(")?;
+            for (i, element) in tuple.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                write!(f, "{element}")?;
+            }
+
+            write!(f, ")")?;
+
+            Ok(())
+        };
+
         match self {
             ExprKind::FunctionArg(ty) => {
                 write!(f, "_: {ty}")
             }
-            ExprKind::Function { params, outputs } => {
-                write!(f, "fn(")?;
-                for (i, param) in params.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{param}")?;
-                }
-
-                write!(f, ") {{ ")?;
-
-                if outputs.len() == 1 {
-                    write!(f, "{}", outputs[0])?;
-                } else {
-                    write!(f, "(")?;
-                    for (i, output) in outputs.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        write!(f, "{output}")?;
-                    }
-                    write!(f, ")")?;
-                }
-
-                write!(f, " }}")?;
+            ExprKind::Function { params, output } => {
+                write!(f, "fn")?;
+                write_tuple(f, params)?;
+                write!(f, " {{ {output} }}")?;
 
                 Ok(())
             }
+            ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {
                 write!(f, "{class}\u{200B}.{field_name}")
             }
@@ -1639,8 +1692,7 @@ impl<'a> GraphPrinter<'a> {
                 .rev()
                 .filter(|(_, op)| matches!(op.kind, ExprKind::Function { .. }))
                 .for_each(|(func_index, op)| {
-                    let ExprKind::Function { params, outputs } = &op.kind
-                    else {
+                    let ExprKind::Function { params, output } = &op.kind else {
                         unreachable!("Due to earlier filter")
                     };
                     let earliest_param = params
@@ -1680,9 +1732,7 @@ impl<'a> GraphPrinter<'a> {
                             };
                         }
 
-                        for output in outputs {
-                            mark!(output);
-                        }
+                        mark!(output);
 
                         while let Some(visiting) = to_visit.pop() {
                             self.graph[visiting]
@@ -1778,15 +1828,15 @@ impl<'a> GraphPrinter<'a> {
         };
 
         #[derive(Debug)]
-        struct PrintItem<'a> {
-            kind: PrintItemKind<'a>,
+        struct PrintItem {
+            kind: PrintItemKind,
             indent: Indent,
         }
         #[derive(Debug)]
-        enum PrintItemKind<'a> {
+        enum PrintItemKind {
             Op(OpIndex),
             FunctionOutput {
-                outputs: &'a [SymbolicValue],
+                output: SymbolicValue,
                 is_extern_func: bool,
             },
         }
@@ -1847,46 +1897,15 @@ impl<'a> GraphPrinter<'a> {
             let index = match print_item.kind {
                 PrintItemKind::Op(index) => index,
                 PrintItemKind::FunctionOutput {
-                    outputs,
+                    output,
                     is_extern_func,
                 } => {
-                    match outputs.len() {
-                        0 => {}
-                        1 => {
-                            if delayed_newline
-                                >= DelayedNewline::BeforeExpression
-                            {
-                                write!(fmt, "\n{indent}")?;
-                            } else {
-                                write!(fmt, " ")?;
-                            }
-                            let expr_printer =
-                                make_expr_printer(outputs[0], false);
-                            write!(fmt, "{expr_printer}")?;
-                        }
-                        _ => {
-                            if delayed_newline
-                                >= DelayedNewline::BeforeExpression
-                            {
-                                write!(fmt, "\n{indent}")?;
-                            }
-                            write!(fmt, "(")?;
-                            let item_indent = indent + self.indent_width;
-                            outputs
-                                .iter()
-                                .cloned()
-                                .map(|value| make_expr_printer(value, false))
-                                .try_for_each(|expr_printer| {
-                                    write!(
-                                        fmt,
-                                        "\n{item_indent}{expr_printer},"
-                                    )
-                                })?;
-                            write!(fmt, ")")?;
-
-                            delayed_newline = DelayedNewline::BeforeAssignment;
-                        }
+                    if delayed_newline >= DelayedNewline::BeforeExpression {
+                        write!(fmt, "\n{indent}")?;
+                    } else {
+                        write!(fmt, " ")?;
                     }
+                    write!(fmt, "{}", make_expr_printer(output, false))?;
 
                     if delayed_newline >= DelayedNewline::BeforeExpression {
                         let closing_indent = indent - self.indent_width;
@@ -1963,7 +1982,7 @@ impl<'a> GraphPrinter<'a> {
                 ExprKind::FunctionArg(_) => {
                     delayed_op_lookup.insert(index, index);
                 }
-                ExprKind::Function { params, outputs } => {
+                ExprKind::Function { params, output } => {
                     if delayed_newline >= DelayedNewline::BeforeExpression {
                         write!(fmt, "\n{indent}")?;
                     }
@@ -1988,7 +2007,7 @@ impl<'a> GraphPrinter<'a> {
 
                     to_print.push(PrintItem {
                         kind: PrintItemKind::FunctionOutput {
-                            outputs,
+                            output: *output,
                             is_extern_func,
                         },
                         indent: indent + self.indent_width,
@@ -2109,41 +2128,34 @@ impl<'a> Display for ExprPrinter<'a> {
         let sep =
             MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
+        let write_tuple = |f: &mut std::fmt::Formatter<'_>,
+                           tuple: &[SymbolicValue]|
+         -> std::fmt::Result {
+            write!(f, "(")?;
+            for (i, element) in tuple.iter().enumerate() {
+                if i > 0 {
+                    write!(f, ", ")?;
+                }
+                let element = self.with_value(*element).as_top_level();
+                write!(f, "{element}")?;
+            }
+
+            write!(f, ")")?;
+            Ok(())
+        };
+
         match self.graph[op_index].as_ref() {
-            ExprKind::Function { params, outputs } => {
-                write!(f, "fn(")?;
-                for (i, param) in params.iter().enumerate() {
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    let param = self.with_value(*param).as_top_level();
-                    write!(f, "{param}")?;
-                }
-
-                write!(f, ") {{")?;
-
-                if outputs.len() == 1 {
-                    let output = self.with_value(outputs[0]);
-                    write!(f, "{output}")?;
-                } else {
-                    write!(f, "(")?;
-                    for (i, output) in outputs.iter().enumerate() {
-                        if i > 0 {
-                            write!(f, ", ")?;
-                        }
-                        let output = self.with_value(*output);
-                        write!(f, "{output}")?;
-                    }
-                    write!(f, ")")?;
-                }
-
-                write!(f, "}}")?;
+            ExprKind::Function { params, output } => {
+                write!(f, "fn")?;
+                write_tuple(f, params)?;
+                write!(f, " {{ {} }}", self.with_value(*output))?;
 
                 Ok(())
             }
             ExprKind::FunctionArg(ty) => {
                 write!(f, "{index_printer}: {ty}")
             }
+            ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {
                 write!(f, "{class}{sep}.{field_name}")
             }

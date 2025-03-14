@@ -785,7 +785,7 @@ impl ObjectExplorer {
             },
         )?;
 
-        let main_func = graph.function_def(vec![], vec![output]);
+        let main_func = graph.function_def(vec![], output);
         graph.name(main_func, "main")?;
         graph.mark_extern_func(main_func)?;
 
@@ -906,6 +906,11 @@ impl ObjectTreeNode {
                 return Err(
                     dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
                         .into(),
+                );
+            }
+            RuntimeType::Tuple(_) => {
+                return Err(
+                    dotnet_debugger::Error::UnexpectedTupleTypeInDotNet.into(),
                 );
             }
         };
@@ -1034,6 +1039,12 @@ impl ObjectTreeNode {
                     RuntimeType::Function(_) => {
                         return Err(
                             dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
+                                .into(),
+                        );
+                    }
+                    RuntimeType::Tuple(_) => {
+                        return Err(
+                            dotnet_debugger::Error::UnexpectedTupleTypeInDotNet
                                 .into(),
                         );
                     }

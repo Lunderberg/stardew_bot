@@ -10,7 +10,7 @@ macro_rules! verify_equivalent_graphs {
                 let expr_builder = $builder;
                 let func_builder = |graph: &mut SymbolicGraph| {
                     let expr = expr_builder(graph);
-                    let func = graph.function_def(vec![], vec![expr]);
+                    let func = graph.function_def(vec![], expr);
                     graph.name(func, "main").unwrap();
                     graph.mark_extern_func(func).unwrap();
                 };
@@ -96,7 +96,7 @@ fn default_comparison_is_order_independent() {
         let x = graph.static_field("class1", "field1");
         let y = graph.static_field("class2", "field2");
         let sum = graph.add(x, y);
-        let func = graph.function_def(vec![], vec![sum]);
+        let func = graph.function_def(vec![], sum);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -107,7 +107,7 @@ fn default_comparison_is_order_independent() {
         let y = graph.static_field("class2", "field2");
         let x = graph.static_field("class1", "field1");
         let sum = graph.add(x, y);
-        let func = graph.function_def(vec![], vec![sum]);
+        let func = graph.function_def(vec![], sum);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -123,7 +123,7 @@ fn order_dependent_comparison_may_be_applied() {
         let x = graph.static_field("class1", "field1");
         let y = graph.static_field("class2", "field2");
         let sum = graph.add(x, y);
-        let func = graph.function_def(vec![], vec![sum]);
+        let func = graph.function_def(vec![], sum);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -134,7 +134,7 @@ fn order_dependent_comparison_may_be_applied() {
         let y = graph.static_field("class2", "field2");
         let x = graph.static_field("class1", "field1");
         let sum = graph.add(x, y);
-        let func = graph.function_def(vec![], vec![sum]);
+        let func = graph.function_def(vec![], sum);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -149,7 +149,7 @@ fn default_comparison_ignores_name() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -158,7 +158,7 @@ fn default_comparison_ignores_name() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_other_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -173,7 +173,7 @@ fn name_dependent_comparison_may_be_applied() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -182,7 +182,7 @@ fn name_dependent_comparison_may_be_applied() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_other_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -197,7 +197,7 @@ fn comparison_may_be_order_and_name_dependent() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -206,7 +206,7 @@ fn comparison_may_be_order_and_name_dependent() {
         let mut graph = SymbolicGraph::new();
         let obj = graph.static_field("class_name", "field_name");
         graph.name(obj, "some_other_name").unwrap();
-        let func = graph.function_def(vec![], vec![obj]);
+        let func = graph.function_def(vec![], obj);
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
@@ -223,14 +223,14 @@ fn comparison_may_be_order_and_name_dependent() {
 fn comparison_depends_on_function_visibility() {
     let lhs = {
         let mut graph = SymbolicGraph::new();
-        let func = graph.function_def(vec![], vec![42.into()]);
+        let func = graph.function_def(vec![], 42.into());
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
         graph
     };
     let rhs = {
         let mut graph = SymbolicGraph::new();
-        let func = graph.function_def(vec![], vec![42.into()]);
+        let func = graph.function_def(vec![], 42.into());
         graph.name(func, "main").unwrap();
         graph
     };

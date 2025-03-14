@@ -33,9 +33,10 @@ impl WatchPointDefinition {
         mut self,
         reader: impl Into<Option<CachedReader<'a>>>,
     ) -> Result<WatchPoint, Error> {
-        let main_func = self.graph.function_def(vec![], self.outputs);
-        self.graph.mark_extern_func(main_func)?;
+        let output = self.graph.tuple(self.outputs);
+        let main_func = self.graph.function_def(vec![], output);
         self.graph.name(main_func, "main")?;
+        self.graph.mark_extern_func(main_func)?;
         let vm = self.graph.compile(reader)?;
         Ok(WatchPoint { vm })
     }

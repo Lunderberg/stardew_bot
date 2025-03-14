@@ -50,6 +50,12 @@ pub enum ParseError {
     )]
     ExpectedSingleTypeArg { num_args: usize, span: Range<usize> },
 
+    #[error(
+        "Function call expected {expected} arguments, \
+             but received {actual} arguments."
+    )]
+    UnexpectedNumberOfArguments { expected: usize, actual: usize },
+
     #[error("Expected {desc} at byte {byte_index}, but found {kind:?}")]
     UnexpectedTokenKind {
         desc: &'static str,
@@ -62,6 +68,12 @@ pub enum ParseError {
              but found {0}"
     )]
     ExpectedPrimType(SymbolicType),
+
+    #[error(
+        "Expected a variable definition for {0}, \
+         but no such variable has been defined."
+    )]
+    ExpectedDefinedVariable(String),
 }
 
 struct SymbolicTokenizer<'a> {
@@ -76,7 +88,7 @@ struct Token<'a> {
     span: Range<usize>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum TokenKind {
     Ident,
     Int(usize),
@@ -100,6 +112,8 @@ pub enum Punctuation {
     RightBrace,
     Semicolon,
     SingleEquals,
+    Plus,
+    Multiply,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -107,6 +121,14 @@ pub enum Keyword {
     Let,
     Public,
     Function,
+}
+
+#[derive(PartialOrd, PartialEq)]
+enum OpPrecedence {
+    MaybeTuple,
+    TupleElement,
+    Addition,
+    Multiplication,
 }
 
 impl TokenKind {
@@ -136,48 +158,180 @@ impl<'a> SymbolicParser<'a> {
     }
 
     pub fn parse_expr(&mut self) -> Result<SymbolicValue, Error> {
-        let expr = self.expect_expr()?;
+        self.tokens
+            .peek()?
+            .ok_or(ParseError::UnexpectedEndOfString("Start of expression"))?;
+        let expr = self.expect_block_body()?;
         self.expect_end_of_string()?;
+
         Ok(expr)
     }
 
-    fn expect_expr(&mut self) -> Result<SymbolicValue, Error> {
+    /// Parse a block
+    ///
+    /// A block consists of an opening left brace '{', a block body,
+    /// and a closing right brace '}'.
+    fn expect_block(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_punct("opening '{' of block", Punctuation::LeftBrace)?;
+
+        let body = self.expect_block_body()?;
+
+        self.expect_punct("closing '}' of block", Punctuation::RightBrace)?;
+
+        Ok(body)
+    }
+
+    /// Parse the body of a block
+    ///
+    /// The body of a block consists of zero or more statements,
+    /// followed by an expression.
+    fn expect_block_body(&mut self) -> Result<SymbolicValue, Error> {
+        // Zero or more statements
+        let mut last_assignment = None;
         while let Some(keyword) = self.peek_keyword()? {
-            match keyword {
+            last_assignment = Some(match keyword {
                 Keyword::Let => self.expect_assignment()?,
                 Keyword::Function | Keyword::Public => {
-                    let opt_func = self.expect_function()?;
-                    if let Some(func) = opt_func {
-                        return Ok(func);
-                    }
+                    self.expect_named_function()?
                 }
-            };
+            });
         }
 
-        if let Some(value) = self.try_int()? {
-            return Ok(SymbolicValue::Int(value));
-        }
-
-        let opt_var_name = self
-            .tokens
-            .next_if(|token| {
-                matches!(token.kind, TokenKind::Ident)
-                    && self.identifiers.contains_key(token.text)
-            })?
-            .map(|token| token.text);
-
-        let mut obj = if let Some(var_name) = opt_var_name {
-            self.identifiers
-                .get(var_name)
-                .cloned()
-                .expect("Unreachable due to earlier check on self.identifiers")
-        } else {
-            // TODO: Implement a way to specify a static field, even if
-            // the leading identifier would otherwise resolve to a
-            // variable definition.  Maybe with a leading . to specify the
-            // global scope?
-            self.next_static_field()?
+        let expr = match self.tokens.peek()?.map(|token| &token.kind) {
+            None | Some(TokenKind::Punct(Punctuation::RightBrace)) => {
+                // Allow the last assignment, if any, to be the return
+                // value of a block.
+                last_assignment.unwrap_or_else(|| self.graph.tuple(vec![]))
+            }
+            _ => self.expect_expr()?,
         };
+
+        Ok(expr)
+    }
+
+    fn expect_comma_separated_list<ItemParser, Item>(
+        &mut self,
+        closing_delimiter: Punctuation,
+        item_parser: ItemParser,
+    ) -> Result<Vec<Item>, Error>
+    where
+        ItemParser: Fn(&mut Self) -> Result<Item, Error>,
+    {
+        let mut output = Vec::new();
+        loop {
+            if self
+                .tokens
+                .peek()?
+                .map(|peek| peek.kind.is_punct(closing_delimiter))
+                .unwrap_or(false)
+            {
+                break;
+            }
+
+            output.push(item_parser(self)?);
+
+            if self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+                .is_none()
+            {
+                break;
+            }
+        }
+        Ok(output)
+    }
+
+    fn expect_expr(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_expr_op_precedence(OpPrecedence::MaybeTuple)
+    }
+
+    fn expect_non_tuple_expr(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_expr_op_precedence(OpPrecedence::TupleElement)
+    }
+
+    fn expect_expr_op_precedence(
+        &mut self,
+        precedence: OpPrecedence,
+    ) -> Result<SymbolicValue, Error> {
+        let mut expr = self.expect_term()?;
+
+        if precedence < OpPrecedence::Multiplication {
+            while let Some(_) = self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Multiply))?
+            {
+                let rhs = self
+                    .expect_expr_op_precedence(OpPrecedence::Multiplication)?;
+                expr = self.graph.mul(expr, rhs);
+            }
+        }
+
+        if precedence < OpPrecedence::Addition {
+            while let Some(_) = self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Plus))?
+            {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::Addition)?;
+                expr = self.graph.add(expr, rhs);
+            }
+        }
+
+        if precedence < OpPrecedence::TupleElement
+            && matches!(self.peek_punct()?, Some(Punctuation::Comma))
+        {
+            let mut elements = vec![expr];
+            while let Some(_) = self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+            {
+                let element =
+                    self.expect_expr_op_precedence(OpPrecedence::TupleElement)?;
+                elements.push(element);
+            }
+            expr = self.graph.tuple(elements)
+        }
+
+        Ok(expr)
+    }
+
+    fn expect_term(&mut self) -> Result<SymbolicValue, Error> {
+        let peek_token = self
+            .tokens
+            .peek()?
+            .ok_or(ParseError::UnexpectedEndOfString("expression"))?;
+        let mut obj = match &peek_token.kind {
+            TokenKind::Int(_) => self.expect_int(),
+
+            TokenKind::Ident
+                if self.identifiers.contains_key(peek_token.text) =>
+            {
+                // TODO: Implement a way to specify a static field, even if
+                // the leading identifier would otherwise resolve to a
+                // variable definition.  Maybe with a leading . to specify the
+                // global scope?
+                self.expect_previously_defined_var()
+            }
+
+            TokenKind::Ident => self.next_static_field(),
+
+            TokenKind::Punct(Punctuation::LeftParen) => {
+                self.tokens.next()?;
+                let expr = self.expect_expr()?;
+                self.expect_punct(
+                    "Closing ')' of parenthesized expression",
+                    Punctuation::RightParen,
+                )?;
+                Ok(expr)
+            }
+
+            _ => Err(ParseError::UnexpectedTokenKind {
+                desc: "expression",
+                byte_index: peek_token.span.start,
+                kind: peek_token.kind,
+            }
+            .into()),
+        }?;
 
         loop {
             if let Some(field) = self.try_field_name()? {
@@ -204,6 +358,19 @@ impl<'a> SymbolicParser<'a> {
         }
     }
 
+    fn peek_punct(&mut self) -> Result<Option<Punctuation>, Error> {
+        let opt_keyword = self
+            .tokens
+            .peek()?
+            .map(|token| match token.kind {
+                TokenKind::Punct(punct) => Some(punct),
+                _ => None,
+            })
+            .flatten();
+
+        Ok(opt_keyword)
+    }
+
     fn peek_keyword(&mut self) -> Result<Option<Keyword>, Error> {
         let opt_keyword = self
             .tokens
@@ -217,28 +384,16 @@ impl<'a> SymbolicParser<'a> {
         Ok(opt_keyword)
     }
 
-    fn try_keyword(&mut self) -> Result<Option<Keyword>, Error> {
-        let opt_keyword = self
-            .tokens
-            .next_if(|token| matches!(token.kind, TokenKind::Keyword(_)))?
-            .map(|token| match token.kind {
-                TokenKind::Keyword(keyword) => keyword,
-                _ => unreachable!("Handled by earlier check"),
-            });
+    fn expect_int(&mut self) -> Result<SymbolicValue, Error> {
+        let token = self
+            .expect_kind("integer", |kind| matches!(kind, TokenKind::Int(_)))?;
 
-        Ok(opt_keyword)
-    }
+        let value = match token.kind {
+            TokenKind::Int(value) => SymbolicValue::Int(value),
+            _ => unreachable!("Handled by earlier check"),
+        };
 
-    fn try_int(&mut self) -> Result<Option<usize>, Error> {
-        let opt_index = self
-            .tokens
-            .next_if(|token| matches!(token.kind, TokenKind::Int(_)))?
-            .map(|token| match token.kind {
-                TokenKind::Int(value) => value,
-                _ => unreachable!("Handled by earlier check"),
-            });
-
-        Ok(opt_index)
+        Ok(value)
     }
 
     fn define_identifier(
@@ -271,7 +426,7 @@ impl<'a> SymbolicParser<'a> {
         Ok(())
     }
 
-    fn expect_assignment(&mut self) -> Result<(), Error> {
+    fn expect_assignment(&mut self) -> Result<SymbolicValue, Error> {
         self.expect_keyword(
             "'let' at start of variable binding",
             Keyword::Let,
@@ -289,7 +444,7 @@ impl<'a> SymbolicParser<'a> {
 
         self.define_identifier(var_name, expr)?;
 
-        Ok(())
+        Ok(expr)
     }
 
     /// Parses a function definition at the point
@@ -298,7 +453,7 @@ impl<'a> SymbolicParser<'a> {
     /// binding, and `expect_function` returns `None`.  If the
     /// function is anonymous, then it gets treated as an expression,
     /// and this function returns `Some(func)`.
-    fn expect_function(&mut self) -> Result<Option<SymbolicValue>, Error> {
+    fn expect_named_function(&mut self) -> Result<SymbolicValue, Error> {
         let is_extern = self
             .tokens
             .next_if(|token| token.kind.is_keyword(Keyword::Public))?
@@ -309,113 +464,35 @@ impl<'a> SymbolicParser<'a> {
             Keyword::Function,
         )?;
 
-        let opt_name = self.try_ident()?.map(|token| token.text);
+        let name = self.expect_ident("Function name")?.text;
 
         self.expect_punct(
             "'(' to start function arguments",
             Punctuation::LeftParen,
         )?;
 
-        let mut params = Vec::new();
-        loop {
-            if self
-                .tokens
-                .peek()?
-                .map(|peek| peek.kind.is_punct(Punctuation::RightParen))
-                .unwrap_or(false)
-            {
-                break;
-            }
-
-            let param = self.expect_function_param()?;
-            params.push(param);
-
-            if self
-                .tokens
-                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
-                .is_none()
-            {
-                break;
-            }
-        }
+        let params = self
+            .expect_comma_separated_list(Punctuation::RightParen, |parser| {
+                parser.expect_function_param()
+            })?;
 
         self.expect_punct(
             "closing ')' of function parameter list",
             Punctuation::RightParen,
         )?;
 
-        self.expect_punct(
-            "opening '{' of function definition",
-            Punctuation::LeftBrace,
-        )?;
-
-        // TODO: Consume statements inside the function
-        // while let Some(keyword) = self.try_keyword()? {
-        //     match keyword {
-        //         Keyword::Let => self.expect_assignment()?,
-        //         Keyword::Public => self.expect_function()?,
-        //         Keyword::Function => self.expect_function_definition()?,
-        //     }
-        // }
-
-        let mut outputs = Vec::new();
-        if self
-            .tokens
-            .next_if(|token| token.kind.is_punct(Punctuation::LeftParen))?
-            .is_none()
-        {
-            // No parentheses, single return value
-            outputs.push(self.expect_expr()?);
-        } else {
-            // Multiple parentheses, multiple return types
-            loop {
-                if self
-                    .tokens
-                    .peek()?
-                    .map(|peek| peek.kind.is_punct(Punctuation::RightParen))
-                    .unwrap_or(false)
-                {
-                    break;
-                }
-
-                let output = self.expect_expr()?;
-                outputs.push(output);
-
-                if self
-                    .tokens
-                    .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
-                    .is_none()
-                {
-                    break;
-                }
-            }
-            self.expect_punct(
-                "closing ')' of function return type list",
-                Punctuation::RightParen,
-            )?;
-        }
-
-        self.expect_punct(
-            "closing '}' of function body",
-            Punctuation::RightBrace,
-        )?;
+        let outputs = self.expect_block()?;
 
         let func = self.graph.function_def(params, outputs);
-        if let Some(name) = opt_name {
-            self.graph.name(func, name)?;
-        }
+        self.graph.name(func, name)?;
         if is_extern {
             self.graph.mark_extern_func(func)?;
         }
 
         // TODO: Roll back any changes to the identifiers.
 
-        if let Some(name) = opt_name {
-            self.define_identifier(name, func)?;
-            Ok(Some(func))
-        } else {
-            Ok(None)
-        }
+        self.define_identifier(name, func)?;
+        Ok(func)
     }
 
     fn expect_function_param(&mut self) -> Result<SymbolicValue, Error> {
@@ -541,18 +618,26 @@ impl<'a> SymbolicParser<'a> {
             )?;
         }
 
-        let mut args = Vec::new();
         self.expect_punct(
-            "left ( to start method arguments",
+            "left '(' to start method arguments",
             Punctuation::LeftParen,
         )?;
-        for _ in 0..num_args {
-            args.push(self.expect_expr()?);
-        }
+        let args = self
+            .expect_comma_separated_list(Punctuation::RightParen, |parser| {
+                parser.expect_non_tuple_expr()
+            })?;
         self.expect_punct(
-            "right ( to finish method arguments",
+            "right ')' to finish method arguments",
             Punctuation::RightParen,
         )?;
+
+        if args.len() != num_args {
+            return Err(ParseError::UnexpectedNumberOfArguments {
+                expected: num_args,
+                actual: args.len(),
+            }
+            .into());
+        }
 
         Ok((type_args, args))
     }
@@ -570,29 +655,10 @@ impl<'a> SymbolicParser<'a> {
             return Ok(None);
         }
 
-        let mut indices = Vec::new();
-
-        loop {
-            // Closing bracket without a trailing comma
-            if self
-                .tokens
-                .peek()?
-                .map(|peek| peek.kind.is_punct(Punctuation::RightSquareBracket))
-                .unwrap_or(false)
-            {
-                break;
-            }
-
-            indices.push(self.expect_expr()?);
-
-            if self
-                .tokens
-                .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
-                .is_none()
-            {
-                break;
-            }
-        }
+        let indices = self.expect_comma_separated_list(
+            Punctuation::RightSquareBracket,
+            |parser| parser.expect_non_tuple_expr(),
+        )?;
 
         self.expect_punct(
             "closing ] of index",
@@ -602,13 +668,18 @@ impl<'a> SymbolicParser<'a> {
         Ok(Some(indices))
     }
 
-    fn try_ident(&mut self) -> Result<Option<Token<'a>>, Error> {
-        self.tokens
-            .next_if(|token| matches!(token.kind, TokenKind::Ident))
-    }
-
     fn expect_ident(&mut self, desc: &'static str) -> Result<Token<'a>, Error> {
         self.expect_kind(desc, |kind| matches!(kind, TokenKind::Ident))
+    }
+
+    fn expect_previously_defined_var(
+        &mut self,
+    ) -> Result<SymbolicValue, Error> {
+        let var_name = self.expect_ident("variable name")?.text;
+        let value = self.identifiers.get(var_name).ok_or_else(|| {
+            ParseError::ExpectedDefinedVariable(var_name.into())
+        })?;
+        Ok(*value)
     }
 
     fn expect_keyword(
@@ -686,58 +757,28 @@ impl<'a> SymbolicParser<'a> {
             .is_some()
         {
             self.expect_generic_type_list()
-                .map(|(generics, _)| generics)
         } else {
             Ok(Vec::new())
         }
     }
 
-    fn expect_generic_type_list(
-        &mut self,
-    ) -> Result<(Vec<SymbolicType>, Range<usize>), Error> {
-        let start = self
-            .expect_punct(
-                "'<' to start list of type arguments",
-                Punctuation::LeftAngleBracket,
-            )?
-            .span
-            .start;
+    fn expect_generic_type_list(&mut self) -> Result<Vec<SymbolicType>, Error> {
+        self.expect_punct(
+            "Opening '<' in list of type arguments",
+            Punctuation::LeftAngleBracket,
+        )?;
 
-        let mut generic_types = Vec::new();
-        loop {
-            if let Some(close) = self.tokens.next_if(|token| {
-                token.kind.is_punct(Punctuation::RightAngleBracket)
-            })? {
-                // Break here handles empty list, and case where there
-                // has been a trailing comma after the last type
-                // argument.
-                return Ok((generic_types, start..close.span.end));
-            }
+        let generic_types = self.expect_comma_separated_list(
+            Punctuation::RightAngleBracket,
+            |parser| parser.expect_type(),
+        )?;
 
-            generic_types.push(self.expect_type()?);
+        self.expect_punct(
+            "Closing '>' in list of type arguments",
+            Punctuation::RightAngleBracket,
+        )?;
 
-            let token = self.tokens.next()?.ok_or(
-                ParseError::UnexpectedEndOfString(
-                    "closing '>' of type arguments",
-                ),
-            )?;
-
-            if token.kind.is_punct(Punctuation::RightAngleBracket) {
-                // Break here handles case where the last type
-                // argument has no trailing comma.
-                return Ok((generic_types, start..token.span.end));
-            } else if token.kind.is_punct(Punctuation::Comma) {
-                // Do nothing, next loop will break if this is a
-                // trailing comma.
-            } else {
-                return Err(ParseError::UnexpectedTokenKind {
-                    desc: "comma or closing '>' of type arguments",
-                    kind: token.kind,
-                    byte_index: token.span.start,
-                }
-                .into());
-            }
-        }
+        Ok(generic_types)
     }
 }
 
@@ -794,10 +835,13 @@ impl<'a> SymbolicTokenizer<'a> {
             return Ok(());
         }
 
-        let c = self.text[start..]
-            .chars()
-            .next()
-            .expect("End-of-string already handled");
+        let (char1, opt_char2) = {
+            let mut char_iter = self.text[start..].chars();
+            let char1 =
+                char_iter.next().expect("End-of-string already handled");
+            let opt_char2 = char_iter.next();
+            (char1, opt_char2)
+        };
         let mut num_bytes = self.text[start..]
             .char_indices()
             .skip(1)
@@ -805,7 +849,7 @@ impl<'a> SymbolicTokenizer<'a> {
             .map(|(i, _)| i)
             .unwrap_or_else(|| self.text.len() - start);
 
-        let kind = match c {
+        let kind = match char1 {
             '.' => TokenKind::Punct(Punctuation::Period),
             ',' => TokenKind::Punct(Punctuation::Comma),
             '(' => TokenKind::Punct(Punctuation::LeftParen),
@@ -818,17 +862,10 @@ impl<'a> SymbolicTokenizer<'a> {
             '}' => TokenKind::Punct(Punctuation::RightBrace),
             ';' => TokenKind::Punct(Punctuation::Semicolon),
             '=' => TokenKind::Punct(Punctuation::SingleEquals),
+            '+' => TokenKind::Punct(Punctuation::Plus),
+            '*' => TokenKind::Punct(Punctuation::Multiply),
             ':' => {
-                let (next_loc, next) = self.text[start..]
-                    .char_indices()
-                    .skip(1)
-                    .next()
-                    .ok_or_else(|| {
-                        ParseError::UnexpectedEndOfString(
-                            "Second ':' of '::' token",
-                        )
-                    })?;
-                if next == ':' {
+                if opt_char2 == Some(':') {
                     num_bytes = 2;
                     TokenKind::Punct(Punctuation::DoubleColon)
                 } else {
@@ -870,7 +907,7 @@ impl<'a> SymbolicTokenizer<'a> {
             }
             _ => {
                 return Err(ParseError::UnexpectedChar {
-                    c,
+                    c: char1,
                     byte_index: start,
                 }
                 .into());

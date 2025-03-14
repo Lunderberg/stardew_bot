@@ -165,7 +165,9 @@ impl PathfindingUI {
             .into_iter()
             .map(|expr| graph.parse(expr))
             .collect::<Result<Vec<_>, _>>()?;
-            let main_func = graph.function_def(vec![], outputs);
+
+            let output = graph.tuple(outputs);
+            let main_func = graph.function_def(vec![], output);
             graph.name(main_func, "main")?;
             graph.mark_extern_func(main_func)?;
 
@@ -271,7 +273,8 @@ impl PathfindingUI {
                 })
                 .collect();
 
-            let main_func = graph.function_def(vec![], outputs);
+            let output = graph.tuple(outputs);
+            let main_func = graph.function_def(vec![], output);
             graph.name(main_func, "main")?;
             graph.mark_extern_func(main_func)?;
 
@@ -514,7 +517,8 @@ impl PathfindingUI {
                 })
                 .collect();
 
-            let main_func = graph.function_def(vec![], outputs);
+            let output = graph.tuple(outputs);
+            let main_func = graph.function_def(vec![], output);
             graph.name(main_func, "main")?;
             graph.mark_extern_func(main_func)?;
 

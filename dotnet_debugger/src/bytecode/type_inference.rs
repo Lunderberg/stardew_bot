@@ -4,7 +4,7 @@ use elsa::FrozenMap;
 use thiserror::Error;
 
 use crate::{
-    runtime_type::{DotNetType, FunctionType, RuntimePrimType},
+    runtime_type::{DotNetType, FunctionType, RuntimePrimType, TupleType},
     CachedReader, Error, RuntimeType,
 };
 
@@ -104,20 +104,24 @@ impl<'a> TypeInference<'a> {
             };
 
             let inferred_type = match graph[index_to_infer].as_ref() {
-                ExprKind::Function { params, outputs } => {
+                ExprKind::Function { params, output } => {
                     let params = params
                         .iter()
                         .map(|param| expect_cache(*param))
                         .cloned()
                         .collect();
-                    let outputs = outputs
-                        .iter()
-                        .map(|output| expect_cache(*output))
-                        .cloned()
-                        .collect();
-                    FunctionType { params, outputs }.into()
+                    let output = Box::new(expect_cache(*output).clone());
+                    FunctionType { params, output }.into()
                 }
                 ExprKind::FunctionArg(ty) => ty.clone(),
+                ExprKind::Tuple(elements) => {
+                    let elements = elements
+                        .iter()
+                        .map(|element| expect_cache(*element))
+                        .cloned()
+                        .collect();
+                    TupleType(elements).into()
+                }
                 ExprKind::StaticField(static_field) => {
                     let reader = self.reader()?;
                     static_field.runtime_type(reader)?

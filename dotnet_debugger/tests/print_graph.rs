@@ -9,7 +9,7 @@ fn print_expanded_graph() {
     let active_index = graph.access_field(subfield, "active_index");
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -39,7 +39,7 @@ fn print_compact_graph() {
     let active_index = graph.access_field(subfield, "active_index");
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -68,7 +68,7 @@ fn print_named_object() {
     let active_index = graph.access_field(subfield, "active_index");
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -99,7 +99,7 @@ fn print_named_intermediate_object() {
     graph.name(active_index, "index").unwrap();
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -137,7 +137,7 @@ fn print_with_duplicate_names() {
     graph.name(active_index, "obj").unwrap();
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -164,7 +164,7 @@ fn print_nullary_function_definition() {
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, active_index);
 
-    let func = graph.function_def(vec![], vec![item]);
+    let func = graph.function_def(vec![], item);
     graph.name(func, "main").unwrap();
     graph.mark_extern_func(func).unwrap();
 
@@ -193,7 +193,7 @@ fn print_unary_function_definition() {
     let array = graph.access_field(subfield, "list._items");
     let item = graph.access_index(array, index);
 
-    let func = graph.function_def(vec![index], vec![item]);
+    let func = graph.function_def(vec![index], item);
     graph.name(func, "main").unwrap();
 
     graph.mark_extern_func(func).unwrap();
