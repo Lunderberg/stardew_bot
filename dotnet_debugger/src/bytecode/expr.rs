@@ -718,6 +718,103 @@ impl SymbolicGraph {
         Ok(())
     }
 
+    /// Collect the subgraph of all nodes between the specified
+    ///
+    /// Returns the set of all nodes such that there exists a path
+    /// from at least one of the inputs to the node, and from the node
+    /// to at least one of the outputs.  The set is inclusive, and
+    /// will include all input nodes that can reach an output node,
+    /// and all output nodes that can be reached from an input node.
+    ///
+    /// This is used when inspecting a function.  For example,
+    /// identifying the set of nodes that should be printed within the
+    /// body of a function.  Alternatively, the set of nodes which
+    /// need to be rewritten when inlining a function.
+    pub fn collect_subgraph(
+        &self,
+        inputs: impl IntoIterator<Item = SymbolicValue>,
+        outputs: impl IntoIterator<Item = SymbolicValue>,
+    ) -> Vec<OpIndex> {
+        let inputs: Vec<OpIndex> = inputs
+            .into_iter()
+            .filter_map(|input| input.as_op_index())
+            .collect();
+
+        if inputs.is_empty() {
+            // Early return in the case that there are no inputs.
+            // This can occur for nullary functions.
+            return vec![];
+        };
+
+        let earliest_input = inputs
+            .iter()
+            .map(|index| index.0)
+            .min()
+            .expect("Only empty sequences can return None");
+
+        // Step 1, walk backwards from the outputs to the inputs.  The
+        // filter on `earliest_input` reduces the number of nodes that
+        // must be inspected.  Because nodes may only ever reference
+        // nodes that appear earlier in the operation list, a node
+        // that appears prior to the earliest input may not depend on
+        // any inputs.
+        let used_by_outputs: Vec<OpIndex> = {
+            let mut to_visit = Vec::<OpIndex>::new();
+            let mut used_by_outputs = HashSet::<OpIndex>::new();
+
+            macro_rules! mark {
+                ($value:expr) => {
+                    $value
+                        .as_op_index()
+                        .filter(|index| index.0 >= earliest_input)
+                        .filter(|index| !used_by_outputs.contains(index))
+                        .into_iter()
+                        .for_each(|index| {
+                            to_visit.push(index);
+                            used_by_outputs.insert(index);
+                        })
+                };
+            }
+
+            for output in outputs {
+                mark!(output);
+            }
+
+            while let Some(visiting) = to_visit.pop() {
+                self[visiting].visit_input_values(|value| mark!(value));
+            }
+
+            used_by_outputs
+                .into_iter()
+                .sorted_by_key(|index| index.0)
+                .collect()
+        };
+
+        // Step 2, walk forward from the inputs to the outputs.  This
+        // only considers nodes that were found earlier when walking
+        // from the outputs.
+        let mut depend_on_inputs: HashSet<OpIndex> =
+            inputs.into_iter().collect();
+        let mut subgraph: Vec<OpIndex> =
+            depend_on_inputs.iter().cloned().collect();
+
+        for index in used_by_outputs {
+            let mut uses_input = false;
+            self[index].visit_input_values(|value| {
+                if let Some(upstream) = value.as_op_index() {
+                    if depend_on_inputs.contains(&upstream) {
+                        uses_input = true;
+                    }
+                }
+            });
+            if uses_input {
+                subgraph.push(index);
+                depend_on_inputs.insert(index);
+            }
+        }
+        subgraph
+    }
+
     pub fn simplify<'a>(
         &self,
         reader: impl Into<Option<CachedReader<'a>>>,
@@ -1695,83 +1792,14 @@ impl<'a> GraphPrinter<'a> {
                     let ExprKind::Function { params, output } = &op.kind else {
                         unreachable!("Due to earlier filter")
                     };
-                    let earliest_param = params
-                        .iter()
-                        .filter_map(|param| param.as_op_index())
-                        .map(|index| index.0)
-                        .min();
-
                     scope[func_index.0] = Some(func_index);
 
-                    // The `earliest_param` will be None for nullary
-                    // functions.  This allows an early return, since
-                    // nullary functions only own themselves, and do
-                    // not own any operations.
-                    let Some(earliest_param) = earliest_param else {
-                        return;
-                    };
-
-                    // Step 1, walk backwards from the outputs to the inputs
-                    let used_by_outputs: Vec<OpIndex> = {
-                        let mut to_visit = Vec::<OpIndex>::new();
-                        let mut used_by_outputs = HashSet::<OpIndex>::new();
-
-                        macro_rules! mark {
-                            ($value:expr) => {
-                                $value
-                                    .as_op_index()
-                                    .filter(|index| index.0 >= earliest_param)
-                                    .filter(|index| {
-                                        !used_by_outputs.contains(index)
-                                    })
-                                    .into_iter()
-                                    .for_each(|index| {
-                                        to_visit.push(index);
-                                        used_by_outputs.insert(index);
-                                    })
-                            };
-                        }
-
-                        mark!(output);
-
-                        while let Some(visiting) = to_visit.pop() {
-                            self.graph[visiting]
-                                .visit_input_values(|value| mark!(value));
-                        }
-
-                        used_by_outputs
-                            .into_iter()
-                            .sorted_by_key(|index| index.0)
-                            .collect()
-                    };
-
-                    // Step 2, walk forward from the inputs to the outputs
-                    let mut depend_on_params: HashSet<OpIndex> = params
-                        .iter()
-                        .filter_map(|param| param.as_op_index())
-                        .collect();
-
-                    for index in used_by_outputs {
-                        let mut uses_param = false;
-                        self.graph[index].visit_input_values(|value| {
-                            if let Some(upstream) = value.as_op_index() {
-                                if depend_on_params.contains(&upstream) {
-                                    uses_param = true;
-                                }
-                            }
+                    self.graph
+                        .collect_subgraph(params.iter().cloned(), Some(*output))
+                        .into_iter()
+                        .for_each(|index| {
+                            scope[index.0] = Some(func_index);
                         });
-                        if uses_param {
-                            depend_on_params.insert(index);
-                        }
-                    }
-
-                    // Step 3, if an operation both depends on the
-                    // function parameters and is used for the
-                    // function's output, then it is considered part
-                    // of the function.
-                    depend_on_params.into_iter().for_each(|index| {
-                        scope[index.0] = Some(func_index);
-                    });
                 });
 
             scope
