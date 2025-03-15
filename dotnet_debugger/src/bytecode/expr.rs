@@ -1249,6 +1249,20 @@ impl SymbolicGraph {
         &self,
         reader: impl Into<Option<CachedReader<'a>>>,
     ) -> Result<VirtualMachine, Error> {
+        let show_steps = std::env::var("SHOW_STEPS")
+            .map(|var| {
+                if var.is_empty() {
+                    false
+                } else if var.eq_ignore_ascii_case("true") {
+                    true
+                } else if let Ok(value) = var.parse::<usize>() {
+                    value > 0
+                } else {
+                    false
+                }
+            })
+            .unwrap_or(false);
+
         let reader = reader.into();
         let expr = self.clone();
 
@@ -1273,10 +1287,21 @@ impl SymbolicGraph {
                 .apply_recursively(),
         )?;
 
+        if show_steps {
+            println!("----------- Initial DCE --------------\n{expr}");
+        }
+
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
+
+        if show_steps {
+            println!("----------- After DCE --------------\n{expr}");
+        }
         let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(reader)?;
+        if show_steps {
+            println!("----------- After CSE --------------\n{expr}");
+        }
 
         let analysis = Analysis::new(reader);
         let rewriter = super::ConstantFold
@@ -1290,10 +1315,23 @@ impl SymbolicGraph {
         let expr = expr.rewrite(rewriter)?;
         expr.validate(reader)?;
 
+        if show_steps {
+            println!("----------- After Simplifcations --------------\n{expr}");
+        }
+
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
+
+        if show_steps {
+            println!("----------- After DCE --------------\n{expr}");
+        }
+
         let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(reader)?;
+
+        if show_steps {
+            println!("----------- After CSE --------------\n{expr}");
+        }
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine()?;
