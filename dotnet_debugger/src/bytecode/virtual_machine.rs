@@ -1,4 +1,4 @@
-use std::{any::Any, collections::HashMap, fmt::Display, ops::Range};
+use std::{any::Any, collections::HashMap, fmt::Display, ops::Range, rc::Rc};
 
 use derive_more::derive::From;
 use memory_reader::Pointer;
@@ -13,7 +13,7 @@ use super::native_function::{NativeFunction, WrappedNativeFunction};
 
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
-    native_functions: Vec<Box<dyn NativeFunction>>,
+    native_functions: Vec<Rc<dyn NativeFunction>>,
     num_outputs: usize,
 }
 
@@ -22,7 +22,7 @@ pub struct VirtualMachine {
     instructions: Vec<Instruction>,
 
     /// Functions in Rust that may be called from the bytecode.
-    native_functions: Vec<Box<dyn NativeFunction>>,
+    native_functions: Vec<Rc<dyn NativeFunction>>,
 
     /// The number of output values to produce.
     num_outputs: usize,
@@ -423,7 +423,15 @@ impl VirtualMachineBuilder {
         T: 'static,
         T: NativeFunction,
     {
-        self.native_functions.push(Box::new(func));
+        self.native_functions.push(Rc::new(func));
+        self
+    }
+
+    pub fn with_rc_native_function(
+        mut self,
+        func: Rc<dyn NativeFunction>,
+    ) -> Self {
+        self.native_functions.push(func);
         self
     }
 
@@ -433,7 +441,7 @@ impl VirtualMachineBuilder {
         WrappedNativeFunction<Func, ArgList>: 'static,
     {
         let wrapped = WrappedNativeFunction::new(func);
-        self.native_functions.push(Box::new(wrapped));
+        self.native_functions.push(Rc::new(wrapped));
         self
     }
 

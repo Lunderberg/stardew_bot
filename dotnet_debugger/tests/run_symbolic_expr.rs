@@ -90,3 +90,28 @@ fn eval_function_call() {
         Some((3 + 5) * (7 + 11))
     );
 }
+
+#[test]
+fn eval_native_function_call() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|a: usize, b: usize| a * b);
+
+    let lhs = graph.add(3, 5);
+    let rhs = graph.add(7, 11);
+    let call = graph.function_call(func, vec![lhs, rhs]);
+    let output = graph.add(call, 13);
+
+    let main = graph.function_def(vec![], output);
+    graph.name(main, "main").unwrap();
+    graph.mark_extern_func(main).unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results.get_as::<usize>(0).unwrap(),
+        Some((3 + 5) * (7 + 11) + 13)
+    );
+}

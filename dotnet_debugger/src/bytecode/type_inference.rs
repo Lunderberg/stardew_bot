@@ -132,6 +132,7 @@ impl<'a> TypeInference<'a> {
                         }
                     }?
                 }
+                ExprKind::NativeFunction(func) => func.signature(),
                 ExprKind::Tuple(elements) => {
                     let elements = elements
                         .iter()
