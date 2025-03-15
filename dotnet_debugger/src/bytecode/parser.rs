@@ -338,6 +338,8 @@ impl<'a> SymbolicParser<'a> {
                 obj = self.generate_field_access_or_operation(obj, field)?;
             } else if let Some(indices) = self.try_container_access()? {
                 obj = self.graph.access_indices(obj, indices);
+            } else if let Some(args) = self.try_function_arguments()? {
+                obj = self.graph.function_call(obj, args);
             } else {
                 break;
             }
@@ -663,6 +665,30 @@ impl<'a> SymbolicParser<'a> {
         self.expect_punct(
             "closing ] of index",
             Punctuation::RightSquareBracket,
+        )?;
+
+        Ok(Some(indices))
+    }
+
+    fn try_function_arguments(
+        &mut self,
+    ) -> Result<Option<Vec<SymbolicValue>>, Error> {
+        if self
+            .tokens
+            .next_if(|token| token.kind.is_punct(Punctuation::LeftParen))?
+            .is_none()
+        {
+            return Ok(None);
+        }
+
+        let indices = self
+            .expect_comma_separated_list(Punctuation::RightParen, |parser| {
+                parser.expect_non_tuple_expr()
+            })?;
+
+        self.expect_punct(
+            "closing ')' of function arguments",
+            Punctuation::RightParen,
         )?;
 
         Ok(Some(indices))

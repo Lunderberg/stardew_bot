@@ -44,6 +44,11 @@ pub enum ExprKind {
         output: SymbolicValue,
     },
 
+    FunctionCall {
+        func: SymbolicValue,
+        args: Vec<SymbolicValue>,
+    },
+
     Tuple(Vec<SymbolicValue>),
 
     /// A static member of a class.  These are specified in terms of
@@ -528,6 +533,14 @@ impl SymbolicGraph {
         self.push(ExprKind::Function { params, output })
     }
 
+    pub fn function_call(
+        &mut self,
+        func: SymbolicValue,
+        args: Vec<SymbolicValue>,
+    ) -> SymbolicValue {
+        self.push(ExprKind::FunctionCall { func, args })
+    }
+
     pub fn tuple(&mut self, elements: Vec<SymbolicValue>) -> SymbolicValue {
         self.push(ExprKind::Tuple(elements))
     }
@@ -854,22 +867,47 @@ impl SymbolicGraph {
             let opt_remapped = op.kind.try_remap(&prev_index_lookup);
             let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
 
-            let value = rewriter
-                .rewrite_expr(&mut builder, kind)?
-                .unwrap_or_else(|| {
-                    let expr: Expr = if let Some(remapped) = opt_remapped {
-                        remapped.into()
-                    } else {
-                        op.clone()
-                    };
-                    builder.push(expr)
-                });
+            let opt_value = rewriter.rewrite_expr(&mut builder, kind)?;
+            let value = opt_value.unwrap_or_else(|| {
+                let expr: Expr = if let Some(remapped) = opt_remapped {
+                    remapped.into()
+                } else {
+                    op.clone()
+                };
+                builder.push(expr)
+            });
             prev_index_lookup.insert(old_index, value);
         }
 
         builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
 
         Ok(builder)
+    }
+
+    pub fn rewrite_subtree(
+        &mut self,
+        rewriter: impl GraphRewrite,
+        indices: impl Iterator<Item = OpIndex>,
+        rewrites_applied: &mut HashMap<OpIndex, SymbolicValue>,
+    ) -> Result<(), Error> {
+        for old_index in indices {
+            let op = self[old_index].clone();
+            let opt_remapped = op.kind.try_remap(rewrites_applied);
+            let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
+
+            let value =
+                rewriter.rewrite_expr(self, kind)?.unwrap_or_else(|| {
+                    let expr: Expr = if let Some(remapped) = opt_remapped {
+                        remapped.into()
+                    } else {
+                        op
+                    };
+                    self.push(expr)
+                });
+            rewrites_applied.insert(old_index, value);
+        }
+
+        Ok(())
     }
 
     fn reachable(
@@ -924,7 +962,7 @@ impl SymbolicGraph {
         Ok(builder)
     }
 
-    pub fn eliminate_common_subexpresssions(self) -> Result<Self, Error> {
+    pub fn eliminate_common_subexpressions(self) -> Result<Self, Error> {
         let mut builder = Self::new();
 
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
@@ -942,7 +980,16 @@ impl SymbolicGraph {
                 *new_index
             } else {
                 let new_index = builder.push(new_kind.clone());
-                dedup_lookup.insert(new_kind, new_index);
+
+                // Temporary workaround.  The long-term fix is to make
+                // update the hashing so that FunctionArg have
+                // structural equality when encountering points of
+                // definition, but reference equality when
+                // encountering points of use (that haven't already
+                // been defined, that is).
+                if !matches!(new_kind, ExprKind::FunctionArg(_)) {
+                    dedup_lookup.insert(new_kind, new_index);
+                }
                 new_index
             };
             prev_index_lookup.insert(prev_index, new_index);
@@ -1066,6 +1113,13 @@ impl SymbolicGraph {
                     // any other context, but thankfully I don't yet
                     // support any other contexts.
                 }
+                ExprKind::FunctionCall { .. } => {
+                    todo!(
+                        "Handle function calls in the VM.  \
+                         Until then, all functions should be inlined."
+                    )
+                }
+
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
@@ -1168,7 +1222,7 @@ impl SymbolicGraph {
 
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
-        let expr = expr.eliminate_common_subexpresssions()?;
+        let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(reader)?;
 
         let analysis = Analysis::new(reader);
@@ -1177,6 +1231,7 @@ impl SymbolicGraph {
             .then(super::RemoveUnusedPrimcast(&analysis))
             .then(super::LowerSymbolicExpr(&analysis))
             .then(super::RemoveUnusedPointerCast)
+            .then(super::InlineFunctionCalls)
             .apply_recursively();
 
         let expr = expr.rewrite(rewriter)?;
@@ -1184,7 +1239,7 @@ impl SymbolicGraph {
 
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
-        let expr = expr.eliminate_common_subexpresssions()?;
+        let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(reader)?;
 
         // Virtual machine, in terms of sequential operations.
@@ -1196,7 +1251,7 @@ impl SymbolicGraph {
 }
 
 impl SymbolicValue {
-    fn as_op_index(self) -> Option<OpIndex> {
+    pub(crate) fn as_op_index(self) -> Option<OpIndex> {
         match self {
             SymbolicValue::Result(op_index) => Some(op_index),
             _ => None,
@@ -1247,6 +1302,16 @@ impl ExprKind {
                     let params = params.iter().map(remap_or_no_op).collect();
                     let output = opt_output.unwrap_or_else(|| *output);
                     ExprKind::Function { params, output }
+                })
+            }
+            ExprKind::FunctionCall { func, args } => {
+                let opt_func = remap(func);
+                let requires_remap =
+                    opt_func.is_some() || vec_requires_remap(args);
+                requires_remap.then(|| {
+                    let func = opt_func.unwrap_or_else(|| *func);
+                    let args = args.iter().map(remap_or_no_op).collect();
+                    ExprKind::FunctionCall { func, args }
                 })
             }
             ExprKind::Tuple(elements) => {
@@ -1347,6 +1412,10 @@ impl ExprKind {
             ExprKind::FunctionArg(_) | ExprKind::StaticField(_) => {}
             ExprKind::Function { output, .. } => {
                 callback(*output);
+            }
+            ExprKind::FunctionCall { func, args } => {
+                callback(*func);
+                args.iter().for_each(|arg| callback(*arg));
             }
             ExprKind::Tuple(elements) => {
                 elements.iter().for_each(|element| callback(*element));
@@ -1507,6 +1576,24 @@ impl<'a> GraphComparison<'a> {
                 },
                 ExprKind::FunctionArg(lhs_ty) => match rhs_kind {
                     ExprKind::FunctionArg(rhs_ty) => lhs_ty == rhs_ty,
+                    _ => false,
+                },
+                ExprKind::FunctionCall {
+                    func: lhs_func,
+                    args: lhs_args,
+                } => match rhs_kind {
+                    ExprKind::FunctionCall {
+                        func: rhs_func,
+                        args: rhs_args,
+                    } => {
+                        equivalent_value!(lhs_func, rhs_func)
+                            && lhs_args.len() == rhs_args.len()
+                            && lhs_args.iter().zip(rhs_args).all(
+                                |(lhs_arg, rhs_arg)| {
+                                    equivalent_value!(lhs_arg, rhs_arg)
+                                },
+                            )
+                    }
                     _ => false,
                 },
                 ExprKind::Tuple(lhs_tuple) => match rhs_kind {
@@ -1709,6 +1796,10 @@ impl Display for ExprKind {
                 write!(f, " {{ {output} }}")?;
 
                 Ok(())
+            }
+            ExprKind::FunctionCall { func, args } => {
+                write!(f, "{func}")?;
+                write_tuple(f, args)
             }
             ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {
@@ -2182,6 +2273,11 @@ impl<'a> Display for ExprPrinter<'a> {
             }
             ExprKind::FunctionArg(ty) => {
                 write!(f, "{index_printer}: {ty}")
+            }
+            ExprKind::FunctionCall { func, args } => {
+                let func = self.with_value(*func);
+                write!(f, "{func}")?;
+                write_tuple(f, args)
             }
             ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {

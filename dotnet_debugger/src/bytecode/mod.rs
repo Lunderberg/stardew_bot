@@ -28,6 +28,9 @@ pub use lower_symbolic_expr::LowerSymbolicExpr;
 mod remove_unused_pointer_cast;
 pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
 
+mod inline_function_calls;
+pub use inline_function_calls::InlineFunctionCalls;
+
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
 

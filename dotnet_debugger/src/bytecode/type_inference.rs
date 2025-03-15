@@ -23,6 +23,12 @@ pub enum TypeInferenceError {
          within a remote process."
     )]
     NoRemoteProcess,
+
+    #[error(
+        "Attempted to make a function call \
+             on an expression not of function type."
+    )]
+    AttemptedCallOnNonFunction,
 }
 
 impl<'a> TypeInference<'a> {
@@ -114,6 +120,16 @@ impl<'a> TypeInference<'a> {
                     FunctionType { params, output }.into()
                 }
                 ExprKind::FunctionArg(ty) => ty.clone(),
+                ExprKind::FunctionCall { func, .. } => {
+                    match expect_cache(*func) {
+                        RuntimeType::Function(FunctionType {
+                            output, ..
+                        }) => Ok(output.as_ref().clone()),
+                        _ => {
+                            Err(TypeInferenceError::AttemptedCallOnNonFunction)
+                        }
+                    }?
+                }
                 ExprKind::Tuple(elements) => {
                     let elements = elements
                         .iter()

@@ -382,3 +382,34 @@ fn parse_mixed_operators_with_leading_parentheses() {
         },
     );
 }
+
+#[test]
+fn parse_function_call() {
+    require_identical_graph(
+        "
+        fn multiply(lhs: usize, rhs: usize) { lhs*rhs }
+        fn main(a: usize, b: usize) { multiply(a+b, b+a) }
+        ",
+        |graph| {
+            let lhs = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(lhs, "lhs").unwrap();
+            let rhs = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(rhs, "rhs").unwrap();
+            let prod = graph.mul(lhs, rhs);
+            let multiply = graph.function_def(vec![lhs, rhs], prod);
+            graph.name(multiply, "multiply").unwrap();
+
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let lhs = graph.add(a, b);
+            let rhs = graph.add(b, a);
+            let call = graph.function_call(multiply, vec![lhs, rhs]);
+
+            let main = graph.function_def(vec![a, b], call);
+            graph.name(main, "main").unwrap();
+        },
+    );
+}
