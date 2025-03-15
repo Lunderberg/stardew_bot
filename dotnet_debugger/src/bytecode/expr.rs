@@ -714,7 +714,7 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////////////////////
     //////////////////////////////////////////////////////////////////
 
-    fn iter_ops(
+    pub(crate) fn iter_ops(
         &self,
     ) -> impl DoubleEndedIterator<Item = (OpIndex, &Expr)> + '_ {
         self.ops

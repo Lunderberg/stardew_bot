@@ -413,3 +413,20 @@ fn parse_function_call() {
         },
     );
 }
+
+#[test]
+fn parse_fragment_using_global_variable() {
+    // Named global variable may be used within a graph.parse() call.
+    require_identical_graph(
+        "
+        let var = 1+2;
+        pub fn main() { var + 3 }
+        ",
+        |graph| {
+            let var = graph.add(1, 2);
+            graph.name(var, "var").unwrap();
+
+            graph.parse("pub fn main() { var + 3 }").unwrap();
+        },
+    );
+}

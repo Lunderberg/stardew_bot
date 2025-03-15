@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::Range};
+use std::{borrow::Cow, collections::HashMap, ops::Range};
 
 use itertools::Itertools as _;
 use thiserror::Error;
@@ -8,7 +8,7 @@ use crate::Error;
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
-    identifiers: HashMap<&'a str, SymbolicValue>,
+    identifiers: HashMap<Cow<'a, str>, SymbolicValue>,
     graph: &'a mut SymbolicGraph,
 }
 
@@ -150,9 +150,17 @@ impl TokenKind {
 impl<'a> SymbolicParser<'a> {
     pub(crate) fn new(text: &'a str, graph: &'a mut SymbolicGraph) -> Self {
         let tokens = SymbolicTokenizer::new(text);
+        let identifiers = graph
+            .iter_ops()
+            .filter_map(|(index, op)| {
+                op.name.as_ref().map(|name| {
+                    (name.clone().into(), SymbolicValue::Result(index))
+                })
+            })
+            .collect();
         Self {
             tokens,
-            identifiers: HashMap::new(),
+            identifiers,
             graph,
         }
     }
@@ -423,7 +431,7 @@ impl<'a> SymbolicParser<'a> {
             self.graph.name(value, name)?;
         }
 
-        self.identifiers.insert(name, value);
+        self.identifiers.insert(Cow::Borrowed(name), value);
 
         Ok(())
     }
@@ -507,7 +515,7 @@ impl<'a> SymbolicParser<'a> {
 
         let arg = self.graph.function_arg(ty);
         self.graph.name(arg, param_name)?;
-        self.identifiers.insert(param_name, arg);
+        self.identifiers.insert(Cow::Borrowed(param_name), arg);
         Ok(arg)
     }
 

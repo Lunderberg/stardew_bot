@@ -115,3 +115,24 @@ fn eval_native_function_call() {
         Some((3 + 5) * (7 + 11) + 13)
     );
 }
+
+#[test]
+fn parse_and_eval_native_function_call() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|a: usize, b: usize| a * b);
+    graph.name(func, "func");
+
+    graph
+        .parse("pub fn main() { func(3+5, 7+11) + 13 }")
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(
+        results.get_as::<usize>(0).unwrap(),
+        Some((3 + 5) * (7 + 11) + 13)
+    );
+}
