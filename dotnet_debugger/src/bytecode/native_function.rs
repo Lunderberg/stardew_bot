@@ -5,8 +5,9 @@ use std::any::Any;
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_type::RustType, Error, RuntimePrimType, RuntimePrimValue,
-    RuntimeType, StackValue, VMExecutionError,
+    runtime_type::{FunctionType, RustType},
+    Error, RuntimePrimType, RuntimePrimValue, RuntimeType, StackValue,
+    VMExecutionError,
 };
 
 pub trait NativeFunction {
@@ -14,6 +15,8 @@ pub trait NativeFunction {
         &self,
         args: &mut [&mut Option<StackValue>],
     ) -> Result<Option<StackValue>, Error>;
+
+    fn signature(&self) -> RuntimeType;
 }
 
 pub trait RustNativeObject: Any {}
@@ -28,10 +31,20 @@ where
     ) -> Result<Option<StackValue>, Error> {
         self(args)
     }
+
+    fn signature(&self) -> RuntimeType {
+        FunctionType {
+            params: None,
+            output: Box::new(RuntimeType::Unknown),
+        }
+        .into()
+    }
 }
 
 trait WrapReturn {
     fn wrap_return(self) -> Result<Option<StackValue>, Error>;
+
+    fn return_signature_type() -> RuntimeType;
 }
 
 trait UnwrapArg: Sized {
@@ -39,6 +52,8 @@ trait UnwrapArg: Sized {
     fn unwrap_arg<'t>(
         arg: &'t mut StackValue,
     ) -> Result<Self::Unwrapped<'t>, Error>;
+
+    fn arg_signature_type() -> RuntimeType;
 }
 
 macro_rules! impl_prim_return {
@@ -47,6 +62,10 @@ macro_rules! impl_prim_return {
             fn wrap_return(self) -> Result<Option<StackValue>, Error> {
                 let prim: RuntimePrimValue = self.into();
                 Ok(Some(prim.into()))
+            }
+
+            fn return_signature_type() -> RuntimeType {
+                RuntimeType::Prim(RuntimePrimType::$variant)
             }
         }
 
@@ -69,6 +88,10 @@ macro_rules! impl_prim_return {
                         .into(),
                     ),
                 }
+            }
+
+            fn arg_signature_type() -> RuntimeType {
+                RuntimeType::Prim(RuntimePrimType::$variant)
             }
         }
 
@@ -93,6 +116,10 @@ macro_rules! impl_prim_return {
                     ),
                 }
             }
+
+            fn arg_signature_type() -> RuntimeType {
+                RuntimeType::Prim(RuntimePrimType::$variant)
+            }
         }
 
         impl<'s> UnwrapArg for &'s mut $prim {
@@ -115,6 +142,10 @@ macro_rules! impl_prim_return {
                         .into(),
                     ),
                 }
+            }
+
+            fn arg_signature_type() -> RuntimeType {
+                RuntimeType::Prim(RuntimePrimType::$variant)
             }
         }
     };
@@ -144,11 +175,19 @@ where
     fn wrap_return(self) -> Result<Option<StackValue>, Error> {
         Ok(Some(StackValue::Any(Box::new(self))))
     }
+
+    fn return_signature_type() -> RuntimeType {
+        std::any::TypeId::of::<T>().into()
+    }
 }
 
 impl WrapReturn for StackValue {
     fn wrap_return(self) -> Result<Option<StackValue>, Error> {
         Ok(Some(self))
+    }
+
+    fn return_signature_type() -> RuntimeType {
+        RuntimeType::Unknown
     }
 }
 
@@ -161,6 +200,10 @@ where
             Some(value) => value.wrap_return(),
             None => Ok(None),
         }
+    }
+
+    fn return_signature_type() -> RuntimeType {
+        <T as WrapReturn>::return_signature_type()
     }
 }
 
@@ -175,11 +218,19 @@ where
             Err(err) => Err(err.into()),
         }
     }
+
+    fn return_signature_type() -> RuntimeType {
+        <T as WrapReturn>::return_signature_type()
+    }
 }
 
 impl WrapReturn for () {
     fn wrap_return(self) -> Result<Option<StackValue>, Error> {
         Ok(None)
+    }
+
+    fn return_signature_type() -> RuntimeType {
+        RuntimeType::Unknown
     }
 }
 
@@ -204,6 +255,10 @@ where
             _ => Err(err),
         }
     }
+
+    fn arg_signature_type() -> RuntimeType {
+        std::any::TypeId::of::<T>().into()
+    }
 }
 
 impl<'b, T> UnwrapArg for &'b mut T
@@ -226,6 +281,10 @@ where
             StackValue::Any(any) => any.downcast_mut().ok_or(err),
             _ => Err(err),
         }
+    }
+
+    fn arg_signature_type() -> RuntimeType {
+        std::any::TypeId::of::<T>().into()
     }
 }
 
@@ -299,6 +358,19 @@ macro_rules! impl_wrapped_native_function {
                 );
 
                 result.wrap_return()
+            }
+
+            fn signature(&self) -> RuntimeType {
+                let params = vec![
+                    $(
+                        <$arg_type as UnwrapArg>::arg_signature_type(),
+                    )*
+                ];
+                let output = <Return as WrapReturn>::return_signature_type();
+                FunctionType{
+                    params: Some(params),
+                    output: Box::new(output),
+                }.into()
             }
         }
     };
