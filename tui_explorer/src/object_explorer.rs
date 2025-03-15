@@ -897,20 +897,15 @@ impl ObjectTreeNode {
                     contents: Some(Box::new(contents)),
                 }
             }
-            RuntimeType::Rust(_) => {
+            other @ (RuntimeType::Unknown
+            | RuntimeType::Rust(_)
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_)) => {
                 return Err(
-                    dotnet_debugger::Error::UnexpectedRustTypeInDotNet.into()
-                );
-            }
-            RuntimeType::Function(_) => {
-                return Err(
-                    dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
-                        .into(),
-                );
-            }
-            RuntimeType::Tuple(_) => {
-                return Err(
-                    dotnet_debugger::Error::UnexpectedTupleTypeInDotNet.into(),
+                    dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext(
+                        other.clone(),
+                    )
+                    .into(),
                 );
             }
         };
@@ -1029,24 +1024,12 @@ impl ObjectTreeNode {
                         | DotNetType::MultiDimArray { .. },
                     ) => None,
 
-                    RuntimeType::Rust(_) => {
-                        return Err(
-                            dotnet_debugger::Error::UnexpectedRustTypeInDotNet
-                                .into(),
-                        );
-                    }
-
-                    RuntimeType::Function(_) => {
-                        return Err(
-                            dotnet_debugger::Error::UnexpectedFunctionTypeInDotNet
-                                .into(),
-                        );
-                    }
-                    RuntimeType::Tuple(_) => {
-                        return Err(
-                            dotnet_debugger::Error::UnexpectedTupleTypeInDotNet
-                                .into(),
-                        );
+                    other @ (RuntimeType::Unknown
+                    | RuntimeType::Rust(_)
+                    | RuntimeType::Function(_)
+                    | RuntimeType::Tuple(_)) => {
+                        use dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext as ErrVariant;
+                        return Err(ErrVariant(other.clone()).into());
                     }
                 };
                 if let Some(value) = opt_value {

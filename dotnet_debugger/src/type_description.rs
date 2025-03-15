@@ -238,6 +238,9 @@ impl<'a> TypeHandleRef<'a> {
         };
 
         match runtime_type {
+            RuntimeType::Unknown => {
+                write!(fmt, "(???)")?;
+            }
             RuntimeType::Prim(prim) => {
                 write!(fmt, "{prim}")?;
             }

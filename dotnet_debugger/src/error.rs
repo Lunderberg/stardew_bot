@@ -331,22 +331,10 @@ pub enum Error {
     AttemptedUseOfReservedName(String),
 
     #[error(
-        "A RustType appeared in a context \
+        "Type {0} found in a context \
          where only .NET types are expected."
     )]
-    UnexpectedRustTypeInDotNet,
-
-    #[error(
-        "A FunctionType appeared in a context \
-         where only .NET types are expected."
-    )]
-    UnexpectedFunctionTypeInDotNet,
-
-    #[error(
-        "A TupleType appeared in a context \
-         where only .NET types are expected."
-    )]
-    UnexpectedTupleTypeInDotNet,
+    UnexpectedTypeFoundInDotNetContext(RuntimeType),
 
     #[error(
         "Attempted conversion of rust-native object \

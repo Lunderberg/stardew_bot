@@ -918,17 +918,16 @@ impl<'a> CachedReader<'a> {
                         | DotNetType::Array { method_table, .. }
                         | DotNetType::MultiDimArray { method_table, .. },
                     ) => *method_table,
-                    RuntimeType::Rust(_) => {
-                        return Err(Error::UnexpectedRustTypeInDotNet);
-                    }
-                    RuntimeType::Function(_) => {
-                        return Err(Error::UnexpectedFunctionTypeInDotNet);
-                    }
-                    RuntimeType::Tuple(_) => {
-                        return Err(Error::UnexpectedTupleTypeInDotNet);
-                    }
                     RuntimeType::DotNet(DotNetType::String) => {
                         unreachable!("Handled with builtin_class_name")
+                    }
+                    other @ (RuntimeType::Unknown
+                    | RuntimeType::Rust(_)
+                    | RuntimeType::Function(_)
+                    | RuntimeType::Tuple(_)) => {
+                        return Err(Error::UnexpectedTypeFoundInDotNetContext(
+                            other.clone(),
+                        ));
                     }
                 }
             };

@@ -21,6 +21,10 @@ use crate::{
 /// So in absence of a better name, calling it `RuntimeType` for now.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
 pub enum RuntimeType {
+    // An unknown type, such as the return value of an opaque
+    // function.
+    Unknown,
+
     // Primitive types.  These have a direct representation within the
     // .NET process, can be parsed from a contiguous chunk of bytes,
     // and have a value that can be represented in `RuntimePrimValue`.
@@ -191,11 +195,12 @@ impl RuntimeType {
                 let ptr: Pointer = bytes[..8].try_into().unwrap();
                 Ok(RuntimeValue::MultiDimArray(ptr.into()))
             }
-            RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
-            RuntimeType::Function(_) => {
-                Err(Error::UnexpectedFunctionTypeInDotNet)
+            other @ (RuntimeType::Unknown
+            | RuntimeType::Rust(_)
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_)) => {
+                Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
             }
-            RuntimeType::Tuple(_) => Err(Error::UnexpectedTupleTypeInDotNet),
         }
     }
 
@@ -211,27 +216,13 @@ impl RuntimeType {
             | RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 Ok(Pointer::SIZE)
             }
-            RuntimeType::Rust(_) => Err(Error::UnexpectedRustTypeInDotNet),
-            RuntimeType::Function(_) => {
-                Err(Error::UnexpectedFunctionTypeInDotNet)
-            }
-            RuntimeType::Tuple(_) => Err(Error::UnexpectedTupleTypeInDotNet),
-        }
-    }
 
-    /// Returns true if instances of this type are held by pointer by
-    /// their containing class.
-    pub fn stored_as_ptr(&self) -> bool {
-        match self {
-            RuntimeType::Prim(_) => false,
-            RuntimeType::DotNet(DotNetType::ValueType { .. }) => false,
-            RuntimeType::DotNet(DotNetType::Class { .. }) => true,
-            RuntimeType::DotNet(DotNetType::String) => true,
-            RuntimeType::DotNet(DotNetType::Array { .. }) => true,
-            RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => true,
-            RuntimeType::Rust(_)
+            other @ (RuntimeType::Unknown
+            | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_) => false,
+            | RuntimeType::Tuple(_)) => {
+                Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
+            }
         }
     }
 
@@ -251,7 +242,8 @@ impl RuntimeType {
             RuntimeType::DotNet(DotNetType::MultiDimArray { .. }) => {
                 Some(RuntimePrimType::Ptr)
             }
-            RuntimeType::Rust(_)
+            RuntimeType::Unknown
+            | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_) => None,
         }
@@ -274,7 +266,8 @@ impl RuntimeType {
             )
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_) => None,
+            | RuntimeType::Tuple(_)
+            | RuntimeType::Unknown => None,
         }
     }
 
@@ -324,6 +317,8 @@ impl RuntimeType {
     /// This is used when caching type information, to ensure that the cache is only used when the type information is known.
     pub(crate) fn is_complete(&self) -> bool {
         match self {
+            RuntimeType::Unknown => false,
+
             RuntimeType::Prim(_)
             | RuntimeType::DotNet(DotNetType::String)
             | RuntimeType::Rust(_) => true,
@@ -489,6 +484,7 @@ impl RuntimePrimType {
 impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            RuntimeType::Unknown => write!(f, "(???)"),
             RuntimeType::Prim(prim) => write!(f, "{prim}"),
             RuntimeType::DotNet(DotNetType::ValueType {
                 method_table: Some(method_table),
