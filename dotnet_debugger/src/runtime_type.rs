@@ -153,7 +153,13 @@ pub enum RustType {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct FunctionType {
-    pub(crate) params: Vec<RuntimeType>,
+    /// The parameter types accepted by the function.  Should be
+    /// `None` for functions with unknown number of arguments.  For
+    /// functions with known arity but unknown argument types, should
+    /// be a vector with all elements being `RuntimeType::Unknown`.
+    pub(crate) params: Option<Vec<RuntimeType>>,
+
+    /// The return type of the function
     pub(crate) output: Box<RuntimeType>,
 }
 
@@ -324,7 +330,11 @@ impl RuntimeType {
             | RuntimeType::Rust(_) => true,
 
             RuntimeType::Function(FunctionType { params, output }) => {
-                params.iter().all(|ty| ty.is_complete()) && output.is_complete()
+                output.is_complete()
+                    && params
+                        .as_ref()
+                        .map(|params| params.iter().all(|ty| ty.is_complete()))
+                        .unwrap_or(false)
             }
 
             RuntimeType::DotNet(
@@ -580,7 +590,11 @@ impl std::fmt::Display for FunctionType {
         };
 
         write!(fmt, "Fn")?;
-        write_tuple(fmt, &self.params)?;
+        if let Some(params) = &self.params {
+            write_tuple(fmt, params)?;
+        } else {
+            write!(fmt, "(...)")?;
+        }
 
         write!(fmt, " -> {}", self.output)?;
 

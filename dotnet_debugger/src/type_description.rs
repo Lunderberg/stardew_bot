@@ -299,7 +299,11 @@ impl<'a> TypeHandleRef<'a> {
             RuntimeType::Rust(rust_type) => write!(fmt, "{rust_type}")?,
             RuntimeType::Function(FunctionType { params, output }) => {
                 write!(fmt, "Fn")?;
-                write_tuple(fmt, params)?;
+                if let Some(params) = params {
+                    write_tuple(fmt, params)?;
+                } else {
+                    write!(fmt, "(...)")?;
+                }
 
                 write!(fmt, " -> ")?;
                 Self::print_runtime_type(output, fmt, reader)?;

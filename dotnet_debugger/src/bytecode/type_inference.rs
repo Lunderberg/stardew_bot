@@ -111,11 +111,13 @@ impl<'a> TypeInference<'a> {
 
             let inferred_type = match graph[index_to_infer].as_ref() {
                 ExprKind::Function { params, output } => {
-                    let params = params
-                        .iter()
-                        .map(|param| expect_cache(*param))
-                        .cloned()
-                        .collect();
+                    let params = Some(
+                        params
+                            .iter()
+                            .map(|param| expect_cache(*param))
+                            .cloned()
+                            .collect(),
+                    );
                     let output = Box::new(expect_cache(*output).clone());
                     FunctionType { params, output }.into()
                 }
