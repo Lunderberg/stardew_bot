@@ -54,6 +54,9 @@ pub enum RuntimeType {
 
     // A tuple of return values.
     Tuple(TupleType),
+
+    // An iterator over some underlying type
+    Iterator(IteratorType),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -166,6 +169,11 @@ pub struct FunctionType {
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct TupleType(pub(crate) Vec<RuntimeType>);
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct IteratorType {
+    pub(crate) item: Box<RuntimeType>,
+}
+
 impl RuntimeType {
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
         match self {
@@ -204,7 +212,8 @@ impl RuntimeType {
             other @ (RuntimeType::Unknown
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_)) => {
+            | RuntimeType::Tuple(_)
+            | RuntimeType::Iterator(_)) => {
                 Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
             }
         }
@@ -226,7 +235,8 @@ impl RuntimeType {
             other @ (RuntimeType::Unknown
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_)) => {
+            | RuntimeType::Tuple(_)
+            | RuntimeType::Iterator(_)) => {
                 Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
             }
         }
@@ -251,7 +261,8 @@ impl RuntimeType {
             RuntimeType::Unknown
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_) => None,
+            | RuntimeType::Tuple(_)
+            | RuntimeType::Iterator(_) => None,
         }
     }
 
@@ -273,6 +284,7 @@ impl RuntimeType {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
+            | RuntimeType::Iterator(_)
             | RuntimeType::Unknown => None,
         }
     }
@@ -347,6 +359,8 @@ impl RuntimeType {
             RuntimeType::Tuple(TupleType(elements)) => {
                 elements.iter().all(|ty| ty.is_complete())
             }
+
+            RuntimeType::Iterator(IteratorType { item }) => item.is_complete(),
         }
     }
 }
@@ -539,6 +553,9 @@ impl std::fmt::Display for RuntimeType {
             RuntimeType::Rust(rust_type) => write!(f, "{rust_type}"),
             RuntimeType::Function(func_type) => write!(f, "{func_type}"),
             RuntimeType::Tuple(tuple_type) => write!(f, "{tuple_type}"),
+            RuntimeType::Iterator(iterator_type) => {
+                write!(f, "{iterator_type}")
+            }
         }
     }
 }
@@ -613,6 +630,12 @@ impl std::fmt::Display for TupleType {
         }
         write!(fmt, ")")?;
         Ok(())
+    }
+}
+
+impl std::fmt::Display for IteratorType {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(fmt, "Iterator<Item = {}>", self.item)
     }
 }
 

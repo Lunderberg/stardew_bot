@@ -3,7 +3,7 @@ use std::borrow::Borrow;
 use memory_reader::{MemoryReader, OwnedBytes, Pointer};
 
 use crate::{
-    runtime_type::{DotNetType, FunctionType, TupleType},
+    runtime_type::{DotNetType, FunctionType, IteratorType, TupleType},
     unpack_fields, CachedReader, CorElementType, Error, MethodTable,
     ReadTypedPointer, RuntimeType, TypedPointer,
 };
@@ -310,6 +310,11 @@ impl<'a> TypeHandleRef<'a> {
             }
             RuntimeType::Tuple(TupleType(elements)) => {
                 write_tuple(fmt, elements)?;
+            }
+            RuntimeType::Iterator(IteratorType { item }) => {
+                write!(fmt, "Iterator<Item = ")?;
+                Self::print_runtime_type(item, fmt, reader)?;
+                write!(fmt, ">")?;
             }
         }
         Ok(())
