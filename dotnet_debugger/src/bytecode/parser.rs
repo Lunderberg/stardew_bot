@@ -194,27 +194,38 @@ impl<'a> SymbolicParser<'a> {
     /// The body of a block consists of zero or more statements,
     /// followed by an expression.
     fn expect_block_body(&mut self) -> Result<SymbolicValue, Error> {
-        // Zero or more statements
-        let mut last_assignment = None;
-        while let Some(keyword) = self.peek_keyword()? {
-            last_assignment = Some(match keyword {
-                Keyword::Let => self.expect_assignment()?,
-                Keyword::Function | Keyword::Public => {
-                    self.expect_named_function()?
+        let mut block_result = None;
+        loop {
+            let peek = self.tokens.peek()?.map(|token| token.kind);
+            match peek {
+                None | Some(TokenKind::Punct(Punctuation::RightBrace)) => {
+                    break;
                 }
-            });
-        }
-
-        let expr = match self.tokens.peek()?.map(|token| &token.kind) {
-            None | Some(TokenKind::Punct(Punctuation::RightBrace)) => {
-                // Allow the last assignment, if any, to be the return
-                // value of a block.
-                last_assignment.unwrap_or_else(|| self.graph.tuple(vec![]))
+                Some(TokenKind::Keyword(Keyword::Let)) => {
+                    block_result = Some(self.expect_assignment()?);
+                }
+                Some(TokenKind::Keyword(
+                    Keyword::Function | Keyword::Public,
+                )) => {
+                    block_result = Some(self.expect_named_function()?);
+                }
+                _ => {
+                    block_result = Some(self.expect_expr()?);
+                    if self
+                        .tokens
+                        .next_if(|token| {
+                            token.kind.is_punct(Punctuation::Semicolon)
+                        })?
+                        .is_none()
+                    {
+                        break;
+                    }
+                }
             }
-            _ => self.expect_expr()?,
-        };
-
-        Ok(expr)
+        }
+        let block_result =
+            block_result.unwrap_or_else(|| self.graph.tuple(vec![]));
+        Ok(block_result)
     }
 
     fn expect_comma_separated_list<ItemParser, Item>(
@@ -374,19 +385,6 @@ impl<'a> SymbolicParser<'a> {
             .peek()?
             .map(|token| match token.kind {
                 TokenKind::Punct(punct) => Some(punct),
-                _ => None,
-            })
-            .flatten();
-
-        Ok(opt_keyword)
-    }
-
-    fn peek_keyword(&mut self) -> Result<Option<Keyword>, Error> {
-        let opt_keyword = self
-            .tokens
-            .peek()?
-            .map(|token| match token.kind {
-                TokenKind::Keyword(keyword) => Some(keyword),
                 _ => None,
             })
             .flatten();

@@ -1027,6 +1027,7 @@ impl SymbolicGraph {
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
         let mut instructions = Vec::new();
         let mut currently_stored: HashMap<OpIndex, VMArg> = HashMap::new();
+        let mut previously_consumed: HashSet<OpIndex> = HashSet::new();
 
         assert!(!self.extern_funcs.is_empty());
 
@@ -1098,13 +1099,18 @@ impl SymbolicGraph {
                     &SymbolicValue::Ptr(ptr) => {
                         VMArg::Const(RuntimePrimValue::Ptr(ptr))
                     }
-                    SymbolicValue::Result(op_index) => currently_stored
-                        .get(&op_index)
-                        .expect(
-                            "Internal error, \
+                    SymbolicValue::Result(op_index) => {
+                        if previously_consumed.contains(&op_index) {
+                            return Err(Error::AttemptedUseOfConsumedValue);
+                        }
+                        currently_stored
+                            .get(&op_index)
+                            .expect(
+                                "Internal error, \
                              {op_index} not located anywhere",
-                        )
-                        .clone(),
+                            )
+                            .clone()
+                    }
                 }
             };
         }
@@ -1148,12 +1154,70 @@ impl SymbolicGraph {
                         for arg in args {
                             vm_args.push(value_to_arg!(arg));
                         }
-                        instructions.push(Instruction::NativeFunctionCall {
-                            index: *native_func_index,
-                            args: vm_args,
-                            output: Some(op_output),
-                        });
-                        currently_stored.insert(op_index, op_output.into());
+
+                        let mutates_first_argument = native_functions
+                            [native_func_index.0]
+                            .mutates_first_argument();
+
+                        if mutates_first_argument {
+                            // The function mutates its input
+                            // argument.  No output index is required.
+                            // However, the `currently_stored` lookup
+                            // should be updated to no longer contain
+                            // the first argument.
+                            let first_arg_op = match &args[0] {
+                                SymbolicValue::Result(op_index) => *op_index,
+                                SymbolicValue::Int(_) |
+                                SymbolicValue::Ptr(_) => todo!(
+                                    "Attempted mutation of const SymbolicValue.  \
+                                     Should handle this case earlier using \
+                                     a new ExprKind to represent mutable constants."
+                                ),
+
+                            };
+                            let first_arg_loc = match &vm_args[0] {
+                                VMArg::SavedValue(stack_index) => *stack_index,
+                                VMArg::Const(_) => todo!(
+                                    "Attempted mutation of VMArg::Const.  \
+                                     Should handle this case earlier using \
+                                     a new ExprKind to represent mutable constants."
+                                ),
+                            };
+
+                            instructions.push(
+                                Instruction::NativeFunctionCall {
+                                    index: *native_func_index,
+                                    args: vm_args,
+                                    output: None,
+                                },
+                            );
+
+                            currently_stored.remove(&first_arg_op);
+                            previously_consumed.insert(first_arg_op);
+
+                            if op_output.0 < outputs.len() {
+                                instructions.push(Instruction::Swap(
+                                    first_arg_loc,
+                                    op_output,
+                                ));
+                                currently_stored
+                                    .insert(op_index, op_output.into());
+                            } else {
+                                currently_stored
+                                    .insert(op_index, first_arg_loc.into());
+                            }
+                        } else {
+                            // The function produces an output value, to
+                            // be stored in the output index.
+                            instructions.push(
+                                Instruction::NativeFunctionCall {
+                                    index: *native_func_index,
+                                    args: vm_args,
+                                    output: Some(op_output),
+                                },
+                            );
+                            currently_stored.insert(op_index, op_output.into());
+                        }
                     } else {
                         todo!(
                             "Handle IR-defined function calls in the VM.  \
@@ -1335,7 +1399,15 @@ impl SymbolicGraph {
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine()?;
+
+        if show_steps {
+            println!("----------- As VM --------------\n{vm}");
+        }
+
         let vm = vm.simplify();
+        if show_steps {
+            println!("----------- VM (simplified) --------------\n{vm}");
+        }
 
         Ok(vm)
     }

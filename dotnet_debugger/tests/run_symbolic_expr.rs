@@ -121,7 +121,7 @@ fn parse_and_eval_native_function_call() {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize, b: usize| a * b);
-    graph.name(func, "func");
+    graph.name(func, "func").unwrap();
 
     graph
         .parse("pub fn main() { func(3+5, 7+11) + 13 }")
@@ -135,4 +135,43 @@ fn parse_and_eval_native_function_call() {
         results.get_as::<usize>(0).unwrap(),
         Some((3 + 5) * (7 + 11) + 13)
     );
+}
+
+#[test]
+fn collecting_into_vector() {
+    let mut graph = SymbolicGraph::new();
+
+    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    graph.name(init_vector, "init_vector").unwrap();
+
+    let push_vector =
+        graph.native_function(|vec: &mut Vec<usize>, element: usize| {
+            vec.push(element);
+        });
+    graph.name(push_vector, "push_vector").unwrap();
+
+    graph
+        .parse(
+            "
+            pub fn main() {
+               let vec = init_vector();
+               let vec = push_vector(vec, 1);
+               let vec = push_vector(vec, 2);
+               let vec = push_vector(vec, 3);
+               vec
+            }",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    let vec = results
+        .get_any(0)
+        .unwrap()
+        .unwrap()
+        .downcast_ref::<Vec<usize>>()
+        .unwrap();
+    assert_eq!(vec, &vec![1, 2, 3]);
 }

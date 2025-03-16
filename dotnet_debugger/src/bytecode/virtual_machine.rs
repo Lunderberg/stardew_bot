@@ -1,4 +1,10 @@
-use std::{any::Any, collections::HashMap, fmt::Display, ops::Range, rc::Rc};
+use std::{
+    any::Any,
+    collections::HashMap,
+    fmt::Display,
+    ops::{Range, RangeFrom},
+    rc::Rc,
+};
 
 use derive_more::derive::From;
 use memory_reader::Pointer;
@@ -63,6 +69,9 @@ pub enum Instruction {
         value: VMArg,
         output: StackIndex,
     },
+
+    // Swap the values stored in two stack locations
+    Swap(StackIndex, StackIndex),
 
     // If the register contains true, jump to the specified
     // instruction.  Otherwise, continue to the next instruction.
@@ -277,6 +286,13 @@ impl VMResults {
             .as_ref()
             .map(|value| value.try_into())
             .transpose()
+    }
+
+    pub fn get_any<'a>(
+        &'a self,
+        index: impl NormalizeStackIndex,
+    ) -> Result<Option<&'a dyn Any>, Error> {
+        self.get_as(index)
     }
 
     fn collect_native_function_args<'a>(
@@ -580,10 +596,7 @@ impl VirtualMachine {
             .instructions
             .into_iter()
             .map(|mut inst| {
-                inst.visit_input_indices(|index| {
-                    *index = do_remap(*index);
-                });
-                inst.visit_output_indices(|index| {
+                inst.visit_indices(|index| {
                     *index = do_remap(*index);
                 });
                 inst
@@ -644,6 +657,21 @@ impl VirtualMachine {
                 Instruction::Copy { value, output } => {
                     let value = arg_to_prim!(value, "Copy");
                     values[*output] = value.map(Into::into);
+                }
+                &Instruction::Swap(lhs, rhs) => {
+                    if lhs != rhs {
+                        let (a, b) = if lhs.0 < rhs.0 {
+                            (lhs, rhs)
+                        } else {
+                            (rhs, lhs)
+                        };
+
+                        let (a_slice, b_slice) =
+                            values[a..].split_at_mut(b - a);
+                        let a_mut = a_slice.first_mut().unwrap();
+                        let b_mut = b_slice.first_mut().unwrap();
+                        std::mem::swap(a_mut, b_mut);
+                    }
                 }
 
                 Instruction::ConditionalJump { cond, dest } => {
@@ -920,6 +948,12 @@ impl Instruction {
                 (Some(*lhs), Some(*rhs), None)
             }
 
+            Instruction::Swap(lhs, rhs) => (
+                Some(VMArg::SavedValue(*lhs)),
+                Some(VMArg::SavedValue(*rhs)),
+                None,
+            ),
+
             // Arbitrary arity instructions
             Instruction::NativeFunctionCall { args, .. } => {
                 (None, None, Some(args.iter().cloned()))
@@ -936,91 +970,86 @@ impl Instruction {
             })
     }
 
-    fn visit_input_indices(
-        &mut self,
-        mut callback: impl FnMut(&mut StackIndex),
-    ) {
+    fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
+        let (opt_a, opt_b) = match self {
+            Instruction::NativeFunctionCall { output: None, .. }
+            | Instruction::ConditionalJump { .. } => (None, None),
+
+            Instruction::Copy { output, .. }
+            | Instruction::NativeFunctionCall {
+                output: Some(output),
+                ..
+            }
+            | Instruction::PrimCast { output, .. }
+            | Instruction::Add { output, .. }
+            | Instruction::Sub { output, .. }
+            | Instruction::Mul { output, .. }
+            | Instruction::Equal { output, .. }
+            | Instruction::LessThan { output, .. }
+            | Instruction::GreaterThan { output, .. }
+            | Instruction::Downcast { output, .. }
+            | Instruction::Read { output, .. } => (Some(*output), None),
+
+            Instruction::Swap(lhs, rhs) => (Some(*lhs), Some(*rhs)),
+        };
+
+        std::iter::empty()
+            .chain(opt_a.into_iter())
+            .chain(opt_b.into_iter())
+    }
+
+    fn visit_indices(&mut self, mut callback: impl FnMut(&mut StackIndex)) {
         match self {
-            Instruction::Copy { value: arg, .. }
-            | Instruction::ConditionalJump { cond: arg, .. }
-            | Instruction::PrimCast { value: arg, .. }
-            | Instruction::Downcast { obj: arg, .. }
-            | Instruction::Read { ptr: arg, .. } => {
+            Instruction::Copy { value: arg, output }
+            | Instruction::PrimCast {
+                value: arg, output, ..
+            }
+            | Instruction::Downcast {
+                obj: arg, output, ..
+            }
+            | Instruction::Read {
+                ptr: arg, output, ..
+            } => {
+                if let VMArg::SavedValue(index) = arg {
+                    callback(index);
+                }
+                callback(output);
+            }
+            Instruction::Swap(lhs, rhs) => {
+                callback(lhs);
+                callback(rhs);
+            }
+            Instruction::ConditionalJump { cond: arg, .. } => {
                 if let VMArg::SavedValue(index) = arg {
                     callback(index);
                 }
             }
-
-            Instruction::Add { lhs, rhs, .. }
-            | Instruction::Sub { lhs, rhs, .. }
-            | Instruction::Mul { lhs, rhs, .. }
-            | Instruction::Equal { lhs, rhs, .. }
-            | Instruction::LessThan { lhs, rhs, .. }
-            | Instruction::GreaterThan { lhs, rhs, .. } => {
-                if let VMArg::SavedValue(index) = lhs {
-                    callback(index);
-                }
-                if let VMArg::SavedValue(index) = rhs {
-                    callback(index);
-                }
-            }
-
-            Instruction::NativeFunctionCall { args, .. } => {
+            Instruction::NativeFunctionCall { args, output, .. } => {
                 args.iter_mut()
                     .filter_map(|arg| match arg {
                         VMArg::SavedValue(index) => Some(index),
                         VMArg::Const(_) => None,
                     })
                     .for_each(|arg| callback(arg));
+                if let Some(output) = output {
+                    callback(output);
+                }
             }
-        }
-    }
 
-    fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
-        let opt_index = match self {
-            Instruction::NativeFunctionCall { output: None, .. }
-            | Instruction::ConditionalJump { .. } => None,
-
-            Instruction::Copy { output, .. }
-            | Instruction::NativeFunctionCall {
-                output: Some(output),
-                ..
+            Instruction::Add { lhs, rhs, output }
+            | Instruction::Sub { lhs, rhs, output }
+            | Instruction::Mul { lhs, rhs, output }
+            | Instruction::Equal { lhs, rhs, output }
+            | Instruction::LessThan { lhs, rhs, output }
+            | Instruction::GreaterThan { lhs, rhs, output } => {
+                if let VMArg::SavedValue(index) = lhs {
+                    callback(index);
+                }
+                if let VMArg::SavedValue(index) = rhs {
+                    callback(index);
+                }
+                callback(output);
             }
-            | Instruction::PrimCast { output, .. }
-            | Instruction::Add { output, .. }
-            | Instruction::Sub { output, .. }
-            | Instruction::Mul { output, .. }
-            | Instruction::Equal { output, .. }
-            | Instruction::LessThan { output, .. }
-            | Instruction::GreaterThan { output, .. }
-            | Instruction::Downcast { output, .. }
-            | Instruction::Read { output, .. } => Some(*output),
-        };
-        opt_index.into_iter()
-    }
-
-    fn visit_output_indices(
-        &mut self,
-        mut callback: impl FnMut(&mut StackIndex),
-    ) {
-        match self {
-            Instruction::Copy { output, .. }
-            | Instruction::NativeFunctionCall {
-                output: Some(output),
-                ..
-            }
-            | Instruction::PrimCast { output, .. }
-            | Instruction::Add { output, .. }
-            | Instruction::Sub { output, .. }
-            | Instruction::Mul { output, .. }
-            | Instruction::Equal { output, .. }
-            | Instruction::LessThan { output, .. }
-            | Instruction::GreaterThan { output, .. }
-            | Instruction::Downcast { output, .. }
-            | Instruction::Read { output, .. } => callback(output),
-
-            Instruction::NativeFunctionCall { output: None, .. }
-            | Instruction::ConditionalJump { .. } => {}
         }
     }
 }
@@ -1094,6 +1123,9 @@ impl Display for Instruction {
             }
             Instruction::Copy { value, output } => {
                 write!(f, "{output} = {value}")
+            }
+            Instruction::Swap(lhs, rhs) => {
+                write!(f, "({rhs}, {lhs}) = ({lhs}, {rhs})")
             }
             Instruction::NativeFunctionCall {
                 index,
@@ -1192,17 +1224,28 @@ impl std::ops::IndexMut<StackIndex> for VMResults {
         &mut self.0[index.0]
     }
 }
-impl std::ops::Index<std::ops::Range<StackIndex>> for VMResults {
+impl std::ops::Index<Range<StackIndex>> for VMResults {
     type Output = [Option<StackValue>];
 
     fn index(&self, index: std::ops::Range<StackIndex>) -> &Self::Output {
         &self.0[index.start.0..index.end.0]
     }
 }
-
 impl std::ops::IndexMut<Range<StackIndex>> for VMResults {
     fn index_mut(&mut self, index: Range<StackIndex>) -> &mut Self::Output {
         &mut self.0[index.start.0..index.end.0]
+    }
+}
+impl std::ops::Index<RangeFrom<StackIndex>> for VMResults {
+    type Output = [Option<StackValue>];
+
+    fn index(&self, index: std::ops::RangeFrom<StackIndex>) -> &Self::Output {
+        &self.0[index.start.0..]
+    }
+}
+impl std::ops::IndexMut<RangeFrom<StackIndex>> for VMResults {
+    fn index_mut(&mut self, index: RangeFrom<StackIndex>) -> &mut Self::Output {
+        &mut self.0[index.start.0..]
     }
 }
 
@@ -1211,6 +1254,13 @@ impl std::ops::Add<usize> for StackIndex {
 
     fn add(self, rhs: usize) -> Self::Output {
         StackIndex(self.0 + rhs)
+    }
+}
+impl std::ops::Sub for StackIndex {
+    type Output = usize;
+
+    fn sub(self, rhs: Self) -> Self::Output {
+        self.0 - rhs.0
     }
 }
 
@@ -1234,6 +1284,20 @@ impl TryInto<RuntimePrimValue> for &'_ StackValue {
             StackValue::Prim(value) => Ok(*value),
             StackValue::Any(any) => {
                 Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
+            }
+        }
+    }
+}
+impl<'a> TryInto<&'a dyn Any> for &'a StackValue {
+    type Error = Error;
+
+    fn try_into(self) -> Result<&'a dyn Any, Self::Error> {
+        match self {
+            StackValue::Any(any) => Ok(any.as_ref()),
+            StackValue::Prim(value) => {
+                Err(Error::AttemptedConversionOfPrimitiveToNativeObject(
+                    value.runtime_type(),
+                ))
             }
         }
     }

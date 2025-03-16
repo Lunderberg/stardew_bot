@@ -7,7 +7,7 @@ use memory_reader::Pointer;
 use crate::{
     runtime_type::{FunctionType, RustType},
     Error, RuntimePrimType, RuntimePrimValue, RuntimeType, StackValue,
-    VMExecutionError,
+    TypeInferenceError, VMExecutionError,
 };
 
 pub trait NativeFunction {
@@ -16,7 +16,9 @@ pub trait NativeFunction {
         args: &mut [&mut Option<StackValue>],
     ) -> Result<Option<StackValue>, Error>;
 
-    fn signature(&self) -> RuntimeType;
+    fn signature(&self) -> Result<RuntimeType, Error>;
+
+    fn mutates_first_argument(&self) -> bool;
 }
 
 pub trait RustNativeObject: Any {}
@@ -32,12 +34,16 @@ where
         self(args)
     }
 
-    fn signature(&self) -> RuntimeType {
-        FunctionType {
+    fn signature(&self) -> Result<RuntimeType, Error> {
+        let sig = FunctionType {
             params: None,
             output: Box::new(RuntimeType::Unknown),
-        }
-        .into()
+        };
+        Ok(sig.into())
+    }
+
+    fn mutates_first_argument(&self) -> bool {
+        false
     }
 }
 
@@ -45,6 +51,8 @@ trait WrapReturn {
     fn wrap_return(self) -> Result<Option<StackValue>, Error>;
 
     fn return_signature_type() -> RuntimeType;
+
+    const IS_VOID: bool = false;
 }
 
 trait UnwrapArg: Sized {
@@ -54,6 +62,8 @@ trait UnwrapArg: Sized {
     ) -> Result<Self::Unwrapped<'t>, Error>;
 
     fn arg_signature_type() -> RuntimeType;
+
+    const IS_MUTABLE: bool = false;
 }
 
 macro_rules! impl_prim_return {
@@ -147,6 +157,8 @@ macro_rules! impl_prim_return {
             fn arg_signature_type() -> RuntimeType {
                 RuntimeType::Prim(RuntimePrimType::$variant)
             }
+
+            const IS_MUTABLE: bool = true;
         }
     };
 }
@@ -232,6 +244,8 @@ impl WrapReturn for () {
     fn return_signature_type() -> RuntimeType {
         RuntimeType::Unknown
     }
+
+    const IS_VOID: bool = true;
 }
 
 impl<'b, T> UnwrapArg for &'b T
@@ -286,6 +300,8 @@ where
     fn arg_signature_type() -> RuntimeType {
         std::any::TypeId::of::<T>().into()
     }
+
+    const IS_MUTABLE: bool = true;
 }
 
 pub struct WrappedNativeFunction<Func, ArgList> {
@@ -311,6 +327,8 @@ macro_rules! count_args {
 #[allow(unused_macros)]
 macro_rules! impl_wrapped_native_function {
     ( $($arg_type:ident),* ) => {
+
+
         impl<Func, Return $(, $arg_type )*> NativeFunction
             for WrappedNativeFunction<Func, ($($arg_type,)*)>
         where
@@ -327,11 +345,12 @@ macro_rules! impl_wrapped_native_function {
             fn apply(&self, args: &mut [&mut Option<StackValue>])
                      -> Result<Option<StackValue>,Error>
             {
-                const N: usize = count_args!( $($arg_type),* );
-                if args.len() != N {
+
+                const NUM_ARGS: usize = count_args!( $($arg_type),* );
+                if args.len() != NUM_ARGS {
                     return Err(
                         VMExecutionError::InvalidNumberOfOperandsForNativeFunction {
-                            expected: N,
+                            expected: NUM_ARGS,
                             provided: args.len(),
                         }
                         .into(),
@@ -360,17 +379,90 @@ macro_rules! impl_wrapped_native_function {
                 result.wrap_return()
             }
 
-            fn signature(&self) -> RuntimeType {
+            fn signature(&self) -> Result<RuntimeType,Error> {
                 let params = vec![
                     $(
                         <$arg_type as UnwrapArg>::arg_signature_type(),
                     )*
                 ];
                 let output = <Return as WrapReturn>::return_signature_type();
-                FunctionType{
-                    params: Some(params),
-                    output: Box::new(output),
-                }.into()
+
+                const NUM_ARGS: usize = count_args!( $($arg_type),* );
+                let mutability: [bool; NUM_ARGS] = [
+                    $( <$arg_type as UnwrapArg>::IS_MUTABLE, )*
+                ];
+                let sig = if mutability.iter().all(|b| !b) {
+                    // All parameters are immutable, represent the
+                    // signature as written.
+                    Ok(FunctionType{
+                        params: Some(params),
+                        output: Box::new(output),
+                    })
+                } else if let Some(i_param) = mutability
+                    .iter()
+                    .enumerate()
+                    .skip(1)
+                    .find(|(_,mutable)| **mutable)
+                    .map(|(i_param,_)| i_param)
+                {
+                    // A parameter other than the first parameter is
+                    // mutable, which is not supported.
+                    let sig = format!(
+                        "{}",
+                        FunctionType{
+                            params: Some(params),
+                            output: Box::new(output),
+                        },
+                    );
+                    let reason = format!(
+                        "mutability is only supported for the first parameter \
+                         but parameter {i_param} is accepted as a mutable reference");
+                    Err(TypeInferenceError::UnsupportedNativeFunction{
+                        sig,
+                        reason,
+                    })
+
+                } else if !<Return as WrapReturn>::IS_VOID {
+                    // A mutable parameter is only supported for void
+                    // outputs.  In the SymbolicGraph, the function's
+                    // output is used to represent the mutable
+                    // argument after.
+                    //
+                    // TODO: Add analysis routine to ensure a single
+                    // use of the pre-mutation parameter.
+                    let sig = format!(
+                        "{}",
+                        FunctionType{
+                            params: Some(params),
+                            output: Box::new(output),
+                        },
+                    );
+                    let sig = format!("{sig}");
+                    let reason = "for a mutable first parameter \
+                                  the output type must be void,\
+                                  so that the SymbolicGraph can represent \
+                                  the mutated argument as the output".into();
+                    Err(TypeInferenceError::UnsupportedNativeFunction{
+                        sig,
+                        reason,
+                    })
+                } else {
+
+                    Ok(FunctionType{
+                        output: Box::new(params[0].clone()),
+                        params: Some(params),
+                    })
+                }?;
+
+                Ok(sig.into())
+            }
+
+            fn mutates_first_argument(&self) -> bool {
+                const NUM_ARGS: usize = count_args!( $($arg_type),* );
+                let mutability: [bool; NUM_ARGS] = [
+                    $( <$arg_type as UnwrapArg>::IS_MUTABLE, )*
+                ];
+                NUM_ARGS > 0 && mutability[0]
             }
         }
     };

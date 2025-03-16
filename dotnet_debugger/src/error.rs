@@ -343,6 +343,12 @@ pub enum Error {
     AttemptedConversionOfNativeObject(std::any::TypeId),
 
     #[error(
+        "Attempted to convert primitive of type {0} \
+         into rust-native object."
+    )]
+    AttemptedConversionOfPrimitiveToNativeObject(RuntimePrimType),
+
+    #[error(
         "Attempted to read rust-native object \
          of type {0:?} as a pointer to a .NET string."
     )]
@@ -362,6 +368,9 @@ pub enum Error {
 
     #[error("Functions marked as external must have an explicit name")]
     ExternalFunctionMustBeNamed,
+
+    #[error("Attempted use of an already consumed value.")]
+    AttemptedUseOfConsumedValue,
 }
 
 impl std::fmt::Debug for Error {

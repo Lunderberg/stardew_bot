@@ -81,6 +81,41 @@ fn triangular_number() {
 }
 
 #[test]
+fn swap_values() {
+    let instructions = vec![
+        // Initialize values into two registers
+        Instruction::Copy {
+            value: 123.into(),
+            output: StackIndex(0),
+        },
+        Instruction::Copy {
+            value: 456.into(),
+            output: StackIndex(1),
+        },
+        // Swap the two values
+        Instruction::Swap(StackIndex(0), StackIndex(1)),
+    ];
+
+    let vm = VirtualMachine::builder(instructions)
+        .num_outputs(2)
+        .build()
+        .simplify();
+
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 2);
+
+    assert_eq!(
+        results.get_as::<RuntimePrimValue>(0).unwrap(),
+        Some(RuntimePrimValue::NativeUInt(456))
+    );
+    assert_eq!(
+        results.get_as::<RuntimePrimValue>(1).unwrap(),
+        Some(RuntimePrimValue::NativeUInt(123))
+    );
+}
+
+#[test]
 fn run_native_function() {
     let instructions = vec![
         Instruction::Mul {

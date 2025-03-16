@@ -29,6 +29,13 @@ pub enum TypeInferenceError {
              on an expression not of function type."
     )]
     AttemptedCallOnNonFunction,
+
+    #[error(
+        "Interop with native function \
+         with signature '{sig}' is not supported, \
+         because {reason}."
+    )]
+    UnsupportedNativeFunction { sig: String, reason: String },
 }
 
 impl<'a> TypeInference<'a> {
@@ -132,7 +139,7 @@ impl<'a> TypeInference<'a> {
                         }
                     }?
                 }
-                ExprKind::NativeFunction(func) => func.signature(),
+                ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {
                     let elements = elements
                         .iter()
