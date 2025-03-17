@@ -215,6 +215,61 @@ fn parse_top_level_function() {
 }
 
 #[test]
+fn parse_anonymous_function() {
+    require_identical_graph("let _0 = |arg: usize| { arg*2 };", |graph| {
+        let arg = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(arg, "arg").unwrap();
+
+        let product = graph.mul(arg, 2);
+
+        graph.function_def(vec![arg], product);
+    });
+}
+
+#[test]
+fn parse_braceless_anonymous_function() {
+    require_identical_graph("let _0 = |arg: usize| arg*2;", |graph| {
+        let arg = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(arg, "arg").unwrap();
+
+        let product = graph.mul(arg, 2);
+
+        graph.function_def(vec![arg], product);
+    });
+}
+
+#[test]
+fn parse_nullary_anonymous_function_with_space() {
+    // With a space between the start and end of the argument list,
+    // the two '|' characters are tokenized as two separate
+    // TokenKind::Pipe tokens.
+    require_identical_graph("let _0 = | | 42*2;", |graph| {
+        let product = graph.mul(42, 2);
+
+        graph.function_def(vec![], product);
+    });
+}
+
+#[test]
+fn parse_nullary_anonymous_function_without_space() {
+    // Without a space between the start and end of the argument list,
+    // the two '|' characters are tokenized as a single
+    // `TokenKind::DoublePipe` token.  In this context, when the
+    // `DoublePipe` appears at the start of an expression, it should
+    // be parsed as an anonymous function equivalent to two
+    // consecutive `Pipe` tokens with a space between.  Whenever
+    // boolean operators are supported, though, a
+    // `TokenKind::DoublePipe` could be parsed as a boolean OR
+    // operation, whereas the two consecutive `Pipe` characters could
+    // not.
+    require_identical_graph("let _0 = || 42*2;", |graph| {
+        let product = graph.mul(42, 2);
+
+        graph.function_def(vec![], product);
+    });
+}
+
+#[test]
 fn parse_function_with_arg() {
     require_identical_graph(
         "let arr = class_name.static_field;

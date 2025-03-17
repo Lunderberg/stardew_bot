@@ -118,6 +118,8 @@ pub enum Punctuation {
     SingleEquals,
     Plus,
     Multiply,
+    Pipe,
+    DoublePipe,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -369,6 +371,12 @@ impl<'a> SymbolicParser<'a> {
                 Ok(expr)
             }
 
+            TokenKind::Punct(Punctuation::LeftBrace) => self.expect_block(),
+
+            TokenKind::Punct(Punctuation::Pipe | Punctuation::DoublePipe) => {
+                self.expect_anonymous_function()
+            }
+
             _ => Err(ParseError::UnexpectedTokenKind {
                 desc: "expression",
                 byte_index: peek_token.span.start,
@@ -514,9 +522,9 @@ impl<'a> SymbolicParser<'a> {
             Punctuation::RightParen,
         )?;
 
-        let outputs = self.expect_block()?;
+        let output = self.expect_block()?;
 
-        let func = self.graph.function_def(params, outputs);
+        let func = self.graph.function_def(params, output);
         self.graph.name(func, name)?;
         if is_extern {
             self.graph.mark_extern_func(func)?;
@@ -525,6 +533,41 @@ impl<'a> SymbolicParser<'a> {
         // TODO: Roll back any changes to the identifiers.
 
         self.define_identifier(name, func)?;
+        Ok(func)
+    }
+
+    fn expect_anonymous_function(&mut self) -> Result<SymbolicValue, Error> {
+        let opening = self.expect_kind(
+            "Opening '|' of closure's argument list",
+            |kind| {
+                kind.is_punct(Punctuation::Pipe)
+                    || kind.is_punct(Punctuation::DoublePipe)
+            },
+        )?;
+
+        let params = match opening.kind {
+            TokenKind::Punct(Punctuation::Pipe) => {
+                let params = self.expect_comma_separated_list(
+                    Punctuation::Pipe,
+                    |parser| parser.expect_function_param(),
+                )?;
+
+                self.expect_punct(
+                    "Closing '|' of closure's argument list",
+                    Punctuation::Pipe,
+                )?;
+                params
+            }
+            TokenKind::Punct(Punctuation::DoublePipe) => {
+                vec![]
+            }
+            _ => unreachable!("Protected by earlier `expect_kind()`"),
+        };
+
+        let output = self.expect_expr()?;
+
+        let func = self.graph.function_def(params, output);
+
         Ok(func)
     }
 
@@ -934,6 +977,14 @@ impl<'a> SymbolicTokenizer<'a> {
                     TokenKind::Punct(Punctuation::DoubleColon)
                 } else {
                     TokenKind::Punct(Punctuation::Colon)
+                }
+            }
+            '|' => {
+                if opt_char2 == Some('|') {
+                    num_bytes = 2;
+                    TokenKind::Punct(Punctuation::DoublePipe)
+                } else {
+                    TokenKind::Punct(Punctuation::Pipe)
                 }
             }
             '0'..='9' => {
