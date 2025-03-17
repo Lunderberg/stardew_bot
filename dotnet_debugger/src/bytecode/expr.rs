@@ -554,6 +554,11 @@ impl SymbolicGraph {
         self.push(ExprKind::FunctionCall { func, args })
     }
 
+    pub fn range(&mut self, extent: impl Into<SymbolicValue>) -> SymbolicValue {
+        let extent = extent.into();
+        self.push(ExprKind::Range { extent })
+    }
+
     pub fn tuple(&mut self, elements: Vec<SymbolicValue>) -> SymbolicValue {
         self.push(ExprKind::Tuple(elements))
     }

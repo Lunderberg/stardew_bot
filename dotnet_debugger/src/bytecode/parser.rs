@@ -74,6 +74,9 @@ pub enum ParseError {
          but no such variable has been defined."
     )]
     ExpectedDefinedVariable(String),
+
+    #[error("")]
+    RangeExpressionsMustStartAtZero,
 }
 
 struct SymbolicTokenizer<'a> {
@@ -99,6 +102,7 @@ pub enum TokenKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Punctuation {
     Period,
+    DoublePeriod,
     Comma,
     LeftParen,
     RightParen,
@@ -127,6 +131,7 @@ pub enum Keyword {
 enum OpPrecedence {
     MaybeTuple,
     TupleElement,
+    RangeExtent,
     Addition,
     Multiplication,
 }
@@ -293,6 +298,26 @@ impl<'a> SymbolicParser<'a> {
                 let rhs =
                     self.expect_expr_op_precedence(OpPrecedence::Addition)?;
                 expr = self.graph.add(expr, rhs);
+            }
+        }
+
+        if precedence < OpPrecedence::RangeExtent {
+            if let Some(_) = self.tokens.next_if(|token| {
+                token.kind.is_punct(Punctuation::DoublePeriod)
+            })? {
+                match expr {
+                    SymbolicValue::Int(0) => {
+                        // Ranges must all start with zero.
+                    }
+                    _ => {
+                        return Err(
+                            ParseError::RangeExpressionsMustStartAtZero.into(),
+                        );
+                    }
+                }
+                let extent =
+                    self.expect_expr_op_precedence(OpPrecedence::RangeExtent)?;
+                expr = self.graph.range(extent);
             }
         }
 
@@ -882,7 +907,14 @@ impl<'a> SymbolicTokenizer<'a> {
             .unwrap_or_else(|| self.text.len() - start);
 
         let kind = match char1 {
-            '.' => TokenKind::Punct(Punctuation::Period),
+            '.' => {
+                if opt_char2 == Some('.') {
+                    num_bytes = 2;
+                    TokenKind::Punct(Punctuation::DoublePeriod)
+                } else {
+                    TokenKind::Punct(Punctuation::Period)
+                }
+            }
             ',' => TokenKind::Punct(Punctuation::Comma),
             '(' => TokenKind::Punct(Punctuation::LeftParen),
             ')' => TokenKind::Punct(Punctuation::RightParen),

@@ -430,3 +430,25 @@ fn parse_fragment_using_global_variable() {
         },
     );
 }
+
+#[test]
+fn parse_static_range() {
+    require_identical_graph("(0..42)", |graph| {
+        graph.range(42);
+    });
+}
+
+#[test]
+fn parse_dynamic_range() {
+    require_identical_graph("(0..5+10)", |graph| {
+        let extent = graph.add(5, 10);
+        graph.range(extent);
+    });
+}
+
+#[test]
+fn non_zero_start_of_range_produces_error() {
+    let mut graph = SymbolicGraph::new();
+    let res = graph.parse("(1..42)");
+    assert!(res.is_err());
+}
