@@ -572,6 +572,20 @@ impl SymbolicGraph {
         self.push(ExprKind::Range { extent })
     }
 
+    pub fn reduce(
+        &mut self,
+        initial: impl Into<SymbolicValue>,
+        iterator: SymbolicValue,
+        reduction: SymbolicValue,
+    ) -> SymbolicValue {
+        let initial = initial.into();
+        self.push(ExprKind::Reduce {
+            initial,
+            iterator,
+            reduction,
+        })
+    }
+
     pub fn tuple(&mut self, elements: Vec<SymbolicValue>) -> SymbolicValue {
         self.push(ExprKind::Tuple(elements))
     }

@@ -507,3 +507,26 @@ fn non_zero_start_of_range_produces_error() {
     let res = graph.parse("(1..42)");
     assert!(res.is_err());
 }
+
+#[test]
+fn parse_sum_of_integers() {
+    require_identical_graph(
+        "
+        (0..42)
+           .reduce(0, |a: usize, b:usize| { a+b })
+        ",
+        |graph| {
+            let iter = graph.range(42);
+
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let sum = graph.add(a, b);
+            let func = graph.function_def(vec![a, b], sum);
+
+            graph.reduce(0, iter, func);
+        },
+    );
+}
