@@ -100,22 +100,27 @@ impl<'a> TypeInference<'a> {
         };
 
         for index_to_infer in to_infer.into_iter().rev() {
-            let expect_cache = |value: SymbolicValue| -> &RuntimeType {
+            let expect_cache = |value: SymbolicValue,
+                                context: &'static str|
+             -> &RuntimeType {
                 match value {
-                    SymbolicValue::Int(_) => {
-                        &RuntimeType::Prim(RuntimePrimType::NativeUInt)
+                        SymbolicValue::Int(_) => {
+                            &RuntimeType::Prim(RuntimePrimType::NativeUInt)
+                        }
+                        SymbolicValue::Ptr(_) => {
+                            &RuntimeType::Prim(RuntimePrimType::Ptr)
+                        }
+                        SymbolicValue::Result(op_index) => {
+                            self.cache.get(&op_index).unwrap_or_else(|| {
+                                panic!(
+                                    "Internal error: \
+                                     No cached value for '{context}'.  \
+                                     Topologic sort should ensure that \
+                                     all input expressions have their type inferred."
+                                )
+                            })
+                        }
                     }
-                    SymbolicValue::Ptr(_) => {
-                        &RuntimeType::Prim(RuntimePrimType::Ptr)
-                    }
-                    SymbolicValue::Result(op_index) => {
-                        self.cache.get(&op_index).expect(
-                            "Internal error: \
-                             Topologic sort should ensure that \
-                             all input expressions have their type inferred.",
-                        )
-                    }
-                }
             };
 
             let inferred_type = match graph[index_to_infer].as_ref() {
@@ -123,16 +128,18 @@ impl<'a> TypeInference<'a> {
                     let params = Some(
                         params
                             .iter()
-                            .map(|param| expect_cache(*param))
+                            .map(|param| expect_cache(*param, "function param"))
                             .cloned()
                             .collect(),
                     );
-                    let output = Box::new(expect_cache(*output).clone());
+                    let output = Box::new(
+                        expect_cache(*output, "function output").clone(),
+                    );
                     FunctionType { params, output }.into()
                 }
                 ExprKind::FunctionArg(ty) => ty.clone(),
                 ExprKind::FunctionCall { func, .. } => {
-                    match expect_cache(*func) {
+                    match expect_cache(*func, "function definition") {
                         RuntimeType::Function(FunctionType {
                             output, ..
                         }) => Ok(output.as_ref().clone()),
@@ -148,14 +155,15 @@ impl<'a> TypeInference<'a> {
                     }
                     .into()
                 }
-                ExprKind::Reduce { initial, .. } => {
-                    expect_cache(*initial).clone()
+                ExprKind::Reduce { initial, .. }
+                | ExprKind::SimpleReduce { initial, .. } => {
+                    expect_cache(*initial, "initial reduction value").clone()
                 }
                 ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {
                     let elements = elements
                         .iter()
-                        .map(|element| expect_cache(*element))
+                        .map(|element| expect_cache(*element, "tuple element"))
                         .cloned()
                         .collect();
                     TupleType(elements).into()
@@ -165,7 +173,7 @@ impl<'a> TypeInference<'a> {
                     static_field.runtime_type(reader)?
                 }
                 ExprKind::FieldAccess { obj, field } => {
-                    let obj_type = expect_cache(*obj);
+                    let obj_type = expect_cache(*obj, "object of field access");
 
                     let method_table_ptr = obj_type
                         .method_table_for_field_access(|| {
@@ -190,7 +198,7 @@ impl<'a> TypeInference<'a> {
                     obj: array,
                     indices,
                 } => {
-                    let array_type = expect_cache(*array);
+                    let array_type = expect_cache(*array, "array");
                     let num_indices = indices.len();
 
                     match array_type {
@@ -253,8 +261,8 @@ impl<'a> TypeInference<'a> {
                 }
                 ExprKind::PointerCast { ty, .. } => ty.clone(),
                 ExprKind::Add { lhs, rhs } => {
-                    let lhs_type = expect_cache(*lhs);
-                    let rhs_type = expect_cache(*rhs);
+                    let lhs_type = expect_cache(*lhs, "lhs of add");
+                    let rhs_type = expect_cache(*rhs, "rhs of add");
                     match (lhs_type, rhs_type) {
                         (
                             ptr,
@@ -286,8 +294,8 @@ impl<'a> TypeInference<'a> {
                     .into()
                 }
                 ExprKind::Mul { lhs, rhs } => {
-                    let lhs_type = expect_cache(*lhs);
-                    let rhs_type = expect_cache(*rhs);
+                    let lhs_type = expect_cache(*lhs, "lhs of mul");
+                    let rhs_type = expect_cache(*rhs, "rhs of mul");
                     match (lhs_type, rhs_type) {
                         (
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
@@ -304,7 +312,7 @@ impl<'a> TypeInference<'a> {
                 }
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
                 ExprKind::PhysicalDowncast { obj, .. } => {
-                    let obj_type = expect_cache(*obj);
+                    let obj_type = expect_cache(*obj, "obj to downcast");
                     match obj_type {
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
                         other => Err(Error::InvalidOperandForPhysicalDowncast(
@@ -314,7 +322,7 @@ impl<'a> TypeInference<'a> {
                     RuntimePrimType::Ptr.into()
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
-                    let ptr_type = expect_cache(*ptr);
+                    let ptr_type = expect_cache(*ptr, "ptr to read");
                     match ptr_type {
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
                         other => Err(Error::InvalidOperandForReadValue(

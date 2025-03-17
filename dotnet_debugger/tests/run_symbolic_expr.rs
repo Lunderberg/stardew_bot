@@ -175,3 +175,69 @@ fn collecting_into_vector() {
         .unwrap();
     assert_eq!(vec, &vec![1, 2, 3]);
 }
+
+#[test]
+fn parse_sum_of_integers() {
+    let mut graph = SymbolicGraph::new();
+    graph
+        .parse(
+            "
+            pub fn main() {
+                (0..42)
+                   .reduce(0, |a: usize, b:usize| { a+b })
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(42 * 41 / 2));
+}
+
+#[test]
+fn parse_reduce_to_const() {
+    let mut graph = SymbolicGraph::new();
+    graph
+        .parse(
+            "
+            pub fn main() {
+                (0..42)
+                   .reduce(0, |a: usize, b:usize| { 123 })
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(123));
+}
+
+#[test]
+fn parse_sum_performed_in_native_function() {
+    let mut graph = SymbolicGraph::new();
+
+    let reduction = graph.native_function(|a: usize, b: usize| a + b);
+    graph.name(reduction, "reduction").unwrap();
+
+    graph
+        .parse(
+            "
+            pub fn main() {
+                (0..42).reduce(0, reduction)
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(42 * 41 / 2));
+}

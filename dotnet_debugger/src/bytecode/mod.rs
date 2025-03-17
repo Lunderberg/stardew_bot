@@ -31,6 +31,9 @@ pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
 mod inline_function_calls;
 pub use inline_function_calls::InlineFunctionCalls;
 
+mod merge_range_reduce_to_simple_reduce;
+pub use merge_range_reduce_to_simple_reduce::MergeRangeReduceToSimpleReduce;
+
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
 

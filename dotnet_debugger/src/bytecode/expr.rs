@@ -13,7 +13,7 @@ use memory_reader::Pointer;
 
 use crate::{
     bytecode::virtual_machine::{
-        FunctionIndex, Instruction, StackIndex, VMArg,
+        FunctionIndex, Instruction, InstructionIndex, StackIndex, VMArg,
     },
     runtime_type::RuntimePrimType,
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
@@ -81,7 +81,21 @@ pub enum ExprKind {
         iterator: SymbolicValue,
 
         /// The reduction function.  Should have signature
-        /// `Fn(TResult, `Item) -> TResult`
+        /// `Fn(TResult, Item) -> TResult`
+        reduction: SymbolicValue,
+    },
+
+    /// Perform a reduction along an iterator.
+    SimpleReduce {
+        /// The initial value of the reduction.
+        initial: SymbolicValue,
+
+        /// The number of iterations over which the reduction should
+        /// be performed.
+        extent: SymbolicValue,
+
+        /// The reduction function.  Should have signature
+        /// `Fn(TResult, usize) -> TResult`
         reduction: SymbolicValue,
     },
 
@@ -271,6 +285,34 @@ pub struct GraphComparison<'a> {
     rhs: &'a SymbolicGraph,
     order_dependent: bool,
     compare_names: bool,
+}
+
+/// Helper struct for collecting VM instructions
+struct ExpressionTranslater<'a> {
+    /// The graph being translated
+    graph: &'a SymbolicGraph,
+
+    /// The instructions being collected.
+    instructions: &'a mut Vec<Instruction>,
+
+    /// Indicates which instructions belong to which scope.  Has the
+    /// same length as `graph.ops`.  If an element is `None`, the
+    /// element belongs in the global scope.  If the element is
+    /// `Some(index)`, then `index` points to the
+    /// `ExprKind::FunctionDef` that owns the expression.
+    scope: &'a [Option<OpIndex>],
+
+    num_outputs: usize,
+    main_func_index: OpIndex,
+    next_free_index: &'a mut usize,
+    native_functions: &'a mut Vec<Rc<dyn NativeFunction>>,
+    native_function_lookup: &'a mut HashMap<OpIndex, FunctionIndex>,
+
+    output_lookup: &'a HashMap<OpIndex, StackIndex>,
+
+    currently_stored: HashMap<OpIndex, VMArg>,
+
+    previously_consumed: HashSet<OpIndex>,
 }
 
 impl SymbolicType {
@@ -586,6 +628,21 @@ impl SymbolicGraph {
         })
     }
 
+    pub fn simple_reduce(
+        &mut self,
+        initial: impl Into<SymbolicValue>,
+        extent: impl Into<SymbolicValue>,
+        reduction: SymbolicValue,
+    ) -> SymbolicValue {
+        let initial = initial.into();
+        let extent = extent.into();
+        self.push(ExprKind::SimpleReduce {
+            initial,
+            extent,
+            reduction,
+        })
+    }
+
     pub fn tuple(&mut self, elements: Vec<SymbolicValue>) -> SymbolicValue {
         self.push(ExprKind::Tuple(elements))
     }
@@ -885,6 +942,31 @@ impl SymbolicGraph {
         subgraph
     }
 
+    /// For each expression, determine which function owns it.  An
+    /// expression is considered owned by a function if it uses at
+    /// least one of the function parameters, and contributes to the
+    /// output of the function.
+    fn operation_scope(&self) -> Vec<Option<OpIndex>> {
+        let mut scope = vec![None; self.ops.len()];
+        self.iter_ops()
+            .rev()
+            .filter(|(_, op)| matches!(op.kind, ExprKind::Function { .. }))
+            .for_each(|(func_index, op)| {
+                let ExprKind::Function { params, output } = &op.kind else {
+                    unreachable!("Due to earlier filter")
+                };
+                scope[func_index.0] = Some(func_index);
+
+                self.collect_subgraph(params.iter().cloned(), Some(*output))
+                    .into_iter()
+                    .for_each(|index| {
+                        scope[index.0] = Some(func_index);
+                    });
+            });
+
+        scope
+    }
+
     pub fn simplify<'a>(
         &self,
         reader: impl Into<Option<CachedReader<'a>>>,
@@ -1062,8 +1144,6 @@ impl SymbolicGraph {
 
     pub fn to_virtual_machine(&self) -> Result<VirtualMachine, Error> {
         let mut instructions = Vec::new();
-        let mut currently_stored: HashMap<OpIndex, VMArg> = HashMap::new();
-        let mut previously_consumed: HashSet<OpIndex> = HashSet::new();
 
         assert!(!self.extern_funcs.is_empty());
 
@@ -1093,8 +1173,9 @@ impl SymbolicGraph {
             },
             _ => vec![output],
         };
+        let num_outputs = outputs.len();
 
-        let mut next_free_index = outputs.len();
+        let mut next_free_index = num_outputs;
         let mut native_functions: Vec<Rc<dyn NativeFunction>> = Vec::new();
         let mut native_function_lookup =
             HashMap::<OpIndex, FunctionIndex>::new();
@@ -1126,218 +1207,28 @@ impl SymbolicGraph {
             output_lookup
         };
 
-        macro_rules! value_to_arg {
-            ($arg:expr) => {
-                match $arg {
-                    &SymbolicValue::Int(value) => {
-                        VMArg::Const(RuntimePrimValue::NativeUInt(value))
-                    }
-                    &SymbolicValue::Ptr(ptr) => {
-                        VMArg::Const(RuntimePrimValue::Ptr(ptr))
-                    }
-                    SymbolicValue::Result(op_index) => {
-                        if previously_consumed.contains(&op_index) {
-                            return Err(Error::AttemptedUseOfConsumedValue);
-                        }
-                        currently_stored
-                            .get(&op_index)
-                            .expect(
-                                "Internal error, \
-                             {op_index} not located anywhere",
-                            )
-                            .clone()
-                    }
-                }
-            };
-        }
+        let scope = self.operation_scope();
 
-        for (op_index, op) in self.iter_ops() {
-            let op_output: StackIndex =
-                output_lookup.get(&op_index).cloned().unwrap_or_else(|| {
-                    let index = next_free_index;
-                    next_free_index += 1;
-                    StackIndex(index)
-                });
+        let iter_op_indices = scope
+            .iter()
+            .enumerate()
+            .filter(|(_, scope)| scope.is_none())
+            .map(|(i, _)| OpIndex::new(i));
 
-            match op.as_ref() {
-                ExprKind::Function { .. } => {
-                    assert!(op_index == main_func_index);
-                }
-                ExprKind::FunctionArg(_) => todo!(),
-                ExprKind::Tuple(_) => {
-                    // Eventually I should put something here, but I
-                    // think this will just barely work for the
-                    // current use cases.  A tuple of function outputs
-                    // is assigned the appropriate StackIndex values
-                    // for each tuple element.  When encountering
-                    // those operations, their output was written to
-                    // the appropriate output index.  So now, when
-                    // encountering the tuple itself, I just
-                    // do...nothing.
-                    //
-                    // This will break horribly if tuples are used in
-                    // any other context, but thankfully I don't yet
-                    // support any other contexts.
-                }
-                ExprKind::FunctionCall { func, args } => {
-                    let Some(func) = func.as_op_index() else {
-                        panic!("Internal error, callee must be function")
-                    };
-                    if let Some(native_func_index) =
-                        native_function_lookup.get(&func)
-                    {
-                        let mut vm_args = Vec::new();
-                        for arg in args {
-                            vm_args.push(value_to_arg!(arg));
-                        }
-
-                        let mutates_first_argument = native_functions
-                            [native_func_index.0]
-                            .mutates_first_argument();
-
-                        if mutates_first_argument {
-                            // The function mutates its input
-                            // argument.  No output index is required.
-                            // However, the `currently_stored` lookup
-                            // should be updated to no longer contain
-                            // the first argument.
-                            let first_arg_op = match &args[0] {
-                                SymbolicValue::Result(op_index) => *op_index,
-                                SymbolicValue::Int(_) |
-                                SymbolicValue::Ptr(_) => todo!(
-                                    "Attempted mutation of const SymbolicValue.  \
-                                     Should handle this case earlier using \
-                                     a new ExprKind to represent mutable constants."
-                                ),
-
-                            };
-                            let first_arg_loc = match &vm_args[0] {
-                                VMArg::SavedValue(stack_index) => *stack_index,
-                                VMArg::Const(_) => todo!(
-                                    "Attempted mutation of VMArg::Const.  \
-                                     Should handle this case earlier using \
-                                     a new ExprKind to represent mutable constants."
-                                ),
-                            };
-
-                            instructions.push(
-                                Instruction::NativeFunctionCall {
-                                    index: *native_func_index,
-                                    args: vm_args,
-                                    output: None,
-                                },
-                            );
-
-                            currently_stored.remove(&first_arg_op);
-                            previously_consumed.insert(first_arg_op);
-
-                            if op_output.0 < outputs.len() {
-                                instructions.push(Instruction::Swap(
-                                    first_arg_loc,
-                                    op_output,
-                                ));
-                                currently_stored
-                                    .insert(op_index, op_output.into());
-                            } else {
-                                currently_stored
-                                    .insert(op_index, first_arg_loc.into());
-                            }
-                        } else {
-                            // The function produces an output value, to
-                            // be stored in the output index.
-                            instructions.push(
-                                Instruction::NativeFunctionCall {
-                                    index: *native_func_index,
-                                    args: vm_args,
-                                    output: Some(op_output),
-                                },
-                            );
-                            currently_stored.insert(op_index, op_output.into());
-                        }
-                    } else {
-                        todo!(
-                            "Handle IR-defined function calls in the VM.  \
-                             Until then, all functions should be inlined."
-                        )
-                    }
-                }
-
-                ExprKind::Range { .. } => todo!(),
-                ExprKind::Reduce { .. } => todo!(),
-                ExprKind::NativeFunction(func) => {
-                    let func_index = FunctionIndex(native_functions.len());
-                    native_functions.push(func.clone());
-                    native_function_lookup.insert(op_index, func_index);
-                }
-
-                ExprKind::Add { lhs, rhs } => {
-                    let lhs = value_to_arg!(lhs);
-                    let rhs = value_to_arg!(rhs);
-                    instructions.push(Instruction::Add {
-                        lhs,
-                        rhs,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, op_output.into());
-                }
-                ExprKind::Mul { lhs, rhs } => {
-                    let lhs = value_to_arg!(lhs);
-                    let rhs = value_to_arg!(rhs);
-                    instructions.push(Instruction::Mul {
-                        lhs,
-                        rhs,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, op_output.into());
-                }
-                ExprKind::PrimCast { value, prim_type } => {
-                    let value = value_to_arg!(value);
-                    instructions.push(Instruction::PrimCast {
-                        value,
-                        prim_type: *prim_type,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, op_output.into());
-                }
-                ExprKind::PhysicalDowncast { obj, ty } => {
-                    let obj = value_to_arg!(obj);
-                    instructions.push(Instruction::Downcast {
-                        obj,
-                        subtype: *ty,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, op_output.into());
-                }
-                ExprKind::ReadValue { ptr, prim_type } => {
-                    let ptr = value_to_arg!(ptr);
-                    instructions.push(Instruction::Read {
-                        ptr,
-                        prim_type: *prim_type,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, op_output.into());
-                }
-                ExprKind::PointerCast { ptr, .. } => {
-                    let ptr = value_to_arg!(ptr);
-                    instructions.push(Instruction::Copy {
-                        value: ptr,
-                        output: op_output,
-                    });
-                    currently_stored.insert(op_index, ptr);
-                }
-
-                symbolic @ (ExprKind::StaticField(_)
-                | ExprKind::FieldAccess { .. }
-                | ExprKind::SymbolicDowncast { .. }
-                | ExprKind::IndexAccess { .. }
-                | ExprKind::NumArrayElements { .. }
-                | ExprKind::ArrayExtent { .. }) => {
-                    return Err(Error::SymbolicExpressionRequiresLowering(
-                        symbolic.clone(),
-                    ));
-                }
-            }
-        }
+        let mut translater = ExpressionTranslater {
+            graph: self,
+            instructions: &mut instructions,
+            scope: &scope,
+            num_outputs,
+            main_func_index,
+            next_free_index: &mut next_free_index,
+            native_functions: &mut native_functions,
+            native_function_lookup: &mut native_function_lookup,
+            output_lookup: &output_lookup,
+            currently_stored: HashMap::new(),
+            previously_consumed: HashSet::new(),
+        };
+        translater.translate(iter_op_indices)?;
 
         let mut builder =
             VirtualMachine::builder(instructions).num_outputs(outputs.len());
@@ -1413,6 +1304,7 @@ impl SymbolicGraph {
             .then(super::LowerSymbolicExpr(&analysis))
             .then(super::RemoveUnusedPointerCast)
             .then(super::InlineFunctionCalls)
+            .then(super::MergeRangeReduceToSimpleReduce)
             .apply_recursively();
 
         let expr = expr.rewrite(rewriter)?;
@@ -1452,6 +1344,423 @@ impl SymbolicGraph {
     }
 }
 
+impl ExpressionTranslater<'_> {
+    fn value_to_arg(&self, value: &SymbolicValue) -> Result<VMArg, Error> {
+        match value {
+            &SymbolicValue::Int(value) => {
+                Ok(VMArg::Const(RuntimePrimValue::NativeUInt(value)))
+            }
+            &SymbolicValue::Ptr(ptr) => {
+                Ok(VMArg::Const(RuntimePrimValue::Ptr(ptr)))
+            }
+            SymbolicValue::Result(op_index)
+                if self.previously_consumed.contains(&op_index) =>
+            {
+                Err(Error::AttemptedUseOfConsumedValue)
+            }
+            SymbolicValue::Result(op_index) => Ok(self
+                .currently_stored
+                .get(&op_index)
+                .expect(
+                    "Internal error, \
+                         {op_index} not located anywhere",
+                )
+                .clone()),
+        }
+    }
+
+    fn translate(
+        &mut self,
+        instructions: impl Iterator<Item = OpIndex>,
+    ) -> Result<(), Error> {
+        macro_rules! value_to_arg {
+            ($arg:expr) => {
+                match $arg {
+                    &SymbolicValue::Int(value) => {
+                        VMArg::Const(RuntimePrimValue::NativeUInt(value))
+                    }
+                    &SymbolicValue::Ptr(ptr) => {
+                        VMArg::Const(RuntimePrimValue::Ptr(ptr))
+                    }
+                    SymbolicValue::Result(op_index) => {
+                        if self.previously_consumed.contains(&op_index) {
+                            return Err(Error::AttemptedUseOfConsumedValue);
+                        }
+                        self.currently_stored
+                            .get(&op_index)
+                            .expect(
+                                "Internal error, \
+                             {op_index} not located anywhere",
+                            )
+                            .clone()
+                    }
+                }
+            };
+        }
+
+        macro_rules! next_free_index {
+            () => {{
+                let index = *self.next_free_index;
+                *self.next_free_index += 1;
+                StackIndex(index)
+            }};
+        }
+
+        for op_index in instructions {
+            let op = &self.graph[op_index];
+
+            let op_output: StackIndex = self
+                .output_lookup
+                .get(&op_index)
+                .cloned()
+                .unwrap_or_else(|| next_free_index!());
+
+            match op.as_ref() {
+                ExprKind::Function { .. } => {
+                    assert!(op_index == self.main_func_index);
+                }
+                ExprKind::FunctionArg(_) => todo!(),
+                ExprKind::Tuple(_) => {
+                    // Eventually I should put something here, but I
+                    // think this will just barely work for the
+                    // current use cases.  A tuple of function outputs
+                    // is assigned the appropriate StackIndex values
+                    // for each tuple element.  When encountering
+                    // those operations, their output was written to
+                    // the appropriate output index.  So now, when
+                    // encountering the tuple itself, I just
+                    // do...nothing.
+                    //
+                    // This will break horribly if tuples are used in
+                    // any other context, but thankfully I don't yet
+                    // support any other contexts.
+                }
+                ExprKind::FunctionCall { func, args } => {
+                    let Some(func) = func.as_op_index() else {
+                        panic!("Internal error, callee must be function")
+                    };
+                    if let Some(native_func_index) =
+                        self.native_function_lookup.get(&func)
+                    {
+                        let mut vm_args = Vec::new();
+                        for arg in args {
+                            vm_args.push(value_to_arg!(arg));
+                        }
+
+                        let mutates_first_argument = self.native_functions
+                            [native_func_index.0]
+                            .mutates_first_argument();
+
+                        if mutates_first_argument {
+                            // The function mutates its input
+                            // argument.  No output index is required.
+                            // However, the `currently_stored` lookup
+                            // should be updated to no longer contain
+                            // the first argument.
+                            let first_arg_op = match &args[0] {
+                                SymbolicValue::Result(op_index) => *op_index,
+                                SymbolicValue::Int(_) |
+                                SymbolicValue::Ptr(_) => todo!(
+                                    "Attempted mutation of const SymbolicValue.  \
+                                     Should handle this case earlier using \
+                                     a new ExprKind to represent mutable constants."
+                                ),
+
+                            };
+                            let first_arg_loc = match &vm_args[0] {
+                                VMArg::SavedValue(stack_index) => *stack_index,
+                                VMArg::Const(_) => todo!(
+                                    "Attempted mutation of VMArg::Const.  \
+                                     Should handle this case earlier using \
+                                     a new ExprKind to represent mutable constants."
+                                ),
+                            };
+
+                            self.instructions.push(
+                                Instruction::NativeFunctionCall {
+                                    index: *native_func_index,
+                                    args: vm_args,
+                                    output: None,
+                                },
+                            );
+
+                            self.currently_stored.remove(&first_arg_op);
+                            self.previously_consumed.insert(first_arg_op);
+
+                            if op_output.0 < self.num_outputs {
+                                self.instructions.push(Instruction::Swap(
+                                    first_arg_loc,
+                                    op_output,
+                                ));
+                                self.currently_stored
+                                    .insert(op_index, op_output.into());
+                            } else {
+                                self.currently_stored
+                                    .insert(op_index, first_arg_loc.into());
+                            }
+                        } else {
+                            // The function produces an output value, to
+                            // be stored in the output index.
+                            self.instructions.push(
+                                Instruction::NativeFunctionCall {
+                                    index: *native_func_index,
+                                    args: vm_args,
+                                    output: Some(op_output),
+                                },
+                            );
+                            self.currently_stored
+                                .insert(op_index, op_output.into());
+                        }
+                    } else {
+                        todo!(
+                            "Handle IR-defined function calls in the VM.  \
+                             Until then, all functions should be inlined."
+                        )
+                    }
+                }
+
+                ExprKind::Range { .. } => panic!(
+                    "All Range expressions should be simplified \
+                     to ExprKind::SimpleReduce"
+                ),
+                ExprKind::Reduce { .. } => panic!(
+                    "All Reduce expressions should be simplified \
+                     to ExprKind::SimpleReduce"
+                ),
+                ExprKind::SimpleReduce {
+                    initial,
+                    extent,
+                    reduction,
+                } => {
+                    let initial = value_to_arg!(initial);
+                    let extent = value_to_arg!(extent);
+                    self.instructions.push(Instruction::Copy {
+                        value: initial,
+                        output: op_output,
+                    });
+                    let loop_iter = next_free_index!();
+                    self.instructions.push(Instruction::Copy {
+                        value: 0usize.into(),
+                        output: loop_iter,
+                    });
+
+                    let loop_start = InstructionIndex(self.instructions.len());
+
+                    let reduction_index = match reduction {
+                        &SymbolicValue::Result(op_index) => op_index,
+                        _ => todo!(
+                            "Better error message \
+                             when SimpleReduce points to non-function"
+                        ),
+                    };
+
+                    match &self.graph[reduction_index].kind {
+                        ExprKind::Function { params, output } => {
+                            if params.len() != 2 {
+                                todo!("Better error message for invalid reduction function");
+                            }
+                            let accumulator = match params[0] {
+                                SymbolicValue::Result(op_index) => op_index,
+                                _ => todo!("Better error message for ill-formed function"),
+                            };
+                            let index = match params[1] {
+                                SymbolicValue::Result(op_index) => op_index,
+                                _ => todo!("Better error message for ill-formed function"),
+                            };
+
+                            let currently_stored = self
+                                .currently_stored
+                                .iter()
+                                .map(|(&stack_index, &vmarg)| {
+                                    (stack_index, vmarg)
+                                })
+                                .chain([
+                                    (accumulator, op_output.into()),
+                                    (index, loop_iter.into()),
+                                ])
+                                .collect();
+
+                            let iter_body = self
+                                .scope
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, scope)| {
+                                    **scope == Some(reduction_index)
+                                })
+                                .map(|(i, _)| OpIndex::new(i))
+                                .filter(|&op| {
+                                    op != accumulator
+                                        && op != index
+                                        && op != reduction_index
+                                });
+                            let iter_body: Box<dyn Iterator<Item = OpIndex>> =
+                                Box::new(iter_body);
+
+                            let mut body_translater = ExpressionTranslater {
+                                currently_stored,
+                                previously_consumed: self
+                                    .previously_consumed
+                                    .clone(),
+                                graph: self.graph,
+                                instructions: self.instructions,
+                                scope: self.scope,
+                                num_outputs: self.num_outputs,
+                                main_func_index: self.main_func_index,
+                                next_free_index: self.next_free_index,
+                                native_functions: self.native_functions,
+                                native_function_lookup: self
+                                    .native_function_lookup,
+                                output_lookup: self.output_lookup,
+                            };
+
+                            body_translater.translate(iter_body)?;
+
+                            match body_translater.value_to_arg(output)? {
+                                VMArg::Const(value) => {
+                                    self.instructions.push(Instruction::Copy {
+                                        value: value.into(),
+                                        output: op_output,
+                                    });
+                                }
+                                VMArg::SavedValue(body_output) => {
+                                    self.instructions.push(Instruction::Swap(
+                                        body_output,
+                                        op_output,
+                                    ));
+                                }
+                            }
+                        }
+                        ExprKind::NativeFunction(_) => {
+                            let native_func_index = self
+                                .native_function_lookup
+                                .get(&reduction_index)
+                                .expect(
+                                    "Internal error, \
+                                     function should have \
+                                     already been encountered.",
+                                );
+                            let mutates_first_argument = self.native_functions
+                                [native_func_index.0]
+                                .mutates_first_argument();
+
+                            let func_output = if mutates_first_argument {
+                                None
+                            } else {
+                                Some(op_output)
+                            };
+
+                            self.instructions.push(
+                                Instruction::NativeFunctionCall {
+                                    index: *native_func_index,
+                                    args: vec![
+                                        op_output.into(),
+                                        loop_iter.into(),
+                                    ],
+                                    output: func_output,
+                                },
+                            );
+                        }
+                        _ => todo!(
+                            "Better error message \
+                             when SimpleReduce points to non-function"
+                        ),
+                    }
+
+                    self.instructions.push(Instruction::Add {
+                        lhs: loop_iter.into(),
+                        rhs: 1usize.into(),
+                        output: loop_iter,
+                    });
+                    let loop_condition = next_free_index!();
+                    self.instructions.push(Instruction::LessThan {
+                        lhs: loop_iter.into(),
+                        rhs: extent,
+                        output: loop_condition,
+                    });
+                    self.instructions.push(Instruction::ConditionalJump {
+                        cond: loop_condition.into(),
+                        dest: loop_start,
+                    });
+                }
+                ExprKind::NativeFunction(func) => {
+                    let func_index = FunctionIndex(self.native_functions.len());
+                    self.native_functions.push(func.clone());
+                    self.native_function_lookup.insert(op_index, func_index);
+                }
+
+                ExprKind::Add { lhs, rhs } => {
+                    let lhs = value_to_arg!(lhs);
+                    let rhs = value_to_arg!(rhs);
+                    self.instructions.push(Instruction::Add {
+                        lhs,
+                        rhs,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+                ExprKind::Mul { lhs, rhs } => {
+                    let lhs = value_to_arg!(lhs);
+                    let rhs = value_to_arg!(rhs);
+                    self.instructions.push(Instruction::Mul {
+                        lhs,
+                        rhs,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+                ExprKind::PrimCast { value, prim_type } => {
+                    let value = value_to_arg!(value);
+                    self.instructions.push(Instruction::PrimCast {
+                        value,
+                        prim_type: *prim_type,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+                ExprKind::PhysicalDowncast { obj, ty } => {
+                    let obj = value_to_arg!(obj);
+                    self.instructions.push(Instruction::Downcast {
+                        obj,
+                        subtype: *ty,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+                ExprKind::ReadValue { ptr, prim_type } => {
+                    let ptr = value_to_arg!(ptr);
+                    self.instructions.push(Instruction::Read {
+                        ptr,
+                        prim_type: *prim_type,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+                ExprKind::PointerCast { ptr, .. } => {
+                    let ptr = value_to_arg!(ptr);
+                    self.instructions.push(Instruction::Copy {
+                        value: ptr,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, ptr);
+                }
+
+                symbolic @ (ExprKind::StaticField(_)
+                | ExprKind::FieldAccess { .. }
+                | ExprKind::SymbolicDowncast { .. }
+                | ExprKind::IndexAccess { .. }
+                | ExprKind::NumArrayElements { .. }
+                | ExprKind::ArrayExtent { .. }) => {
+                    return Err(Error::SymbolicExpressionRequiresLowering(
+                        symbolic.clone(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 impl SymbolicValue {
     pub(crate) fn as_op_index(self) -> Option<OpIndex> {
         match self {
@@ -1466,7 +1775,7 @@ impl Expr {
         &self,
         callback: impl FnMut(SymbolicValue),
     ) {
-        self.kind.visit_input_values(callback)
+        self.kind.reachable_nodes(callback)
     }
 }
 
@@ -1539,6 +1848,28 @@ impl ExprKind {
                     ExprKind::Reduce {
                         initial,
                         iterator,
+                        reduction,
+                    }
+                })
+            }
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => {
+                let opt_initial = remap(initial);
+                let opt_extent = remap(extent);
+                let opt_reduction = remap(reduction);
+                (opt_initial.is_some()
+                    || opt_extent.is_some()
+                    || opt_reduction.is_some())
+                .then(|| {
+                    let initial = opt_initial.unwrap_or_else(|| *initial);
+                    let extent = opt_extent.unwrap_or_else(|| *extent);
+                    let reduction = opt_reduction.unwrap_or_else(|| *reduction);
+                    ExprKind::SimpleReduce {
+                        initial,
+                        extent,
                         reduction,
                     }
                 })
@@ -1633,7 +1964,7 @@ impl ExprKind {
         }
     }
 
-    pub(crate) fn visit_input_values(
+    pub(crate) fn reachable_nodes(
         &self,
         mut callback: impl FnMut(SymbolicValue),
     ) {
@@ -1641,7 +1972,8 @@ impl ExprKind {
             ExprKind::NativeFunction(_)
             | ExprKind::FunctionArg(_)
             | ExprKind::StaticField(_) => {}
-            ExprKind::Function { output, .. } => {
+            ExprKind::Function { params, output } => {
+                params.iter().for_each(|param| callback(*param));
                 callback(*output);
             }
             ExprKind::FunctionCall { func, args } => {
@@ -1658,6 +1990,15 @@ impl ExprKind {
             } => {
                 callback(*initial);
                 callback(*iterator);
+                callback(*reduction);
+            }
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => {
+                callback(*initial);
+                callback(*extent);
                 callback(*reduction);
             }
             ExprKind::Tuple(elements) => {
@@ -1857,6 +2198,22 @@ impl<'a> GraphComparison<'a> {
                     } => {
                         equivalent_value!(lhs_initial, rhs_initial)
                             && equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_reduction, rhs_reduction)
+                    }
+                    _ => false,
+                },
+                ExprKind::SimpleReduce {
+                    initial: lhs_initial,
+                    extent: lhs_extent,
+                    reduction: lhs_reduction,
+                } => match rhs_kind {
+                    ExprKind::SimpleReduce {
+                        initial: rhs_initial,
+                        extent: rhs_extent,
+                        reduction: rhs_reduction,
+                    } => {
+                        equivalent_value!(lhs_initial, rhs_initial)
+                            && equivalent_value!(lhs_extent, rhs_extent)
                             && equivalent_value!(lhs_reduction, rhs_reduction)
                     }
                     _ => false,
@@ -2082,6 +2439,13 @@ impl Display for ExprKind {
             } => {
                 write!(f, "{iterator}.reduce({initial}, {reduction})")
             }
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => {
+                write!(f, "(0..{extent}).reduce({initial}, {reduction})")
+            }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
             }
@@ -2157,28 +2521,7 @@ impl<'a> GraphPrinter<'a> {
             vec![true; self.graph.ops.len()]
         };
 
-        let scope: Vec<Option<OpIndex>> = {
-            let mut scope = vec![None; self.graph.ops.len()];
-            self.graph
-                .iter_ops()
-                .rev()
-                .filter(|(_, op)| matches!(op.kind, ExprKind::Function { .. }))
-                .for_each(|(func_index, op)| {
-                    let ExprKind::Function { params, output } = &op.kind else {
-                        unreachable!("Due to earlier filter")
-                    };
-                    scope[func_index.0] = Some(func_index);
-
-                    self.graph
-                        .collect_subgraph(params.iter().cloned(), Some(*output))
-                        .into_iter()
-                        .for_each(|index| {
-                            scope[index.0] = Some(func_index);
-                        });
-                });
-
-            scope
-        };
+        let scope = self.graph.operation_scope();
 
         let inline_expr: Vec<bool> = if self.expand_all_expressions {
             vec![false; self.graph.ops.len()]
@@ -2577,6 +2920,16 @@ impl<'a> Display for ExprPrinter<'a> {
                 let reduction = self.with_value(*reduction);
                 write!(f, "{iterator}.reduce({initial}, {reduction})")
             }
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => {
+                let initial = self.with_value(*initial);
+                let extent = self.with_value(*extent);
+                let reduction = self.with_value(*reduction);
+                write!(f, "(0..{extent}).reduce({initial}, {reduction})")
+            }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
             }
@@ -2684,6 +3037,16 @@ impl std::fmt::Debug for ExprKind {
                 .debug_struct("Reduce")
                 .field("initial", initial)
                 .field("iterator", iterator)
+                .field("reduction", reduction)
+                .finish(),
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => f
+                .debug_struct("Reduce")
+                .field("initial", initial)
+                .field("extent", extent)
                 .field("reduction", reduction)
                 .finish(),
             Self::Tuple(tuple) => f.debug_tuple("Tuple").field(tuple).finish(),
@@ -2796,6 +3159,22 @@ impl PartialEq for ExprKind {
                 } => {
                     lhs_initial == rhs_initial
                         && lhs_iterator == rhs_iterator
+                        && lhs_reduction == rhs_reduction
+                }
+                _ => false,
+            },
+            ExprKind::SimpleReduce {
+                initial: lhs_initial,
+                extent: lhs_extent,
+                reduction: lhs_reduction,
+            } => match other {
+                ExprKind::SimpleReduce {
+                    initial: rhs_initial,
+                    extent: rhs_extent,
+                    reduction: rhs_reduction,
+                } => {
+                    lhs_initial == rhs_initial
+                        && lhs_extent == rhs_extent
                         && lhs_reduction == rhs_reduction
                 }
                 _ => false,
@@ -2945,6 +3324,15 @@ impl std::hash::Hash for ExprKind {
             } => {
                 initial.hash(state);
                 iterator.hash(state);
+                reduction.hash(state);
+            }
+            ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => {
+                initial.hash(state);
+                extent.hash(state);
                 reduction.hash(state);
             }
             ExprKind::Tuple(values) => values.hash(state),
