@@ -72,6 +72,19 @@ pub enum ExprKind {
     /// increasing by one.
     Range { extent: SymbolicValue },
 
+    /// Perform a reduction along an iterator.
+    Reduce {
+        /// The initial value of the reduction.
+        initial: SymbolicValue,
+
+        /// The iterator over which the reduction should be performed.
+        iterator: SymbolicValue,
+
+        /// The reduction function.  Should have signature
+        /// `Fn(TResult, `Item) -> TResult`
+        reduction: SymbolicValue,
+    },
+
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
     ///
@@ -1137,7 +1150,6 @@ impl SymbolicGraph {
                     assert!(op_index == main_func_index);
                 }
                 ExprKind::FunctionArg(_) => todo!(),
-                ExprKind::Range { .. } => todo!(),
                 ExprKind::Tuple(_) => {
                     // Eventually I should put something here, but I
                     // think this will just barely work for the
@@ -1235,6 +1247,9 @@ impl SymbolicGraph {
                         )
                     }
                 }
+
+                ExprKind::Range { .. } => todo!(),
+                ExprKind::Reduce { .. } => todo!(),
                 ExprKind::NativeFunction(func) => {
                     let func_index = FunctionIndex(native_functions.len());
                     native_functions.push(func.clone());
@@ -1492,6 +1507,28 @@ impl ExprKind {
             ExprKind::Range { extent } => {
                 remap(extent).map(|extent| ExprKind::Range { extent })
             }
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => {
+                let opt_initial = remap(initial);
+                let opt_iterator = remap(iterator);
+                let opt_reduction = remap(reduction);
+                (opt_initial.is_some()
+                    || opt_iterator.is_some()
+                    || opt_reduction.is_some())
+                .then(|| {
+                    let initial = opt_initial.unwrap_or_else(|| *initial);
+                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
+                    let reduction = opt_reduction.unwrap_or_else(|| *reduction);
+                    ExprKind::Reduce {
+                        initial,
+                        iterator,
+                        reduction,
+                    }
+                })
+            }
             ExprKind::Tuple(elements) => {
                 let requires_remap = vec_requires_remap(elements);
                 requires_remap.then(|| {
@@ -1599,6 +1636,15 @@ impl ExprKind {
             }
             ExprKind::Range { extent } => {
                 callback(*extent);
+            }
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => {
+                callback(*initial);
+                callback(*iterator);
+                callback(*reduction);
             }
             ExprKind::Tuple(elements) => {
                 elements.iter().for_each(|element| callback(*element));
@@ -1782,6 +1828,22 @@ impl<'a> GraphComparison<'a> {
                 ExprKind::Range { extent: lhs_extent } => match rhs_kind {
                     ExprKind::Range { extent: rhs_extent } => {
                         equivalent_value!(lhs_extent, rhs_extent)
+                    }
+                    _ => false,
+                },
+                ExprKind::Reduce {
+                    initial: lhs_initial,
+                    iterator: lhs_iterator,
+                    reduction: lhs_reduction,
+                } => match rhs_kind {
+                    ExprKind::Reduce {
+                        initial: rhs_initial,
+                        iterator: rhs_iterator,
+                        reduction: rhs_reduction,
+                    } => {
+                        equivalent_value!(lhs_initial, rhs_initial)
+                            && equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_reduction, rhs_reduction)
                     }
                     _ => false,
                 },
@@ -1998,6 +2060,13 @@ impl Display for ExprKind {
             }
             ExprKind::Range { extent } => {
                 write!(f, "(0..{extent})")
+            }
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => {
+                write!(f, "{iterator}.reduce({initial}, {reduction})")
             }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
@@ -2484,6 +2553,16 @@ impl<'a> Display for ExprPrinter<'a> {
                 let extent = self.with_value(*extent);
                 write!(f, "(0..{extent})")
             }
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => {
+                let initial = self.with_value(*initial);
+                let iterator = self.with_value(*iterator);
+                let reduction = self.with_value(*reduction);
+                write!(f, "{iterator}.reduce({initial}, {reduction})")
+            }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
             }
@@ -2583,6 +2662,16 @@ impl std::fmt::Debug for ExprKind {
             Self::Range { extent } => {
                 f.debug_struct("Range").field("extent", extent).finish()
             }
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => f
+                .debug_struct("Reduce")
+                .field("initial", initial)
+                .field("iterator", iterator)
+                .field("reduction", reduction)
+                .finish(),
             Self::Tuple(tuple) => f.debug_tuple("Tuple").field(tuple).finish(),
             Self::NativeFunction(func) => f
                 .debug_tuple("NativeFunction")
@@ -2678,6 +2767,22 @@ impl PartialEq for ExprKind {
             ExprKind::Range { extent: lhs_extent } => match other {
                 ExprKind::Range { extent: rhs_extent } => {
                     lhs_extent == rhs_extent
+                }
+                _ => false,
+            },
+            ExprKind::Reduce {
+                initial: lhs_initial,
+                iterator: lhs_iterator,
+                reduction: lhs_reduction,
+            } => match other {
+                ExprKind::Reduce {
+                    initial: rhs_initial,
+                    iterator: rhs_iterator,
+                    reduction: rhs_reduction,
+                } => {
+                    lhs_initial == rhs_initial
+                        && lhs_iterator == rhs_iterator
+                        && lhs_reduction == rhs_reduction
                 }
                 _ => false,
             },
@@ -2819,6 +2924,15 @@ impl std::hash::Hash for ExprKind {
                 args.hash(state);
             }
             ExprKind::Range { extent } => extent.hash(state),
+            ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => {
+                initial.hash(state);
+                iterator.hash(state);
+                reduction.hash(state);
+            }
             ExprKind::Tuple(values) => values.hash(state),
             ExprKind::NativeFunction(func) => Rc::as_ptr(func).hash(state),
             ExprKind::StaticField(static_field) => static_field.hash(state),

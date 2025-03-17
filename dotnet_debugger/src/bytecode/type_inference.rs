@@ -148,6 +148,9 @@ impl<'a> TypeInference<'a> {
                     }
                     .into()
                 }
+                ExprKind::Reduce { initial, .. } => {
+                    expect_cache(*initial).clone()
+                }
                 ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {
                     let elements = elements
