@@ -4,7 +4,9 @@ use elsa::FrozenMap;
 use thiserror::Error;
 
 use crate::{
-    runtime_type::{DotNetType, FunctionType, RuntimePrimType, TupleType},
+    runtime_type::{
+        DotNetType, FunctionType, IteratorType, RuntimePrimType, TupleType,
+    },
     CachedReader, Error, RuntimeType,
 };
 
@@ -138,6 +140,13 @@ impl<'a> TypeInference<'a> {
                             Err(TypeInferenceError::AttemptedCallOnNonFunction)
                         }
                     }?
+                }
+                ExprKind::Range { .. } => {
+                    let item = RuntimeType::Prim(RuntimePrimType::NativeUInt);
+                    IteratorType {
+                        item: Box::new(item),
+                    }
+                    .into()
                 }
                 ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {

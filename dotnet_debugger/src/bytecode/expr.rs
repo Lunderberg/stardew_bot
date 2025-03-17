@@ -68,6 +68,10 @@ pub enum ExprKind {
     /// expression.
     NativeFunction(Rc<dyn NativeFunction>),
 
+    /// An iterator that starts at zero, has `extent` elements, each
+    /// increasing by one.
+    Range { extent: SymbolicValue },
+
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
     ///
@@ -1128,6 +1132,7 @@ impl SymbolicGraph {
                     assert!(op_index == main_func_index);
                 }
                 ExprKind::FunctionArg(_) => todo!(),
+                ExprKind::Range { .. } => todo!(),
                 ExprKind::Tuple(_) => {
                     // Eventually I should put something here, but I
                     // think this will just barely work for the
@@ -1479,6 +1484,9 @@ impl ExprKind {
                     ExprKind::FunctionCall { func, args }
                 })
             }
+            ExprKind::Range { extent } => {
+                remap(extent).map(|extent| ExprKind::Range { extent })
+            }
             ExprKind::Tuple(elements) => {
                 let requires_remap = vec_requires_remap(elements);
                 requires_remap.then(|| {
@@ -1583,6 +1591,9 @@ impl ExprKind {
             ExprKind::FunctionCall { func, args } => {
                 callback(*func);
                 args.iter().for_each(|arg| callback(*arg));
+            }
+            ExprKind::Range { extent } => {
+                callback(*extent);
             }
             ExprKind::Tuple(elements) => {
                 elements.iter().for_each(|element| callback(*element));
@@ -1760,6 +1771,12 @@ impl<'a> GraphComparison<'a> {
                                     equivalent_value!(lhs_arg, rhs_arg)
                                 },
                             )
+                    }
+                    _ => false,
+                },
+                ExprKind::Range { extent: lhs_extent } => match rhs_kind {
+                    ExprKind::Range { extent: rhs_extent } => {
+                        equivalent_value!(lhs_extent, rhs_extent)
                     }
                     _ => false,
                 },
@@ -1973,6 +1990,9 @@ impl Display for ExprKind {
             ExprKind::FunctionCall { func, args } => {
                 write!(f, "{func}")?;
                 write_tuple(f, args)
+            }
+            ExprKind::Range { extent } => {
+                write!(f, "(0..{extent})")
             }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
@@ -2455,6 +2475,10 @@ impl<'a> Display for ExprPrinter<'a> {
                 write!(f, "{func}")?;
                 write_tuple(f, args)
             }
+            ExprKind::Range { extent } => {
+                let extent = self.with_value(*extent);
+                write!(f, "(0..{extent})")
+            }
             ExprKind::NativeFunction(func) => {
                 write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
             }
@@ -2551,6 +2575,9 @@ impl std::fmt::Debug for ExprKind {
                 .field("func", func)
                 .field("args", args)
                 .finish(),
+            Self::Range { extent } => {
+                f.debug_struct("Range").field("extent", extent).finish()
+            }
             Self::Tuple(tuple) => f.debug_tuple("Tuple").field(tuple).finish(),
             Self::NativeFunction(func) => f
                 .debug_tuple("NativeFunction")
@@ -2641,6 +2668,12 @@ impl PartialEq for ExprKind {
                     func: rhs_func,
                     args: rhs_args,
                 } => lhs_func == rhs_func && lhs_args == rhs_args,
+                _ => false,
+            },
+            ExprKind::Range { extent: lhs_extent } => match other {
+                ExprKind::Range { extent: rhs_extent } => {
+                    lhs_extent == rhs_extent
+                }
                 _ => false,
             },
             ExprKind::Tuple(lhs_values) => match other {
@@ -2780,6 +2813,7 @@ impl std::hash::Hash for ExprKind {
                 func.hash(state);
                 args.hash(state);
             }
+            ExprKind::Range { extent } => extent.hash(state),
             ExprKind::Tuple(values) => values.hash(state),
             ExprKind::NativeFunction(func) => Rc::as_ptr(func).hash(state),
             ExprKind::StaticField(static_field) => static_field.hash(state),
