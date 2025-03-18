@@ -956,6 +956,21 @@ impl SymbolicGraph {
                 };
                 builder.push(expr)
             });
+
+            // If the pre-rewrite value had a name, then copy it to
+            // the post-rewrite value.  This should only be applied if
+            // the post-rewrite value does not already have a name.
+            // For example, in `let y = x+0`, both `x` and `y` are
+            // named values.  When `y` gets replaced with `x`, it
+            // should *NOT* cause `x` to be renamed in earlier parts
+            // of the function.
+            if let Some(name) = &op.name {
+                if let SymbolicValue::Result(new_index) = value {
+                    if builder[new_index].name.is_none() {
+                        builder.name(value, name)?;
+                    }
+                }
+            }
             prev_index_lookup.insert(old_index, value);
         }
 
