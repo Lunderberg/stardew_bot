@@ -189,7 +189,9 @@ impl<'a> SymbolicParser<'a> {
     fn expect_block(&mut self) -> Result<SymbolicValue, Error> {
         self.expect_punct("opening '{' of block", Punctuation::LeftBrace)?;
 
+        let identifiers = self.identifiers.clone();
         let body = self.expect_block_body()?;
+        self.identifiers = identifiers;
 
         self.expect_punct("closing '}' of block", Punctuation::RightBrace)?;
 
