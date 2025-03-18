@@ -190,6 +190,12 @@ pub enum ExprKind {
         ptr: SymbolicValue,
         prim_type: RuntimePrimType,
     },
+
+    /// Read a .NET string
+    ///
+    /// Given a location of a .NET string, produces a Rust-native
+    /// String.
+    ReadString { ptr: SymbolicValue },
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
@@ -723,6 +729,14 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let ptr = ptr.into();
         self.push(ExprKind::ReadValue { ptr, prim_type })
+    }
+
+    pub fn read_string(
+        &mut self,
+        ptr: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let ptr = ptr.into();
+        self.push(ExprKind::ReadString { ptr })
     }
 
     //////////////////////////////////////////////////////////////////
@@ -1700,6 +1714,14 @@ impl ExpressionTranslator<'_> {
                     });
                     self.currently_stored.insert(op_index, op_output.into());
                 }
+                ExprKind::ReadString { ptr } => {
+                    let ptr = self.value_to_arg(ptr)?;
+                    self.instructions.push(Instruction::ReadString {
+                        ptr,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
                 ExprKind::PointerCast { ptr, .. } => {
                     let ptr = self.value_to_arg(ptr)?;
                     self.instructions.push(Instruction::Copy {
@@ -1929,6 +1951,9 @@ impl ExprKind {
                     prim_type: prim_type.clone(),
                 })
             }
+            ExprKind::ReadString { ptr } => {
+                remap(ptr).map(|ptr| ExprKind::ReadString { ptr })
+            }
         }
     }
 
@@ -1998,7 +2023,8 @@ impl ExprKind {
             ExprKind::PhysicalDowncast { obj, .. } => {
                 callback(*obj);
             }
-            ExprKind::ReadValue { ptr, .. } => {
+            ExprKind::ReadValue { ptr, .. }
+            | ExprKind::ReadString { ptr, .. } => {
                 callback(*ptr);
             }
         }
@@ -2358,6 +2384,12 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::ReadString { ptr: lhs_ptr } => match rhs_kind {
+                    ExprKind::ReadString { ptr: rhs_ptr } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr)
+                    }
+                    _ => false,
+                },
             };
 
             if !is_match {
@@ -2471,6 +2503,9 @@ impl Display for ExprKind {
             }
             ExprKind::ReadValue { ptr, prim_type } => {
                 write!(f, "{ptr}.read::<{prim_type}>()")
+            }
+            ExprKind::ReadString { ptr } => {
+                write!(f, "{ptr}.read_string()")
             }
         }
     }

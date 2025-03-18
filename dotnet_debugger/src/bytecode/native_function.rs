@@ -21,6 +21,16 @@ pub trait NativeFunction {
     fn mutates_first_argument(&self) -> bool;
 }
 
+/// A marker trait for Rust-native types that should be exposed
+/// through the VM.
+///
+/// For any type implementing `RustNativeObject`, a blanket
+/// implementation provides an implementation of `UnwrapArg`.
+/// Unfortunately, this does mean that these types `impl
+/// RustNativeObject for Foo {}` whenever they are used.  This
+/// requirement is necessary, to keep the blanket implementation of
+/// `UnwrapArg` from overlapping with the implementation of
+/// `UnwrapArg` for primitive types.
 pub trait RustNativeObject: Any {}
 
 impl<Func> NativeFunction for Func
@@ -181,6 +191,7 @@ impl_prim_return!(F32, f32);
 impl_prim_return!(F64, f64);
 impl_prim_return!(Ptr, Pointer);
 
+impl RustNativeObject for String {}
 impl<T: 'static> RustNativeObject for Vec<T> {}
 
 impl<T> WrapReturn for T

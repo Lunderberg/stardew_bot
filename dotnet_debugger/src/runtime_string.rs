@@ -1,5 +1,7 @@
+use std::ops::Range;
+
 use itertools::Itertools;
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, OwnedBytes, Pointer};
 
 use crate::{Error, ReadTypedPointer};
 
@@ -8,17 +10,20 @@ pub struct RuntimeString(
     #[allow(dead_code)] String,
 );
 
-impl ReadTypedPointer for RuntimeString {
-    fn read_typed_ptr(
+impl RuntimeString {
+    pub(crate) fn read_string<Reader>(
         ptr: Pointer,
-        reader: &MemoryReader,
-    ) -> Result<Self, Error> {
+        mut read_bytes: Reader,
+    ) -> Result<Self, Error>
+    where
+        Reader: FnMut(Range<Pointer>) -> Result<OwnedBytes, Error>,
+    {
         const SHORT_READ: usize = 32;
 
         // Advance past the System.String method table
         let ptr = ptr + Pointer::SIZE;
 
-        let bytes = reader.read_bytes(ptr..ptr + SHORT_READ)?;
+        let bytes = read_bytes(ptr..ptr + SHORT_READ)?;
         let num_u16_code_units =
             i32::from_ne_bytes(bytes[0..4].try_into().unwrap());
         if num_u16_code_units < 0 {
@@ -31,7 +36,7 @@ impl ReadTypedPointer for RuntimeString {
         let bytes = if num_total_bytes <= SHORT_READ {
             bytes
         } else {
-            reader.read_bytes(ptr..ptr + num_total_bytes)?
+            read_bytes(ptr..ptr + num_total_bytes)?
         };
 
         let iter_u16 = bytes
@@ -46,6 +51,17 @@ impl ReadTypedPointer for RuntimeString {
             char::decode_utf16(iter_u16).collect::<Result<String, _>>()?;
 
         Ok(RuntimeString(string))
+    }
+}
+
+impl ReadTypedPointer for RuntimeString {
+    fn read_typed_ptr(
+        ptr: Pointer,
+        reader: &MemoryReader,
+    ) -> Result<Self, Error> {
+        RuntimeString::read_string(ptr, |byte_range| -> Result<_, Error> {
+            Ok(reader.read_bytes(byte_range)?)
+        })
     }
 }
 

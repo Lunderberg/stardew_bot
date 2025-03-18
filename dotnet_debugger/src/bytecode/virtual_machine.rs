@@ -6,12 +6,12 @@ use std::{
 };
 
 use derive_more::derive::From;
-use memory_reader::Pointer;
+use memory_reader::{OwnedBytes, Pointer};
 use thiserror::Error;
 
 use crate::{
     runtime_type::RuntimePrimType, CachedReader, Error, MethodTable,
-    RuntimePrimValue, RuntimeType, TypedPointer,
+    RuntimePrimValue, RuntimeString, RuntimeType, TypedPointer,
 };
 
 use super::{
@@ -180,6 +180,11 @@ pub enum Instruction {
     Read {
         ptr: VMArg,
         prim_type: RuntimePrimType,
+        output: StackIndex,
+    },
+
+    ReadString {
+        ptr: VMArg,
         output: StackIndex,
     },
 }
@@ -932,6 +937,29 @@ impl VirtualMachine {
                         }
                     };
                 }
+                Instruction::ReadString { ptr, output } => {
+                    let opt_prim = arg_to_prim!(ptr, "ReadString");
+                    values[*output] = opt_prim
+                        .map(|prim| -> Result<_, Error> {
+                            let ptr: Pointer = prim.try_into()?;
+                            let runtime_string = RuntimeString::read_string(
+                                ptr,
+                                |byte_range| -> Result<OwnedBytes, Error> {
+                                    let num_bytes =
+                                        byte_range.end - byte_range.start;
+                                    let mut bytes = vec![0; num_bytes];
+                                    reader.read_bytes(
+                                        byte_range.start,
+                                        &mut bytes,
+                                    )?;
+                                    Ok(OwnedBytes::new(byte_range.start, bytes))
+                                },
+                            )?;
+                            let string: String = runtime_string.into();
+                            Ok(StackValue::Any(Box::new(string)))
+                        })
+                        .transpose()?;
+                }
             }
         }
 
@@ -950,6 +978,7 @@ impl Instruction {
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::Downcast { obj: arg, .. }
             | Instruction::Read { ptr: arg, .. }
+            | Instruction::ReadString { ptr: arg, .. }
             | Instruction::IsSome { value: arg, .. } => {
                 (Some(*arg), None, None)
             }
@@ -1005,6 +1034,7 @@ impl Instruction {
             | Instruction::GreaterThan { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. }
+            | Instruction::ReadString { output, .. }
             | Instruction::IsSome { output, .. } => (Some(*output), None),
 
             Instruction::Swap(lhs, rhs) => (Some(*lhs), Some(*rhs)),
@@ -1027,7 +1057,8 @@ impl Instruction {
             }
             | Instruction::Read {
                 ptr: arg, output, ..
-            } => {
+            }
+            | Instruction::ReadString { ptr: arg, output } => {
                 if let VMArg::SavedValue(index) = arg {
                     callback(index);
                 }
@@ -1200,6 +1231,9 @@ impl Display for Instruction {
                 prim_type,
                 output,
             } => write!(f, "{output} = {ptr}.read({prim_type})"),
+            Instruction::ReadString { ptr, output } => {
+                write!(f, "{output} = {ptr}.read_string()")
+            }
         }
     }
 }

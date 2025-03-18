@@ -622,6 +622,10 @@ impl<'a> Display for ExprPrinter<'a> {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
             }
+            ExprKind::ReadString { ptr } => {
+                let ptr = self.with_value(*ptr);
+                write!(f, "{ptr}.read_string()")
+            }
         }
     }
 }

@@ -655,7 +655,7 @@ impl<'a> SymbolicParser<'a> {
                     Ok(expr)
                 }
                 "len" => {
-                    let _ = self.expect_function_arguments(0, 0)?;
+                    self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.num_array_elements(obj))
                 }
                 "extent" => {
@@ -676,8 +676,24 @@ impl<'a> SymbolicParser<'a> {
                     Ok(self.graph.reduce(initial, obj, reduction))
                 }
                 "is_some" => {
-                    let _ = self.expect_function_arguments(0, 0)?;
+                    self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.is_some(obj))
+                }
+                "read" => {
+                    let (type_args, _) =
+                        self.expect_function_arguments(1, 0)?;
+                    let ty = type_args
+                        .into_iter()
+                        .next()
+                        .expect("Protected by length check");
+                    let prim_type = ty
+                        .try_prim_type()
+                        .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                    Ok(self.graph.read_value(obj, prim_type))
+                }
+                "read_string" => {
+                    self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.read_string(obj))
                 }
                 _ => Err(ParseError::UnknownOperator {
                     name: field.text.to_string(),

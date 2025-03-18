@@ -332,6 +332,9 @@ impl<'a> TypeInference<'a> {
                     }?;
                     (*prim_type).into()
                 }
+                ExprKind::ReadString { .. } => {
+                    std::any::TypeId::of::<String>().into()
+                }
             };
 
             self.cache.insert(index_to_infer, Box::new(inferred_type));
