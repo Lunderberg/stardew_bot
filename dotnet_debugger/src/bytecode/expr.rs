@@ -1412,10 +1412,14 @@ impl ExpressionTranslater<'_> {
             SymbolicValue::Result(op_index) => Ok(self
                 .currently_stored
                 .get(&op_index)
-                .expect(
-                    "Internal error, \
-                         {op_index} not located anywhere",
-                )
+                .unwrap_or_else(|| {
+                    panic!(
+                        "Internal error, \
+                         {op_index} was not previously translated.  \
+                         This op is expression {}",
+                        self.graph[*op_index].kind
+                    )
+                })
                 .clone()),
         }
     }
