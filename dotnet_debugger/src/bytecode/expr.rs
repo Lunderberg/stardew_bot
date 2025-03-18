@@ -220,7 +220,7 @@ pub struct GraphComparison<'a> {
 }
 
 /// Helper struct for collecting VM instructions
-struct ExpressionTranslater<'a> {
+struct ExpressionTranslator<'a> {
     /// The graph being translated
     graph: &'a SymbolicGraph,
 
@@ -1183,7 +1183,7 @@ impl SymbolicGraph {
             .filter(|(_, scope)| scope.is_none())
             .map(|(i, _)| OpIndex::new(i));
 
-        let mut translater = ExpressionTranslater {
+        let mut translater = ExpressionTranslator {
             graph: self,
             instructions: &mut instructions,
             scope: &scope,
@@ -1312,7 +1312,7 @@ impl SymbolicGraph {
     }
 }
 
-impl ExpressionTranslater<'_> {
+impl ExpressionTranslator<'_> {
     fn value_to_arg(&self, value: &SymbolicValue) -> Result<VMArg, Error> {
         match value {
             &SymbolicValue::Int(value) => {
@@ -1552,7 +1552,7 @@ impl ExpressionTranslater<'_> {
                             let iter_body: Box<dyn Iterator<Item = OpIndex>> =
                                 Box::new(iter_body);
 
-                            let mut body_translater = ExpressionTranslater {
+                            let mut body_translater = ExpressionTranslator {
                                 currently_stored,
                                 previously_consumed: self
                                     .previously_consumed
