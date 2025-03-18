@@ -681,12 +681,7 @@ impl SymbolicGraph {
         obj: impl Into<SymbolicValue>,
         index: impl Into<SymbolicValue>,
     ) -> SymbolicValue {
-        let obj = obj.into();
-        let index = self.prim_cast(index, RuntimePrimType::NativeUInt);
-        self.push(ExprKind::IndexAccess {
-            obj,
-            indices: vec![index],
-        })
+        self.access_indices(obj, [index])
     }
 
     pub fn access_indices<Iter>(
@@ -701,7 +696,15 @@ impl SymbolicGraph {
         let obj = obj.into();
         let indices = indices
             .into_iter()
-            .map(|index| self.prim_cast(index, RuntimePrimType::NativeUInt))
+            .map(|index| {
+                let index = index.into();
+                // TODO: Move this into a legalization step instead of
+                // being applied during the graph construction.
+                match index {
+                    SymbolicValue::Int(_) => index,
+                    _ => self.prim_cast(index, RuntimePrimType::NativeUInt),
+                }
+            })
             .collect();
         self.push(ExprKind::IndexAccess { obj, indices })
     }

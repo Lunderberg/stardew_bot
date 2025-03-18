@@ -34,27 +34,18 @@ fn print_static_field_with_zwsp() {
 
 #[test]
 fn print_array_access() {
-    check_printed_expr(
-        "class_name.field_name[\
-         123.prim_cast::<usize>()]",
-        |graph| {
-            let obj = graph.static_field("class_name", "field_name");
-            graph.access_index(obj, 123)
-        },
-    );
+    check_printed_expr("class_name.field_name[123]", |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        graph.access_index(obj, 123)
+    });
 }
 
 #[test]
 fn print_multi_dim_array_access() {
-    check_printed_expr(
-        "class_name.field_name[\
-         123.prim_cast::<usize>(), \
-         456.prim_cast::<usize>()]",
-        |graph| {
-            let obj = graph.static_field("class_name", "field_name");
-            graph.access_indices(obj, [123, 456])
-        },
-    );
+    check_printed_expr("class_name.field_name[123, 456]", |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        graph.access_indices(obj, [123, 456])
+    });
 }
 
 #[test]
