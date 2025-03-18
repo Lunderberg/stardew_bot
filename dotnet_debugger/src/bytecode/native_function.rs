@@ -85,9 +85,12 @@ macro_rules! impl_prim_return {
                 arg: &'t mut StackValue,
             ) -> Result<Self::Unwrapped<'t>, Error> {
                 match arg {
-                    StackValue::Prim(RuntimePrimValue::$variant(prim)) => {
-                        Ok(*prim)
-                    }
+                    // Some primitive types may have automatic type
+                    // conversions applied.  Therefore, when passing a
+                    // primitive by value, use TryInto to apply these
+                    // conversions rather than explicitly unwrapping
+                    // the RuntimePrimValue.
+                    StackValue::Prim(prim) => (*prim).try_into(),
                     other => Err(
                         VMExecutionError::InvalidArgumentForNativeFunction {
                             expected: RuntimeType::Prim(
