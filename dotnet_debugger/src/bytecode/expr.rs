@@ -1257,6 +1257,10 @@ impl SymbolicGraph {
         let reader = reader.into();
         let expr = self.clone();
 
+        if show_steps {
+            println!("----------- Initial Graph --------------\n{expr}");
+        }
+
         // The display of static fields is done similar to C#, which
         // uses the same syntax for specifying static fields, and for
         // specifying namespaces.
@@ -1279,7 +1283,9 @@ impl SymbolicGraph {
         )?;
 
         if show_steps {
-            println!("----------- Initial DCE --------------\n{expr}");
+            println!(
+                "----------- After IdentifyStaticField --------------\n{expr}"
+            );
         }
 
         let expr = expr.dead_code_elimination()?;
