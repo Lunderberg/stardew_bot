@@ -2922,14 +2922,20 @@ impl<'a> Display for ExprPrinter<'a> {
             MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
         let write_tuple = |f: &mut std::fmt::Formatter<'_>,
-                           tuple: &[SymbolicValue]|
+                           tuple: &[SymbolicValue],
+                           is_top_level: bool|
          -> std::fmt::Result {
             write!(f, "(")?;
             for (i, element) in tuple.iter().enumerate() {
                 if i > 0 {
                     write!(f, ", ")?;
                 }
-                let element = self.with_value(*element).as_top_level();
+                let element = self.with_value(*element);
+                let element = if is_top_level {
+                    element.as_top_level()
+                } else {
+                    element
+                };
                 write!(f, "{element}")?;
             }
 
@@ -2940,18 +2946,22 @@ impl<'a> Display for ExprPrinter<'a> {
         match self.graph[op_index].as_ref() {
             ExprKind::Function { params, output } => {
                 write!(f, "fn")?;
-                write_tuple(f, params)?;
+                write_tuple(f, params, true)?;
                 write!(f, " {{ {} }}", self.with_value(*output))?;
 
                 Ok(())
             }
             ExprKind::FunctionArg(ty) => {
-                write!(f, "{index_printer}: {ty}")
+                write!(f, "{index_printer}")?;
+                if self.is_top_level && !matches!(ty, RuntimeType::Unknown) {
+                    write!(f, ": {ty}")?;
+                }
+                Ok(())
             }
             ExprKind::FunctionCall { func, args } => {
                 let func = self.with_value(*func);
                 write!(f, "{func}")?;
-                write_tuple(f, args)
+                write_tuple(f, args, false)
             }
             ExprKind::Range { extent } => {
                 let extent = self.with_value(*extent);
@@ -2980,7 +2990,7 @@ impl<'a> Display for ExprPrinter<'a> {
             ExprKind::NativeFunction(func) => {
                 write!(f, "{func}")
             }
-            ExprKind::Tuple(elements) => write_tuple(f, elements),
+            ExprKind::Tuple(elements) => write_tuple(f, elements, false),
             ExprKind::StaticField(StaticField { class, field_name }) => {
                 write!(f, "{class}{sep}.{field_name}")
             }
