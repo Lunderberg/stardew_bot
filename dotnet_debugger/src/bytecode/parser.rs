@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 use thiserror::Error;
 
 use super::expr::{SymbolicGraph, SymbolicType, SymbolicValue};
-use crate::Error;
+use crate::{Error, RuntimeType};
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
@@ -574,10 +574,19 @@ impl<'a> SymbolicParser<'a> {
     fn expect_function_param(&mut self) -> Result<SymbolicValue, Error> {
         let param_name = self.expect_ident("function parameter")?.text;
 
-        self.expect_punct("':' after variable name", Punctuation::Colon)?;
-        let ty = self.expect_type()?;
-
-        let ty = ty.try_prim_type().expect("TODO: Non-primitive params");
+        let ty: RuntimeType = if self
+            .tokens
+            .next_if(|token| token.kind.is_punct(Punctuation::Colon))?
+            .is_some()
+        {
+            let symbolic_type = self.expect_type()?;
+            let ty = symbolic_type
+                .try_prim_type()
+                .expect("TODO: Non-primitive params");
+            ty.into()
+        } else {
+            RuntimeType::Unknown
+        };
 
         let arg = self.graph.function_arg(ty);
         self.graph.name(arg, param_name)?;

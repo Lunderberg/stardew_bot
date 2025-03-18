@@ -1,7 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
     fmt::Display,
-    rc::Rc,
 };
 
 use derive_more::derive::From;
@@ -15,14 +14,14 @@ use crate::{
     bytecode::virtual_machine::{
         FunctionIndex, Instruction, InstructionIndex, StackIndex, VMArg,
     },
-    runtime_type::RuntimePrimType,
+    runtime_type::{FunctionType, RuntimePrimType},
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
 };
 
 use super::{
     graph_rewrite::Analysis, native_function::WrappedNativeFunction,
-    GraphRewrite, NativeFunction, TypeInference,
+    ExposedNativeFunction, GraphRewrite, NativeFunction, TypeInference,
 };
 
 #[derive(Default, Clone)]
@@ -37,7 +36,7 @@ pub struct Expr {
     pub(crate) name: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExprKind {
     /// A variable argument to a function.
     FunctionArg(RuntimeType),
@@ -66,7 +65,7 @@ pub enum ExprKind {
 
     /// A native function, exposed to be used as part of the
     /// expression.
-    NativeFunction(Rc<dyn NativeFunction>),
+    NativeFunction(ExposedNativeFunction),
 
     /// An iterator that starts at zero, has `extent` elements, each
     /// increasing by one.
@@ -305,7 +304,7 @@ struct ExpressionTranslater<'a> {
     num_outputs: usize,
     main_func_index: OpIndex,
     next_free_index: &'a mut usize,
-    native_functions: &'a mut Vec<Rc<dyn NativeFunction>>,
+    native_functions: &'a mut Vec<ExposedNativeFunction>,
     native_function_lookup: &'a mut HashMap<OpIndex, FunctionIndex>,
 
     output_lookup: &'a HashMap<OpIndex, StackIndex>,
@@ -754,7 +753,7 @@ impl SymbolicGraph {
         WrappedNativeFunction<Func, ArgList>: 'static,
     {
         let wrapped = WrappedNativeFunction::new(func);
-        self.push(ExprKind::NativeFunction(Rc::new(wrapped)))
+        self.push(ExprKind::NativeFunction(wrapped.into()))
     }
 
     pub fn add(
@@ -1092,6 +1091,10 @@ impl SymbolicGraph {
                     .try_remap(&prev_index_lookup)
                     .unwrap_or_else(|| op.kind.clone());
                 let new_index = builder.push(kind);
+                if let Some(name) = &op.name {
+                    builder.name(new_index, name)?;
+                }
+
                 prev_index_lookup.insert(prev_index, new_index);
             }
         }
@@ -1107,6 +1110,8 @@ impl SymbolicGraph {
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut dedup_lookup: HashMap<ExprKind, SymbolicValue> = HashMap::new();
+        let mut functions_returning_rust_native: HashSet<SymbolicValue> =
+            HashSet::new();
 
         for (prev_index, op) in self.iter_ops() {
             let new_kind = op
@@ -1119,16 +1124,51 @@ impl SymbolicGraph {
                 *new_index
             } else {
                 let new_index = builder.push(new_kind.clone());
+                if let Some(name) = &op.name {
+                    builder.name(new_index, name)?;
+                }
 
-                // Temporary workaround.  The long-term fix is to make
-                // update the hashing so that FunctionArg have
-                // structural equality when encountering points of
-                // definition, but reference equality when
-                // encountering points of use (that haven't already
-                // been defined, that is).
-                if !matches!(new_kind, ExprKind::FunctionArg(_)) {
+                if let ExprKind::NativeFunction(func) = &new_kind {
+                    // Track fucntions
+                    let RuntimeType::Function(FunctionType { output, .. }) =
+                        func.signature()?
+                    else {
+                        panic!(
+                            "Internal error, \
+                                    NativeFunction should have function type."
+                        )
+                    };
+
+                    if matches!(
+                        output.as_ref(),
+                        RuntimeType::Unknown | RuntimeType::Rust(_)
+                    ) {
+                        functions_returning_rust_native.insert(new_index);
+                    }
+                }
+
+                let can_dedup = match &new_kind {
+                    ExprKind::FunctionArg(_) => {
+                        // Temporary workaround.  The long-term fix is
+                        // to make update the hashing so that
+                        // FunctionArg have structural equality when
+                        // encountering points of definition, but
+                        // reference equality when encountering points
+                        // of use (that haven't already been defined,
+                        // that is).
+                        false
+                    }
+                    ExprKind::FunctionCall { func, .. } => {
+                        !functions_returning_rust_native.contains(func)
+                    }
+
+                    _ => true,
+                };
+
+                if can_dedup {
                     dedup_lookup.insert(new_kind, new_index);
                 }
+
                 new_index
             };
             prev_index_lookup.insert(prev_index, new_index);
@@ -1176,7 +1216,7 @@ impl SymbolicGraph {
         let num_outputs = outputs.len();
 
         let mut next_free_index = num_outputs;
-        let mut native_functions: Vec<Rc<dyn NativeFunction>> = Vec::new();
+        let mut native_functions: Vec<ExposedNativeFunction> = Vec::new();
         let mut native_function_lookup =
             HashMap::<OpIndex, FunctionIndex>::new();
 
@@ -1233,7 +1273,7 @@ impl SymbolicGraph {
         let mut builder =
             VirtualMachine::builder(instructions).num_outputs(outputs.len());
         for native_func in native_functions.into_iter() {
-            builder = builder.with_rc_native_function(native_func);
+            builder = builder.with_raw_native_function(native_func);
         }
 
         Ok(builder.build())
@@ -1534,10 +1574,19 @@ impl ExpressionTranslater<'_> {
                 } => {
                     let initial = value_to_arg!(initial);
                     let extent = value_to_arg!(extent);
-                    self.instructions.push(Instruction::Copy {
-                        value: initial,
-                        output: op_output,
-                    });
+
+                    match initial {
+                        VMArg::Const(_) => {
+                            self.instructions.push(Instruction::Copy {
+                                value: initial,
+                                output: op_output,
+                            })
+                        }
+                        VMArg::SavedValue(stack_index) => self
+                            .instructions
+                            .push(Instruction::Swap(stack_index, op_output)),
+                    }
+
                     let loop_iter = next_free_index!();
                     self.instructions.push(Instruction::Copy {
                         value: 0usize.into(),
@@ -2219,9 +2268,7 @@ impl<'a> GraphComparison<'a> {
                     _ => false,
                 },
                 ExprKind::NativeFunction(lhs_func) => match rhs_kind {
-                    ExprKind::NativeFunction(rhs_func) => {
-                        std::ptr::eq(Rc::as_ptr(lhs_func), Rc::as_ptr(rhs_func))
-                    }
+                    ExprKind::NativeFunction(rhs_func) => lhs_func == rhs_func,
                     _ => false,
                 },
                 ExprKind::Tuple(lhs_tuple) => match rhs_kind {
@@ -2447,7 +2494,7 @@ impl Display for ExprKind {
                 write!(f, "(0..{extent}).reduce({initial}, {reduction})")
             }
             ExprKind::NativeFunction(func) => {
-                write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
+                write!(f, "{func}")
             }
             ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {
@@ -2931,7 +2978,7 @@ impl<'a> Display for ExprPrinter<'a> {
                 write!(f, "(0..{extent}).reduce({initial}, {reduction})")
             }
             ExprKind::NativeFunction(func) => {
-                write!(f, "NativeFunction({:p})", Rc::as_ptr(func))
+                write!(f, "{func}")
             }
             ExprKind::Tuple(elements) => write_tuple(f, elements),
             ExprKind::StaticField(StaticField { class, field_name }) => {
@@ -2998,386 +3045,6 @@ impl<'a> Display for ExprPrinter<'a> {
             ExprKind::ReadValue { ptr, prim_type } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}.read::<{prim_type}>()")
-            }
-        }
-    }
-}
-
-impl std::fmt::Debug for ExprKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        struct FormatPtr<T>(*const T);
-        impl<T> std::fmt::Debug for FormatPtr<T> {
-            fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                write!(f, "{:p}", self.0)
-            }
-        }
-
-        match self {
-            Self::FunctionArg(arg) => {
-                f.debug_tuple("FunctionArg").field(arg).finish()
-            }
-            Self::Function { params, output } => f
-                .debug_struct("Function")
-                .field("params", params)
-                .field("output", output)
-                .finish(),
-            Self::FunctionCall { func, args } => f
-                .debug_struct("FunctionCall")
-                .field("func", func)
-                .field("args", args)
-                .finish(),
-            Self::Range { extent } => {
-                f.debug_struct("Range").field("extent", extent).finish()
-            }
-            ExprKind::Reduce {
-                initial,
-                iterator,
-                reduction,
-            } => f
-                .debug_struct("Reduce")
-                .field("initial", initial)
-                .field("iterator", iterator)
-                .field("reduction", reduction)
-                .finish(),
-            ExprKind::SimpleReduce {
-                initial,
-                extent,
-                reduction,
-            } => f
-                .debug_struct("Reduce")
-                .field("initial", initial)
-                .field("extent", extent)
-                .field("reduction", reduction)
-                .finish(),
-            Self::Tuple(tuple) => f.debug_tuple("Tuple").field(tuple).finish(),
-            Self::NativeFunction(func) => f
-                .debug_tuple("NativeFunction")
-                .field(&FormatPtr(Rc::as_ptr(func) as *const ()))
-                .finish(),
-            Self::StaticField(field) => {
-                f.debug_tuple("StaticField").field(field).finish()
-            }
-            Self::FieldAccess { obj, field } => f
-                .debug_struct("FieldAccess")
-                .field("obj", obj)
-                .field("field", field)
-                .finish(),
-            Self::SymbolicDowncast { obj, ty } => f
-                .debug_struct("SymbolicDowncast")
-                .field("obj", obj)
-                .field("ty", ty)
-                .finish(),
-            Self::IndexAccess { obj, indices } => f
-                .debug_struct("IndexAccess")
-                .field("obj", obj)
-                .field("indices", indices)
-                .finish(),
-            Self::NumArrayElements { array } => f
-                .debug_struct("NumArrayElements")
-                .field("array", array)
-                .finish(),
-            Self::ArrayExtent { array, dim } => f
-                .debug_struct("ArrayExtent")
-                .field("array", array)
-                .field("dim", dim)
-                .finish(),
-            Self::PointerCast { ptr, ty } => f
-                .debug_struct("PointerCast")
-                .field("ptr", ptr)
-                .field("ty", ty)
-                .finish(),
-            Self::Add { lhs, rhs } => f
-                .debug_struct("Add")
-                .field("lhs", lhs)
-                .field("rhs", rhs)
-                .finish(),
-            Self::Mul { lhs, rhs } => f
-                .debug_struct("Mul")
-                .field("lhs", lhs)
-                .field("rhs", rhs)
-                .finish(),
-            Self::PrimCast { value, prim_type } => f
-                .debug_struct("PrimCast")
-                .field("value", value)
-                .field("prim_type", prim_type)
-                .finish(),
-            Self::PhysicalDowncast { obj, ty } => f
-                .debug_struct("PhysicalDowncast")
-                .field("obj", obj)
-                .field("ty", ty)
-                .finish(),
-            Self::ReadValue { ptr, prim_type } => f
-                .debug_struct("ReadValue")
-                .field("ptr", ptr)
-                .field("prim_type", prim_type)
-                .finish(),
-        }
-    }
-}
-impl PartialEq for ExprKind {
-    fn eq(&self, other: &Self) -> bool {
-        match self {
-            ExprKind::FunctionArg(lhs) => match other {
-                ExprKind::FunctionArg(rhs) => lhs == rhs,
-                _ => false,
-            },
-            ExprKind::Function {
-                params: lhs_params,
-                output: lhs_output,
-            } => match other {
-                ExprKind::Function {
-                    params: rhs_params,
-                    output: rhs_output,
-                } => lhs_params == rhs_params && lhs_output == rhs_output,
-                _ => false,
-            },
-            ExprKind::FunctionCall {
-                func: lhs_func,
-                args: lhs_args,
-            } => match other {
-                ExprKind::FunctionCall {
-                    func: rhs_func,
-                    args: rhs_args,
-                } => lhs_func == rhs_func && lhs_args == rhs_args,
-                _ => false,
-            },
-            ExprKind::Range { extent: lhs_extent } => match other {
-                ExprKind::Range { extent: rhs_extent } => {
-                    lhs_extent == rhs_extent
-                }
-                _ => false,
-            },
-            ExprKind::Reduce {
-                initial: lhs_initial,
-                iterator: lhs_iterator,
-                reduction: lhs_reduction,
-            } => match other {
-                ExprKind::Reduce {
-                    initial: rhs_initial,
-                    iterator: rhs_iterator,
-                    reduction: rhs_reduction,
-                } => {
-                    lhs_initial == rhs_initial
-                        && lhs_iterator == rhs_iterator
-                        && lhs_reduction == rhs_reduction
-                }
-                _ => false,
-            },
-            ExprKind::SimpleReduce {
-                initial: lhs_initial,
-                extent: lhs_extent,
-                reduction: lhs_reduction,
-            } => match other {
-                ExprKind::SimpleReduce {
-                    initial: rhs_initial,
-                    extent: rhs_extent,
-                    reduction: rhs_reduction,
-                } => {
-                    lhs_initial == rhs_initial
-                        && lhs_extent == rhs_extent
-                        && lhs_reduction == rhs_reduction
-                }
-                _ => false,
-            },
-            ExprKind::Tuple(lhs_values) => match other {
-                ExprKind::Tuple(rhs_values) => lhs_values == rhs_values,
-                _ => false,
-            },
-            ExprKind::NativeFunction(lhs_func) => match other {
-                ExprKind::NativeFunction(rhs_func) => {
-                    std::ptr::eq(Rc::as_ptr(lhs_func), Rc::as_ptr(rhs_func))
-                }
-                _ => false,
-            },
-            ExprKind::StaticField(lhs_field) => match other {
-                ExprKind::StaticField(rhs_field) => lhs_field == rhs_field,
-                _ => false,
-            },
-            ExprKind::FieldAccess {
-                obj: lhs_obj,
-                field: lhs_field,
-            } => match other {
-                ExprKind::FieldAccess {
-                    obj: rhs_obj,
-                    field: rhs_field,
-                } => lhs_obj == rhs_obj && lhs_field == rhs_field,
-                _ => false,
-            },
-            ExprKind::SymbolicDowncast {
-                obj: lhs_obj,
-                ty: lhs_ty,
-            } => match other {
-                ExprKind::SymbolicDowncast {
-                    obj: rhs_obj,
-                    ty: rhs_ty,
-                } => lhs_obj == rhs_obj && lhs_ty == rhs_ty,
-                _ => false,
-            },
-            ExprKind::IndexAccess {
-                obj: lhs_obj,
-                indices: lhs_indices,
-            } => match other {
-                ExprKind::IndexAccess {
-                    obj: rhs_obj,
-                    indices: rhs_indices,
-                } => lhs_obj == rhs_obj && lhs_indices == rhs_indices,
-                _ => false,
-            },
-            ExprKind::NumArrayElements { array: lhs_array } => match other {
-                ExprKind::NumArrayElements { array: rhs_array } => {
-                    lhs_array == rhs_array
-                }
-                _ => false,
-            },
-            ExprKind::ArrayExtent {
-                array: lhs_array,
-                dim: lhs_dim,
-            } => match other {
-                ExprKind::ArrayExtent {
-                    array: rhs_array,
-                    dim: rhs_dim,
-                } => lhs_array == rhs_array && lhs_dim == rhs_dim,
-                _ => false,
-            },
-            ExprKind::PointerCast {
-                ptr: lhs_ptr,
-                ty: lhs_ty,
-            } => match other {
-                ExprKind::PointerCast {
-                    ptr: rhs_ptr,
-                    ty: rhs_ty,
-                } => lhs_ptr == rhs_ptr && lhs_ty == rhs_ty,
-                _ => false,
-            },
-            ExprKind::Add {
-                lhs: lhs_lhs,
-                rhs: lhs_rhs,
-            } => match other {
-                ExprKind::Add {
-                    lhs: rhs_lhs,
-                    rhs: rhs_rhs,
-                } => lhs_lhs == rhs_lhs && lhs_rhs == rhs_rhs,
-                _ => false,
-            },
-            ExprKind::Mul {
-                lhs: lhs_lhs,
-                rhs: lhs_rhs,
-            } => match other {
-                ExprKind::Mul {
-                    lhs: rhs_lhs,
-                    rhs: rhs_rhs,
-                } => lhs_lhs == rhs_lhs && lhs_rhs == rhs_rhs,
-                _ => false,
-            },
-            ExprKind::PrimCast {
-                value: lhs_value,
-                prim_type: lhs_ty,
-            } => match other {
-                ExprKind::PrimCast {
-                    value: rhs_value,
-                    prim_type: rhs_ty,
-                } => lhs_value == rhs_value && lhs_ty == rhs_ty,
-                _ => false,
-            },
-            ExprKind::PhysicalDowncast {
-                obj: lhs_obj,
-                ty: lhs_ty,
-            } => match other {
-                ExprKind::PhysicalDowncast {
-                    obj: rhs_obj,
-                    ty: rhs_ty,
-                } => lhs_obj == rhs_obj && lhs_ty == rhs_ty,
-                _ => false,
-            },
-            ExprKind::ReadValue {
-                ptr: lhs_ptr,
-                prim_type: lhs_ty,
-            } => match other {
-                ExprKind::ReadValue {
-                    ptr: rhs_ptr,
-                    prim_type: rhs_ty,
-                } => lhs_ptr == rhs_ptr && lhs_ty == rhs_ty,
-                _ => false,
-            },
-        }
-    }
-}
-impl Eq for ExprKind {}
-impl std::hash::Hash for ExprKind {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        core::mem::discriminant(self).hash(state);
-        match self {
-            ExprKind::FunctionArg(ty) => ty.hash(state),
-            ExprKind::Function { params, output } => {
-                params.hash(state);
-                output.hash(state);
-            }
-            ExprKind::FunctionCall { func, args } => {
-                func.hash(state);
-                args.hash(state);
-            }
-            ExprKind::Range { extent } => extent.hash(state),
-            ExprKind::Reduce {
-                initial,
-                iterator,
-                reduction,
-            } => {
-                initial.hash(state);
-                iterator.hash(state);
-                reduction.hash(state);
-            }
-            ExprKind::SimpleReduce {
-                initial,
-                extent,
-                reduction,
-            } => {
-                initial.hash(state);
-                extent.hash(state);
-                reduction.hash(state);
-            }
-            ExprKind::Tuple(values) => values.hash(state),
-            ExprKind::NativeFunction(func) => Rc::as_ptr(func).hash(state),
-            ExprKind::StaticField(static_field) => static_field.hash(state),
-            ExprKind::FieldAccess { obj, field } => {
-                obj.hash(state);
-                field.hash(state);
-            }
-            ExprKind::SymbolicDowncast { obj, ty } => {
-                obj.hash(state);
-                ty.hash(state);
-            }
-            ExprKind::IndexAccess { obj, indices } => {
-                obj.hash(state);
-                indices.hash(state);
-            }
-            ExprKind::NumArrayElements { array } => array.hash(state),
-            ExprKind::ArrayExtent { array, dim } => {
-                array.hash(state);
-                dim.hash(state);
-            }
-            ExprKind::PointerCast { ptr, ty } => {
-                ptr.hash(state);
-                ty.hash(state);
-            }
-            ExprKind::Add { lhs, rhs } => {
-                lhs.hash(state);
-                rhs.hash(state);
-            }
-            ExprKind::Mul { lhs, rhs } => {
-                lhs.hash(state);
-                rhs.hash(state);
-            }
-            ExprKind::PrimCast { value, prim_type } => {
-                value.hash(state);
-                prim_type.hash(state);
-            }
-            ExprKind::PhysicalDowncast { obj, ty } => {
-                obj.hash(state);
-                ty.hash(state);
-            }
-            ExprKind::ReadValue { ptr, prim_type } => {
-                ptr.hash(state);
-                prim_type.hash(state);
             }
         }
     }

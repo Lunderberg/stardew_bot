@@ -1,4 +1,4 @@
-use dotnet_debugger::{RuntimePrimType, SymbolicGraph};
+use dotnet_debugger::{RuntimePrimType, RustNativeObject, SymbolicGraph};
 
 #[test]
 fn eval_integer_literal() {
@@ -177,7 +177,7 @@ fn collecting_into_vector() {
 }
 
 #[test]
-fn parse_sum_of_integers() {
+fn sum_of_integers_in_vm_function() {
     let mut graph = SymbolicGraph::new();
     graph
         .parse(
@@ -198,7 +198,7 @@ fn parse_sum_of_integers() {
 }
 
 #[test]
-fn parse_reduce_to_const() {
+fn reduce_integers_into_constant_value() {
     let mut graph = SymbolicGraph::new();
     graph
         .parse(
@@ -219,7 +219,7 @@ fn parse_reduce_to_const() {
 }
 
 #[test]
-fn parse_sum_performed_in_native_function() {
+fn sum_of_integers_in_native_function() {
     let mut graph = SymbolicGraph::new();
 
     let reduction = graph.native_function(|a: usize, b: usize| a + b);
@@ -240,4 +240,153 @@ fn parse_sum_performed_in_native_function() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(42 * 41 / 2));
+}
+
+#[test]
+fn collect_integers_into_vector() {
+    let mut graph = SymbolicGraph::new();
+
+    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    graph.name(init_vector, "init_vector").unwrap();
+
+    let push_vector =
+        graph.native_function(|vec: &mut Vec<usize>, element: usize| {
+            vec.push(element);
+        });
+    graph.name(push_vector, "push_vector").unwrap();
+
+    graph
+        .parse(
+            "
+            pub fn main() {
+                (0..5).reduce(
+                    init_vector(),
+                    |arr, i: usize| { push_vector(arr, i*i) }
+                )
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    let vec = results
+        .get_any(0)
+        .unwrap()
+        .unwrap()
+        .downcast_ref::<Vec<usize>>()
+        .unwrap();
+    assert_eq!(vec, &vec![0, 1, 4, 9, 16]);
+}
+
+#[test]
+fn collect_two_vectors_of_integers() {
+    let mut graph = SymbolicGraph::new();
+
+    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    graph.name(init_vector, "init_vector").unwrap();
+
+    let push_vector =
+        graph.native_function(|vec: &mut Vec<usize>, element: usize| {
+            vec.push(element);
+        });
+    graph.name(push_vector, "push_vector").unwrap();
+
+    graph
+        .parse(
+            "
+            pub fn main() {
+                let a = (0..5).reduce(
+                    init_vector(),
+                    |arr, i: usize| { push_vector(arr, i) }
+                );
+                let b = (0..5).reduce(
+                    init_vector(),
+                    |arr, i: usize| { push_vector(arr, i*i) }
+                );
+                (a,b)
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 2);
+    let vec_a = results
+        .get_any(0)
+        .unwrap()
+        .unwrap()
+        .downcast_ref::<Vec<usize>>()
+        .unwrap();
+    let vec_b = results
+        .get_any(1)
+        .unwrap()
+        .unwrap()
+        .downcast_ref::<Vec<usize>>()
+        .unwrap();
+    assert_eq!(vec_a, &vec![0, 1, 2, 3, 4]);
+    assert_eq!(vec_b, &vec![0, 1, 4, 9, 16]);
+}
+
+#[test]
+fn collect_vector_of_rust_native_objects() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct MyObj(usize, usize);
+
+    impl RustNativeObject for MyObj {}
+
+    let make_obj = graph.native_function(|a: usize, b: usize| MyObj(a, b));
+    graph.name(make_obj, "make_obj").unwrap();
+
+    let init_vector = graph.native_function(|| Vec::<MyObj>::new());
+    graph.name(init_vector, "init_vector").unwrap();
+
+    let push_vector =
+        graph.native_function(|vec: &mut Vec<MyObj>, element: &MyObj| {
+            vec.push(element.clone());
+        });
+    graph.name(push_vector, "push_vector").unwrap();
+
+    graph
+        .parse(
+            "
+            pub fn main() {
+                (0..5).reduce(
+                    init_vector(),
+                    |arr, i: usize| {
+                         let obj = make_obj(i, i*i);
+                         push_vector(arr, obj)
+                    }
+                )
+            }
+            ",
+        )
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    let vec = results
+        .get_any(0)
+        .unwrap()
+        .unwrap()
+        .downcast_ref::<Vec<MyObj>>()
+        .unwrap();
+    assert_eq!(
+        vec,
+        &vec![
+            MyObj(0, 0),
+            MyObj(1, 1),
+            MyObj(2, 4),
+            MyObj(3, 9),
+            MyObj(4, 16),
+        ]
+    );
 }

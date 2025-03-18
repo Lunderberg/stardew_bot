@@ -50,3 +50,6 @@ pub use virtual_machine::{
 
 pub mod native_function;
 pub use native_function::{NativeFunction, RustNativeObject};
+
+mod exposed_native_function;
+pub use exposed_native_function::ExposedNativeFunction;
