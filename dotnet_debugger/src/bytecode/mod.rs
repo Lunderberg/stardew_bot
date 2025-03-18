@@ -40,6 +40,8 @@ pub use type_inference::{TypeInference, TypeInferenceError};
 mod parser;
 pub(crate) use parser::*;
 
+mod printer;
+
 mod op_index;
 pub use op_index::OpIndex;
 
