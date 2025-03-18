@@ -150,6 +150,9 @@ pub enum ExprKind {
     /// Cast a pointer to another pointer type.
     PointerCast { ptr: SymbolicValue, ty: RuntimeType },
 
+    /// Check if a value is well-defined.
+    IsSome(SymbolicValue),
+
     /// Perform addition of the LHS and RHS.
     ///
     /// This operation is used for both pointer arithmetic and numeric
@@ -754,6 +757,14 @@ impl SymbolicGraph {
     {
         let wrapped = WrappedNativeFunction::new(func);
         self.push(ExprKind::NativeFunction(wrapped.into()))
+    }
+
+    pub fn is_some(
+        &mut self,
+        value: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let value = value.into();
+        self.push(ExprKind::IsSome(value))
     }
 
     pub fn add(
@@ -1737,6 +1748,15 @@ impl ExpressionTranslater<'_> {
                     self.native_function_lookup.insert(op_index, func_index);
                 }
 
+                ExprKind::IsSome(value) => {
+                    let value = self.value_to_arg(value)?;
+                    self.instructions.push(Instruction::IsSome {
+                        value,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = value_to_arg!(lhs);
                     let rhs = value_to_arg!(rhs);
@@ -1978,6 +1998,9 @@ impl ExprKind {
                     ty: ty.clone(),
                 })
             }
+            ExprKind::IsSome(value) => {
+                remap(value).map(|value| ExprKind::IsSome(value))
+            }
             ExprKind::Add { lhs, rhs } => {
                 let opt_lhs = remap(lhs);
                 let opt_rhs = remap(rhs);
@@ -2070,6 +2093,7 @@ impl ExprKind {
                 callback(*dim);
             }
             ExprKind::PointerCast { ptr, .. } => callback(*ptr),
+            ExprKind::IsSome(value) => callback(*value),
             ExprKind::Add { lhs, rhs } | ExprKind::Mul { lhs, rhs } => {
                 callback(*lhs);
                 callback(*rhs)
@@ -2368,6 +2392,12 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::IsSome(lhs_value) => match rhs_kind {
+                    ExprKind::IsSome(rhs_value) => {
+                        equivalent_value!(lhs_value, rhs_value)
+                    }
+                    _ => false,
+                },
                 ExprKind::Add {
                     lhs: lhs_lhs,
                     rhs: lhs_rhs,
@@ -2527,6 +2557,10 @@ impl Display for ExprKind {
 
             ExprKind::PointerCast { ptr, ty } => {
                 write!(f, "{ptr}\u{200B}.ptr_cast::<{ty}>()")
+            }
+
+            ExprKind::IsSome(value) => {
+                write!(f, "{value}.is_some()")
             }
 
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
@@ -3033,6 +3067,10 @@ impl<'a> Display for ExprPrinter<'a> {
             ExprKind::PointerCast { ptr, ty } => {
                 let ptr = self.with_value(*ptr);
                 write!(f, "{ptr}{sep}.ptr_cast::<{ty}>()")
+            }
+            ExprKind::IsSome(value) => {
+                let value = self.with_value(*value);
+                write!(f, "{value}.is_some()")
             }
             ExprKind::Add { lhs, rhs } => {
                 let lhs = self.with_value(*lhs);

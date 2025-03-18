@@ -675,6 +675,10 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.reduce(initial, obj, reduction))
                 }
+                "is_some" => {
+                    let _ = self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.is_some(obj))
+                }
                 _ => Err(ParseError::UnknownOperator {
                     name: field.text.to_string(),
                 }

@@ -260,6 +260,7 @@ impl<'a> TypeInference<'a> {
                     RuntimeType::Prim(RuntimePrimType::NativeUInt)
                 }
                 ExprKind::PointerCast { ty, .. } => ty.clone(),
+                ExprKind::IsSome(_) => RuntimeType::Prim(RuntimePrimType::Bool),
                 ExprKind::Add { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of add");
                     let rhs_type = expect_cache(*rhs, "rhs of add");

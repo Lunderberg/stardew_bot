@@ -97,6 +97,12 @@ pub enum Instruction {
         output: StackIndex,
     },
 
+    // Check if a location contains a non-None value.
+    IsSome {
+        value: VMArg,
+        output: StackIndex,
+    },
+
     // Increment the register by the value specified in the argument,
     // storing the result back to the register.
     Add {
@@ -713,6 +719,18 @@ impl VirtualMachine {
                         .transpose()?
                         .map(Into::into);
                 }
+
+                Instruction::IsSome { value, output } => {
+                    let is_some: bool = match value {
+                        VMArg::Const(_) => true,
+                        VMArg::SavedValue(stack_index) => {
+                            values[*stack_index].is_some()
+                        }
+                    };
+                    values[*output] =
+                        Some(RuntimePrimValue::Bool(is_some).into());
+                }
+
                 Instruction::Add { lhs, rhs, output } => {
                     let opt_lhs = arg_to_prim!(lhs, "Add");
                     let opt_rhs = arg_to_prim!(rhs, "Add");
@@ -931,7 +949,10 @@ impl Instruction {
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::Downcast { obj: arg, .. }
-            | Instruction::Read { ptr: arg, .. } => (Some(*arg), None, None),
+            | Instruction::Read { ptr: arg, .. }
+            | Instruction::IsSome { value: arg, .. } => {
+                (Some(*arg), None, None)
+            }
 
             // Binary instructions
             Instruction::Add { lhs, rhs, .. }
@@ -983,7 +1004,8 @@ impl Instruction {
             | Instruction::LessThan { output, .. }
             | Instruction::GreaterThan { output, .. }
             | Instruction::Downcast { output, .. }
-            | Instruction::Read { output, .. } => (Some(*output), None),
+            | Instruction::Read { output, .. }
+            | Instruction::IsSome { output, .. } => (Some(*output), None),
 
             Instruction::Swap(lhs, rhs) => (Some(*lhs), Some(*rhs)),
         };
@@ -995,7 +1017,8 @@ impl Instruction {
 
     fn visit_indices(&mut self, mut callback: impl FnMut(&mut StackIndex)) {
         match self {
-            Instruction::Copy { value: arg, output }
+            Instruction::IsSome { value: arg, output }
+            | Instruction::Copy { value: arg, output }
             | Instruction::PrimCast {
                 value: arg, output, ..
             }
@@ -1144,6 +1167,11 @@ impl Display for Instruction {
                 prim_type,
                 output,
             } => write!(f, "{output} = {value}.prim_cast({prim_type})"),
+
+            Instruction::IsSome { value, output } => {
+                write!(f, "{output} = {value}.is_some()")
+            }
+
             Instruction::Add { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs} + {rhs}")
             }
