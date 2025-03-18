@@ -1428,31 +1428,6 @@ impl ExpressionTranslater<'_> {
         &mut self,
         instructions: impl Iterator<Item = OpIndex>,
     ) -> Result<(), Error> {
-        macro_rules! value_to_arg {
-            ($arg:expr) => {
-                match $arg {
-                    &SymbolicValue::Int(value) => {
-                        VMArg::Const(RuntimePrimValue::NativeUInt(value))
-                    }
-                    &SymbolicValue::Ptr(ptr) => {
-                        VMArg::Const(RuntimePrimValue::Ptr(ptr))
-                    }
-                    SymbolicValue::Result(op_index) => {
-                        if self.previously_consumed.contains(&op_index) {
-                            return Err(Error::AttemptedUseOfConsumedValue);
-                        }
-                        self.currently_stored
-                            .get(&op_index)
-                            .expect(
-                                "Internal error, \
-                             {op_index} not located anywhere",
-                            )
-                            .clone()
-                    }
-                }
-            };
-        }
-
         macro_rules! next_free_index {
             () => {{
                 let index = *self.next_free_index;
@@ -1499,7 +1474,7 @@ impl ExpressionTranslater<'_> {
                     {
                         let mut vm_args = Vec::new();
                         for arg in args {
-                            vm_args.push(value_to_arg!(arg));
+                            vm_args.push(self.value_to_arg(arg)?);
                         }
 
                         let mutates_first_argument = self.native_functions
@@ -1587,8 +1562,8 @@ impl ExpressionTranslater<'_> {
                     extent,
                     reduction,
                 } => {
-                    let initial = value_to_arg!(initial);
-                    let extent = value_to_arg!(extent);
+                    let initial = self.value_to_arg(initial)?;
+                    let extent = self.value_to_arg(extent)?;
 
                     match initial {
                         VMArg::Const(_) => {
@@ -1762,8 +1737,8 @@ impl ExpressionTranslater<'_> {
                 }
 
                 ExprKind::Add { lhs, rhs } => {
-                    let lhs = value_to_arg!(lhs);
-                    let rhs = value_to_arg!(rhs);
+                    let lhs = self.value_to_arg(lhs)?;
+                    let rhs = self.value_to_arg(rhs)?;
                     self.instructions.push(Instruction::Add {
                         lhs,
                         rhs,
@@ -1772,8 +1747,8 @@ impl ExpressionTranslater<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::Mul { lhs, rhs } => {
-                    let lhs = value_to_arg!(lhs);
-                    let rhs = value_to_arg!(rhs);
+                    let lhs = self.value_to_arg(lhs)?;
+                    let rhs = self.value_to_arg(rhs)?;
                     self.instructions.push(Instruction::Mul {
                         lhs,
                         rhs,
@@ -1782,7 +1757,7 @@ impl ExpressionTranslater<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PrimCast { value, prim_type } => {
-                    let value = value_to_arg!(value);
+                    let value = self.value_to_arg(value)?;
                     self.instructions.push(Instruction::PrimCast {
                         value,
                         prim_type: *prim_type,
@@ -1791,7 +1766,7 @@ impl ExpressionTranslater<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
-                    let obj = value_to_arg!(obj);
+                    let obj = self.value_to_arg(obj)?;
                     self.instructions.push(Instruction::Downcast {
                         obj,
                         subtype: *ty,
@@ -1800,7 +1775,7 @@ impl ExpressionTranslater<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
-                    let ptr = value_to_arg!(ptr);
+                    let ptr = self.value_to_arg(ptr)?;
                     self.instructions.push(Instruction::Read {
                         ptr,
                         prim_type: *prim_type,
@@ -1809,7 +1784,7 @@ impl ExpressionTranslater<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PointerCast { ptr, .. } => {
-                    let ptr = value_to_arg!(ptr);
+                    let ptr = self.value_to_arg(ptr)?;
                     self.instructions.push(Instruction::Copy {
                         value: ptr,
                         output: op_output,
