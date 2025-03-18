@@ -837,7 +837,7 @@ impl SymbolicGraph {
 
         for (index, op) in self.iter_ops() {
             let mut result = Ok(());
-            op.visit_input_values(|input_value| {
+            op.visit_reachable_nodes(|input_value| {
                 if let SymbolicValue::Result(prev_index) = input_value {
                     if prev_index.0 >= index.0 {
                         result = Err(Error::InvalidReference {
@@ -918,7 +918,7 @@ impl SymbolicGraph {
             }
 
             while let Some(visiting) = to_visit.pop() {
-                self[visiting].visit_input_values(|value| mark!(value));
+                self[visiting].visit_reachable_nodes(|value| mark!(value));
             }
 
             used_by_outputs
@@ -937,7 +937,7 @@ impl SymbolicGraph {
 
         for index in used_by_outputs {
             let mut uses_input = false;
-            self[index].visit_input_values(|value| {
+            self[index].visit_reachable_nodes(|value| {
                 if let Some(upstream) = value.as_op_index() {
                     if depend_on_inputs.contains(&upstream) {
                         uses_input = true;
@@ -1074,7 +1074,7 @@ impl SymbolicGraph {
         }
 
         while let Some(visiting) = to_visit.pop() {
-            self[visiting].visit_input_values(|upstream| {
+            self[visiting].visit_reachable_nodes(|upstream| {
                 if let SymbolicValue::Result(upstream) = upstream {
                     if !reachable[upstream.0] {
                         reachable[upstream.0] = true;
@@ -1840,11 +1840,11 @@ impl SymbolicValue {
 }
 
 impl Expr {
-    pub(crate) fn visit_input_values(
+    pub(crate) fn visit_reachable_nodes(
         &self,
         callback: impl FnMut(SymbolicValue),
     ) {
-        self.kind.reachable_nodes(callback)
+        self.kind.visit_reachable_nodes(callback)
     }
 }
 
@@ -2036,7 +2036,7 @@ impl ExprKind {
         }
     }
 
-    pub(crate) fn reachable_nodes(
+    pub(crate) fn visit_reachable_nodes(
         &self,
         mut callback: impl FnMut(SymbolicValue),
     ) {
@@ -2613,7 +2613,7 @@ impl<'a> GraphPrinter<'a> {
                 .iter_ops()
                 .filter(|(index, _)| reachable[index.0])
                 .for_each(|(downstream_index, op)| {
-                    op.visit_input_values(|input_value| {
+                    op.visit_reachable_nodes(|input_value| {
                         if let SymbolicValue::Result(upstream_index) =
                             input_value
                         {
@@ -2759,7 +2759,7 @@ impl<'a> GraphPrinter<'a> {
 
             let mut uses_param = None;
             if !matches!(op.kind, ExprKind::Function { .. }) {
-                op.visit_input_values(|input| {
+                op.visit_reachable_nodes(|input| {
                     if let SymbolicValue::Result(op_index) = input {
                         if let Some(function_arg) =
                             delayed_op_lookup.get(&op_index)

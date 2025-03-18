@@ -84,7 +84,7 @@ impl<'a> TypeInference<'a> {
                 if self.cache.get(&visiting).is_none() {
                     reverse_topologic_order.push(visiting);
                     let expr = &graph[visiting];
-                    expr.visit_input_values(|input_value| {
+                    expr.visit_reachable_nodes(|input_value| {
                         if let SymbolicValue::Result(input_index) = input_value
                         {
                             if !seen.contains(&input_index) {
