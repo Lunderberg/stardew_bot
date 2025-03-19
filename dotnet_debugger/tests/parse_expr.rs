@@ -339,6 +339,30 @@ fn parse_function_that_shadows_variable() {
 }
 
 #[test]
+fn parse_function_with_param_that_shadows_variable() {
+    require_identical_graph(
+        stringify! {
+            let x = 1+1;
+            fn func(x: usize) {
+                x + 1000
+            }
+            func(x)
+        },
+        |graph| {
+            let x_outer = graph.add(1, 1);
+            graph.name(x_outer, "x").unwrap();
+            let x_param = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(x_param, "x").unwrap();
+            let sum = graph.add(x_param, 1000);
+            let func = graph.function_def(vec![x_param], sum);
+            graph.name(func, "func").unwrap();
+
+            graph.function_call(func, vec![x_outer]);
+        },
+    );
+}
+
+#[test]
 fn parse_addition() {
     require_identical_graph("fn main(a: usize, b: usize) { a+b }", |graph| {
         let a = graph.function_arg(RuntimePrimType::NativeUInt);

@@ -497,6 +497,8 @@ impl<'a> SymbolicParser<'a> {
     /// function is anonymous, then it gets treated as an expression,
     /// and this function returns `Some(func)`.
     fn expect_named_function(&mut self) -> Result<SymbolicValue, Error> {
+        let identifiers = self.identifiers.clone();
+
         let is_extern = self
             .tokens
             .next_if(|token| token.kind.is_keyword(Keyword::Public))?
@@ -532,13 +534,14 @@ impl<'a> SymbolicParser<'a> {
             self.graph.mark_extern_func(func)?;
         }
 
-        // TODO: Roll back any changes to the identifiers.
+        self.identifiers = identifiers;
 
         self.define_identifier(name, func)?;
         Ok(func)
     }
 
     fn expect_anonymous_function(&mut self) -> Result<SymbolicValue, Error> {
+        let identifiers = self.identifiers.clone();
         let opening = self.expect_kind(
             "Opening '|' of closure's argument list",
             |kind| {
@@ -569,6 +572,8 @@ impl<'a> SymbolicParser<'a> {
         let output = self.expect_expr()?;
 
         let func = self.graph.function_def(params, output);
+
+        self.identifiers = identifiers;
 
         Ok(func)
     }
