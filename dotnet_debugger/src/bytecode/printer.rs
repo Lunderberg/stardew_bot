@@ -402,7 +402,11 @@ impl<'a> GraphPrinter<'a> {
             }
         }
 
-        assert_eq!(delayed_ops.len(), 0);
+        // The `delayed_ops` lookup could still contain entries at
+        // this point.  This is not an error, since there could be a
+        // FunctionArg that was used by another expression, but
+        // neither had actually been part of the externally-defined
+        // functions.
 
         Ok(())
     }
