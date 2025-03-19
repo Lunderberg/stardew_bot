@@ -272,6 +272,7 @@ impl<'a> GraphPrinter<'a> {
                     write!(fmt, "}}")?;
                     if !is_extern_func {
                         write!(fmt, ";")?;
+                        delayed_newline = DelayedNewline::BeforeExpression;
                     }
                     continue;
                 }
