@@ -1086,7 +1086,10 @@ impl SymbolicGraph {
             let value =
                 rewriter.rewrite_expr(self, kind)?.unwrap_or_else(|| {
                     let expr: Expr = if let Some(remapped) = opt_remapped {
-                        remapped.into()
+                        Expr {
+                            kind: remapped,
+                            name: op.name,
+                        }
                     } else {
                         op
                     };
