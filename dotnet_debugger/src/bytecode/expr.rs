@@ -744,7 +744,7 @@ impl SymbolicGraph {
 
     pub(crate) fn iter_extern_funcs(
         &self,
-    ) -> impl Iterator<Item = OpIndex> + '_ {
+    ) -> impl DoubleEndedIterator<Item = OpIndex> + '_ {
         self.extern_funcs.iter().cloned()
     }
 
@@ -989,7 +989,6 @@ impl SymbolicGraph {
                 let ExprKind::Function { params, output } = &op.kind else {
                     unreachable!("Due to earlier filter")
                 };
-                scope[func_index.0] = Some(func_index);
 
                 self.collect_subgraph(params.iter().cloned(), Some(*output))
                     .into_iter()
@@ -1306,7 +1305,10 @@ impl SymbolicGraph {
             .iter()
             .enumerate()
             .filter(|(_, scope)| scope.is_none())
-            .map(|(i, _)| OpIndex::new(i));
+            .map(|(i, _)| OpIndex::new(i))
+            .filter(|index| {
+                !matches!(self[*index].kind, ExprKind::Function { .. })
+            });
 
         let mut translater = ExpressionTranslator {
             graph: self,
@@ -1501,7 +1503,10 @@ impl ExpressionTranslator<'_> {
 
             match op.as_ref() {
                 ExprKind::Function { .. } => {
-                    assert!(op_index == self.main_func_index);
+                    unreachable!(
+                        "Function calls should be inlined, \
+                         and should only be encountered in SimpleReduce."
+                    )
                 }
                 ExprKind::FunctionArg(_) => todo!(),
                 ExprKind::Tuple(_) => {

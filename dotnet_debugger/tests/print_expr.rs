@@ -103,9 +103,9 @@ fn print_downcast_with_zwsp() {
     let expected = "class_name\u{200B}\
                     .field_name\u{200B}\
                     .subfield\
-                    .as::<\u{200B}\
+                    .as::<\
                     other_class<\u{200B}arg1, \u{200B}arg2>\
-                    \u{200B}>()";
+                    >()";
     assert_eq!(printed, expected);
 }
 

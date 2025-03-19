@@ -3,9 +3,13 @@ use std::{
     fmt::Display,
 };
 
+use itertools::{Either, Itertools, Position};
+
 use format_utils::Indent;
 
-use crate::{ExprKind, RuntimeType};
+use crate::{
+    ExprKind, MethodTable, RuntimePrimType, RuntimeType, TypedPointer,
+};
 
 use super::{
     expr::StaticField, OpIndex, SymbolicGraph, SymbolicType, SymbolicValue,
@@ -82,16 +86,6 @@ pub struct GraphPrinter<'a> {
 }
 
 #[derive(Clone, Copy)]
-pub struct ExprPrinter<'a> {
-    graph: &'a SymbolicGraph,
-    value: SymbolicValue,
-    is_top_level: bool,
-    inline_expr: &'a [bool],
-    requires_name_prefix: &'a [bool],
-    insert_zero_width_space_at_breakpoint: bool,
-}
-
-#[derive(Clone, Copy)]
 struct TypePrinter<'a> {
     ty: &'a SymbolicType,
     insert_zero_width_space_at_breakpoint: bool,
@@ -102,6 +96,51 @@ struct IndexPrinter<'a> {
     graph: &'a SymbolicGraph,
     index: OpIndex,
     requires_name_prefix: bool,
+}
+
+#[derive(Debug)]
+enum PrintItem<'a> {
+    Stmt(OpIndex),
+    Expr(SymbolicValue),
+    ExpandedExpr(OpIndex),
+    AssignmentEnd,
+    FunctionBody {
+        func_index: OpIndex,
+        output: SymbolicValue,
+        is_stmt: bool,
+    },
+    FunctionClose {
+        start_line: usize,
+        is_stmt: bool,
+    },
+    Comma,
+    OptionalTrailingComma,
+    Str(&'a str),
+    SymbolicType(&'a SymbolicType),
+    RuntimeType(&'a RuntimeType),
+    PrimType(&'a RuntimePrimType),
+    MethodTablePointer(TypedPointer<MethodTable>),
+    ParenOpen,
+    ParenClose,
+    SquareBracketOpen,
+    SquareBracketClose,
+    MemberAccess,
+}
+
+trait IterPrintItemExt<'a>: Iterator<Item = PrintItem<'a>> + Sized {
+    fn comma_separated(self) -> impl Iterator<Item = PrintItem<'a>> {
+        self.with_position().flat_map(|(pos, item)| {
+            std::iter::once(item).chain(match pos {
+                Position::First | Position::Middle => Some(PrintItem::Comma),
+                Position::Last => Some(PrintItem::OptionalTrailingComma),
+                Position::Only => None,
+            })
+        })
+    }
+}
+impl<'a, Iter> IterPrintItemExt<'a> for Iter where
+    Iter: Iterator<Item = PrintItem<'a>>
+{
 }
 
 impl<'a> GraphPrinter<'a> {
@@ -119,12 +158,19 @@ impl<'a> GraphPrinter<'a> {
         }
     }
 
+    fn iter_root_nodes(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = SymbolicValue> + '_ {
+        match self.root_subgraph_node {
+            Some(root_index) => Either::Left(std::iter::once(root_index)),
+            None => {
+                Either::Right(self.graph.iter_extern_funcs().map(Into::into))
+            }
+        }
+    }
+
     fn display(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let reachable = if let Some(root_node) = self.root_subgraph_node {
-            self.graph.reachable(std::iter::once(root_node))
-        } else {
-            vec![true; self.graph.num_operations()]
-        };
+        let reachable = self.graph.reachable(self.iter_root_nodes());
 
         let scope = self.graph.operation_scope();
 
@@ -138,14 +184,16 @@ impl<'a> GraphPrinter<'a> {
                 .iter_ops()
                 .filter(|(index, _)| reachable[index.0])
                 .for_each(|(downstream_index, op)| {
+                    let downstream_scope = match op.kind {
+                        ExprKind::Function { .. } => Some(downstream_index),
+                        _ => scope[downstream_index.0],
+                    };
                     op.visit_reachable_nodes(|input_value| {
                         if let SymbolicValue::Result(upstream_index) =
                             input_value
                         {
                             num_usage[upstream_index.0] += 1;
-                            if scope[upstream_index.0]
-                                != scope[downstream_index.0]
-                            {
+                            if scope[upstream_index.0] != downstream_scope {
                                 used_by_child_scope[upstream_index.0] = true;
                             }
                         }
@@ -159,7 +207,12 @@ impl<'a> GraphPrinter<'a> {
                 .map(|((i, count), uses_parent_scope)| {
                     let index = OpIndex(i);
                     let op = &self.graph[index];
-                    count == 1 && op.name.is_none() && !uses_parent_scope
+                    let is_subgraph_root = Some(SymbolicValue::Result(index))
+                        == self.root_subgraph_node;
+                    is_subgraph_root
+                        || (count == 1
+                            && op.name.is_none()
+                            && !uses_parent_scope)
                 })
                 .collect()
         };
@@ -182,231 +235,542 @@ impl<'a> GraphPrinter<'a> {
             requires_name_prefix
         };
 
-        #[derive(Debug)]
-        struct PrintItem {
-            kind: PrintItemKind,
-            indent: Indent,
-        }
-        #[derive(Debug)]
-        enum PrintItemKind {
-            Op(OpIndex),
-            FunctionOutput {
-                output: SymbolicValue,
-                is_extern_func: bool,
-            },
-        }
+        let sep =
+            MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
         // A stack of operations to print.  If an operation is not yet
         // printable, such as an operation that uses a function
         // argument prior to encountering the function, it will be
         // moved to `delayed_ops` rather than printed.  After it
         // becomes printable, it will be pushed back onto the stack.
-        let mut to_print: Vec<PrintItem> = (0..self.graph.num_operations())
-            .rev()
-            .map(|i| PrintItem {
-                kind: PrintItemKind::Op(OpIndex::new(i)),
-                indent: Indent(0),
-            })
-            .collect();
+        let mut to_print: Vec<PrintItem> = Vec::new();
 
-        // Track operations that depend on a function argument.  These
-        // shouldn't be printed until encountering the function that
-        // owns them.
-        let mut delayed_ops: Vec<PrintItem> = Vec::new();
-        // Lookup from an operation to the Expr::FunctionArg that it makes use of.
-        //
-        // TODO: Something feels wrong for the order in which these
-        // are looked up.  If there's an expression that uses
-        // arguments from two separate functions, then the expression
-        // is contained within both functions.  On encountering either
-        // function definition, you know that the expression is part
-        // of the innermost function.  But I'm only tracking a single
-        // index here.
-        let mut delayed_op_lookup: HashMap<OpIndex, OpIndex> = HashMap::new();
-
-        #[derive(PartialEq, PartialOrd)]
-        enum DelayedNewline {
-            None,
-            BeforeAssignment,
-            BeforeExpression,
+        if let Some(root_value) = self.root_subgraph_node {
+            to_print.push(PrintItem::Expr(root_value));
         }
 
-        let mut delayed_newline = DelayedNewline::None;
+        (0..self.graph.num_operations())
+            .rev()
+            .filter(|i| {
+                // Only display operations that are reachable when
+                // starting from the displayed node.
+                reachable[*i]
+            })
+            .filter(|i| {
+                // Initialize the stack with operations in the global
+                // scope.  On encountering a function definition,
+                // operations within that function will be added to
+                // the stack.
+                scope[*i].is_none()
+            })
+            .filter(|i| {
+                // Initialize the stack only with expressions that are
+                // displayed as statements.  Expressions that are
+                // displayed as in-line parts of other expressions
+                // will be pushed onto the stack later.
+                !inline_expr[*i]
+            })
+            .filter(|i| {
+                Some(SymbolicValue::Result(OpIndex::new(*i)))
+                    != self.root_subgraph_node
+            })
+            .for_each(|i| {
+                let item = PrintItem::Stmt(OpIndex::new(i));
+                to_print.push(item);
+            });
 
-        let make_expr_printer =
-            |value: SymbolicValue, is_top_level: bool| ExprPrinter {
-                graph: self.graph,
-                value,
-                is_top_level,
-                inline_expr: &inline_expr,
-                requires_name_prefix: &requires_name_prefix,
-                insert_zero_width_space_at_breakpoint: self
-                    .insert_zero_width_space_at_breakpoint,
-            };
+        enum PrevPrintType {
+            None,
+            FunctionOpen,
+            Comma,
+            Expr,
+            Stmt,
+        }
+
+        let mut prev_print_type = PrevPrintType::None;
+
+        let mut current_line: usize = 0;
+
+        let make_index_printer = |index: OpIndex| IndexPrinter {
+            graph: self.graph,
+            index,
+            requires_name_prefix: requires_name_prefix[index.0],
+        };
 
         let extern_func_lookup: HashSet<OpIndex> =
             self.graph.iter_extern_funcs().collect();
 
-        while let Some(print_item) = to_print.pop() {
-            let indent = print_item.indent;
-            let index = match print_item.kind {
-                PrintItemKind::Op(index) => index,
-                PrintItemKind::FunctionOutput {
-                    output,
-                    is_extern_func,
-                } => {
-                    if delayed_newline >= DelayedNewline::BeforeExpression {
-                        write!(fmt, "\n{indent}")?;
-                    } else {
-                        write!(fmt, " ")?;
-                    }
-                    write!(fmt, "{}", make_expr_printer(output, false))?;
+        let mut current_indent = Indent(0);
 
-                    if delayed_newline >= DelayedNewline::BeforeExpression {
-                        let closing_indent = indent - self.indent_width;
-                        write!(fmt, "\n{closing_indent}")?;
-                    } else {
+        while let Some(print_item) = to_print.pop() {
+            match print_item {
+                PrintItem::Comma => {
+                    write!(fmt, ",")?;
+                    prev_print_type = PrevPrintType::Comma;
+                }
+                PrintItem::OptionalTrailingComma => {
+                    // write!(fmt, ",")?;
+                }
+                PrintItem::Str(text) => {
+                    write!(fmt, "{text}")?;
+                }
+                PrintItem::SymbolicType(ty) => {
+                    let ty = TypePrinter {
+                        ty,
+                        insert_zero_width_space_at_breakpoint: self
+                            .insert_zero_width_space_at_breakpoint,
+                    };
+                    write!(fmt, "{ty}")?;
+                }
+                PrintItem::ParenOpen => write!(fmt, "(")?,
+                PrintItem::ParenClose => write!(fmt, ")")?,
+                PrintItem::SquareBracketOpen => write!(fmt, "[")?,
+                PrintItem::SquareBracketClose => write!(fmt, "]")?,
+                PrintItem::MemberAccess => write!(fmt, "{sep}.")?,
+                PrintItem::RuntimeType(ty) => write!(fmt, "{ty}")?,
+                PrintItem::PrimType(ty) => write!(fmt, "{ty}")?,
+                PrintItem::MethodTablePointer(ty) => write!(fmt, "{ty}")?,
+                PrintItem::Stmt(index) => {
+                    let op = &self.graph[index];
+
+                    let index_printer = make_index_printer(index);
+
+                    match op.as_ref() {
+                        ExprKind::FunctionArg(_) => {
+                            // No action needed, handled as part of Function
+                        }
+                        ExprKind::Function { params, output } => {
+                            match prev_print_type {
+                                PrevPrintType::FunctionOpen
+                                | PrevPrintType::Stmt => {
+                                    write!(fmt, "\n{current_indent}")?;
+                                    current_line += 1;
+                                }
+                                _ => {}
+                            }
+
+                            let is_extern_func =
+                                extern_func_lookup.contains(&index);
+                            if is_extern_func {
+                                write!(fmt, "pub ")?;
+                            }
+
+                            write!(fmt, "fn {index_printer}")?;
+
+                            prev_print_type = PrevPrintType::None;
+
+                            std::iter::empty()
+                                .chain(Some(PrintItem::ParenOpen))
+                                .chain(
+                                    params
+                                        .iter()
+                                        .filter_map(|param| param.as_op_index())
+                                        .map(PrintItem::ExpandedExpr)
+                                        .comma_separated(),
+                                )
+                                .chain(Some(PrintItem::ParenClose))
+                                .chain(Some(PrintItem::FunctionBody {
+                                    func_index: index,
+                                    output: *output,
+                                    is_stmt: true,
+                                }))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                        }
+                        _ => {
+                            match prev_print_type {
+                                PrevPrintType::FunctionOpen
+                                | PrevPrintType::Stmt => {
+                                    write!(fmt, "\n{current_indent}")?;
+                                    current_line += 1;
+                                }
+
+                                _ => {}
+                            }
+
+                            write!(fmt, "let {index_printer} = ")?;
+                            to_print.push(PrintItem::AssignmentEnd);
+                            to_print.push(PrintItem::ExpandedExpr(index));
+                            prev_print_type = PrevPrintType::None;
+                        }
+                    }
+                }
+                PrintItem::Expr(value) => {
+                    match prev_print_type {
+                        PrevPrintType::FunctionOpen | PrevPrintType::Comma => {
+                            write!(fmt, " ")?
+                        }
+                        PrevPrintType::Stmt => {
+                            write!(fmt, "\n{current_indent}")?;
+                            current_line += 1;
+                        }
+                        _ => {}
+                    }
+                    prev_print_type = PrevPrintType::None;
+
+                    match value {
+                        SymbolicValue::Result(index)
+                            if inline_expr[index.0] =>
+                        {
+                            to_print.push(PrintItem::ExpandedExpr(index));
+                        }
+                        SymbolicValue::Result(index) => {
+                            write!(fmt, "{}", make_index_printer(index))?;
+                            prev_print_type = PrevPrintType::Expr;
+                        }
+                        _ => {
+                            write!(fmt, "{value}")?;
+                            prev_print_type = PrevPrintType::Expr;
+                        }
+                    }
+                }
+
+                PrintItem::FunctionBody {
+                    func_index,
+                    output,
+                    is_stmt,
+                } => {
+                    write!(fmt, " {{")?;
+
+                    current_indent += self.indent_width;
+
+                    to_print.push(PrintItem::FunctionClose {
+                        start_line: current_line,
+                        is_stmt,
+                    });
+                    to_print.push(PrintItem::Expr(output));
+                    scope
+                        .iter()
+                        .enumerate()
+                        .rev()
+                        .filter(|(_, op_scope)| **op_scope == Some(func_index))
+                        .filter(|(i, _)| !inline_expr[*i])
+                        .for_each(|(i, _)| {
+                            let op_index = OpIndex::new(i);
+                            to_print.push(PrintItem::Stmt(op_index));
+                        });
+
+                    prev_print_type = PrevPrintType::FunctionOpen;
+                }
+                PrintItem::FunctionClose {
+                    start_line,
+                    is_stmt,
+                } => {
+                    current_indent -= self.indent_width;
+                    if start_line == current_line {
                         write!(fmt, " ")?;
+                    } else {
+                        write!(fmt, "\n{current_indent}")?;
+                        current_line += 1;
                     }
 
                     write!(fmt, "}}")?;
-                    if !is_extern_func {
-                        write!(fmt, ";")?;
-                        delayed_newline = DelayedNewline::BeforeExpression;
-                    }
-                    continue;
-                }
-            };
-
-            let op = &self.graph[index];
-
-            if !reachable[index.0] {
-                // Only display operations that are reachable when
-                // starting from the displayed node.
-                continue;
-            }
-
-            let mut uses_param = None;
-            if !matches!(op.kind, ExprKind::Function { .. }) {
-                op.visit_reachable_nodes(|input| {
-                    if let SymbolicValue::Result(op_index) = input {
-                        if let Some(function_arg) =
-                            delayed_op_lookup.get(&op_index)
-                        {
-                            uses_param = Some(function_arg);
-                        }
-                    }
-                });
-            }
-            if let Some(function_arg) = uses_param {
-                // Depends on a function argument.  Mark it for
-                // printing out later.
-                delayed_ops.push(PrintItem {
-                    indent: indent + self.indent_width,
-                    ..print_item
-                });
-                delayed_op_lookup.insert(index, *function_arg);
-                continue;
-            }
-
-            if inline_expr[index.0] {
-                // Do not provide a separate printout for expressions that
-                // are being displayed inline.
-                continue;
-            }
-
-            let index_printer = IndexPrinter {
-                graph: self.graph,
-                index,
-                requires_name_prefix: requires_name_prefix[index.0],
-            };
-            let expr_printer = make_expr_printer(index.into(), true);
-
-            let is_root_node =
-                Some(SymbolicValue::Result(index)) == self.root_subgraph_node;
-
-            if is_root_node {
-                if delayed_newline >= DelayedNewline::BeforeExpression {
-                    write!(fmt, "\n{indent}")?;
-                }
-
-                write!(fmt, "{expr_printer}")?;
-                continue;
-            }
-
-            match op.as_ref() {
-                ExprKind::FunctionArg(_) => {
-                    delayed_op_lookup.insert(index, index);
-                }
-                ExprKind::Function { params, output } => {
-                    if delayed_newline >= DelayedNewline::BeforeExpression {
-                        write!(fmt, "\n{indent}")?;
-                    }
-
-                    let is_extern_func = extern_func_lookup.contains(&index);
-
-                    if is_extern_func {
-                        write!(fmt, "pub fn {index_printer}(")?;
+                    prev_print_type = if is_stmt {
+                        PrevPrintType::Stmt
                     } else {
-                        write!(fmt, "let {index_printer} = ")?;
-                        write!(fmt, "fn(")?;
-                    }
-                    for (i, param) in params.iter().enumerate() {
-                        if i > 0 {
-                            write!(fmt, ", ")?;
-                        }
-                        let param =
-                            expr_printer.with_value(*param).as_top_level();
-                        write!(fmt, "{param}")?;
-                    }
-                    write!(fmt, ") {{")?;
-
-                    to_print.push(PrintItem {
-                        kind: PrintItemKind::FunctionOutput {
-                            output: *output,
-                            is_extern_func,
-                        },
-                        indent: indent + self.indent_width,
-                    });
-
-                    params
-                        .iter()
-                        .filter_map(|param| match param {
-                            SymbolicValue::Result(param_index) => {
-                                Some(param_index)
-                            }
-                            _ => None,
-                        })
-                        .for_each(|param_index| {
-                            delayed_op_lookup.remove(param_index);
-                        });
-
-                    let mut stolen_ops = Vec::new();
-                    std::mem::swap(&mut delayed_ops, &mut stolen_ops);
-                    for delayed in stolen_ops.into_iter().rev() {
-                        if let PrintItemKind::Op(delayed_index) = &delayed.kind
-                        {
-                            delayed_op_lookup.remove(delayed_index);
-                        }
-                        to_print.push(delayed);
-                    }
-                    delayed_newline = DelayedNewline::BeforeAssignment;
+                        PrevPrintType::Expr
+                    };
                 }
-                _ => {
-                    if delayed_newline >= DelayedNewline::BeforeAssignment {
-                        write!(fmt, "\n{indent}")?;
+                PrintItem::AssignmentEnd => {
+                    write!(fmt, ";")?;
+                    prev_print_type = PrevPrintType::Stmt;
+                }
+
+                PrintItem::ExpandedExpr(index) => {
+                    match prev_print_type {
+                        PrevPrintType::FunctionOpen | PrevPrintType::Comma => {
+                            write!(fmt, " ")?
+                        }
+                        PrevPrintType::Stmt => {
+                            write!(fmt, "\n{current_indent}")?;
+                            current_line += 1;
+                        }
+                        _ => {}
                     }
-                    write!(fmt, "let {index_printer} = {expr_printer};")?;
-                    delayed_newline = DelayedNewline::BeforeExpression;
+                    match &self.graph[index].kind {
+                        ExprKind::FunctionArg(ty) => {
+                            let index = make_index_printer(index);
+                            write!(fmt, "{index}: {ty}")?;
+                        }
+                        ExprKind::Function { params, output } => {
+                            std::iter::empty()
+                                .chain(Some(PrintItem::Str("|")))
+                                .chain(
+                                    params
+                                        .iter()
+                                        .filter_map(|param| param.as_op_index())
+                                        .map(PrintItem::ExpandedExpr)
+                                        .comma_separated(),
+                                )
+                                .chain(Some(PrintItem::Str("|")))
+                                .chain(Some(PrintItem::FunctionBody {
+                                    func_index: index,
+                                    output: *output,
+                                    is_stmt: false,
+                                }))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                        }
+                        ExprKind::Reduce {
+                            initial,
+                            iterator,
+                            reduction,
+                        } => {
+                            [
+                                PrintItem::Expr(*iterator),
+                                PrintItem::Str(".reduce"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(*initial),
+                                PrintItem::Comma,
+                                PrintItem::Expr(*reduction),
+                                PrintItem::OptionalTrailingComma,
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
+                        ExprKind::FunctionCall { func, args } => {
+                            std::iter::empty()
+                                .chain(Some(PrintItem::Expr(*func)))
+                                .chain(Some(PrintItem::ParenOpen))
+                                .chain(
+                                    args.iter()
+                                        .cloned()
+                                        .map(PrintItem::Expr)
+                                        .comma_separated(),
+                                )
+                                .chain(Some(PrintItem::ParenClose))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                        }
+
+                        ExprKind::SimpleReduce {
+                            initial,
+                            extent,
+                            reduction,
+                        } => {
+                            [
+                                PrintItem::Str("(0.."),
+                                PrintItem::Expr(*extent),
+                                PrintItem::Str(").reduce"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(*initial),
+                                PrintItem::Comma,
+                                PrintItem::Expr(*reduction),
+                                PrintItem::OptionalTrailingComma,
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
+                        ExprKind::Tuple(values) => {
+                            std::iter::empty()
+                                .chain([PrintItem::ParenOpen])
+                                .chain(
+                                    values
+                                        .iter()
+                                        .cloned()
+                                        .map(PrintItem::Expr)
+                                        .comma_separated(),
+                                )
+                                .chain(Some(PrintItem::ParenClose))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                        }
+                        ExprKind::NativeFunction(func) => {
+                            write!(fmt, "{func}")?
+                        }
+
+                        ExprKind::Range { extent } => {
+                            [
+                                PrintItem::Str("(0.."),
+                                PrintItem::Expr(*extent),
+                                PrintItem::Str(")"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
+                        ExprKind::StaticField(StaticField {
+                            class,
+                            field_name,
+                        }) => {
+                            [
+                                PrintItem::SymbolicType(class),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str(field_name),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::FieldAccess { obj, field } => {
+                            [
+                                PrintItem::Expr(*obj),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str(field),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::SymbolicDowncast { obj, ty } => {
+                            [
+                                PrintItem::Expr(*obj),
+                                PrintItem::Str(".as::<"),
+                                PrintItem::SymbolicType(ty),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::IndexAccess { obj, indices } => {
+                            std::iter::once(PrintItem::Expr(*obj))
+                                .chain(Some(PrintItem::SquareBracketOpen))
+                                .chain(
+                                    indices
+                                        .iter()
+                                        .cloned()
+                                        .map(PrintItem::Expr)
+                                        .comma_separated(),
+                                )
+                                .chain(Some(PrintItem::SquareBracketClose))
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                        }
+                        ExprKind::NumArrayElements { array } => {
+                            [
+                                PrintItem::Expr(*array),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("len()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ArrayExtent { array, dim } => {
+                            [
+                                PrintItem::Expr(*array),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("extent"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(*dim),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::PointerCast { ptr, ty } => {
+                            [
+                                PrintItem::Expr(*ptr),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("ptr_cast::<"),
+                                PrintItem::RuntimeType(ty),
+                                PrintItem::Str(">"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::IsSome(value) => {
+                            [
+                                PrintItem::Expr(*value),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("is_some()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::Add { lhs, rhs } => {
+                            [
+                                PrintItem::Expr(*lhs),
+                                PrintItem::Str(" + "),
+                                PrintItem::Expr(*rhs),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::Mul { lhs, rhs } => {
+                            [
+                                PrintItem::Expr(*lhs),
+                                PrintItem::Str("*"),
+                                PrintItem::Expr(*rhs),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::PrimCast { value, prim_type } => {
+                            [
+                                PrintItem::Expr(*value),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("prim_cast::<"),
+                                PrintItem::PrimType(prim_type),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
+                        ExprKind::PhysicalDowncast { obj, ty } => {
+                            [
+                                PrintItem::Expr(*obj),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("downcast::<"),
+                                PrintItem::MethodTablePointer(*ty),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ReadValue { ptr, prim_type } => {
+                            [
+                                PrintItem::Expr(*ptr),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("read::<"),
+                                PrintItem::PrimType(prim_type),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ReadString { ptr } => {
+                            [
+                                PrintItem::Expr(*ptr),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str(".read_string()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                    }
+                    prev_print_type = PrevPrintType::Expr;
                 }
             }
         }
-
-        // The `delayed_ops` lookup could still contain entries at
-        // this point.  This is not an error, since there could be a
-        // FunctionArg that was used by another expression, but
-        // neither had actually been part of the externally-defined
-        // functions.
 
         Ok(())
     }
@@ -415,23 +779,6 @@ impl<'a> GraphPrinter<'a> {
 impl<'a> Display for GraphPrinter<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.display(fmt)
-    }
-}
-
-impl<'a> ExprPrinter<'a> {
-    fn with_value(self, value: SymbolicValue) -> Self {
-        Self {
-            value,
-            is_top_level: false,
-            ..self
-        }
-    }
-
-    fn as_top_level(self) -> Self {
-        Self {
-            is_top_level: true,
-            ..self
-        }
     }
 }
 
@@ -457,180 +804,6 @@ impl<'a> Display for IndexPrinter<'a> {
             }
         } else {
             write!(f, "_{index}")
-        }
-    }
-}
-
-impl<'a> Display for ExprPrinter<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let op_index = match self.value {
-            SymbolicValue::Int(int) => {
-                return write!(f, "{int}");
-            }
-            SymbolicValue::Ptr(ptr) => {
-                return write!(f, "{ptr}");
-            }
-            SymbolicValue::Result(op_index) => op_index,
-        };
-
-        let index_printer = IndexPrinter {
-            graph: self.graph,
-            index: op_index,
-            requires_name_prefix: self.requires_name_prefix[op_index.0],
-        };
-
-        let display_full_expr =
-            self.is_top_level || self.inline_expr[op_index.0];
-        if !display_full_expr {
-            return write!(f, "{index_printer}");
-        }
-
-        let sep =
-            MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
-
-        let write_tuple = |f: &mut std::fmt::Formatter<'_>,
-                           tuple: &[SymbolicValue],
-                           is_top_level: bool|
-         -> std::fmt::Result {
-            write!(f, "(")?;
-            for (i, element) in tuple.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", ")?;
-                }
-                let element = self.with_value(*element);
-                let element = if is_top_level {
-                    element.as_top_level()
-                } else {
-                    element
-                };
-                write!(f, "{element}")?;
-            }
-
-            write!(f, ")")?;
-            Ok(())
-        };
-
-        match self.graph[op_index].as_ref() {
-            ExprKind::Function { params, output } => {
-                write!(f, "fn")?;
-                write_tuple(f, params, true)?;
-                write!(f, " {{ {} }}", self.with_value(*output))?;
-
-                Ok(())
-            }
-            ExprKind::FunctionArg(ty) => {
-                write!(f, "{index_printer}")?;
-                if self.is_top_level && !matches!(ty, RuntimeType::Unknown) {
-                    write!(f, ": {ty}")?;
-                }
-                Ok(())
-            }
-            ExprKind::FunctionCall { func, args } => {
-                let func = self.with_value(*func);
-                write!(f, "{func}")?;
-                write_tuple(f, args, false)
-            }
-            ExprKind::Range { extent } => {
-                let extent = self.with_value(*extent);
-                write!(f, "(0..{extent})")
-            }
-            ExprKind::Reduce {
-                initial,
-                iterator,
-                reduction,
-            } => {
-                let initial = self.with_value(*initial);
-                let iterator = self.with_value(*iterator);
-                let reduction = self.with_value(*reduction);
-                write!(f, "{iterator}.reduce({initial}, {reduction})")
-            }
-            ExprKind::SimpleReduce {
-                initial,
-                extent,
-                reduction,
-            } => {
-                let initial = self.with_value(*initial);
-                let extent = self.with_value(*extent);
-                let reduction = self.with_value(*reduction);
-                write!(f, "(0..{extent}).reduce({initial}, {reduction})")
-            }
-            ExprKind::NativeFunction(func) => {
-                write!(f, "{func}")
-            }
-            ExprKind::Tuple(elements) => write_tuple(f, elements, false),
-            ExprKind::StaticField(StaticField { class, field_name }) => {
-                write!(f, "{class}{sep}.{field_name}")
-            }
-            ExprKind::FieldAccess { obj, field } => {
-                let obj = self.with_value(*obj);
-                write!(f, "{obj}{sep}.{field}")
-            }
-            ExprKind::IndexAccess { obj, indices } => {
-                let obj = self.with_value(*obj);
-                write!(f, "{obj}[{sep}")?;
-
-                for (i, index) in indices.iter().enumerate() {
-                    let index = self.with_value(*index);
-                    if i > 0 {
-                        write!(f, ", ")?;
-                    }
-                    write!(f, "{index}")?;
-                }
-
-                write!(f, "{sep}]")
-            }
-            ExprKind::SymbolicDowncast { obj, ty } => {
-                let obj = self.with_value(*obj);
-                let ty = TypePrinter {
-                    ty,
-                    insert_zero_width_space_at_breakpoint: self
-                        .insert_zero_width_space_at_breakpoint,
-                };
-                write!(f, "{obj}.as::<{sep}{ty}{sep}>()")
-            }
-            ExprKind::NumArrayElements { array } => {
-                let array = self.with_value(*array);
-                write!(f, "{array}{sep}.len()")
-            }
-            ExprKind::ArrayExtent { array, dim } => {
-                let array = self.with_value(*array);
-                let dim = self.with_value(*dim);
-                write!(f, "{array}{sep}.extent({dim})")
-            }
-            ExprKind::PointerCast { ptr, ty } => {
-                let ptr = self.with_value(*ptr);
-                write!(f, "{ptr}{sep}.ptr_cast::<{ty}>()")
-            }
-            ExprKind::IsSome(value) => {
-                let value = self.with_value(*value);
-                write!(f, "{value}.is_some()")
-            }
-            ExprKind::Add { lhs, rhs } => {
-                let lhs = self.with_value(*lhs);
-                let rhs = self.with_value(*rhs);
-                write!(f, "{lhs} + {rhs}")
-            }
-            ExprKind::Mul { lhs, rhs } => {
-                let lhs = self.with_value(*lhs);
-                let rhs = self.with_value(*rhs);
-                write!(f, "{lhs}*{rhs}")
-            }
-            ExprKind::PhysicalDowncast { obj, ty } => {
-                let obj = self.with_value(*obj);
-                write!(f, "{obj}.downcast::<{ty}>()")
-            }
-            ExprKind::PrimCast { value, prim_type } => {
-                let value = self.with_value(*value);
-                write!(f, "{value}.prim_cast::<{prim_type}>()")
-            }
-            ExprKind::ReadValue { ptr, prim_type } => {
-                let ptr = self.with_value(*ptr);
-                write!(f, "{ptr}.read::<{prim_type}>()")
-            }
-            ExprKind::ReadString { ptr } => {
-                let ptr = self.with_value(*ptr);
-                write!(f, "{ptr}.read_string()")
-            }
         }
     }
 }

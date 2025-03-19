@@ -117,6 +117,36 @@ fn eval_native_function_call() {
 }
 
 #[test]
+fn eval_nested_function_call() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn func_outer(arg_outer: usize) {
+                fn func_inner(arg_inner: usize) {
+                    let sum = arg_outer + arg_inner;
+                    let res_inner = sum*10;
+                    res_inner
+                }
+                let res_outer = func_inner(1000);
+                res_outer
+            }
+            pub fn main() {
+                let res_main = func_outer(42);
+                res_main
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+    let expected = (42 + 1000) * 10;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
 fn parse_and_eval_native_function_call() {
     let mut graph = SymbolicGraph::new();
 

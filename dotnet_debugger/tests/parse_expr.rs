@@ -581,3 +581,105 @@ fn parse_sum_of_integers() {
         },
     );
 }
+
+#[test]
+fn parse_nested_function() {
+    require_identical_graph(
+        "
+        fn func_outer(arg_outer: usize) {
+            fn func_inner(arg_inner: usize) {
+                let sum = arg_outer + arg_inner;
+                let res_inner = sum*10;
+                res_inner
+            }
+            let res_outer = func_inner(1000);
+            res_outer
+        }
+        pub fn main() {
+            let res_main = func_outer(42);
+            res_main
+        }",
+        |graph| {
+            let arg_outer = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(arg_outer, "arg_outer").unwrap();
+
+            let arg_inner = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(arg_inner, "arg_inner").unwrap();
+            let sum = graph.add(arg_outer, arg_inner);
+            graph.name(sum, "sum").unwrap();
+
+            let res_inner = graph.mul(sum, 10);
+            graph.name(res_inner, "res_inner").unwrap();
+            let func_inner = graph.function_def(vec![arg_inner], res_inner);
+            graph.name(func_inner, "func_inner").unwrap();
+
+            let res_outer = graph.function_call(func_inner, vec![1000.into()]);
+            graph.name(res_outer, "res_outer").unwrap();
+            let func_outer = graph.function_def(vec![arg_outer], res_outer);
+            graph.name(func_outer, "func_outer").unwrap();
+
+            let res_main = graph.function_call(func_outer, vec![42.into()]);
+            graph.name(res_main, "res_main").unwrap();
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_reduce_with_named_reduction() {
+    require_identical_graph(
+        "
+        fn reduction(a: usize, b: usize) { a + b }
+        let res_main = (0..10).reduce(0, reduction);
+        pub fn main() { res_main }
+        ",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let sum = graph.add(a, b);
+            let reduction = graph.function_def(vec![a, b], sum);
+            graph.name(reduction, "reduction").unwrap();
+
+            let iterator = graph.range(10);
+            let res_main = graph.reduce(0, iterator, reduction);
+            graph.name(res_main, "res_main").unwrap();
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_reduce_with_anonymous_reduction() {
+    require_identical_graph(
+        "
+        let res_main = (0..10).reduce(0, |a: usize, b: usize| { a + b });
+        pub fn main() { res_main }
+        ",
+        |graph| {
+            let iterator = graph.range(10);
+
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+
+            let sum = graph.add(a, b);
+            let reduction = graph.function_def(vec![a, b], sum);
+
+            let res_main = graph.reduce(0, iterator, reduction);
+            graph.name(res_main, "res_main").unwrap();
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}
