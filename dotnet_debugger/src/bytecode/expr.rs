@@ -1505,7 +1505,9 @@ impl ExpressionTranslator<'_> {
                 ExprKind::Function { .. } => {
                     unreachable!(
                         "Function calls should be inlined, \
-                         and should only be encountered in SimpleReduce."
+                         and should only be encountered in SimpleReduce.  \
+                         But at index {op_index}, encountered function named {:?}",
+                        op.name
                     )
                 }
                 ExprKind::FunctionArg(_) => todo!(),
