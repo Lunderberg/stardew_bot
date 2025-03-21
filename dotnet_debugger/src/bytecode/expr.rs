@@ -1644,6 +1644,20 @@ impl ExpressionTranslator<'_> {
 
                     let loop_start = InstructionIndex(self.instructions.len());
 
+                    let stop_loop_condition = next_free_index!();
+                    self.instructions.push(Instruction::GreaterThanOrEqual {
+                        lhs: loop_iter.into(),
+                        rhs: extent,
+                        output: stop_loop_condition,
+                    });
+
+                    // Placeholder for the conditional jump to break
+                    // out of the loop.  To be updated after the loop
+                    // body is generated, when we know the destination
+                    // index of the jump.
+                    let jump_to_end_instruction_index = self.instructions.len();
+                    self.instructions.push(Instruction::NoOp);
+
                     let reduction_index = match reduction {
                         &SymbolicValue::Result(op_index) => op_index,
                         _ => todo!(
@@ -1689,7 +1703,10 @@ impl ExpressionTranslator<'_> {
                                 .filter(|&op| {
                                     op != accumulator
                                         && op != index
-                                        && op != reduction_index
+                                        && !matches!(
+                                            self.graph[op].kind,
+                                            ExprKind::Function { .. }
+                                        )
                                 });
                             let iter_body: Box<dyn Iterator<Item = OpIndex>> =
                                 Box::new(iter_body);
@@ -1769,16 +1786,20 @@ impl ExpressionTranslator<'_> {
                         rhs: 1usize.into(),
                         output: loop_iter,
                     });
-                    let loop_condition = next_free_index!();
-                    self.instructions.push(Instruction::LessThan {
-                        lhs: loop_iter.into(),
-                        rhs: extent,
-                        output: loop_condition,
-                    });
+
                     self.instructions.push(Instruction::ConditionalJump {
-                        cond: loop_condition.into(),
+                        cond: RuntimePrimValue::Bool(true).into(),
                         dest: loop_start,
                     });
+
+                    let after_loop = InstructionIndex(self.instructions.len());
+                    self.instructions[jump_to_end_instruction_index] =
+                        Instruction::ConditionalJump {
+                            cond: stop_loop_condition.into(),
+                            dest: after_loop,
+                        };
+
+                    self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::NativeFunction(func) => {
                     let func_index = FunctionIndex(self.native_functions.len());

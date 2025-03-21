@@ -420,3 +420,61 @@ fn collect_vector_of_rust_native_objects() {
         ]
     );
 }
+
+#[test]
+fn eval_length_zero_reductions() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..0).reduce(0, |a: usize, b: usize| {a+b+1})
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = 0;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn eval_nested_reductions() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn outer_reduction(a:usize, b:usize) {
+                fn inner_reduction(c: usize,d: usize) {
+                    c + d + b
+                }
+                a + (0..b).reduce(0, inner_reduction)
+            }
+            pub fn main() {
+                (0..10).reduce(0, outer_reduction)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = {
+        let mut outer_sum = 0;
+        for i in 0..10 {
+            let mut inner_sum = 0;
+            for j in 0..i {
+                inner_sum += i + j;
+            }
+            outer_sum += inner_sum;
+        }
+        outer_sum
+    };
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

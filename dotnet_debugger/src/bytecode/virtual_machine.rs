@@ -65,6 +65,9 @@ pub struct FunctionIndex(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
+    // Do nothing.
+    NoOp,
+
     // Returns a copy of the specified value.  Can be used to copy a
     // value on the stack, or to store a constant value onto the
     // stack.
@@ -148,6 +151,12 @@ pub enum Instruction {
     // specified argument, storing the resulting boolean back to the
     // register.
     GreaterThan {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    GreaterThanOrEqual {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
@@ -654,12 +663,41 @@ impl VirtualMachine {
             }};
         }
 
+        macro_rules! comparison_op {
+            ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $cmp:ident) => {{
+                let lhs = $lhs;
+                let rhs = $rhs;
+                let output = $output;
+                let opt_lhs = arg_to_prim!(lhs, $name);
+                let opt_rhs = arg_to_prim!(rhs, $name);
+                values[*output] = match (opt_lhs, opt_rhs) {
+                    (Some(lhs), Some(rhs)) => {
+                        let res = match (lhs, rhs) {
+                            (
+                                RuntimePrimValue::NativeUInt(a),
+                                RuntimePrimValue::NativeUInt(b),
+                            ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
+                            _ => Err(
+                                Error::InvalidOperandsForNumericComparison {
+                                    lhs: lhs.runtime_type().into(),
+                                    rhs: rhs.runtime_type().into(),
+                                },
+                            ),
+                        }?;
+                        Some(res.into())
+                    }
+                    _ => None,
+                };
+            }};
+        }
+
         let mut current_instruction = InstructionIndex(0);
         while current_instruction.0 < self.instructions.len() {
             let instruction = &self.instructions[current_instruction.0];
             current_instruction.0 += 1;
 
             match instruction {
+                Instruction::NoOp => {}
                 Instruction::Copy { value, output } => {
                     let value = arg_to_prim!(value, "Copy");
                     values[*output] = value.map(Into::into);
@@ -815,65 +853,18 @@ impl VirtualMachine {
                     };
                 }
                 Instruction::Equal { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "Equal");
-                    let opt_rhs = arg_to_prim!(rhs, "Equal");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = if std::mem::discriminant(&lhs)
-                                == std::mem::discriminant(&rhs)
-                            {
-                                Ok(RuntimePrimValue::Bool(lhs == rhs))
-                            } else {
-                                Err(Error::InvalidOperandsForEqualityCheck {
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                })
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                    comparison_op! {lhs, rhs, output, "Equal", eq}
                 }
                 Instruction::LessThan { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "LessThan");
-                    let opt_rhs = arg_to_prim!(rhs, "LessThan");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs,rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::Bool(a < b)),
-                                _ => Err(Error::InvalidOperandsForNumericComparison {
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                }),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                    comparison_op! {lhs, rhs, output, "LessThan", lt}
                 }
                 Instruction::GreaterThan { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "GreaterThan");
-                    let opt_rhs = arg_to_prim!(rhs, "GreaterThan");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs,rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::Bool(a > b)),
-                                _ => Err(Error::InvalidOperandsForNumericComparison {
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                }),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                    comparison_op! {lhs, rhs, output, "GreaterThan", gt}
                 }
+                Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
+                    comparison_op! {lhs, rhs, output, "GreaterThanOrEqual", ge}
+                }
+
                 Instruction::Downcast {
                     obj,
                     subtype,
@@ -972,6 +963,9 @@ impl VirtualMachine {
 impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = StackIndex> + '_ {
         let (lhs, rhs, dyn_args) = match self {
+            // Nullary instructions
+            Instruction::NoOp => (None, None, None),
+
             // Unary instructions
             Instruction::Copy { value: arg, .. }
             | Instruction::ConditionalJump { cond: arg, .. }
@@ -989,7 +983,8 @@ impl Instruction {
             | Instruction::Mul { lhs, rhs, .. }
             | Instruction::Equal { lhs, rhs, .. }
             | Instruction::LessThan { lhs, rhs, .. }
-            | Instruction::GreaterThan { lhs, rhs, .. } => {
+            | Instruction::GreaterThan { lhs, rhs, .. }
+            | Instruction::GreaterThanOrEqual { lhs, rhs, .. } => {
                 (Some(*lhs), Some(*rhs), None)
             }
 
@@ -1017,7 +1012,8 @@ impl Instruction {
 
     fn output_indices(&self) -> impl Iterator<Item = StackIndex> {
         let (opt_a, opt_b) = match self {
-            Instruction::NativeFunctionCall { output: None, .. }
+            Instruction::NoOp
+            | Instruction::NativeFunctionCall { output: None, .. }
             | Instruction::ConditionalJump { .. } => (None, None),
 
             Instruction::Copy { output, .. }
@@ -1032,6 +1028,7 @@ impl Instruction {
             | Instruction::Equal { output, .. }
             | Instruction::LessThan { output, .. }
             | Instruction::GreaterThan { output, .. }
+            | Instruction::GreaterThanOrEqual { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1047,6 +1044,8 @@ impl Instruction {
 
     fn visit_indices(&mut self, mut callback: impl FnMut(&mut StackIndex)) {
         match self {
+            Instruction::NoOp => {}
+
             Instruction::IsSome { value: arg, output }
             | Instruction::Copy { value: arg, output }
             | Instruction::PrimCast {
@@ -1090,7 +1089,8 @@ impl Instruction {
             | Instruction::Mul { lhs, rhs, output }
             | Instruction::Equal { lhs, rhs, output }
             | Instruction::LessThan { lhs, rhs, output }
-            | Instruction::GreaterThan { lhs, rhs, output } => {
+            | Instruction::GreaterThan { lhs, rhs, output }
+            | Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
                 if let VMArg::SavedValue(index) = lhs {
                     callback(index);
                 }
@@ -1167,6 +1167,10 @@ impl Display for FunctionIndex {
 impl Display for Instruction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            Instruction::NoOp => {
+                write!(f, "{{}}")
+            }
+
             Instruction::ConditionalJump { cond, dest } => {
                 write!(f, "if {cond} {{ goto {dest} }}")
             }
@@ -1220,6 +1224,9 @@ impl Display for Instruction {
             }
             Instruction::GreaterThan { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs} > {rhs}")
+            }
+            Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} >= {rhs}")
             }
             Instruction::Downcast {
                 obj,
