@@ -620,9 +620,30 @@ impl VirtualMachine {
 
         Self {
             instructions,
-            num_temporaries: remap.len(),
+            num_temporaries: remap.len() - self.num_outputs,
             ..self
         }
+    }
+
+    pub fn assert_equal(&self, other: &VirtualMachine) {
+        assert_eq!(self.num_outputs, other.num_outputs);
+        assert_eq!(self.num_temporaries, other.num_temporaries);
+        assert_eq!(self.native_functions.len(), other.native_functions.len());
+        self.native_functions
+            .iter()
+            .zip(other.native_functions.iter())
+            .for_each(|(self_func, other_func)| {
+                assert_eq!(self_func, other_func);
+            });
+
+        assert_eq!(self.instructions.len(), other.instructions.len());
+
+        self.instructions
+            .iter()
+            .zip(other.instructions.iter())
+            .for_each(|(self_instruction, other_instruction)| {
+                assert_eq!(self_instruction, other_instruction);
+            });
     }
 
     /// Evaluate the virtual machine, raising an error if any
