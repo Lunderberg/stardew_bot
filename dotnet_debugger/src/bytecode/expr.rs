@@ -1,5 +1,6 @@
 use std::{
-    collections::{HashMap, HashSet},
+    cmp::Reverse,
+    collections::{BinaryHeap, HashMap, HashSet},
     fmt::Display,
 };
 
@@ -225,6 +226,44 @@ pub struct GraphComparison<'a> {
     compare_names: bool,
 }
 
+pub struct SymbolicGraphCompiler<'a, 'b> {
+    graph: &'a SymbolicGraph,
+    show_steps: bool,
+    reader: Option<CachedReader<'b>>,
+    optimize_symbolic_graph: bool,
+}
+
+#[derive(Clone, Copy)]
+struct LastUsage {
+    /// The expression in which the expression is used.
+    usage_point: OpIndex,
+
+    /// The expression that was used.
+    expr_used: OpIndex,
+}
+
+/// The result of analyzing a function
+#[derive(Debug)]
+struct FunctionInfo {
+    /// The index of the function definition, which will always be a
+    /// `ExprKind::Function`.  If `None`, refers to expressions that
+    /// are outside the scope of any function definition.
+    index: Option<OpIndex>,
+
+    /// An ordered list of expressions that are part of the body of
+    /// the function.  A function's body is defined as all the set of
+    /// all expressions such that the expression depends on a function
+    /// parameter, and the function output depends on the expression.
+    body: Vec<OpIndex>,
+
+    /// Variables from outside of the function's body that are used by
+    /// the function.
+    enclosed: Vec<OpIndex>,
+
+    /// The scope that owns this function.
+    parent_scope: Option<OpIndex>,
+}
+
 /// Helper struct for collecting VM instructions
 struct ExpressionTranslator<'a> {
     /// The graph being translated
@@ -240,15 +279,19 @@ struct ExpressionTranslator<'a> {
     /// `ExprKind::FunctionDef` that owns the expression.
     scope: &'a [Option<OpIndex>],
 
+    /// Indicates the last time that an expression is used.
+    last_usage: &'a [LastUsage],
+
     num_outputs: usize,
     main_func_index: OpIndex,
     next_free_index: &'a mut usize,
+    dead_indices: &'a mut BinaryHeap<Reverse<usize>>,
     native_functions: &'a mut Vec<ExposedNativeFunction>,
     native_function_lookup: &'a mut HashMap<OpIndex, FunctionIndex>,
 
     output_lookup: &'a HashMap<OpIndex, StackIndex>,
 
-    currently_stored: HashMap<OpIndex, VMArg>,
+    currently_stored: &'a mut HashMap<OpIndex, VMArg>,
 
     previously_consumed: HashSet<OpIndex>,
 }
@@ -676,6 +719,13 @@ impl SymbolicGraph {
         self.push(ExprKind::NativeFunction(wrapped.into()))
     }
 
+    pub fn raw_native_function(
+        &mut self,
+        func: ExposedNativeFunction,
+    ) -> SymbolicValue {
+        self.push(ExprKind::NativeFunction(func))
+    }
+
     pub fn is_some(
         &mut self,
         value: impl Into<SymbolicValue>,
@@ -974,6 +1024,78 @@ impl SymbolicGraph {
             }
         }
         subgraph
+    }
+
+    fn analyze_functions(&self) -> Vec<FunctionInfo> {
+        let mut info: Vec<_> = std::iter::once(None)
+            .chain(
+                self.iter_ops()
+                    .filter(|(_, op)| {
+                        matches!(op.kind, ExprKind::Function { .. })
+                    })
+                    .map(|(index, _)| Some(index)),
+            )
+            .map(|index| FunctionInfo {
+                index,
+                parent_scope: None,
+                body: vec![],
+                enclosed: vec![],
+            })
+            .collect();
+
+        let mut func_lookup: HashMap<Option<OpIndex>, &mut FunctionInfo> = info
+            .iter_mut()
+            .map(|func_info| (func_info.index.clone(), func_info))
+            .collect();
+
+        let scope = self.operation_scope();
+
+        scope
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, scope)| (OpIndex::new(i), scope))
+            .for_each(|(op_index, scope)| {
+                if let Some(func_info) = func_lookup.get_mut(&Some(op_index)) {
+                    func_info.parent_scope = scope;
+                }
+                if let Some(func_info) = func_lookup.get_mut(&scope) {
+                    func_info.body.push(op_index);
+                }
+            });
+
+        for func in info.iter_mut() {
+            let mut enclosed: HashSet<OpIndex> = HashSet::new();
+            let mut do_visit = |value| {
+                if let SymbolicValue::Result(prev_index) = value {
+                    if scope[prev_index.0] != func.index {
+                        enclosed.insert(prev_index);
+                    }
+                }
+            };
+
+            if let Some(index) = func.index {
+                match &self[index].kind {
+                    ExprKind::Function { output, .. } => {
+                        do_visit(*output);
+                    }
+                    _ => {
+                        unreachable!(
+                            "Index {index} collected as function, \
+                             but did not reference a function."
+                        );
+                    }
+                }
+            }
+            for op in func.body.iter().cloned() {
+                self[op].kind.visit_reachable_nodes(&mut do_visit);
+            }
+
+            func.enclosed =
+                enclosed.into_iter().sorted_by_key(|op| op.0).collect();
+        }
+
+        info
     }
 
     /// For each expression, determine which function owns it.  An
@@ -1299,7 +1421,72 @@ impl SymbolicGraph {
             output_lookup
         };
 
+        let func_info = self.analyze_functions();
+
         let scope = self.operation_scope();
+        let last_usage: Vec<LastUsage> = {
+            let mut last_usage: Vec<Option<OpIndex>> =
+                vec![None; self.ops.len()];
+
+            self.iter_ops().for_each(|(downstream_index, op)| {
+                let mut visitor = |value| {
+                    if let SymbolicValue::Result(upstream_index) = value {
+                        last_usage[upstream_index.0] = Some(downstream_index);
+                    }
+                };
+                match &op.kind {
+                    ExprKind::SimpleReduce {
+                        initial,
+                        extent,
+                        reduction: SymbolicValue::Result(reduction),
+                    } => {
+                        visitor(*initial);
+                        visitor(*extent);
+                        if let Ok(reduction_info_index) = func_info
+                            .binary_search_by(|info| {
+                                use std::cmp::Ordering;
+                                match (info.index, reduction) {
+                                    (None, _) => Ordering::Less,
+                                    (Some(a), b) => a.0.cmp(&b.0),
+                                }
+                            })
+                        {
+                            func_info[reduction_info_index]
+                                .enclosed
+                                .iter()
+                                .cloned()
+                                .map(SymbolicValue::Result)
+                                .for_each(visitor);
+                        }
+                    }
+                    other => other.visit_reachable_nodes(visitor),
+                }
+            });
+
+            last_usage
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, opt_usage_point)| {
+                    let expr_used = OpIndex::new(i);
+                    opt_usage_point.map(|usage_point| LastUsage {
+                        usage_point,
+                        expr_used,
+                    })
+                })
+                .filter(|last_usage| {
+                    let op = &self[last_usage.expr_used];
+                    match &op.kind {
+                        ExprKind::FunctionArg(_) => false,
+                        ExprKind::NativeFunction(_) => false,
+                        _ => true,
+                    }
+                })
+                .sorted_by_key(|last_usage| last_usage.usage_point.0)
+                .collect()
+        };
+
+        let mut dead_indices = BinaryHeap::new();
+        let mut currently_stored = HashMap::new();
 
         let iter_op_indices = scope
             .iter()
@@ -1314,13 +1501,15 @@ impl SymbolicGraph {
             graph: self,
             instructions: &mut instructions,
             scope: &scope,
+            last_usage: &last_usage,
             num_outputs,
             main_func_index,
             next_free_index: &mut next_free_index,
+            dead_indices: &mut dead_indices,
             native_functions: &mut native_functions,
             native_function_lookup: &mut native_function_lookup,
             output_lookup: &output_lookup,
-            currently_stored: HashMap::new(),
+            currently_stored: &mut currently_stored,
             previously_consumed: HashSet::new(),
         };
         translater.translate(iter_op_indices)?;
@@ -1334,10 +1523,22 @@ impl SymbolicGraph {
         Ok(builder.build())
     }
 
+    pub fn compiler<'a, 'b>(&'a self) -> SymbolicGraphCompiler<'a, 'b> {
+        SymbolicGraphCompiler::from_graph(self)
+    }
+
     pub fn compile<'a>(
         &self,
         reader: impl Into<Option<CachedReader<'a>>>,
     ) -> Result<VirtualMachine, Error> {
+        SymbolicGraphCompiler::from_graph(self)
+            .with_reader(reader)
+            .compile()
+    }
+}
+
+impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
+    pub(crate) fn from_graph(graph: &'a SymbolicGraph) -> Self {
         let show_steps = std::env::var("SHOW_STEPS")
             .map(|var| {
                 if var.is_empty() {
@@ -1352,10 +1553,40 @@ impl SymbolicGraph {
             })
             .unwrap_or(false);
 
-        let reader = reader.into();
-        let expr = self.clone();
+        Self {
+            graph,
+            show_steps,
+            reader: None,
+            optimize_symbolic_graph: true,
+        }
+    }
 
-        if show_steps {
+    pub fn show_each_step(self, show_steps: bool) -> Self {
+        Self { show_steps, ..self }
+    }
+
+    pub fn with_reader(
+        self,
+        reader: impl Into<Option<CachedReader<'b>>>,
+    ) -> Self {
+        Self {
+            reader: reader.into(),
+            ..self
+        }
+    }
+
+    pub fn disable_optimizations(self) -> Self {
+        Self {
+            optimize_symbolic_graph: false,
+            ..self
+        }
+    }
+
+    pub fn compile(self) -> Result<VirtualMachine, Error> {
+        let reader = self.reader;
+        let expr = self.graph;
+
+        if self.show_steps {
             println!("----------- Initial Graph --------------\n{expr}");
         }
         expr.validate_only_back_references()?;
@@ -1386,7 +1617,7 @@ impl SymbolicGraph {
         expr.validate_unique_parameter_owner_among_reachable_functions()?;
         expr.validate_all_parameters_defined()?;
 
-        if show_steps {
+        if self.show_steps {
             println!(
                 "----------- After IdentifyStaticField --------------\n{expr}"
             );
@@ -1395,55 +1626,62 @@ impl SymbolicGraph {
         let expr = expr.dead_code_elimination()?;
         expr.validate(reader)?;
 
-        if show_steps {
+        if self.show_steps {
             println!("----------- After DCE --------------\n{expr}");
         }
         let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(reader)?;
-        if show_steps {
+        if self.show_steps {
             println!("----------- After CSE --------------\n{expr}");
         }
 
-        let analysis = Analysis::new(reader);
-        let rewriter = super::ConstantFold
-            .then(super::RemoveUnusedDowncast(&analysis))
-            .then(super::RemoveUnusedPrimcast(&analysis))
-            .then(super::LowerSymbolicExpr(&analysis))
-            .then(super::RemoveUnusedPointerCast)
-            .then(super::InlineFunctionCalls)
-            .then(super::MergeRangeReduceToSimpleReduce)
-            .apply_recursively();
+        let expr = if self.optimize_symbolic_graph {
+            let analysis = Analysis::new(reader);
+            let rewriter = super::ConstantFold
+                .then(super::RemoveUnusedDowncast(&analysis))
+                .then(super::RemoveUnusedPrimcast(&analysis))
+                .then(super::LowerSymbolicExpr(&analysis))
+                .then(super::RemoveUnusedPointerCast)
+                .then(super::InlineFunctionCalls)
+                .then(super::MergeRangeReduceToSimpleReduce)
+                .apply_recursively();
 
-        let expr = expr.rewrite(rewriter)?;
-        expr.validate(reader)?;
+            let expr = expr.rewrite(rewriter)?;
+            expr.validate(reader)?;
 
-        if show_steps {
-            println!("----------- After Simplifcations --------------\n{expr}");
-        }
+            if self.show_steps {
+                println!(
+                    "----------- After Simplifcations --------------\n{expr}"
+                );
+            }
 
-        let expr = expr.dead_code_elimination()?;
-        expr.validate(reader)?;
+            let expr = expr.dead_code_elimination()?;
+            expr.validate(reader)?;
 
-        if show_steps {
-            println!("----------- After DCE --------------\n{expr}");
-        }
+            if self.show_steps {
+                println!("----------- After DCE --------------\n{expr}");
+            }
 
-        let expr = expr.eliminate_common_subexpressions()?;
-        expr.validate(reader)?;
+            let expr = expr.eliminate_common_subexpressions()?;
+            expr.validate(reader)?;
 
-        if show_steps {
-            println!("----------- After CSE --------------\n{expr}");
-        }
+            if self.show_steps {
+                println!("----------- After CSE --------------\n{expr}");
+            }
+            expr
+        } else {
+            expr
+        };
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine()?;
 
-        if show_steps {
+        if self.show_steps {
             println!("----------- As VM --------------\n{vm}");
         }
 
         let vm = vm.simplify();
-        if show_steps {
+        if self.show_steps {
             println!("----------- VM (simplified) --------------\n{vm}");
         }
 
@@ -1480,26 +1718,60 @@ impl ExpressionTranslator<'_> {
         }
     }
 
+    fn alloc_index(&mut self) -> StackIndex {
+        self.dead_indices
+            .pop()
+            .map(|Reverse(i)| StackIndex(i))
+            .unwrap_or_else(|| {
+                let index = *self.next_free_index;
+                *self.next_free_index += 1;
+                StackIndex(index)
+            })
+    }
+
+    fn free_dead_indices(&mut self, op_index: OpIndex) {
+        let first_index = self.last_usage.partition_point(|last_usage| {
+            last_usage.usage_point.0 < op_index.0
+        });
+        self.last_usage[first_index..]
+            .iter()
+            .take_while(|last_usage| last_usage.usage_point == op_index)
+            .for_each(|last_usage| {
+                let Some(old_value) =
+                    self.currently_stored.remove(&last_usage.expr_used)
+                else {
+                    panic!(
+                        "Internal error: \
+                         Last usage of {} occurred after {}, \
+                         (expr '{}' used in '{}') \
+                         but {} was not actually defined.",
+                        last_usage.expr_used,
+                        last_usage.usage_point,
+                        self.graph[last_usage.expr_used].kind,
+                        self.graph[last_usage.usage_point].kind,
+                        last_usage.expr_used,
+                    )
+                };
+
+                if let VMArg::SavedValue(StackIndex(old_index)) = old_value {
+                    self.dead_indices.push(Reverse(old_index));
+                }
+            });
+    }
+
+    fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
+        self.output_lookup
+            .get(&op_index)
+            .cloned()
+            .unwrap_or_else(|| self.alloc_index())
+    }
+
     fn translate(
         &mut self,
         instructions: impl Iterator<Item = OpIndex>,
     ) -> Result<(), Error> {
-        macro_rules! next_free_index {
-            () => {{
-                let index = *self.next_free_index;
-                *self.next_free_index += 1;
-                StackIndex(index)
-            }};
-        }
-
         for op_index in instructions {
             let op = &self.graph[op_index];
-
-            let op_output: StackIndex = self
-                .output_lookup
-                .get(&op_index)
-                .cloned()
-                .unwrap_or_else(|| next_free_index!());
 
             match op.as_ref() {
                 ExprKind::Function { .. } => {
@@ -1530,7 +1802,8 @@ impl ExpressionTranslator<'_> {
                     let Some(func) = func.as_op_index() else {
                         panic!("Internal error, callee must be function")
                     };
-                    if let Some(native_func_index) =
+
+                    if let Some(&native_func_index) =
                         self.native_function_lookup.get(&func)
                     {
                         let mut vm_args = Vec::new();
@@ -1569,7 +1842,7 @@ impl ExpressionTranslator<'_> {
 
                             self.instructions.push(
                                 Instruction::NativeFunctionCall {
-                                    index: *native_func_index,
+                                    index: native_func_index,
                                     args: vm_args,
                                     output: None,
                                 },
@@ -1578,6 +1851,7 @@ impl ExpressionTranslator<'_> {
                             self.currently_stored.remove(&first_arg_op);
                             self.previously_consumed.insert(first_arg_op);
 
+                            let op_output = self.get_output_index(op_index);
                             if op_output.0 < self.num_outputs {
                                 self.instructions.push(Instruction::Swap(
                                     first_arg_loc,
@@ -1592,9 +1866,10 @@ impl ExpressionTranslator<'_> {
                         } else {
                             // The function produces an output value, to
                             // be stored in the output index.
+                            let op_output = self.get_output_index(op_index);
                             self.instructions.push(
                                 Instruction::NativeFunctionCall {
-                                    index: *native_func_index,
+                                    index: native_func_index,
                                     args: vm_args,
                                     output: Some(op_output),
                                 },
@@ -1626,6 +1901,8 @@ impl ExpressionTranslator<'_> {
                     let initial = self.value_to_arg(initial)?;
                     let extent = self.value_to_arg(extent)?;
 
+                    let op_output = self.get_output_index(op_index);
+
                     match initial {
                         VMArg::Const(_) => {
                             self.instructions.push(Instruction::Copy {
@@ -1638,7 +1915,7 @@ impl ExpressionTranslator<'_> {
                             .push(Instruction::Swap(stack_index, op_output)),
                     }
 
-                    let loop_iter = next_free_index!();
+                    let loop_iter = self.alloc_index();
                     self.instructions.push(Instruction::Copy {
                         value: 0usize.into(),
                         output: loop_iter,
@@ -1646,7 +1923,7 @@ impl ExpressionTranslator<'_> {
 
                     let loop_start = InstructionIndex(self.instructions.len());
 
-                    let stop_loop_condition = next_free_index!();
+                    let stop_loop_condition = self.alloc_index();
                     self.instructions.push(Instruction::GreaterThanOrEqual {
                         lhs: loop_iter.into(),
                         rhs: extent,
@@ -1682,17 +1959,10 @@ impl ExpressionTranslator<'_> {
                                 _ => todo!("Better error message for ill-formed function"),
                             };
 
-                            let currently_stored = self
-                                .currently_stored
-                                .iter()
-                                .map(|(&stack_index, &vmarg)| {
-                                    (stack_index, vmarg)
-                                })
-                                .chain([
-                                    (accumulator, op_output.into()),
-                                    (index, loop_iter.into()),
-                                ])
-                                .collect();
+                            self.currently_stored
+                                .insert(accumulator, op_output.into());
+                            self.currently_stored
+                                .insert(index, loop_iter.into());
 
                             let iter_body = self
                                 .scope
@@ -1714,16 +1984,18 @@ impl ExpressionTranslator<'_> {
                                 Box::new(iter_body);
 
                             let mut body_translater = ExpressionTranslator {
-                                currently_stored,
+                                currently_stored: self.currently_stored,
                                 previously_consumed: self
                                     .previously_consumed
                                     .clone(),
                                 graph: self.graph,
                                 instructions: self.instructions,
                                 scope: self.scope,
+                                last_usage: self.last_usage,
                                 num_outputs: self.num_outputs,
                                 main_func_index: self.main_func_index,
                                 next_free_index: self.next_free_index,
+                                dead_indices: self.dead_indices,
                                 native_functions: self.native_functions,
                                 native_function_lookup: self
                                     .native_function_lookup,
@@ -1746,6 +2018,9 @@ impl ExpressionTranslator<'_> {
                                     ));
                                 }
                             }
+
+                            self.currently_stored.remove(&accumulator);
+                            self.currently_stored.remove(&index);
                         }
                         ExprKind::NativeFunction(_) => {
                             let native_func_index = self
@@ -1801,6 +2076,8 @@ impl ExpressionTranslator<'_> {
                             dest: after_loop,
                         };
 
+                    self.free_dead_indices(op_index);
+
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::NativeFunction(func) => {
@@ -1811,6 +2088,8 @@ impl ExpressionTranslator<'_> {
 
                 ExprKind::IsSome(value) => {
                     let value = self.value_to_arg(value)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::IsSome {
                         value,
                         output: op_output,
@@ -1821,6 +2100,8 @@ impl ExpressionTranslator<'_> {
                 ExprKind::Add { lhs, rhs } => {
                     let lhs = self.value_to_arg(lhs)?;
                     let rhs = self.value_to_arg(rhs)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::Add {
                         lhs,
                         rhs,
@@ -1831,6 +2112,8 @@ impl ExpressionTranslator<'_> {
                 ExprKind::Mul { lhs, rhs } => {
                     let lhs = self.value_to_arg(lhs)?;
                     let rhs = self.value_to_arg(rhs)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::Mul {
                         lhs,
                         rhs,
@@ -1840,6 +2123,8 @@ impl ExpressionTranslator<'_> {
                 }
                 ExprKind::PrimCast { value, prim_type } => {
                     let value = self.value_to_arg(value)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::PrimCast {
                         value,
                         prim_type: *prim_type,
@@ -1849,6 +2134,8 @@ impl ExpressionTranslator<'_> {
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     let obj = self.value_to_arg(obj)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::Downcast {
                         obj,
                         subtype: *ty,
@@ -1858,6 +2145,8 @@ impl ExpressionTranslator<'_> {
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr = self.value_to_arg(ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::Read {
                         ptr,
                         prim_type: *prim_type,
@@ -1867,6 +2156,8 @@ impl ExpressionTranslator<'_> {
                 }
                 ExprKind::ReadString { ptr } => {
                     let ptr = self.value_to_arg(ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::ReadString {
                         ptr,
                         output: op_output,
@@ -1875,6 +2166,8 @@ impl ExpressionTranslator<'_> {
                 }
                 ExprKind::PointerCast { ptr, .. } => {
                     let ptr = self.value_to_arg(ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
                     self.instructions.push(Instruction::Copy {
                         value: ptr,
                         output: op_output,

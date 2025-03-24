@@ -581,6 +581,10 @@ impl VirtualMachine {
         self.instructions.len()
     }
 
+    pub fn num_temporaries(&self) -> usize {
+        self.num_temporaries
+    }
+
     pub fn simplify(self) -> Self {
         self.remap_temporary_indices()
     }

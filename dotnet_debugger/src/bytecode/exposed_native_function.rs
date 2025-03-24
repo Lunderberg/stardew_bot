@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use super::NativeFunction;
+use super::{native_function::WrappedNativeFunction, NativeFunction};
 
 /// Wrapper trait, solely so that it can be used within structs that
 /// derive Debug.
@@ -10,6 +10,15 @@ pub struct ExposedNativeFunction(Rc<dyn NativeFunction>);
 impl ExposedNativeFunction {
     pub fn new(func: impl NativeFunction + 'static) -> Self {
         Self(Rc::new(func))
+    }
+
+    pub fn from_closure<Func, ArgList>(func: Func) -> Self
+    where
+        WrappedNativeFunction<Func, ArgList>: NativeFunction,
+        WrappedNativeFunction<Func, ArgList>: 'static,
+    {
+        let wrapped = WrappedNativeFunction::new(func);
+        wrapped.into()
     }
 }
 
