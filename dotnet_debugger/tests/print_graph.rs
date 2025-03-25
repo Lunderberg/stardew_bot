@@ -400,3 +400,46 @@ fn print_reduce_with_anonymous_reduction_including_named_subexpressions() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_map() {
+    let mut graph = SymbolicGraph::new();
+
+    let map = {
+        let i = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(i, "i").unwrap();
+        let square = graph.mul(i, i);
+
+        graph.function_def(vec![i], square)
+    };
+
+    let reduction = {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+
+        let sum = graph.add(a, b);
+        graph.function_def(vec![a, b], sum)
+    };
+
+    let iterator = graph.range(10);
+    let mapped = graph.map(iterator, map);
+    let res_main = graph.reduce(0, mapped, reduction);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let res_main = (0..10).map(|i: usize| { i*i }).reduce(0, |a: usize, b: usize| { a + b });
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}

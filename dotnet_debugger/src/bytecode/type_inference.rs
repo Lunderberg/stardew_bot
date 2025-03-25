@@ -38,6 +38,12 @@ pub enum TypeInferenceError {
          because {reason}."
     )]
     UnsupportedNativeFunction { sig: String, reason: String },
+
+    #[error(
+        "Attempted to apply mapping function to iterator, \
+         but the provided map was not a function."
+    )]
+    AttemptedMapOnNonFunction,
 }
 
 impl<'a> TypeInference<'a> {
@@ -154,6 +160,18 @@ impl<'a> TypeInference<'a> {
                         item: Box::new(item),
                     }
                     .into()
+                }
+                ExprKind::Map { map, .. } => {
+                    let map = expect_cache(*map, "mapping function");
+                    match map {
+                        RuntimeType::Function(FunctionType {
+                            output, ..
+                        }) => Ok(IteratorType {
+                            item: output.clone(),
+                        }
+                        .into()),
+                        _ => Err(TypeInferenceError::AttemptedMapOnNonFunction),
+                    }?
                 }
                 ExprKind::Reduce { initial, .. }
                 | ExprKind::SimpleReduce { initial, .. } => {
@@ -277,13 +295,16 @@ impl<'a> TypeInference<'a> {
                             Some(RuntimePrimType::Ptr)
                         ) =>
                         {
-                            Ok(RuntimePrimType::Ptr)
+                            Ok(RuntimePrimType::Ptr.into())
                         }
 
                         (
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::NativeUInt.into()),
+
+                        (RuntimeType::Unknown, _)
+                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
 
                         (other_lhs, other_rhs) => {
                             Err(Error::InvalidOperandsForAddition {
@@ -292,7 +313,6 @@ impl<'a> TypeInference<'a> {
                             })
                         }
                     }?
-                    .into()
                 }
                 ExprKind::Mul { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of mul");
@@ -301,7 +321,9 @@ impl<'a> TypeInference<'a> {
                         (
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::NativeUInt.into()),
+                        (RuntimeType::Unknown, _)
+                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
                         (other_lhs, other_rhs) => {
                             Err(Error::InvalidOperandsForMultiplication {
                                 lhs: other_lhs.clone(),
@@ -309,7 +331,6 @@ impl<'a> TypeInference<'a> {
                             })
                         }
                     }?
-                    .into()
                 }
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
                 ExprKind::PhysicalDowncast { obj, .. } => {

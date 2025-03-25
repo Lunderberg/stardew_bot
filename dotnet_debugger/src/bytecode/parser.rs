@@ -673,6 +673,14 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.array_extent(obj, dim))
                 }
+                "map" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let map = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.map(obj, map))
+                }
                 "reduce" => {
                     let (_, args) = self.expect_function_arguments(0, 2)?;
                     let (initial, reduction) = args

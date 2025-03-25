@@ -71,6 +71,16 @@ pub enum ExprKind {
     /// increasing by one.
     Range { extent: SymbolicValue },
 
+    /// Map the elements of an iterator, using a mapping function.
+    Map {
+        /// The iterator whose elements should be mapped.
+        iterator: SymbolicValue,
+
+        /// The mapping function to apply.  Should have signature
+        /// `Fn(ItemA) -> ItemB`
+        map: SymbolicValue,
+    },
+
     /// Perform a reduction along an iterator.
     Reduce {
         /// The initial value of the reduction.
@@ -571,6 +581,14 @@ impl SymbolicGraph {
     pub fn range(&mut self, extent: impl Into<SymbolicValue>) -> SymbolicValue {
         let extent = extent.into();
         self.push(ExprKind::Range { extent })
+    }
+
+    pub fn map(
+        &mut self,
+        iterator: SymbolicValue,
+        map: SymbolicValue,
+    ) -> SymbolicValue {
+        self.push(ExprKind::Map { iterator, map })
     }
 
     pub fn reduce(
@@ -1644,6 +1662,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
                 .then(super::RemoveUnusedPointerCast)
                 .then(super::InlineFunctionCalls)
                 .then(super::MergeRangeReduceToSimpleReduce)
+                .then(super::InlineIteratorMap)
                 .apply_recursively();
 
             let expr = expr.rewrite(rewriter)?;
@@ -1887,6 +1906,10 @@ impl ExpressionTranslator<'_> {
 
                 ExprKind::Range { .. } => panic!(
                     "All Range expressions should be simplified \
+                     to ExprKind::SimpleReduce"
+                ),
+                ExprKind::Map { .. } => panic!(
+                    "All Map expressions should be simplified \
                      to ExprKind::SimpleReduce"
                 ),
                 ExprKind::Reduce { .. } => panic!(
@@ -2261,6 +2284,15 @@ impl ExprKind {
             ExprKind::Range { extent } => {
                 remap(extent).map(|extent| ExprKind::Range { extent })
             }
+            ExprKind::Map { iterator, map } => {
+                let opt_iterator = remap(iterator);
+                let opt_map = remap(map);
+                (opt_iterator.is_some() || opt_map.is_some()).then(|| {
+                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
+                    let map = opt_map.unwrap_or_else(|| *map);
+                    ExprKind::Map { iterator, map }
+                })
+            }
             ExprKind::Reduce {
                 initial,
                 iterator,
@@ -2419,6 +2451,10 @@ impl ExprKind {
             }
             ExprKind::Range { extent } => {
                 callback(*extent);
+            }
+            ExprKind::Map { iterator, map } => {
+                callback(*iterator);
+                callback(*map);
             }
             ExprKind::Reduce {
                 initial,
@@ -2622,6 +2658,19 @@ impl<'a> GraphComparison<'a> {
                 ExprKind::Range { extent: lhs_extent } => match rhs_kind {
                     ExprKind::Range { extent: rhs_extent } => {
                         equivalent_value!(lhs_extent, rhs_extent)
+                    }
+                    _ => false,
+                },
+                ExprKind::Map {
+                    iterator: lhs_iterator,
+                    map: lhs_map,
+                } => match rhs_kind {
+                    ExprKind::Map {
+                        iterator: rhs_iterator,
+                        map: rhs_map,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_map, rhs_map)
                     }
                     _ => false,
                 },
@@ -2880,6 +2929,9 @@ impl Display for ExprKind {
             }
             ExprKind::Range { extent } => {
                 write!(f, "(0..{extent})")
+            }
+            ExprKind::Map { iterator, map } => {
+                write!(f, "{iterator}.map({map})")
             }
             ExprKind::Reduce {
                 initial,

@@ -515,6 +515,18 @@ impl<'a> GraphPrinter<'a> {
                                 .rev()
                                 .for_each(|item| to_print.push(item));
                         }
+                        ExprKind::Map { iterator, map } => {
+                            [
+                                PrintItem::Expr(*iterator),
+                                PrintItem::Str(".map"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(*map),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
                         ExprKind::Reduce {
                             initial,
                             iterator,

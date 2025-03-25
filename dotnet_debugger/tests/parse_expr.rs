@@ -683,3 +683,45 @@ fn parse_reduce_with_anonymous_reduction() {
         },
     );
 }
+
+#[test]
+fn parse_map() {
+    require_identical_graph(
+        stringify! {
+            let res_main = (0..10)
+                .map(|i: usize| i*i )
+                .reduce(0, |a: usize, b: usize| a + b );
+
+            pub fn main() { res_main }
+        },
+        |graph| {
+            let iterator = graph.range(10);
+
+            let map = {
+                let i = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(i, "i").unwrap();
+                let square = graph.mul(i, i);
+
+                graph.function_def(vec![i], square)
+            };
+            let mapped = graph.map(iterator, map);
+
+            let reduction = {
+                let a = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(a, "a").unwrap();
+                let b = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(b, "b").unwrap();
+
+                let sum = graph.add(a, b);
+                graph.function_def(vec![a, b], sum)
+            };
+
+            let res_main = graph.reduce(0, mapped, reduction);
+            graph.name(res_main, "res_main").unwrap();
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}
