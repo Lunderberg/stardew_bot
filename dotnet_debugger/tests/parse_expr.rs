@@ -790,3 +790,23 @@ fn parse_comparisons() {
         },
     );
 }
+
+#[test]
+fn parse_comments() {
+    require_identical_graph(
+        "
+            pub fn main() {
+                5 + 10 // + 15
+                    + 20
+            }
+        ",
+        |graph| {
+            let a = graph.add(5, 10);
+            let res_main = graph.add(a, 20);
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

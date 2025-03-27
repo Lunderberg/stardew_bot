@@ -1084,7 +1084,14 @@ impl<'a> SymbolicTokenizer<'a> {
             return Ok(());
         }
 
-        self.skip_whitespace();
+        loop {
+            let offset_before_skip = self.offset;
+            self.skip_whitespace();
+            self.skip_comment();
+            if self.offset == offset_before_skip {
+                break;
+            }
+        }
 
         let start = self.offset;
         if start == self.text.len() {
@@ -1195,8 +1202,6 @@ impl<'a> SymbolicTokenizer<'a> {
 
         let end = start + num_bytes;
         self.peek = Some(Token {
-            // kind,
-            //text: &self.text[start..end],
             text: &self.text.get(start..end).unwrap_or_else(|| {
                 panic!(
                     "Token {kind:?} at indices {start}..{end}, \
@@ -1215,16 +1220,28 @@ impl<'a> SymbolicTokenizer<'a> {
     }
 
     fn skip_whitespace(&mut self) {
-        let remaining = &self.text[self.offset..];
-        let new_offset = remaining
+        self.offset = self.text[self.offset..]
             .char_indices()
             .find(|&(_, c)| !c.is_whitespace() && c != '\u{200b}')
-            .map(|(i, _)| i);
+            .map(|(i, _)| self.offset + i)
+            .unwrap_or_else(|| self.text.len());
+    }
 
-        if let Some(new_offset) = new_offset {
-            self.offset += new_offset;
-        } else {
-            self.offset = self.text.len();
+    fn skip_comment(&mut self) {
+        let is_comment = self.text[self.offset..]
+            .chars()
+            .take(2)
+            .filter(|&c| c == '/')
+            .count()
+            == 2;
+        if is_comment {
+            self.offset = self.text[self.offset..]
+                .char_indices()
+                .skip_while(|&(_, c)| c != '\n')
+                .skip(1)
+                .next()
+                .map(|(i, _)| self.offset + i)
+                .unwrap_or_else(|| self.text.len());
         }
     }
 }
