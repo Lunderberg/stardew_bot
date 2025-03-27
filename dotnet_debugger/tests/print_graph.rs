@@ -493,7 +493,43 @@ fn print_comparisons() {
 
     let printed = format!("{graph}");
     let expected = indoc! {"
-        let res_main = (5==10, 5!=10, 5<10, 5>10, 5<=10, 5>=10);
+        let res_main = (5 == 10, 5 != 10, 5 < 10, 5 > 10, 5 <= 10, 5 >= 10);
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_div_mod() {
+    let mut graph = SymbolicGraph::new();
+
+    let div = graph.div(5, 3);
+    graph.name(div, "div").unwrap();
+    let modulo = graph.modulo(5, 3);
+    graph.name(modulo, "modulo").unwrap();
+
+    let mul = graph.mul(div, 3);
+    let sum = graph.add(mul, modulo);
+    let validation = graph.equal(sum, 5);
+    graph.name(validation, "validation").unwrap();
+
+    let res_main = graph.tuple(vec![div, modulo, validation]);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let div = 5/3;
+        let modulo = 5%3;
+        let validation = div*3 + modulo == 5;
+        let res_main = (div, modulo, validation);
         pub fn main() { res_main }"
     };
 

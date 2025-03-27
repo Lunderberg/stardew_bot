@@ -299,11 +299,12 @@ pub enum Error {
     #[error("Value '{0}' of type {1} not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue, RuntimePrimType),
 
-    #[error("Cannot add values with types {lhs} and {rhs}")]
-    InvalidOperandsForAddition { lhs: RuntimeType, rhs: RuntimeType },
-
-    #[error("Cannot multiply values with types {lhs} and {rhs}")]
-    InvalidOperandsForMultiplication { lhs: RuntimeType, rhs: RuntimeType },
+    #[error("Cannot apply operator '{op}' with operand types {lhs} and {rhs}")]
+    InvalidOperandsForBinaryOp {
+        op: &'static str,
+        lhs: RuntimeType,
+        rhs: RuntimeType,
+    },
 
     #[error(
         "Cannot perform equality check \

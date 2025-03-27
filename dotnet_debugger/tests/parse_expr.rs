@@ -810,3 +810,42 @@ fn parse_comments() {
         },
     );
 }
+
+#[test]
+fn parse_div_mod() {
+    require_identical_graph(
+        stringify! {
+            pub fn main() {
+                let numerator = 5;
+                let denominator = 3;
+                let div = numerator / denominator;
+                let modulo = numerator % denominator;
+                let validation = div*denominator + modulo == numerator;
+                let res_main = (
+                    div,
+                    modulo,
+                    validation,
+                );
+                res_main
+            }
+        },
+        |graph| {
+            let div = graph.div(5, 3);
+            graph.name(div, "div").unwrap();
+            let modulo = graph.modulo(5, 3);
+            graph.name(modulo, "modulo").unwrap();
+
+            let mul = graph.mul(div, 3);
+            let sum = graph.add(mul, modulo);
+            let validation = graph.equal(sum, 5);
+            graph.name(validation, "validation").unwrap();
+
+            let res_main = graph.tuple(vec![div, modulo, validation]);
+            graph.name(res_main, "res_main").unwrap();
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

@@ -230,6 +230,26 @@ pub enum ExprKind {
         rhs: SymbolicValue,
     },
 
+    /// Perform numeric multiplication of the LHS and RHS.
+    Div {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Determine the Perform numeric multiplication of the LHS and RHS.
+    ///
+    /// When handling negative operands, the sign of the result is
+    /// taken from the denominator.  This follows standard
+    /// mathematical conventions for the modulo operator, and always
+    /// produces an output between zero (inclusive) and the
+    /// denominator (exclusive).  (This convention is the same as is used for Python.)  , and is *NOT* the convention u C
+    /// convention, which uses the sign of the numerator for the sign
+    /// of the output.
+    Mod {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
     PrimCast {
         value: SymbolicValue,
         prim_type: RuntimePrimType,
@@ -871,6 +891,8 @@ impl SymbolicGraph {
 
     binary_op! {add, Add}
     binary_op! {mul, Mul}
+    binary_op! {div, Div}
+    binary_op! {modulo, Mod}
 
     pub fn prim_cast(
         &mut self,
@@ -2612,6 +2634,8 @@ impl ExpressionTranslator<'_> {
 
                 ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
                 ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+                ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
+                ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
                 ExprKind::PrimCast { value, prim_type } => {
                     let value = self.value_to_arg(value)?;
@@ -2933,6 +2957,8 @@ impl ExprKind {
 
             ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
             ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+            ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
+            ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
             ExprKind::PhysicalDowncast { obj, ty } => {
                 remap(obj).map(|obj| ExprKind::PhysicalDowncast {
@@ -3031,7 +3057,9 @@ impl ExprKind {
             | ExprKind::GreaterThanOrEqual { lhs, rhs }
             | ExprKind::LessThanOrEqual { lhs, rhs }
             | ExprKind::Add { lhs, rhs }
-            | ExprKind::Mul { lhs, rhs } => {
+            | ExprKind::Mul { lhs, rhs }
+            | ExprKind::Div { lhs, rhs }
+            | ExprKind::Mod { lhs, rhs } => {
                 callback(*lhs);
                 callback(*rhs);
             }
@@ -3043,6 +3071,43 @@ impl ExprKind {
             | ExprKind::ReadString { ptr, .. } => {
                 callback(*ptr);
             }
+        }
+    }
+
+    pub(crate) fn op_name(&self) -> &'static str {
+        match self {
+            ExprKind::FunctionArg { .. } => "FunctionArg",
+            ExprKind::Function { .. } => "Function",
+            ExprKind::FunctionCall { .. } => "FunctionCall",
+            ExprKind::Tuple { .. } => "Tuple",
+            ExprKind::NativeFunction { .. } => "NativeFunction",
+            ExprKind::Range { .. } => "Range",
+            ExprKind::Map { .. } => "Map",
+            ExprKind::Reduce { .. } => "Reduce",
+            ExprKind::SimpleReduce { .. } => "SimpleReduce",
+            ExprKind::StaticField { .. } => "StaticField",
+            ExprKind::FieldAccess { .. } => "FieldAccess",
+            ExprKind::SymbolicDowncast { .. } => "SymbolicDowncast",
+            ExprKind::IndexAccess { .. } => "IndexAccess",
+            ExprKind::NumArrayElements { .. } => "NumArrayElements",
+            ExprKind::ArrayExtent { .. } => "ArrayExtent",
+            ExprKind::PointerCast { .. } => "PointerCast",
+            ExprKind::IsSome { .. } => "IsSome",
+            ExprKind::IfElse { .. } => "IfElse",
+            ExprKind::Equal { .. } => "Equal",
+            ExprKind::NotEqual { .. } => "NotEqual",
+            ExprKind::LessThan { .. } => "LessThan",
+            ExprKind::GreaterThan { .. } => "GreaterThan",
+            ExprKind::LessThanOrEqual { .. } => "LessThanOrEqual",
+            ExprKind::GreaterThanOrEqual { .. } => "GreaterThanOrEqual",
+            ExprKind::Add { .. } => "Add",
+            ExprKind::Mul { .. } => "Mul",
+            ExprKind::Div { .. } => "Div",
+            ExprKind::Mod { .. } => "Mod",
+            ExprKind::PrimCast { .. } => "PrimCast",
+            ExprKind::PhysicalDowncast { .. } => "PhysicalDowncast",
+            ExprKind::ReadValue { .. } => "ReadValue",
+            ExprKind::ReadString { .. } => "ReadString",
         }
     }
 }
@@ -3407,6 +3472,8 @@ impl<'a> GraphComparison<'a> {
 
                 ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
                 ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+                ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
+                ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
                 ExprKind::PrimCast {
                     value: lhs_value,
@@ -3585,6 +3652,8 @@ impl Display for ExprKind {
 
             ExprKind::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
             ExprKind::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
+            ExprKind::Div { lhs, rhs } => write!(f, "{lhs}/{rhs}"),
+            ExprKind::Mod { lhs, rhs } => write!(f, "{lhs}%{rhs}"),
             ExprKind::PhysicalDowncast { obj, ty } => {
                 write!(f, "{obj}.downcast({ty})")
             }

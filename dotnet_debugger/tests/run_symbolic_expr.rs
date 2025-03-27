@@ -564,3 +564,39 @@ fn eval_comparisons() {
     assert_eq!(results.get_as::<bool>(4).unwrap(), Some(5 <= 10));
     assert_eq!(results.get_as::<bool>(5).unwrap(), Some(5 >= 10));
 }
+
+#[test]
+fn eval_div_mul_mod() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                let numerator = 5;
+                let denominator = 3;
+                let div = numerator / denominator;
+                let modulo = numerator % denominator;
+                let validation = div*denominator + modulo == numerator;
+                (
+                    div,
+                    modulo,
+                    validation,
+                )
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 3);
+    assert_eq!(
+        results.get_as::<usize>(0).unwrap(),
+        Some(5usize.div_euclid(3))
+    );
+    assert_eq!(
+        results.get_as::<usize>(1).unwrap(),
+        Some(5usize.rem_euclid(3))
+    );
+    assert_eq!(results.get_as::<bool>(2).unwrap(), Some(true));
+}

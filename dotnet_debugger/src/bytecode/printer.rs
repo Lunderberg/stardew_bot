@@ -768,22 +768,22 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
                         ExprKind::Equal { lhs, rhs } => {
-                            handle_binary_op!("==", lhs, rhs)
+                            handle_binary_op!(" == ", lhs, rhs)
                         }
                         ExprKind::NotEqual { lhs, rhs } => {
-                            handle_binary_op!("!=", lhs, rhs)
+                            handle_binary_op!(" != ", lhs, rhs)
                         }
                         ExprKind::GreaterThan { lhs, rhs } => {
-                            handle_binary_op!(">", lhs, rhs)
+                            handle_binary_op!(" > ", lhs, rhs)
                         }
                         ExprKind::LessThan { lhs, rhs } => {
-                            handle_binary_op!("<", lhs, rhs)
+                            handle_binary_op!(" < ", lhs, rhs)
                         }
                         ExprKind::GreaterThanOrEqual { lhs, rhs } => {
-                            handle_binary_op!(">=", lhs, rhs)
+                            handle_binary_op!(" >= ", lhs, rhs)
                         }
                         ExprKind::LessThanOrEqual { lhs, rhs } => {
-                            handle_binary_op!("<=", lhs, rhs)
+                            handle_binary_op!(" <= ", lhs, rhs)
                         }
 
                         ExprKind::Add { lhs, rhs } => {
@@ -791,6 +791,12 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::Mul { lhs, rhs } => {
                             handle_binary_op!("*", lhs, rhs)
+                        }
+                        ExprKind::Div { lhs, rhs } => {
+                            handle_binary_op!("/", lhs, rhs)
+                        }
+                        ExprKind::Mod { lhs, rhs } => {
+                            handle_binary_op!("%", lhs, rhs)
                         }
 
                         ExprKind::PrimCast { value, prim_type } => {

@@ -2,7 +2,7 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt::Display,
-    ops::{Range, RangeFrom},
+    ops::{Mul, Range, RangeFrom},
 };
 
 use derive_more::derive::From;
@@ -166,6 +166,22 @@ pub enum Instruction {
     /// Multiply the two operands together, storing the result to the
     /// output index.
     Mul {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Divide the left-hand operand by the right-hand operand,
+    /// storing the result to the output index.
+    Div {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Divide the left-hand operand by the right-hand operand,
+    /// storing the remainder to the output index.
+    Mod {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
@@ -697,38 +713,67 @@ impl VirtualMachine {
             }};
         }
 
-        macro_rules! comparison_op {
-            ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $cmp:ident) => {{
-                let lhs = $lhs;
-                let rhs = $rhs;
-                let output = $output;
-                let opt_lhs = arg_to_prim!(lhs, $name);
-                let opt_rhs = arg_to_prim!(rhs, $name);
-                values[*output] = match (opt_lhs, opt_rhs) {
-                    (Some(lhs), Some(rhs)) => {
-                        let res = match (lhs, rhs) {
-                            (
-                                RuntimePrimValue::NativeUInt(a),
-                                RuntimePrimValue::NativeUInt(b),
-                            ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
-                            _ => Err(
-                                Error::InvalidOperandsForNumericComparison {
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                },
-                            ),
-                        }?;
-                        Some(res.into())
-                    }
-                    _ => None,
-                };
-            }};
-        }
-
         let mut current_instruction = InstructionIndex(0);
         while current_instruction.0 < self.instructions.len() {
             let instruction = &self.instructions[current_instruction.0];
             current_instruction.0 += 1;
+
+            macro_rules! comparison_op {
+                ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $cmp:ident) => {{
+                    let lhs = $lhs;
+                    let rhs = $rhs;
+                    let output = $output;
+                    let opt_lhs = arg_to_prim!(lhs, $name);
+                    let opt_rhs = arg_to_prim!(rhs, $name);
+                    values[*output] = match (opt_lhs, opt_rhs) {
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
+                                _ => Err(
+                                    Error::InvalidOperandsForNumericComparison {
+                                        lhs: lhs.runtime_type().into(),
+                                        rhs: rhs.runtime_type().into(),
+                                    },
+                                ),
+                            }?;
+                            Some(res.into())
+                        }
+                        _ => None,
+                    };
+                }};
+            }
+
+            macro_rules! integer_op {
+                ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $op:ident) => {{
+                    let lhs = $lhs;
+                    let rhs = $rhs;
+                    let output = $output;
+                    let opt_lhs = arg_to_prim!(lhs, $name);
+                    let opt_rhs = arg_to_prim!(rhs, $name);
+                    values[*output] = match (opt_lhs, opt_rhs) {
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::NativeUInt(a),
+                                    RuntimePrimValue::NativeUInt(b),
+                                ) => Ok(RuntimePrimValue::NativeUInt(a.$op(b))),
+                                (lhs, rhs) => {
+                                    Err(Error::InvalidOperandsForBinaryOp {
+                                        op: instruction.op_name(),
+                                        lhs: lhs.runtime_type().into(),
+                                        rhs: rhs.runtime_type().into(),
+                                    })
+                                }
+                            }?;
+                            Some(res.into())
+                        }
+                        _ => None,
+                    };
+                }};
+            }
 
             match instruction {
                 Instruction::NoOp => {}
@@ -827,7 +872,8 @@ impl VirtualMachine {
                                     RuntimePrimValue::Ptr(b),
                                 ) => Ok(RuntimePrimValue::Ptr(b + a)),
                                 (lhs, rhs) => {
-                                    Err(Error::InvalidOperandsForAddition {
+                                    Err(Error::InvalidOperandsForBinaryOp {
+                                        op: instruction.op_name(),
                                         lhs: lhs.runtime_type().into(),
                                         rhs: rhs.runtime_type().into(),
                                     })
@@ -853,7 +899,8 @@ impl VirtualMachine {
                                     RuntimePrimValue::NativeUInt(b),
                                 ) => Ok(RuntimePrimValue::Ptr(a - b)),
                                 (lhs, rhs) => {
-                                    Err(Error::InvalidOperandsForAddition {
+                                    Err(Error::InvalidOperandsForBinaryOp {
+                                        op: instruction.op_name(),
                                         lhs: lhs.runtime_type().into(),
                                         rhs: rhs.runtime_type().into(),
                                     })
@@ -865,26 +912,13 @@ impl VirtualMachine {
                     };
                 }
                 Instruction::Mul { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "Mul");
-                    let opt_rhs = arg_to_prim!(rhs, "Mul");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::NativeUInt(a * b)),
-                                (lhs, rhs) => Err(
-                                    Error::InvalidOperandsForMultiplication {
-                                        lhs: lhs.runtime_type().into(),
-                                        rhs: rhs.runtime_type().into(),
-                                    },
-                                ),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                    integer_op! {lhs, rhs, output, "Mul", mul}
+                }
+                Instruction::Div { lhs, rhs, output } => {
+                    integer_op! {lhs, rhs, output, "Div", div_euclid}
+                }
+                Instruction::Mod { lhs, rhs, output } => {
+                    integer_op! {lhs, rhs, output, "Mod", rem_euclid}
                 }
                 Instruction::Equal { lhs, rhs, output } => {
                     comparison_op! {lhs, rhs, output, "Equal", eq}
@@ -1026,7 +1060,9 @@ impl Instruction {
             | Instruction::GreaterThanOrEqual { lhs, rhs, .. }
             | Instruction::Add { lhs, rhs, .. }
             | Instruction::Sub { lhs, rhs, .. }
-            | Instruction::Mul { lhs, rhs, .. } => {
+            | Instruction::Mul { lhs, rhs, .. }
+            | Instruction::Div { lhs, rhs, .. }
+            | Instruction::Mod { lhs, rhs, .. } => {
                 (Some(*lhs), Some(*rhs), None)
             }
 
@@ -1073,6 +1109,8 @@ impl Instruction {
             | Instruction::Add { output, .. }
             | Instruction::Sub { output, .. }
             | Instruction::Mul { output, .. }
+            | Instruction::Div { output, .. }
+            | Instruction::Mod { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1136,7 +1174,9 @@ impl Instruction {
             | Instruction::GreaterThanOrEqual { lhs, rhs, output }
             | Instruction::Add { lhs, rhs, output }
             | Instruction::Sub { lhs, rhs, output }
-            | Instruction::Mul { lhs, rhs, output } => {
+            | Instruction::Mul { lhs, rhs, output }
+            | Instruction::Div { lhs, rhs, output }
+            | Instruction::Mod { lhs, rhs, output } => {
                 if let VMArg::SavedValue(index) = lhs {
                     callback(index);
                 }
@@ -1145,6 +1185,32 @@ impl Instruction {
                 }
                 callback(output);
             }
+        }
+    }
+
+    fn op_name(&self) -> &'static str {
+        match self {
+            Instruction::NoOp => "NoOp",
+            Instruction::Copy { .. } => "Copy",
+            Instruction::Swap { .. } => "Swap",
+            Instruction::ConditionalJump { .. } => "ConditionalJump",
+            Instruction::NativeFunctionCall { .. } => "NativeFunctionCall",
+            Instruction::PrimCast { .. } => "PrimCast",
+            Instruction::IsSome { .. } => "IsSome ",
+            Instruction::Equal { .. } => "Equal ",
+            Instruction::NotEqual { .. } => "NotEqual",
+            Instruction::LessThan { .. } => "LessThan",
+            Instruction::GreaterThan { .. } => "GreaterThan",
+            Instruction::LessThanOrEqual { .. } => "LessThanOrEqual",
+            Instruction::GreaterThanOrEqual { .. } => "GreaterThanOrEqual",
+            Instruction::Add { .. } => "Add",
+            Instruction::Sub { .. } => "Sub",
+            Instruction::Mul { .. } => "Mul",
+            Instruction::Div { .. } => "Div",
+            Instruction::Mod { .. } => "Mod",
+            Instruction::Downcast { .. } => "Downcast",
+            Instruction::Read { .. } => "Read",
+            Instruction::ReadString { .. } => "ReadString",
         }
     }
 }
@@ -1285,6 +1351,12 @@ impl Display for Instruction {
             }
             Instruction::Mul { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs}*{rhs}")
+            }
+            Instruction::Div { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} / {rhs}")
+            }
+            Instruction::Mod { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} % {rhs}")
             }
 
             Instruction::Downcast {

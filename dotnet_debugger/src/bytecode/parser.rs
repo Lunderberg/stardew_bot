@@ -125,6 +125,8 @@ pub enum Punctuation {
     Multiply,
     Pipe,
     DoublePipe,
+    Slash,
+    Percent,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -145,7 +147,7 @@ enum OpPrecedence {
     ComparisonOperator,
     RangeExtent,
     Addition,
-    Multiplication,
+    MulDiv,
 }
 
 impl TokenKind {
@@ -293,14 +295,31 @@ impl<'a> SymbolicParser<'a> {
     ) -> Result<SymbolicValue, Error> {
         let mut expr = self.expect_term()?;
 
-        if precedence < OpPrecedence::Multiplication {
-            while let Some(_) = self
-                .tokens
-                .next_if(|token| token.kind.is_punct(Punctuation::Multiply))?
-            {
-                let rhs = self
-                    .expect_expr_op_precedence(OpPrecedence::Multiplication)?;
-                expr = self.graph.mul(expr, rhs);
+        if precedence < OpPrecedence::MulDiv {
+            while let Some(token) = self.tokens.next_if(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Punct(
+                        Punctuation::Multiply
+                            | Punctuation::Slash
+                            | Punctuation::Percent
+                    )
+                )
+            })? {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::MulDiv)?;
+                expr = match token.kind {
+                    TokenKind::Punct(Punctuation::Multiply) => {
+                        self.graph.mul(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::Slash) => {
+                        self.graph.div(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::Percent) => {
+                        self.graph.modulo(expr, rhs)
+                    }
+                    _ => unreachable!("Due to earlier check"),
+                };
             }
         }
 
@@ -351,7 +370,7 @@ impl<'a> SymbolicParser<'a> {
                     TokenKind::Punct(Punctuation::RightAngleBracketEquals) => {
                         self.graph.greater_than_or_equal(expr, rhs)
                     }
-                    _ => unreachable!(""),
+                    _ => unreachable!("Due to earlier check"),
                 };
             }
         }
@@ -1158,6 +1177,8 @@ impl<'a> SymbolicTokenizer<'a> {
                 TokenKind::Punct(Punctuation::DoublePipe)
             }
             '|' => TokenKind::Punct(Punctuation::Pipe),
+            '/' => TokenKind::Punct(Punctuation::Slash),
+            '%' => TokenKind::Punct(Punctuation::Percent),
             '0'..='9' => {
                 let mut value = 0;
                 let mut index = None;

@@ -135,7 +135,8 @@ impl<'a> TypeInference<'a> {
                     }
             };
 
-            let inferred_type = match graph[index_to_infer].as_ref() {
+            let expr_kind = &graph[index_to_infer].kind;
+            let inferred_type = match expr_kind {
                 ExprKind::Function { params, output } => {
                     let params = Some(
                         params
@@ -338,14 +339,18 @@ impl<'a> TypeInference<'a> {
                         | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
 
                         (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForAddition {
+                            Err(Error::InvalidOperandsForBinaryOp {
+                                op: expr_kind.op_name(),
                                 lhs: other_lhs.clone(),
                                 rhs: other_rhs.clone(),
                             })
                         }
                     }?
                 }
-                ExprKind::Mul { lhs, rhs } => {
+
+                ExprKind::Mul { lhs, rhs }
+                | ExprKind::Div { lhs, rhs }
+                | ExprKind::Mod { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of mul");
                     let rhs_type = expect_cache(*rhs, "rhs of mul");
                     match (lhs_type, rhs_type) {
@@ -356,13 +361,15 @@ impl<'a> TypeInference<'a> {
                         (RuntimeType::Unknown, _)
                         | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
                         (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForMultiplication {
+                            Err(Error::InvalidOperandsForBinaryOp {
+                                op: expr_kind.op_name(),
                                 lhs: other_lhs.clone(),
                                 rhs: other_rhs.clone(),
                             })
                         }
                     }?
                 }
+
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
                 ExprKind::PhysicalDowncast { obj, .. } => {
                     let obj_type = expect_cache(*obj, "obj to downcast");
