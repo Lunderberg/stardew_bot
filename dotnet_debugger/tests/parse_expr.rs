@@ -725,3 +725,36 @@ fn parse_map() {
         },
     );
 }
+
+#[test]
+fn parse_if_else() {
+    require_identical_graph(
+        stringify! {
+            pub fn main() {
+                let a = if true {
+                    20
+                } else {
+                    30
+                };
+                let b = if false {
+                    2
+                } else {
+                    3
+                };
+                a+b
+            }
+        },
+        |graph| {
+            let a = graph.if_else(true, 20, 30);
+            graph.name(a, "a").unwrap();
+            let b = graph.if_else(false, 2, 3);
+            graph.name(b, "b").unwrap();
+
+            let res_main = graph.add(a, b);
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

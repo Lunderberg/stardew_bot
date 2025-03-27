@@ -8,7 +8,8 @@ use itertools::{Either, Itertools, Position};
 use format_utils::Indent;
 
 use crate::{
-    ExprKind, MethodTable, RuntimePrimType, RuntimeType, TypedPointer,
+    bytecode::expr::Scope, ExprKind, MethodTable, RuntimePrimType, RuntimeType,
+    TypedPointer,
 };
 
 use super::{
@@ -124,6 +125,8 @@ enum PrintItem<'a> {
     ParenClose,
     SquareBracketOpen,
     SquareBracketClose,
+    BraceOpen,
+    BraceClose,
     MemberAccess,
 }
 
@@ -185,7 +188,9 @@ impl<'a> GraphPrinter<'a> {
                 .filter(|(index, _)| reachable[index.0])
                 .for_each(|(downstream_index, op)| {
                     let downstream_scope = match op.kind {
-                        ExprKind::Function { .. } => Some(downstream_index),
+                        ExprKind::Function { .. } => {
+                            Scope::Function(downstream_index)
+                        }
                         _ => scope[downstream_index.0],
                     };
                     op.visit_reachable_nodes(|input_value| {
@@ -261,7 +266,7 @@ impl<'a> GraphPrinter<'a> {
                 // scope.  On encountering a function definition,
                 // operations within that function will be added to
                 // the stack.
-                scope[*i].is_none()
+                scope[*i] == Scope::Global
             })
             .filter(|i| {
                 // Initialize the stack only with expressions that are
@@ -281,7 +286,7 @@ impl<'a> GraphPrinter<'a> {
 
         enum PrevPrintType {
             None,
-            FunctionOpen,
+            OpenBrace,
             Comma,
             Expr,
             Stmt,
@@ -326,6 +331,21 @@ impl<'a> GraphPrinter<'a> {
                 PrintItem::ParenClose => write!(fmt, ")")?,
                 PrintItem::SquareBracketOpen => write!(fmt, "[")?,
                 PrintItem::SquareBracketClose => write!(fmt, "]")?,
+                PrintItem::BraceOpen => {
+                    write!(fmt, " {{")?;
+                    prev_print_type = PrevPrintType::OpenBrace;
+                }
+                PrintItem::BraceClose => {
+                    match prev_print_type {
+                        PrevPrintType::Expr => write!(fmt, " ")?,
+                        PrevPrintType::Stmt | PrevPrintType::Comma => {
+                            write!(fmt, "\n{current_indent}")?;
+                            current_line += 1;
+                        }
+                        _ => {}
+                    }
+                    write!(fmt, "}}")?;
+                }
                 PrintItem::MemberAccess => write!(fmt, "{sep}.")?,
                 PrintItem::RuntimeType(ty) => write!(fmt, "{ty}")?,
                 PrintItem::PrimType(ty) => write!(fmt, "{ty}")?,
@@ -341,7 +361,7 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::Function { params, output } => {
                             match prev_print_type {
-                                PrevPrintType::FunctionOpen
+                                PrevPrintType::OpenBrace
                                 | PrevPrintType::Stmt => {
                                     write!(fmt, "\n{current_indent}")?;
                                     current_line += 1;
@@ -381,7 +401,7 @@ impl<'a> GraphPrinter<'a> {
                         }
                         _ => {
                             match prev_print_type {
-                                PrevPrintType::FunctionOpen
+                                PrevPrintType::OpenBrace
                                 | PrevPrintType::Stmt => {
                                     write!(fmt, "\n{current_indent}")?;
                                     current_line += 1;
@@ -399,7 +419,7 @@ impl<'a> GraphPrinter<'a> {
                 }
                 PrintItem::Expr(value) => {
                     match prev_print_type {
-                        PrevPrintType::FunctionOpen | PrevPrintType::Comma => {
+                        PrevPrintType::OpenBrace | PrevPrintType::Comma => {
                             write!(fmt, " ")?
                         }
                         PrevPrintType::Stmt => {
@@ -445,14 +465,16 @@ impl<'a> GraphPrinter<'a> {
                         .iter()
                         .enumerate()
                         .rev()
-                        .filter(|(_, op_scope)| **op_scope == Some(func_index))
+                        .filter(|(_, op_scope)| {
+                            **op_scope == Scope::Function(func_index)
+                        })
                         .filter(|(i, _)| !inline_expr[*i])
                         .for_each(|(i, _)| {
                             let op_index = OpIndex::new(i);
                             to_print.push(PrintItem::Stmt(op_index));
                         });
 
-                    prev_print_type = PrevPrintType::FunctionOpen;
+                    prev_print_type = PrevPrintType::OpenBrace;
                 }
                 PrintItem::FunctionClose {
                     start_line,
@@ -480,7 +502,7 @@ impl<'a> GraphPrinter<'a> {
 
                 PrintItem::ExpandedExpr(index) => {
                     match prev_print_type {
-                        PrevPrintType::FunctionOpen | PrevPrintType::Comma => {
+                        PrevPrintType::OpenBrace | PrevPrintType::Comma => {
                             write!(fmt, " ")?
                         }
                         PrevPrintType::Stmt => {
@@ -706,6 +728,26 @@ impl<'a> GraphPrinter<'a> {
                                 PrintItem::Expr(*value),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("is_some()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::IfElse {
+                            condition,
+                            if_branch,
+                            else_branch,
+                        } => {
+                            [
+                                PrintItem::Str("if "),
+                                PrintItem::Expr(*condition),
+                                PrintItem::BraceOpen,
+                                PrintItem::Expr(*if_branch),
+                                PrintItem::BraceClose,
+                                PrintItem::Str(" else"),
+                                PrintItem::BraceOpen,
+                                PrintItem::Expr(*else_branch),
+                                PrintItem::BraceClose,
                             ]
                             .into_iter()
                             .rev()

@@ -501,3 +501,36 @@ fn eval_map_reduce() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn eval_if_else() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                let x = 5+5;
+                let a = if true {
+                    x*2
+                } else {
+                    x*3
+                };
+                let b = if false {
+                    2
+                } else {
+                    3
+                };
+                a+b
+            }
+        })
+        .unwrap();
+
+    //let vm = graph.compile(None).unwrap();
+    let vm = graph.compiler().disable_optimizations().compile().unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = 23;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

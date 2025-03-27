@@ -65,6 +65,9 @@ impl<'a> TypeInference<'a> {
         value: SymbolicValue,
     ) -> Result<&'a RuntimeType, Error> {
         let op_index = match value {
+            SymbolicValue::Bool(_) => {
+                return Ok(&RuntimeType::Prim(RuntimePrimType::Bool));
+            }
             SymbolicValue::Int(_) => {
                 return Ok(&RuntimeType::Prim(RuntimePrimType::NativeUInt));
             }
@@ -110,6 +113,9 @@ impl<'a> TypeInference<'a> {
                                 context: &'static str|
              -> &RuntimeType {
                 match value {
+                        SymbolicValue::Bool(_) => {
+                            &RuntimeType::Prim(RuntimePrimType::Bool)
+                        }
                         SymbolicValue::Int(_) => {
                             &RuntimeType::Prim(RuntimePrimType::NativeUInt)
                         }
@@ -279,6 +285,22 @@ impl<'a> TypeInference<'a> {
                 }
                 ExprKind::PointerCast { ty, .. } => ty.clone(),
                 ExprKind::IsSome(_) => RuntimeType::Prim(RuntimePrimType::Bool),
+
+                ExprKind::IfElse {
+                    if_branch,
+                    else_branch,
+                    ..
+                } => {
+                    let if_branch = expect_cache(*if_branch, "if branch");
+                    let else_branch = expect_cache(*else_branch, "else branch");
+
+                    match (if_branch, else_branch) {
+                        (ty, RuntimeType::Unknown)
+                        | (RuntimeType::Unknown, ty) => ty.clone(),
+                        (ty, _) => ty.clone(),
+                    }
+                }
+
                 ExprKind::Add { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of add");
                     let rhs_type = expect_cache(*rhs, "rhs of add");

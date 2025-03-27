@@ -443,3 +443,32 @@ fn print_map() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_if_else() {
+    let mut graph = SymbolicGraph::new();
+    let a = graph.if_else(true, 20, 30);
+    graph.name(a, "a").unwrap();
+    let b = graph.if_else(false, 2, 3);
+    graph.name(b, "b").unwrap();
+
+    let res_main = graph.add(a, b);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let a = if true { 20 } else { 30 };
+        let b = if false { 2 } else { 3 };
+        let res_main = a + b;
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}

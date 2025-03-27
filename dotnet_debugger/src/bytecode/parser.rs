@@ -127,6 +127,10 @@ pub enum Keyword {
     Let,
     Public,
     Function,
+    If,
+    Else,
+    True,
+    False,
 }
 
 #[derive(PartialOrd, PartialEq)]
@@ -350,6 +354,8 @@ impl<'a> SymbolicParser<'a> {
             .ok_or(ParseError::UnexpectedEndOfString("expression"))?;
         let mut obj = match &peek_token.kind {
             TokenKind::Int(_) => self.expect_int(),
+            TokenKind::Keyword(Keyword::True)
+            | TokenKind::Keyword(Keyword::False) => self.expect_bool(),
 
             TokenKind::Ident
                 if self.identifiers.contains_key(peek_token.text) =>
@@ -378,6 +384,8 @@ impl<'a> SymbolicParser<'a> {
             TokenKind::Punct(Punctuation::Pipe | Punctuation::DoublePipe) => {
                 self.expect_anonymous_function()
             }
+
+            TokenKind::Keyword(Keyword::If) => self.expect_if_else(),
 
             _ => Err(ParseError::UnexpectedTokenKind {
                 desc: "expression",
@@ -437,6 +445,44 @@ impl<'a> SymbolicParser<'a> {
         };
 
         Ok(value)
+    }
+
+    fn expect_bool(&mut self) -> Result<SymbolicValue, Error> {
+        let token = self.expect_kind("boolean", |kind| {
+            matches!(
+                kind,
+                TokenKind::Keyword(Keyword::True)
+                    | TokenKind::Keyword(Keyword::False)
+            )
+        })?;
+
+        let value = match token.kind {
+            TokenKind::Keyword(Keyword::True) => SymbolicValue::Bool(true),
+            TokenKind::Keyword(Keyword::False) => SymbolicValue::Bool(false),
+            _ => unreachable!("Handled by earlier check"),
+        };
+
+        Ok(value)
+    }
+
+    fn expect_if_else(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_keyword(
+            "'if' at start of if/else expressions",
+            Keyword::If,
+        )?;
+
+        let condition = self.expect_expr()?;
+        let if_branch = self.expect_block()?;
+
+        self.expect_keyword(
+            "'else' after the end of 'if' block",
+            Keyword::Else,
+        )?;
+
+        let else_branch = self.expect_block()?;
+
+        let if_else = self.graph.if_else(condition, if_branch, else_branch);
+        Ok(if_else)
     }
 
     fn define_identifier(
@@ -941,6 +987,10 @@ impl Keyword {
             "let" => Some(Keyword::Let),
             "pub" => Some(Keyword::Public),
             "fn" => Some(Keyword::Function),
+            "if" => Some(Keyword::If),
+            "else" => Some(Keyword::Else),
+            "true" => Some(Keyword::True),
+            "false" => Some(Keyword::False),
             _ => None,
         }
     }

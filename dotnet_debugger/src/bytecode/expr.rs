@@ -163,6 +163,18 @@ pub enum ExprKind {
     /// Check if a value is well-defined.
     IsSome(SymbolicValue),
 
+    /// Perform a conditional statement
+    IfElse {
+        /// The condition.
+        condition: SymbolicValue,
+
+        /// The value if the condition is true.
+        if_branch: SymbolicValue,
+
+        /// The value if the condition is false.
+        else_branch: SymbolicValue,
+    },
+
     /// Perform addition of the LHS and RHS.
     ///
     /// This operation is used for both pointer arithmetic and numeric
@@ -211,6 +223,7 @@ pub enum ExprKind {
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
 pub enum SymbolicValue {
+    Bool(bool),
     Int(usize),
     Ptr(Pointer),
     Result(OpIndex),
@@ -252,13 +265,37 @@ struct LastUsage {
     expr_used: OpIndex,
 }
 
+/// Indicates which scope contains an operation
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) enum Scope {
+    /// The operation is contained within the global scope.
+    Global,
+
+    /// The operation is contained within the body of a function.  A
+    /// function's body is identified as the set of all expressions
+    /// that depend on at least one of the function's parameters, and
+    /// are depended on by the function's output.
+    Function(OpIndex),
+
+    /// The operation is contained within the `if` branch of a
+    /// conditional.  A conditional branch's body is identified as the
+    /// set of all expressions that contribute to the branch's value,
+    /// and only contribute to the parent scope's value through the
+    /// branch.
+    IfBranch(OpIndex),
+
+    /// The operation is contained within the `else` branch of a
+    /// conditional.  See also, `Scope::IfBranch`.
+    ElseBranch(OpIndex),
+}
+
 /// The result of analyzing a function
 #[derive(Debug)]
-struct FunctionInfo {
+struct ScopeInfo {
     /// The index of the function definition, which will always be a
     /// `ExprKind::Function`.  If `None`, refers to expressions that
     /// are outside the scope of any function definition.
-    index: Option<OpIndex>,
+    scope: Scope,
 
     /// An ordered list of expressions that are part of the body of
     /// the function.  A function's body is defined as all the set of
@@ -270,8 +307,9 @@ struct FunctionInfo {
     /// the function.
     enclosed: Vec<OpIndex>,
 
-    /// The scope that owns this function.
-    parent_scope: Option<OpIndex>,
+    /// The enclosing scope that contains this function.  Note: For
+    /// Scope::Global, this field contains Scope::Global.
+    parent_scope: Scope,
 }
 
 /// Helper struct for collecting VM instructions
@@ -282,12 +320,11 @@ struct ExpressionTranslator<'a> {
     /// The instructions being collected.
     instructions: &'a mut Vec<Instruction>,
 
+    instructions_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
+
     /// Indicates which instructions belong to which scope.  Has the
-    /// same length as `graph.ops`.  If an element is `None`, the
-    /// element belongs in the global scope.  If the element is
-    /// `Some(index)`, then `index` points to the
-    /// `ExprKind::FunctionDef` that owns the expression.
-    scope: &'a [Option<OpIndex>],
+    /// same length as `graph.ops`.
+    scope: &'a [Scope],
 
     /// Indicates the last time that an expression is used.
     last_usage: &'a [LastUsage],
@@ -299,7 +336,7 @@ struct ExpressionTranslator<'a> {
     native_functions: &'a mut Vec<ExposedNativeFunction>,
     native_function_lookup: &'a mut HashMap<OpIndex, FunctionIndex>,
 
-    output_lookup: &'a HashMap<OpIndex, StackIndex>,
+    reserved_outputs: &'a mut HashMap<OpIndex, StackIndex>,
 
     currently_stored: &'a mut HashMap<OpIndex, VMArg>,
 
@@ -505,7 +542,9 @@ impl SymbolicGraph {
                 }
                 self.ops[op_index.0].name = Some(name);
             }
-            SymbolicValue::Int(_) | SymbolicValue::Ptr(_) => {
+            SymbolicValue::Bool(_)
+            | SymbolicValue::Int(_)
+            | SymbolicValue::Ptr(_) => {
                 // Currently, constants are stored in-line at their
                 // point-of-use, and can't be named.  If constants are
                 // ever moved to be represented as their own nodes,
@@ -750,6 +789,22 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let value = value.into();
         self.push(ExprKind::IsSome(value))
+    }
+
+    pub fn if_else(
+        &mut self,
+        condition: impl Into<SymbolicValue>,
+        if_branch: impl Into<SymbolicValue>,
+        else_branch: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let condition = condition.into();
+        let if_branch = if_branch.into();
+        let else_branch = else_branch.into();
+        self.push(ExprKind::IfElse {
+            condition,
+            if_branch,
+            else_branch,
+        })
     }
 
     pub fn add(
@@ -1044,26 +1099,34 @@ impl SymbolicGraph {
         subgraph
     }
 
-    fn analyze_functions(&self) -> Vec<FunctionInfo> {
-        let mut info: Vec<_> = std::iter::once(None)
-            .chain(
-                self.iter_ops()
-                    .filter(|(_, op)| {
-                        matches!(op.kind, ExprKind::Function { .. })
-                    })
-                    .map(|(index, _)| Some(index)),
-            )
-            .map(|index| FunctionInfo {
-                index,
-                parent_scope: None,
+    fn analyze_scopes(&self) -> Vec<ScopeInfo> {
+        let iter_scopes = self.iter_ops().flat_map(|(index, op)| {
+            let (a, b) = match op.kind {
+                ExprKind::Function { .. } => {
+                    (Some(Scope::Function(index)), None)
+                }
+                ExprKind::IfElse { .. } => (
+                    Some(Scope::IfBranch(index)),
+                    Some(Scope::ElseBranch(index)),
+                ),
+                _ => (None, None),
+            };
+            a.into_iter().chain(b)
+        });
+
+        let mut info: Vec<_> = std::iter::once(Scope::Global)
+            .chain(iter_scopes)
+            .map(|scope| ScopeInfo {
+                scope,
+                parent_scope: Scope::Global,
                 body: vec![],
                 enclosed: vec![],
             })
             .collect();
 
-        let mut func_lookup: HashMap<Option<OpIndex>, &mut FunctionInfo> = info
+        let mut scope_lookup: HashMap<Scope, &mut ScopeInfo> = info
             .iter_mut()
-            .map(|func_info| (func_info.index.clone(), func_info))
+            .map(|func_info| (func_info.scope, func_info))
             .collect();
 
         let scope = self.operation_scope();
@@ -1074,25 +1137,28 @@ impl SymbolicGraph {
             .enumerate()
             .map(|(i, scope)| (OpIndex::new(i), scope))
             .for_each(|(op_index, scope)| {
-                if let Some(func_info) = func_lookup.get_mut(&Some(op_index)) {
-                    func_info.parent_scope = scope;
-                }
-                if let Some(func_info) = func_lookup.get_mut(&scope) {
+                if let Some(func_info) = scope_lookup.get_mut(&scope) {
                     func_info.body.push(op_index);
                 }
             });
 
         for func in info.iter_mut() {
+            if let Some(OpIndex(i)) = func.scope.op_index() {
+                func.parent_scope = scope[i];
+            }
+        }
+
+        for func in info.iter_mut() {
             let mut enclosed: HashSet<OpIndex> = HashSet::new();
             let mut do_visit = |value| {
                 if let SymbolicValue::Result(prev_index) = value {
-                    if scope[prev_index.0] != func.index {
+                    if scope[prev_index.0] != func.scope {
                         enclosed.insert(prev_index);
                     }
                 }
             };
 
-            if let Some(index) = func.index {
+            if let Scope::Function(index) = func.scope {
                 match &self[index].kind {
                     ExprKind::Function { output, .. } => {
                         do_visit(*output);
@@ -1116,28 +1182,236 @@ impl SymbolicGraph {
         info
     }
 
-    /// For each expression, determine which function owns it.  An
-    /// expression is considered owned by a function if it uses at
-    /// least one of the function parameters, and contributes to the
-    /// output of the function.
-    pub(crate) fn operation_scope(&self) -> Vec<Option<OpIndex>> {
-        let mut scope = vec![None; self.ops.len()];
+    /// For each expression, determine which function owns it.
+    ///
+    /// `Scope::Function(func_index)`: The expression uses at least
+    /// one parameter from the function declared at `func_index`, and
+    /// the expression is used by the function's output.
+    ///
+    /// `Scope::IfBranch(if_else_index)`: The expression is used by
+    /// the if branch of the `ExprKind::IfElse` declared at
+    /// `if_else_index`, and is not used by any other
+    pub(crate) fn operation_scope(&self) -> Vec<Scope> {
+        let mut scope = vec![Scope::Global; self.ops.len()];
+
+        // Step 1: Visit each function in reverse order of
+        // declaration.  For each function, mark all expressions that
+        // are part of the subgraph defined by the function parameters
+        // and output.  This handles nested scopes, since inner-scoped
+        // functions will be visited after their containing scope.
         self.iter_ops()
             .rev()
-            .filter(|(_, op)| matches!(op.kind, ExprKind::Function { .. }))
-            .for_each(|(func_index, op)| {
-                let ExprKind::Function { params, output } = &op.kind else {
-                    unreachable!("Due to earlier filter")
-                };
-
-                self.collect_subgraph(params.iter().cloned(), Some(*output))
+            .for_each(|(func_index, op)| match &op.kind {
+                ExprKind::Function { params, output } => {
+                    self.collect_subgraph(
+                        params.iter().cloned(),
+                        Some(*output),
+                    )
                     .into_iter()
                     .for_each(|index| {
-                        scope[index.0] = Some(func_index);
+                        scope[index.0] = Scope::Function(func_index);
                     });
+                }
+                _ => {}
             });
 
+        // Step 2: Update the scope with If/Else branches.  When
+        // walking along the dominator graph, a node will either
+        // encounter an if/else branch, or its containing function.
+        let dominators = self.dominators();
+        for i in 0..self.ops.len() {
+            let op_index = OpIndex(i);
+            let mut dominator = Some(op_index);
+            while let Some(dom_index) = dominator {
+                let Some(next_dom) = dominators[dom_index.0] else {
+                    break;
+                };
+                match self[next_dom].kind {
+                    ExprKind::Function { .. } => {
+                        break;
+                    }
+                    ExprKind::IfElse {
+                        if_branch: SymbolicValue::Result(if_index),
+                        ..
+                    } if if_index == dom_index
+                        && scope[if_index.0] == scope[i] =>
+                    {
+                        scope[i] = Scope::IfBranch(next_dom);
+                        break;
+                    }
+                    ExprKind::IfElse {
+                        else_branch: SymbolicValue::Result(else_index),
+                        ..
+                    } if else_index == dom_index
+                        && scope[else_index.0] == scope[i] =>
+                    {
+                        scope[i] = Scope::ElseBranch(next_dom);
+                        break;
+                    }
+                    ExprKind::IfElse { .. } => {
+                        break;
+                    }
+                    _ => {}
+                }
+
+                dominator = Some(next_dom);
+            }
+        }
+
         scope
+    }
+
+    /// Using Lengauer-Tarjan algorithm, find dominators in the graph
+    /// mapping outputs to inputs.
+    ///
+    /// Returns a list of indices.  Element `i` of the returned vector
+    /// specifies the location of the immediate dominator of operation
+    /// `i`.  If element `i` of the returned vector is `None`, then
+    /// operation `i` is a root node.
+    ///
+    /// https://dl.acm.org/doi/pdf/10.1145/357062.357071
+    pub(crate) fn dominators(&self) -> Vec<Option<OpIndex>> {
+        let mut parent = vec![0; self.ops.len() + 1];
+        let mut dfs_order_to_op_order = vec![0; self.ops.len() + 1];
+        let mut op_order_to_dfs_order = vec![0; self.ops.len()];
+
+        {
+            let mut visited: HashSet<usize> = HashSet::new();
+            let mut to_visit: Vec<(usize, usize)> = self
+                .extern_funcs
+                .iter()
+                .map(|op_index| (op_index.0 + 1, 0))
+                .collect();
+            let mut i_dfs = 0;
+
+            while let Some((i_op, this_parent)) = to_visit.pop() {
+                if visited.contains(&i_op) {
+                    continue;
+                }
+
+                i_dfs += 1;
+                dfs_order_to_op_order[i_dfs] = i_op - 1;
+                op_order_to_dfs_order[i_op - 1] = i_dfs;
+                parent[i_dfs] = this_parent;
+
+                let mut do_visit = |value| {
+                    if let SymbolicValue::Result(index) = value {
+                        to_visit.push((index.0 + 1, i_dfs));
+                    }
+                };
+
+                match &self[OpIndex(i_op - 1)].kind {
+                    ExprKind::Function { output, .. } => do_visit(*output),
+                    other => other.visit_reachable_nodes(do_visit),
+                }
+
+                visited.insert(i_op);
+            }
+        }
+
+        let mut succ: Vec<Vec<usize>> =
+            (0..self.ops.len() + 1).map(|_| Vec::new()).collect();
+        let mut pred: Vec<Vec<usize>> =
+            (0..self.ops.len() + 1).map(|_| Vec::new()).collect();
+        for (i_op, i_dfs_src) in
+            op_order_to_dfs_order.iter().cloned().enumerate()
+        {
+            let i_op = OpIndex(i_op);
+            let mut do_visit = |value| {
+                if let SymbolicValue::Result(index) = value {
+                    let i_dfs_dest = op_order_to_dfs_order[index.0];
+                    succ[i_dfs_src].push(i_dfs_dest);
+                    pred[i_dfs_dest].push(i_dfs_src);
+                }
+            };
+
+            match &self[i_op].kind {
+                ExprKind::Function { output, .. } => do_visit(*output),
+                other => other.visit_reachable_nodes(do_visit),
+            }
+        }
+
+        let mut semi: Vec<usize> = (0..self.ops.len() + 1).collect();
+        let mut idom = vec![0usize; self.ops.len() + 1];
+        let mut ancestor = vec![0usize; self.ops.len() + 1];
+        let mut best: Vec<usize> = (0..self.ops.len() + 1).collect();
+        let mut bucket: Vec<Vec<usize>> =
+            (0..self.ops.len() + 1).map(|_| Vec::new()).collect();
+
+        fn compress(
+            ancestor: &mut [usize],
+            semi: &[usize],
+            best: &mut [usize],
+            v: usize,
+        ) {
+            let a = ancestor[v];
+            if ancestor[a] == 0 {
+                return;
+            }
+            compress(ancestor, semi, best, a);
+
+            if semi[best[v]] > semi[best[a]] {
+                best[v] = best[a];
+            }
+
+            ancestor[v] = ancestor[a];
+        }
+        let eval = |ancestor: &mut [usize],
+                    semi: &[usize],
+                    best: &mut [usize],
+                    v: usize|
+         -> usize {
+            if ancestor[v] == 0 {
+                v
+            } else {
+                compress(ancestor, semi, best, v);
+                best[v]
+            }
+        };
+
+        for w in (1..=self.ops.len()).rev() {
+            let p = parent[w];
+
+            // Step 2
+            for v in pred[w].iter().cloned() {
+                let u = eval(&mut ancestor, &semi, &mut best, v);
+                if semi[w] > semi[u] {
+                    semi[w] = semi[u];
+                }
+            }
+            bucket[semi[w]].push(w);
+            assert!(bucket[semi[w]].len() < self.ops.len() * 10);
+            ancestor[w] = p;
+
+            // Step 3
+            for v in bucket[p].iter().cloned() {
+                let u = eval(&mut ancestor, &semi, &mut best, v);
+                let new_idom = if semi[u] < semi[v] { u } else { p };
+                idom[v] = new_idom;
+            }
+            bucket[p].clear();
+        }
+
+        // Step 4
+        for w in 2..=self.ops.len() {
+            if idom[w] != semi[w] {
+                idom[w] = idom[idom[w]];
+            }
+        }
+        idom[1] = 0;
+
+        let idom_by_op: Vec<Option<OpIndex>> = (0..self.ops.len())
+            .map(|i| {
+                let dfs_order = op_order_to_dfs_order[i];
+                let idom_dfs = idom[dfs_order];
+                (idom_dfs > 0).then(|| {
+                    let idom_op = dfs_order_to_op_order[idom_dfs];
+                    OpIndex::new(idom_op)
+                })
+            })
+            .collect();
+
+        idom_by_op
     }
 
     pub fn simplify<'a>(
@@ -1412,13 +1686,20 @@ impl SymbolicGraph {
         let mut native_function_lookup =
             HashMap::<OpIndex, FunctionIndex>::new();
 
-        let output_lookup: HashMap<OpIndex, StackIndex> = {
+        let mut output_lookup: HashMap<OpIndex, StackIndex> = {
             let mut output_lookup = HashMap::new();
             for (i, output) in outputs.iter().cloned().enumerate() {
                 let stack_index = StackIndex(i);
                 match output {
                     SymbolicValue::Result(op_index) => {
                         output_lookup.insert(op_index, stack_index);
+                    }
+                    SymbolicValue::Bool(value) => {
+                        let value = RuntimePrimValue::Bool(value).into();
+                        instructions.push(Instruction::Copy {
+                            value,
+                            output: stack_index,
+                        });
                     }
                     SymbolicValue::Int(value) => {
                         let value = RuntimePrimValue::NativeUInt(value).into();
@@ -1439,77 +1720,41 @@ impl SymbolicGraph {
             output_lookup
         };
 
-        let func_info = self.analyze_functions();
-
         let scope = self.operation_scope();
-        let last_usage: Vec<LastUsage> = {
-            let mut last_usage: Vec<Option<OpIndex>> =
-                vec![None; self.ops.len()];
 
-            self.iter_ops().for_each(|(downstream_index, op)| {
-                let mut visitor = |value| {
-                    if let SymbolicValue::Result(upstream_index) = value {
-                        last_usage[upstream_index.0] = Some(downstream_index);
-                    }
+        let last_usage: Vec<LastUsage> = self
+            .dominators()
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, dom)| {
+                let op_index = OpIndex::new(i);
+                let opt_usage_point = match self[op_index].kind {
+                    ExprKind::FunctionArg(_) => None,
+                    ExprKind::Function { .. } => None,
+                    ExprKind::NativeFunction(_) => None,
+                    _ => dom,
                 };
-                match &op.kind {
-                    ExprKind::SimpleReduce {
-                        initial,
-                        extent,
-                        reduction: SymbolicValue::Result(reduction),
-                    } => {
-                        visitor(*initial);
-                        visitor(*extent);
-                        if let Ok(reduction_info_index) = func_info
-                            .binary_search_by(|info| {
-                                use std::cmp::Ordering;
-                                match (info.index, reduction) {
-                                    (None, _) => Ordering::Less,
-                                    (Some(a), b) => a.0.cmp(&b.0),
-                                }
-                            })
-                        {
-                            func_info[reduction_info_index]
-                                .enclosed
-                                .iter()
-                                .cloned()
-                                .map(SymbolicValue::Result)
-                                .for_each(visitor);
-                        }
-                    }
-                    other => other.visit_reachable_nodes(visitor),
-                }
-            });
-
-            last_usage
-                .into_iter()
-                .enumerate()
-                .filter_map(|(i, opt_usage_point)| {
-                    let expr_used = OpIndex::new(i);
-                    opt_usage_point.map(|usage_point| LastUsage {
-                        usage_point,
-                        expr_used,
-                    })
+                opt_usage_point.map(|usage_point| LastUsage {
+                    usage_point,
+                    expr_used: op_index,
                 })
-                .filter(|last_usage| {
-                    let op = &self[last_usage.expr_used];
-                    match &op.kind {
-                        ExprKind::FunctionArg(_) => false,
-                        ExprKind::NativeFunction(_) => false,
-                        _ => true,
-                    }
-                })
-                .sorted_by_key(|last_usage| last_usage.usage_point.0)
-                .collect()
-        };
+            })
+            .collect();
 
         let mut dead_indices = BinaryHeap::new();
         let mut currently_stored = HashMap::new();
 
+        let operations_by_scope = scope
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, scope)| (scope, OpIndex::new(i)))
+            .into_group_map();
+
         let iter_op_indices = scope
             .iter()
             .enumerate()
-            .filter(|(_, scope)| scope.is_none())
+            .filter(|(_, scope)| **scope == Scope::Global)
             .map(|(i, _)| OpIndex::new(i))
             .filter(|index| {
                 !matches!(self[*index].kind, ExprKind::Function { .. })
@@ -1518,6 +1763,7 @@ impl SymbolicGraph {
         let mut translater = ExpressionTranslator {
             graph: self,
             instructions: &mut instructions,
+            instructions_by_scope: &operations_by_scope,
             scope: &scope,
             last_usage: &last_usage,
             num_outputs,
@@ -1526,7 +1772,7 @@ impl SymbolicGraph {
             dead_indices: &mut dead_indices,
             native_functions: &mut native_functions,
             native_function_lookup: &mut native_function_lookup,
-            output_lookup: &output_lookup,
+            reserved_outputs: &mut output_lookup,
             currently_stored: &mut currently_stored,
             previously_consumed: HashSet::new(),
         };
@@ -1552,6 +1798,87 @@ impl SymbolicGraph {
         SymbolicGraphCompiler::from_graph(self)
             .with_reader(reader)
             .compile()
+    }
+}
+
+impl std::cmp::PartialOrd for Scope {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl std::cmp::Ord for Scope {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering as R;
+        match (self, other) {
+            (a, b) if a == b => R::Equal,
+            (Scope::Global, _) => R::Less,
+            (_, Scope::Global) => R::Greater,
+            (Scope::IfBranch(a), Scope::ElseBranch(b)) if a == b => R::Less,
+            (Scope::ElseBranch(a), Scope::IfBranch(b)) if a == b => R::Greater,
+            (a, b) => {
+                let a = a.op_index().expect("Scope::Global already handled");
+                let b = b.op_index().expect("Scope::Global already handled");
+                a.0.cmp(&b.0)
+            }
+        }
+    }
+}
+
+impl Scope {
+    fn op_index(&self) -> Option<OpIndex> {
+        match self {
+            Scope::Global => None,
+            Scope::Function(op_index) => Some(*op_index),
+            Scope::IfBranch(op_index) => Some(*op_index),
+            Scope::ElseBranch(op_index) => Some(*op_index),
+        }
+    }
+
+    fn printer<'a>(
+        &'a self,
+        graph: &'a SymbolicGraph,
+    ) -> impl std::fmt::Display + 'a {
+        return Printer { scope: self, graph };
+
+        struct Printer<'a> {
+            scope: &'a Scope,
+            graph: &'a SymbolicGraph,
+        }
+        impl<'a> std::fmt::Display for Printer<'a> {
+            fn fmt(
+                &self,
+                fmt: &mut std::fmt::Formatter<'_>,
+            ) -> std::fmt::Result {
+                match self.scope {
+                    Scope::Global => write!(fmt, "(global)")?,
+                    Scope::Function(op_index) => {
+                        if let Some(name) = &self.graph[*op_index].name {
+                            write!(fmt, "Function '{name}' at {op_index}")?;
+                        } else {
+                            write!(fmt, "Function at {op_index}")?;
+                        }
+                    }
+                    Scope::IfBranch(op_index) => {
+                        if let Some(name) = &self.graph[*op_index].name {
+                            write!(fmt, "If-branch of '{name}' at {op_index}")?;
+                        } else {
+                            write!(fmt, "If-branch at {op_index}")?;
+                        }
+                    }
+                    Scope::ElseBranch(op_index) => {
+                        if let Some(name) = &self.graph[*op_index].name {
+                            write!(
+                                fmt,
+                                "Else-branch of '{name}' at {op_index}"
+                            )?;
+                        } else {
+                            write!(fmt, "Else-branch at {op_index}")?;
+                        }
+                    }
+                }
+                Ok(())
+            }
+        }
     }
 }
 
@@ -1711,6 +2038,9 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 impl ExpressionTranslator<'_> {
     fn value_to_arg(&self, value: &SymbolicValue) -> Result<VMArg, Error> {
         match value {
+            &SymbolicValue::Bool(value) => {
+                Ok(VMArg::Const(RuntimePrimValue::Bool(value)))
+            }
             &SymbolicValue::Int(value) => {
                 Ok(VMArg::Const(RuntimePrimValue::NativeUInt(value)))
             }
@@ -1779,7 +2109,7 @@ impl ExpressionTranslator<'_> {
     }
 
     fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
-        self.output_lookup
+        self.reserved_outputs
             .get(&op_index)
             .cloned()
             .unwrap_or_else(|| self.alloc_index())
@@ -1842,7 +2172,7 @@ impl ExpressionTranslator<'_> {
                             // the first argument.
                             let first_arg_op = match &args[0] {
                                 SymbolicValue::Result(op_index) => *op_index,
-                                SymbolicValue::Int(_) |
+                                SymbolicValue::Bool(_) |SymbolicValue::Int(_) |
                                 SymbolicValue::Ptr(_) => todo!(
                                     "Attempted mutation of const SymbolicValue.  \
                                      Should handle this case earlier using \
@@ -1988,13 +2318,11 @@ impl ExpressionTranslator<'_> {
                                 .insert(index, loop_iter.into());
 
                             let iter_body = self
-                                .scope
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, scope)| {
-                                    **scope == Some(reduction_index)
-                                })
-                                .map(|(i, _)| OpIndex::new(i))
+                                .instructions_by_scope
+                                .get(&Scope::Function(reduction_index))
+                                .into_iter()
+                                .flatten()
+                                .cloned()
                                 .filter(|&op| {
                                     op != accumulator
                                         && op != index
@@ -2013,6 +2341,8 @@ impl ExpressionTranslator<'_> {
                                     .clone(),
                                 graph: self.graph,
                                 instructions: self.instructions,
+                                instructions_by_scope: self
+                                    .instructions_by_scope,
                                 scope: self.scope,
                                 last_usage: self.last_usage,
                                 num_outputs: self.num_outputs,
@@ -2022,7 +2352,7 @@ impl ExpressionTranslator<'_> {
                                 native_functions: self.native_functions,
                                 native_function_lookup: self
                                     .native_function_lookup,
-                                output_lookup: self.output_lookup,
+                                reserved_outputs: self.reserved_outputs,
                             };
 
                             body_translater.translate(iter_body)?;
@@ -2117,6 +2447,85 @@ impl ExpressionTranslator<'_> {
                         value,
                         output: op_output,
                     });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+
+                ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => {
+                    let condition = self.value_to_arg(condition)?;
+
+                    let op_output = self.get_output_index(op_index);
+
+                    let jump_to_if_branch_index = self.instructions.len();
+                    self.instructions.push(Instruction::NoOp);
+
+                    match else_branch {
+                        &SymbolicValue::Result(else_index) => {
+                            self.reserved_outputs.insert(else_index, op_output);
+                            self.translate(
+                                self.instructions_by_scope
+                                    .get(&Scope::ElseBranch(op_index))
+                                    .into_iter()
+                                    .flatten()
+                                    .cloned(),
+                            )?;
+                            self.reserved_outputs.remove(&else_index);
+                        }
+                        other => self.instructions.push(Instruction::Copy {
+                            value: other
+                                .as_prim_value()
+                                .expect(
+                                    "Only SymbolicValue::Result \
+                                     should return None",
+                                )
+                                .into(),
+                            output: op_output,
+                        }),
+                    }
+
+                    let jump_to_branch_end_index = self.instructions.len();
+                    self.instructions.push(Instruction::NoOp);
+
+                    self.instructions[jump_to_if_branch_index] =
+                        Instruction::ConditionalJump {
+                            cond: condition,
+                            dest: InstructionIndex(self.instructions.len()),
+                        };
+
+                    match if_branch {
+                        &SymbolicValue::Result(if_index) => {
+                            self.reserved_outputs.insert(if_index, op_output);
+                            self.translate(
+                                self.instructions_by_scope
+                                    .get(&Scope::IfBranch(op_index))
+                                    .into_iter()
+                                    .flatten()
+                                    .cloned(),
+                            )?;
+                            self.reserved_outputs.remove(&if_index);
+                        }
+                        other => self.instructions.push(Instruction::Copy {
+                            value: other
+                                .as_prim_value()
+                                .expect(
+                                    "Only SymbolicValue::Result \
+                                     should return None",
+                                )
+                                .into(),
+                            output: op_output,
+                        }),
+                    }
+
+                    self.instructions[jump_to_branch_end_index] =
+                        Instruction::ConditionalJump {
+                            cond: true.into(),
+                            dest: InstructionIndex(self.instructions.len()),
+                        };
+
+                    self.free_dead_indices(op_index);
                     self.currently_stored.insert(op_index, op_output.into());
                 }
 
@@ -2222,6 +2631,15 @@ impl SymbolicValue {
             _ => None,
         }
     }
+
+    pub(crate) fn as_prim_value(self) -> Option<RuntimePrimValue> {
+        match self {
+            SymbolicValue::Bool(val) => Some(RuntimePrimValue::Bool(val)),
+            SymbolicValue::Int(val) => Some(RuntimePrimValue::NativeUInt(val)),
+            SymbolicValue::Ptr(ptr) => Some(RuntimePrimValue::Ptr(ptr)),
+            SymbolicValue::Result(_) => None,
+        }
+    }
 }
 
 impl Expr {
@@ -2252,8 +2670,9 @@ impl ExprKind {
         let vec_requires_remap = |slice: &[SymbolicValue]| -> bool {
             slice.iter().any(|item| match item {
                 SymbolicValue::Result(op_index) => map.contains_key(op_index),
-                SymbolicValue::Int(_) => false,
-                SymbolicValue::Ptr(_) => false,
+                SymbolicValue::Bool(_)
+                | SymbolicValue::Int(_)
+                | SymbolicValue::Ptr(_) => false,
             })
         };
 
@@ -2395,6 +2814,31 @@ impl ExprKind {
             ExprKind::IsSome(value) => {
                 remap(value).map(|value| ExprKind::IsSome(value))
             }
+
+            ExprKind::IfElse {
+                condition,
+                if_branch,
+                else_branch,
+            } => {
+                let opt_condition = remap(condition);
+                let opt_if_branch = remap(if_branch);
+                let opt_else_branch = remap(else_branch);
+                let requires_remap = opt_condition.is_some()
+                    || opt_if_branch.is_some()
+                    || opt_else_branch.is_some();
+                requires_remap.then(|| {
+                    let condition = opt_condition.unwrap_or_else(|| *condition);
+                    let if_branch = opt_if_branch.unwrap_or_else(|| *if_branch);
+                    let else_branch =
+                        opt_else_branch.unwrap_or_else(|| *else_branch);
+                    ExprKind::IfElse {
+                        condition,
+                        if_branch,
+                        else_branch,
+                    }
+                })
+            }
+
             ExprKind::Add { lhs, rhs } => {
                 let opt_lhs = remap(lhs);
                 let opt_rhs = remap(rhs);
@@ -2495,9 +2939,18 @@ impl ExprKind {
             }
             ExprKind::PointerCast { ptr, .. } => callback(*ptr),
             ExprKind::IsSome(value) => callback(*value),
+            ExprKind::IfElse {
+                condition,
+                if_branch,
+                else_branch,
+            } => {
+                callback(*condition);
+                callback(*if_branch);
+                callback(*else_branch);
+            }
             ExprKind::Add { lhs, rhs } | ExprKind::Mul { lhs, rhs } => {
                 callback(*lhs);
-                callback(*rhs)
+                callback(*rhs);
             }
 
             ExprKind::PhysicalDowncast { obj, .. } => {
@@ -2813,6 +3266,25 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::IfElse {
+                    condition: lhs_condition,
+                    if_branch: lhs_if_branch,
+                    else_branch: lhs_else_branch,
+                } => match rhs_kind {
+                    ExprKind::IfElse {
+                        condition: rhs_condition,
+                        if_branch: rhs_if_branch,
+                        else_branch: rhs_else_branch,
+                    } => {
+                        equivalent_value!(lhs_condition, rhs_condition)
+                            && equivalent_value!(lhs_if_branch, rhs_if_branch)
+                            && equivalent_value!(
+                                lhs_else_branch,
+                                rhs_else_branch
+                            )
+                    }
+                    _ => false,
+                },
                 ExprKind::Add {
                     lhs: lhs_lhs,
                     rhs: lhs_rhs,
@@ -2987,6 +3459,20 @@ impl Display for ExprKind {
                 write!(f, "{value}.is_some()")
             }
 
+            ExprKind::IfElse {
+                condition,
+                if_branch,
+                else_branch,
+            } => {
+                write!(
+                    f,
+                    "if {condition} \
+                     {{ {if_branch} }} \
+                     else \
+                     {{ {else_branch} }}"
+                )
+            }
+
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
             // parser.
             ExprKind::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
@@ -3041,6 +3527,7 @@ where
 impl Display for SymbolicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            SymbolicValue::Bool(value) => write!(f, "{value}"),
             SymbolicValue::Int(value) => write!(f, "{value}"),
             SymbolicValue::Ptr(ptr) => write!(f, "{ptr}"),
             SymbolicValue::Result(op_index) => write!(f, "{op_index}"),

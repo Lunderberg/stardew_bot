@@ -1133,6 +1133,11 @@ impl From<usize> for VMArg {
         VMArg::Const(RuntimePrimValue::NativeUInt(value))
     }
 }
+impl From<bool> for VMArg {
+    fn from(value: bool) -> Self {
+        VMArg::Const(RuntimePrimValue::Bool(value))
+    }
+}
 
 impl std::fmt::Debug for VMExecutionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
