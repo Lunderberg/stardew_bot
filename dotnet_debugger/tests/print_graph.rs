@@ -472,3 +472,33 @@ fn print_if_else() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_comparisons() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.equal(5, 10);
+    let b = graph.not_equal(5, 10);
+    let c = graph.less_than(5, 10);
+    let d = graph.greater_than(5, 10);
+    let e = graph.less_than_or_equal(5, 10);
+    let f = graph.greater_than_or_equal(5, 10);
+
+    let res_main = graph.tuple(vec![a, b, c, d, e, f]);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let res_main = (5==10, 5!=10, 5<10, 5>10, 5<=10, 5>=10);
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}

@@ -175,6 +175,46 @@ pub enum ExprKind {
         else_branch: SymbolicValue,
     },
 
+    /// Returns true if the operands are equal, false otherwise
+    Equal {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Returns false if the operands are equal, true otherwise
+    NotEqual {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Returns true if the left-hand side is less than the right-hand
+    /// side, false otherwise
+    LessThan {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Returns true if the left-hand side is greater than the
+    /// right-hand side, false otherwise
+    GreaterThan {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Returns true if the left-hand side is less than or equal to
+    /// the right-hand side, false otherwise
+    LessThanOrEqual {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Returns true if the left-hand side is greater than or equal to
+    /// the right-hand side, false otherwise
+    GreaterThanOrEqual {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
     /// Perform addition of the LHS and RHS.
     ///
     /// This operation is used for both pointer arithmetic and numeric
@@ -291,6 +331,7 @@ pub(crate) enum Scope {
 
 /// The result of analyzing a function
 #[derive(Debug)]
+#[allow(dead_code)]
 struct ScopeInfo {
     /// The index of the function definition, which will always be a
     /// `ExprKind::Function`.  If `None`, refers to expressions that
@@ -494,6 +535,20 @@ impl StaticField {
 
         Ok(location)
     }
+}
+
+macro_rules! binary_op {
+    ($name:ident, $variant:ident) => {
+        pub fn $name(
+            &mut self,
+            lhs: impl Into<SymbolicValue>,
+            rhs: impl Into<SymbolicValue>,
+        ) -> SymbolicValue {
+            let lhs = lhs.into();
+            let rhs = rhs.into();
+            self.push(ExprKind::$variant { lhs, rhs })
+        }
+    };
 }
 
 impl SymbolicGraph {
@@ -807,25 +862,15 @@ impl SymbolicGraph {
         })
     }
 
-    pub fn add(
-        &mut self,
-        lhs: impl Into<SymbolicValue>,
-        rhs: impl Into<SymbolicValue>,
-    ) -> SymbolicValue {
-        let lhs = lhs.into();
-        let rhs = rhs.into();
-        self.push(ExprKind::Add { lhs, rhs })
-    }
+    binary_op! {equal, Equal}
+    binary_op! {not_equal, NotEqual}
+    binary_op! {less_than, LessThan}
+    binary_op! {greater_than, GreaterThan}
+    binary_op! {less_than_or_equal, LessThanOrEqual}
+    binary_op! {greater_than_or_equal, GreaterThanOrEqual}
 
-    pub fn mul(
-        &mut self,
-        lhs: impl Into<SymbolicValue>,
-        rhs: impl Into<SymbolicValue>,
-    ) -> SymbolicValue {
-        let lhs = lhs.into();
-        let rhs = rhs.into();
-        self.push(ExprKind::Mul { lhs, rhs })
-    }
+    binary_op! {add, Add}
+    binary_op! {mul, Mul}
 
     pub fn prim_cast(
         &mut self,
@@ -1099,6 +1144,7 @@ impl SymbolicGraph {
         subgraph
     }
 
+    #[allow(dead_code)]
     fn analyze_scopes(&self) -> Vec<ScopeInfo> {
         let iter_scopes = self.iter_ops().flat_map(|(index, op)| {
             let (a, b) = match op.kind {
@@ -1834,6 +1880,7 @@ impl Scope {
         }
     }
 
+    #[allow(dead_code)]
     fn printer<'a>(
         &'a self,
         graph: &'a SymbolicGraph,
@@ -2121,6 +2168,21 @@ impl ExpressionTranslator<'_> {
     ) -> Result<(), Error> {
         for op_index in instructions {
             let op = &self.graph[op_index];
+
+            macro_rules! handle_binary_op {
+                ($variant:ident, $lhs:expr, $rhs:expr) => {{
+                    let lhs = self.value_to_arg($lhs)?;
+                    let rhs = self.value_to_arg($rhs)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.instructions.push(Instruction::$variant {
+                        lhs,
+                        rhs,
+                        output: op_output,
+                    });
+                    self.currently_stored.insert(op_index, op_output.into());
+                }};
+            }
 
             match op.as_ref() {
                 ExprKind::Function { .. } => {
@@ -2529,30 +2591,28 @@ impl ExpressionTranslator<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
 
-                ExprKind::Add { lhs, rhs } => {
-                    let lhs = self.value_to_arg(lhs)?;
-                    let rhs = self.value_to_arg(rhs)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.instructions.push(Instruction::Add {
-                        lhs,
-                        rhs,
-                        output: op_output,
-                    });
-                    self.currently_stored.insert(op_index, op_output.into());
+                ExprKind::Equal { lhs, rhs } => {
+                    handle_binary_op!(Equal, lhs, rhs)
                 }
-                ExprKind::Mul { lhs, rhs } => {
-                    let lhs = self.value_to_arg(lhs)?;
-                    let rhs = self.value_to_arg(rhs)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.instructions.push(Instruction::Mul {
-                        lhs,
-                        rhs,
-                        output: op_output,
-                    });
-                    self.currently_stored.insert(op_index, op_output.into());
+                ExprKind::NotEqual { lhs, rhs } => {
+                    handle_binary_op!(NotEqual, lhs, rhs)
                 }
+                ExprKind::GreaterThan { lhs, rhs } => {
+                    handle_binary_op!(GreaterThan, lhs, rhs)
+                }
+                ExprKind::LessThan { lhs, rhs } => {
+                    handle_binary_op!(LessThan, lhs, rhs)
+                }
+                ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(GreaterThanOrEqual, lhs, rhs)
+                }
+                ExprKind::LessThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(LessThanOrEqual, lhs, rhs)
+                }
+
+                ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+                ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+
                 ExprKind::PrimCast { value, prim_type } => {
                     let value = self.value_to_arg(value)?;
                     self.free_dead_indices(op_index);
@@ -2675,6 +2735,21 @@ impl ExprKind {
                 | SymbolicValue::Ptr(_) => false,
             })
         };
+
+        macro_rules! handle_binary_op {
+            ($variant:ident, $lhs:expr, $rhs:expr) => {{
+                let lhs = $lhs;
+                let rhs = $rhs;
+                let opt_lhs = remap(lhs);
+                let opt_rhs = remap(rhs);
+                let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
+                requires_remap.then(|| {
+                    let lhs = opt_lhs.unwrap_or_else(|| *lhs);
+                    let rhs = opt_rhs.unwrap_or_else(|| *rhs);
+                    ExprKind::$variant { lhs, rhs }
+                })
+            }};
+        }
 
         match self {
             ExprKind::NativeFunction(_)
@@ -2839,26 +2914,26 @@ impl ExprKind {
                 })
             }
 
-            ExprKind::Add { lhs, rhs } => {
-                let opt_lhs = remap(lhs);
-                let opt_rhs = remap(rhs);
-                let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
-                requires_remap.then(|| {
-                    let lhs = opt_lhs.unwrap_or_else(|| *lhs);
-                    let rhs = opt_rhs.unwrap_or_else(|| *rhs);
-                    ExprKind::Add { lhs, rhs }
-                })
+            ExprKind::Equal { lhs, rhs } => handle_binary_op!(Equal, lhs, rhs),
+            ExprKind::NotEqual { lhs, rhs } => {
+                handle_binary_op!(NotEqual, lhs, rhs)
             }
-            ExprKind::Mul { lhs, rhs } => {
-                let opt_lhs = remap(lhs);
-                let opt_rhs = remap(rhs);
-                let requires_remap = opt_lhs.is_some() || opt_rhs.is_some();
-                requires_remap.then(|| {
-                    let lhs = opt_lhs.unwrap_or_else(|| *lhs);
-                    let rhs = opt_rhs.unwrap_or_else(|| *rhs);
-                    ExprKind::Mul { lhs, rhs }
-                })
+            ExprKind::GreaterThan { lhs, rhs } => {
+                handle_binary_op!(GreaterThan, lhs, rhs)
             }
+            ExprKind::LessThan { lhs, rhs } => {
+                handle_binary_op!(LessThan, lhs, rhs)
+            }
+            ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                handle_binary_op!(GreaterThanOrEqual, lhs, rhs)
+            }
+            ExprKind::LessThanOrEqual { lhs, rhs } => {
+                handle_binary_op!(LessThanOrEqual, lhs, rhs)
+            }
+
+            ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+            ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+
             ExprKind::PhysicalDowncast { obj, ty } => {
                 remap(obj).map(|obj| ExprKind::PhysicalDowncast {
                     obj,
@@ -2948,7 +3023,15 @@ impl ExprKind {
                 callback(*if_branch);
                 callback(*else_branch);
             }
-            ExprKind::Add { lhs, rhs } | ExprKind::Mul { lhs, rhs } => {
+
+            ExprKind::Equal { lhs, rhs }
+            | ExprKind::NotEqual { lhs, rhs }
+            | ExprKind::GreaterThan { lhs, rhs }
+            | ExprKind::LessThan { lhs, rhs }
+            | ExprKind::GreaterThanOrEqual { lhs, rhs }
+            | ExprKind::LessThanOrEqual { lhs, rhs }
+            | ExprKind::Add { lhs, rhs }
+            | ExprKind::Mul { lhs, rhs } => {
                 callback(*lhs);
                 callback(*rhs);
             }
@@ -3066,6 +3149,23 @@ impl<'a> GraphComparison<'a> {
 
             let lhs_kind = &lhs[lhs_index].kind;
             let rhs_kind = &rhs[rhs_index].kind;
+
+            macro_rules! handle_binary_op {
+                ($variant:ident, $lhs:expr, $rhs:expr) => {{
+                    let lhs_lhs = $lhs;
+                    let lhs_rhs = $rhs;
+                    match rhs_kind {
+                        ExprKind::$variant {
+                            lhs: rhs_lhs,
+                            rhs: rhs_rhs,
+                        } => {
+                            equivalent_value!(lhs_lhs, rhs_lhs)
+                                && equivalent_value!(lhs_rhs, rhs_rhs)
+                        }
+                        _ => false,
+                    }
+                }};
+            }
 
             let is_match = match lhs_kind {
                 ExprKind::Function {
@@ -3285,32 +3385,29 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
-                ExprKind::Add {
-                    lhs: lhs_lhs,
-                    rhs: lhs_rhs,
-                } => match rhs_kind {
-                    ExprKind::Add {
-                        lhs: rhs_lhs,
-                        rhs: rhs_rhs,
-                    } => {
-                        equivalent_value!(lhs_lhs, rhs_lhs)
-                            && equivalent_value!(lhs_rhs, rhs_rhs)
-                    }
-                    _ => false,
-                },
-                ExprKind::Mul {
-                    lhs: lhs_lhs,
-                    rhs: lhs_rhs,
-                } => match rhs_kind {
-                    ExprKind::Mul {
-                        lhs: rhs_lhs,
-                        rhs: rhs_rhs,
-                    } => {
-                        equivalent_value!(lhs_lhs, rhs_lhs)
-                            && equivalent_value!(lhs_rhs, rhs_rhs)
-                    }
-                    _ => false,
-                },
+
+                ExprKind::Equal { lhs, rhs } => {
+                    handle_binary_op!(Equal, lhs, rhs)
+                }
+                ExprKind::NotEqual { lhs, rhs } => {
+                    handle_binary_op!(NotEqual, lhs, rhs)
+                }
+                ExprKind::GreaterThan { lhs, rhs } => {
+                    handle_binary_op!(GreaterThan, lhs, rhs)
+                }
+                ExprKind::LessThan { lhs, rhs } => {
+                    handle_binary_op!(LessThan, lhs, rhs)
+                }
+                ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(GreaterThanOrEqual, lhs, rhs)
+                }
+                ExprKind::LessThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(LessThanOrEqual, lhs, rhs)
+                }
+
+                ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+                ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+
                 ExprKind::PrimCast {
                     value: lhs_value,
                     prim_type: lhs_prim_type,
@@ -3475,6 +3572,17 @@ impl Display for ExprKind {
 
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
             // parser.
+            ExprKind::Equal { lhs, rhs } => write!(f, "{lhs} == {rhs}"),
+            ExprKind::NotEqual { lhs, rhs } => write!(f, "{lhs} != {rhs}"),
+            ExprKind::LessThan { lhs, rhs } => write!(f, "{lhs} < {rhs}"),
+            ExprKind::GreaterThan { lhs, rhs } => write!(f, "{lhs} > {rhs}"),
+            ExprKind::LessThanOrEqual { lhs, rhs } => {
+                write!(f, "{lhs} <= {rhs}")
+            }
+            ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                write!(f, "{lhs} >= {rhs}")
+            }
+
             ExprKind::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
             ExprKind::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
             ExprKind::PhysicalDowncast { obj, ty } => {

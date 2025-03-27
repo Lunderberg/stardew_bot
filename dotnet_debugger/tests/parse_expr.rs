@@ -758,3 +758,35 @@ fn parse_if_else() {
         },
     );
 }
+
+#[test]
+fn parse_comparisons() {
+    require_identical_graph(
+        stringify! {
+            pub fn main() {
+                (
+                    5==10,
+                    5!=10,
+                    5<10,
+                    5>10,
+                    5<=10,
+                    5>=10,
+                )
+            }
+        },
+        |graph| {
+            let a = graph.equal(5, 10);
+            let b = graph.not_equal(5, 10);
+            let c = graph.less_than(5, 10);
+            let d = graph.greater_than(5, 10);
+            let e = graph.less_than_or_equal(5, 10);
+            let f = graph.greater_than_or_equal(5, 10);
+
+            let res_main = graph.tuple(vec![a, b, c, d, e, f]);
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

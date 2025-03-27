@@ -110,12 +110,17 @@ pub enum Punctuation {
     DoubleColon,
     LeftAngleBracket,
     RightAngleBracket,
+    LeftAngleBracketEquals,
+    RightAngleBracketEquals,
     LeftSquareBracket,
     RightSquareBracket,
     LeftBrace,
     RightBrace,
     Semicolon,
     SingleEquals,
+    DoubleEquals,
+    Bang,
+    BangEquals,
     Plus,
     Multiply,
     Pipe,
@@ -137,6 +142,7 @@ pub enum Keyword {
 enum OpPrecedence {
     MaybeTuple,
     TupleElement,
+    ComparisonOperator,
     RangeExtent,
     Addition,
     Multiplication,
@@ -309,6 +315,47 @@ impl<'a> SymbolicParser<'a> {
             }
         }
 
+        if precedence < OpPrecedence::ComparisonOperator {
+            if let Some(token) = self.tokens.next_if(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Punct(
+                        Punctuation::DoubleEquals
+                            | Punctuation::BangEquals
+                            | Punctuation::LeftAngleBracket
+                            | Punctuation::RightAngleBracket
+                            | Punctuation::LeftAngleBracketEquals
+                            | Punctuation::RightAngleBracketEquals
+                    )
+                )
+            })? {
+                let rhs = self.expect_expr_op_precedence(
+                    OpPrecedence::ComparisonOperator,
+                )?;
+                expr = match token.kind {
+                    TokenKind::Punct(Punctuation::DoubleEquals) => {
+                        self.graph.equal(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::BangEquals) => {
+                        self.graph.not_equal(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::LeftAngleBracket) => {
+                        self.graph.less_than(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::RightAngleBracket) => {
+                        self.graph.greater_than(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::LeftAngleBracketEquals) => {
+                        self.graph.less_than_or_equal(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::RightAngleBracketEquals) => {
+                        self.graph.greater_than_or_equal(expr, rhs)
+                    }
+                    _ => unreachable!(""),
+                };
+            }
+        }
+
         if precedence < OpPrecedence::RangeExtent {
             if let Some(_) = self.tokens.next_if(|token| {
                 token.kind.is_punct(Punctuation::DoublePeriod)
@@ -337,6 +384,12 @@ impl<'a> SymbolicParser<'a> {
                 .tokens
                 .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
             {
+                if matches!(self.peek_punct()?, Some(Punctuation::RightParen)) {
+                    // Early break, in case of trailing comma at the
+                    // end of the tuple.
+                    break;
+                }
+
                 let element =
                     self.expect_expr_op_precedence(OpPrecedence::TupleElement)?;
                 elements.push(element);
@@ -1053,43 +1106,51 @@ impl<'a> SymbolicTokenizer<'a> {
             .unwrap_or_else(|| self.text.len() - start);
 
         let kind = match char1 {
-            '.' => {
-                if opt_char2 == Some('.') {
-                    num_bytes = 2;
-                    TokenKind::Punct(Punctuation::DoublePeriod)
-                } else {
-                    TokenKind::Punct(Punctuation::Period)
-                }
+            '.' if opt_char2 == Some('.') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoublePeriod)
             }
+            '.' => TokenKind::Punct(Punctuation::Period),
             ',' => TokenKind::Punct(Punctuation::Comma),
             '(' => TokenKind::Punct(Punctuation::LeftParen),
             ')' => TokenKind::Punct(Punctuation::RightParen),
+            '<' if opt_char2 == Some('=') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::LeftAngleBracketEquals)
+            }
             '<' => TokenKind::Punct(Punctuation::LeftAngleBracket),
+            '>' if opt_char2 == Some('=') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::RightAngleBracketEquals)
+            }
             '>' => TokenKind::Punct(Punctuation::RightAngleBracket),
             '[' => TokenKind::Punct(Punctuation::LeftSquareBracket),
             ']' => TokenKind::Punct(Punctuation::RightSquareBracket),
             '{' => TokenKind::Punct(Punctuation::LeftBrace),
             '}' => TokenKind::Punct(Punctuation::RightBrace),
             ';' => TokenKind::Punct(Punctuation::Semicolon),
+            '=' if opt_char2 == Some('=') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoubleEquals)
+            }
             '=' => TokenKind::Punct(Punctuation::SingleEquals),
+            '!' if opt_char2 == Some('=') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::BangEquals)
+            }
+            '!' => TokenKind::Punct(Punctuation::Bang),
             '+' => TokenKind::Punct(Punctuation::Plus),
             '*' => TokenKind::Punct(Punctuation::Multiply),
-            ':' => {
-                if opt_char2 == Some(':') {
-                    num_bytes = 2;
-                    TokenKind::Punct(Punctuation::DoubleColon)
-                } else {
-                    TokenKind::Punct(Punctuation::Colon)
-                }
+            ':' if opt_char2 == Some(':') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoubleColon)
             }
-            '|' => {
-                if opt_char2 == Some('|') {
-                    num_bytes = 2;
-                    TokenKind::Punct(Punctuation::DoublePipe)
-                } else {
-                    TokenKind::Punct(Punctuation::Pipe)
-                }
+            ':' => TokenKind::Punct(Punctuation::Colon),
+            '|' if opt_char2 == Some('|') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoublePipe)
             }
+            '|' => TokenKind::Punct(Punctuation::Pipe),
             '0'..='9' => {
                 let mut value = 0;
                 let mut index = None;

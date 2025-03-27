@@ -65,137 +65,146 @@ pub struct FunctionIndex(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
-    // Do nothing.
+    /// Do nothing.
     NoOp,
 
-    // Returns a copy of the specified value.  Can be used to copy a
-    // value on the stack, or to store a constant value onto the
-    // stack.
-    Copy {
-        value: VMArg,
-        output: StackIndex,
-    },
+    /// Copy the value to the specified location.  Can be used to copy
+    /// a value on the stack, or to store a constant value onto the
+    /// stack.
+    Copy { value: VMArg, output: StackIndex },
 
-    // Swap the values stored in two stack locations
+    /// Swap the values stored in two stack locations.
     Swap(StackIndex, StackIndex),
 
-    // If the register contains true, jump to the specified
-    // instruction.  Otherwise, continue to the next instruction.
-    ConditionalJump {
-        cond: VMArg,
-        dest: InstructionIndex,
-    },
+    /// If the register contains true, jump to the specified
+    /// instruction.  Otherwise, continue to the next instruction.
+    ConditionalJump { cond: VMArg, dest: InstructionIndex },
 
-    // Call a native function
+    /// Call a native function
     NativeFunctionCall {
         index: FunctionIndex,
         args: Vec<VMArg>,
         output: Option<StackIndex>,
     },
 
-    // Cast the value in the register to the specified type.
+    /// Cast a value to the specified primitive type.
     PrimCast {
         value: VMArg,
         prim_type: RuntimePrimType,
         output: StackIndex,
     },
 
-    // Check if a location contains a non-None value.
-    IsSome {
-        value: VMArg,
-        output: StackIndex,
-    },
+    /// Check if a location contains a non-None value.
+    IsSome { value: VMArg, output: StackIndex },
 
-    // Increment the register by the value specified in the argument,
-    // storing the result back to the register.
-    Add {
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    },
-
-    // Decrement the register by the value specified in the argument,
-    // storing the result back to the register.
-    Sub {
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    },
-
-    // Multiply the register by the value specified in the argument,
-    // storing the result back to the register.
-    Mul {
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    },
-
-    // Check if the value in the register is equal to the specified
-    // argument, storing the resulting boolean back to the register.
+    /// Check if the two operands are equal to each other, storing the
+    /// resulting boolean to the output index.
     Equal {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
     },
 
-    // Check if the value in the register is greater than the
-    // specified argument, storing the resulting boolean back to the
-    // register.
+    /// Check if the two operands are not equal to each other, storing
+    /// the resulting boolean to the output index.
+    NotEqual {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Check if the left-hand operand is less than the right-hand
+    /// operand, storing the resulting boolean to the output index.
     LessThan {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
     },
 
-    // Check if the value in the register is greater than the
-    // specified argument, storing the resulting boolean back to the
-    // register.
+    /// Check if the left-hand operand is greater than the right-hand
+    /// operand, storing the resulting boolean to the output index.
     GreaterThan {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
     },
 
+    /// Check if the left-hand operand is less than or equal to the
+    /// right-hand operand, storing the resulting boolean to the
+    /// output index.
+    LessThanOrEqual {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Check if the left-hand operand is greater than or equal to the
+    /// right-hand operand, storing the resulting boolean to the
+    /// output index.
     GreaterThanOrEqual {
         lhs: VMArg,
         rhs: VMArg,
         output: StackIndex,
     },
 
-    // Downcast a type.  Assumes the register contains a pointer to an
-    // object.  If the object is of type `ty`, then the register is
-    // unchanged.  If the object is not of type `ty`, then the
-    // register is replaced with `None`.
-    //
-    // TODO: If/when conditionals are implemented, express this as a
-    // Read(RuntimeType::Ptr), followed by a boolean check IsBaseOf.
-    // That way, multiple type checks on the same object can share the
-    // same Read of the method table pointer.
+    /// Add the two operands together, storing the result to the
+    /// output index.
+    Add {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Subtract the right-hand operand from the left-hand operand,
+    /// storing the result to the output index.
+    Sub {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Multiply the two operands together, storing the result to the
+    /// output index.
+    Mul {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Downcast a type.  Assumes the register contains a pointer to an
+    /// object.  If the object is of type `ty`, then the register is
+    /// unchanged.  If the object is not of type `ty`, then the
+    /// register is replaced with `None`.
+    ///
+    /// TODO: If/when conditionals are implemented, express this as a
+    /// Read(RuntimeType::Ptr), followed by a boolean check IsBaseOf.
+    /// That way, multiple type checks on the same object can share the
+    /// same Read of the method table pointer.
     Downcast {
         obj: VMArg,
         subtype: TypedPointer<MethodTable>,
         output: StackIndex,
     },
 
-    // Read a value.
-    //
-    // Assumes the register contains a pointer.  Reads a value of the
-    // specified type from the register's location into the register.
-    //
-    // TODO: Change Read to produce a byte array, followed by a later
-    // Cast operator the operates on a subset of those bytes.  This
-    // would allow access of multiple fields of an object to share the
-    // same read.
+    /// Read a value.
+    ///
+    /// Assumes the register contains a pointer.  Reads a value of the
+    /// specified type from the register's location into the register.
+    ///
+    /// TODO: Change Read to produce a byte array, followed by a later
+    /// Cast operator the operates on a subset of those bytes.  This
+    /// would allow access of multiple fields of an object to share the
+    /// same read.
     Read {
         ptr: VMArg,
         prim_type: RuntimePrimType,
         output: StackIndex,
     },
 
-    ReadString {
-        ptr: VMArg,
-        output: StackIndex,
-    },
+    /// Given a pointer to a .NET string, read the contents of the
+    /// string, storing the result into a native Rust `String` located
+    /// at the output index.
+    ReadString { ptr: VMArg, output: StackIndex },
 }
 
 #[derive(Error)]
@@ -880,8 +889,14 @@ impl VirtualMachine {
                 Instruction::Equal { lhs, rhs, output } => {
                     comparison_op! {lhs, rhs, output, "Equal", eq}
                 }
+                Instruction::NotEqual { lhs, rhs, output } => {
+                    comparison_op! {lhs, rhs, output, "NotEqual", ne}
+                }
                 Instruction::LessThan { lhs, rhs, output } => {
                     comparison_op! {lhs, rhs, output, "LessThan", lt}
+                }
+                Instruction::LessThanOrEqual { lhs, rhs, output } => {
+                    comparison_op! {lhs, rhs, output, "LessThanOrEqual", le}
                 }
                 Instruction::GreaterThan { lhs, rhs, output } => {
                     comparison_op! {lhs, rhs, output, "GreaterThan", gt}
@@ -1003,13 +1018,15 @@ impl Instruction {
             }
 
             // Binary instructions
-            Instruction::Add { lhs, rhs, .. }
-            | Instruction::Sub { lhs, rhs, .. }
-            | Instruction::Mul { lhs, rhs, .. }
-            | Instruction::Equal { lhs, rhs, .. }
+            Instruction::Equal { lhs, rhs, .. }
+            | Instruction::NotEqual { lhs, rhs, .. }
             | Instruction::LessThan { lhs, rhs, .. }
             | Instruction::GreaterThan { lhs, rhs, .. }
-            | Instruction::GreaterThanOrEqual { lhs, rhs, .. } => {
+            | Instruction::LessThanOrEqual { lhs, rhs, .. }
+            | Instruction::GreaterThanOrEqual { lhs, rhs, .. }
+            | Instruction::Add { lhs, rhs, .. }
+            | Instruction::Sub { lhs, rhs, .. }
+            | Instruction::Mul { lhs, rhs, .. } => {
                 (Some(*lhs), Some(*rhs), None)
             }
 
@@ -1047,13 +1064,15 @@ impl Instruction {
                 ..
             }
             | Instruction::PrimCast { output, .. }
+            | Instruction::Equal { output, .. }
+            | Instruction::NotEqual { output, .. }
+            | Instruction::LessThan { output, .. }
+            | Instruction::GreaterThan { output, .. }
+            | Instruction::LessThanOrEqual { output, .. }
+            | Instruction::GreaterThanOrEqual { output, .. }
             | Instruction::Add { output, .. }
             | Instruction::Sub { output, .. }
             | Instruction::Mul { output, .. }
-            | Instruction::Equal { output, .. }
-            | Instruction::LessThan { output, .. }
-            | Instruction::GreaterThan { output, .. }
-            | Instruction::GreaterThanOrEqual { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1109,13 +1128,15 @@ impl Instruction {
                 }
             }
 
-            Instruction::Add { lhs, rhs, output }
-            | Instruction::Sub { lhs, rhs, output }
-            | Instruction::Mul { lhs, rhs, output }
-            | Instruction::Equal { lhs, rhs, output }
+            Instruction::Equal { lhs, rhs, output }
+            | Instruction::NotEqual { lhs, rhs, output }
             | Instruction::LessThan { lhs, rhs, output }
             | Instruction::GreaterThan { lhs, rhs, output }
-            | Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
+            | Instruction::LessThanOrEqual { lhs, rhs, output }
+            | Instruction::GreaterThanOrEqual { lhs, rhs, output }
+            | Instruction::Add { lhs, rhs, output }
+            | Instruction::Sub { lhs, rhs, output }
+            | Instruction::Mul { lhs, rhs, output } => {
                 if let VMArg::SavedValue(index) = lhs {
                     callback(index);
                 }
@@ -1237,6 +1258,25 @@ impl Display for Instruction {
                 write!(f, "{output} = {value}.is_some()")
             }
 
+            Instruction::Equal { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} == {rhs}")
+            }
+            Instruction::NotEqual { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} != {rhs}")
+            }
+            Instruction::LessThan { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} < {rhs}")
+            }
+            Instruction::GreaterThan { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} > {rhs}")
+            }
+            Instruction::LessThanOrEqual { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} <= {rhs}")
+            }
+            Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} >= {rhs}")
+            }
+
             Instruction::Add { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs} + {rhs}")
             }
@@ -1246,18 +1286,7 @@ impl Display for Instruction {
             Instruction::Mul { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs}*{rhs}")
             }
-            Instruction::Equal { lhs, rhs, output } => {
-                write!(f, "{output} = {lhs} == {rhs}")
-            }
-            Instruction::LessThan { lhs, rhs, output } => {
-                write!(f, "{output} = {lhs} < {rhs}")
-            }
-            Instruction::GreaterThan { lhs, rhs, output } => {
-                write!(f, "{output} = {lhs} > {rhs}")
-            }
-            Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
-                write!(f, "{output} = {lhs} >= {rhs}")
-            }
+
             Instruction::Downcast {
                 obj,
                 subtype,

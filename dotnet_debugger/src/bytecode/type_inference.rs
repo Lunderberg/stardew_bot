@@ -301,6 +301,15 @@ impl<'a> TypeInference<'a> {
                     }
                 }
 
+                ExprKind::Equal { .. }
+                | ExprKind::NotEqual { .. }
+                | ExprKind::LessThan { .. }
+                | ExprKind::GreaterThan { .. }
+                | ExprKind::LessThanOrEqual { .. }
+                | ExprKind::GreaterThanOrEqual { .. } => {
+                    RuntimeType::Prim(RuntimePrimType::Bool)
+                }
+
                 ExprKind::Add { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of add");
                     let rhs_type = expect_cache(*rhs, "rhs of add");

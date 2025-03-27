@@ -525,12 +525,42 @@ fn eval_if_else() {
         })
         .unwrap();
 
-    //let vm = graph.compile(None).unwrap();
-    let vm = graph.compiler().disable_optimizations().compile().unwrap();
+    let vm = graph.compile(None).unwrap();
     let results = vm.local_eval().unwrap();
 
     let expected = 23;
 
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn eval_comparisons() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (
+                    5==10,
+                    5!=10,
+                    5<10,
+                    5>10,
+                    5<=10,
+                    5>=10,
+                )
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 6);
+    assert_eq!(results.get_as::<bool>(0).unwrap(), Some(5 == 10));
+    assert_eq!(results.get_as::<bool>(1).unwrap(), Some(5 != 10));
+    assert_eq!(results.get_as::<bool>(2).unwrap(), Some(5 < 10));
+    assert_eq!(results.get_as::<bool>(3).unwrap(), Some(5 > 10));
+    assert_eq!(results.get_as::<bool>(4).unwrap(), Some(5 <= 10));
+    assert_eq!(results.get_as::<bool>(5).unwrap(), Some(5 >= 10));
 }

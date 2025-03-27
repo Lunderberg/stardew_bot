@@ -511,6 +511,20 @@ impl<'a> GraphPrinter<'a> {
                         }
                         _ => {}
                     }
+
+                    macro_rules! handle_binary_op {
+                        ($op:literal, $lhs:expr, $rhs:expr) => {{
+                            [
+                                PrintItem::Expr(*$lhs),
+                                PrintItem::Str($op),
+                                PrintItem::Expr(*$rhs),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }};
+                    }
+
                     match &self.graph[index].kind {
                         ExprKind::FunctionArg(ty) => {
                             let index = make_index_printer(index);
@@ -753,26 +767,32 @@ impl<'a> GraphPrinter<'a> {
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
                         }
+                        ExprKind::Equal { lhs, rhs } => {
+                            handle_binary_op!("==", lhs, rhs)
+                        }
+                        ExprKind::NotEqual { lhs, rhs } => {
+                            handle_binary_op!("!=", lhs, rhs)
+                        }
+                        ExprKind::GreaterThan { lhs, rhs } => {
+                            handle_binary_op!(">", lhs, rhs)
+                        }
+                        ExprKind::LessThan { lhs, rhs } => {
+                            handle_binary_op!("<", lhs, rhs)
+                        }
+                        ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                            handle_binary_op!(">=", lhs, rhs)
+                        }
+                        ExprKind::LessThanOrEqual { lhs, rhs } => {
+                            handle_binary_op!("<=", lhs, rhs)
+                        }
+
                         ExprKind::Add { lhs, rhs } => {
-                            [
-                                PrintItem::Expr(*lhs),
-                                PrintItem::Str(" + "),
-                                PrintItem::Expr(*rhs),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                            handle_binary_op!(" + ", lhs, rhs)
                         }
                         ExprKind::Mul { lhs, rhs } => {
-                            [
-                                PrintItem::Expr(*lhs),
-                                PrintItem::Str("*"),
-                                PrintItem::Expr(*rhs),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                            handle_binary_op!("*", lhs, rhs)
                         }
+
                         ExprKind::PrimCast { value, prim_type } => {
                             [
                                 PrintItem::Expr(*value),
