@@ -17,7 +17,9 @@ fn addition() {
         output: StackIndex(0),
     }];
 
-    let vm = VirtualMachine::builder(instructions).build();
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
+        .build();
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
@@ -67,7 +69,10 @@ fn triangular_number() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions).build().simplify();
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
+        .build()
+        .simplify();
 
     let results = vm.local_eval().unwrap();
 
@@ -96,7 +101,8 @@ fn swap_values() {
         Instruction::Swap(StackIndex(0), StackIndex(1)),
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .num_outputs(2)
         .build()
         .simplify();
@@ -140,7 +146,8 @@ fn run_native_function() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_raw_native_function(
             |args: &[&mut Option<StackValue>]|
                          -> Result<Option<StackValue>,Error> {
@@ -169,7 +176,8 @@ fn run_wrapped_nullary_native_function() {
         output: Some(StackIndex(0)),
     }];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|| -> usize { 42 })
         .build()
         .simplify();
@@ -197,7 +205,8 @@ fn run_wrapped_unary_native_function() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|&val: &usize| -> usize { val * val })
         .build()
         .simplify();
@@ -231,7 +240,8 @@ fn run_wrapped_binary_native_function() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|&lhs: &usize, &rhs: &usize| -> usize {
             lhs + rhs
         })
@@ -273,7 +283,8 @@ fn rust_function_returning_rust_object() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
         .build()
         .simplify();
@@ -322,7 +333,8 @@ fn rust_function_accepting_rust_object() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
         .with_native_function(|obj: &RustObj| obj.a + obj.b)
         .build()
@@ -373,7 +385,8 @@ fn rust_function_accepting_mutable_rust_object() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
         .with_native_function(|obj: &mut RustObj, &c: &usize| {
             obj.a += c;
@@ -445,7 +458,8 @@ fn rust_function_collecting_triangular_numbers() {
         },
     ];
 
-    let vm = VirtualMachine::builder(instructions)
+    let vm = VirtualMachine::builder()
+        .with_instructions(instructions)
         .with_native_function(|| -> Vec<usize> {
             println!("Constructing Vec<usize>");
             Vec::new()

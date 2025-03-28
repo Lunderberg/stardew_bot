@@ -23,6 +23,7 @@ pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
     native_functions: Vec<ExposedNativeFunction>,
     num_outputs: usize,
+    annotations: HashMap<InstructionIndex, String>,
 }
 
 #[derive(Debug)]
@@ -38,6 +39,9 @@ pub struct VirtualMachine {
 
     /// The number of additional temporary values to allocate.
     num_temporaries: usize,
+
+    /// Annotations of each instruction
+    annotations: HashMap<InstructionIndex, String>,
 }
 
 #[derive(Debug, From)]
@@ -475,6 +479,39 @@ impl StackValue {
 }
 
 impl VirtualMachineBuilder {
+    pub(crate) fn push(&mut self, inst: Instruction) -> InstructionIndex {
+        let index = InstructionIndex(self.instructions.len());
+        self.instructions.push(inst);
+        index
+    }
+
+    pub(crate) fn update(
+        &mut self,
+        index: InstructionIndex,
+        inst: Instruction,
+    ) {
+        self.instructions[index.0] = inst;
+    }
+
+    pub(crate) fn current_index(&self) -> InstructionIndex {
+        InstructionIndex(self.instructions.len())
+    }
+
+    pub(crate) fn annotate(
+        &mut self,
+        inst: InstructionIndex,
+        annot: impl Into<String>,
+    ) {
+        self.annotations.insert(inst, annot.into());
+    }
+
+    pub fn with_instructions(self, instructions: Vec<Instruction>) -> Self {
+        Self {
+            instructions,
+            ..self
+        }
+    }
+
     pub fn num_outputs(self, num_outputs: usize) -> Self {
         Self {
             num_outputs,
@@ -526,6 +563,7 @@ impl VirtualMachineBuilder {
             native_functions: self.native_functions,
             num_outputs: self.num_outputs,
             num_temporaries: num_values - self.num_outputs,
+            annotations: self.annotations,
         }
     }
 }
@@ -590,16 +628,23 @@ impl VMReader for DummyReader {
 }
 
 impl VirtualMachine {
-    pub fn builder(instructions: Vec<Instruction>) -> VirtualMachineBuilder {
+    pub fn builder() -> VirtualMachineBuilder {
         VirtualMachineBuilder {
-            instructions,
+            instructions: Vec::new(),
             native_functions: Vec::new(),
             num_outputs: 1,
+            annotations: HashMap::new(),
         }
     }
 
     pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
-        Self::builder(instructions).num_outputs(num_outputs).build()
+        VirtualMachineBuilder {
+            instructions,
+            native_functions: Vec::new(),
+            num_outputs,
+            annotations: HashMap::new(),
+        }
+        .build()
     }
 
     pub fn num_instructions(&self) -> usize {
@@ -1242,7 +1287,11 @@ impl Display for VirtualMachine {
             self.num_temporaries
         )?;
         for (i, instruction) in self.instructions.iter().enumerate() {
-            writeln!(f, "{i}: {instruction}")?;
+            write!(f, "{i}: {instruction}")?;
+            if let Some(annot) = self.annotations.get(&InstructionIndex(i)) {
+                write!(f, " // {annot}")?;
+            }
+            writeln!(f)?;
         }
         Ok(())
     }

@@ -6,9 +6,12 @@ fn compare_to_expected(
     before: impl IntoIterator<Item = Instruction>,
     expected: impl IntoIterator<Item = Instruction>,
 ) {
-    let before = VirtualMachine::builder(before.into_iter().collect()).build();
-    let expected =
-        VirtualMachine::builder(expected.into_iter().collect()).build();
+    let before = VirtualMachine::builder()
+        .with_instructions(before.into_iter().collect())
+        .build();
+    let expected = VirtualMachine::builder()
+        .with_instructions(expected.into_iter().collect())
+        .build();
 
     println!("------------- Before ------------\n{before}");
 

@@ -600,3 +600,95 @@ fn eval_div_mul_mod() {
     );
     assert_eq!(results.get_as::<bool>(2).unwrap(), Some(true));
 }
+
+#[test]
+fn eval_conditional_reduction() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn reduction(a: usize, b:usize) {
+                let condition = b%2==0;
+                if condition {
+                    a+b
+                } else {
+                    a+2*b
+                }
+            }
+            pub fn main() {
+                let reduced = (0..100).reduce(0, reduction);
+                reduced
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..100)
+        .map(|b| if b % 2 == 0 { b } else { 2 * b })
+        .sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn eval_conditional_reduction_with_no_change_in_if_branch() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn reduction(a: usize, b:usize) {
+                let condition = b%2==0;
+                if condition {
+                    a
+                } else {
+                    a+b
+                }
+            }
+            pub fn main() {
+                let reduced = (0..100).reduce(0, reduction);
+                reduced
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..100).filter(|b| b % 2 != 0).sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn eval_conditional_reduction_with_no_change_in_else_branch() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn reduction(a: usize, b:usize) {
+                let condition = b%2==0;
+                if condition {
+                    a+b
+                } else {
+                    a
+                }
+            }
+            pub fn main() {
+                let reduced = (0..100).reduce(0, reduction);
+                reduced
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..100).filter(|b| b % 2 == 0).sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
