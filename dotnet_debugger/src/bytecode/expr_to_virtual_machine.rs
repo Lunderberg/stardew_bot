@@ -599,6 +599,10 @@ impl ExpressionTranslator<'_> {
                     "All Map expressions should be simplified \
                      to ExprKind::SimpleReduce"
                 ),
+                ExprKind::Filter { .. } => panic!(
+                    "All Filter expressions should be simplified \
+                     to ExprKind::SimpleReduce"
+                ),
                 ExprKind::Reduce { .. } => panic!(
                     "All Reduce expressions should be simplified \
                      to ExprKind::SimpleReduce"

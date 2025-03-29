@@ -37,6 +37,9 @@ pub use merge_range_reduce_to_simple_reduce::MergeRangeReduceToSimpleReduce;
 mod inline_iterator_map;
 pub use inline_iterator_map::InlineIteratorMap;
 
+mod inline_iterator_filter;
+pub use inline_iterator_filter::InlineIteratorFilter;
+
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
 

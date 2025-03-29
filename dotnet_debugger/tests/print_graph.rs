@@ -538,3 +538,60 @@ fn print_div_mod() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_iterator_filter() {
+    let mut graph = SymbolicGraph::new();
+
+    let iter = graph.range(100);
+
+    let filter = {
+        let i = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(i, "i").unwrap();
+
+        let rem = graph.modulo(i, 2);
+        let eq = graph.equal(rem, 0);
+        graph.function_def(vec![i], eq)
+    };
+    let iter = graph.filter(iter, filter);
+
+    let map = {
+        let j = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(j, "j").unwrap();
+
+        let prod = graph.mul(j, j);
+        graph.function_def(vec![j], prod)
+    };
+    let iter = graph.map(iter, map);
+
+    let reduce = {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+
+        let sum = graph.add(a, b);
+        graph.function_def(vec![a, b], sum)
+    };
+    let res_main = graph.reduce(0, iter, reduce);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let res_main = (0..100)\
+                    .filter(|i: usize| { i%2 == 0 })\
+                    .map(|j: usize| { j*j })\
+                    .reduce(0, |a: usize, b: usize| { a + b });
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}

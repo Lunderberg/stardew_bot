@@ -77,6 +77,17 @@ pub enum ExprKind {
         map: SymbolicValue,
     },
 
+    /// Filter the elements of an iterator, retaining elements of the
+    /// iterator for which the filter function returns true.
+    Filter {
+        /// The iterator whose elements should be mapped.
+        iterator: SymbolicValue,
+
+        /// The filter function to apply.  Should have signature
+        /// `Fn(ItemA) -> bool`
+        filter: SymbolicValue,
+    },
+
     /// Perform a reduction along an iterator.
     Reduce {
         /// The initial value of the reduction.
@@ -659,6 +670,14 @@ impl SymbolicGraph {
         map: SymbolicValue,
     ) -> SymbolicValue {
         self.push(ExprKind::Map { iterator, map })
+    }
+
+    pub fn filter(
+        &mut self,
+        iterator: SymbolicValue,
+        filter: SymbolicValue,
+    ) -> SymbolicValue {
+        self.push(ExprKind::Filter { iterator, filter })
     }
 
     pub fn reduce(
@@ -1861,6 +1880,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
                 .then(super::InlineFunctionCalls)
                 .then(super::MergeRangeReduceToSimpleReduce)
                 .then(super::InlineIteratorMap)
+                .then(super::InlineIteratorFilter)
                 .apply_recursively();
 
             expr.rewrite(rewriter)?
@@ -1870,6 +1890,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
                 .then(super::InlineFunctionCalls)
                 .then(super::MergeRangeReduceToSimpleReduce)
                 .then(super::InlineIteratorMap)
+                .then(super::InlineIteratorFilter)
                 .apply_recursively();
 
             expr.rewrite(rewriter)?
@@ -2012,6 +2033,15 @@ impl ExprKind {
                     let iterator = opt_iterator.unwrap_or_else(|| *iterator);
                     let map = opt_map.unwrap_or_else(|| *map);
                     ExprKind::Map { iterator, map }
+                })
+            }
+            ExprKind::Filter { iterator, filter } => {
+                let opt_iterator = remap(iterator);
+                let opt_filter = remap(filter);
+                (opt_iterator.is_some() || opt_filter.is_some()).then(|| {
+                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
+                    let filter = opt_filter.unwrap_or_else(|| *filter);
+                    ExprKind::Filter { iterator, filter }
                 })
             }
             ExprKind::Reduce {
@@ -2204,6 +2234,10 @@ impl ExprKind {
                 callback(*iterator);
                 callback(*map);
             }
+            ExprKind::Filter { iterator, filter } => {
+                callback(*iterator);
+                callback(*filter);
+            }
             ExprKind::Reduce {
                 initial,
                 iterator,
@@ -2286,6 +2320,7 @@ impl ExprKind {
             ExprKind::NativeFunction { .. } => "NativeFunction",
             ExprKind::Range { .. } => "Range",
             ExprKind::Map { .. } => "Map",
+            ExprKind::Filter { .. } => "Filter",
             ExprKind::Reduce { .. } => "Reduce",
             ExprKind::SimpleReduce { .. } => "SimpleReduce",
             ExprKind::StaticField { .. } => "StaticField",
@@ -2492,6 +2527,19 @@ impl<'a> GraphComparison<'a> {
                     } => {
                         equivalent_value!(lhs_iterator, rhs_iterator)
                             && equivalent_value!(lhs_map, rhs_map)
+                    }
+                    _ => false,
+                },
+                ExprKind::Filter {
+                    iterator: lhs_iterator,
+                    filter: lhs_filter,
+                } => match rhs_kind {
+                    ExprKind::Filter {
+                        iterator: rhs_iterator,
+                        filter: rhs_filter,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_filter, rhs_filter)
                     }
                     _ => false,
                 },
@@ -2771,6 +2819,9 @@ impl Display for ExprKind {
             }
             ExprKind::Map { iterator, map } => {
                 write!(f, "{iterator}.map({map})")
+            }
+            ExprKind::Filter { iterator, filter } => {
+                write!(f, "{iterator}.filter({filter})")
             }
             ExprKind::Reduce {
                 initial,

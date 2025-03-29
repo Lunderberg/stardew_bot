@@ -567,6 +567,18 @@ impl<'a> GraphPrinter<'a> {
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
                         }
+                        ExprKind::Filter { iterator, filter } => {
+                            [
+                                PrintItem::Expr(*iterator),
+                                PrintItem::Str(".filter"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(*filter),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
                         ExprKind::Reduce {
                             initial,
                             iterator,

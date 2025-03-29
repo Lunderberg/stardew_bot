@@ -180,6 +180,11 @@ impl<'a> TypeInference<'a> {
                         _ => Err(TypeInferenceError::AttemptedMapOnNonFunction),
                     }?
                 }
+                ExprKind::Filter { iterator, .. } => {
+                    let iter =
+                        expect_cache(*iterator, "iterator being filtered");
+                    iter.clone()
+                }
                 ExprKind::Reduce { initial, .. }
                 | ExprKind::SimpleReduce { initial, .. } => {
                     expect_cache(*initial, "initial reduction value").clone()

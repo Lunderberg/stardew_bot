@@ -700,3 +700,30 @@ fn eval_conditional_reduction_with_no_change_in_else_branch() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn eval_iterator_filter() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..100)
+                    .filter(|i: usize| i%2==0)
+                    .map(|i: usize| i*i)
+                    .reduce(0, |a:usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..100)
+        .filter(|i| i % 2 == 0)
+        .map(|i| i * i)
+        .sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
