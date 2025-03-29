@@ -48,6 +48,8 @@ mod printer;
 mod op_index;
 pub use op_index::OpIndex;
 
+mod expr_to_virtual_machine;
+
 pub mod virtual_machine;
 pub use virtual_machine::{
     Instruction, StackValue, VMArg, VMExecutionError, VMResults, VirtualMachine,
