@@ -23,6 +23,7 @@ impl SymbolicGraph {
         GraphPrinter {
             graph: self,
             expand_all_expressions: false,
+            number_all_expressions: false,
             root_subgraph_node: None,
             insert_zero_width_space_at_breakpoint: false,
             indent_width: Self::DEFAULT_INDENT_WIDTH,
@@ -31,11 +32,8 @@ impl SymbolicGraph {
 
     pub fn print<'a>(&'a self, value: SymbolicValue) -> GraphPrinter<'a> {
         GraphPrinter {
-            graph: self,
             root_subgraph_node: Some(value),
-            expand_all_expressions: false,
-            insert_zero_width_space_at_breakpoint: false,
-            indent_width: Self::DEFAULT_INDENT_WIDTH,
+            ..self.printer()
         }
     }
 }
@@ -71,6 +69,8 @@ pub struct GraphPrinter<'a> {
     ///     let _0 = x + y;
     ///     let _1 = _0 + _0;
     expand_all_expressions: bool,
+
+    number_all_expressions: bool,
 
     /// The subgraph to be printed.  If it contains a value, only
     /// nodes that are used by the specified value will be printed.
@@ -111,7 +111,6 @@ enum PrintItem<'a> {
         is_stmt: bool,
     },
     FunctionClose {
-        start_line: usize,
         is_stmt: bool,
     },
     Comma,
@@ -150,6 +149,13 @@ impl<'a> GraphPrinter<'a> {
     pub fn expand_all_expressions(self) -> Self {
         Self {
             expand_all_expressions: true,
+            ..self
+        }
+    }
+
+    pub fn number_all_expressions(self) -> Self {
+        Self {
+            number_all_expressions: true,
             ..self
         }
     }
@@ -224,7 +230,7 @@ impl<'a> GraphPrinter<'a> {
 
         let requires_name_prefix = {
             let mut requires_name_prefix =
-                vec![false; self.graph.num_operations()];
+                vec![self.number_all_expressions; self.graph.num_operations()];
             let mut name_lookup: HashMap<&str, OpIndex> = HashMap::new();
             for (index, op) in self.graph.iter_ops() {
                 if let Some(name) = op.name.as_ref().map(|name| name.as_str()) {
@@ -294,7 +300,15 @@ impl<'a> GraphPrinter<'a> {
 
         let mut prev_print_type = PrevPrintType::None;
 
-        let mut current_line: usize = 0;
+        let mut current_indent = Indent(0);
+        let mut same_line_as_previous_brace = false;
+
+        macro_rules! advance_line {
+            () => {
+                write!(fmt, "\n{current_indent}")?;
+                same_line_as_previous_brace = false;
+            };
+        }
 
         let make_index_printer = |index: OpIndex| IndexPrinter {
             graph: self.graph,
@@ -304,8 +318,6 @@ impl<'a> GraphPrinter<'a> {
 
         let extern_func_lookup: HashSet<OpIndex> =
             self.graph.iter_extern_funcs().collect();
-
-        let mut current_indent = Indent(0);
 
         while let Some(print_item) = to_print.pop() {
             match print_item {
@@ -334,16 +346,18 @@ impl<'a> GraphPrinter<'a> {
                 PrintItem::BraceOpen => {
                     write!(fmt, " {{")?;
                     prev_print_type = PrevPrintType::OpenBrace;
+                    current_indent += self.indent_width;
+                    same_line_as_previous_brace = true;
                 }
                 PrintItem::BraceClose => {
-                    match prev_print_type {
-                        PrevPrintType::Expr => write!(fmt, " ")?,
-                        PrevPrintType::Stmt | PrevPrintType::Comma => {
-                            write!(fmt, "\n{current_indent}")?;
-                            current_line += 1;
-                        }
-                        _ => {}
+                    current_indent -= self.indent_width;
+
+                    if same_line_as_previous_brace {
+                        write!(fmt, " ")?;
+                    } else {
+                        advance_line!();
                     }
+
                     write!(fmt, "}}")?;
                 }
                 PrintItem::MemberAccess => write!(fmt, "{sep}.")?,
@@ -363,8 +377,7 @@ impl<'a> GraphPrinter<'a> {
                             match prev_print_type {
                                 PrevPrintType::OpenBrace
                                 | PrevPrintType::Stmt => {
-                                    write!(fmt, "\n{current_indent}")?;
-                                    current_line += 1;
+                                    advance_line!();
                                 }
                                 _ => {}
                             }
@@ -403,8 +416,7 @@ impl<'a> GraphPrinter<'a> {
                             match prev_print_type {
                                 PrevPrintType::OpenBrace
                                 | PrevPrintType::Stmt => {
-                                    write!(fmt, "\n{current_indent}")?;
-                                    current_line += 1;
+                                    advance_line!();
                                 }
 
                                 _ => {}
@@ -423,8 +435,7 @@ impl<'a> GraphPrinter<'a> {
                             write!(fmt, " ")?
                         }
                         PrevPrintType::Stmt => {
-                            write!(fmt, "\n{current_indent}")?;
-                            current_line += 1;
+                            advance_line!();
                         }
                         _ => {}
                     }
@@ -456,10 +467,7 @@ impl<'a> GraphPrinter<'a> {
 
                     current_indent += self.indent_width;
 
-                    to_print.push(PrintItem::FunctionClose {
-                        start_line: current_line,
-                        is_stmt,
-                    });
+                    to_print.push(PrintItem::FunctionClose { is_stmt });
                     to_print.push(PrintItem::Expr(output));
                     scope
                         .iter()
@@ -474,18 +482,15 @@ impl<'a> GraphPrinter<'a> {
                             to_print.push(PrintItem::Stmt(op_index));
                         });
 
+                    same_line_as_previous_brace = true;
                     prev_print_type = PrevPrintType::OpenBrace;
                 }
-                PrintItem::FunctionClose {
-                    start_line,
-                    is_stmt,
-                } => {
+                PrintItem::FunctionClose { is_stmt, .. } => {
                     current_indent -= self.indent_width;
-                    if start_line == current_line {
+                    if same_line_as_previous_brace {
                         write!(fmt, " ")?;
                     } else {
-                        write!(fmt, "\n{current_indent}")?;
-                        current_line += 1;
+                        advance_line!();
                     }
 
                     write!(fmt, "}}")?;
@@ -506,8 +511,7 @@ impl<'a> GraphPrinter<'a> {
                             write!(fmt, " ")?
                         }
                         PrevPrintType::Stmt => {
-                            write!(fmt, "\n{current_indent}")?;
-                            current_line += 1;
+                            advance_line!();
                         }
                         _ => {}
                     }
@@ -752,20 +756,43 @@ impl<'a> GraphPrinter<'a> {
                             if_branch,
                             else_branch,
                         } => {
-                            [
-                                PrintItem::Str("if "),
-                                PrintItem::Expr(*condition),
-                                PrintItem::BraceOpen,
-                                PrintItem::Expr(*if_branch),
-                                PrintItem::BraceClose,
-                                PrintItem::Str(" else"),
-                                PrintItem::BraceOpen,
-                                PrintItem::Expr(*else_branch),
-                                PrintItem::BraceClose,
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                            let iter_if = scope
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, op_scope)| {
+                                    **op_scope == Scope::IfBranch(index)
+                                })
+                                .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
+                            let iter_else = scope
+                                .iter()
+                                .enumerate()
+                                .filter(|(_, op_scope)| {
+                                    **op_scope == Scope::ElseBranch(index)
+                                })
+                                .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
+
+                            std::iter::empty()
+                                .chain([
+                                    PrintItem::Str("if "),
+                                    PrintItem::Expr(*condition),
+                                    PrintItem::BraceOpen,
+                                ])
+                                .chain(iter_if)
+                                .chain([
+                                    PrintItem::Expr(*if_branch),
+                                    PrintItem::BraceClose,
+                                    PrintItem::Str(" else"),
+                                    PrintItem::BraceOpen,
+                                ])
+                                .chain(iter_else)
+                                .chain([
+                                    PrintItem::Expr(*else_branch),
+                                    PrintItem::BraceClose,
+                                ])
+                                .rev()
+                                .for_each(|print_item| {
+                                    to_print.push(print_item)
+                                });
                         }
                         ExprKind::Equal { lhs, rhs } => {
                             handle_binary_op!(" == ", lhs, rhs)

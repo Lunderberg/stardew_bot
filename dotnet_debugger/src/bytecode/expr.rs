@@ -317,7 +317,7 @@ pub struct SymbolicGraphCompiler<'a, 'b> {
     optimize_symbolic_graph: bool,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 struct LastUsage {
     /// The expression in which the expression is used.
     usage_point: OpIndex,
@@ -384,15 +384,10 @@ struct ExpressionTranslator<'a> {
 
     instructions_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
 
-    /// Indicates which instructions belong to which scope.  Has the
-    /// same length as `graph.ops`.
-    scope: &'a [Scope],
-
     /// Indicates the last time that an expression is used.
     last_usage: &'a [LastUsage],
 
     num_outputs: usize,
-    main_func_index: OpIndex,
     next_free_index: &'a mut usize,
     dead_indices: &'a mut BinaryHeap<Reverse<usize>>,
     native_functions: &'a mut Vec<ExposedNativeFunction>,
@@ -1292,6 +1287,14 @@ impl SymbolicGraph {
         let dominators = self.dominators();
         for i in 0..self.ops.len() {
             let op_index = OpIndex(i);
+
+            match self[op_index].kind {
+                ExprKind::FunctionArg(_) => {
+                    continue;
+                }
+                _ => {}
+            }
+
             let mut dominator = Some(op_index);
             while let Some(dom_index) = dominator {
                 let Some(next_dom) = dominators[dom_index.0] else {
@@ -1330,6 +1333,45 @@ impl SymbolicGraph {
         }
 
         scope
+    }
+
+    fn last_usage(&self) -> Vec<LastUsage> {
+        let all_scopes = self.operation_scope();
+
+        let operations_by_scope: HashMap<Scope, Vec<OpIndex>> = all_scopes
+            .iter()
+            .cloned()
+            .enumerate()
+            .rev()
+            .map(|(i, scope)| (scope, OpIndex::new(i)))
+            .into_group_map();
+
+        let collector = LastUsageCollector {
+            graph: self,
+            operations_by_scope: &operations_by_scope,
+        };
+
+        let mut last_usage = Vec::<LastUsage>::new();
+        let mut encountered = HashSet::<OpIndex>::new();
+
+        collector.walk_tree(
+            &mut encountered,
+            &mut last_usage,
+            collector.iter_scope(Scope::Global),
+        );
+
+        last_usage
+            .into_iter()
+            .filter(|last_usage| match &self[last_usage.expr_used].kind {
+                ExprKind::Function { .. } => false,
+                ExprKind::FunctionArg(_) => false,
+                ExprKind::NativeFunction(_) => false,
+                _ => true,
+            })
+            .sorted_by_key(|last_usage| {
+                (last_usage.usage_point, last_usage.expr_used)
+            })
+            .collect()
     }
 
     /// Using Lengauer-Tarjan algorithm, find dominators in the graph
@@ -1796,24 +1838,7 @@ impl SymbolicGraph {
 
         let scope = self.operation_scope();
 
-        let last_usage: Vec<LastUsage> = self
-            .dominators()
-            .into_iter()
-            .enumerate()
-            .filter_map(|(i, dom)| {
-                let op_index = OpIndex::new(i);
-                let opt_usage_point = match self[op_index].kind {
-                    ExprKind::FunctionArg(_) => None,
-                    ExprKind::Function { .. } => None,
-                    ExprKind::NativeFunction(_) => None,
-                    _ => dom,
-                };
-                opt_usage_point.map(|usage_point| LastUsage {
-                    usage_point,
-                    expr_used: op_index,
-                })
-            })
-            .collect();
+        let last_usage = self.last_usage();
 
         let mut dead_indices = BinaryHeap::new();
         let mut currently_stored = HashMap::new();
@@ -1838,10 +1863,8 @@ impl SymbolicGraph {
             graph: self,
             instructions: &mut builder,
             instructions_by_scope: &operations_by_scope,
-            scope: &scope,
             last_usage: &last_usage,
             num_outputs,
-            main_func_index,
             next_free_index: &mut next_free_index,
             dead_indices: &mut dead_indices,
             native_functions: &mut native_functions,
@@ -1875,24 +1898,110 @@ impl SymbolicGraph {
     }
 }
 
-impl std::cmp::PartialOrd for Scope {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
+struct LastUsageCollector<'a> {
+    graph: &'a SymbolicGraph,
+    operations_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
 }
-impl std::cmp::Ord for Scope {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        use std::cmp::Ordering as R;
-        match (self, other) {
-            (a, b) if a == b => R::Equal,
-            (Scope::Global, _) => R::Less,
-            (_, Scope::Global) => R::Greater,
-            (Scope::IfBranch(a), Scope::ElseBranch(b)) if a == b => R::Less,
-            (Scope::ElseBranch(a), Scope::IfBranch(b)) if a == b => R::Greater,
-            (a, b) => {
-                let a = a.op_index().expect("Scope::Global already handled");
-                let b = b.op_index().expect("Scope::Global already handled");
-                a.0.cmp(&b.0)
+
+impl<'a> LastUsageCollector<'a> {
+    fn iter_scope(&self, scope: Scope) -> impl Iterator<Item = OpIndex> + '_ {
+        self.operations_by_scope
+            .get(&scope)
+            .into_iter()
+            .flatten()
+            .cloned()
+    }
+
+    fn walk_tree(
+        &self,
+        encountered: &mut HashSet<OpIndex>,
+        last_usage: &mut Vec<LastUsage>,
+        to_visit: impl Iterator<Item = OpIndex>,
+    ) {
+        for visiting in to_visit {
+            macro_rules! mark_value {
+                ($node_set:expr, $value:expr) => {
+                    if let SymbolicValue::Result(index) = $value {
+                        if !$node_set.contains(&index) {
+                            last_usage.push(LastUsage {
+                                usage_point: visiting,
+                                expr_used: index,
+                            });
+                            $node_set.insert(index);
+                        }
+                    }
+                };
+            }
+
+            match &self.graph[visiting].kind {
+                ExprKind::Function { output, .. } => {
+                    self.walk_tree(
+                        encountered,
+                        last_usage,
+                        self.iter_scope(Scope::Function(visiting)),
+                    );
+                    mark_value!(encountered, *output);
+                }
+
+                ExprKind::IfElse { condition, .. } => {
+                    mark_value!(encountered, *condition);
+
+                    let mut encountered_if: HashSet<OpIndex> =
+                        encountered.clone();
+                    self.walk_tree(
+                        &mut encountered_if,
+                        last_usage,
+                        self.iter_scope(Scope::IfBranch(visiting)),
+                    );
+
+                    let mut encountered_else: HashSet<OpIndex> =
+                        encountered.clone();
+                    self.walk_tree(
+                        &mut encountered_else,
+                        last_usage,
+                        self.iter_scope(Scope::ElseBranch(visiting)),
+                    );
+
+                    if let Some(start_of_else) =
+                        self.iter_scope(Scope::ElseBranch(visiting)).next()
+                    {
+                        for index in &encountered_if {
+                            if encountered.contains(index) {
+                                if !encountered_else.contains(index) {
+                                    last_usage.push(LastUsage {
+                                        usage_point: start_of_else,
+                                        expr_used: *index,
+                                    })
+                                }
+                            }
+                        }
+                    }
+
+                    if let Some(start_of_if) =
+                        self.iter_scope(Scope::IfBranch(visiting)).next()
+                    {
+                        for index in &encountered_else {
+                            if encountered.contains(index) {
+                                if !encountered_if.contains(index) {
+                                    last_usage.push(LastUsage {
+                                        usage_point: start_of_if,
+                                        expr_used: *index,
+                                    });
+                                }
+                            }
+                        }
+                    }
+
+                    encountered_if
+                        .into_iter()
+                        .chain(encountered_else)
+                        .for_each(|index| {
+                            encountered.insert(index);
+                        });
+                }
+                other => other.visit_reachable_nodes(|value| {
+                    mark_value!(encountered, value)
+                }),
             }
         }
     }
@@ -2067,32 +2176,37 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
                 .then(super::InlineIteratorMap)
                 .apply_recursively();
 
-            let expr = expr.rewrite(rewriter)?;
-            expr.validate(reader)?;
-
-            if self.show_steps {
-                println!(
-                    "----------- After Simplifcations --------------\n{expr}"
-                );
-            }
-
-            let expr = expr.dead_code_elimination()?;
-            expr.validate(reader)?;
-
-            if self.show_steps {
-                println!("----------- After DCE --------------\n{expr}");
-            }
-
-            let expr = expr.eliminate_common_subexpressions()?;
-            expr.validate(reader)?;
-
-            if self.show_steps {
-                println!("----------- After CSE --------------\n{expr}");
-            }
-            expr
+            expr.rewrite(rewriter)?
         } else {
-            expr
+            let analysis = Analysis::new(reader);
+            let rewriter = super::LowerSymbolicExpr(&analysis)
+                .then(super::InlineFunctionCalls)
+                .then(super::MergeRangeReduceToSimpleReduce)
+                .then(super::InlineIteratorMap)
+                .apply_recursively();
+
+            expr.rewrite(rewriter)?
         };
+
+        expr.validate(reader)?;
+
+        if self.show_steps {
+            println!("----------- After Simplifcations --------------\n{expr}");
+        }
+
+        let expr = expr.dead_code_elimination()?;
+        expr.validate(reader)?;
+
+        if self.show_steps {
+            println!("----------- After DCE --------------\n{expr}");
+        }
+
+        let expr = expr.eliminate_common_subexpressions()?;
+        expr.validate(reader)?;
+
+        if self.show_steps {
+            println!("----------- After CSE --------------\n{expr}");
+        }
 
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine(self.show_steps)?;
@@ -2190,12 +2304,19 @@ impl ExpressionTranslator<'_> {
                         "Internal error: \
                          Last usage of {} occurred after {}, \
                          (expr '{}' used in '{}') \
-                         but {} was not actually defined.",
+                         but {} was not actually defined.  \
+                         Currently, [{}] are defined.",
                         last_usage.expr_used,
                         last_usage.usage_point,
                         self.graph[last_usage.expr_used].kind,
                         self.graph[last_usage.usage_point].kind,
                         last_usage.expr_used,
+                        self.currently_stored
+                            .iter()
+                            .map(|(op_index, _)| *op_index)
+                            .sorted()
+                            .map(|op_index| format!("{op_index}"))
+                            .join(", "),
                     )
                 };
 
@@ -2611,7 +2732,10 @@ impl ExpressionTranslator<'_> {
                 } => {
                     let condition = self.value_to_arg(condition)?;
 
+                    self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
+                    let mut cached_currently_stored =
+                        self.currently_stored.clone();
 
                     let jump_to_if_branch_index = push_annotated!(
                         Instruction::NoOp,
@@ -2642,6 +2766,10 @@ impl ExpressionTranslator<'_> {
                                         .cloned(),
                                 )?;
                                 self.reserved_outputs.remove(&else_index);
+                                std::mem::swap(
+                                    self.currently_stored,
+                                    &mut cached_currently_stored,
+                                );
                             }
                         }
                         other => {
@@ -2734,7 +2862,13 @@ impl ExpressionTranslator<'_> {
                         },
                     );
 
-                    self.free_dead_indices(op_index);
+                    *self.currently_stored = cached_currently_stored
+                        .into_iter()
+                        .filter(|(op_index, _)| {
+                            self.currently_stored.contains_key(op_index)
+                        })
+                        .collect();
+
                     self.currently_stored.insert(op_index, op_output.into());
                 }
 

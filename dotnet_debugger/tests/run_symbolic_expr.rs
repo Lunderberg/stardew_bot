@@ -609,10 +609,11 @@ fn eval_conditional_reduction() {
         .parse(stringify! {
             fn reduction(a: usize, b:usize) {
                 let condition = b%2==0;
+                let c = b*10;
                 if condition {
-                    a+b
+                    a + 2*c
                 } else {
-                    a+2*b
+                    a + 3*c
                 }
             }
             pub fn main() {
@@ -626,7 +627,14 @@ fn eval_conditional_reduction() {
     let results = vm.local_eval().unwrap();
 
     let expected = (0..100)
-        .map(|b| if b % 2 == 0 { b } else { 2 * b })
+        .map(|b| {
+            let c = b * 10;
+            if b % 2 == 0 {
+                2 * c
+            } else {
+                3 * c
+            }
+        })
         .sum::<usize>();
 
     assert_eq!(results.len(), 1);
