@@ -10,13 +10,14 @@ use memory_reader::{OwnedBytes, Pointer};
 use thiserror::Error;
 
 use crate::{
-    runtime_type::RuntimePrimType, CachedReader, Error, MethodTable,
-    RuntimePrimValue, RuntimeString, RuntimeType, TypedPointer,
+    runtime_type::{RuntimePrimType, RustType},
+    CachedReader, Error, MethodTable, RuntimePrimValue, RuntimeString,
+    RuntimeType, TypedPointer,
 };
 
 use super::{
     native_function::{NativeFunction, WrappedNativeFunction},
-    ExposedNativeFunction,
+    ExposedNativeFunction, ExposedNativeObject, RustNativeObject,
 };
 
 pub struct VirtualMachineBuilder {
@@ -47,7 +48,7 @@ pub struct VirtualMachine {
 #[derive(Debug, From)]
 pub enum StackValue {
     Prim(RuntimePrimValue),
-    Any(Box<dyn Any>),
+    Native(ExposedNativeObject),
 }
 
 pub struct VMResults(Vec<Option<StackValue>>);
@@ -288,12 +289,14 @@ pub enum VMExecutionError {
     },
 
     #[error(
-        "Operator {operator} does not support operands \
+        "Operator {operator} in instruction {index} \
+         does not support operands \
          of rust-native type {arg_type:?}"
     )]
     OperatorExpectsPrimitiveArgument {
         operator: &'static str,
-        arg_type: std::any::TypeId,
+        index: InstructionIndex,
+        arg_type: RuntimeType,
     },
 
     #[error(
@@ -302,6 +305,48 @@ pub enum VMExecutionError {
     )]
     InvalidArgumentForNativeFunction {
         expected: RuntimeType,
+        actual: RuntimeType,
+    },
+
+    #[error("Cannot initialize vector with element type {0}")]
+    IllegalVectorElementType(RuntimeType),
+
+    #[error(
+        "Vector was expected to be type {expected}, \
+         but was instead {actual}."
+    )]
+    IncorrectVectorType {
+        expected: RuntimeType,
+        actual: RuntimeType,
+    },
+
+    #[error(
+        "Item of type {item_type} cannot be pushed \
+         into Vec<{element_type}>."
+    )]
+    IncorrectVectorElementType {
+        element_type: RuntimeType,
+        item_type: RuntimeType,
+    },
+
+    #[error(
+        "Expected vector into which to accumulate, \
+         but received None."
+    )]
+    ExpectedVectorToAccumulateInto,
+
+    #[error(
+        "When pushing into vector, \
+         pushed element must not be None."
+    )]
+    MissingElementTypeInVectorAccumulation,
+
+    #[error(
+        "Attempted to read output as {attempted}, \
+         but the output was of type {actual}."
+    )]
+    IncorrectOutputType {
+        attempted: RuntimeType,
         actual: RuntimeType,
     },
 }
@@ -345,6 +390,33 @@ impl VMResults {
         index: impl NormalizeStackIndex,
     ) -> Result<Option<&'a dyn Any>, Error> {
         self.get_as(index)
+    }
+
+    pub fn get_obj<'a, T: RustNativeObject>(
+        &'a self,
+        index: impl NormalizeStackIndex,
+    ) -> Result<Option<&'a T>, Error> {
+        let index = index.normalize_stack_index();
+        let opt_value = self[index].as_ref();
+
+        let opt_obj = opt_value
+            .map(|value| match value {
+                StackValue::Native(native) => native
+                    .downcast_ref::<T>()
+                    .ok_or_else(|| VMExecutionError::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: native.runtime_type(),
+                    }),
+                StackValue::Prim(value) => {
+                    Err(VMExecutionError::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: RuntimeType::Prim(value.runtime_type()),
+                    })
+                }
+            })
+            .transpose()?;
+
+        Ok(opt_obj)
     }
 
     fn collect_native_function_args<'a>(
@@ -451,17 +523,17 @@ impl VMResults {
 }
 
 impl StackValue {
-    pub fn runtime_type(&self) -> RuntimeType {
+    pub(crate) fn runtime_type(&self) -> RuntimeType {
         match self {
             StackValue::Prim(prim) => prim.runtime_type().into(),
-            StackValue::Any(any) => any.type_id().into(),
+            StackValue::Native(native) => native.ty.clone(),
         }
     }
 
     pub fn as_prim(&self) -> Option<RuntimePrimValue> {
         match self {
             StackValue::Prim(prim) => Some(*prim),
-            StackValue::Any(_) => None,
+            StackValue::Native(_) => None,
         }
     }
 
@@ -471,10 +543,30 @@ impl StackValue {
     ) -> Result<String, Error> {
         match self {
             StackValue::Prim(prim) => prim.read_string_ptr(reader),
-            StackValue::Any(obj) => Err(
+            StackValue::Native(obj) => Err(
                 Error::AttemptedReadOfNativeObjectAsStringPtr(obj.type_id()),
             ),
         }
+    }
+
+    pub fn init_vector(element_type: &RuntimeType) -> Result<Self, Error> {
+        let native = match element_type {
+            RuntimeType::Prim(RuntimePrimType::NativeUInt) => {
+                let vec = Vec::<usize>::new();
+                let obj = Box::new(vec);
+                let ty = RustType::new::<Vec<usize>>().into();
+                ExposedNativeObject { obj, ty }
+            }
+            RuntimeType::Rust(rust_type) => todo!(),
+            other => {
+                return Err(VMExecutionError::IllegalVectorElementType(
+                    other.clone(),
+                )
+                .into())
+            }
+        };
+
+        Ok(native.into())
     }
 }
 
@@ -736,32 +828,35 @@ impl VirtualMachine {
             VMResults(stack)
         };
 
-        macro_rules! arg_to_prim {
-            ($arg:expr, $operator:literal) => {{
-                let arg: &VMArg = $arg;
-                let prim:Option<RuntimePrimValue> = match arg {
-                    VMArg::Const(value) => Ok(Some(*value)),
-                    VMArg::SavedValue(index) => {
-                        match &values[*index] {
-                            Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
-                            Some(StackValue::Any(obj)) => Err(
-                                VMExecutionError::OperatorExpectsPrimitiveArgument {
-                                    operator: $operator,
-                                    arg_type: obj.type_id(),
-                                },
-                            ),
-                            None => Ok(None),
-                        }
-                    }
-                }?;
-                prim
-            }};
-        }
-
         let mut current_instruction = InstructionIndex(0);
         while current_instruction.0 < self.instructions.len() {
             let instruction = &self.instructions[current_instruction.0];
-            current_instruction.0 += 1;
+            let mut next_instruction =
+                InstructionIndex(current_instruction.0 + 1);
+
+            macro_rules! arg_to_prim {
+                ($arg:expr, $operator:literal) => {{
+                    let arg: &VMArg = $arg;
+                    let prim:Option<RuntimePrimValue> = match arg {
+                        VMArg::Const(value) => Ok(Some(*value)),
+                        VMArg::SavedValue(index) => {
+                            match &values[*index] {
+                                Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
+                                Some(StackValue::Native(native)) => Err(
+                                    VMExecutionError
+                                        ::OperatorExpectsPrimitiveArgument {
+                                            operator: $operator,
+                                            index: current_instruction,
+                                            arg_type: native.ty.clone(),
+                                    },
+                                ),
+                                None => Ok(None),
+                            }
+                        }
+                    }?;
+                    prim
+                }};
+            }
 
             macro_rules! comparison_op {
                 ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $cmp:ident) => {{
@@ -856,7 +951,7 @@ impl VirtualMachine {
                         .transpose()?
                         .unwrap_or(false);
                     if should_jump {
-                        current_instruction = *dest;
+                        next_instruction = *dest;
                     }
                 }
 
@@ -1066,11 +1161,13 @@ impl VirtualMachine {
                                 },
                             )?;
                             let string: String = runtime_string.into();
-                            Ok(StackValue::Any(Box::new(string)))
+                            Ok(ExposedNativeObject::new(string).into())
                         })
                         .transpose()?;
                 }
             }
+
+            current_instruction = next_instruction;
         }
 
         values.0.truncate(self.num_outputs);
@@ -1300,7 +1397,7 @@ impl Display for StackValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             StackValue::Prim(prim) => write!(f, "{prim}"),
-            StackValue::Any(any) => {
+            StackValue::Native(any) => {
                 write!(f, "[rust-native object of type {:?}]", any.type_id())
             }
         }
@@ -1514,7 +1611,7 @@ impl TryInto<RuntimePrimValue> for StackValue {
     fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
         match self {
             StackValue::Prim(value) => Ok(value),
-            StackValue::Any(any) => {
+            StackValue::Native(any) => {
                 Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
             }
         }
@@ -1526,7 +1623,7 @@ impl TryInto<RuntimePrimValue> for &'_ StackValue {
     fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
         match self {
             StackValue::Prim(value) => Ok(*value),
-            StackValue::Any(any) => {
+            StackValue::Native(any) => {
                 Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
             }
         }
@@ -1537,7 +1634,7 @@ impl<'a> TryInto<&'a dyn Any> for &'a StackValue {
 
     fn try_into(self) -> Result<&'a dyn Any, Self::Error> {
         match self {
-            StackValue::Any(any) => Ok(any.as_ref()),
+            StackValue::Native(native) => Ok(native.as_ref()),
             StackValue::Prim(value) => {
                 Err(Error::AttemptedConversionOfPrimitiveToNativeObject(
                     value.runtime_type(),
@@ -1555,9 +1652,11 @@ macro_rules! stack_value_to_prim {
             fn try_into(self) -> Result<$prim, Self::Error> {
                 match self {
                     StackValue::Prim(value) => value.try_into(),
-                    StackValue::Any(any) => Err(
-                        Error::AttemptedConversionOfNativeObject(any.type_id()),
-                    ),
+                    StackValue::Native(native) => {
+                        Err(Error::AttemptedConversionOfNativeObject(
+                            native.type_id(),
+                        ))
+                    }
                 }
             }
         }
@@ -1568,9 +1667,11 @@ macro_rules! stack_value_to_prim {
             fn try_into(self) -> Result<$prim, Self::Error> {
                 match self {
                     StackValue::Prim(value) => (*value).try_into(),
-                    StackValue::Any(any) => Err(
-                        Error::AttemptedConversionOfNativeObject(any.type_id()),
-                    ),
+                    StackValue::Native(native) => {
+                        Err(Error::AttemptedConversionOfNativeObject(
+                            native.type_id(),
+                        ))
+                    }
                 }
             }
         }

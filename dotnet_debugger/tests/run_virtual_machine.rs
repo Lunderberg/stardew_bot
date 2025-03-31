@@ -292,12 +292,12 @@ fn rust_function_returning_rust_object() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Any(obj) = results.get(0).unwrap() else {
+    let StackValue::Native(native) = results.get(0).unwrap() else {
         panic!("Should produce rust-native output")
     };
-    assert_eq!(obj.type_id(), std::any::TypeId::of::<RustObj>());
+    assert_eq!(native.type_id(), std::any::TypeId::of::<RustObj>());
 
-    let obj = obj.downcast_ref::<RustObj>().unwrap();
+    let obj = native.downcast_ref::<RustObj>().unwrap();
     assert_eq!(obj.a, 2 * 3);
     assert_eq!(obj.b, 5 * 7);
 }
@@ -397,7 +397,7 @@ fn rust_function_accepting_mutable_rust_object() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Any(obj) = results.get(0).unwrap() else {
+    let StackValue::Native(obj) = results.get(0).unwrap() else {
         panic!("Should produce rust-native output")
     };
     assert_eq!(obj.type_id(), std::any::TypeId::of::<RustObj>());
@@ -474,7 +474,7 @@ fn rust_function_collecting_triangular_numbers() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Any(obj) = results.get(0).unwrap() else {
+    let StackValue::Native(obj) = results.get(0).unwrap() else {
         panic!("Should produce rust-native output")
     };
     assert_eq!(obj.type_id(), std::any::TypeId::of::<Vec<usize>>());

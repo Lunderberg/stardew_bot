@@ -2,8 +2,10 @@ use derive_more::derive::From;
 use memory_reader::Pointer;
 
 use crate::{
-    runtime_value::RuntimePrimValue, Error, MethodTable, RuntimeValue,
-    TypedPointer,
+    bytecode::{ExposedNativeObject, RustNativeTypeUtils},
+    runtime_value::RuntimePrimValue,
+    Error, MethodTable, RuntimeValue, RustNativeObject, StackValue,
+    TypeInferenceError, TypedPointer, VMExecutionError,
 };
 
 /// The runtime representation of the static type of a field.
@@ -149,9 +151,51 @@ pub enum DotNetType {
     },
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
-pub enum RustType {
-    Opaque(std::any::TypeId),
+pub struct RustType {
+    type_id: std::any::TypeId,
+    utils: Box<dyn RustNativeTypeUtils>,
+}
+
+impl RustType {
+    pub(crate) fn new<T: RustNativeObject>() -> Self {
+        let type_id = std::any::TypeId::of::<T>();
+        let utils =
+            Box::new(crate::bytecode::RustNativeUtilContainer::<T>::new());
+
+        Self { type_id, utils }
+    }
+
+    pub(crate) fn new_vector(&self) -> Result<ExposedNativeObject, Error> {
+        self.utils.new_vector()
+    }
+
+    pub(crate) fn collect_into_vector(
+        &self,
+        vec: &mut StackValue,
+        item: &mut Option<StackValue>,
+    ) -> Result<(), Error> {
+        self.utils.collect_into_vector(vec, item)
+    }
+
+    pub(crate) fn vector_type(&self) -> Result<RuntimeType, Error> {
+        self.utils.vector_type()
+    }
+}
+
+impl Clone for RustType {
+    fn clone(&self) -> Self {
+        Self {
+            type_id: self.type_id.clone(),
+            utils: self.utils.clone(),
+        }
+    }
+}
+impl std::fmt::Debug for RustType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RustType")
+            .field("type_id", &self.type_id)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -363,6 +407,47 @@ impl RuntimeType {
             RuntimeType::Iterator(IteratorType { item }) => item.is_complete(),
         }
     }
+
+    pub(crate) fn new_vector(&self) -> Result<ExposedNativeObject, Error> {
+        match self {
+            RuntimeType::Prim(prim_type) => Ok(prim_type.new_vector()),
+            RuntimeType::Rust(rust_type) => rust_type.new_vector(),
+            other => {
+                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
+                    .into())
+            }
+        }
+    }
+
+    pub(crate) fn collect_into_vector(
+        &self,
+        vec: &mut StackValue,
+        item: &mut Option<StackValue>,
+    ) -> Result<(), Error> {
+        match self {
+            RuntimeType::Prim(prim_type) => {
+                prim_type.collect_into_vector(vec, item)
+            }
+            RuntimeType::Rust(rust_type) => {
+                rust_type.collect_into_vector(vec, item)
+            }
+            other => {
+                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
+                    .into())
+            }
+        }
+    }
+
+    pub(crate) fn vector_type(&self) -> Result<RuntimeType, Error> {
+        match self {
+            RuntimeType::Prim(prim_type) => Ok(prim_type.vector_type()),
+            RuntimeType::Rust(rust_type) => rust_type.vector_type(),
+            other => {
+                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
+                    .into())
+            }
+        }
+    }
 }
 
 impl RuntimePrimType {
@@ -503,6 +588,121 @@ impl RuntimePrimType {
             })
         }
     }
+
+    pub(crate) fn new_vector(&self) -> ExposedNativeObject {
+        match self {
+            RuntimePrimType::Bool => {
+                ExposedNativeObject::new(Vec::<bool>::new())
+            }
+            RuntimePrimType::Char => {
+                ExposedNativeObject::new(Vec::<char>::new())
+            }
+            RuntimePrimType::U8 => ExposedNativeObject::new(Vec::<u8>::new()),
+            RuntimePrimType::U16 => ExposedNativeObject::new(Vec::<u16>::new()),
+            RuntimePrimType::U32 => ExposedNativeObject::new(Vec::<u32>::new()),
+            RuntimePrimType::U64 => ExposedNativeObject::new(Vec::<u64>::new()),
+            RuntimePrimType::NativeUInt => {
+                ExposedNativeObject::new(Vec::<usize>::new())
+            }
+            RuntimePrimType::I8 => ExposedNativeObject::new(Vec::<i8>::new()),
+            RuntimePrimType::I16 => ExposedNativeObject::new(Vec::<i16>::new()),
+            RuntimePrimType::I32 => ExposedNativeObject::new(Vec::<i32>::new()),
+            RuntimePrimType::I64 => ExposedNativeObject::new(Vec::<i64>::new()),
+            RuntimePrimType::NativeInt => {
+                ExposedNativeObject::new(Vec::<isize>::new())
+            }
+            RuntimePrimType::F32 => ExposedNativeObject::new(Vec::<f32>::new()),
+            RuntimePrimType::F64 => ExposedNativeObject::new(Vec::<f64>::new()),
+            RuntimePrimType::Ptr => {
+                ExposedNativeObject::new(Vec::<Pointer>::new())
+            }
+        }
+    }
+
+    pub(crate) fn vector_type(&self) -> RuntimeType {
+        match self {
+            RuntimePrimType::Bool => RustType::new::<Vec<bool>>().into(),
+            RuntimePrimType::Char => RustType::new::<Vec<char>>().into(),
+            RuntimePrimType::U8 => RustType::new::<Vec<u8>>().into(),
+            RuntimePrimType::U16 => RustType::new::<Vec<u16>>().into(),
+            RuntimePrimType::U32 => RustType::new::<Vec<u32>>().into(),
+            RuntimePrimType::U64 => RustType::new::<Vec<u64>>().into(),
+            RuntimePrimType::NativeUInt => RustType::new::<Vec<usize>>().into(),
+            RuntimePrimType::I8 => RustType::new::<Vec<i8>>().into(),
+            RuntimePrimType::I16 => RustType::new::<Vec<i16>>().into(),
+            RuntimePrimType::I32 => RustType::new::<Vec<i32>>().into(),
+            RuntimePrimType::I64 => RustType::new::<Vec<i64>>().into(),
+            RuntimePrimType::NativeInt => RustType::new::<Vec<isize>>().into(),
+            RuntimePrimType::F32 => RustType::new::<Vec<f32>>().into(),
+            RuntimePrimType::F64 => RustType::new::<Vec<f64>>().into(),
+            RuntimePrimType::Ptr => RustType::new::<Vec<Pointer>>().into(),
+        }
+    }
+
+    pub(crate) fn collect_into_vector(
+        &self,
+        vec: &mut StackValue,
+        item: &mut Option<StackValue>,
+    ) -> Result<(), Error> {
+        let native = match vec {
+            StackValue::Native(native) => Ok(native),
+            other => {
+                Err(TypeInferenceError::InvalidVectorType(other.runtime_type()))
+            }
+        }?;
+
+        let item = item.as_ref().ok_or_else(|| {
+            VMExecutionError::MissingElementTypeInVectorAccumulation
+        })?;
+
+        let item = item.as_prim().ok_or_else(|| {
+            VMExecutionError::IncorrectVectorElementType {
+                element_type: (*self).into(),
+                item_type: item.runtime_type(),
+            }
+        })?;
+
+        macro_rules! handle_prim {
+            ($variant:ident,$prim:ty) => {{
+                let RuntimePrimValue::$variant(item) = item else {
+                    return Err(VMExecutionError::IncorrectVectorElementType {
+                        element_type: RuntimePrimType::$variant.into(),
+                        item_type: item.runtime_type().into(),
+                    }
+                    .into());
+                };
+
+                if let Some(vec) = native.downcast_mut::<Vec<$prim>>() {
+                    vec.push(item);
+                } else {
+                    return Err(VMExecutionError::IncorrectVectorType {
+                        expected: RustType::new::<Vec<$prim>>().into(),
+                        actual: native.runtime_type(),
+                    }
+                    .into());
+                }
+            }};
+        }
+
+        match self {
+            RuntimePrimType::Bool => handle_prim!(Bool, bool),
+            RuntimePrimType::Char => handle_prim!(Char, u16),
+            RuntimePrimType::U8 => handle_prim!(U8, u8),
+            RuntimePrimType::U16 => handle_prim!(U16, u16),
+            RuntimePrimType::U32 => handle_prim!(U32, u32),
+            RuntimePrimType::U64 => handle_prim!(U64, u64),
+            RuntimePrimType::NativeUInt => handle_prim!(NativeUInt, usize),
+            RuntimePrimType::I8 => handle_prim!(I8, i8),
+            RuntimePrimType::I16 => handle_prim!(I16, i16),
+            RuntimePrimType::I32 => handle_prim!(I32, i32),
+            RuntimePrimType::I64 => handle_prim!(I64, i64),
+            RuntimePrimType::NativeInt => handle_prim!(NativeInt, isize),
+            RuntimePrimType::F32 => handle_prim!(F32, f32),
+            RuntimePrimType::F64 => handle_prim!(F64, f64),
+            RuntimePrimType::Ptr => handle_prim!(Ptr, Pointer),
+        }
+        Ok(())
+    }
 }
 
 impl std::fmt::Display for RuntimeType {
@@ -584,9 +784,7 @@ impl std::fmt::Display for RuntimePrimType {
 
 impl std::fmt::Display for RustType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            RustType::Opaque(type_id) => write!(f, "{type_id:?}"),
-        }
+        write!(f, "{:?}", self.type_id)
     }
 }
 
@@ -669,12 +867,6 @@ impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
     }
 }
 
-impl From<std::any::TypeId> for RuntimeType {
-    fn from(type_id: std::any::TypeId) -> Self {
-        RuntimeType::Rust(type_id.into())
-    }
-}
-
 impl std::cmp::PartialEq<RuntimeType> for RuntimePrimType {
     fn eq(&self, other: &RuntimeType) -> bool {
         match other {
@@ -700,5 +892,17 @@ impl std::cmp::PartialEq<dll_unpacker::SignaturePrimType> for RuntimePrimType {
 impl std::cmp::PartialEq<RuntimePrimType> for dll_unpacker::SignaturePrimType {
     fn eq(&self, other: &RuntimePrimType) -> bool {
         other == self
+    }
+}
+
+impl std::cmp::PartialEq for RustType {
+    fn eq(&self, other: &Self) -> bool {
+        self.type_id == other.type_id
+    }
+}
+impl std::cmp::Eq for RustType {}
+impl std::hash::Hash for RustType {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.type_id.hash(state);
     }
 }

@@ -901,3 +901,23 @@ fn parse_iterator_filter() {
         },
     );
 }
+
+#[test]
+fn parse_iterator_collect() {
+    require_identical_graph(
+        stringify! {
+            pub fn main() {
+                (0..100).collect()
+            }
+        },
+        |graph| {
+            let iter = graph.range(100);
+
+            let res_main = graph.collect(iter);
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

@@ -88,6 +88,12 @@ pub enum ExprKind {
         filter: SymbolicValue,
     },
 
+    /// Collect an iterator into a vector.
+    Collect {
+        /// The iterator to be collected
+        iterator: SymbolicValue,
+    },
+
     /// Perform a reduction along an iterator.
     Reduce {
         /// The initial value of the reduction.
@@ -694,6 +700,10 @@ impl SymbolicGraph {
         })
     }
 
+    pub fn collect(&mut self, iterator: SymbolicValue) -> SymbolicValue {
+        self.push(ExprKind::Collect { iterator })
+    }
+
     pub fn simple_reduce(
         &mut self,
         initial: impl Into<SymbolicValue>,
@@ -920,6 +930,71 @@ impl SymbolicGraph {
             .iter()
             .enumerate()
             .map(|(i, op)| (OpIndex::new(i), op))
+    }
+
+    pub(crate) fn copy_first_param(
+        &mut self,
+        func: SymbolicValue,
+    ) -> SymbolicValue {
+        let SymbolicValue::Result(func) = func else {
+            panic!(
+                "Internal error, \
+                 SymbolicValue should point to function \
+                 for copy_first_param"
+            )
+        };
+        let params = match &self[func].kind {
+            ExprKind::Function { params, .. } => params,
+            ExprKind::NativeFunction(func) => {
+                let sig = func.signature().unwrap();
+                match sig {
+                    RuntimeType::Function(FunctionType { params, .. }) => {
+                        let param_ty = params
+                            .map(|params| params[0].clone())
+                            .unwrap_or(RuntimeType::Unknown);
+                        return self.function_arg(param_ty);
+                    }
+                    _ => panic!(
+                        "Internal error, \
+                         NativeFunction should return TunctionType"
+                    ),
+                }
+            }
+            _ => panic!(
+                "Internal error, \
+                 SymbolicValue should point to function \
+                 for copy_first_param"
+            ),
+        };
+
+        let SymbolicValue::Result(first_param_index) = params[0] else {
+            panic!(
+                "Internal error, \
+                 All function parameters \
+                 should point to FunctionArg"
+            )
+        };
+
+        let first_param = &self[first_param_index];
+
+        let ExprKind::FunctionArg(param_ty) = &first_param.kind else {
+            panic!(
+                "Internal error, \
+                 All function parameters \
+                 should point to FunctionArg"
+            )
+        };
+
+        let opt_name = first_param.name.clone();
+        let new_param = self.function_arg(param_ty.clone());
+        if let Some(name) = opt_name {
+            self.name(new_param, name).expect(
+                "Internal error, \
+                 Existing name must already be valid",
+            );
+        }
+
+        new_param
     }
 
     //////////////////////////////////////////////////////////////////
@@ -1870,28 +1945,28 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             println!("----------- After CSE --------------\n{expr}");
         }
 
+        let analysis = Analysis::new(reader);
+
+        let optional_optimizations = super::ConstantFold
+            .then(super::RemoveUnusedDowncast(&analysis))
+            .then(super::RemoveUnusedPrimcast(&analysis))
+            .then(super::RemoveUnusedPointerCast);
+
+        let mandatory_lowering = super::LowerSymbolicExpr(&analysis)
+            .then(super::InlineFunctionCalls)
+            .then(super::MergeRangeReduceToSimpleReduce)
+            .then(super::InlineIteratorMap)
+            .then(super::InlineIteratorFilter)
+            .then(super::ConvertCollectToReduce(&analysis));
+
         let expr = if self.optimize_symbolic_graph {
-            let analysis = Analysis::new(reader);
-            let rewriter = super::ConstantFold
-                .then(super::RemoveUnusedDowncast(&analysis))
-                .then(super::RemoveUnusedPrimcast(&analysis))
-                .then(super::LowerSymbolicExpr(&analysis))
-                .then(super::RemoveUnusedPointerCast)
-                .then(super::InlineFunctionCalls)
-                .then(super::MergeRangeReduceToSimpleReduce)
-                .then(super::InlineIteratorMap)
-                .then(super::InlineIteratorFilter)
+            let rewriter = optional_optimizations
+                .then(mandatory_lowering)
                 .apply_recursively();
 
             expr.rewrite(rewriter)?
         } else {
-            let analysis = Analysis::new(reader);
-            let rewriter = super::LowerSymbolicExpr(&analysis)
-                .then(super::InlineFunctionCalls)
-                .then(super::MergeRangeReduceToSimpleReduce)
-                .then(super::InlineIteratorMap)
-                .then(super::InlineIteratorFilter)
-                .apply_recursively();
+            let rewriter = mandatory_lowering.apply_recursively();
 
             expr.rewrite(rewriter)?
         };
@@ -2044,6 +2119,10 @@ impl ExprKind {
                     ExprKind::Filter { iterator, filter }
                 })
             }
+            ExprKind::Collect { iterator } => {
+                remap(iterator).map(|iterator| ExprKind::Collect { iterator })
+            }
+
             ExprKind::Reduce {
                 initial,
                 iterator,
@@ -2066,6 +2145,7 @@ impl ExprKind {
                     }
                 })
             }
+
             ExprKind::SimpleReduce {
                 initial,
                 extent,
@@ -2238,6 +2318,7 @@ impl ExprKind {
                 callback(*iterator);
                 callback(*filter);
             }
+            ExprKind::Collect { iterator } => callback(*iterator),
             ExprKind::Reduce {
                 initial,
                 iterator,
@@ -2321,6 +2402,7 @@ impl ExprKind {
             ExprKind::Range { .. } => "Range",
             ExprKind::Map { .. } => "Map",
             ExprKind::Filter { .. } => "Filter",
+            ExprKind::Collect { .. } => "Collect",
             ExprKind::Reduce { .. } => "Reduce",
             ExprKind::SimpleReduce { .. } => "SimpleReduce",
             ExprKind::StaticField { .. } => "StaticField",
@@ -2540,6 +2622,16 @@ impl<'a> GraphComparison<'a> {
                     } => {
                         equivalent_value!(lhs_iterator, rhs_iterator)
                             && equivalent_value!(lhs_filter, rhs_filter)
+                    }
+                    _ => false,
+                },
+                ExprKind::Collect {
+                    iterator: lhs_iterator,
+                } => match rhs_kind {
+                    ExprKind::Collect {
+                        iterator: rhs_iterator,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
                     }
                     _ => false,
                 },
@@ -2822,6 +2914,9 @@ impl Display for ExprKind {
             }
             ExprKind::Filter { iterator, filter } => {
                 write!(f, "{iterator}.filter({filter})")
+            }
+            ExprKind::Collect { iterator } => {
+                write!(f, "{iterator}.collect()")
             }
             ExprKind::Reduce {
                 initial,

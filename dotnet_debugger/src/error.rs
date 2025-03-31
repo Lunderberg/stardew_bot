@@ -389,6 +389,12 @@ pub enum Error {
 
     #[error("Attempted use of an already consumed value.")]
     AttemptedUseOfConsumedValue,
+
+    #[error(
+        "Collection of iterators into nested vectors \
+         is not currently supported."
+    )]
+    CollectionIntoNestedVectorNotSupported,
 }
 
 impl std::fmt::Debug for Error {

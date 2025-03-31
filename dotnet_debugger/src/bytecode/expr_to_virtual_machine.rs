@@ -553,17 +553,18 @@ impl ExpressionTranslator<'_> {
                             self.currently_stored.remove(&first_arg_op);
                             self.previously_consumed.insert(first_arg_op);
 
-                            let op_output = self.get_output_index(op_index);
-                            if op_output.0 < self.num_outputs {
+                            if let Some(&required_output) =
+                                self.reserved_outputs.get(&op_index)
+                            {
                                 push_annotated!(
-                                    Instruction::Swap(first_arg_loc, op_output),
+                                    Instruction::Swap(first_arg_loc, required_output),
                                     format!(
                                         "swap {expr_name} \
-                                         to mandatory output loc {op_output}"
+                                         to mandatory output loc {required_output}"
                                     ),
                                 );
                                 self.currently_stored
-                                    .insert(op_index, op_output.into());
+                                    .insert(op_index, required_output.into());
                             } else {
                                 self.currently_stored
                                     .insert(op_index, first_arg_loc.into());
@@ -591,21 +592,14 @@ impl ExpressionTranslator<'_> {
                     }
                 }
 
-                ExprKind::Range { .. } => panic!(
-                    "All Range expressions should be simplified \
-                     to ExprKind::SimpleReduce"
-                ),
-                ExprKind::Map { .. } => panic!(
-                    "All Map expressions should be simplified \
-                     to ExprKind::SimpleReduce"
-                ),
-                ExprKind::Filter { .. } => panic!(
-                    "All Filter expressions should be simplified \
-                     to ExprKind::SimpleReduce"
-                ),
-                ExprKind::Reduce { .. } => panic!(
-                    "All Reduce expressions should be simplified \
-                     to ExprKind::SimpleReduce"
+                iterator @ (ExprKind::Range { .. }
+                | ExprKind::Map { .. }
+                | ExprKind::Filter { .. }
+                | ExprKind::Collect { .. }
+                | ExprKind::Reduce { .. }) => panic!(
+                    "All {} expressions should be simplified \
+                     to ExprKind::SimpleReduce",
+                    iterator.op_name(),
                 ),
                 ExprKind::SimpleReduce {
                     initial,
@@ -698,22 +692,27 @@ impl ExpressionTranslator<'_> {
                             self.currently_stored
                                 .insert(index, loop_iter.into());
 
-                            let iter_body = self
-                                .instructions_by_scope
-                                .get(&Scope::Function(reduction_index))
-                                .into_iter()
-                                .flatten()
-                                .cloned()
-                                .filter(|&op| {
-                                    !matches!(
-                                        self.graph[op].kind,
-                                        ExprKind::Function { .. }
-                                    )
-                                });
-                            let iter_body: Box<dyn Iterator<Item = OpIndex>> =
-                                Box::new(iter_body);
+                            if let &SymbolicValue::Result(output) = output {
+                                let iter_body = self
+                                    .instructions_by_scope
+                                    .get(&Scope::Function(reduction_index))
+                                    .into_iter()
+                                    .flatten()
+                                    .cloned()
+                                    .filter(|&op| {
+                                        !matches!(
+                                            self.graph[op].kind,
+                                            ExprKind::Function { .. }
+                                        )
+                                    });
+                                let iter_body: Box<
+                                    dyn Iterator<Item = OpIndex>,
+                                > = Box::new(iter_body);
 
-                            self.translate(iter_body)?;
+                                self.reserved_outputs.insert(output, op_output);
+                                self.translate(iter_body)?;
+                                self.reserved_outputs.remove(&output);
+                            }
 
                             match self.value_to_arg(output)? {
                                 VMArg::Const(value) => {
@@ -847,17 +846,19 @@ impl ExpressionTranslator<'_> {
 
                     match else_branch {
                         &SymbolicValue::Result(else_index) => {
-                            if let Some(existing) =
+                            if let Some(&existing) =
                                 self.currently_stored.get(&else_index)
                             {
-                                push_annotated!(
-                                    Instruction::Copy {
-                                        value: *existing,
-                                        output: op_output
-                                    },
-                                    "move existing else-branch of {expr_name} \
-                                     to output of if/else"
-                                );
+                                if existing != VMArg::SavedValue(op_output) {
+                                    push_annotated!(
+                                        Instruction::Copy {
+                                            value: existing,
+                                            output: op_output
+                                        },
+                                        "move existing else-branch of {expr_name} \
+                                         to output of if/else"
+                                    );
+                                }
                             } else {
                                 self.reserved_outputs
                                     .insert(else_index, op_output);
@@ -913,17 +914,19 @@ impl ExpressionTranslator<'_> {
 
                     match if_branch {
                         &SymbolicValue::Result(if_index) => {
-                            if let Some(existing) =
+                            if let Some(&existing) =
                                 self.currently_stored.get(&if_index)
                             {
-                                push_annotated!(
-                                    Instruction::Copy {
-                                        value: *existing,
-                                        output: op_output
-                                    },
-                                    "move existing if-branch of {expr_name} \
-                                     to output of if/else"
-                                );
+                                if existing != VMArg::SavedValue(op_output) {
+                                    push_annotated!(
+                                        Instruction::Copy {
+                                            value: existing,
+                                            output: op_output
+                                        },
+                                        "move existing if-branch of {expr_name} \
+                                         to output of if/else"
+                                    );
+                                }
                             } else {
                                 self.reserved_outputs
                                     .insert(if_index, op_output);

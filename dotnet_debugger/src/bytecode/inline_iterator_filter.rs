@@ -2,38 +2,6 @@ use super::{ExprKind, GraphRewrite, SymbolicValue};
 
 pub struct InlineIteratorFilter;
 
-fn copy_first_param(
-    graph: &mut super::SymbolicGraph,
-    func: SymbolicValue,
-) -> SymbolicValue {
-    let SymbolicValue::Result(func) = func else {
-        panic!("")
-    };
-    let ExprKind::Function { params, .. } = &graph[func].kind else {
-        panic!("")
-    };
-
-    let SymbolicValue::Result(first_param_index) = params[0] else {
-        panic!("")
-    };
-
-    let first_param = &graph[first_param_index];
-
-    let ExprKind::FunctionArg(param_ty) = &first_param.kind else {
-        panic!("")
-    };
-
-    let opt_name = first_param.name.clone();
-    let new_param = graph.function_arg(param_ty.clone());
-    if let Some(name) = opt_name {
-        graph
-            .name(new_param, name)
-            .expect("Existing name must already be valid");
-    }
-
-    new_param
-}
-
 impl GraphRewrite for InlineIteratorFilter {
     fn rewrite_expr(
         &self,
@@ -47,8 +15,8 @@ impl GraphRewrite for InlineIteratorFilter {
                 reduction,
             } => match graph[iterator].as_ref() {
                 &ExprKind::Filter { iterator, filter } => {
-                    let new_reduce_lhs = copy_first_param(graph, reduction);
-                    let new_reduce_rhs = copy_first_param(graph, filter);
+                    let new_reduce_lhs = graph.copy_first_param(reduction);
+                    let new_reduce_rhs = graph.copy_first_param(filter);
 
                     let condition =
                         graph.function_call(filter, vec![new_reduce_rhs]);

@@ -807,6 +807,10 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.filter(obj, filter))
                 }
+                "collect" => {
+                    let _ = self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.collect(obj))
+                }
                 "reduce" => {
                     let (_, args) = self.expect_function_arguments(0, 2)?;
                     let (initial, reduction) = args

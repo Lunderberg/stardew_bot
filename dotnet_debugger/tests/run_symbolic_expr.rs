@@ -727,3 +727,104 @@ fn eval_iterator_filter() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn eval_iterator_collect() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..100)
+                    .collect()
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<usize> = (0..100).collect();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_obj::<Vec<usize>>(0).unwrap(), Some(&expected));
+}
+
+#[test]
+fn eval_iterator_filter_collect() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..100)
+                    .filter(|i:usize| i%2==0)
+                    .collect()
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<usize> = (0..100).filter(|i| i % 2 == 0).collect();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_obj::<Vec<usize>>(0).unwrap(), Some(&expected));
+}
+
+#[test]
+fn eval_iterator_map_collect() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..100)
+                    .map(|i:usize| i*i)
+                    .collect()
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<usize> = (0..100).map(|i| i * i).collect();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_obj::<Vec<usize>>(0).unwrap(), Some(&expected));
+}
+
+#[test]
+fn eval_iterator_map_collect_native_obj() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(Debug, PartialEq)]
+    struct MyObj(usize, usize);
+
+    impl RustNativeObject for MyObj {}
+
+    let make_obj = graph.native_function(|a: usize, b: usize| MyObj(a, b));
+    graph.name(make_obj, "make_obj").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..100)
+                    .map(|i:usize| make_obj(i, i*i))
+                    .collect()
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<_> = (0..100).map(|i| MyObj(i, i * i)).collect();
+
+    assert_eq!(results.len(), 1);
+
+    let actual = results.get_obj::<Vec<MyObj>>(0).unwrap();
+    assert_eq!(actual, Some(&expected));
+}

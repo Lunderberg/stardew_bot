@@ -10,6 +10,8 @@ use crate::{
     TypeInferenceError, VMExecutionError,
 };
 
+use super::ExposedNativeObject;
+
 pub trait NativeFunction {
     fn apply(
         &self,
@@ -31,7 +33,60 @@ pub trait NativeFunction {
 /// requirement is necessary, to keep the blanket implementation of
 /// `UnwrapArg` from overlapping with the implementation of
 /// `UnwrapArg` for primitive types.
-pub trait RustNativeObject: Any {}
+pub trait RustNativeObject: Any {
+    fn new_vector() -> Result<ExposedNativeObject, Error>
+    where
+        Self: Sized,
+    {
+        Ok(ExposedNativeObject::new(Vec::<Self>::new()))
+    }
+
+    fn collect_into_vector(
+        vec: &mut StackValue,
+        item: &mut Option<StackValue>,
+    ) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
+        let vec = match vec {
+            StackValue::Native(native) => Ok(native),
+            other => Err(VMExecutionError::IncorrectVectorType {
+                expected: RustType::new::<Vec<Self>>().into(),
+                actual: other.runtime_type(),
+            }),
+        }?
+        .downcast_mut::<Vec<Self>>()
+        .ok_or_else(|| VMExecutionError::ExpectedVectorToAccumulateInto)?;
+        let item = item.take().ok_or_else(|| {
+            VMExecutionError::MissingElementTypeInVectorAccumulation
+        })?;
+
+        let item = match item {
+            StackValue::Native(native) => Ok(native),
+            other => Err(VMExecutionError::IncorrectVectorElementType {
+                element_type: RustType::new::<Self>().into(),
+                item_type: other.runtime_type(),
+            }),
+        }?
+        .downcast::<Self>()
+        .map_err(|item| {
+            VMExecutionError::IncorrectVectorElementType {
+                element_type: RustType::new::<Self>().into(),
+                item_type: item.runtime_type(),
+            }
+        })?;
+
+        vec.push(*item);
+        Ok(())
+    }
+
+    fn vector_type() -> Result<RuntimeType, Error>
+    where
+        Self: Sized,
+    {
+        Ok(RustType::new::<Vec<Self>>().into())
+    }
+}
 
 impl<Func> NativeFunction for Func
 where
@@ -192,18 +247,64 @@ impl_prim_return!(F64, f64);
 impl_prim_return!(Ptr, Pointer);
 
 impl RustNativeObject for String {}
-impl<T: 'static> RustNativeObject for Vec<T> {}
+impl<T: 'static> RustNativeObject for Vec<T> {
+    // Avoid infinite recursion when specifying a RustType.
+    //
+    // The utility functions for Rust-native objects must be
+    // constructed based solely on the types exposed to the
+    // SymbolicGraph, and not on their usage within any bytecode.
+    // Auto-generated utility functions may only interact with
+    // types that are named at the Rust compile-time.  However,
+    // attempting to generate these utility functions for nested
+    // vector types would result in infinite recursion, as rustc
+    // attempts to generate implementations for all
+    // `Vec<Vec<...Vec<T>...>>`.
+
+    fn new_vector() -> Result<ExposedNativeObject, Error>
+    where
+        Self: Sized,
+    {
+        Err(Error::CollectionIntoNestedVectorNotSupported)
+    }
+
+    fn collect_into_vector(
+        _: &mut StackValue,
+        _: &mut Option<StackValue>,
+    ) -> Result<(), Error>
+    where
+        Self: Sized,
+    {
+        Err(Error::CollectionIntoNestedVectorNotSupported)
+    }
+
+    fn vector_type() -> Result<RuntimeType, Error>
+    where
+        Self: Sized,
+    {
+        Err(Error::CollectionIntoNestedVectorNotSupported)
+    }
+}
 
 impl<T> WrapReturn for T
 where
     T: RustNativeObject,
 {
     fn wrap_return(self) -> Result<Option<StackValue>, Error> {
-        Ok(Some(StackValue::Any(Box::new(self))))
+        Ok(Some(StackValue::Native(ExposedNativeObject::new(self))))
     }
 
     fn return_signature_type() -> RuntimeType {
-        std::any::TypeId::of::<T>().into()
+        RustType::new::<T>().into()
+    }
+}
+
+impl WrapReturn for ExposedNativeObject {
+    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
+        todo!()
+    }
+
+    fn return_signature_type() -> RuntimeType {
+        RuntimeType::Unknown
     }
 }
 
@@ -272,20 +373,18 @@ where
         arg: &'a mut StackValue,
     ) -> Result<Self::Unwrapped<'a>, Error> {
         let err: Error = VMExecutionError::InvalidArgumentForNativeFunction {
-            expected: RuntimeType::Rust(RustType::Opaque(
-                std::any::TypeId::of::<T>(),
-            )),
+            expected: RuntimeType::Rust(RustType::new::<T>()),
             actual: arg.runtime_type(),
         }
         .into();
         match arg {
-            StackValue::Any(any) => any.downcast_ref().ok_or(err),
+            StackValue::Native(native) => native.downcast_ref().ok_or(err),
             _ => Err(err),
         }
     }
 
     fn arg_signature_type() -> RuntimeType {
-        std::any::TypeId::of::<T>().into()
+        RustType::new::<T>().into()
     }
 }
 
@@ -299,20 +398,18 @@ where
         arg: &'a mut StackValue,
     ) -> Result<Self::Unwrapped<'a>, Error> {
         let err: Error = VMExecutionError::InvalidArgumentForNativeFunction {
-            expected: RuntimeType::Rust(RustType::Opaque(
-                std::any::TypeId::of::<T>(),
-            )),
+            expected: RuntimeType::Rust(RustType::new::<T>()),
             actual: arg.runtime_type(),
         }
         .into();
         match arg {
-            StackValue::Any(any) => any.downcast_mut().ok_or(err),
+            StackValue::Native(native) => native.downcast_mut().ok_or(err),
             _ => Err(err),
         }
     }
 
     fn arg_signature_type() -> RuntimeType {
-        std::any::TypeId::of::<T>().into()
+        RustType::new::<T>().into()
     }
 
     const IS_MUTABLE: bool = true;

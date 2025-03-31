@@ -5,7 +5,8 @@ use thiserror::Error;
 
 use crate::{
     runtime_type::{
-        DotNetType, FunctionType, IteratorType, RuntimePrimType, TupleType,
+        DotNetType, FunctionType, IteratorType, RuntimePrimType, RustType,
+        TupleType,
     },
     CachedReader, Error, RuntimeType,
 };
@@ -44,6 +45,25 @@ pub enum TypeInferenceError {
          but the provided map was not a function."
     )]
     AttemptedMapOnNonFunction,
+
+    #[error(
+        "Vector operations require a vector operand, \
+         but were applied to type '{0}'."
+    )]
+    InvalidVectorType(RuntimeType),
+
+    #[error(
+        "Vector are only supported when they contain \
+         primitive elements, or rust-native types that are not vectors.  \
+         Cannot construct a vector of type '{0}'. "
+    )]
+    InvalidVectorElementType(RuntimeType),
+
+    #[error(
+        "Attempted to collect from type '{0}', \
+         but only iterators can be collected."
+    )]
+    CollectRequiresIterator(RuntimeType),
 }
 
 impl<'a> TypeInference<'a> {
@@ -184,6 +204,21 @@ impl<'a> TypeInference<'a> {
                     let iter =
                         expect_cache(*iterator, "iterator being filtered");
                     iter.clone()
+                }
+                ExprKind::Collect { iterator } => {
+                    let iter =
+                        expect_cache(*iterator, "iterator being collected");
+                    match iter {
+                        RuntimeType::Unknown => RuntimeType::Unknown,
+                        RuntimeType::Iterator(IteratorType { item }) => {
+                            item.as_ref().vector_type()?
+                        }
+                        other => {
+                            Err(TypeInferenceError::CollectRequiresIterator(
+                                other.clone(),
+                            ))?
+                        }
+                    }
                 }
                 ExprKind::Reduce { initial, .. }
                 | ExprKind::SimpleReduce { initial, .. } => {
@@ -396,9 +431,7 @@ impl<'a> TypeInference<'a> {
                     }?;
                     (*prim_type).into()
                 }
-                ExprKind::ReadString { .. } => {
-                    std::any::TypeId::of::<String>().into()
-                }
+                ExprKind::ReadString { .. } => RustType::new::<String>().into(),
             };
 
             self.cache.insert(index_to_infer, Box::new(inferred_type));

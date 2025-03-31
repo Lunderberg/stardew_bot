@@ -595,3 +595,27 @@ fn print_iterator_filter() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_iterator_collect() {
+    let mut graph = SymbolicGraph::new();
+
+    let iter = graph.range(100);
+    let res_main = graph.collect(iter);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let res_main = (0..100).collect();
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
