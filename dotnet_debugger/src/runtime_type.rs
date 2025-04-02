@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use derive_more::derive::From;
 use memory_reader::Pointer;
 
@@ -179,6 +181,10 @@ impl RustType {
 
     pub(crate) fn vector_type(&self) -> Result<RuntimeType, Error> {
         self.utils.vector_type()
+    }
+
+    pub(crate) fn type_name(&self) -> Cow<'static, str> {
+        self.utils.type_name()
     }
 }
 
@@ -784,7 +790,7 @@ impl std::fmt::Display for RuntimePrimType {
 
 impl std::fmt::Display for RustType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.type_id)
+        write!(f, "{}", self.type_name())
     }
 }
 

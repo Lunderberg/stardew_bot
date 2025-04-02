@@ -39,7 +39,11 @@ where
 
 impl std::fmt::Display for ExposedNativeFunction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "NativeFunction({:p})", Rc::as_ptr(&self.0))
+        let ptr = Rc::as_ptr(&self.0) as *const ();
+        let sig = self
+            .signature()
+            .expect("Signature should be validated on construction");
+        write!(f, "NativeFunction({ptr:p}, {sig})",)
     }
 }
 

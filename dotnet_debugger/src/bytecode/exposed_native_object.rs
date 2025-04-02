@@ -1,4 +1,6 @@
-use std::{any::Any, marker::PhantomData};
+use std::{any::Any, borrow::Cow, marker::PhantomData};
+
+use itertools::Itertools as _;
 
 use crate::{runtime_type::RustType, Error, RuntimeType};
 
@@ -62,6 +64,8 @@ pub(crate) trait RustNativeTypeUtils {
     ) -> Result<(), Error>;
 
     fn vector_type(&self) -> Result<RuntimeType, Error>;
+
+    fn type_name(&self) -> Cow<'static, str>;
 }
 pub(crate) struct RustNativeUtilContainer<T>(PhantomData<T>);
 impl<T: RustNativeObject> RustNativeUtilContainer<T> {
@@ -88,5 +92,27 @@ impl<T: RustNativeObject> RustNativeTypeUtils for RustNativeUtilContainer<T> {
 
     fn vector_type(&self) -> Result<RuntimeType, Error> {
         T::vector_type()
+    }
+
+    fn type_name(&self) -> Cow<'static, str> {
+        let name = std::any::type_name::<T>();
+
+        fn last_path_segment<'a>(segment: &'a str) -> &'a str {
+            if let Some((_, last)) = segment.rsplit_once("::") {
+                last
+            } else {
+                segment
+            }
+        }
+
+        if name.contains('<') {
+            let name: String = name
+                .split_inclusive(|c| c == '<' || c == '>')
+                .map(last_path_segment)
+                .join("");
+            name.into()
+        } else {
+            last_path_segment(name).into()
+        }
     }
 }
