@@ -577,6 +577,30 @@ impl VirtualMachineBuilder {
         self.annotations.insert(inst, annot.into());
     }
 
+    pub fn push_raw_native_function<T>(&mut self, func: T) -> FunctionIndex
+    where
+        T: 'static,
+        T: Into<ExposedNativeFunction>,
+    {
+        let index = FunctionIndex(self.native_functions.len());
+        self.native_functions.push(func.into());
+        index
+    }
+
+    pub fn push_native_function<Func, ArgList>(
+        &mut self,
+        func: Func,
+    ) -> FunctionIndex
+    where
+        WrappedNativeFunction<Func, ArgList>: NativeFunction,
+        WrappedNativeFunction<Func, ArgList>: 'static,
+    {
+        let index = FunctionIndex(self.native_functions.len());
+        let wrapped = WrappedNativeFunction::new(func);
+        self.native_functions.push(wrapped.into());
+        index
+    }
+
     pub fn with_instructions(self, instructions: Vec<Instruction>) -> Self {
         Self {
             instructions,

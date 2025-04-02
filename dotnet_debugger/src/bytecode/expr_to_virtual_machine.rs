@@ -67,8 +67,8 @@ struct ExpressionTranslator<'a> {
 
     next_free_index: &'a mut usize,
     dead_indices: &'a mut BinaryHeap<Reverse<usize>>,
-    native_functions: &'a mut Vec<ExposedNativeFunction>,
-    native_function_lookup: &'a mut HashMap<OpIndex, FunctionIndex>,
+    native_functions: &'a [ExposedNativeFunction],
+    native_function_lookup: &'a HashMap<OpIndex, FunctionIndex>,
 
     reserved_outputs: &'a mut HashMap<OpIndex, StackIndex>,
 
@@ -115,9 +115,21 @@ impl SymbolicGraph {
         let num_outputs = outputs.len();
 
         let mut next_free_index = num_outputs;
-        let mut native_functions: Vec<ExposedNativeFunction> = Vec::new();
-        let mut native_function_lookup =
-            HashMap::<OpIndex, FunctionIndex>::new();
+
+        let (native_functions, native_function_lookup): (
+            Vec<ExposedNativeFunction>,
+            HashMap<OpIndex, FunctionIndex>,
+        ) = self
+            .iter_ops()
+            .filter_map(|(op_index, op)| match &op.kind {
+                ExprKind::NativeFunction(func) => Some((op_index, func)),
+                _ => None,
+            })
+            .map(|(op_index, func)| {
+                let func_index = builder.push_raw_native_function(func.clone());
+                (func.clone(), (op_index, func_index))
+            })
+            .unzip();
 
         let mut output_lookup: HashMap<OpIndex, StackIndex> = {
             let mut output_lookup = HashMap::new();
@@ -183,8 +195,8 @@ impl SymbolicGraph {
             last_usage: &last_usage,
             next_free_index: &mut next_free_index,
             dead_indices: &mut dead_indices,
-            native_functions: &mut native_functions,
-            native_function_lookup: &mut native_function_lookup,
+            native_functions: &native_functions,
+            native_function_lookup: &native_function_lookup,
             reserved_outputs: &mut output_lookup,
             currently_stored: &mut currently_stored,
             previously_consumed: HashSet::new(),
@@ -192,12 +204,7 @@ impl SymbolicGraph {
         };
         translater.translate(iter_op_indices)?;
 
-        builder = builder.num_outputs(num_outputs);
-        for native_func in native_functions.into_iter() {
-            builder = builder.with_raw_native_function(native_func);
-        }
-
-        Ok(builder.build())
+        Ok(builder.num_outputs(num_outputs).build())
     }
 
     fn analyze_scopes(&self) -> Vec<ScopeInfo> {
@@ -942,10 +949,13 @@ impl ExpressionTranslator<'_> {
 
                     self.currently_stored.insert(op_index, op_output.into());
                 }
-                ExprKind::NativeFunction(func) => {
-                    let func_index = FunctionIndex(self.native_functions.len());
-                    self.native_functions.push(func.clone());
-                    self.native_function_lookup.insert(op_index, func_index);
+                ExprKind::NativeFunction(_) => {
+                    assert!(
+                        self.native_function_lookup.contains_key(&op_index),
+                        "Internal error: \
+                         Lookup should be populated with \
+                         all native functions."
+                    );
                 }
 
                 ExprKind::IsSome(value) => {
