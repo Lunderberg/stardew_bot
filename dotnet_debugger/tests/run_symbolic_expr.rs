@@ -828,3 +828,40 @@ fn eval_iterator_map_collect_native_obj() {
     let actual = results.get_obj::<Vec<MyObj>>(0).unwrap();
     assert_eq!(actual, Some(&expected));
 }
+
+#[test]
+fn reduction_with_last_usage_of_var() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                let x = (0..10)
+                    .reduce(0, |a:usize, b:usize| a+1);
+                (0..10)
+                    .map(|i:usize| {
+
+                        let y = x+x;
+                        let z = y+y;
+                        i*z
+                    })
+                    .reduce(0, |a:usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..10)
+        .map(|i| {
+            let x = 5 + 5;
+            let y = x + x;
+            let z = y + y;
+            i * z
+        })
+        .sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

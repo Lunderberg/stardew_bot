@@ -125,10 +125,11 @@ impl<'a> TypeInference<'a> {
                 }
             }
 
+            reverse_topologic_order.sort();
             reverse_topologic_order
         };
 
-        for index_to_infer in to_infer.into_iter().rev() {
+        for index_to_infer in to_infer.into_iter() {
             let expect_cache = |value: SymbolicValue,
                                 context: &'static str|
              -> &RuntimeType {
@@ -146,7 +147,8 @@ impl<'a> TypeInference<'a> {
                             self.cache.get(&op_index).unwrap_or_else(|| {
                                 panic!(
                                     "Internal error: \
-                                     No cached value for '{context}'.  \
+                                     No cached value for '{context}' \
+                                     located at {op_index}.  \
                                      Topologic sort should ensure that \
                                      all input expressions have their type inferred."
                                 )

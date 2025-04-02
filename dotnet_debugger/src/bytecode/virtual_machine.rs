@@ -548,26 +548,6 @@ impl StackValue {
             ),
         }
     }
-
-    pub fn init_vector(element_type: &RuntimeType) -> Result<Self, Error> {
-        let native = match element_type {
-            RuntimeType::Prim(RuntimePrimType::NativeUInt) => {
-                let vec = Vec::<usize>::new();
-                let obj = Box::new(vec);
-                let ty = RustType::new::<Vec<usize>>().into();
-                ExposedNativeObject { obj, ty }
-            }
-            RuntimeType::Rust(rust_type) => todo!(),
-            other => {
-                return Err(VMExecutionError::IllegalVectorElementType(
-                    other.clone(),
-                )
-                .into())
-            }
-        };
-
-        Ok(native.into())
-    }
 }
 
 impl VirtualMachineBuilder {

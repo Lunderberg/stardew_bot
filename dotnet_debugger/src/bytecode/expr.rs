@@ -353,30 +353,6 @@ pub(crate) enum Scope {
     ElseBranch(OpIndex),
 }
 
-/// The result of analyzing a function
-#[derive(Debug)]
-#[allow(dead_code)]
-struct ScopeInfo {
-    /// The index of the function definition, which will always be a
-    /// `ExprKind::Function`.  If `None`, refers to expressions that
-    /// are outside the scope of any function definition.
-    scope: Scope,
-
-    /// An ordered list of expressions that are part of the body of
-    /// the function.  A function's body is defined as all the set of
-    /// all expressions such that the expression depends on a function
-    /// parameter, and the function output depends on the expression.
-    body: Vec<OpIndex>,
-
-    /// Variables from outside of the function's body that are used by
-    /// the function.
-    enclosed: Vec<OpIndex>,
-
-    /// The enclosing scope that contains this function.  Note: For
-    /// Scope::Global, this field contains Scope::Global.
-    parent_scope: Scope,
-}
-
 impl SymbolicType {
     pub(crate) fn method_table<'a>(
         &self,
@@ -1216,90 +1192,6 @@ impl SymbolicGraph {
         subgraph
     }
 
-    #[allow(dead_code)]
-    fn analyze_scopes(&self) -> Vec<ScopeInfo> {
-        let iter_scopes = self.iter_ops().flat_map(|(index, op)| {
-            let (a, b) = match op.kind {
-                ExprKind::Function { .. } => {
-                    (Some(Scope::Function(index)), None)
-                }
-                ExprKind::IfElse { .. } => (
-                    Some(Scope::IfBranch(index)),
-                    Some(Scope::ElseBranch(index)),
-                ),
-                _ => (None, None),
-            };
-            a.into_iter().chain(b)
-        });
-
-        let mut info: Vec<_> = std::iter::once(Scope::Global)
-            .chain(iter_scopes)
-            .map(|scope| ScopeInfo {
-                scope,
-                parent_scope: Scope::Global,
-                body: vec![],
-                enclosed: vec![],
-            })
-            .collect();
-
-        let mut scope_lookup: HashMap<Scope, &mut ScopeInfo> = info
-            .iter_mut()
-            .map(|func_info| (func_info.scope, func_info))
-            .collect();
-
-        let scope = self.operation_scope();
-
-        scope
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, scope)| (OpIndex::new(i), scope))
-            .for_each(|(op_index, scope)| {
-                if let Some(func_info) = scope_lookup.get_mut(&scope) {
-                    func_info.body.push(op_index);
-                }
-            });
-
-        for func in info.iter_mut() {
-            if let Some(OpIndex(i)) = func.scope.op_index() {
-                func.parent_scope = scope[i];
-            }
-        }
-
-        for func in info.iter_mut() {
-            let mut enclosed: HashSet<OpIndex> = HashSet::new();
-            let mut do_visit = |value| {
-                if let SymbolicValue::Result(prev_index) = value {
-                    if scope[prev_index.0] != func.scope {
-                        enclosed.insert(prev_index);
-                    }
-                }
-            };
-
-            if let Scope::Function(index) = func.scope {
-                match &self[index].kind {
-                    ExprKind::Function { output, .. } => {
-                        do_visit(*output);
-                    }
-                    _ => {
-                        unreachable!(
-                            "Index {index} collected as function, \
-                             but did not reference a function."
-                        );
-                    }
-                }
-            }
-            for op in func.body.iter().cloned() {
-                self[op].kind.visit_reachable_nodes(&mut do_visit);
-            }
-
-            func.enclosed =
-                enclosed.into_iter().sorted_by_key(|op| op.0).collect();
-        }
-
-        info
-    }
-
     /// For each expression, determine which function owns it.
     ///
     /// `Scope::Function(func_index)`: The expression uses at least
@@ -1789,7 +1681,7 @@ impl SymbolicGraph {
 }
 
 impl Scope {
-    fn op_index(&self) -> Option<OpIndex> {
+    pub(crate) fn op_index(&self) -> Option<OpIndex> {
         match self {
             Scope::Global => None,
             Scope::Function(op_index) => Some(*op_index),

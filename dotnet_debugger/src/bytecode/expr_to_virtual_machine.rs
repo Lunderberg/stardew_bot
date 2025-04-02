@@ -15,6 +15,29 @@ use super::{
     ExposedNativeFunction, Instruction, SymbolicGraph, VMArg, VirtualMachine,
 };
 
+/// The result of analyzing a function
+#[derive(Debug)]
+struct ScopeInfo {
+    /// The index of the function definition, which will always be a
+    /// `ExprKind::Function`.  If `None`, refers to expressions that
+    /// are outside the scope of any function definition.
+    scope: Scope,
+
+    /// An ordered list of expressions that are part of the body of
+    /// the function.  A function's body is defined as all the set of
+    /// all expressions such that the expression depends on a function
+    /// parameter, and the function output depends on the expression.
+    body: Vec<OpIndex>,
+
+    /// Variables from outside of the function's body that are used by
+    /// the function.
+    enclosed: Vec<OpIndex>,
+
+    /// The enclosing scope that contains this function.  Note: For
+    /// Scope::Global, this field contains Scope::Global.
+    parent_scope: Scope,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct LastUsage {
     /// The expression in which the expression is used.
@@ -26,7 +49,7 @@ struct LastUsage {
 
 struct LastUsageCollector<'a> {
     graph: &'a SymbolicGraph,
-    operations_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
+    scope_info_lookup: &'a HashMap<Scope, ScopeInfo>,
 }
 
 /// Helper struct for collecting VM instructions
@@ -42,7 +65,6 @@ struct ExpressionTranslator<'a> {
     /// Indicates the last time that an expression is used.
     last_usage: &'a [LastUsage],
 
-    num_outputs: usize,
     next_free_index: &'a mut usize,
     dead_indices: &'a mut BinaryHeap<Reverse<usize>>,
     native_functions: &'a mut Vec<ExposedNativeFunction>,
@@ -159,7 +181,6 @@ impl SymbolicGraph {
             instructions: &mut builder,
             instructions_by_scope: &operations_by_scope,
             last_usage: &last_usage,
-            num_outputs,
             next_free_index: &mut next_free_index,
             dead_indices: &mut dead_indices,
             native_functions: &mut native_functions,
@@ -171,7 +192,7 @@ impl SymbolicGraph {
         };
         translater.translate(iter_op_indices)?;
 
-        builder = builder.num_outputs(outputs.len());
+        builder = builder.num_outputs(num_outputs);
         for native_func in native_functions.into_iter() {
             builder = builder.with_raw_native_function(native_func);
         }
@@ -179,20 +200,108 @@ impl SymbolicGraph {
         Ok(builder.build())
     }
 
-    fn last_usage(&self) -> Vec<LastUsage> {
-        let all_scopes = self.operation_scope();
+    fn analyze_scopes(&self) -> Vec<ScopeInfo> {
+        let iter_scopes = self.iter_ops().flat_map(|(index, op)| {
+            let (a, b) = match op.kind {
+                ExprKind::Function { .. } => {
+                    (Some(Scope::Function(index)), None)
+                }
+                ExprKind::IfElse { .. } => (
+                    Some(Scope::IfBranch(index)),
+                    Some(Scope::ElseBranch(index)),
+                ),
+                _ => (None, None),
+            };
+            a.into_iter().chain(b)
+        });
 
-        let operations_by_scope: HashMap<Scope, Vec<OpIndex>> = all_scopes
+        let mut info: Vec<_> = std::iter::once(Scope::Global)
+            .chain(iter_scopes)
+            .map(|scope| ScopeInfo {
+                scope,
+                parent_scope: Scope::Global,
+                body: vec![],
+                enclosed: vec![],
+            })
+            .collect();
+
+        let mut scope_lookup: HashMap<Scope, &mut ScopeInfo> = info
+            .iter_mut()
+            .map(|func_info| (func_info.scope, func_info))
+            .collect();
+
+        let scope = self.operation_scope();
+
+        scope
             .iter()
             .cloned()
             .enumerate()
-            .rev()
-            .map(|(i, scope)| (scope, OpIndex::new(i)))
-            .into_group_map();
+            .map(|(i, scope)| (OpIndex::new(i), scope))
+            .for_each(|(op_index, scope)| {
+                if let Some(func_info) = scope_lookup.get_mut(&scope) {
+                    func_info.body.push(op_index);
+                }
+            });
+
+        for func in info.iter_mut() {
+            if let Some(OpIndex(i)) = func.scope.op_index() {
+                func.parent_scope = scope[i];
+            }
+        }
+
+        for func in info.iter_mut() {
+            let parent_scopes: Vec<Scope> =
+                std::iter::successors(Some(func.parent_scope), |scope_obj| {
+                    scope_obj.op_index().map(|OpIndex(i)| scope[i])
+                })
+                .collect();
+
+            let mut enclosed: HashSet<OpIndex> = HashSet::new();
+            let mut do_visit = |value| {
+                if let SymbolicValue::Result(prev_index) = value {
+                    let value_scope = &scope[prev_index.0];
+                    if parent_scopes.iter().any(|scope| value_scope == scope) {
+                        enclosed.insert(prev_index);
+                    }
+                }
+            };
+
+            if let Scope::Function(index) = func.scope {
+                match &self[index].kind {
+                    ExprKind::Function { output, .. } => {
+                        do_visit(*output);
+                    }
+                    _ => {
+                        unreachable!(
+                            "Index {index} collected as function, \
+                             but did not reference a function."
+                        );
+                    }
+                }
+            }
+            for op in func.body.iter().cloned() {
+                self[op].kind.visit_reachable_nodes(&mut do_visit);
+            }
+
+            func.enclosed =
+                enclosed.into_iter().sorted_by_key(|op| op.0).collect();
+        }
+
+        info
+    }
+
+    fn last_usage(&self) -> Vec<LastUsage> {
+        // println!("Scope info: {:#?}", self.analyze_scopes());
+
+        let scope_info_lookup = self
+            .analyze_scopes()
+            .into_iter()
+            .map(|info| (info.scope, info))
+            .collect();
 
         let collector = LastUsageCollector {
             graph: self,
-            operations_by_scope: &operations_by_scope,
+            scope_info_lookup: &scope_info_lookup,
         };
 
         let mut last_usage = Vec::<LastUsage>::new();
@@ -221,10 +330,23 @@ impl SymbolicGraph {
 
 impl<'a> LastUsageCollector<'a> {
     fn iter_scope(&self, scope: Scope) -> impl Iterator<Item = OpIndex> + '_ {
-        self.operations_by_scope
+        self.scope_info_lookup
             .get(&scope)
             .into_iter()
-            .flatten()
+            .flat_map(|info| info.body.iter().rev())
+            .cloned()
+    }
+
+    fn iter_enclosed(
+        &self,
+        func: SymbolicValue,
+    ) -> impl Iterator<Item = OpIndex> + '_ {
+        func.as_op_index()
+            .into_iter()
+            .filter_map(|func_index| {
+                self.scope_info_lookup.get(&Scope::Function(func_index))
+            })
+            .flat_map(|info| info.enclosed.iter())
             .cloned()
     }
 
@@ -315,6 +437,19 @@ impl<'a> LastUsageCollector<'a> {
                             encountered.insert(index);
                         });
                 }
+
+                ExprKind::SimpleReduce {
+                    initial,
+                    extent,
+                    reduction,
+                } => {
+                    mark_value!(encountered, *initial);
+                    mark_value!(encountered, *extent);
+                    self.iter_enclosed(*reduction)
+                        .map(SymbolicValue::Result)
+                        .for_each(|value| mark_value!(encountered, value));
+                }
+
                 other => other.visit_reachable_nodes(|value| {
                     mark_value!(encountered, value)
                 }),
