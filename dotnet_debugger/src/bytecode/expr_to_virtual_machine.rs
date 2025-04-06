@@ -298,8 +298,6 @@ impl SymbolicGraph {
     }
 
     fn last_usage(&self) -> Vec<LastUsage> {
-        // println!("Scope info: {:#?}", self.analyze_scopes());
-
         let scope_info_lookup = self
             .analyze_scopes()
             .into_iter()

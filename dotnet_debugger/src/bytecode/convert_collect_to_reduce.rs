@@ -24,9 +24,8 @@ struct CollectIntoVector {
 impl NativeFunction for MakeVector {
     fn apply(
         &self,
-        args: &mut [&mut Option<super::StackValue>],
+        _args: &mut [&mut Option<super::StackValue>],
     ) -> Result<Option<super::StackValue>, Error> {
-        assert!(args.is_empty());
         let obj = self.element_type.new_vector()?;
         Ok(Some(obj.into()))
     }
@@ -34,7 +33,7 @@ impl NativeFunction for MakeVector {
     fn signature(&self) -> Result<RuntimeType, Error> {
         let vector_type = self.element_type.vector_type()?;
         Ok(FunctionType {
-            params: Some(vec![]),
+            params: None,
             output: Box::new(vector_type),
         }
         .into())
@@ -107,7 +106,14 @@ impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
                     }),
                 );
 
-                let initial = graph.function_call(make_vector, vec![]);
+                let dummy_initial_args = graph
+                    .undefined_args(Some(iterator))
+                    .into_iter()
+                    .map(|op_index| op_index.into())
+                    .collect();
+
+                let initial =
+                    graph.function_call(make_vector, dummy_initial_args);
 
                 let collected =
                     graph.reduce(initial, iterator, collect_into_vector);

@@ -315,6 +315,18 @@ pub struct StaticField {
     pub field_name: String,
 }
 
+struct RewriteResults {
+    /// The resulting graph
+    graph: SymbolicGraph,
+
+    /// The number of terms rewritten by the GraphRewrite rule.
+    num_rewritten_terms: usize,
+
+    /// The number of terms which have been updated to reference a
+    /// rewritten term, directly or indirectly.
+    num_terms_with_new_inputs: usize,
+}
+
 pub struct GraphComparison<'a> {
     lhs: &'a SymbolicGraph,
     rhs: &'a SymbolicGraph,
@@ -325,6 +337,7 @@ pub struct GraphComparison<'a> {
 pub struct SymbolicGraphCompiler<'a, 'b> {
     graph: &'a SymbolicGraph,
     show_steps: bool,
+    interactive_substeps: bool,
     reader: Option<CachedReader<'b>>,
     optimize_symbolic_graph: bool,
 }
@@ -1189,6 +1202,7 @@ impl SymbolicGraph {
                 depend_on_inputs.insert(index);
             }
         }
+
         subgraph
     }
 
@@ -1462,24 +1476,37 @@ impl SymbolicGraph {
             .collect()
     }
 
-    pub fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
+    fn rewrite_verbose(
+        &self,
+        rewriter: impl GraphRewrite,
+    ) -> Result<RewriteResults, Error> {
+        rewriter.init();
+
+        let mut num_rewritten_terms = 0;
+        let mut num_terms_with_new_inputs = 0;
+
         let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
             HashMap::new();
         let mut builder = Self::new();
 
         for (old_index, op) in self.iter_ops() {
             let opt_remapped = op.kind.try_remap(&prev_index_lookup);
-            let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
+            let kind = if let Some(remapped) = &opt_remapped {
+                num_terms_with_new_inputs += 1;
+                remapped
+            } else {
+                &op.kind
+            };
 
             let opt_value = rewriter.rewrite_expr(&mut builder, kind)?;
-            let value = opt_value.unwrap_or_else(|| {
-                let expr: Expr = if let Some(remapped) = opt_remapped {
-                    remapped.into()
-                } else {
-                    op.clone()
-                };
-                builder.push(expr)
-            });
+            let value = if let Some(value) = opt_value {
+                num_rewritten_terms += 1;
+                value
+            } else if let Some(remapped) = opt_remapped {
+                builder.push(remapped)
+            } else {
+                builder.push(op.clone())
+            };
 
             // If the pre-rewrite value had a name, then copy it to
             // the post-rewrite value.  This should only be applied if
@@ -1500,15 +1527,25 @@ impl SymbolicGraph {
 
         builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
 
-        Ok(builder)
+        Ok(RewriteResults {
+            graph: builder,
+            num_rewritten_terms,
+            num_terms_with_new_inputs,
+        })
     }
 
-    pub fn rewrite_subtree(
+    pub fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
+        Ok(self.rewrite_verbose(rewriter)?.graph)
+    }
+
+    fn rewrite_subtree(
         &mut self,
         rewriter: impl GraphRewrite,
         indices: impl Iterator<Item = OpIndex>,
         rewrites_applied: &mut HashMap<OpIndex, SymbolicValue>,
     ) -> Result<(), Error> {
+        rewriter.init();
+
         for old_index in indices {
             let op = self[old_index].clone();
             let opt_remapped = op.kind.try_remap(rewrites_applied);
@@ -1532,6 +1569,116 @@ impl SymbolicGraph {
         Ok(())
     }
 
+    pub fn substitute(
+        &mut self,
+        replacements: &HashMap<OpIndex, SymbolicValue>,
+        value: SymbolicValue,
+    ) -> Result<Option<SymbolicValue>, Error> {
+        let Some(index) = value.as_op_index() else {
+            return Ok(None);
+        };
+        if replacements.is_empty() {
+            return Ok(None);
+        }
+
+        let subgraph = self
+            .collect_subgraph(
+                replacements.iter().map(|(key, _)| (*key).into()),
+                Some(value),
+            )
+            .into_iter()
+            .filter(|index| !replacements.contains_key(index));
+
+        let mut rewrites = HashMap::new();
+
+        self.rewrite_subtree(
+            Substitute(replacements),
+            subgraph,
+            &mut rewrites,
+        )?;
+
+        return Ok(rewrites.get(&index).cloned());
+
+        struct Substitute<'a>(&'a HashMap<OpIndex, SymbolicValue>);
+
+        impl GraphRewrite for Substitute<'_> {
+            fn rewrite_expr(
+                &self,
+                graph: &mut SymbolicGraph,
+                expr: &ExprKind,
+            ) -> Result<Option<SymbolicValue>, Error> {
+                Ok(expr.try_remap(self.0).map(|remapped| graph.push(remapped)))
+            }
+        }
+    }
+
+    /// Determine which arguments
+    pub(crate) fn undefined_args(
+        &self,
+        initial: impl IntoIterator<Item = SymbolicValue>,
+    ) -> Vec<OpIndex> {
+        enum VisitItem {
+            PreVisit(OpIndex),
+            RemoveDefinition(OpIndex),
+        }
+
+        let mut to_visit: Vec<_> = initial
+            .into_iter()
+            .filter_map(|value| value.as_op_index())
+            .map(VisitItem::PreVisit)
+            .collect();
+
+        let mut used_without_definition = HashSet::<OpIndex>::new();
+        let mut currently_defined = HashSet::<OpIndex>::new();
+
+        while let Some(visiting) = to_visit.pop() {
+            match visiting {
+                VisitItem::PreVisit(op_index) => match &self[op_index].kind {
+                    ExprKind::FunctionArg(_) => {
+                        if !currently_defined.contains(&op_index) {
+                            used_without_definition.insert(op_index);
+                        }
+                    }
+                    ExprKind::Function { params, output } => {
+                        params.iter().filter_map(|p| p.as_op_index()).for_each(
+                            |param_index| {
+                                assert!(
+                                    !currently_defined.contains(&param_index)
+                                );
+                                currently_defined.insert(param_index);
+                                to_visit.push(VisitItem::RemoveDefinition(
+                                    param_index,
+                                ));
+                            },
+                        );
+                        if let Some(out_index) = output.as_op_index() {
+                            to_visit.push(VisitItem::PreVisit(out_index));
+                        }
+                    }
+                    other => {
+                        other.visit_reachable_nodes(|value| {
+                            if let Some(prev_index) = value.as_op_index() {
+                                to_visit.push(VisitItem::PreVisit(prev_index));
+                            }
+                        });
+                    }
+                },
+                VisitItem::RemoveDefinition(op_index) => {
+                    currently_defined.remove(&op_index);
+                }
+            }
+        }
+
+        used_without_definition.into_iter().sorted().collect()
+    }
+
+    /// Determine which expressions are used by some expression.
+    ///
+    /// Given a set of initial expressions, returns a boolean vector
+    /// of size `self.num_operations()`.  If one or more of the
+    /// initial expressions depends on an operation, the boolean
+    /// vector will contain `true` for that element.  Otherwise, the
+    /// boolean vector will contain `false`.
     pub(crate) fn reachable(
         &self,
         initial: impl IntoIterator<Item = SymbolicValue>,
@@ -1741,23 +1888,28 @@ impl Scope {
 
 impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
     pub(crate) fn from_graph(graph: &'a SymbolicGraph) -> Self {
-        let show_steps = std::env::var("SHOW_STEPS")
-            .map(|var| {
-                if var.is_empty() {
-                    false
-                } else if var.eq_ignore_ascii_case("true") {
-                    true
-                } else if let Ok(value) = var.parse::<usize>() {
-                    value > 0
-                } else {
-                    false
-                }
-            })
-            .unwrap_or(false);
+        let get_env_var = |name: &'static str| -> bool {
+            std::env::var(name)
+                .map(|var| {
+                    if var.is_empty() {
+                        false
+                    } else if var.eq_ignore_ascii_case("true") {
+                        true
+                    } else if let Ok(value) = var.parse::<usize>() {
+                        value > 0
+                    } else {
+                        false
+                    }
+                })
+                .unwrap_or(false)
+        };
+        let show_steps = get_env_var("SHOW_STEPS");
+        let interactive_substeps = get_env_var("INTERACTIVE_SUBSTEPS");
 
         Self {
             graph,
             show_steps,
+            interactive_substeps,
             reader: None,
             optimize_symbolic_graph: true,
         }
@@ -1765,6 +1917,13 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 
     pub fn show_each_step(self, show_steps: bool) -> Self {
         Self { show_steps, ..self }
+    }
+
+    pub fn interactive_substeps(self, interactive_substeps: bool) -> Self {
+        Self {
+            interactive_substeps,
+            ..self
+        }
     }
 
     pub fn with_reader(
@@ -1781,6 +1940,42 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         Self {
             optimize_symbolic_graph: false,
             ..self
+        }
+    }
+
+    fn apply_rewrites(
+        &self,
+        mut expr: SymbolicGraph,
+        rewriter: impl GraphRewrite,
+    ) -> Result<SymbolicGraph, Error> {
+        if self.interactive_substeps {
+            let rewriter = rewriter.apply_once();
+
+            println!("--------- Initial ------------\n{expr}");
+
+            for i_update in 1.. {
+                let rewrite_details = expr.rewrite_verbose(&rewriter)?;
+
+                if rewrite_details.num_rewritten_terms == 0 {
+                    assert!(rewrite_details.num_terms_with_new_inputs == 0);
+                    break;
+                } else {
+                    expr = rewrite_details.graph;
+                }
+
+                println!(
+                    "--------- After {i_update} Updates ------------\n{}",
+                    expr.printer().expand_all_expressions(),
+                );
+
+                std::io::stdin()
+                    .read_line(&mut String::new())
+                    .expect("Error reading stdin");
+            }
+
+            Ok(expr)
+        } else {
+            expr.rewrite(rewriter.apply_recursively())
         }
     }
 
@@ -1844,23 +2039,21 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::RemoveUnusedPrimcast(&analysis))
             .then(super::RemoveUnusedPointerCast);
 
-        let mandatory_lowering = super::LowerSymbolicExpr(&analysis)
+        let mandatory_lowering = super::InferFunctionParameterTypes(&analysis)
             .then(super::InlineFunctionCalls)
             .then(super::MergeRangeReduceToSimpleReduce)
             .then(super::InlineIteratorMap)
             .then(super::InlineIteratorFilter)
-            .then(super::ConvertCollectToReduce(&analysis));
+            .then(super::ConvertCollectToReduce(&analysis))
+            .then(super::LowerSymbolicExpr(&analysis));
 
         let expr = if self.optimize_symbolic_graph {
-            let rewriter = optional_optimizations
-                .then(mandatory_lowering)
-                .apply_recursively();
-
-            expr.rewrite(rewriter)?
+            self.apply_rewrites(
+                expr,
+                optional_optimizations.then(mandatory_lowering),
+            )?
         } else {
-            let rewriter = mandatory_lowering.apply_recursively();
-
-            expr.rewrite(rewriter)?
+            self.apply_rewrites(expr, mandatory_lowering)?
         };
 
         expr.validate(reader)?;

@@ -57,6 +57,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let obj = *obj;
                 let obj_type = self.0.infer_type(graph, obj)?;
 
+                if matches!(obj_type, RuntimeType::Unknown) {
+                    return Ok(None);
+                }
+
                 let method_table_ptr =
                     obj_type.method_table_for_field_access(|| {
                         format!("{}", graph.print(obj))
@@ -211,6 +215,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
             ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj = *obj;
                 let obj_type = self.0.infer_type(graph, obj)?;
+
+                if matches!(obj_type, RuntimeType::Unknown) {
+                    return Ok(None);
+                }
 
                 let static_method_table_ptr =
                     obj_type.method_table_for_downcast()?;

@@ -19,6 +19,9 @@ pub use remove_unused_primcast::RemoveUnusedPrimcast;
 mod recursive_rewrite;
 pub use recursive_rewrite::RecursiveRewrite;
 
+mod single_rewrite;
+pub use single_rewrite::SingleRewrite;
+
 mod sequential_rewrite;
 pub use sequential_rewrite::SequentialRewrite;
 
@@ -42,6 +45,9 @@ pub use inline_iterator_filter::InlineIteratorFilter;
 
 mod convert_collect_to_reduce;
 pub use convert_collect_to_reduce::ConvertCollectToReduce;
+
+mod infer_function_parameter_types;
+pub use infer_function_parameter_types::InferFunctionParameterTypes;
 
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
