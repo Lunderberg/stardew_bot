@@ -242,16 +242,21 @@ impl<'a> TypeInference<'a> {
                 ExprKind::FieldAccess { obj, field } => {
                     let obj_type = expect_cache(*obj, "object of field access");
 
-                    let method_table_ptr = obj_type
-                        .method_table_for_field_access(|| {
-                            format!("{}", graph.print(*obj))
-                        })?;
-                    let field_type =
-                        self.reader()?.field_by_name_to_runtime_type(
-                            method_table_ptr,
-                            field.as_str(),
-                        )?;
-                    field_type
+                    match obj_type {
+                        RuntimeType::Unknown => RuntimeType::Unknown,
+                        other => {
+                            let method_table_ptr = other
+                                .method_table_for_field_access(|| {
+                                    format!("{}", graph.print(*obj))
+                                })?;
+                            let field_type =
+                                self.reader()?.field_by_name_to_runtime_type(
+                                    method_table_ptr,
+                                    field.as_str(),
+                                )?;
+                            field_type
+                        }
+                    }
                 }
                 ExprKind::SymbolicDowncast { ty, .. } => {
                     let reader = self.reader()?;

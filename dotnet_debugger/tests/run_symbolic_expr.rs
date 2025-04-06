@@ -865,3 +865,134 @@ fn reduction_with_last_usage_of_var() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+// Currently, there is no way to mark that the `Vec<usize>` must be
+// re-initialized for each iteration of the outer loop.  Because it
+// does not depend on any function parameter, it is initialized as
+// part of the global scope.
+#[ignore = "Known failing test"]
+#[test]
+fn reduce_into_vec_of_vecs() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct RustObj(Vec<usize>);
+
+    impl RustNativeObject for RustObj {}
+
+    let new_obj =
+        graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));
+    graph.name(new_obj, "new_obj").unwrap();
+
+    let new_vec_usize = graph.native_function(|| Vec::<usize>::new());
+    graph.name(new_vec_usize, "new_vec_usize").unwrap();
+
+    let collect_into_vec_usize = graph
+        .native_function(|vec: &mut Vec<usize>, item: usize| vec.push(item));
+    graph
+        .name(collect_into_vec_usize, "collect_into_vec_usize")
+        .unwrap();
+
+    let new_vec_obj = graph.native_function(|| Vec::<RustObj>::new());
+    graph.name(new_vec_obj, "new_vec_obj").unwrap();
+
+    let collect_into_vec_obj =
+        graph.native_function(|vec: &mut Vec<RustObj>, item: &RustObj| {
+            vec.push(item.clone())
+        });
+    graph
+        .name(collect_into_vec_obj, "collect_into_vec_obj")
+        .unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+
+                (0..3)
+                    .reduce(
+                        new_vec_obj(),
+                        |vec_obj, i: usize| {
+                            let vec_usize = (0..i)
+                                .reduce(
+                                    new_vec_usize(),
+                                    |vec_usize, j: usize| {
+                                        collect_into_vec_usize(vec_usize, j)
+                                    }
+                                );
+                            let rust_obj = new_obj(vec_usize);
+                            collect_into_vec_obj(vec_obj, rust_obj)
+                        }
+                    )
+            }
+        })
+        .unwrap();
+
+    println!("Graph: {graph}");
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<RustObj> =
+        (0..3).map(|i| RustObj((0..i).collect())).collect();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_obj::<Vec<RustObj>>(0).unwrap(), Some(&expected));
+}
+
+#[test]
+fn collect_into_vec_of_vecs() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(Debug, Clone, PartialEq)]
+    struct RustObj(Vec<usize>);
+
+    impl RustNativeObject for RustObj {}
+
+    let new_obj =
+        graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));
+    graph.name(new_obj, "new_obj").unwrap();
+
+    let new_vec_usize = graph.native_function(|| Vec::<usize>::new());
+    graph.name(new_vec_usize, "new_vec_usize").unwrap();
+
+    let collect_into_vec_usize = graph
+        .native_function(|vec: &mut Vec<usize>, item: usize| vec.push(item));
+    graph
+        .name(collect_into_vec_usize, "collect_into_vec_usize")
+        .unwrap();
+
+    let new_vec_obj = graph.native_function(|| Vec::<RustObj>::new());
+    graph.name(new_vec_obj, "new_vec_obj").unwrap();
+
+    let collect_into_vec_obj =
+        graph.native_function(|vec: &mut Vec<RustObj>, item: &RustObj| {
+            vec.push(item.clone())
+        });
+    graph
+        .name(collect_into_vec_obj, "collect_into_vec_obj")
+        .unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..3)
+                    .map(|i| {
+                        let vec_usize = (0..i).collect();
+                        new_obj(vec_usize)
+                    })
+                    .collect()
+            }
+        })
+        .unwrap();
+
+    println!("Graph: {graph}");
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: Vec<RustObj> =
+        (0..3).map(|i| RustObj((0..i).collect())).collect();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_obj::<Vec<RustObj>>(0).unwrap(), Some(&expected));
+}

@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::{Error, RuntimeType};
 
 use super::{
     graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
@@ -16,6 +16,10 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
         Ok(match expr {
             ExprKind::SymbolicDowncast { obj, ty } => {
                 let obj_type = self.0.infer_type(graph, *obj)?;
+
+                if matches!(obj_type, RuntimeType::Unknown) {
+                    return Ok(None);
+                }
 
                 let reader = self.0.reader()?;
 

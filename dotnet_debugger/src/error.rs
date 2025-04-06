@@ -190,9 +190,9 @@ pub enum Error {
     #[error(
         "The SymbolicOperation::Field(name) operation \
          accesses a field of a class or struct.  \
-         However, it was applied to an object of type {0}."
+         However, it was applied to object '{0}' of type '{1}'."
     )]
-    FieldAccessRequiresClassOrStruct(RuntimeType),
+    FieldAccessRequiresClassOrStruct(String, RuntimeType),
 
     #[error(
         "The SymbolicOperation::IndexAccess(indices) operation \

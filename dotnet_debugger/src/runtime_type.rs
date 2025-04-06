@@ -351,7 +351,10 @@ impl RuntimeType {
                 method_table
                     .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name()))
             }
-            _ => Err(Error::FieldAccessRequiresClassOrStruct(self.clone())),
+            _ => Err(Error::FieldAccessRequiresClassOrStruct(
+                gen_name(),
+                self.clone(),
+            )),
         }
     }
 
