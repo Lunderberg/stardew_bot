@@ -102,6 +102,23 @@ pub enum Instruction {
     /// Check if a location contains a non-None value.
     IsSome { value: VMArg, output: StackIndex },
 
+    /// Compute the AND of two boolean expressions.
+    And {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Compute the OR of two boolean expressions.
+    Or {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Negate a boolean expression
+    Not { arg: VMArg, output: StackIndex },
+
     /// Check if the two operands are equal to each other, storing the
     /// resulting boolean to the output index.
     Equal {
@@ -839,7 +856,7 @@ impl VirtualMachine {
                 InstructionIndex(current_instruction.0 + 1);
 
             macro_rules! arg_to_prim {
-                ($arg:expr, $operator:literal) => {{
+                ($arg:expr, $operator:expr) => {{
                     let arg: &VMArg = $arg;
                     let prim:Option<RuntimePrimValue> = match arg {
                         VMArg::Const(value) => Ok(Some(*value)),
@@ -867,8 +884,10 @@ impl VirtualMachine {
                     let lhs = $lhs;
                     let rhs = $rhs;
                     let output = $output;
+
                     let opt_lhs = arg_to_prim!(lhs, $name);
                     let opt_rhs = arg_to_prim!(rhs, $name);
+
                     values[*output] = match (opt_lhs, opt_rhs) {
                         (Some(lhs), Some(rhs)) => {
                             let res = match (lhs, rhs) {
@@ -1064,6 +1083,73 @@ impl VirtualMachine {
                 Instruction::Mod { lhs, rhs, output } => {
                     integer_op! {lhs, rhs, output, "Mod", rem_euclid}
                 }
+
+                Instruction::And { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "And");
+                    let opt_rhs = arg_to_prim!(rhs, "And");
+                    values[*output] = match (opt_lhs, opt_rhs) {
+                        (None, Some(RuntimePrimValue::Bool(false)))
+                        | (Some(RuntimePrimValue::Bool(false)), None) => {
+                            Some(RuntimePrimValue::Bool(false).into())
+                        }
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::Bool(a),
+                                    RuntimePrimValue::Bool(b),
+                                ) => Ok(RuntimePrimValue::Bool(a && b)),
+                                _ => Err(Error::InvalidOperandsForBinaryOp {
+                                    op: instruction.op_name(),
+                                    lhs: lhs.runtime_type().into(),
+                                    rhs: rhs.runtime_type().into(),
+                                }),
+                            }?;
+                            Some(res.into())
+                        }
+                        _ => None,
+                    };
+                }
+
+                Instruction::Or { lhs, rhs, output } => {
+                    let opt_lhs = arg_to_prim!(lhs, "Or");
+                    let opt_rhs = arg_to_prim!(rhs, "Or");
+                    values[*output] = match (opt_lhs, opt_rhs) {
+                        (None, Some(RuntimePrimValue::Bool(true)))
+                        | (Some(RuntimePrimValue::Bool(true)), None) => {
+                            Some(RuntimePrimValue::Bool(true).into())
+                        }
+                        (Some(lhs), Some(rhs)) => {
+                            let res = match (lhs, rhs) {
+                                (
+                                    RuntimePrimValue::Bool(a),
+                                    RuntimePrimValue::Bool(b),
+                                ) => Ok(RuntimePrimValue::Bool(a || b)),
+                                _ => Err(Error::InvalidOperandsForBinaryOp {
+                                    op: instruction.op_name(),
+                                    lhs: lhs.runtime_type().into(),
+                                    rhs: rhs.runtime_type().into(),
+                                }),
+                            }?;
+                            Some(res.into())
+                        }
+                        _ => None,
+                    };
+                }
+
+                Instruction::Not { arg, output } => {
+                    let opt_arg = arg_to_prim!(arg, "Not");
+                    values[*output] = match opt_arg {
+                        Some(RuntimePrimValue::Bool(b)) => {
+                            Ok(Some(RuntimePrimValue::Bool(!b).into()))
+                        }
+                        Some(other) => Err(Error::InvalidOperandForUnaryOp {
+                            op: instruction.op_name(),
+                            arg: other.runtime_type().into(),
+                        }),
+                        None => Ok(None),
+                    }?;
+                }
+
                 Instruction::Equal { lhs, rhs, output } => {
                     comparison_op! {lhs, rhs, output, "Equal", eq}
                 }
@@ -1193,12 +1279,13 @@ impl Instruction {
             | Instruction::Downcast { obj: arg, .. }
             | Instruction::Read { ptr: arg, .. }
             | Instruction::ReadString { ptr: arg, .. }
-            | Instruction::IsSome { value: arg, .. } => {
-                (Some(*arg), None, None)
-            }
+            | Instruction::IsSome { value: arg, .. }
+            | Instruction::Not { arg, .. } => (Some(*arg), None, None),
 
             // Binary instructions
-            Instruction::Equal { lhs, rhs, .. }
+            Instruction::And { lhs, rhs, .. }
+            | Instruction::Or { lhs, rhs, .. }
+            | Instruction::Equal { lhs, rhs, .. }
             | Instruction::NotEqual { lhs, rhs, .. }
             | Instruction::LessThan { lhs, rhs, .. }
             | Instruction::GreaterThan { lhs, rhs, .. }
@@ -1246,6 +1333,9 @@ impl Instruction {
                 ..
             }
             | Instruction::PrimCast { output, .. }
+            | Instruction::And { output, .. }
+            | Instruction::Or { output, .. }
+            | Instruction::Not { output, .. }
             | Instruction::Equal { output, .. }
             | Instruction::NotEqual { output, .. }
             | Instruction::LessThan { output, .. }
@@ -1275,6 +1365,7 @@ impl Instruction {
             Instruction::NoOp => {}
 
             Instruction::IsSome { value: arg, output }
+            | Instruction::Not { arg, output }
             | Instruction::Copy { value: arg, output }
             | Instruction::PrimCast {
                 value: arg, output, ..
@@ -1312,7 +1403,9 @@ impl Instruction {
                 }
             }
 
-            Instruction::Equal { lhs, rhs, output }
+            Instruction::And { lhs, rhs, output }
+            | Instruction::Or { lhs, rhs, output }
+            | Instruction::Equal { lhs, rhs, output }
             | Instruction::NotEqual { lhs, rhs, output }
             | Instruction::LessThan { lhs, rhs, output }
             | Instruction::GreaterThan { lhs, rhs, output }
@@ -1342,7 +1435,10 @@ impl Instruction {
             Instruction::ConditionalJump { .. } => "ConditionalJump",
             Instruction::NativeFunctionCall { .. } => "NativeFunctionCall",
             Instruction::PrimCast { .. } => "PrimCast",
-            Instruction::IsSome { .. } => "IsSome ",
+            Instruction::IsSome { .. } => "IsSome",
+            Instruction::And { .. } => "And",
+            Instruction::Or { .. } => "Or",
+            Instruction::Not { .. } => "Not",
             Instruction::Equal { .. } => "Equal ",
             Instruction::NotEqual { .. } => "NotEqual",
             Instruction::LessThan { .. } => "LessThan",
@@ -1472,6 +1568,18 @@ impl Display for Instruction {
 
             Instruction::IsSome { value, output } => {
                 write!(f, "{output} = {value}.is_some()")
+            }
+
+            Instruction::And { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} && {rhs}")
+            }
+
+            Instruction::Or { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} || {rhs}")
+            }
+
+            Instruction::Not { arg, output } => {
+                write!(f, "{output} = !{arg}")
             }
 
             Instruction::Equal { lhs, rhs, output } => {

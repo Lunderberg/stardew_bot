@@ -996,3 +996,29 @@ fn collect_into_vec_of_vecs() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_obj::<Vec<RustObj>>(0).unwrap(), Some(&expected));
 }
+
+#[test]
+fn reduce_with_extent_none() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|| -> Option<usize> { None });
+    graph.name(func, "func").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                let extent = func();
+                (0..extent)
+                    .reduce(42, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize = 42;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

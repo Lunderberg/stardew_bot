@@ -299,7 +299,12 @@ pub enum Error {
     #[error("Value '{0}' of type {1} not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue, RuntimePrimType),
 
-    #[error("Cannot apply operator '{op}' with operand types {lhs} and {rhs}")]
+    #[error("Cannot apply operator '{op}' with operand type '{arg}'")]
+    InvalidOperandForUnaryOp { op: &'static str, arg: RuntimeType },
+
+    #[error(
+        "Cannot apply operator '{op}' with operand types '{lhs}' and '{rhs}'"
+    )]
     InvalidOperandsForBinaryOp {
         op: &'static str,
         lhs: RuntimeType,
