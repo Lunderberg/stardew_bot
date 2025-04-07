@@ -528,6 +528,11 @@ impl ExpressionTranslator<'_> {
             })
     }
 
+    fn free_index(&mut self, stack_index: StackIndex) {
+        let StackIndex(index) = stack_index;
+        self.dead_indices.push(Reverse(index));
+    }
+
     fn free_dead_indices(&mut self, op_index: OpIndex) {
         let first_index = self.last_usage.partition_point(|last_usage| {
             last_usage.usage_point.0 < op_index.0
@@ -696,13 +701,15 @@ impl ExpressionTranslator<'_> {
                             if let Some(&required_output) =
                                 self.reserved_outputs.get(&op_index)
                             {
-                                push_annotated!(
-                                    Instruction::Swap(first_arg_loc, required_output),
-                                    format!(
-                                        "swap {expr_name} \
-                                         to mandatory output loc {required_output}"
-                                    ),
-                                );
+                                if first_arg_loc != required_output {
+                                    push_annotated!(
+                                        Instruction::Swap(first_arg_loc, required_output),
+                                        format!(
+                                            "swap {expr_name} \
+                                             to mandatory output loc {required_output}"
+                                        ),
+                                    );
+                                }
                                 self.currently_stored
                                     .insert(op_index, required_output.into());
                             } else {
@@ -765,15 +772,64 @@ impl ExpressionTranslator<'_> {
                             );
                         }
                         VMArg::SavedValue(stack_index) => {
-                            push_annotated!(
-                                Instruction::Swap(stack_index, op_output,),
-                                format!(
-                                    "move initial value \
-                                     of reduction {expr_name}"
-                                ),
-                            );
+                            if stack_index != op_output {
+                                push_annotated!(
+                                    Instruction::Swap(stack_index, op_output),
+                                    format!(
+                                        "move initial value \
+                                         of reduction {expr_name}"
+                                    ),
+                                );
+                            }
                         }
                     }
+
+                    let extent_is_none = self.alloc_index();
+                    push_annotated!(
+                        Instruction::IsSome {
+                            value: extent,
+                            output: extent_is_none
+                        },
+                        format!("extent {extent} is some"),
+                    );
+                    push_annotated!(
+                        Instruction::Not {
+                            arg: extent_is_none.into(),
+                            output: extent_is_none
+                        },
+                        format!("extent {extent} is none"),
+                    );
+                    let extent_is_zero = self.alloc_index();
+                    push_annotated!(
+                        Instruction::Equal {
+                            lhs: extent,
+                            rhs: 0usize.into(),
+                            output: extent_is_zero
+                        },
+                        format!("extent {extent} is zero"),
+                    );
+
+                    self.free_index(extent_is_none);
+                    self.free_index(extent_is_zero);
+                    let can_skip_loop = self.alloc_index();
+                    push_annotated!(
+                        Instruction::Or {
+                            lhs: extent_is_none.into(),
+                            rhs: extent_is_zero.into(),
+                            output: can_skip_loop
+                        },
+                        format!("loop over {extent} can be skipped"),
+                    );
+
+                    // Placeholder for the conditional jump to break
+                    // out of the loop.  To be updated after the loop
+                    // body is generated, when we know the destination
+                    // index of the jump.
+                    let jump_to_end_instruction_index = push_annotated!(
+                        Instruction::NoOp,
+                        format!("loop for {expr_name} terminated"),
+                    );
+                    self.free_index(can_skip_loop);
 
                     let loop_iter = self.alloc_index();
                     push_annotated!(
@@ -785,25 +841,6 @@ impl ExpressionTranslator<'_> {
                     );
 
                     let loop_start = self.instructions.current_index();
-
-                    let stop_loop_condition = self.alloc_index();
-                    push_annotated!(
-                        Instruction::GreaterThanOrEqual {
-                            lhs: loop_iter.into(),
-                            rhs: extent,
-                            output: stop_loop_condition,
-                        },
-                        format!("loop condition of {expr_name}"),
-                    );
-
-                    // Placeholder for the conditional jump to break
-                    // out of the loop.  To be updated after the loop
-                    // body is generated, when we know the destination
-                    // index of the jump.
-                    let jump_to_end_instruction_index = push_annotated!(
-                        Instruction::NoOp,
-                        format!("loop for {expr_name} terminated"),
-                    );
 
                     let reduction_index = match reduction {
                         &SymbolicValue::Result(op_index) => op_index,
@@ -865,13 +902,17 @@ impl ExpressionTranslator<'_> {
                                     );
                                 }
                                 VMArg::SavedValue(body_output) => {
-                                    push_annotated!(
-                                        Instruction::Swap(
-                                            body_output,
-                                            op_output,
-                                        ),
-                                        format!("move output of {expr_name}"),
-                                    );
+                                    if body_output != op_output {
+                                        push_annotated!(
+                                            Instruction::Swap(
+                                                body_output,
+                                                op_output,
+                                            ),
+                                            format!(
+                                                "move output of {expr_name}"
+                                            ),
+                                        );
+                                    }
                                 }
                             }
 
@@ -926,19 +967,30 @@ impl ExpressionTranslator<'_> {
                         format!("increment loop iterator for {expr_name}"),
                     );
 
+                    let loop_condition = self.alloc_index();
+                    push_annotated!(
+                        Instruction::LessThan {
+                            lhs: loop_iter.into(),
+                            rhs: extent.into(),
+                            output: loop_condition,
+                        },
+                        format!("loop condition for {expr_name}"),
+                    );
+
                     push_annotated!(
                         Instruction::ConditionalJump {
-                            cond: RuntimePrimValue::Bool(true).into(),
+                            cond: loop_condition.into(),
                             dest: loop_start,
                         },
                         format!("jump to beginning of {expr_name}"),
                     );
+                    self.free_index(loop_condition);
 
                     let after_loop = self.instructions.current_index();
                     self.instructions.update(
                         jump_to_end_instruction_index,
                         Instruction::ConditionalJump {
-                            cond: stop_loop_condition.into(),
+                            cond: can_skip_loop.into(),
                             dest: after_loop,
                         },
                     );
