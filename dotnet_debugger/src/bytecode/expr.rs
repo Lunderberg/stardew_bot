@@ -1216,13 +1216,17 @@ impl SymbolicGraph {
     /// the if branch of the `ExprKind::IfElse` declared at
     /// `if_else_index`, and is not used by any other
     pub(crate) fn operation_scope(&self) -> Vec<Scope> {
-        let mut scope = vec![Scope::Global; self.ops.len()];
+        let mut func_scope = vec![Scope::Global; self.ops.len()];
 
         // Step 1: Visit each function in reverse order of
         // declaration.  For each function, mark all expressions that
         // are part of the subgraph defined by the function parameters
         // and output.  This handles nested scopes, since inner-scoped
         // functions will be visited after their containing scope.
+        //
+        // This step produces a valid scope assignment, preferentially
+        // placing expressions in the outermost scope that may legally
+        // be applied.
         self.iter_ops()
             .rev()
             .for_each(|(func_index, op)| match &op.kind {
@@ -1233,62 +1237,122 @@ impl SymbolicGraph {
                     )
                     .into_iter()
                     .for_each(|index| {
-                        scope[index.0] = Scope::Function(func_index);
+                        func_scope[index.0] = Scope::Function(func_index);
                     });
                 }
                 _ => {}
             });
 
-        // Step 2: Update the scope with If/Else branches.  When
-        // walking along the dominator graph, a node will either
-        // encounter an if/else branch, or its containing function.
-        let dominators = self.dominators();
-        for i in 0..self.ops.len() {
-            let op_index = OpIndex(i);
+        // Step 2: Visit each expression in reverse order of
+        // declaration.  For each expression, claim the inputs as
+        // being in the same scope as the expression.  If the inputs
+        // are already claimed by another scope, resolve the two
+        // claims with the innermost scope that contains both claims.
+        //
+        // This step produces a valid scope assignment, preferentially
+        // placing expressions in the innermost scope that may legally
+        // be applied.
+        let mut all_scopes: Vec<Option<Scope>> = vec![None; self.ops.len()];
+        self.extern_funcs.iter().cloned().for_each(|OpIndex(i)| {
+            all_scopes[i] = Some(Scope::Global);
+        });
 
-            match self[op_index].kind {
-                ExprKind::FunctionArg(_) => {
-                    continue;
-                }
-                _ => {}
-            }
+        for current_index in (0..self.ops.len()).rev() {
+            let current_op = OpIndex(current_index);
+            let Some(scope_i) = all_scopes[current_index] else {
+                continue;
+            };
 
-            let mut dominator = Some(op_index);
-            while let Some(dom_index) = dominator {
-                let Some(next_dom) = dominators[dom_index.0] else {
-                    break;
+            let mut mark_scope = |value: SymbolicValue, new_scope: Scope| {
+                let Some(upstream_op) = value.as_op_index() else {
+                    return;
                 };
-                match self[next_dom].kind {
-                    ExprKind::Function { .. } => {
-                        break;
-                    }
-                    ExprKind::IfElse {
-                        if_branch: SymbolicValue::Result(if_index),
-                        ..
-                    } if if_index == dom_index
-                        && scope[if_index.0] == scope[i] =>
-                    {
-                        scope[i] = Scope::IfBranch(next_dom);
-                        break;
-                    }
-                    ExprKind::IfElse {
-                        else_branch: SymbolicValue::Result(else_index),
-                        ..
-                    } if else_index == dom_index
-                        && scope[else_index.0] == scope[i] =>
-                    {
-                        scope[i] = Scope::ElseBranch(next_dom);
-                        break;
-                    }
-                    ExprKind::IfElse { .. } => {
-                        break;
-                    }
-                    _ => {}
+                let OpIndex(upstream_index) = upstream_op;
+                if func_scope[current_index] != func_scope[upstream_index]
+                    && !matches!(
+                        self[upstream_op].kind,
+                        ExprKind::FunctionArg(_)
+                    )
+                    && !matches!(
+                        self[current_op].kind,
+                        ExprKind::Function { .. }
+                    )
+                {
+                    return;
                 }
 
-                dominator = Some(next_dom);
+                all_scopes[upstream_index] = match all_scopes[upstream_index] {
+                    None => Some(new_scope),
+                    Some(prev_scope) if prev_scope == new_scope => {
+                        Some(prev_scope)
+                    }
+                    Some(prev_scope) => {
+                        let iter_parent_scopes = |scope: Scope| {
+                            std::iter::successors(Some(scope), |scope| {
+                                scope
+                                    .op_index()
+                                    .and_then(|OpIndex(j)| all_scopes[j])
+                            })
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                        };
+
+                        let joint_scope = iter_parent_scopes(prev_scope)
+                            .zip(iter_parent_scopes(new_scope))
+                            .take_while(|(a, b)| a == b)
+                            .map(|(a, _)| a)
+                            .last()
+                            .expect(
+                                "All expressions are within the Global scope",
+                            );
+
+                        Some(joint_scope)
+                    }
+                };
+            };
+
+            match &self[current_op].kind {
+                ExprKind::Function { params, output } => {
+                    let scope = Scope::Function(current_op);
+                    mark_scope(*output, scope);
+                    params
+                        .iter()
+                        .cloned()
+                        .for_each(|param| mark_scope(param, scope));
+                }
+                &ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => {
+                    mark_scope(condition, scope_i);
+                    mark_scope(if_branch, Scope::IfBranch(current_op));
+                    mark_scope(else_branch, Scope::ElseBranch(current_op));
+                }
+                other => other
+                    .visit_reachable_nodes(|value| mark_scope(value, scope_i)),
             }
         }
+
+        // Step 3: Combine the results of steps (1) and (2)
+        //
+        // To minimize the amount of duplicate evaluations performed
+        // in function evaluation, especially reductions, prefer to
+        // have as few expressions as possible within the body of a
+        // funciton.  To minimize the amount of unused evaluations in
+        // branching expressions, prefer to have as many expressions
+        // as possible within the body of conditional branches.
+        let scope: Vec<Scope> = all_scopes
+            .into_iter()
+            .zip(func_scope)
+            .map(|(opt_scope, func_scope)| match (opt_scope, func_scope) {
+                (Some(Scope::IfBranch(_) | Scope::ElseBranch(_)), _) => {
+                    opt_scope.unwrap()
+                }
+                _ => func_scope,
+            })
+            .collect();
 
         scope
     }
@@ -1302,6 +1366,7 @@ impl SymbolicGraph {
     /// operation `i` is a root node.
     ///
     /// https://dl.acm.org/doi/pdf/10.1145/357062.357071
+    #[allow(dead_code)]
     pub(crate) fn dominators(&self) -> Vec<Option<OpIndex>> {
         let mut parent = vec![0; self.ops.len() + 1];
         let mut dfs_order_to_op_order = vec![0; self.ops.len() + 1];
@@ -2074,6 +2139,12 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 
         if self.show_steps {
             println!("----------- After CSE --------------\n{expr}");
+            println!(
+                "----------- After CSE --------------\n{}",
+                expr.printer()
+                    .expand_all_expressions()
+                    .number_all_expressions(),
+            );
         }
 
         // Virtual machine, in terms of sequential operations.

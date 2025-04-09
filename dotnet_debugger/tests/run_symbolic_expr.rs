@@ -1022,3 +1022,78 @@ fn reduce_with_extent_none() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn reduction_with_numeric_conditional_in_map() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|a: usize| -> Option<usize> {
+        (a % 2 == 0).then(|| a)
+    });
+    graph.name(func, "func").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(|i| {
+                        let j = i+1;
+                        let cond = j*j > 10;
+                        if cond {
+                            j
+                        } else {
+                            42
+                        }
+                    })
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize = (0..10)
+        .map(|i| i + 1)
+        .map(|i| if i * i > 10 { i } else { 42 })
+        .sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn reduction_with_none_check_in_map() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|a: usize| -> Option<usize> {
+        (a % 2 == 0).then(|| a)
+    });
+    graph.name(func, "func").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(|i| {
+                        let b = func(i);
+                        if b.is_some() {
+                            b
+                        } else {
+                            42
+                        }
+                    })
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize =
+        (0..10).map(|i| if i % 2 == 0 { i } else { 42 }).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

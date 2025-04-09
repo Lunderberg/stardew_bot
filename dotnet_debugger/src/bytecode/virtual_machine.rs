@@ -666,9 +666,10 @@ impl VirtualMachineBuilder {
 
         assert!(
             num_values >= self.num_outputs,
-            "Virtual machine has {}, \
+            "Virtual machine has {} output{}, \
              but only found instructions for writing to {num_values}",
-            self.num_outputs
+            self.num_outputs,
+            if self.num_outputs == 1 { "" } else { "s" },
         );
 
         VirtualMachine {

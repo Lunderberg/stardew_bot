@@ -3,7 +3,7 @@ use std::{
     collections::{BinaryHeap, HashMap, HashSet},
 };
 
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 
 use crate::{
     bytecode::expr::Scope, Error, ExprKind, OpIndex, RuntimePrimValue,
@@ -74,7 +74,7 @@ struct ExpressionTranslator<'a> {
 
     currently_stored: &'a mut HashMap<OpIndex, VMArg>,
 
-    previously_consumed: HashSet<OpIndex>,
+    previously_consumed: HashMap<OpIndex, OpIndex>,
 
     show_steps: bool,
 }
@@ -105,17 +105,6 @@ impl SymbolicGraph {
             todo!("Handle extern functions with parameters");
         }
 
-        let outputs = match output {
-            SymbolicValue::Result(op_index) => match &self[op_index].kind {
-                ExprKind::Tuple(values) => values.clone(),
-                _ => vec![output],
-            },
-            _ => vec![output],
-        };
-        let num_outputs = outputs.len();
-
-        let mut next_free_index = num_outputs;
-
         let (native_functions, native_function_lookup): (
             Vec<ExposedNativeFunction>,
             HashMap<OpIndex, FunctionIndex>,
@@ -131,39 +120,38 @@ impl SymbolicGraph {
             })
             .unzip();
 
-        let mut output_lookup: HashMap<OpIndex, StackIndex> = {
-            let mut output_lookup = HashMap::new();
-            for (i, output) in outputs.iter().cloned().enumerate() {
-                let stack_index = StackIndex(i);
-                match output {
-                    SymbolicValue::Result(op_index) => {
-                        output_lookup.insert(op_index, stack_index);
-                    }
-                    SymbolicValue::Bool(value) => {
-                        let value = RuntimePrimValue::Bool(value).into();
-                        builder.push(Instruction::Copy {
-                            value,
-                            output: stack_index,
-                        });
-                    }
-                    SymbolicValue::Int(value) => {
-                        let value = RuntimePrimValue::NativeUInt(value).into();
-                        builder.push(Instruction::Copy {
-                            value,
-                            output: stack_index,
-                        });
-                    }
-                    SymbolicValue::Ptr(ptr) => {
-                        let value = RuntimePrimValue::Ptr(ptr).into();
-                        builder.push(Instruction::Copy {
-                            value,
-                            output: stack_index,
-                        });
-                    }
+        let mut reserved_outputs = HashMap::<OpIndex, StackIndex>::new();
+        let mut next_free_index = 0;
+        match output {
+            SymbolicValue::Result(op_index) => match &self[op_index].kind {
+                ExprKind::Tuple(elements) => {
+                    Either::Left(elements.iter().cloned())
+                }
+                _ => Either::Right(Some(output).into_iter()),
+            },
+            _ => Either::Right(Some(output).into_iter()),
+        }
+        .enumerate()
+        .for_each(|(i, value)| {
+            let stack_index = StackIndex(i);
+            next_free_index += 1;
+            match value {
+                SymbolicValue::Result(op_index) => {
+                    reserved_outputs.insert(op_index, stack_index);
+                }
+                other => {
+                    let value: VMArg = other
+                        .as_prim_value()
+                        .expect("Only SymbolicValue::Result returns None")
+                        .into();
+                    builder.push(Instruction::Copy {
+                        value,
+                        output: stack_index,
+                    });
                 }
             }
-            output_lookup
-        };
+        });
+        let num_outputs = next_free_index;
 
         let scope = self.operation_scope();
 
@@ -197,9 +185,9 @@ impl SymbolicGraph {
             dead_indices: &mut dead_indices,
             native_functions: &native_functions,
             native_function_lookup: &native_function_lookup,
-            reserved_outputs: &mut output_lookup,
+            reserved_outputs: &mut reserved_outputs,
             currently_stored: &mut currently_stored,
-            previously_consumed: HashSet::new(),
+            previously_consumed: HashMap::new(),
             show_steps,
         };
         translater.translate(iter_op_indices)?;
@@ -386,7 +374,11 @@ impl<'a> LastUsageCollector<'a> {
                     mark_value!(encountered, *output);
                 }
 
-                ExprKind::IfElse { condition, .. } => {
+                ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => {
                     mark_value!(encountered, *condition);
 
                     let mut encountered_if: HashSet<OpIndex> =
@@ -396,6 +388,7 @@ impl<'a> LastUsageCollector<'a> {
                         last_usage,
                         self.iter_scope(Scope::IfBranch(visiting)),
                     );
+                    mark_value!(encountered_if, *if_branch);
 
                     let mut encountered_else: HashSet<OpIndex> =
                         encountered.clone();
@@ -404,6 +397,7 @@ impl<'a> LastUsageCollector<'a> {
                         last_usage,
                         self.iter_scope(Scope::ElseBranch(visiting)),
                     );
+                    mark_value!(encountered_else, *else_branch);
 
                     if let Some(start_of_else) =
                         self.iter_scope(Scope::ElseBranch(visiting)).next()
@@ -486,7 +480,11 @@ impl<'a> std::fmt::Display for LocalIndexPrinter<'a> {
 }
 
 impl ExpressionTranslator<'_> {
-    fn value_to_arg(&self, value: &SymbolicValue) -> Result<VMArg, Error> {
+    fn value_to_arg(
+        &self,
+        usage: OpIndex,
+        value: &SymbolicValue,
+    ) -> Result<VMArg, Error> {
         match value {
             &SymbolicValue::Bool(value) => {
                 Ok(VMArg::Const(RuntimePrimValue::Bool(value)))
@@ -498,7 +496,7 @@ impl ExpressionTranslator<'_> {
                 Ok(VMArg::Const(RuntimePrimValue::Ptr(ptr)))
             }
             SymbolicValue::Result(op_index)
-                if self.previously_consumed.contains(&op_index) =>
+                if self.previously_consumed.contains_key(&op_index) =>
             {
                 Err(Error::AttemptedUseOfConsumedValue)
             }
@@ -508,9 +506,10 @@ impl ExpressionTranslator<'_> {
                 .unwrap_or_else(|| {
                     panic!(
                         "Internal error, \
-                         {op_index} was not previously translated.  \
-                         This op is expression {}",
-                        self.graph[*op_index].kind
+                         expression {usage} ({}) attempted to use \
+                         {op_index} ({}), \
+                         but {op_index} was not previously translated.",
+                        self.graph[usage].kind, self.graph[*op_index].kind,
                     )
                 })
                 .clone()),
@@ -601,8 +600,8 @@ impl ExpressionTranslator<'_> {
 
             macro_rules! handle_binary_op {
                 ($variant:ident, $lhs:expr, $rhs:expr) => {{
-                    let lhs = self.value_to_arg($lhs)?;
-                    let rhs = self.value_to_arg($rhs)?;
+                    let lhs = self.value_to_arg(op_index, $lhs)?;
+                    let rhs = self.value_to_arg(op_index, $rhs)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -614,6 +613,59 @@ impl ExpressionTranslator<'_> {
                         format!("evaluate {expr_name}"),
                     );
                     self.currently_stored.insert(op_index, op_output.into());
+                }};
+            }
+
+            macro_rules! handle_scope {
+                ($value:expr,
+                 $stack_index:expr,
+                 $scope:expr $(,)?
+                ) => {{
+                    if let &SymbolicValue::Result(scope_output) = $value {
+                        if !self.currently_stored.contains_key(&scope_output) {
+                            self.reserved_outputs
+                                .insert(scope_output, $stack_index);
+                            let iter_scope = self
+                                .instructions_by_scope
+                                .get(&$scope)
+                                .into_iter()
+                                .flatten()
+                                .cloned()
+                                .filter(|&op| {
+                                    !matches!(
+                                        self.graph[op].kind,
+                                        ExprKind::Function { .. },
+                                    )
+                                });
+                            let iter_scope: Box<dyn Iterator<Item = OpIndex>> =
+                                Box::new(iter_scope);
+
+                            self.translate(iter_scope)?;
+                            self.reserved_outputs.remove(&scope_output);
+                        }
+                    }
+                    match self.value_to_arg(op_index, $value)? {
+                        VMArg::Const(value) => {
+                            push_annotated!(
+                                Instruction::Copy {
+                                    value: value.into(),
+                                    output: $stack_index,
+                                },
+                                format!("copy output of {expr_name}"),
+                            );
+                        }
+                        VMArg::SavedValue(body_output) => {
+                            if body_output != $stack_index {
+                                push_annotated!(
+                                    Instruction::Swap(
+                                        body_output,
+                                        $stack_index,
+                                    ),
+                                    format!("move output of {expr_name}"),
+                                );
+                            }
+                        }
+                    }
                 }};
             }
 
@@ -654,7 +706,7 @@ impl ExpressionTranslator<'_> {
                     {
                         let mut vm_args = Vec::new();
                         for arg in args {
-                            vm_args.push(self.value_to_arg(arg)?);
+                            vm_args.push(self.value_to_arg(op_index, arg)?);
                         }
 
                         let mutates_first_argument = self.native_functions
@@ -696,7 +748,8 @@ impl ExpressionTranslator<'_> {
                             );
 
                             self.currently_stored.remove(&first_arg_op);
-                            self.previously_consumed.insert(first_arg_op);
+                            self.previously_consumed
+                                .insert(first_arg_op, op_index);
 
                             if let Some(&required_output) =
                                 self.reserved_outputs.get(&op_index)
@@ -753,8 +806,8 @@ impl ExpressionTranslator<'_> {
                     extent,
                     reduction,
                 } => {
-                    let initial = self.value_to_arg(initial)?;
-                    let extent = self.value_to_arg(extent)?;
+                    let initial = self.value_to_arg(op_index, initial)?;
+                    let extent = self.value_to_arg(op_index, extent)?;
 
                     let op_output = self.get_output_index(op_index);
 
@@ -869,52 +922,11 @@ impl ExpressionTranslator<'_> {
                             self.currently_stored
                                 .insert(index, loop_iter.into());
 
-                            if let &SymbolicValue::Result(output) = output {
-                                let iter_body = self
-                                    .instructions_by_scope
-                                    .get(&Scope::Function(reduction_index))
-                                    .into_iter()
-                                    .flatten()
-                                    .cloned()
-                                    .filter(|&op| {
-                                        !matches!(
-                                            self.graph[op].kind,
-                                            ExprKind::Function { .. }
-                                        )
-                                    });
-                                let iter_body: Box<
-                                    dyn Iterator<Item = OpIndex>,
-                                > = Box::new(iter_body);
-
-                                self.reserved_outputs.insert(output, op_output);
-                                self.translate(iter_body)?;
-                                self.reserved_outputs.remove(&output);
-                            }
-
-                            match self.value_to_arg(output)? {
-                                VMArg::Const(value) => {
-                                    push_annotated!(
-                                        Instruction::Copy {
-                                            value: value.into(),
-                                            output: op_output,
-                                        },
-                                        format!("copy output of {expr_name}"),
-                                    );
-                                }
-                                VMArg::SavedValue(body_output) => {
-                                    if body_output != op_output {
-                                        push_annotated!(
-                                            Instruction::Swap(
-                                                body_output,
-                                                op_output,
-                                            ),
-                                            format!(
-                                                "move output of {expr_name}"
-                                            ),
-                                        );
-                                    }
-                                }
-                            }
+                            handle_scope!(
+                                output,
+                                op_output,
+                                Scope::Function(reduction_index),
+                            );
 
                             self.currently_stored.remove(&accumulator);
                             self.currently_stored.remove(&index);
@@ -1009,7 +1021,7 @@ impl ExpressionTranslator<'_> {
                 }
 
                 ExprKind::IsSome(value) => {
-                    let value = self.value_to_arg(value)?;
+                    let value = self.value_to_arg(op_index, value)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1027,69 +1039,35 @@ impl ExpressionTranslator<'_> {
                     if_branch,
                     else_branch,
                 } => {
-                    let condition = self.value_to_arg(condition)?;
+                    let condition = self.value_to_arg(op_index, condition)?;
 
-                    self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     let mut cached_currently_stored =
                         self.currently_stored.clone();
+                    let mut cached_dead_indices = self.dead_indices.clone();
+                    let mut cached_previously_consumed =
+                        self.previously_consumed.clone();
 
                     let jump_to_if_branch_index = push_annotated!(
                         Instruction::NoOp,
                         format!("jump to if branch of {expr_name}"),
                     );
 
-                    match else_branch {
-                        &SymbolicValue::Result(else_index) => {
-                            if let Some(&existing) =
-                                self.currently_stored.get(&else_index)
-                            {
-                                if existing != VMArg::SavedValue(op_output) {
-                                    push_annotated!(
-                                        Instruction::Copy {
-                                            value: existing,
-                                            output: op_output
-                                        },
-                                        "move existing else-branch of {expr_name} \
-                                         to output of if/else"
-                                    );
-                                }
-                            } else {
-                                self.reserved_outputs
-                                    .insert(else_index, op_output);
-                                self.translate(
-                                    self.instructions_by_scope
-                                        .get(&Scope::ElseBranch(op_index))
-                                        .into_iter()
-                                        .flatten()
-                                        .cloned(),
-                                )?;
-                                self.reserved_outputs.remove(&else_index);
-                                std::mem::swap(
-                                    self.currently_stored,
-                                    &mut cached_currently_stored,
-                                );
-                            }
-                        }
-                        other => {
-                            push_annotated!(
-                                Instruction::Copy {
-                                    value: other
-                                        .as_prim_value()
-                                        .expect(
-                                            "Only SymbolicValue::Result \
-                                             should return None",
-                                        )
-                                        .into(),
-                                    output: op_output,
-                                },
-                                format!(
-                                    "copy else-branch output \
-                                     to {expr_name}"
-                                ),
-                            );
-                        }
-                    }
+                    handle_scope!(
+                        else_branch,
+                        op_output,
+                        Scope::ElseBranch(op_index),
+                    );
+
+                    std::mem::swap(
+                        self.currently_stored,
+                        &mut cached_currently_stored,
+                    );
+                    std::mem::swap(self.dead_indices, &mut cached_dead_indices);
+                    std::mem::swap(
+                        &mut self.previously_consumed,
+                        &mut cached_previously_consumed,
+                    );
 
                     let jump_to_branch_end_index = push_annotated!(
                         Instruction::NoOp,
@@ -1107,53 +1085,11 @@ impl ExpressionTranslator<'_> {
                         },
                     );
 
-                    match if_branch {
-                        &SymbolicValue::Result(if_index) => {
-                            if let Some(&existing) =
-                                self.currently_stored.get(&if_index)
-                            {
-                                if existing != VMArg::SavedValue(op_output) {
-                                    push_annotated!(
-                                        Instruction::Copy {
-                                            value: existing,
-                                            output: op_output
-                                        },
-                                        "move existing if-branch of {expr_name} \
-                                         to output of if/else"
-                                    );
-                                }
-                            } else {
-                                self.reserved_outputs
-                                    .insert(if_index, op_output);
-                                self.translate(
-                                    self.instructions_by_scope
-                                        .get(&Scope::IfBranch(op_index))
-                                        .into_iter()
-                                        .flatten()
-                                        .cloned(),
-                                )?;
-                                self.reserved_outputs.remove(&if_index);
-                            }
-                        }
-                        other => {
-                            push_annotated!(
-                                Instruction::Copy {
-                                    value: other
-                                        .as_prim_value()
-                                        .expect(
-                                            "Only SymbolicValue::Result \
-                                             should return None",
-                                        )
-                                        .into(),
-                                    output: op_output,
-                                },
-                                format!(
-                                    "copy if-branch output \
-                                     to {expr_name}"
-                                ),
-                            );
-                        }
-                    }
+                    handle_scope!(
+                        if_branch,
+                        op_output,
+                        Scope::IfBranch(op_index),
+                    );
 
                     self.instructions.update(
                         jump_to_branch_end_index,
@@ -1163,6 +1099,18 @@ impl ExpressionTranslator<'_> {
                         },
                     );
 
+                    // After the conditional, dead indices marked as dead
+                    // while following either branch are considered
+                    // dead.
+                    *self.dead_indices = cached_dead_indices
+                        .into_iter()
+                        .chain(self.dead_indices.iter().cloned())
+                        .unique()
+                        .collect();
+
+                    // Likewise, only values that are currently stored
+                    // at the end of both branches have a known
+                    // storage location after the conditional.
                     *self.currently_stored = cached_currently_stored
                         .into_iter()
                         .filter(|(op_index, _)| {
@@ -1198,7 +1146,7 @@ impl ExpressionTranslator<'_> {
                 ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
                 ExprKind::PrimCast { value, prim_type } => {
-                    let value = self.value_to_arg(value)?;
+                    let value = self.value_to_arg(op_index, value)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1212,7 +1160,7 @@ impl ExpressionTranslator<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
-                    let obj = self.value_to_arg(obj)?;
+                    let obj = self.value_to_arg(op_index, obj)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1226,7 +1174,7 @@ impl ExpressionTranslator<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
-                    let ptr = self.value_to_arg(ptr)?;
+                    let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1240,7 +1188,7 @@ impl ExpressionTranslator<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::ReadString { ptr } => {
-                    let ptr = self.value_to_arg(ptr)?;
+                    let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1253,7 +1201,7 @@ impl ExpressionTranslator<'_> {
                     self.currently_stored.insert(op_index, op_output.into());
                 }
                 ExprKind::PointerCast { ptr, .. } => {
-                    let ptr = self.value_to_arg(ptr)?;
+                    let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     push_annotated!(
@@ -1263,7 +1211,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, ptr);
+                    self.currently_stored.insert(op_index, op_output.into());
                 }
 
                 symbolic @ (ExprKind::StaticField(_)
