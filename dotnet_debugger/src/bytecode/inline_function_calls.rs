@@ -28,7 +28,12 @@ impl GraphRewrite for InlineFunctionCalls {
                         })
                         .collect();
 
-                    graph.substitute(&replacements, *output)?
+                    let output = *output;
+                    Some(
+                        graph
+                            .substitute(&replacements, output)?
+                            .unwrap_or(output),
+                    )
                 }
                 _ => None,
             },

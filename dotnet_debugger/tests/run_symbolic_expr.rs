@@ -92,6 +92,29 @@ fn eval_function_call() {
 }
 
 #[test]
+fn eval_function_call_with_unused_parameters() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                let i = 10;
+                fn func(j: usize) {
+                    i
+                }
+                func(42)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(10));
+}
+
+#[test]
 fn eval_native_function_call() {
     let mut graph = SymbolicGraph::new();
 
