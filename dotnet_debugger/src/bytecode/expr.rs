@@ -2139,12 +2139,6 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 
         if self.show_steps {
             println!("----------- After CSE --------------\n{expr}");
-            println!(
-                "----------- After CSE --------------\n{}",
-                expr.printer()
-                    .expand_all_expressions()
-                    .number_all_expressions(),
-            );
         }
 
         // Virtual machine, in terms of sequential operations.
@@ -2447,105 +2441,107 @@ impl ExprKind {
         }
     }
 
+    pub(crate) fn iter_input_values(
+        &self,
+    ) -> impl Iterator<Item = SymbolicValue> + '_ {
+        let (static_inputs, dynamic_inputs): (_, Option<&[SymbolicValue]>) =
+            match self {
+                // No upstream inputs
+                ExprKind::NativeFunction(_)
+                | ExprKind::FunctionArg(_)
+                | ExprKind::StaticField(_) => ([None, None, None], None),
+
+                // Dynamic number of upstream inputs
+                ExprKind::Function { params, output } => {
+                    ([Some(*output), None, None], Some(&params))
+                }
+                ExprKind::FunctionCall { func, args } => {
+                    ([Some(*func), None, None], Some(&args))
+                }
+                ExprKind::Tuple(items) => ([None, None, None], Some(&items)),
+                ExprKind::IndexAccess { obj, indices } => {
+                    ([Some(*obj), None, None], Some(&indices))
+                }
+
+                // One upstream input
+                ExprKind::Range { extent: value }
+                | ExprKind::Collect { iterator: value }
+                | ExprKind::FieldAccess { obj: value, .. }
+                | ExprKind::SymbolicDowncast { obj: value, .. }
+                | ExprKind::NumArrayElements { array: value }
+                | ExprKind::PointerCast { ptr: value, .. }
+                | ExprKind::IsSome(value)
+                | ExprKind::PrimCast { value, .. }
+                | ExprKind::PhysicalDowncast { obj: value, .. }
+                | ExprKind::ReadValue { ptr: value, .. }
+                | ExprKind::ReadString { ptr: value } => {
+                    ([Some(*value), None, None], None)
+                }
+
+                // Two upstreams inputs
+                &ExprKind::Map { iterator, map } => {
+                    ([Some(iterator), Some(map), None], None)
+                }
+                &ExprKind::Filter { iterator, filter } => {
+                    ([Some(iterator), Some(filter), None], None)
+                }
+                &ExprKind::ArrayExtent { array, dim } => {
+                    ([Some(array), Some(dim), None], None)
+                }
+
+                // Binary operators
+                &ExprKind::Equal { lhs, rhs }
+                | &ExprKind::NotEqual { lhs, rhs }
+                | &ExprKind::LessThan { lhs, rhs }
+                | &ExprKind::GreaterThan { lhs, rhs }
+                | &ExprKind::LessThanOrEqual { lhs, rhs }
+                | &ExprKind::GreaterThanOrEqual { lhs, rhs }
+                | &ExprKind::Add { lhs, rhs }
+                | &ExprKind::Mul { lhs, rhs }
+                | &ExprKind::Div { lhs, rhs }
+                | &ExprKind::Mod { lhs, rhs } => {
+                    ([Some(lhs), Some(rhs), None], None)
+                }
+
+                // Three upstreams inputs
+                &ExprKind::Reduce {
+                    initial,
+                    iterator,
+                    reduction,
+                } => ([Some(initial), Some(iterator), Some(reduction)], None),
+                &ExprKind::SimpleReduce {
+                    initial,
+                    extent,
+                    reduction,
+                } => ([Some(initial), Some(extent), Some(reduction)], None),
+                &ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => (
+                    [Some(condition), Some(if_branch), Some(else_branch)],
+                    None,
+                ),
+            };
+
+        let iter_static =
+            static_inputs.into_iter().filter_map(|opt_value| opt_value);
+        let iter_dynamic = dynamic_inputs.into_iter().flatten().cloned();
+        iter_static.chain(iter_dynamic)
+    }
+
+    pub(crate) fn iter_input_nodes(
+        &self,
+    ) -> impl Iterator<Item = OpIndex> + '_ {
+        self.iter_input_values()
+            .filter_map(|value| value.as_op_index())
+    }
+
     pub(crate) fn visit_reachable_nodes(
         &self,
-        mut callback: impl FnMut(SymbolicValue),
+        callback: impl FnMut(SymbolicValue),
     ) {
-        match self {
-            ExprKind::NativeFunction(_)
-            | ExprKind::FunctionArg(_)
-            | ExprKind::StaticField(_) => {}
-            ExprKind::Function { params, output } => {
-                params.iter().for_each(|param| callback(*param));
-                callback(*output);
-            }
-            ExprKind::FunctionCall { func, args } => {
-                callback(*func);
-                args.iter().for_each(|arg| callback(*arg));
-            }
-            ExprKind::Range { extent } => {
-                callback(*extent);
-            }
-            ExprKind::Map { iterator, map } => {
-                callback(*iterator);
-                callback(*map);
-            }
-            ExprKind::Filter { iterator, filter } => {
-                callback(*iterator);
-                callback(*filter);
-            }
-            ExprKind::Collect { iterator } => callback(*iterator),
-            ExprKind::Reduce {
-                initial,
-                iterator,
-                reduction,
-            } => {
-                callback(*initial);
-                callback(*iterator);
-                callback(*reduction);
-            }
-            ExprKind::SimpleReduce {
-                initial,
-                extent,
-                reduction,
-            } => {
-                callback(*initial);
-                callback(*extent);
-                callback(*reduction);
-            }
-            ExprKind::Tuple(elements) => {
-                elements.iter().for_each(|element| callback(*element));
-            }
-            ExprKind::FieldAccess { obj, .. } => {
-                callback(*obj);
-            }
-            ExprKind::IndexAccess { obj, indices } => {
-                callback(*obj);
-                indices.iter().for_each(|index| callback(*index));
-            }
-            ExprKind::PrimCast { value, .. } => callback(*value),
-            ExprKind::SymbolicDowncast { obj, .. } => callback(*obj),
-            ExprKind::NumArrayElements { array } => {
-                callback(*array);
-            }
-            ExprKind::ArrayExtent { array, dim } => {
-                callback(*array);
-                callback(*dim);
-            }
-            ExprKind::PointerCast { ptr, .. } => callback(*ptr),
-            ExprKind::IsSome(value) => callback(*value),
-            ExprKind::IfElse {
-                condition,
-                if_branch,
-                else_branch,
-            } => {
-                callback(*condition);
-                callback(*if_branch);
-                callback(*else_branch);
-            }
-
-            ExprKind::Equal { lhs, rhs }
-            | ExprKind::NotEqual { lhs, rhs }
-            | ExprKind::GreaterThan { lhs, rhs }
-            | ExprKind::LessThan { lhs, rhs }
-            | ExprKind::GreaterThanOrEqual { lhs, rhs }
-            | ExprKind::LessThanOrEqual { lhs, rhs }
-            | ExprKind::Add { lhs, rhs }
-            | ExprKind::Mul { lhs, rhs }
-            | ExprKind::Div { lhs, rhs }
-            | ExprKind::Mod { lhs, rhs } => {
-                callback(*lhs);
-                callback(*rhs);
-            }
-
-            ExprKind::PhysicalDowncast { obj, .. } => {
-                callback(*obj);
-            }
-            ExprKind::ReadValue { ptr, .. }
-            | ExprKind::ReadString { ptr, .. } => {
-                callback(*ptr);
-            }
-        }
+        self.iter_input_values().for_each(callback)
     }
 
     pub(crate) fn op_name(&self) -> &'static str {

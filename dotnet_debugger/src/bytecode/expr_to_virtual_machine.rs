@@ -225,62 +225,98 @@ impl SymbolicGraph {
             .map(|func_info| (func_info.scope, func_info))
             .collect();
 
-        let scope = self.operation_scope();
+        let operation_to_scope = self.operation_scope();
 
-        scope
+        // Step 1: Collect the body of each scope.
+        operation_to_scope
             .iter()
             .cloned()
             .enumerate()
             .map(|(i, scope)| (OpIndex::new(i), scope))
-            .for_each(|(op_index, scope)| {
-                if let Some(func_info) = scope_lookup.get_mut(&scope) {
+            .for_each(|(op_index, scope_info)| {
+                if let Some(func_info) = scope_lookup.get_mut(&scope_info) {
                     func_info.body.push(op_index);
                 }
             });
 
-        for func in info.iter_mut() {
-            if let Some(OpIndex(i)) = func.scope.op_index() {
-                func.parent_scope = scope[i];
+        // Step 2: Collect the parent of each scope.
+        for (_, scope_info) in scope_lookup.iter_mut() {
+            if let Some(OpIndex(i)) = scope_info.scope.op_index() {
+                scope_info.parent_scope = operation_to_scope[i];
             }
         }
 
-        for func in info.iter_mut() {
-            let parent_scopes: Vec<Scope> =
-                std::iter::successors(Some(func.parent_scope), |scope_obj| {
-                    scope_obj.op_index().map(|OpIndex(i)| scope[i])
+        // Step 3: Collect variables that are enclosed because they
+        // are directly used within a scope.
+        self.iter_ops()
+            .zip(operation_to_scope.iter().cloned())
+            .flat_map(|((op_index, op), scope)| match &op.kind {
+                // Generate an iterator whose elements are the node
+                // that was used, and the scope in which that usage
+                // occurred.  For most expressions, this just iterates
+                // over the inputs.  The Function and IfElse
+                // expression types are handled separately, as their
+                // inputs are used within a child scope.
+                ExprKind::Function { params, output } => {
+                    let iter = params
+                        .iter()
+                        .chain(Some(output))
+                        .filter_map(|value| value.as_op_index())
+                        .map(move |usage| (usage, Scope::Function(op_index)));
+                    Either::Left(Either::Left(iter))
+                }
+                ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => {
+                    let iter = [
+                        (condition, scope),
+                        (if_branch, Scope::IfBranch(op_index)),
+                        (else_branch, Scope::ElseBranch(op_index)),
+                    ]
+                    .into_iter()
+                    .filter_map(
+                        |(value_used, used_in_scope)| {
+                            value_used
+                                .as_op_index()
+                                .map(|node_used| (node_used, used_in_scope))
+                        },
+                    );
+                    Either::Left(Either::Right(iter))
+                }
+                other => {
+                    let iter = other
+                        .iter_input_nodes()
+                        .map(move |usage| (usage, scope));
+                    Either::Right(iter)
+                }
+            })
+            .flat_map(|(index_used, used_in_scope)| {
+                // For each usage, walk up the scope tree until
+                // encountering the scope that defines the expression.
+                let OpIndex(i) = index_used;
+                let definition_scope = operation_to_scope[i];
+                std::iter::successors(Some(used_in_scope), |scope| {
+                    scope_lookup
+                        .get(scope)
+                        .and_then(|info| Some(info.parent_scope))
                 })
-                .collect();
-
-            let mut enclosed: HashSet<OpIndex> = HashSet::new();
-            let mut do_visit = |value| {
-                if let SymbolicValue::Result(prev_index) = value {
-                    let value_scope = &scope[prev_index.0];
-                    if parent_scopes.iter().any(|scope| value_scope == scope) {
-                        enclosed.insert(prev_index);
-                    }
-                }
-            };
-
-            if let Scope::Function(index) = func.scope {
-                match &self[index].kind {
-                    ExprKind::Function { output, .. } => {
-                        do_visit(*output);
-                    }
-                    _ => {
-                        unreachable!(
-                            "Index {index} collected as function, \
-                             but did not reference a function."
-                        );
-                    }
-                }
-            }
-            for op in func.body.iter().cloned() {
-                self[op].kind.visit_reachable_nodes(&mut do_visit);
-            }
-
-            func.enclosed =
-                enclosed.into_iter().sorted_by_key(|op| op.0).collect();
-        }
+                .take_while(move |scope| {
+                    *scope != Scope::Global && *scope != definition_scope
+                })
+                .map(move |scope| (scope, index_used))
+            })
+            .unique()
+            .sorted_by_key(|(_, op_index)| *op_index)
+            .into_group_map()
+            .into_iter()
+            .for_each(|(scope, enclosed)| {
+                scope_lookup
+                    .get_mut(&scope)
+                    .expect("Scope lookup should include all scopes")
+                    .enclosed = enclosed;
+            });
 
         info
     }
@@ -335,11 +371,12 @@ impl<'a> LastUsageCollector<'a> {
         func: SymbolicValue,
     ) -> impl Iterator<Item = OpIndex> + '_ {
         func.as_op_index()
-            .into_iter()
-            .filter_map(|func_index| {
+            .and_then(|func_index| {
                 self.scope_info_lookup.get(&Scope::Function(func_index))
             })
-            .flat_map(|info| info.enclosed.iter())
+            .map(|info| info.enclosed.iter())
+            .into_iter()
+            .flatten()
             .cloned()
     }
 

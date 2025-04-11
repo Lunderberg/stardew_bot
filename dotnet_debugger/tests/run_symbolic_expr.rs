@@ -503,6 +503,61 @@ fn eval_nested_reductions() {
 }
 
 #[test]
+fn eval_nested_reductions_with_enclosed_variables() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            fn outer_reduction(a:usize, b:usize) {
+                let b2 = b*2;
+                fn inner_reduction(c: usize,d: usize) {
+                    if d%2 == 0 {
+                        let sum = c;
+                        let sum = sum + b2;
+                        let sum = sum + b2;
+                        sum
+                    } else {
+                        let sum = c;
+                        let d2 = d*2;
+                        let sum = sum + d2;
+                        let sum = sum + d2;
+                        sum
+                    }
+                }
+                a + (0..b).reduce(0, inner_reduction)
+            }
+            pub fn main() {
+                (0..10).reduce(0, outer_reduction)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..10).fold(0, |a: usize, b: usize| {
+        let b2 = b * 2;
+        a + (0..b).fold(0, |c: usize, d: usize| {
+            if d % 2 == 0 {
+                let sum = c;
+                let sum = sum + b2;
+                let sum = sum + b2;
+                sum
+            } else {
+                let sum = c;
+                let d2 = d * 2;
+                let sum = sum + d2;
+                let sum = sum + d2;
+                sum
+            }
+        })
+    });
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
 fn eval_map_reduce() {
     let mut graph = SymbolicGraph::new();
 
