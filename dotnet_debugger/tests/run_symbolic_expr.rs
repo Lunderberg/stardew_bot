@@ -389,10 +389,8 @@ fn collect_two_vectors_of_integers() {
 fn collect_vector_of_rust_native_objects() {
     let mut graph = SymbolicGraph::new();
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, RustNativeObject)]
     struct MyObj(usize, usize);
-
-    impl RustNativeObject for MyObj {}
 
     let make_obj = graph.native_function(|a: usize, b: usize| MyObj(a, b));
     graph.name(make_obj, "make_obj").unwrap();
@@ -878,10 +876,8 @@ fn eval_iterator_map_collect() {
 fn eval_iterator_map_collect_native_obj() {
     let mut graph = SymbolicGraph::new();
 
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, PartialEq, RustNativeObject)]
     struct MyObj(usize, usize);
-
-    impl RustNativeObject for MyObj {}
 
     let make_obj = graph.native_function(|a: usize, b: usize| MyObj(a, b));
     graph.name(make_obj, "make_obj").unwrap();
@@ -953,10 +949,8 @@ fn reduction_with_last_usage_of_var() {
 fn reduce_into_vec_of_vecs() {
     let mut graph = SymbolicGraph::new();
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(Debug, Clone, PartialEq, RustNativeObject)]
     struct RustObj(Vec<usize>);
-
-    impl RustNativeObject for RustObj {}
 
     let new_obj =
         graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));
@@ -1021,10 +1015,8 @@ fn reduce_into_vec_of_vecs() {
 fn collect_into_vec_of_vecs() {
     let mut graph = SymbolicGraph::new();
 
-    #[derive(Debug, Clone, PartialEq)]
+    #[derive(RustNativeObject, Debug, Clone, PartialEq)]
     struct RustObj(Vec<usize>);
-
-    impl RustNativeObject for RustObj {}
 
     let new_obj =
         graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));

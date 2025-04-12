@@ -3,6 +3,8 @@ pub use error::Error;
 
 pub(crate) mod macros;
 
+pub use bytecode_proc_macros::*;
+
 mod typed_pointer;
 pub use typed_pointer::*;
 

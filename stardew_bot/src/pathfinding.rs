@@ -23,7 +23,7 @@ pub struct PathfindingUI {
 
 /// A region of the game.  Contains information extracted from the
 /// `StardewValley.GameLocation` objects.
-#[derive(Clone, Debug)]
+#[derive(RustNativeObject, Clone, Debug)]
 struct GameLocation {
     /// The unique name of the room.  Used as a lookup to refer to
     /// this location.
@@ -57,21 +57,21 @@ struct GameLocation {
     water_tiles: Option<Vec<bool>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Warp {
     location: Tile,
     target: Tile,
     target_room: String,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct ResourceClump {
     location: Position,
     shape: Rectangle,
     kind: ResourceClumpKind,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(RustNativeObject, Debug, Clone, Copy)]
 enum ResourceClumpKind {
     Stump,
     Boulder,
@@ -79,13 +79,13 @@ enum ResourceClumpKind {
     MineBoulder,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Bush {
     size: usize,
     position: Position,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Tree {
     position: Position,
     #[allow(dead_code)]
@@ -98,7 +98,7 @@ struct Tree {
     is_stump: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 enum TreeKind {
     Oak,
     Maple,
@@ -115,47 +115,37 @@ enum TreeKind {
     Birch,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Litter {
     position: Position,
     kind: LitterKind,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(RustNativeObject, Debug, Clone, PartialEq, Eq)]
 enum LitterKind {
     Stone,
     Wood,
     Fiber,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Rectangle {
     width: usize,
     height: usize,
 }
 
-#[derive(Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone)]
 struct Tile {
     right: isize,
     down: isize,
 }
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(RustNativeObject, Debug, PartialEq, Clone, Copy)]
 struct Position {
     right: f32,
     down: f32,
 }
 
-impl RustNativeObject for Tile {}
-impl RustNativeObject for Warp {}
-impl RustNativeObject for Position {}
-impl RustNativeObject for Rectangle {}
-impl RustNativeObject for ResourceClump {}
-impl RustNativeObject for ResourceClumpKind {}
-impl RustNativeObject for Tree {}
-impl RustNativeObject for Bush {}
-impl RustNativeObject for Litter {}
-impl RustNativeObject for GameLocation {}
 
 impl PathfindingUI {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {

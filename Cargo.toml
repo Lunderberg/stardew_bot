@@ -9,6 +9,7 @@ members = [
   "iterator_extensions",
   "tui_utils",
   "format_utils",
+  "bytecode_proc_macros",
 ]
 resolver = "2"
 
