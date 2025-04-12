@@ -163,8 +163,8 @@ impl StardewBot {
         layout.switch_to_buffer(0);
         layout.cycle_next();
         layout.cycle_next();
-        layout.switch_to_buffer(2);
-        // layout.switch_to_buffer(3);
+        // layout.switch_to_buffer(2);
+        layout.switch_to_buffer(4);
 
         Ok(Self {
             tui_globals,

@@ -1,7 +1,6 @@
 use std::fmt::Display;
 
-use dotnet_debugger::{CachedReader, SymbolicGraph};
-use itertools::Itertools as _;
+use dotnet_debugger::{CachedReader, RustNativeObject, SymbolicGraph};
 use ratatui::{
     layout::Constraint,
     style::Color,
@@ -24,6 +23,7 @@ pub struct PathfindingUI {
 
 /// A region of the game.  Contains information extracted from the
 /// `StardewValley.GameLocation` objects.
+#[derive(Clone, Debug)]
 struct GameLocation {
     /// The unique name of the room.  Used as a lookup to refer to
     /// this location.
@@ -49,24 +49,29 @@ struct GameLocation {
     /// during worldgen.
     trees: Vec<Tree>,
 
+    grass: Vec<Position>,
+
     litter: Vec<Litter>,
 
     /// Which tiles have water.
     water_tiles: Option<Vec<bool>>,
 }
 
+#[derive(Debug, Clone)]
 struct Warp {
     location: Tile,
     target: Tile,
     target_room: String,
 }
 
+#[derive(Debug, Clone)]
 struct ResourceClump {
     location: Position,
     shape: Rectangle,
     kind: ResourceClumpKind,
 }
 
+#[derive(Debug, Clone, Copy)]
 enum ResourceClumpKind {
     Stump,
     Boulder,
@@ -74,11 +79,13 @@ enum ResourceClumpKind {
     MineBoulder,
 }
 
+#[derive(Debug, Clone)]
 struct Bush {
     size: usize,
     position: Position,
 }
 
+#[derive(Debug, Clone)]
 struct Tree {
     position: Position,
     #[allow(dead_code)]
@@ -91,6 +98,7 @@ struct Tree {
     is_stump: bool,
 }
 
+#[derive(Debug, Clone)]
 enum TreeKind {
     Oak,
     Maple,
@@ -107,636 +115,458 @@ enum TreeKind {
     Birch,
 }
 
+#[derive(Debug, Clone)]
 struct Litter {
     position: Position,
     kind: LitterKind,
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum LitterKind {
     Stone,
     Wood,
     Fiber,
 }
 
+#[derive(Debug, Clone)]
 struct Rectangle {
     width: usize,
     height: usize,
 }
 
+#[derive(Debug, Clone)]
 struct Tile {
     right: isize,
     down: isize,
 }
 
-#[derive(PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 struct Position {
     right: f32,
     down: f32,
 }
 
+impl RustNativeObject for Tile {}
+impl RustNativeObject for Warp {}
+impl RustNativeObject for Position {}
+impl RustNativeObject for Rectangle {}
+impl RustNativeObject for ResourceClump {}
+impl RustNativeObject for ResourceClumpKind {}
+impl RustNativeObject for Tree {}
+impl RustNativeObject for Bush {}
+impl RustNativeObject for Litter {}
+impl RustNativeObject for GameLocation {}
+
 impl PathfindingUI {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {
-        let location_list = "StardewValley.Game1.game1\
-                             ._locations\
-                             .as::<System.Collections.ObjectModel.Collection`1<StardewValley.GameLocation>>()\
-                             .items\
-                             .as::<\
-                               System.Collections.Generic\
-                               .List`1<StardewValley.GameLocation>\
-                             >()";
+        let mut graph = SymbolicGraph::new();
 
-        let current_location = "StardewValley.Game1._player\
-                                .currentLocationRef\
-                                .locationName\
-                                .value";
+        let location_list = graph.parse(
+            "StardewValley.Game1.game1\
+                 ._locations\
+                 .as::<
+                     System.Collections.ObjectModel
+                     .Collection`1<StardewValley.GameLocation>
+                 >()\
+                 .items\
+                 .as::<\
+                   System.Collections.Generic\
+                   .List`1<StardewValley.GameLocation>\
+                 >()",
+        )?;
+        graph.name(location_list, "location_list")?;
 
-        let player_x = "StardewValley.Game1._player.position.Field.value.X";
-        let player_y = "StardewValley.Game1._player.position.Field.value.Y";
+        let new_tile = graph
+            .native_function(|right: isize, down: isize| Tile { right, down });
+        graph.name(new_tile, "new_tile")?;
 
-        let res = {
-            let mut graph = SymbolicGraph::new();
-            let outputs = [
-                format!("{location_list}._size").as_str(),
-                current_location,
-                player_x,
-                player_y,
-            ]
-            .into_iter()
-            .map(|expr| graph.parse(expr))
-            .collect::<Result<Vec<_>, _>>()?;
+        let new_position = graph
+            .native_function(|right: f32, down: f32| Position { right, down });
+        graph.name(new_position, "new_position")?;
 
-            let output = graph.tuple(outputs);
-            let main_func = graph.function_def(vec![], output);
-            graph.name(main_func, "main")?;
-            graph.mark_extern_func(main_func)?;
+        let new_rectangle =
+            graph.native_function(|width: usize, height: usize| Rectangle {
+                width,
+                height,
+            });
+        graph.name(new_rectangle, "new_rectangle")?;
 
-            let vm = graph.compile(reader)?;
-            let res = vm.evaluate(reader)?;
+        let new_warp = graph.native_function(
+            |location: &Tile, target: &Tile, target_room: &String| Warp {
+                location: location.clone(),
+                target: target.clone(),
+                target_room: target_room.clone(),
+            },
+        );
+        graph.name(new_warp, "new_warp")?;
 
-            res
-        };
-        let _num_locations: usize = res.get_as::<usize>(0)?.unwrap();
-        let current_location = res.get(1).unwrap().read_string_ptr(&reader)?;
-        let player_x: f32 = res.get_as::<f32>(2)?.unwrap();
-        let player_y: f32 = res.get_as::<f32>(3)?.unwrap();
+        let new_resource_clump_kind =
+            graph.native_function(|kind: i32| -> ResourceClumpKind {
+                kind.try_into().expect(
+                    "Allow NativeFunction to propagate \
+                         user-defined error types",
+                )
+            });
+        graph.name(new_resource_clump_kind, "new_resource_clump_kind")?;
 
-        let num_locations = 2;
+        let new_resource_clump = graph.native_function(
+            |location: &Position,
+             shape: &Rectangle,
+             kind: &ResourceClumpKind| {
+                ResourceClump {
+                    location: location.clone(),
+                    shape: shape.clone(),
+                    kind: kind.clone(),
+                }
+            },
+        );
+        graph.name(new_resource_clump, "new_resource_clump")?;
 
-        /// Helper struct to hold the per-location fields that are
-        /// read out for every location.  Fields within a location
-        /// that depend on one of these values are read out
-        /// later. (e.g. Reading the warps once it is known how many
-        /// warps are present.)
-        struct StaticLocationFields {
-            index: usize,
-            name: String,
-            shape: Rectangle,
-            num_warps: usize,
-            num_resource_clumps: usize,
-            num_features: usize,
-            num_large_features: usize,
-            num_objects: usize,
-            has_water_tiles: bool,
-        }
+        let new_tree = graph.native_function(
+            |position: &Position,
+             kind: &String,
+             growth_stage: i32,
+             has_seed: bool,
+             is_stump: bool| Tree {
+                position: position.clone(),
+                kind: kind.parse().unwrap(),
+                growth_stage,
+                has_seed,
+                is_stump,
+            },
+        );
+        graph.name(new_tree, "new_tree")?;
 
-        const FIELDS_PER_LOCATION: usize = 9;
+        let new_litter = graph.native_function(
+            |position: &Position, name: &String, category: i32| {
+                if category != -999 {
+                    return None;
+                }
+                let opt_kind = if name == "Twig" {
+                    Some(LitterKind::Wood)
+                } else if name == "Stone" {
+                    Some(LitterKind::Stone)
+                } else if name.to_lowercase().contains("weeds") {
+                    Some(LitterKind::Fiber)
+                } else {
+                    None
+                };
+                opt_kind.map(|kind| Litter {
+                    position: position.clone(),
+                    kind,
+                })
+            },
+        );
+        graph.name(new_litter, "new_litter")?;
 
-        let static_location_fields: Vec<StaticLocationFields> = {
-            let mut graph = SymbolicGraph::new();
+        let new_bush =
+            graph.native_function(|size: usize, position: &Position| Bush {
+                size,
+                position: position.clone(),
+            });
+        graph.name(new_bush, "new_bush")?;
 
-            let location_list =
-                graph.parse(&format!("{location_list}._items"))?;
-            let outputs: Vec<_> = (0..num_locations)
-                .flat_map(|i| {
-                    let location = graph.access_index(location_list, i);
+        let new_location = graph.native_function(
+            |name: &String,
+             shape: &Rectangle,
+             warps: &Vec<Warp>,
+             resource_clumps: &Vec<ResourceClump>,
+             grass: &Vec<Position>,
+             trees: &Vec<Tree>,
+             bushes: &Vec<Bush>,
+             litter: &Vec<Litter>,
+             water_tiles: &Vec<bool>| {
+                GameLocation {
+                    name: name.clone(),
+                    shape: shape.clone(),
+                    warps: warps.clone(),
+                    resource_clumps: resource_clumps.clone(),
+                    grass: grass.clone(),
+                    trees: trees.clone(),
+                    bushes: bushes.clone(),
+                    litter: litter.clone(),
+                    water_tiles: (!water_tiles.is_empty())
+                        .then(|| water_tiles.clone()),
+                }
+            },
+        );
+        graph.name(new_location, "new_location")?;
 
-                    let name = graph.access_field(location, "name.value");
+        graph.parse(stringify! {
+            fn get_location(i_loc: usize) {
+                let location = location_list._items[i_loc];
+                let name = location.name.value.read_string();
+                let size = location
+                    .map
+                    .m_layers
+                    ._items[0]
+                    .m_layerSize;
+                let width = size.Width.prim_cast::<usize>();
+                let height = size.Height.prim_cast::<usize>();
+                let shape = new_rectangle(width,height);
 
-                    let (width, height) = {
-                        let field =
-                            graph.access_field(location, "map.m_layers._items");
-                        let field = graph.access_index(field, 0);
-                        let field = graph.access_field(field, "m_layerSize");
+                let num_warps = location
+                    .warps
+                    .count
+                    .value
+                    .prim_cast::<usize>();
 
-                        let width = graph.access_field(field, "Width");
-                        let height = graph.access_field(field, "Height");
-
-                        (width, height)
-                    };
-
-                    let num_warps =
-                        graph.access_field(location, "warps.count.value");
-
-                    let num_resource_clumps = graph
-                        .access_field(location, "resourceClumps.list._size");
-
-                    let num_features = {
-                        let entries = graph.access_field(
-                            location,
-                            "terrainFeatures.dict._entries",
+                let warps = (0..num_warps)
+                    .map(|i_warp: usize| {
+                        let warp = location
+                            .warps
+                            .array
+                            .value
+                            .elements
+                            ._items[i_warp]
+                            .value;
+                        let location = new_tile(
+                            warp.x.value,
+                            warp.y.value,
                         );
-                        graph.num_array_elements(entries)
-                    };
-
-                    let num_large_features = graph.access_field(
-                        location,
-                        "largeTerrainFeatures.list._size",
-                    );
-
-                    let num_objects = {
-                        let array = graph.access_field(
-                            location,
-                            "objects.compositeDict._entries",
+                        let target = new_tile(
+                            warp.targetX.value,
+                            warp.targetY.value,
                         );
-                        graph.num_array_elements(array)
-                    };
-
-                    let water_tiles = {
-                        let field = graph.access_field(location, "waterTiles");
-                        let field =
-                            graph.downcast(field, "StardewValley.WaterTiles");
-                        graph.access_field(field, "waterTiles")
-                    };
-
-                    [
-                        name,
-                        width,
-                        height,
-                        num_warps,
-                        num_resource_clumps,
-                        num_features,
-                        num_large_features,
-                        num_objects,
-                        water_tiles,
-                    ]
-                })
-                .collect();
-
-            let output = graph.tuple(outputs);
-            let main_func = graph.function_def(vec![], output);
-            graph.name(main_func, "main")?;
-            graph.mark_extern_func(main_func)?;
-
-            let vm = graph.compile(reader)?;
-            let values = vm.evaluate(reader)?;
-
-            values
-                .chunks_exact(FIELDS_PER_LOCATION)
-                .enumerate()
-                .map(|(index, chunk)| {
-                    let mut next = {
-                        let mut iter_chunk = chunk.iter();
-                        move || iter_chunk.next().unwrap().as_ref()
-                    };
-
-                    let name = next().unwrap().read_string_ptr(&reader)?;
-                    let shape = {
-                        let width = next().unwrap().try_into()?;
-                        let height = next().unwrap().try_into()?;
-                        Rectangle { width, height }
-                    };
-
-                    let num_warps = next().unwrap().try_into()?;
-                    let num_resource_clumps = next().unwrap().try_into()?;
-                    let num_features = next()
-                        .map(|value| value.try_into())
-                        .transpose()?
-                        .unwrap_or(0);
-                    let num_large_features = next().unwrap().try_into()?;
-
-                    let num_objects = next()
-                        .map(|value| value.try_into())
-                        .transpose()?
-                        .unwrap_or(0);
-
-                    let has_water_tiles = next().is_some();
-
-                    Ok(StaticLocationFields {
-                        index,
-                        name,
-                        shape,
-                        num_warps,
-                        num_resource_clumps,
-                        num_features,
-                        num_large_features,
-                        num_objects,
-                        has_water_tiles,
-                    })
-                })
-                .collect::<Result<Vec<_>, Error>>()?
-        };
-
-        let mut iter_values_within_location = {
-            let mut graph = SymbolicGraph::new();
-
-            let location_list =
-                graph.parse(&format!("{location_list}._items"))?;
-
-            let outputs = static_location_fields
-                .iter()
-                .flat_map(|loc| {
-                    let location = graph.access_index(location_list, loc.index);
-
-                    let warps = graph.access_field(
-                        location,
-                        "warps.array.value.elements._items",
-                    );
-
-                    let warp_fields = (0..loc.num_warps)
-                        .flat_map(|i_warp| {
-                            let warp = {
-                                let element = graph.access_index(warps, i_warp);
-                                graph.access_field(element, "value")
-                            };
-
-                            ["x", "y", "targetX", "targetY", "targetName"]
-                                .into_iter()
-                                .map(|name| {
-                                    let field = graph.access_field(warp, name);
-                                    let field =
-                                        graph.access_field(field, "value");
-                                    field
-                                })
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter();
-
-                    let resource_clumps = graph
-                        .access_field(location, "resourceClumps.list._items");
-
-                    let clump_fields = (0..loc.num_resource_clumps)
-                        .flat_map(|i_clump| {
-                            let clump =
-                                graph.access_index(resource_clumps, i_clump);
-
-                            let right =
-                                graph.access_field(clump, "netTile.value.X");
-                            let down =
-                                graph.access_field(clump, "netTile.value.Y");
-                            let width =
-                                graph.access_field(clump, "width.value");
-                            let height =
-                                graph.access_field(clump, "height.value");
-
-                            let kind_index = graph
-                                .access_field(clump, "parentSheetIndex.value");
-
-                            [right, down, width, height, kind_index]
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter();
-
-                    let features = graph.access_field(
-                        location,
-                        "terrainFeatures.dict._entries",
-                    );
-                    let feature_fields = (0..loc.num_features)
-                        .flat_map(|i| {
-                            let feature = graph.access_index(features, i);
-
-                            let right = graph.access_field(feature, "key.X");
-                            let down = graph.access_field(feature, "key.Y");
-
-                            let obj =
-                                graph.access_field(feature, "value.value");
-
-                            let grass_health = {
-                                let grass = graph.downcast(
-                                    obj,
-                                    "StardewValley.TerrainFeatures.Grass",
-                                );
-                                graph.access_field(grass, "grassBladeHealth")
-                            };
-
-                            let tree_fields = {
-                                let tree = graph.downcast(
-                                    obj,
-                                    "StardewValley.TerrainFeatures.Tree",
-                                );
-                                // treeType looks like an integer, but has
-                                // been converted to a string.
-                                let tree_type =
-                                    graph.access_field(tree, "treeType.value");
-                                let growth_stage = graph
-                                    .access_field(tree, "growthStage.value");
-                                let has_seed =
-                                    graph.access_field(tree, "hasSeed.value");
-                                let is_stump =
-                                    graph.access_field(tree, "stump.value");
-                                [tree_type, growth_stage, has_seed, is_stump]
-                            };
-
-                            [right, down, grass_health]
-                                .into_iter()
-                                .chain(tree_fields)
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter();
-
-                    let large_features = graph.access_field(
-                        location,
-                        "largeTerrainFeatures.list._items",
-                    );
-                    let large_feature_fields = (0..loc.num_large_features)
-                        .flat_map(|i| {
-                            let feature = {
-                                let field =
-                                    graph.access_index(large_features, i);
-                                graph.downcast(
-                                    field,
-                                    "StardewValley.TerrainFeatures.Bush",
-                                )
-                            };
-                            let size =
-                                graph.access_field(feature, "size.value");
-                            let right = graph.access_field(
-                                feature,
-                                "netTilePosition.value.X",
-                            );
-                            let down = graph.access_field(
-                                feature,
-                                "netTilePosition.value.Y",
-                            );
-                            [size, right, down]
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter();
-
-                    let objects = graph.access_field(
-                        location,
-                        "objects.compositeDict._entries",
-                    );
-                    let object_fields = (0..loc.num_objects)
-                        .flat_map(|i| {
-                            let object = graph.access_index(objects, i);
-
-                            let right = graph.access_field(
-                                object,
-                                "value.tileLocation.value.X",
-                            );
-                            let down = graph.access_field(
-                                object,
-                                "value.tileLocation.value.Y",
-                            );
-
-                            let category = graph
-                                .access_field(object, "value.category.value");
-                            let name = graph
-                                .access_field(object, "value.netName.value");
-
-                            [right, down, category, name]
-                        })
-                        .collect::<Vec<_>>()
-                        .into_iter();
-
-                    let water_tiles =
-                        graph.access_field(location, "waterTiles.waterTiles");
-                    let water_tile_fields = (0..loc.shape.width)
-                        .cartesian_product(0..loc.shape.height)
-                        .filter(|_| loc.has_water_tiles)
-                        .map(|(i, j)| {
-                            let element =
-                                graph.access_indices(water_tiles, vec![i, j]);
-                            let element =
-                                graph.access_field(element, "isWater");
-                            element
-                        });
-
-                    std::iter::empty()
-                        .chain(warp_fields)
-                        .chain(clump_fields)
-                        .chain(feature_fields)
-                        .chain(large_feature_fields)
-                        .chain(object_fields)
-                        .chain(water_tile_fields)
-                        .collect::<Vec<_>>()
-                        .into_iter()
-                })
-                .collect();
-
-            let output = graph.tuple(outputs);
-            let main_func = graph.function_def(vec![], output);
-            graph.name(main_func, "main")?;
-            graph.mark_extern_func(main_func)?;
-
-            let vm = graph.compile(reader)?;
-            let values = vm.evaluate(reader)?;
-            values.into_iter()
-        };
-
-        let mut next_value = || {
-            iter_values_within_location.next().expect(
-                "Should have generated sufficient values for all fields",
-            )
-        };
-
-        let locations = static_location_fields
-            .into_iter()
-            .map(|loc| -> Result<_, Error> {
-                let warps = (0..loc.num_warps)
-                    .map(|_| -> Result<_, Error> {
-                        let x = next_value().unwrap();
-                        let y = next_value().unwrap();
-                        let target_x = next_value().unwrap();
-                        let target_y = next_value().unwrap();
-                        let target_name = next_value().unwrap();
-                        let location = {
-                            let right = x.try_into()?;
-                            let down = y.try_into()?;
-                            Tile { right, down }
-                        };
-                        let target = {
-                            let right = target_x.try_into()?;
-                            let down = target_y.try_into()?;
-                            Tile { right, down }
-                        };
-                        let target_room =
-                            target_name.read_string_ptr(&reader)?;
-                        Ok(Warp {
+                        let target_room = warp
+                            .targetName
+                            .value
+                            .read_string();
+                        new_warp(
                             location,
                             target,
                             target_room,
-                        })
+                        )
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .filter(|obj| obj.is_some())
+                    .collect();
 
-                let resource_clumps = (0..loc.num_resource_clumps)
-                    .map(|_| -> Result<_, Error> {
+                let num_resource_clumps = location
+                    .resourceClumps
+                    .list
+                    ._size
+                    .prim_cast::<usize>();
+                let resource_clumps = (0..num_resource_clumps)
+                    .map(|i_clump: usize| {
+                        let clump = location
+                            .resourceClumps
+                            .list
+                            ._items[i_clump];
                         let location = {
-                            let right = next_value().unwrap().try_into()?;
-                            let down = next_value().unwrap().try_into()?;
-                            Position { right, down }
+                            let right = clump.netTile.value.X;
+                            let down = clump.netTile.value.Y;
+                            new_position(right,down)
                         };
                         let shape = {
-                            let width = next_value().unwrap().try_into()?;
-                            let height = next_value().unwrap().try_into()?;
-                            Rectangle { width, height }
+                            let width = clump.width.value;
+                            let height = clump.height.value;
+                            new_rectangle(width,height)
                         };
 
-                        let kind: ResourceClumpKind = {
-                            let index: i32 =
-                                next_value().unwrap().try_into()?;
-                            index.try_into()?
+                        let kind = {
+                            let kind_index = clump.parentSheetIndex.value;
+                            new_resource_clump_kind(kind_index)
                         };
-
-                        Ok(ResourceClump {
-                            location,
-                            shape,
-                            kind,
-                        })
+                        new_resource_clump(location,shape,kind)
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .filter(|obj| obj.is_some())
+                    .collect();
 
-                let mut trees = Vec::new();
-                let mut grass = Vec::new();
-                for _ in 0..loc.num_features {
-                    let position = {
-                        let right = next_value().unwrap().try_into()?;
-                        let down = next_value().unwrap().try_into()?;
-                        Position { right, down }
-                    };
-                    let grass_health: Option<i32> =
-                        next_value().map(TryInto::try_into).transpose()?;
-                    let tree = {
-                        let tree_type = next_value();
-                        let growth_stage = next_value();
-                        let has_seed = next_value();
-                        let is_stump = next_value();
-                        if tree_type.is_some() {
-                            Some(Tree {
-                                position,
-                                kind: tree_type
-                                    .unwrap()
-                                    .read_string_ptr(&reader)?
-                                    .parse()?,
-                                growth_stage: growth_stage
-                                    .unwrap()
-                                    .try_into()?,
-                                has_seed: has_seed.unwrap().try_into()?,
-                                is_stump: is_stump.unwrap().try_into()?,
-                            })
-                        } else {
-                            None
-                        }
-                    };
+                let num_features = location
+                    .terrainFeatures
+                    .dict
+                    ._entries
+                    .len();
+                let num_features = if num_features.is_some() { num_features } else { 0 };
+                let iter_features = (0..num_features)
+                    .map(|i_feat: usize| {
+                        location
+                            .terrainFeatures
+                            .dict
+                            ._entries[i_feat]
+                    });
 
-                    if let Some(tree) = tree {
-                        trees.push(tree);
-                    }
-                    if let Some(_) = grass_health {
-                        grass.push(position);
-                    }
-                }
-
-                let bushes = (0..loc.num_large_features)
-                    .filter_map(|_| {
-                        let size = next_value();
-                        let right = next_value();
-                        let down = next_value();
-
-                        let size = match size?.try_into() {
-                            Ok(val) => val,
-                            Err(err) => {
-                                return Some(Err(err));
-                            }
-                        };
-                        let location = {
-                            let right = match right?.try_into() {
-                                Ok(val) => val,
-                                Err(err) => {
-                                    return Some(Err(err));
-                                }
-                            };
-                            let down = match down?.try_into() {
-                                Ok(val) => val,
-                                Err(err) => {
-                                    return Some(Err(err));
-                                }
-                            };
-                            Position { right, down }
-                        };
-                        Some(Ok(Bush {
-                            size,
-                            position: location,
-                        }))
+                let grass = iter_features
+                    .filter(|feature| feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Grass>()
+                            .grassBladeHealth
+                            .is_some())
+                    .map(|feature| {
+                        let right = feature.key.X;
+                        let down = feature.key.Y;
+                        new_position(right,down)
                     })
-                    .collect::<Result<Vec<_>, _>>()?;
+                    .collect();
 
-                let mut litter = Vec::new();
-                for _ in 0..loc.num_objects {
-                    let right = next_value();
-                    let down = next_value();
-                    let category = next_value();
-                    let name = next_value();
-                    let opt_litter = category
-                        .map(|value| value.try_into())
-                        .transpose()?
-                        .filter(|category: &isize| *category == -999)
-                        .map(|_| -> Result<_, Error> {
-                            let name =
-                                name.unwrap().read_string_ptr(&reader)?;
-                            let kind = if name == "Twig" {
-                                Some(LitterKind::Wood)
-                            } else if name == "Stone" {
-                                Some(LitterKind::Stone)
-                            } else if name.to_lowercase().contains("weeds") {
-                                Some(LitterKind::Fiber)
-                            } else {
-                                None
-                            };
-                            Ok(kind)
-                        })
-                        .transpose()?
-                        .flatten()
-                        .map(|kind| -> Result<_, Error> {
-                            let position = {
-                                let right = right.unwrap().try_into()?;
-                                let down = down.unwrap().try_into()?;
-                                Position { right, down }
-                            };
-                            Ok(Litter { position, kind })
-                        })
-                        .transpose()?;
-                    if let Some(obj) = opt_litter {
-                        litter.push(obj);
-                    }
-                }
-
-                let water_tiles = loc
-                    .has_water_tiles
-                    .then(|| -> Result<_, Error> {
-                        let is_water = (0..loc.shape.width)
-                            .cartesian_product(0..loc.shape.height)
-                            .map(|(_i, _j)| next_value().unwrap().try_into())
-                            .collect::<Result<Vec<_>, _>>()?;
-                        Ok(is_water)
+                let trees = iter_features
+                    .filter(|feature| feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Tree>()
+                            .is_some())
+                    .map(|feature| {
+                        let tree = feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Tree>();
+                        let position = {
+                            let right = feature.key.X;
+                            let down = feature.key.Y;
+                            new_position(right,down)
+                        };
+                        // treeType looks like an integer, but has
+                        // been converted to a string.
+                        let tree_type =
+                            tree.treeType.value.read_string();
+                        let growth_stage = tree.growthStage.value;
+                        let has_seed = tree.hasSeed.value;
+                        let is_stump = tree.stump.value;
+                        new_tree(
+                            position,
+                            tree_type,
+                            growth_stage,
+                            has_seed,
+                            is_stump
+                        )
                     })
-                    .transpose()?;
+                    .collect();
 
-                Ok(GameLocation {
-                    name: loc.name,
-                    shape: loc.shape,
+                let num_large_features = location
+                    .largeTerrainFeatures
+                    .list
+                    ._size
+                    .prim_cast::<usize>();
+                let bushes = (0..num_large_features)
+                    .map(|i| {
+                        location
+                            .largeTerrainFeatures
+                            .list
+                            ._items[i]
+                            .as::<StardewValley.TerrainFeatures.Bush>()
+                    })
+                    .map(|feature| {
+                        let size = feature.size.value;
+                        let position = {
+                            let right = feature.netTilePosition.value.X;
+                            let down = feature.netTilePosition.value.Y;
+                            new_position(right,down)
+                        };
+                        new_bush(size,position)
+                    })
+                    .collect();
+
+                let num_objects = location
+                    .objects
+                    .compositeDict
+                    ._entries
+                    .len();
+                let litter = (0..num_objects)
+                    .map(|i| {
+                        location
+                            .objects
+                            .compositeDict
+                            ._entries[i]
+                    })
+                    .map(|obj| {
+                        let position = {
+                            let right = obj.value.tileLocation.value.X;
+                            let down = obj.value.tileLocation.value.Y;
+                            new_position(right,down)
+                        };
+                        let name = obj.value.netName.value.read_string();
+                        let category = obj.value.category.value;
+                        new_litter(position,name,category)
+                    })
+                    .filter(|litter| litter.is_some())
+                    .collect();
+
+                let water_tiles = location
+                    .waterTiles
+                    .as::<StardewValley.WaterTiles>()
+                    .waterTiles;
+                let has_water_tiles = water_tiles.is_some();
+                let flattened_water_tiles = (0..(height*width))
+                    .filter(|i| has_water_tiles)
+                    .map(|i| {
+                        water_tiles[i/height, i%height].isWater
+                    })
+                    .collect();
+
+                new_location(
+                    name,
+                    shape,
                     warps,
                     resource_clumps,
-                    bushes,
+                    grass,
                     trees,
+                    bushes,
                     litter,
-                    water_tiles,
-                })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
+                    flattened_water_tiles,
+                )
+            }
 
-        Ok(Self {
-            locations,
-            current_location,
-            position: Position {
-                right: player_x,
-                down: player_y,
-            },
-        })
+            pub fn main() {
+                let num_locations = location_list._size.prim_cast::<usize>();
+
+                let locations = (0..num_locations)
+                    .map(get_location)
+                    .collect();
+
+                let player_position = {
+                    let pos = StardewValley
+                        .Game1
+                        ._player
+                        .position
+                        .Field
+                        .value;
+                    new_position(pos.X, pos.Y)
+                };
+
+                let current_location = StardewValley
+                    .Game1
+                    ._player
+                    .currentLocationRef
+                    .locationName
+                    .value
+                    .read_string();
+
+                (
+                    locations,
+                    current_location,
+                    player_position,
+                )
+            }
+        })?;
+
+        let vm = graph.compile(reader)?;
+        let res = vm.evaluate(reader)?;
+
+        let locations = res
+            .get_any(0)?
+            .expect("Vector should exist")
+            .downcast_ref::<Vec<GameLocation>>()
+            .expect("Vector should be Vec<Location>");
+
+        let current_location = res
+            .get_any(1)?
+            .expect("current_location shoudl exist")
+            .downcast_ref::<String>()
+            .expect("Current location should be string");
+
+        let position = res
+            .get_any(2)?
+            .expect("Player location shoudl exist")
+            .downcast_ref::<Position>()
+            .expect("Player location should be Position");
+
+        let pathfinding = Self {
+            locations: locations.clone(),
+            current_location: current_location.clone(),
+            position: position.clone(),
+        };
+        return Ok(pathfinding);
     }
 }
 
@@ -934,6 +764,24 @@ impl WidgetWindow<Error> for PathfindingUI {
                         ctx.draw(&Points {
                             coords: &trees,
                             color: Color::Rgb(133, 74, 5),
+                        });
+                    }
+
+                    {
+                        let grass = loc
+                            .grass
+                            .iter()
+                            .map(|grass_pos| {
+                                (
+                                    grass_pos.right as f64,
+                                    (loc.shape.height as f64)
+                                        - (grass_pos.down as f64),
+                                )
+                            })
+                            .collect::<Vec<_>>();
+                        ctx.draw(&Points {
+                            coords: &grass,
+                            color: Color::Rgb(10, 80, 10),
                         });
                     }
 
