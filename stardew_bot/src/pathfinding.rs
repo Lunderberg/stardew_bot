@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use std::fmt::Display;
 
 use dotnet_debugger::{CachedReader, RustNativeObject, SymbolicGraph};
@@ -55,6 +56,8 @@ struct GameLocation {
 
     /// Which tiles have water.
     water_tiles: Option<Vec<bool>>,
+
+    buildings: Vec<Building>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -146,6 +149,27 @@ struct Position {
     down: f32,
 }
 
+#[derive(RustNativeObject, Debug, Clone)]
+struct Building {
+    /// The position of the top-left corner of the building
+    loc: Tile,
+
+    /// The size of the building
+    shape: Rectangle,
+
+    /// The door to the inside of the building
+    door: Option<BuildingDoor>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+struct BuildingDoor {
+    /// The location of the door, relative to the top-left corner of
+    /// the building.
+    relative_location: Tile,
+
+    /// The name of the GameLocation that is inside the building.
+    inside_name: String,
+}
 
 impl PathfindingUI {
     pub fn new(reader: CachedReader) -> Result<Self, Error> {
@@ -256,6 +280,24 @@ impl PathfindingUI {
             });
         graph.name(new_bush, "new_bush")?;
 
+        let new_building_door = graph.native_function(
+            |relative_location: &Tile, inside_name: &String| BuildingDoor {
+                relative_location: relative_location.clone(),
+                inside_name: inside_name.clone(),
+            },
+        );
+        graph.name(new_building_door, "new_building_door")?;
+
+        let new_building = graph.native_function(
+            |loc: &Tile, shape: &Rectangle, door: Option<&BuildingDoor>| {
+                let loc = loc.clone();
+                let shape = shape.clone();
+                let door = door.cloned();
+                Building { loc, shape, door }
+            },
+        );
+        graph.name(new_building, "new_building")?;
+
         let new_location = graph.native_function(
             |name: &String,
              shape: &Rectangle,
@@ -265,7 +307,8 @@ impl PathfindingUI {
              trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
              litter: &Vec<Litter>,
-             water_tiles: &Vec<bool>| {
+             water_tiles: &Vec<bool>,
+             buildings: &Vec<Building>| {
                 GameLocation {
                     name: name.clone(),
                     shape: shape.clone(),
@@ -277,15 +320,26 @@ impl PathfindingUI {
                     litter: litter.clone(),
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
+                    buildings: buildings.clone(),
                 }
             },
         );
         graph.name(new_location, "new_location")?;
 
         graph.parse(stringify! {
+            fn get_location_name_ptr(loc) {
+                let unique_name = loc.uniqueName.value;
+                let name = loc.name.value;
+                if unique_name.is_some() {
+                    unique_name
+                } else {
+                    name
+                }
+            }
+
             fn get_location(i_loc: usize) {
                 let location = location_list._items[i_loc];
-                let name = location.name.value.read_string();
+                let name = get_location_name_ptr(location).read_string();
                 let size = location
                     .map
                     .m_layers
@@ -484,6 +538,58 @@ impl PathfindingUI {
                     })
                     .collect();
 
+                let num_buildings = location
+                    .buildings
+                    .list
+                    ._size
+                    .prim_cast::<usize>();
+                let buildings = (0..num_buildings)
+                    .map(|i| location
+                         .buildings
+                         .list
+                         ._items[i]
+                    )
+                    .map(|building| {
+                        let loc = {
+                            let right = building.tileX.value;
+                            let down = building.tileY.value;
+                            new_tile(right,down)
+                        };
+
+                        let shape = {
+                            let width = building.tilesWide.value;
+                            let height = building.tilesHigh.value;
+                            new_rectangle(width,height)
+                        };
+
+                        let door = {
+                            let relative_location = {
+                                let right = building.humanDoor.value.X;
+                                let down = building.humanDoor.value.Y;
+                                new_tile(right,down)
+                            };
+
+                            let inside = building
+                                .indoors
+                                .value;
+
+                            let inside_name_ptr = if inside.is_some() {
+                                get_location_name_ptr(inside)
+                            } else {
+                                building
+                                    .nonInstancedIndoorsName
+                                    .value
+                            };
+
+                            let inside_name = inside_name_ptr.read_string();
+
+                            new_building_door(relative_location, inside_name)
+                        };
+
+                        new_building(loc, shape, door)
+                    })
+                    .collect();
+
                 new_location(
                     name,
                     shape,
@@ -494,6 +600,7 @@ impl PathfindingUI {
                     bushes,
                     litter,
                     flattened_water_tiles,
+                    buildings,
                 )
             }
 
