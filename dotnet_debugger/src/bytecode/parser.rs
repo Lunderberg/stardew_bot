@@ -138,6 +138,7 @@ pub enum Keyword {
     Else,
     True,
     False,
+    None,
 }
 
 #[derive(PartialOrd, PartialEq)]
@@ -429,6 +430,8 @@ impl<'a> SymbolicParser<'a> {
             TokenKind::Keyword(Keyword::True)
             | TokenKind::Keyword(Keyword::False) => self.expect_bool(),
 
+            TokenKind::Keyword(Keyword::None) => self.expect_none(),
+
             TokenKind::Ident
                 if self.identifiers.contains_key(peek_token.text) =>
             {
@@ -517,6 +520,14 @@ impl<'a> SymbolicParser<'a> {
         };
 
         Ok(value)
+    }
+
+    fn expect_none(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_kind("none", |kind| {
+            matches!(kind, TokenKind::Keyword(Keyword::None))
+        })?;
+
+        Ok(self.graph.none())
     }
 
     fn expect_bool(&mut self) -> Result<SymbolicValue, Error> {
@@ -1075,6 +1086,7 @@ impl Keyword {
             "else" => Some(Keyword::Else),
             "true" => Some(Keyword::True),
             "false" => Some(Keyword::False),
+            "None" => Some(Keyword::None),
             _ => None,
         }
     }

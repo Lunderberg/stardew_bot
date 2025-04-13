@@ -73,6 +73,9 @@ pub enum Instruction {
     /// Do nothing.
     NoOp,
 
+    /// Clear the specified location.
+    Clear { loc: StackIndex },
+
     /// Copy the value to the specified location.  Can be used to copy
     /// a value on the stack, or to store a constant value onto the
     /// stack.
@@ -941,6 +944,9 @@ impl VirtualMachine {
 
             match instruction {
                 Instruction::NoOp => {}
+                Instruction::Clear { loc } => {
+                    values[*loc] = None;
+                }
                 Instruction::Copy { value, output } => {
                     let value = arg_to_prim!(value, "Copy");
                     values[*output] = value.map(Into::into);
@@ -1271,7 +1277,7 @@ impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = StackIndex> + '_ {
         let (lhs, rhs, dyn_args) = match self {
             // Nullary instructions
-            Instruction::NoOp => (None, None, None),
+            Instruction::NoOp | Instruction::Clear { .. } => (None, None, None),
 
             // Unary instructions
             Instruction::Copy { value: arg, .. }
@@ -1328,7 +1334,8 @@ impl Instruction {
             | Instruction::NativeFunctionCall { output: None, .. }
             | Instruction::ConditionalJump { .. } => (None, None),
 
-            Instruction::Copy { output, .. }
+            Instruction::Clear { loc: output }
+            | Instruction::Copy { output, .. }
             | Instruction::NativeFunctionCall {
                 output: Some(output),
                 ..
@@ -1364,6 +1371,8 @@ impl Instruction {
     fn visit_indices(&mut self, mut callback: impl FnMut(&mut StackIndex)) {
         match self {
             Instruction::NoOp => {}
+
+            Instruction::Clear { loc } => callback(loc),
 
             Instruction::IsSome { value: arg, output }
             | Instruction::Not { arg, output }
@@ -1431,6 +1440,7 @@ impl Instruction {
     fn op_name(&self) -> &'static str {
         match self {
             Instruction::NoOp => "NoOp",
+            Instruction::Clear { .. } => "Clear",
             Instruction::Copy { .. } => "Copy",
             Instruction::Swap { .. } => "Swap",
             Instruction::ConditionalJump { .. } => "ConditionalJump",
@@ -1533,6 +1543,10 @@ impl Display for Instruction {
         match self {
             Instruction::NoOp => {
                 write!(f, "{{}}")
+            }
+
+            Instruction::Clear { loc } => {
+                write!(f, "{loc} = None;")
             }
 
             Instruction::ConditionalJump { cond, dest } => {

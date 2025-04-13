@@ -34,6 +34,9 @@ pub struct Expr {
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum ExprKind {
+    /// An empty expression
+    None,
+
     /// A variable argument to a function.
     FunctionArg(RuntimeType),
 
@@ -629,6 +632,10 @@ impl SymbolicGraph {
     //////////////////////////////////////////////////
     ////          Symbolic Operations              ///
     //////////////////////////////////////////////////
+
+    pub fn none(&mut self) -> SymbolicValue {
+        self.push(ExprKind::None)
+    }
 
     pub fn function_arg(
         &mut self,
@@ -2225,7 +2232,8 @@ impl ExprKind {
         }
 
         match self {
-            ExprKind::NativeFunction(_)
+            ExprKind::None
+            | ExprKind::NativeFunction(_)
             | ExprKind::FunctionArg(_)
             | ExprKind::StaticField(_) => None,
             ExprKind::Function { params, output } => {
@@ -2447,7 +2455,8 @@ impl ExprKind {
         let (static_inputs, dynamic_inputs): (_, Option<&[SymbolicValue]>) =
             match self {
                 // No upstream inputs
-                ExprKind::NativeFunction(_)
+                ExprKind::None
+                | ExprKind::NativeFunction(_)
                 | ExprKind::FunctionArg(_)
                 | ExprKind::StaticField(_) => ([None, None, None], None),
 
@@ -2546,6 +2555,7 @@ impl ExprKind {
 
     pub(crate) fn op_name(&self) -> &'static str {
         match self {
+            ExprKind::None => "None",
             ExprKind::FunctionArg { .. } => "FunctionArg",
             ExprKind::Function { .. } => "Function",
             ExprKind::FunctionCall { .. } => "FunctionCall",
@@ -2705,6 +2715,8 @@ impl<'a> GraphComparison<'a> {
             }
 
             let is_match = match lhs_kind {
+                ExprKind::None => matches!(rhs_kind, ExprKind::None),
+
                 ExprKind::Function {
                     params: lhs_params,
                     output: lhs_output,
@@ -3044,6 +3056,8 @@ impl Display for ExprKind {
         };
 
         match self {
+            ExprKind::None => write!(f, "None"),
+
             ExprKind::FunctionArg(ty) => {
                 write!(f, "_: {ty}")
             }

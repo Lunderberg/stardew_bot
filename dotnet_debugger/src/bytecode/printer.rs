@@ -187,28 +187,62 @@ impl<'a> GraphPrinter<'a> {
             vec![false; self.graph.num_operations()]
         } else {
             let mut num_usage = vec![0; self.graph.num_operations()];
+            self.graph
+                .iter_ops()
+                .filter(|(index, _)| reachable[index.0])
+                .flat_map(|(_, op)| op.kind.iter_input_nodes())
+                .for_each(|upstream_index| {
+                    num_usage[upstream_index.0] += 1;
+                });
+
             let mut used_by_child_scope =
                 vec![false; self.graph.num_operations()];
             self.graph
                 .iter_ops()
                 .filter(|(index, _)| reachable[index.0])
-                .for_each(|(downstream_index, op)| {
-                    let downstream_scope = match op.kind {
+                .flat_map(|(downstream_index, op)| {
+                    let op_scope = match &op.kind {
                         ExprKind::Function { .. } => {
                             Scope::Function(downstream_index)
                         }
                         _ => scope[downstream_index.0],
                     };
-                    op.visit_reachable_nodes(|input_value| {
-                        if let SymbolicValue::Result(upstream_index) =
-                            input_value
-                        {
-                            num_usage[upstream_index.0] += 1;
-                            if scope[upstream_index.0] != downstream_scope {
-                                used_by_child_scope[upstream_index.0] = true;
-                            }
-                        }
-                    })
+
+                    match &op.kind {
+                        ExprKind::IfElse {
+                            condition,
+                            if_branch,
+                            else_branch,
+                        } => Either::Left(
+                            [
+                                (*condition, op_scope),
+                                (*if_branch, Scope::IfBranch(downstream_index)),
+                                (
+                                    *else_branch,
+                                    Scope::ElseBranch(downstream_index),
+                                ),
+                            ]
+                            .into_iter()
+                            .filter_map(
+                                |(upstream_value, expected_scope)| {
+                                    upstream_value.as_op_index().map(
+                                        |upstream_index| {
+                                            (upstream_index, expected_scope)
+                                        },
+                                    )
+                                },
+                            ),
+                        ),
+                        other => Either::Right(other.iter_input_nodes().map(
+                            move |upstream_index| (upstream_index, op_scope),
+                        )),
+                    }
+                })
+                .filter(|(upstream_index, op_scope)| {
+                    scope[upstream_index.0] != *op_scope
+                })
+                .for_each(|(upstream_index, _)| {
+                    used_by_child_scope[upstream_index.0] = true;
                 });
 
             num_usage
@@ -530,6 +564,8 @@ impl<'a> GraphPrinter<'a> {
                     }
 
                     match &self.graph[index].kind {
+                        ExprKind::None => write!(fmt, "None")?,
+
                         ExprKind::FunctionArg(ty) => {
                             let index = make_index_printer(index);
                             write!(fmt, "{index}: {ty}")?;
@@ -783,6 +819,7 @@ impl<'a> GraphPrinter<'a> {
                                 .filter(|(_, op_scope)| {
                                     **op_scope == Scope::IfBranch(index)
                                 })
+                                .filter(|(i, _)| !inline_expr[*i])
                                 .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
                             let iter_else = scope
                                 .iter()
@@ -790,6 +827,7 @@ impl<'a> GraphPrinter<'a> {
                                 .filter(|(_, op_scope)| {
                                     **op_scope == Scope::ElseBranch(index)
                                 })
+                                .filter(|(i, _)| !inline_expr[*i])
                                 .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
 
                             std::iter::empty()

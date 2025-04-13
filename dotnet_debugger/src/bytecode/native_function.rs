@@ -121,10 +121,10 @@ trait WrapReturn {
 }
 
 trait UnwrapArg: Sized {
-    type Unwrapped<'t>;
+    type Unwrapped<'t>: 't;
     fn unwrap_arg<'t>(
-        arg: &'t mut StackValue,
-    ) -> Result<Self::Unwrapped<'t>, Error>;
+        arg: &'t mut Option<StackValue>,
+    ) -> Result<Option<Self::Unwrapped<'t>>, Error>;
 
     fn arg_signature_type() -> RuntimeType;
 
@@ -147,16 +147,19 @@ macro_rules! impl_prim_return {
         impl UnwrapArg for $prim {
             type Unwrapped<'t> = $prim;
             fn unwrap_arg<'t>(
-                arg: &'t mut StackValue,
-            ) -> Result<Self::Unwrapped<'t>, Error> {
+                arg: &'t mut Option<StackValue>,
+            ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
+                    None => Ok(None),
                     // Some primitive types may have automatic type
                     // conversions applied.  Therefore, when passing a
                     // primitive by value, use TryInto to apply these
                     // conversions rather than explicitly unwrapping
                     // the RuntimePrimValue.
-                    StackValue::Prim(prim) => (*prim).try_into(),
-                    other => Err(
+                    Some(StackValue::Prim(prim)) => {
+                        Some((*prim).try_into()).transpose()
+                    }
+                    Some(other) => Err(
                         VMExecutionError::InvalidArgumentForNativeFunction {
                             expected: RuntimeType::Prim(
                                 RuntimePrimType::$variant,
@@ -177,13 +180,14 @@ macro_rules! impl_prim_return {
             type Unwrapped<'t> = &'t $prim;
 
             fn unwrap_arg<'t>(
-                arg: &'t mut StackValue,
-            ) -> Result<Self::Unwrapped<'t>, Error> {
+                arg: &'t mut Option<StackValue>,
+            ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
-                    StackValue::Prim(RuntimePrimValue::$variant(prim)) => {
-                        Ok(prim)
-                    }
-                    other => Err(
+                    None => Ok(None),
+                    Some(StackValue::Prim(RuntimePrimValue::$variant(
+                        prim,
+                    ))) => Ok(Some(prim)),
+                    Some(other) => Err(
                         VMExecutionError::InvalidArgumentForNativeFunction {
                             expected: RuntimeType::Prim(
                                 RuntimePrimType::$variant,
@@ -204,13 +208,14 @@ macro_rules! impl_prim_return {
             type Unwrapped<'t> = &'t mut $prim;
 
             fn unwrap_arg<'t>(
-                arg: &'t mut StackValue,
-            ) -> Result<Self::Unwrapped<'t>, Error> {
+                arg: &'t mut Option<StackValue>,
+            ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
-                    StackValue::Prim(RuntimePrimValue::$variant(prim)) => {
-                        Ok(prim)
-                    }
-                    other => Err(
+                    None => Ok(None),
+                    Some(StackValue::Prim(RuntimePrimValue::$variant(
+                        prim,
+                    ))) => Ok(Some(prim)),
+                    Some(other) => Err(
                         VMExecutionError::InvalidArgumentForNativeFunction {
                             expected: RuntimeType::Prim(
                                 RuntimePrimType::$variant,
@@ -370,17 +375,25 @@ where
     type Unwrapped<'a> = &'a T;
 
     fn unwrap_arg<'a>(
-        arg: &'a mut StackValue,
-    ) -> Result<Self::Unwrapped<'a>, Error> {
-        let err: Error = VMExecutionError::InvalidArgumentForNativeFunction {
-            expected: RuntimeType::Rust(RustType::new::<T>()),
-            actual: arg.runtime_type(),
-        }
-        .into();
-        match arg {
-            StackValue::Native(native) => native.downcast_ref().ok_or(err),
-            _ => Err(err),
-        }
+        opt_arg: &'a mut Option<StackValue>,
+    ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
+        opt_arg
+            .as_ref()
+            .map(|arg| {
+                let err: Error =
+                    VMExecutionError::InvalidArgumentForNativeFunction {
+                        expected: RuntimeType::Rust(RustType::new::<T>()),
+                        actual: arg.runtime_type(),
+                    }
+                    .into();
+                match arg {
+                    StackValue::Native(native) => {
+                        native.downcast_ref().ok_or(err)
+                    }
+                    _ => Err(err),
+                }
+            })
+            .transpose()
     }
 
     fn arg_signature_type() -> RuntimeType {
@@ -395,17 +408,25 @@ where
     type Unwrapped<'a> = &'a mut T;
 
     fn unwrap_arg<'a>(
-        arg: &'a mut StackValue,
-    ) -> Result<Self::Unwrapped<'a>, Error> {
-        let err: Error = VMExecutionError::InvalidArgumentForNativeFunction {
-            expected: RuntimeType::Rust(RustType::new::<T>()),
-            actual: arg.runtime_type(),
-        }
-        .into();
-        match arg {
-            StackValue::Native(native) => native.downcast_mut().ok_or(err),
-            _ => Err(err),
-        }
+        opt_arg: &'a mut Option<StackValue>,
+    ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
+        opt_arg
+            .as_mut()
+            .map(|arg| {
+                let err: Error =
+                    VMExecutionError::InvalidArgumentForNativeFunction {
+                        expected: RuntimeType::Rust(RustType::new::<T>()),
+                        actual: arg.runtime_type(),
+                    }
+                    .into();
+                match arg {
+                    StackValue::Native(native) => {
+                        native.downcast_mut().ok_or(err)
+                    }
+                    _ => Err(err),
+                }
+            })
+            .transpose()
     }
 
     fn arg_signature_type() -> RuntimeType {
@@ -413,6 +434,26 @@ where
     }
 
     const IS_MUTABLE: bool = true;
+}
+
+impl<T> UnwrapArg for Option<T>
+where
+    T: UnwrapArg,
+{
+    type Unwrapped<'a> = Option<T::Unwrapped<'a>>;
+
+    fn unwrap_arg<'a>(
+        opt_arg: &'a mut Option<StackValue>,
+    ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
+        match opt_arg {
+            None => Ok(Some(None)),
+            some => Ok(Some(<T as UnwrapArg>::unwrap_arg(some)?)),
+        }
+    }
+
+    fn arg_signature_type() -> RuntimeType {
+        <T as UnwrapArg>::arg_signature_type()
+    }
 }
 
 pub struct WrappedNativeFunction<Func, ArgList> {
@@ -479,10 +520,12 @@ macro_rules! impl_wrapped_native_function {
                         let opt_arg = arg_iter
                             .next()
                             .expect("Handled by earlier size check.");
-                        let Some(arg) = opt_arg else {
+
+                        let opt_unwrapped = $arg_type::unwrap_arg(opt_arg)?;
+
+                        let Some(unwrapped) = opt_unwrapped else {
                             return Ok(None);
                         };
-                        let unwrapped = $arg_type::unwrap_arg(arg)?;
                         unwrapped
                     }),*
                 );

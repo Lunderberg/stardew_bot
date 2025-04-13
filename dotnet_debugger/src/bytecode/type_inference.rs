@@ -159,6 +159,8 @@ impl<'a> TypeInference<'a> {
 
             let expr_kind = &graph[index_to_infer].kind;
             let inferred_type = match expr_kind {
+                ExprKind::None => RuntimeType::Unknown,
+
                 ExprKind::Function { params, output } => {
                     let params = Some(
                         params

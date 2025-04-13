@@ -921,3 +921,22 @@ fn parse_iterator_collect() {
         },
     );
 }
+
+#[test]
+fn parse_none() {
+    require_identical_graph(
+        stringify! {
+            let res_main = if true { 100 } else { None };
+            pub fn main() { res_main }
+        },
+        |graph| {
+            let else_branch = graph.none();
+            let res_main = graph.if_else(true, 100, else_branch);
+            graph.name(res_main, "res_main").unwrap();
+
+            let func_main = graph.function_def(vec![], res_main);
+            graph.name(func_main, "main").unwrap();
+            graph.mark_extern_func(func_main).unwrap();
+        },
+    );
+}

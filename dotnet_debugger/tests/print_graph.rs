@@ -619,3 +619,27 @@ fn print_iterator_collect() {
 
     assert_eq!(printed, expected);
 }
+
+#[test]
+fn print_none() {
+    let mut graph = SymbolicGraph::new();
+
+    let else_branch = graph.none();
+    let res_main = graph.if_else(true, 100, else_branch);
+    graph.name(res_main, "res_main").unwrap();
+
+    let func_main = graph.function_def(vec![], res_main);
+    graph.name(func_main, "main").unwrap();
+    graph.mark_extern_func(func_main).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        let res_main = if true { 100 } else { None };
+        pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}

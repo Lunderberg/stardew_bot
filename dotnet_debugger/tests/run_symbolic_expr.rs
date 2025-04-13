@@ -191,6 +191,66 @@ fn parse_and_eval_native_function_call() {
 }
 
 #[test]
+fn native_function_call_accepting_prim_option() {
+    let mut graph = SymbolicGraph::new();
+
+    let func = graph.native_function(|opt_value: Option<usize>| {
+        if let Some(value) = opt_value {
+            value * value
+        } else {
+            100
+        }
+    });
+    graph.name(func, "func").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                func(None) + func(3)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(109));
+}
+
+#[test]
+fn native_function_call_accepting_native_option() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(RustNativeObject, PartialEq, Debug)]
+    struct RustObj(usize, usize);
+
+    let new_obj = graph.native_function(|a: usize, b: usize| RustObj(a, b));
+    graph.name(new_obj, "new_obj").unwrap();
+
+    let func = graph.native_function(|opt_obj: Option<&RustObj>| {
+        opt_obj.map(|obj| obj.0 + obj.1).unwrap_or(42)
+    });
+    graph.name(func, "func").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                func(None) + func(new_obj(5,10))
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = 42 + 5 + 10;
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
 fn collecting_into_vector() {
     let mut graph = SymbolicGraph::new();
 

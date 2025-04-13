@@ -707,6 +707,15 @@ impl ExpressionTranslator<'_> {
             }
 
             match op.as_ref() {
+                ExprKind::None => {
+                    let op_output = self.get_output_index(op_index);
+                    push_annotated!(
+                        Instruction::Clear { loc: op_output },
+                        format!("generate None for {expr_name}"),
+                    );
+                    self.currently_stored.insert(op_index, op_output.into());
+                }
+
                 ExprKind::Function { .. } => {
                     unreachable!(
                         "Function calls should be inlined, \
