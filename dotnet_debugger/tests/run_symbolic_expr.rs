@@ -616,6 +616,115 @@ fn eval_nested_reductions_with_enclosed_variables() {
 }
 
 #[test]
+fn eval_nested_reductions_with_native_function() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(RustNativeObject)]
+    struct Obj(usize);
+
+    let new_obj = graph.native_function(|| Obj(0));
+    graph.name(new_obj, "new_obj").unwrap();
+
+    let increment_obj = graph.native_function(|obj: &mut Obj, step: usize| {
+        obj.0 += step;
+    });
+    graph.name(increment_obj, "increment_obj").unwrap();
+
+    let unwrap_obj = graph.native_function(|obj: &Obj| obj.0);
+    graph.name(unwrap_obj, "unwrap_obj").unwrap();
+
+    graph
+        .parse(stringify! {
+            fn inner_reduction(obj, j:usize) {
+                let j_mod_2 = j%2;
+                let cond = j_mod_2 == 0;
+                if cond {
+                    increment_obj(obj, j*j)
+                } else {
+                    increment_obj(obj, j)
+                }
+            }
+
+            fn outer_reduction(obj, i:usize) {
+                (0..i).reduce(obj, inner_reduction)
+            }
+            pub fn main() {
+                let initial = new_obj();
+                let obj = (0..10).reduce(initial, outer_reduction);
+                unwrap_obj(obj)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..10)
+        .flat_map(|i| 0..i)
+        .map(|j| if j % 2 == 0 { j * j } else { j })
+        .sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn eval_nested_reductions_with_native_function_as_last_expression() {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(RustNativeObject)]
+    struct Obj(usize);
+
+    let new_obj = graph.native_function(|| Obj(0));
+    graph.name(new_obj, "new_obj").unwrap();
+
+    let increment_obj = graph.native_function(|obj: &mut Obj, step: usize| {
+        obj.0 += step;
+    });
+    graph.name(increment_obj, "increment_obj").unwrap();
+
+    let unwrap_obj = graph.native_function(|obj: &Obj| obj.0);
+    graph.name(unwrap_obj, "unwrap_obj").unwrap();
+
+    graph
+        .parse(stringify! {
+            fn inner_reduction(obj, j:usize) {
+                let j_mod_2 = j%2;
+                let cond = j_mod_2 == 0;
+                let value = if cond {
+                    let j_squared = j*j;
+                    j_squared
+                } else {
+                    j
+                };
+                let after_increment = increment_obj(obj, value);
+                after_increment
+            }
+
+            fn outer_reduction(obj, i:usize) {
+                (0..i).reduce(obj, inner_reduction)
+            }
+            pub fn main() {
+                let initial = new_obj();
+                let obj = (0..10).reduce(initial, outer_reduction);
+                unwrap_obj(obj)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected = (0..10)
+        .flat_map(|i| 0..i)
+        .map(|j| if j % 2 == 0 { j * j } else { j })
+        .sum::<usize>();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
 fn eval_map_reduce() {
     let mut graph = SymbolicGraph::new();
 

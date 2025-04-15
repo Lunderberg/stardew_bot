@@ -24,7 +24,14 @@ pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
     native_functions: Vec<ExposedNativeFunction>,
     num_outputs: usize,
-    annotations: HashMap<InstructionIndex, String>,
+    annotations: HashMap<AnnotationLocation, String>,
+}
+
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub enum AnnotationLocation {
+    Before(InstructionIndex),
+    At(InstructionIndex),
+    After(InstructionIndex),
 }
 
 #[derive(Debug)]
@@ -42,7 +49,7 @@ pub struct VirtualMachine {
     num_temporaries: usize,
 
     /// Annotations of each instruction
-    annotations: HashMap<InstructionIndex, String>,
+    annotations: HashMap<AnnotationLocation, String>,
 }
 
 #[derive(Debug, From)]
@@ -62,7 +69,7 @@ pub enum VMArg {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InstructionIndex(pub usize);
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct StackIndex(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -320,7 +327,7 @@ pub enum VMExecutionError {
     },
 
     #[error(
-        "Rust-native function expected argument of type {expected:?}, \
+        "Rust-native function expected argument of type {expected}, \
          but received argument of type {actual}."
     )]
     InvalidArgumentForNativeFunction {
@@ -557,6 +564,13 @@ impl StackValue {
         }
     }
 
+    pub fn as_native<T: RustNativeObject>(&self) -> Option<&T> {
+        match self {
+            StackValue::Native(native) => native.downcast_ref(),
+            StackValue::Prim(_) => None,
+        }
+    }
+
     pub fn read_string_ptr(
         &self,
         reader: &memory_reader::MemoryReader,
@@ -591,10 +605,15 @@ impl VirtualMachineBuilder {
 
     pub(crate) fn annotate(
         &mut self,
-        inst: InstructionIndex,
-        annot: impl Into<String>,
+        inst: impl Into<AnnotationLocation>,
+        annot: impl Display,
     ) {
-        self.annotations.insert(inst, annot.into());
+        self.annotations
+            .entry(inst.into())
+            .and_modify(|prev| {
+                *prev = format!("{prev}\n{annot}");
+            })
+            .or_insert_with(|| format!("{annot}"));
     }
 
     pub fn push_raw_native_function<T>(&mut self, func: T) -> FunctionIndex
@@ -1468,6 +1487,12 @@ impl Instruction {
     }
 }
 
+impl From<InstructionIndex> for AnnotationLocation {
+    fn from(instruction: InstructionIndex) -> Self {
+        Self::At(instruction)
+    }
+}
+
 impl From<usize> for VMArg {
     fn from(value: usize) -> Self {
         VMArg::Const(RuntimePrimValue::NativeUInt(value))
@@ -1495,11 +1520,31 @@ impl Display for VirtualMachine {
             self.num_temporaries
         )?;
         for (i, instruction) in self.instructions.iter().enumerate() {
+            let index = InstructionIndex(i);
+
+            if let Some(annot) =
+                self.annotations.get(&AnnotationLocation::Before(index))
+            {
+                for line in annot.split('\n') {
+                    writeln!(f, "// {line}")?;
+                }
+            }
+
             write!(f, "{i}: {instruction}")?;
-            if let Some(annot) = self.annotations.get(&InstructionIndex(i)) {
+            if let Some(annot) =
+                self.annotations.get(&AnnotationLocation::At(index))
+            {
                 write!(f, " // {annot}")?;
             }
             writeln!(f)?;
+
+            if let Some(annot) =
+                self.annotations.get(&AnnotationLocation::After(index))
+            {
+                for line in annot.split('\n') {
+                    writeln!(f, "// {line}")?;
+                }
+            }
         }
         Ok(())
     }

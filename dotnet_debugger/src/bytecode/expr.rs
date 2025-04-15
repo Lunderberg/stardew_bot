@@ -1225,6 +1225,10 @@ impl SymbolicGraph {
     pub(crate) fn operation_scope(&self) -> Vec<Scope> {
         let mut func_scope = vec![Scope::Global; self.ops.len()];
 
+        let reachable = self.reachable(
+            self.extern_funcs.iter().cloned().map(SymbolicValue::Result),
+        );
+
         // Step 1: Visit each function in reverse order of
         // declaration.  For each function, mark all expressions that
         // are part of the subgraph defined by the function parameters
@@ -1236,6 +1240,7 @@ impl SymbolicGraph {
         // be applied.
         self.iter_ops()
             .rev()
+            .filter(|(OpIndex(i), _)| reachable[*i])
             .for_each(|(func_index, op)| match &op.kind {
                 ExprKind::Function { params, output } => {
                     self.collect_subgraph(
@@ -1264,48 +1269,53 @@ impl SymbolicGraph {
             all_scopes[i] = Some(Scope::Global);
         });
 
-        for current_index in (0..self.ops.len()).rev() {
+        for current_index in (0..self.ops.len()).rev().filter(|i| reachable[*i])
+        {
             let current_op = OpIndex(current_index);
-            let Some(scope_i) = all_scopes[current_index] else {
-                continue;
-            };
+            let opt_current_scope = all_scopes[current_index];
 
-            let mut mark_scope = |value: SymbolicValue, new_scope: Scope| {
-                let Some(upstream_op) = value.as_op_index() else {
-                    return;
-                };
-                let OpIndex(upstream_index) = upstream_op;
-                if func_scope[current_index] != func_scope[upstream_index]
-                    && !matches!(
-                        self[upstream_op].kind,
-                        ExprKind::FunctionArg(_)
-                    )
-                    && !matches!(
-                        self[current_op].kind,
-                        ExprKind::Function { .. }
-                    )
-                {
-                    return;
-                }
-
-                all_scopes[upstream_index] = match all_scopes[upstream_index] {
-                    None => Some(new_scope),
-                    Some(prev_scope) if prev_scope == new_scope => {
-                        Some(prev_scope)
+            let mut mark_scope =
+                |value: SymbolicValue, new_scope: Option<Scope>| {
+                    let Some(new_scope) = new_scope else {
+                        return;
+                    };
+                    let Some(upstream_op) = value.as_op_index() else {
+                        return;
+                    };
+                    let OpIndex(upstream_index) = upstream_op;
+                    if func_scope[current_index] != func_scope[upstream_index]
+                        && !matches!(
+                            self[upstream_op].kind,
+                            ExprKind::FunctionArg(_)
+                        )
+                        && !matches!(
+                            self[current_op].kind,
+                            ExprKind::Function { .. }
+                        )
+                    {
+                        return;
                     }
-                    Some(prev_scope) => {
-                        let iter_parent_scopes = |scope: Scope| {
-                            std::iter::successors(Some(scope), |scope| {
-                                scope
-                                    .op_index()
-                                    .and_then(|OpIndex(j)| all_scopes[j])
-                            })
-                            .collect::<Vec<_>>()
-                            .into_iter()
-                            .rev()
-                        };
 
-                        let joint_scope = iter_parent_scopes(prev_scope)
+                    all_scopes[upstream_index] = match all_scopes
+                        [upstream_index]
+                    {
+                        None => Some(new_scope),
+                        Some(prev_scope) if prev_scope == new_scope => {
+                            Some(prev_scope)
+                        }
+                        Some(prev_scope) => {
+                            let iter_parent_scopes = |scope: Scope| {
+                                std::iter::successors(Some(scope), |scope| {
+                                    scope
+                                        .op_index()
+                                        .and_then(|OpIndex(j)| all_scopes[j])
+                                })
+                                .collect::<Vec<_>>()
+                                .into_iter()
+                                .rev()
+                            };
+
+                            let joint_scope = iter_parent_scopes(prev_scope)
                             .zip(iter_parent_scopes(new_scope))
                             .take_while(|(a, b)| a == b)
                             .map(|(a, _)| a)
@@ -1314,14 +1324,14 @@ impl SymbolicGraph {
                                 "All expressions are within the Global scope",
                             );
 
-                        Some(joint_scope)
-                    }
+                            Some(joint_scope)
+                        }
+                    };
                 };
-            };
 
             match &self[current_op].kind {
                 ExprKind::Function { params, output } => {
-                    let scope = Scope::Function(current_op);
+                    let scope = Some(Scope::Function(current_op));
                     mark_scope(*output, scope);
                     params
                         .iter()
@@ -1333,12 +1343,16 @@ impl SymbolicGraph {
                     if_branch,
                     else_branch,
                 } => {
-                    mark_scope(condition, scope_i);
-                    mark_scope(if_branch, Scope::IfBranch(current_op));
-                    mark_scope(else_branch, Scope::ElseBranch(current_op));
+                    mark_scope(condition, opt_current_scope);
+                    mark_scope(if_branch, Some(Scope::IfBranch(current_op)));
+                    mark_scope(
+                        else_branch,
+                        Some(Scope::ElseBranch(current_op)),
+                    );
                 }
-                other => other
-                    .visit_reachable_nodes(|value| mark_scope(value, scope_i)),
+                other => other.visit_reachable_nodes(|value| {
+                    mark_scope(value, opt_current_scope)
+                }),
             }
         }
 
@@ -1537,12 +1551,15 @@ impl SymbolicGraph {
         self.extern_funcs
             .iter()
             .map(|old_index| {
-                let new_value = lookup
+                let new_index = lookup
                     .get(old_index)
-                    .expect("All operations have been visited");
-                let new_index = new_value
-                    .as_op_index()
-                    .ok_or(Error::AttemptedToMarkNonFunctionAsExternFunc)?;
+                    .map(|new_value| {
+                        new_value.as_op_index().ok_or(
+                            Error::AttemptedToMarkNonFunctionAsExternFunc,
+                        )
+                    })
+                    .transpose()?
+                    .unwrap_or(*old_index);
                 Ok(new_index)
             })
             .collect()
@@ -1594,7 +1611,9 @@ impl SymbolicGraph {
                     }
                 }
             }
-            prev_index_lookup.insert(old_index, value);
+            if value != SymbolicValue::Result(old_index) {
+                prev_index_lookup.insert(old_index, value);
+            }
         }
 
         builder.extern_funcs = self.remap_extern_funcs(&prev_index_lookup)?;
@@ -1623,19 +1642,30 @@ impl SymbolicGraph {
             let opt_remapped = op.kind.try_remap(rewrites_applied);
             let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
 
-            let value =
-                rewriter.rewrite_expr(self, kind)?.unwrap_or_else(|| {
-                    let expr: Expr = if let Some(remapped) = opt_remapped {
-                        Expr {
-                            kind: remapped,
-                            name: op.name,
+            let opt_new_value =
+                if let Some(rewritten) = rewriter.rewrite_expr(self, kind)? {
+                    if let Some(name) = &op.name {
+                        if let SymbolicValue::Result(new_index) = rewritten {
+                            if self[new_index].name.is_none() {
+                                self.name(rewritten, name)?;
+                            }
                         }
-                    } else {
-                        op
+                    }
+                    Some(rewritten)
+                } else if let Some(remapped) = opt_remapped {
+                    let expr = Expr {
+                        kind: remapped,
+                        name: op.name,
                     };
-                    self.push(expr)
-                });
-            rewrites_applied.insert(old_index, value);
+
+                    Some(self.push(expr))
+                } else {
+                    None
+                };
+
+            if let Some(new_value) = opt_new_value {
+                rewrites_applied.insert(old_index, new_value);
+            }
         }
 
         Ok(())
@@ -2026,6 +2056,10 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             println!("--------- Initial ------------\n{expr}");
 
             for i_update in 1.. {
+                std::io::stdin()
+                    .read_line(&mut String::new())
+                    .expect("Error reading stdin");
+
                 let rewrite_details = expr.rewrite_verbose(&rewriter)?;
 
                 if rewrite_details.num_rewritten_terms == 0 {
@@ -2040,9 +2074,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
                     expr.printer().expand_all_expressions(),
                 );
 
-                std::io::stdin()
-                    .read_line(&mut String::new())
-                    .expect("Error reading stdin");
+                expr.validate(None)?;
             }
 
             Ok(expr)

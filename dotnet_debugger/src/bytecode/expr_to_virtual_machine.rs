@@ -1,17 +1,21 @@
 use std::{
-    cmp::Reverse,
-    collections::{BinaryHeap, HashMap, HashSet},
+    collections::{BTreeSet, HashMap, HashSet},
+    fmt::Display,
 };
 
 use itertools::{Either, Itertools as _};
 
 use crate::{
     bytecode::expr::Scope, Error, ExprKind, OpIndex, RuntimePrimValue,
-    SymbolicValue,
+    RuntimeType, SymbolicValue,
 };
 
 use super::{
-    virtual_machine::{FunctionIndex, StackIndex, VirtualMachineBuilder},
+    graph_rewrite::Analysis,
+    virtual_machine::{
+        AnnotationLocation, FunctionIndex, InstructionIndex, StackIndex,
+        VirtualMachineBuilder,
+    },
     ExposedNativeFunction, Instruction, SymbolicGraph, VMArg, VirtualMachine,
 };
 
@@ -66,15 +70,17 @@ struct ExpressionTranslator<'a> {
     last_usage: &'a [LastUsage],
 
     next_free_index: &'a mut usize,
-    dead_indices: &'a mut BinaryHeap<Reverse<usize>>,
+    dead_indices: &'a mut BTreeSet<StackIndex>,
     native_functions: &'a [ExposedNativeFunction],
     native_function_lookup: &'a HashMap<OpIndex, FunctionIndex>,
 
     reserved_outputs: &'a mut HashMap<OpIndex, StackIndex>,
 
-    currently_stored: &'a mut HashMap<OpIndex, VMArg>,
+    currently_stored: &'a mut HashMap<OpIndex, StackIndex>,
 
     previously_consumed: HashMap<OpIndex, OpIndex>,
+
+    analysis: Analysis<'a>,
 
     show_steps: bool,
 }
@@ -157,9 +163,6 @@ impl SymbolicGraph {
 
         let last_usage = self.last_usage();
 
-        let mut dead_indices = BinaryHeap::new();
-        let mut currently_stored = HashMap::new();
-
         let operations_by_scope = scope
             .iter()
             .cloned()
@@ -176,7 +179,7 @@ impl SymbolicGraph {
                 !matches!(self[*index].kind, ExprKind::Function { .. })
             });
 
-        let mut translater = ExpressionTranslator {
+        let mut translator = ExpressionTranslator {
             graph: self,
             instructions: &mut builder,
             instructions_by_scope: &operations_by_scope,
@@ -189,8 +192,9 @@ impl SymbolicGraph {
             currently_stored: &mut currently_stored,
             previously_consumed: HashMap::new(),
             show_steps,
+            analysis: Analysis::new(None),
         };
-        translater.translate(iter_op_indices)?;
+        translator.translate(iter_op_indices)?;
 
         Ok(builder.num_outputs(num_outputs).build())
     }
@@ -484,6 +488,7 @@ impl<'a> LastUsageCollector<'a> {
                     self.iter_enclosed(*reduction)
                         .map(SymbolicValue::Result)
                         .for_each(|value| mark_value!(encountered, value));
+                    mark_value!(encountered, *reduction);
                 }
 
                 other => other.visit_reachable_nodes(|value| {
@@ -549,24 +554,107 @@ impl ExpressionTranslator<'_> {
                         self.graph[usage].kind, self.graph[*op_index].kind,
                     )
                 })
-                .clone()),
+                .clone()
+                .into()),
+        }
+    }
+
+    fn annotate<Func, Annot>(&mut self, generate_annotation: Func)
+    where
+        Func: FnOnce(&SymbolicGraph) -> Annot,
+        Annot: Display,
+    {
+        if self.show_steps {
+            let index = self.instructions.current_index();
+            let loc = AnnotationLocation::Before(index);
+            self.instructions
+                .annotate(loc, generate_annotation(self.graph));
+        }
+    }
+
+    fn reserve_index(&mut self, op_index: OpIndex, stack_index: StackIndex) {
+        self.annotate(|graph| {
+            format!(
+                "Reserving {stack_index} for {}",
+                LocalIndexPrinter::new(op_index, graph)
+            )
+        });
+        self.reserved_outputs.insert(op_index, stack_index);
+        self.dead_indices.remove(&stack_index);
+    }
+
+    fn release_reserved_index(&mut self, op_index: OpIndex) {
+        let Some(stack_index) = self.reserved_outputs.remove(&op_index) else {
+            unreachable!(
+                "Internal error: \
+                 Attempted to release reservation for {op_index}, \
+                 but no such reservation existed."
+            )
+        };
+
+        self.annotate(|graph| {
+            format!(
+                "Releasing reservation of {stack_index} for {}",
+                LocalIndexPrinter::new(op_index, graph),
+            )
+        });
+
+        if !self.currently_stored.contains_key(&op_index) {
+            self.annotate(|graph| {
+                format!(
+                    "Since {} is not stored anywhere, \
+                     marking released reservation of {stack_index} \
+                     as a dead index.",
+                    LocalIndexPrinter::new(op_index, graph),
+                )
+            });
+            self.dead_indices.insert(stack_index);
         }
     }
 
     fn alloc_index(&mut self) -> StackIndex {
-        self.dead_indices
-            .pop()
-            .map(|Reverse(i)| StackIndex(i))
-            .unwrap_or_else(|| {
-                let index = *self.next_free_index;
-                *self.next_free_index += 1;
-                StackIndex(index)
-            })
+        if let Some(index) = self.dead_indices.pop_first() {
+            self.annotate(|_| format!("Reusing dead index {index}"));
+            index
+        } else {
+            let index = StackIndex(*self.next_free_index);
+            *self.next_free_index += 1;
+            self.annotate(|_| {
+                format!("No dead indices, using new index {index}")
+            });
+            index
+        }
+    }
+
+    fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
+        if let Some(&index) = self.reserved_outputs.get(&op_index) {
+            self.annotate(|graph| {
+                format!(
+                    "For op {}, \
+                     using reserved output {index}",
+                    LocalIndexPrinter::new(op_index, graph),
+                )
+            });
+            index
+        } else {
+            self.annotate(|graph| {
+                format!(
+                    "For op {}, allocating output index.",
+                    LocalIndexPrinter::new(op_index, graph),
+                )
+            });
+            self.alloc_index()
+        }
     }
 
     fn free_index(&mut self, stack_index: StackIndex) {
-        let StackIndex(index) = stack_index;
-        self.dead_indices.push(Reverse(index));
+        self.annotate(|_| {
+            format!(
+                "Location {stack_index} no longer needed, \
+                 marking as dead."
+            )
+        });
+        self.dead_indices.insert(stack_index);
     }
 
     fn free_dead_indices(&mut self, op_index: OpIndex) {
@@ -577,7 +665,7 @@ impl ExpressionTranslator<'_> {
             .iter()
             .take_while(|last_usage| last_usage.usage_point == op_index)
             .for_each(|last_usage| {
-                let Some(old_value) =
+                let Some(old_stack_index) =
                     self.currently_stored.remove(&last_usage.expr_used)
                 else {
                     panic!(
@@ -600,17 +688,150 @@ impl ExpressionTranslator<'_> {
                     )
                 };
 
-                if let VMArg::SavedValue(StackIndex(old_index)) = old_value {
-                    self.dead_indices.push(Reverse(old_index));
-                }
+                self.annotate(|graph| {
+                    format!(
+                        "After {}, {} is no longer needed.  \
+                             Marking {old_stack_index} as dead.",
+                        LocalIndexPrinter::new(op_index, graph),
+                        LocalIndexPrinter::new(last_usage.expr_used, graph),
+                    )
+                });
+                self.dead_indices.insert(old_stack_index);
             });
     }
 
-    fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
-        self.reserved_outputs
-            .get(&op_index)
-            .cloned()
-            .unwrap_or_else(|| self.alloc_index())
+    fn push_annotated<Func, Annot>(
+        &mut self,
+        inst: Instruction,
+        generate_annotation: Func,
+    ) -> InstructionIndex
+    where
+        Func: FnOnce() -> Annot,
+        Annot: Display,
+    {
+        let index = self.instructions.push(inst);
+        if self.show_steps {
+            self.instructions.annotate(index, generate_annotation());
+        }
+        index
+    }
+
+    /// Translate a scoped expression
+    ///
+    /// * `op_index`: The index of the expression that requires the
+    ///       scoped.  (e.g. A `FunctionCall`, `IfElse`, or
+    ///       `SimpleReduce` expression)
+    ///
+    /// * `value`: The value that should be produced as the output of
+    ///       the scope.
+    ///
+    /// * `out_index`: The index to which `value` should be written.
+    ///
+    /// * `scope`: The scope to be evaluated.
+    fn translate_scope(
+        &mut self,
+        op_index: OpIndex,
+        value: SymbolicValue,
+        out_stack_index: StackIndex,
+        scope: Scope,
+    ) -> Result<(), Error> {
+        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+
+        let scope_output = match value {
+            SymbolicValue::Result(i) => i,
+            other => {
+                // Early return in case the scope returns a constant.
+                let value = other.as_prim_value().unwrap().into();
+                self.push_annotated(
+                    Instruction::Copy {
+                        value,
+                        output: out_stack_index,
+                    },
+                    || format!("write output of {expr_name}"),
+                );
+                return Ok(());
+            }
+        };
+
+        if let Some(&currently_at) = self.currently_stored.get(&scope_output) {
+            if currently_at == out_stack_index {
+                // Already in the desired location, no action needed
+            } else if matches!(
+                self.analysis.infer_type(self.graph, value)?,
+                RuntimeType::Prim(_)
+            ) {
+                // A primitive value can be copied into the desired
+                // location.
+                self.push_annotated(
+                    Instruction::Copy {
+                        value: currently_at.into(),
+                        output: out_stack_index,
+                    },
+                    || format!("copy value to output of {expr_name}"),
+                );
+            } else if self
+                .last_usage
+                .binary_search_by_key(&(op_index, scope_output), |last_usage| {
+                    (last_usage.usage_point, last_usage.expr_used)
+                })
+                .is_ok()
+            {
+                // A rust-native object may be moved to the output
+                // location, if this is the last usage of the
+                // rust-native object in its current state.
+                self.push_annotated(
+                    Instruction::Swap(out_stack_index, currently_at),
+                    || format!("copy value to output of {expr_name}"),
+                );
+            } else {
+                todo!(
+                    "Limitation of current register assignment.  \
+                     Evaluation of {scope:?} requires \
+                     placing output in location {out_stack_index}.  \
+                     However, it is currently located in {currently_at}, \
+                     and can neither be copied to the output location \
+                     (only primitives can be copied), \
+                     nor can it be moved be moved to the output location \
+                     (requires this usage to be the last usage).  \
+                     Fixing this will require implementing \
+                     better aliasing variable analysis."
+                )
+            }
+        } else {
+            // The output does not yet exist, need to evaluate
+            // statements in the scope to generate it.
+            self.reserve_index(scope_output, out_stack_index);
+            let iter_scope = self
+                .instructions_by_scope
+                .get(&scope)
+                .into_iter()
+                .flatten()
+                .cloned()
+                .filter(|&op| {
+                    !matches!(self.graph[op].kind, ExprKind::Function { .. },)
+                });
+            let iter_scope: Box<dyn Iterator<Item = OpIndex>> =
+                Box::new(iter_scope);
+
+            self.translate(iter_scope)?;
+            self.release_reserved_index(scope_output);
+
+            // In case the output was stored somewhere other than the
+            // reserved address, move it to the correct location.
+            let body_output = self
+                .currently_stored
+                .get(&scope_output)
+                .expect("Output of scope should not be generated")
+                .clone();
+            if body_output != out_stack_index {
+                self.push_annotated(
+                    Instruction::Swap(body_output, out_stack_index),
+                    || format!("move output of {expr_name}"),
+                );
+            }
+        }
+
+        Ok(())
     }
 
     fn translate(
@@ -649,60 +870,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("evaluate {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
-                }};
-            }
-
-            macro_rules! handle_scope {
-                ($value:expr,
-                 $stack_index:expr,
-                 $scope:expr $(,)?
-                ) => {{
-                    if let &SymbolicValue::Result(scope_output) = $value {
-                        if !self.currently_stored.contains_key(&scope_output) {
-                            self.reserved_outputs
-                                .insert(scope_output, $stack_index);
-                            let iter_scope = self
-                                .instructions_by_scope
-                                .get(&$scope)
-                                .into_iter()
-                                .flatten()
-                                .cloned()
-                                .filter(|&op| {
-                                    !matches!(
-                                        self.graph[op].kind,
-                                        ExprKind::Function { .. },
-                                    )
-                                });
-                            let iter_scope: Box<dyn Iterator<Item = OpIndex>> =
-                                Box::new(iter_scope);
-
-                            self.translate(iter_scope)?;
-                            self.reserved_outputs.remove(&scope_output);
-                        }
-                    }
-                    match self.value_to_arg(op_index, $value)? {
-                        VMArg::Const(value) => {
-                            push_annotated!(
-                                Instruction::Copy {
-                                    value: value.into(),
-                                    output: $stack_index,
-                                },
-                                format!("copy output of {expr_name}"),
-                            );
-                        }
-                        VMArg::SavedValue(body_output) => {
-                            if body_output != $stack_index {
-                                push_annotated!(
-                                    Instruction::Swap(
-                                        body_output,
-                                        $stack_index,
-                                    ),
-                                    format!("move output of {expr_name}"),
-                                );
-                            }
-                        }
-                    }
+                    self.currently_stored.insert(op_index, op_output);
                 }};
             }
 
@@ -713,7 +881,7 @@ impl ExpressionTranslator<'_> {
                         Instruction::Clear { loc: op_output },
                         format!("generate None for {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
 
                 ExprKind::Function { .. } => {
@@ -810,10 +978,10 @@ impl ExpressionTranslator<'_> {
                                     );
                                 }
                                 self.currently_stored
-                                    .insert(op_index, required_output.into());
+                                    .insert(op_index, required_output);
                             } else {
                                 self.currently_stored
-                                    .insert(op_index, first_arg_loc.into());
+                                    .insert(op_index, first_arg_loc);
                             }
                         } else {
                             // The function produces an output value, to
@@ -827,8 +995,7 @@ impl ExpressionTranslator<'_> {
                                 },
                                 format!("produce {expr_name}"),
                             );
-                            self.currently_stored
-                                .insert(op_index, op_output.into());
+                            self.currently_stored.insert(op_index, op_output);
                         }
                     } else {
                         todo!(
@@ -926,20 +1093,9 @@ impl ExpressionTranslator<'_> {
                     // index of the jump.
                     let jump_to_end_instruction_index = push_annotated!(
                         Instruction::NoOp,
-                        format!("loop for {expr_name} terminated"),
+                        format!("skip empty reduction loop for {expr_name}"),
                     );
                     self.free_index(can_skip_loop);
-
-                    let loop_iter = self.alloc_index();
-                    push_annotated!(
-                        Instruction::Copy {
-                            value: 0usize.into(),
-                            output: loop_iter,
-                        },
-                        format!("initialize loop iterator for {expr_name}"),
-                    );
-
-                    let loop_start = self.instructions.current_index();
 
                     let reduction_index = match reduction {
                         &SymbolicValue::Result(op_index) => op_index,
@@ -948,6 +1104,30 @@ impl ExpressionTranslator<'_> {
                              when SimpleReduce points to non-function"
                         ),
                     };
+                    let loop_iter_name =
+                        match &self.graph[reduction_index].kind {
+                            ExprKind::Function { params, .. } => {
+                                Some(params[1])
+                            }
+                            _ => None,
+                        }
+                        .and_then(|param| param.as_op_index())
+                        .and_then(|param_index| {
+                            self.graph[param_index].name.as_ref()
+                        })
+                        .map(|name| format!("loop iterator '{name}'"))
+                        .unwrap_or_else(|| "loop iterator".into());
+
+                    let loop_iter = self.alloc_index();
+                    push_annotated!(
+                        Instruction::Copy {
+                            value: 0usize.into(),
+                            output: loop_iter,
+                        },
+                        format!("initialize {loop_iter_name} for {expr_name}"),
+                    );
+
+                    let loop_start = self.instructions.current_index();
 
                     match &self.graph[reduction_index].kind {
                         ExprKind::Function { params, output } => {
@@ -964,15 +1144,15 @@ impl ExpressionTranslator<'_> {
                             };
 
                             self.currently_stored
-                                .insert(accumulator, op_output.into());
-                            self.currently_stored
-                                .insert(index, loop_iter.into());
+                                .insert(accumulator, op_output);
+                            self.currently_stored.insert(index, loop_iter);
 
-                            handle_scope!(
-                                output,
+                            self.translate_scope(
+                                op_index,
+                                *output,
                                 op_output,
                                 Scope::Function(reduction_index),
-                            );
+                            )?;
 
                             self.currently_stored.remove(&accumulator);
                             self.currently_stored.remove(&index);
@@ -1022,7 +1202,7 @@ impl ExpressionTranslator<'_> {
                             rhs: 1usize.into(),
                             output: loop_iter,
                         },
-                        format!("increment loop iterator for {expr_name}"),
+                        format!("increment {loop_iter_name} for {expr_name}"),
                     );
 
                     let loop_condition = self.alloc_index();
@@ -1055,7 +1235,7 @@ impl ExpressionTranslator<'_> {
 
                     self.free_dead_indices(op_index);
 
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
                 ExprKind::NativeFunction(_) => {
                     assert!(
@@ -1077,7 +1257,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("evaluate {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
 
                 ExprKind::IfElse {
@@ -1099,11 +1279,12 @@ impl ExpressionTranslator<'_> {
                         format!("jump to if branch of {expr_name}"),
                     );
 
-                    handle_scope!(
-                        else_branch,
+                    self.translate_scope(
+                        op_index,
+                        *else_branch,
                         op_output,
                         Scope::ElseBranch(op_index),
-                    );
+                    )?;
 
                     std::mem::swap(
                         self.currently_stored,
@@ -1131,11 +1312,12 @@ impl ExpressionTranslator<'_> {
                         },
                     );
 
-                    handle_scope!(
-                        if_branch,
+                    self.translate_scope(
+                        op_index,
+                        *if_branch,
                         op_output,
                         Scope::IfBranch(op_index),
-                    );
+                    )?;
 
                     self.instructions.update(
                         jump_to_branch_end_index,
@@ -1164,7 +1346,7 @@ impl ExpressionTranslator<'_> {
                         })
                         .collect();
 
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
 
                 ExprKind::Equal { lhs, rhs } => {
@@ -1203,7 +1385,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     let obj = self.value_to_arg(op_index, obj)?;
@@ -1217,7 +1399,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1231,7 +1413,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
                 ExprKind::ReadString { ptr } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1244,7 +1426,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
                 ExprKind::PointerCast { ptr, .. } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1257,7 +1439,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.currently_stored.insert(op_index, op_output.into());
+                    self.currently_stored.insert(op_index, op_output);
                 }
 
                 symbolic @ (ExprKind::StaticField(_)

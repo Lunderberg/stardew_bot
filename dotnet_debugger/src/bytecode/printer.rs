@@ -266,16 +266,21 @@ impl<'a> GraphPrinter<'a> {
             let mut requires_name_prefix =
                 vec![self.number_all_expressions; self.graph.num_operations()];
             let mut name_lookup: HashMap<&str, OpIndex> = HashMap::new();
-            for (index, op) in self.graph.iter_ops() {
-                if let Some(name) = op.name.as_ref().map(|name| name.as_str()) {
-                    if let Some(prev_index) = name_lookup.get(name) {
-                        requires_name_prefix[index.0] = true;
-                        requires_name_prefix[prev_index.0] = true;
-                    } else {
-                        name_lookup.insert(name, index);
+            self.graph
+                .iter_ops()
+                .filter(|(index, _)| reachable[index.0])
+                .for_each(|(index, op)| {
+                    if let Some(name) =
+                        op.name.as_ref().map(|name| name.as_str())
+                    {
+                        if let Some(prev_index) = name_lookup.get(name) {
+                            requires_name_prefix[index.0] = true;
+                            requires_name_prefix[prev_index.0] = true;
+                        } else {
+                            name_lookup.insert(name, index);
+                        }
                     }
-                }
-            }
+                });
 
             requires_name_prefix
         };
