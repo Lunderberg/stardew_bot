@@ -464,7 +464,7 @@ impl SymbolicType {
             "isize" => Some(RuntimePrimType::NativeInt),
             "f32" => Some(RuntimePrimType::F32),
             "f64" => Some(RuntimePrimType::F64),
-            "ptr" | "Ptr" => Some(RuntimePrimType::Ptr),
+            "Pointer" | "ptr" | "Ptr" => Some(RuntimePrimType::Ptr),
             _ => None,
         }
     }
