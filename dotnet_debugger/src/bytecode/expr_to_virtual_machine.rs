@@ -773,6 +773,238 @@ impl ExpressionTranslator<'_> {
         index
     }
 
+    fn translate(
+        &mut self,
+        instructions: impl Iterator<Item = OpIndex>,
+    ) -> Result<(), Error> {
+        for op_index in instructions {
+            let op = &self.graph[op_index];
+            let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+
+            macro_rules! handle_binary_op {
+                ($variant:ident, $lhs:expr, $rhs:expr) => {{
+                    let lhs = self.value_to_arg(op_index, $lhs)?;
+                    let rhs = self.value_to_arg(op_index, $rhs)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::$variant {
+                            lhs,
+                            rhs,
+                            output: op_output,
+                        },
+                        || format!("evaluate {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }};
+            }
+
+            match op.as_ref() {
+                ExprKind::None => {
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Clear { loc: op_output },
+                        || format!("generate None for {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                ExprKind::Function { .. } => {
+                    unreachable!(
+                        "Function calls should be inlined, \
+                         and should only be encountered in SimpleReduce.  \
+                         But at index {op_index}, encountered function named {:?}",
+                        op.name
+                    )
+                }
+                ExprKind::FunctionArg(_) => {
+                    assert!(self
+                        .index_tracking
+                        .current_location
+                        .contains_key(&op_index));
+                }
+                ExprKind::Tuple(_) => {
+                    // Eventually I should put something here, but I
+                    // think this will just barely work for the
+                    // current use cases.  A tuple of function outputs
+                    // is assigned the appropriate StackIndex values
+                    // for each tuple element.  When encountering
+                    // those operations, their output was written to
+                    // the appropriate output index.  So now, when
+                    // encountering the tuple itself, I just
+                    // do...nothing.
+                    //
+                    // This will break horribly if tuples are used in
+                    // any other context, but thankfully I don't yet
+                    // support any other contexts.
+                }
+                ExprKind::FunctionCall { func, args } => {
+                    self.translate_function_call(op_index, *func, args)?;
+                }
+
+                iterator @ (ExprKind::Range { .. }
+                | ExprKind::Map { .. }
+                | ExprKind::Filter { .. }
+                | ExprKind::Collect { .. }
+                | ExprKind::Reduce { .. }) => panic!(
+                    "All {} expressions should be simplified \
+                     to ExprKind::SimpleReduce",
+                    iterator.op_name(),
+                ),
+                ExprKind::SimpleReduce {
+                    initial,
+                    extent,
+                    reduction,
+                } => {
+                    self.translate_simple_reduce(
+                        op_index, *initial, *extent, *reduction,
+                    )?;
+                }
+                ExprKind::NativeFunction(_) => {
+                    assert!(
+                        self.native_function_lookup.contains_key(&op_index),
+                        "Internal error: \
+                         Lookup should be populated with \
+                         all native functions."
+                    );
+                }
+
+                ExprKind::IsSome(value) => {
+                    let value = self.value_to_arg(op_index, value)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::IsSome {
+                            value,
+                            output: op_output,
+                        },
+                        || format!("evaluate {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                ExprKind::IfElse {
+                    condition,
+                    if_branch,
+                    else_branch,
+                } => {
+                    self.translate_if_else(
+                        op_index,
+                        *condition,
+                        *if_branch,
+                        *else_branch,
+                    )?;
+                }
+
+                ExprKind::Equal { lhs, rhs } => {
+                    handle_binary_op!(Equal, lhs, rhs)
+                }
+                ExprKind::NotEqual { lhs, rhs } => {
+                    handle_binary_op!(NotEqual, lhs, rhs)
+                }
+                ExprKind::GreaterThan { lhs, rhs } => {
+                    handle_binary_op!(GreaterThan, lhs, rhs)
+                }
+                ExprKind::LessThan { lhs, rhs } => {
+                    handle_binary_op!(LessThan, lhs, rhs)
+                }
+                ExprKind::GreaterThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(GreaterThanOrEqual, lhs, rhs)
+                }
+                ExprKind::LessThanOrEqual { lhs, rhs } => {
+                    handle_binary_op!(LessThanOrEqual, lhs, rhs)
+                }
+
+                ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+                ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
+                ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
+                ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
+
+                ExprKind::PrimCast { value, prim_type } => {
+                    let value = self.value_to_arg(op_index, value)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::PrimCast {
+                            value,
+                            prim_type: *prim_type,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+                ExprKind::PhysicalDowncast { obj, ty } => {
+                    let obj = self.value_to_arg(op_index, obj)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Downcast {
+                            obj,
+                            subtype: *ty,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+                ExprKind::ReadValue { ptr, prim_type } => {
+                    let ptr = self.value_to_arg(op_index, ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Read {
+                            ptr,
+                            prim_type: *prim_type,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+                ExprKind::ReadString { ptr } => {
+                    let ptr = self.value_to_arg(op_index, ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::ReadString {
+                            ptr,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+                ExprKind::PointerCast { ptr, .. } => {
+                    let ptr = self.value_to_arg(op_index, ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Copy {
+                            value: ptr,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                symbolic @ (ExprKind::StaticField(_)
+                | ExprKind::FieldAccess { .. }
+                | ExprKind::SymbolicDowncast { .. }
+                | ExprKind::IndexAccess { .. }
+                | ExprKind::NumArrayElements { .. }
+                | ExprKind::ArrayExtent { .. }) => {
+                    return Err(Error::SymbolicExpressionRequiresLowering(
+                        symbolic.clone(),
+                    ));
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     /// Translate a scoped expression
     ///
     /// * `op_index`: The index of the expression that requires the
@@ -894,95 +1126,36 @@ impl ExpressionTranslator<'_> {
         Ok(())
     }
 
-    fn translate(
+    fn translate_function_call(
         &mut self,
-        instructions: impl Iterator<Item = OpIndex>,
+        op_index: OpIndex,
+        func: SymbolicValue,
+        args: &[SymbolicValue],
     ) -> Result<(), Error> {
-        for op_index in instructions {
-            let op = &self.graph[op_index];
-            let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
 
-            macro_rules! handle_binary_op {
-                ($variant:ident, $lhs:expr, $rhs:expr) => {{
-                    let lhs = self.value_to_arg(op_index, $lhs)?;
-                    let rhs = self.value_to_arg(op_index, $rhs)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::$variant {
-                            lhs,
-                            rhs,
-                            output: op_output,
-                        },
-                        || format!("evaluate {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }};
+        let Some(func) = func.as_op_index() else {
+            panic!("Internal error, callee must be function")
+        };
+
+        if let Some(&native_func_index) = self.native_function_lookup.get(&func)
+        {
+            let mut vm_args = Vec::new();
+            for arg in args {
+                vm_args.push(self.value_to_arg(op_index, arg)?);
             }
 
-            match op.as_ref() {
-                ExprKind::None => {
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::Clear { loc: op_output },
-                        || format!("generate None for {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
+            let mutates_first_argument = self.native_functions
+                [native_func_index.0]
+                .mutates_first_argument();
 
-                ExprKind::Function { .. } => {
-                    unreachable!(
-                        "Function calls should be inlined, \
-                         and should only be encountered in SimpleReduce.  \
-                         But at index {op_index}, encountered function named {:?}",
-                        op.name
-                    )
-                }
-                ExprKind::FunctionArg(_) => {
-                    assert!(self
-                        .index_tracking
-                        .current_location
-                        .contains_key(&op_index));
-                }
-                ExprKind::Tuple(_) => {
-                    // Eventually I should put something here, but I
-                    // think this will just barely work for the
-                    // current use cases.  A tuple of function outputs
-                    // is assigned the appropriate StackIndex values
-                    // for each tuple element.  When encountering
-                    // those operations, their output was written to
-                    // the appropriate output index.  So now, when
-                    // encountering the tuple itself, I just
-                    // do...nothing.
-                    //
-                    // This will break horribly if tuples are used in
-                    // any other context, but thankfully I don't yet
-                    // support any other contexts.
-                }
-                ExprKind::FunctionCall { func, args } => {
-                    let Some(func) = func.as_op_index() else {
-                        panic!("Internal error, callee must be function")
-                    };
-
-                    if let Some(&native_func_index) =
-                        self.native_function_lookup.get(&func)
-                    {
-                        let mut vm_args = Vec::new();
-                        for arg in args {
-                            vm_args.push(self.value_to_arg(op_index, arg)?);
-                        }
-
-                        let mutates_first_argument = self.native_functions
-                            [native_func_index.0]
-                            .mutates_first_argument();
-
-                        if mutates_first_argument {
-                            // The function mutates its input
-                            // argument.  No output index is required.
-                            // However, the `current_location` lookup
-                            // should be updated to no longer contain
-                            // the first argument.
-                            let first_arg_op = match &args[0] {
+            if mutates_first_argument {
+                // The function mutates its input
+                // argument.  No output index is required.
+                // However, the `current_location` lookup
+                // should be updated to no longer contain
+                // the first argument.
+                let first_arg_op = match &args[0] {
                                 SymbolicValue::Result(op_index) => *op_index,
                                 SymbolicValue::Bool(_) |SymbolicValue::Int(_) |
                                 SymbolicValue::Ptr(_) => todo!(
@@ -992,7 +1165,7 @@ impl ExpressionTranslator<'_> {
                                 ),
 
                             };
-                            let first_arg_loc = match &vm_args[0] {
+                let first_arg_loc = match &vm_args[0] {
                                 VMArg::SavedValue(stack_index) => *stack_index,
                                 VMArg::Const(_) => todo!(
                                     "Attempted mutation of VMArg::Const.  \
@@ -1001,503 +1174,348 @@ impl ExpressionTranslator<'_> {
                                 ),
                             };
 
-                            self.push_annotated(
-                                Instruction::NativeFunctionCall {
-                                    index: native_func_index,
-                                    args: vm_args,
-                                    output: None,
-                                },
-                                || format!("produce {expr_name}"),
-                            );
+                self.push_annotated(
+                    Instruction::NativeFunctionCall {
+                        index: native_func_index,
+                        args: vm_args,
+                        output: None,
+                    },
+                    || format!("produce {expr_name}"),
+                );
 
-                            self.index_tracking
-                                .current_location
-                                .remove(&first_arg_op);
-                            self.index_tracking
-                                .previously_consumed
-                                .insert(first_arg_op, op_index);
+                self.index_tracking.current_location.remove(&first_arg_op);
+                self.index_tracking
+                    .previously_consumed
+                    .insert(first_arg_op, op_index);
 
-                            if let Some(&required_output) = self
-                                .index_tracking
-                                .reserved_outputs
-                                .get(&op_index)
-                            {
-                                if first_arg_loc != required_output {
-                                    self.push_annotated(
+                if let Some(&required_output) =
+                    self.index_tracking.reserved_outputs.get(&op_index)
+                {
+                    if first_arg_loc != required_output {
+                        self.push_annotated(
                                         Instruction::Swap(first_arg_loc, required_output),
                                         || format!(
                                             "swap {expr_name} \
                                              to mandatory output loc {required_output}"
                                         ),
                                     );
-                                }
-                                self.index_tracking
-                                    .define_contents(op_index, required_output);
-                            } else {
-                                self.index_tracking
-                                    .define_contents(op_index, first_arg_loc);
-                            }
-                        } else {
-                            // The function produces an output value, to
-                            // be stored in the output index.
-                            let op_output = self.get_output_index(op_index);
-                            self.push_annotated(
-                                Instruction::NativeFunctionCall {
-                                    index: native_func_index,
-                                    args: vm_args,
-                                    output: Some(op_output),
-                                },
-                                || format!("produce {expr_name}"),
-                            );
-                            self.index_tracking
-                                .define_contents(op_index, op_output);
-                        }
-                    } else {
-                        todo!(
-                            "Handle IR-defined function calls in the VM.  \
+                    }
+                    self.index_tracking
+                        .define_contents(op_index, required_output);
+                } else {
+                    self.index_tracking
+                        .define_contents(op_index, first_arg_loc);
+                }
+            } else {
+                // The function produces an output value, to
+                // be stored in the output index.
+                let op_output = self.get_output_index(op_index);
+                self.push_annotated(
+                    Instruction::NativeFunctionCall {
+                        index: native_func_index,
+                        args: vm_args,
+                        output: Some(op_output),
+                    },
+                    || format!("produce {expr_name}"),
+                );
+                self.index_tracking.define_contents(op_index, op_output);
+            }
+        } else {
+            todo!(
+                "Handle IR-defined function calls in the VM.  \
                              Until then, all functions should be inlined."
-                        )
-                    }
-                }
+            )
+        }
 
-                iterator @ (ExprKind::Range { .. }
-                | ExprKind::Map { .. }
-                | ExprKind::Filter { .. }
-                | ExprKind::Collect { .. }
-                | ExprKind::Reduce { .. }) => panic!(
-                    "All {} expressions should be simplified \
-                     to ExprKind::SimpleReduce",
-                    iterator.op_name(),
-                ),
-                ExprKind::SimpleReduce {
-                    initial,
-                    extent,
-                    reduction,
-                } => {
-                    let initial = self.value_to_arg(op_index, initial)?;
-                    let extent = self.value_to_arg(op_index, extent)?;
+        Ok(())
+    }
 
-                    let op_output = self.get_output_index(op_index);
+    fn translate_simple_reduce(
+        &mut self,
+        op_index: OpIndex,
+        initial: SymbolicValue,
+        extent: SymbolicValue,
+        reduction: SymbolicValue,
+    ) -> Result<(), Error> {
+        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
 
-                    match initial {
-                        VMArg::Const(_) => {
-                            self.push_annotated(
-                                Instruction::Copy {
-                                    value: initial,
-                                    output: op_output,
-                                },
-                                || {
-                                    format!(
-                                        "copy initial value \
+        let initial = self.value_to_arg(op_index, &initial)?;
+        let extent = self.value_to_arg(op_index, &extent)?;
+
+        let op_output = self.get_output_index(op_index);
+
+        match initial {
+            VMArg::Const(_) => {
+                self.push_annotated(
+                    Instruction::Copy {
+                        value: initial,
+                        output: op_output,
+                    },
+                    || {
+                        format!(
+                            "copy initial value \
                                      of reduction {expr_name}"
-                                    )
-                                },
-                            );
-                        }
-                        VMArg::SavedValue(stack_index) => {
-                            if stack_index != op_output {
-                                self.push_annotated(
-                                    Instruction::Swap(stack_index, op_output),
-                                    || {
-                                        format!(
-                                            "move initial value \
+                        )
+                    },
+                );
+            }
+            VMArg::SavedValue(stack_index) => {
+                if stack_index != op_output {
+                    self.push_annotated(
+                        Instruction::Swap(stack_index, op_output),
+                        || {
+                            format!(
+                                "move initial value \
                                          of reduction {expr_name}"
-                                        )
-                                    },
-                                );
-                            }
-                        }
-                    }
-
-                    let extent_is_none = self.alloc_index();
-                    self.push_annotated(
-                        Instruction::IsSome {
-                            value: extent,
-                            output: extent_is_none,
-                        },
-                        || format!("extent {extent} is some"),
-                    );
-                    self.push_annotated(
-                        Instruction::Not {
-                            arg: extent_is_none.into(),
-                            output: extent_is_none,
-                        },
-                        || format!("extent {extent} is none"),
-                    );
-                    let extent_is_zero = self.alloc_index();
-                    self.push_annotated(
-                        Instruction::Equal {
-                            lhs: extent,
-                            rhs: 0usize.into(),
-                            output: extent_is_zero,
-                        },
-                        || format!("extent {extent} is zero"),
-                    );
-
-                    self.free_index(extent_is_none);
-                    self.free_index(extent_is_zero);
-                    let can_skip_loop = self.alloc_index();
-                    self.push_annotated(
-                        Instruction::Or {
-                            lhs: extent_is_none.into(),
-                            rhs: extent_is_zero.into(),
-                            output: can_skip_loop,
-                        },
-                        || format!("loop over {extent} can be skipped"),
-                    );
-
-                    // Placeholder for the conditional jump to break
-                    // out of the loop.  To be updated after the loop
-                    // body is generated, when we know the destination
-                    // index of the jump.
-                    let jump_to_end_instruction_index = self
-                        .push_annotated(Instruction::NoOp, || {
-                            format!("skip empty reduction loop for {expr_name}")
-                        });
-                    self.free_index(can_skip_loop);
-
-                    let reduction_index = match reduction {
-                        &SymbolicValue::Result(op_index) => op_index,
-                        _ => todo!(
-                            "Better error message \
-                             when SimpleReduce points to non-function"
-                        ),
-                    };
-                    let loop_iter_name =
-                        match &self.graph[reduction_index].kind {
-                            ExprKind::Function { params, .. } => {
-                                Some(params[1])
-                            }
-                            _ => None,
-                        }
-                        .and_then(|param| param.as_op_index())
-                        .and_then(|param_index| {
-                            self.graph[param_index].name.as_ref()
-                        })
-                        .map(|name| format!("loop iterator '{name}'"))
-                        .unwrap_or_else(|| "loop iterator".into());
-
-                    let loop_iter = self.alloc_index();
-                    self.push_annotated(
-                        Instruction::Copy {
-                            value: 0usize.into(),
-                            output: loop_iter,
-                        },
-                        || {
-                            format!(
-                                "initialize {loop_iter_name} for {expr_name}"
                             )
                         },
                     );
-
-                    let loop_start = self.instructions.current_index();
-
-                    match &self.graph[reduction_index].kind {
-                        ExprKind::Function { params, output } => {
-                            if params.len() != 2 {
-                                todo!("Better error message for invalid reduction function");
-                            }
-                            let accumulator = match params[0] {
-                                SymbolicValue::Result(op_index) => op_index,
-                                _ => todo!("Better error message for ill-formed function"),
-                            };
-                            let index = match params[1] {
-                                SymbolicValue::Result(op_index) => op_index,
-                                _ => todo!("Better error message for ill-formed function"),
-                            };
-
-                            self.index_tracking
-                                .define_contents(accumulator, op_output);
-                            self.index_tracking
-                                .define_contents(index, loop_iter);
-
-                            self.translate_scope(
-                                op_index,
-                                *output,
-                                op_output,
-                                Scope::Function(reduction_index),
-                            )?;
-
-                            self.index_tracking
-                                .current_location
-                                .remove(&accumulator);
-                            self.index_tracking.current_location.remove(&index);
-                        }
-                        ExprKind::NativeFunction(_) => {
-                            let native_func_index = self
-                                .native_function_lookup
-                                .get(&reduction_index)
-                                .expect(
-                                    "Internal error, \
-                                     function should have \
-                                     already been encountered.",
-                                );
-                            let mutates_first_argument = self.native_functions
-                                [native_func_index.0]
-                                .mutates_first_argument();
-
-                            let func_output = if mutates_first_argument {
-                                None
-                            } else {
-                                Some(op_output)
-                            };
-
-                            self.push_annotated(
-                                Instruction::NativeFunctionCall {
-                                    index: *native_func_index,
-                                    args: vec![
-                                        op_output.into(),
-                                        loop_iter.into(),
-                                    ],
-                                    output: func_output,
-                                },
-                                || {
-                                    format!(
-                                    "native call to reduce into {expr_name}"
-                                )
-                                },
-                            );
-                        }
-                        _ => todo!(
-                            "Better error message \
-                             when SimpleReduce points to non-function"
-                        ),
-                    }
-
-                    self.push_annotated(
-                        Instruction::Add {
-                            lhs: loop_iter.into(),
-                            rhs: 1usize.into(),
-                            output: loop_iter,
-                        },
-                        || {
-                            format!(
-                                "increment {loop_iter_name} for {expr_name}"
-                            )
-                        },
-                    );
-
-                    let loop_condition = self.alloc_index();
-                    self.push_annotated(
-                        Instruction::LessThan {
-                            lhs: loop_iter.into(),
-                            rhs: extent.into(),
-                            output: loop_condition,
-                        },
-                        || format!("loop condition for {expr_name}"),
-                    );
-
-                    self.push_annotated(
-                        Instruction::ConditionalJump {
-                            cond: loop_condition.into(),
-                            dest: loop_start,
-                        },
-                        || format!("jump to beginning of {expr_name}"),
-                    );
-                    self.free_index(loop_condition);
-
-                    let after_loop = self.instructions.current_index();
-                    self.instructions.update(
-                        jump_to_end_instruction_index,
-                        Instruction::ConditionalJump {
-                            cond: can_skip_loop.into(),
-                            dest: after_loop,
-                        },
-                    );
-
-                    self.free_dead_indices(op_index);
-
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-                ExprKind::NativeFunction(_) => {
-                    assert!(
-                        self.native_function_lookup.contains_key(&op_index),
-                        "Internal error: \
-                         Lookup should be populated with \
-                         all native functions."
-                    );
-                }
-
-                ExprKind::IsSome(value) => {
-                    let value = self.value_to_arg(op_index, value)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::IsSome {
-                            value,
-                            output: op_output,
-                        },
-                        || format!("evaluate {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-
-                ExprKind::IfElse {
-                    condition,
-                    if_branch,
-                    else_branch,
-                } => {
-                    let condition = self.value_to_arg(op_index, condition)?;
-
-                    let op_output = self.get_output_index(op_index);
-
-                    let mut cached = self.index_tracking.clone();
-
-                    let jump_to_if_branch_index = self
-                        .push_annotated(Instruction::NoOp, || {
-                            format!("jump to if branch of {expr_name}")
-                        });
-
-                    self.translate_scope(
-                        op_index,
-                        *else_branch,
-                        op_output,
-                        Scope::ElseBranch(op_index),
-                    )?;
-
-                    std::mem::swap(&mut self.index_tracking, &mut cached);
-
-                    let jump_to_branch_end_index =
-                        self.push_annotated(Instruction::NoOp, || {
-                            format!(
-                                "after else branch {expr_name}, \
-                             skip the if branch"
-                            )
-                        });
-
-                    self.instructions.update(
-                        jump_to_if_branch_index,
-                        Instruction::ConditionalJump {
-                            cond: condition,
-                            dest: self.instructions.current_index(),
-                        },
-                    );
-
-                    self.translate_scope(
-                        op_index,
-                        *if_branch,
-                        op_output,
-                        Scope::IfBranch(op_index),
-                    )?;
-
-                    self.instructions.update(
-                        jump_to_branch_end_index,
-                        Instruction::ConditionalJump {
-                            cond: true.into(),
-                            dest: self.instructions.current_index(),
-                        },
-                    );
-
-                    self.index_tracking.merge_conditional_branches(cached);
-
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-
-                ExprKind::Equal { lhs, rhs } => {
-                    handle_binary_op!(Equal, lhs, rhs)
-                }
-                ExprKind::NotEqual { lhs, rhs } => {
-                    handle_binary_op!(NotEqual, lhs, rhs)
-                }
-                ExprKind::GreaterThan { lhs, rhs } => {
-                    handle_binary_op!(GreaterThan, lhs, rhs)
-                }
-                ExprKind::LessThan { lhs, rhs } => {
-                    handle_binary_op!(LessThan, lhs, rhs)
-                }
-                ExprKind::GreaterThanOrEqual { lhs, rhs } => {
-                    handle_binary_op!(GreaterThanOrEqual, lhs, rhs)
-                }
-                ExprKind::LessThanOrEqual { lhs, rhs } => {
-                    handle_binary_op!(LessThanOrEqual, lhs, rhs)
-                }
-
-                ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
-                ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
-                ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
-                ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
-
-                ExprKind::PrimCast { value, prim_type } => {
-                    let value = self.value_to_arg(op_index, value)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::PrimCast {
-                            value,
-                            prim_type: *prim_type,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-                ExprKind::PhysicalDowncast { obj, ty } => {
-                    let obj = self.value_to_arg(op_index, obj)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::Downcast {
-                            obj,
-                            subtype: *ty,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-                ExprKind::ReadValue { ptr, prim_type } => {
-                    let ptr = self.value_to_arg(op_index, ptr)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::Read {
-                            ptr,
-                            prim_type: *prim_type,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-                ExprKind::ReadString { ptr } => {
-                    let ptr = self.value_to_arg(op_index, ptr)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::ReadString {
-                            ptr,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-                ExprKind::PointerCast { ptr, .. } => {
-                    let ptr = self.value_to_arg(op_index, ptr)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::Copy {
-                            value: ptr,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
-
-                symbolic @ (ExprKind::StaticField(_)
-                | ExprKind::FieldAccess { .. }
-                | ExprKind::SymbolicDowncast { .. }
-                | ExprKind::IndexAccess { .. }
-                | ExprKind::NumArrayElements { .. }
-                | ExprKind::ArrayExtent { .. }) => {
-                    return Err(Error::SymbolicExpressionRequiresLowering(
-                        symbolic.clone(),
-                    ));
                 }
             }
         }
+
+        let extent_is_none = self.alloc_index();
+        self.push_annotated(
+            Instruction::IsSome {
+                value: extent,
+                output: extent_is_none,
+            },
+            || format!("extent {extent} is some"),
+        );
+        self.push_annotated(
+            Instruction::Not {
+                arg: extent_is_none.into(),
+                output: extent_is_none,
+            },
+            || format!("extent {extent} is none"),
+        );
+        let extent_is_zero = self.alloc_index();
+        self.push_annotated(
+            Instruction::Equal {
+                lhs: extent,
+                rhs: 0usize.into(),
+                output: extent_is_zero,
+            },
+            || format!("extent {extent} is zero"),
+        );
+
+        self.free_index(extent_is_none);
+        self.free_index(extent_is_zero);
+        let can_skip_loop = self.alloc_index();
+        self.push_annotated(
+            Instruction::Or {
+                lhs: extent_is_none.into(),
+                rhs: extent_is_zero.into(),
+                output: can_skip_loop,
+            },
+            || format!("loop over {extent} can be skipped"),
+        );
+
+        // Placeholder for the conditional jump to break
+        // out of the loop.  To be updated after the loop
+        // body is generated, when we know the destination
+        // index of the jump.
+        let jump_to_end_instruction_index = self
+            .push_annotated(Instruction::NoOp, || {
+                format!("skip empty reduction loop for {expr_name}")
+            });
+        self.free_index(can_skip_loop);
+
+        let reduction_index = match reduction {
+            SymbolicValue::Result(op_index) => op_index,
+            _ => todo!(
+                "Better error message \
+                             when SimpleReduce points to non-function"
+            ),
+        };
+        let loop_iter_name = match &self.graph[reduction_index].kind {
+            ExprKind::Function { params, .. } => Some(params[1]),
+            _ => None,
+        }
+        .and_then(|param| param.as_op_index())
+        .and_then(|param_index| self.graph[param_index].name.as_ref())
+        .map(|name| format!("loop iterator '{name}'"))
+        .unwrap_or_else(|| "loop iterator".into());
+
+        let loop_iter = self.alloc_index();
+        self.push_annotated(
+            Instruction::Copy {
+                value: 0usize.into(),
+                output: loop_iter,
+            },
+            || format!("initialize {loop_iter_name} for {expr_name}"),
+        );
+
+        let loop_start = self.instructions.current_index();
+
+        match &self.graph[reduction_index].kind {
+            ExprKind::Function { params, output } => {
+                if params.len() != 2 {
+                    todo!(
+                        "Better error message for invalid reduction function"
+                    );
+                }
+                let accumulator = match params[0] {
+                    SymbolicValue::Result(op_index) => op_index,
+                    _ => todo!("Better error message for ill-formed function"),
+                };
+                let index = match params[1] {
+                    SymbolicValue::Result(op_index) => op_index,
+                    _ => todo!("Better error message for ill-formed function"),
+                };
+
+                self.index_tracking.define_contents(accumulator, op_output);
+                self.index_tracking.define_contents(index, loop_iter);
+
+                self.translate_scope(
+                    op_index,
+                    *output,
+                    op_output,
+                    Scope::Function(reduction_index),
+                )?;
+
+                self.index_tracking.current_location.remove(&accumulator);
+                self.index_tracking.current_location.remove(&index);
+            }
+            ExprKind::NativeFunction(_) => {
+                let native_func_index =
+                    self.native_function_lookup.get(&reduction_index).expect(
+                        "Internal error, \
+                                     function should have \
+                                     already been encountered.",
+                    );
+                let mutates_first_argument = self.native_functions
+                    [native_func_index.0]
+                    .mutates_first_argument();
+
+                let func_output = if mutates_first_argument {
+                    None
+                } else {
+                    Some(op_output)
+                };
+
+                self.push_annotated(
+                    Instruction::NativeFunctionCall {
+                        index: *native_func_index,
+                        args: vec![op_output.into(), loop_iter.into()],
+                        output: func_output,
+                    },
+                    || format!("native call to reduce into {expr_name}"),
+                );
+            }
+            _ => todo!(
+                "Better error message \
+                             when SimpleReduce points to non-function"
+            ),
+        }
+
+        self.push_annotated(
+            Instruction::Add {
+                lhs: loop_iter.into(),
+                rhs: 1usize.into(),
+                output: loop_iter,
+            },
+            || format!("increment {loop_iter_name} for {expr_name}"),
+        );
+
+        let loop_condition = self.alloc_index();
+        self.push_annotated(
+            Instruction::LessThan {
+                lhs: loop_iter.into(),
+                rhs: extent.into(),
+                output: loop_condition,
+            },
+            || format!("loop condition for {expr_name}"),
+        );
+
+        self.push_annotated(
+            Instruction::ConditionalJump {
+                cond: loop_condition.into(),
+                dest: loop_start,
+            },
+            || format!("jump to beginning of {expr_name}"),
+        );
+        self.free_index(loop_condition);
+
+        let after_loop = self.instructions.current_index();
+        self.instructions.update(
+            jump_to_end_instruction_index,
+            Instruction::ConditionalJump {
+                cond: can_skip_loop.into(),
+                dest: after_loop,
+            },
+        );
+
+        self.free_dead_indices(op_index);
+
+        self.index_tracking.define_contents(op_index, op_output);
+
+        Ok(())
+    }
+
+    fn translate_if_else(
+        &mut self,
+        op_index: OpIndex,
+        condition: SymbolicValue,
+        if_branch: SymbolicValue,
+        else_branch: SymbolicValue,
+    ) -> Result<(), Error> {
+        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+
+        let condition = self.value_to_arg(op_index, &condition)?;
+
+        let op_output = self.get_output_index(op_index);
+
+        let mut cached = self.index_tracking.clone();
+
+        let jump_to_if_branch_index = self
+            .push_annotated(Instruction::NoOp, || {
+                format!("jump to if branch of {expr_name}")
+            });
+
+        self.translate_scope(
+            op_index,
+            else_branch,
+            op_output,
+            Scope::ElseBranch(op_index),
+        )?;
+
+        std::mem::swap(&mut self.index_tracking, &mut cached);
+
+        let jump_to_branch_end_index =
+            self.push_annotated(Instruction::NoOp, || {
+                format!(
+                    "after else branch {expr_name}, \
+                             skip the if branch"
+                )
+            });
+
+        self.instructions.update(
+            jump_to_if_branch_index,
+            Instruction::ConditionalJump {
+                cond: condition,
+                dest: self.instructions.current_index(),
+            },
+        );
+
+        self.translate_scope(
+            op_index,
+            if_branch,
+            op_output,
+            Scope::IfBranch(op_index),
+        )?;
+
+        self.instructions.update(
+            jump_to_branch_end_index,
+            Instruction::ConditionalJump {
+                cond: true.into(),
+                dest: self.instructions.current_index(),
+            },
+        );
+
+        self.index_tracking.merge_conditional_branches(cached);
+
+        self.index_tracking.define_contents(op_index, op_output);
 
         Ok(())
     }
