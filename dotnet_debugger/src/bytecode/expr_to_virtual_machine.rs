@@ -902,33 +902,19 @@ impl ExpressionTranslator<'_> {
             let op = &self.graph[op_index];
             let expr_name = LocalIndexPrinter::new(op_index, self.graph);
 
-            macro_rules! push_annotated {
-                ($inst:expr $(,)?) => {{
-                    self.instructions.push($inst)
-                }};
-
-                ($inst:expr, $annot:expr $(,)?) => {{
-                    let inst = self.instructions.push($inst);
-                    if self.show_steps {
-                        self.instructions.annotate(inst, $annot);
-                    }
-                    inst
-                }};
-            }
-
             macro_rules! handle_binary_op {
                 ($variant:ident, $lhs:expr, $rhs:expr) => {{
                     let lhs = self.value_to_arg(op_index, $lhs)?;
                     let rhs = self.value_to_arg(op_index, $rhs)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::$variant {
                             lhs,
                             rhs,
                             output: op_output,
                         },
-                        format!("evaluate {expr_name}"),
+                        || format!("evaluate {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }};
@@ -937,9 +923,9 @@ impl ExpressionTranslator<'_> {
             match op.as_ref() {
                 ExprKind::None => {
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Clear { loc: op_output },
-                        format!("generate None for {expr_name}"),
+                        || format!("generate None for {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1015,13 +1001,13 @@ impl ExpressionTranslator<'_> {
                                 ),
                             };
 
-                            push_annotated!(
+                            self.push_annotated(
                                 Instruction::NativeFunctionCall {
                                     index: native_func_index,
                                     args: vm_args,
                                     output: None,
                                 },
-                                format!("produce {expr_name}"),
+                                || format!("produce {expr_name}"),
                             );
 
                             self.index_tracking
@@ -1037,9 +1023,9 @@ impl ExpressionTranslator<'_> {
                                 .get(&op_index)
                             {
                                 if first_arg_loc != required_output {
-                                    push_annotated!(
+                                    self.push_annotated(
                                         Instruction::Swap(first_arg_loc, required_output),
-                                        format!(
+                                        || format!(
                                             "swap {expr_name} \
                                              to mandatory output loc {required_output}"
                                         ),
@@ -1055,13 +1041,13 @@ impl ExpressionTranslator<'_> {
                             // The function produces an output value, to
                             // be stored in the output index.
                             let op_output = self.get_output_index(op_index);
-                            push_annotated!(
+                            self.push_annotated(
                                 Instruction::NativeFunctionCall {
                                     index: native_func_index,
                                     args: vm_args,
                                     output: Some(op_output),
                                 },
-                                format!("produce {expr_name}"),
+                                || format!("produce {expr_name}"),
                             );
                             self.index_tracking
                                 .define_contents(op_index, op_output);
@@ -1095,75 +1081,79 @@ impl ExpressionTranslator<'_> {
 
                     match initial {
                         VMArg::Const(_) => {
-                            push_annotated!(
+                            self.push_annotated(
                                 Instruction::Copy {
                                     value: initial,
                                     output: op_output,
                                 },
-                                format!(
-                                    "copy initial value \
+                                || {
+                                    format!(
+                                        "copy initial value \
                                      of reduction {expr_name}"
-                                ),
+                                    )
+                                },
                             );
                         }
                         VMArg::SavedValue(stack_index) => {
                             if stack_index != op_output {
-                                push_annotated!(
+                                self.push_annotated(
                                     Instruction::Swap(stack_index, op_output),
-                                    format!(
-                                        "move initial value \
+                                    || {
+                                        format!(
+                                            "move initial value \
                                          of reduction {expr_name}"
-                                    ),
+                                        )
+                                    },
                                 );
                             }
                         }
                     }
 
                     let extent_is_none = self.alloc_index();
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::IsSome {
                             value: extent,
-                            output: extent_is_none
+                            output: extent_is_none,
                         },
-                        format!("extent {extent} is some"),
+                        || format!("extent {extent} is some"),
                     );
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Not {
                             arg: extent_is_none.into(),
-                            output: extent_is_none
+                            output: extent_is_none,
                         },
-                        format!("extent {extent} is none"),
+                        || format!("extent {extent} is none"),
                     );
                     let extent_is_zero = self.alloc_index();
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Equal {
                             lhs: extent,
                             rhs: 0usize.into(),
-                            output: extent_is_zero
+                            output: extent_is_zero,
                         },
-                        format!("extent {extent} is zero"),
+                        || format!("extent {extent} is zero"),
                     );
 
                     self.free_index(extent_is_none);
                     self.free_index(extent_is_zero);
                     let can_skip_loop = self.alloc_index();
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Or {
                             lhs: extent_is_none.into(),
                             rhs: extent_is_zero.into(),
-                            output: can_skip_loop
+                            output: can_skip_loop,
                         },
-                        format!("loop over {extent} can be skipped"),
+                        || format!("loop over {extent} can be skipped"),
                     );
 
                     // Placeholder for the conditional jump to break
                     // out of the loop.  To be updated after the loop
                     // body is generated, when we know the destination
                     // index of the jump.
-                    let jump_to_end_instruction_index = push_annotated!(
-                        Instruction::NoOp,
-                        format!("skip empty reduction loop for {expr_name}"),
-                    );
+                    let jump_to_end_instruction_index = self
+                        .push_annotated(Instruction::NoOp, || {
+                            format!("skip empty reduction loop for {expr_name}")
+                        });
                     self.free_index(can_skip_loop);
 
                     let reduction_index = match reduction {
@@ -1188,12 +1178,16 @@ impl ExpressionTranslator<'_> {
                         .unwrap_or_else(|| "loop iterator".into());
 
                     let loop_iter = self.alloc_index();
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Copy {
                             value: 0usize.into(),
                             output: loop_iter,
                         },
-                        format!("initialize {loop_iter_name} for {expr_name}"),
+                        || {
+                            format!(
+                                "initialize {loop_iter_name} for {expr_name}"
+                            )
+                        },
                     );
 
                     let loop_start = self.instructions.current_index();
@@ -1248,7 +1242,7 @@ impl ExpressionTranslator<'_> {
                                 Some(op_output)
                             };
 
-                            push_annotated!(
+                            self.push_annotated(
                                 Instruction::NativeFunctionCall {
                                     index: *native_func_index,
                                     args: vec![
@@ -1257,9 +1251,11 @@ impl ExpressionTranslator<'_> {
                                     ],
                                     output: func_output,
                                 },
-                                format!(
+                                || {
+                                    format!(
                                     "native call to reduce into {expr_name}"
-                                ),
+                                )
+                                },
                             );
                         }
                         _ => todo!(
@@ -1268,31 +1264,35 @@ impl ExpressionTranslator<'_> {
                         ),
                     }
 
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Add {
                             lhs: loop_iter.into(),
                             rhs: 1usize.into(),
                             output: loop_iter,
                         },
-                        format!("increment {loop_iter_name} for {expr_name}"),
+                        || {
+                            format!(
+                                "increment {loop_iter_name} for {expr_name}"
+                            )
+                        },
                     );
 
                     let loop_condition = self.alloc_index();
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::LessThan {
                             lhs: loop_iter.into(),
                             rhs: extent.into(),
                             output: loop_condition,
                         },
-                        format!("loop condition for {expr_name}"),
+                        || format!("loop condition for {expr_name}"),
                     );
 
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::ConditionalJump {
                             cond: loop_condition.into(),
                             dest: loop_start,
                         },
-                        format!("jump to beginning of {expr_name}"),
+                        || format!("jump to beginning of {expr_name}"),
                     );
                     self.free_index(loop_condition);
 
@@ -1322,12 +1322,12 @@ impl ExpressionTranslator<'_> {
                     let value = self.value_to_arg(op_index, value)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::IsSome {
                             value,
                             output: op_output,
                         },
-                        format!("evaluate {expr_name}"),
+                        || format!("evaluate {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1343,10 +1343,10 @@ impl ExpressionTranslator<'_> {
 
                     let mut cached = self.index_tracking.clone();
 
-                    let jump_to_if_branch_index = push_annotated!(
-                        Instruction::NoOp,
-                        format!("jump to if branch of {expr_name}"),
-                    );
+                    let jump_to_if_branch_index = self
+                        .push_annotated(Instruction::NoOp, || {
+                            format!("jump to if branch of {expr_name}")
+                        });
 
                     self.translate_scope(
                         op_index,
@@ -1357,13 +1357,13 @@ impl ExpressionTranslator<'_> {
 
                     std::mem::swap(&mut self.index_tracking, &mut cached);
 
-                    let jump_to_branch_end_index = push_annotated!(
-                        Instruction::NoOp,
-                        format!(
-                            "after else branch {expr_name}, \
+                    let jump_to_branch_end_index =
+                        self.push_annotated(Instruction::NoOp, || {
+                            format!(
+                                "after else branch {expr_name}, \
                              skip the if branch"
-                        ),
-                    );
+                            )
+                        });
 
                     self.instructions.update(
                         jump_to_if_branch_index,
@@ -1421,13 +1421,13 @@ impl ExpressionTranslator<'_> {
                     let value = self.value_to_arg(op_index, value)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::PrimCast {
                             value,
                             prim_type: *prim_type,
                             output: op_output,
                         },
-                        format!("eval {expr_name}"),
+                        || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1435,13 +1435,13 @@ impl ExpressionTranslator<'_> {
                     let obj = self.value_to_arg(op_index, obj)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Downcast {
                             obj,
                             subtype: *ty,
                             output: op_output,
                         },
-                        format!("eval {expr_name}"),
+                        || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1449,13 +1449,13 @@ impl ExpressionTranslator<'_> {
                     let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Read {
                             ptr,
                             prim_type: *prim_type,
                             output: op_output,
                         },
-                        format!("eval {expr_name}"),
+                        || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1463,12 +1463,12 @@ impl ExpressionTranslator<'_> {
                     let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::ReadString {
                             ptr,
                             output: op_output,
                         },
-                        format!("eval {expr_name}"),
+                        || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1476,12 +1476,12 @@ impl ExpressionTranslator<'_> {
                     let ptr = self.value_to_arg(op_index, ptr)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
-                    push_annotated!(
+                    self.push_annotated(
                         Instruction::Copy {
                             value: ptr,
                             output: op_output,
                         },
-                        format!("eval {expr_name}"),
+                        || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
