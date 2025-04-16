@@ -646,6 +646,7 @@ fn eval_nested_reductions_with_native_function() {
             }
 
             fn outer_reduction(obj, i:usize) {
+                let obj = increment_obj(obj, i);
                 (0..i).reduce(obj, inner_reduction)
             }
             pub fn main() {
@@ -660,8 +661,11 @@ fn eval_nested_reductions_with_native_function() {
     let results = vm.local_eval().unwrap();
 
     let expected = (0..10)
-        .flat_map(|i| 0..i)
-        .map(|j| if j % 2 == 0 { j * j } else { j })
+        .map(|i| {
+            i + (0..i)
+                .map(|j| if j % 2 == 0 { j * j } else { j })
+                .sum::<usize>()
+        })
         .sum::<usize>();
 
     assert_eq!(results.len(), 1);

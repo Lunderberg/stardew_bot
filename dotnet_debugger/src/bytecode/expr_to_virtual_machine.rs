@@ -6,8 +6,7 @@ use std::{
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    bytecode::expr::Scope, Error, ExprKind, OpIndex, RuntimePrimValue,
-    RuntimeType, SymbolicValue,
+    bytecode::expr::Scope, Error, ExprKind, OpIndex, RuntimeType, SymbolicValue,
 };
 
 use super::{
@@ -83,9 +82,12 @@ struct ExpressionTranslator<'a> {
 struct IndexTracking {
     next_free_index: usize,
     dead_indices: BTreeSet<StackIndex>,
-    reserved_outputs: HashMap<OpIndex, StackIndex>,
+
+    expr_to_reserved_location: HashMap<OpIndex, StackIndex>,
+
     current_location: HashMap<OpIndex, StackIndex>,
-    current_contents: HashMap<StackIndex, OpIndex>,
+    num_aliasing: HashMap<StackIndex, usize>,
+
     previously_consumed: HashMap<OpIndex, OpIndex>,
 }
 
@@ -130,7 +132,8 @@ impl SymbolicGraph {
             })
             .unzip();
 
-        let mut reserved_outputs = HashMap::<OpIndex, StackIndex>::new();
+        let mut expr_to_reserved_location =
+            HashMap::<OpIndex, StackIndex>::new();
         let mut next_free_index = 0;
         match output {
             SymbolicValue::Result(op_index) => match &self[op_index].kind {
@@ -147,7 +150,7 @@ impl SymbolicGraph {
             next_free_index += 1;
             match value {
                 SymbolicValue::Result(op_index) => {
-                    reserved_outputs.insert(op_index, stack_index);
+                    expr_to_reserved_location.insert(op_index, stack_index);
                 }
                 other => {
                     let value: VMArg = other
@@ -185,7 +188,7 @@ impl SymbolicGraph {
 
         let index_tracking = IndexTracking {
             next_free_index,
-            reserved_outputs,
+            expr_to_reserved_location,
             ..Default::default()
         };
 
@@ -368,9 +371,108 @@ impl SymbolicGraph {
 }
 
 impl IndexTracking {
+    fn expr_to_location(
+        &self,
+        op_index: OpIndex,
+    ) -> Result<Option<StackIndex>, Error> {
+        if self.previously_consumed.contains_key(&op_index) {
+            return Err(Error::AttemptedUseOfConsumedValue);
+        }
+
+        Ok(self.current_location.get(&op_index).cloned())
+    }
+
+    fn reserve_index(&mut self, op_index: OpIndex, stack_index: StackIndex) {
+        {
+            let previous_reserved_location =
+                self.expr_to_reserved_location.get(&op_index);
+            assert!(
+                previous_reserved_location.is_none(),
+                "Attempted to reserve {stack_index} to store {op_index}, \
+                 but {} is already reserved for {op_index}",
+                previous_reserved_location.unwrap(),
+            );
+        }
+
+        self.expr_to_reserved_location.insert(op_index, stack_index);
+        self.dead_indices.remove(&stack_index);
+    }
+
+    fn release_reservation(&mut self, op_index: OpIndex) -> StackIndex {
+        let Some(stack_index) =
+            self.expr_to_reserved_location.remove(&op_index)
+        else {
+            unreachable!(
+                "Internal error: \
+                 Attempted to release reservation for {op_index}, \
+                 but no such reservation existed."
+            )
+        };
+
+        assert!(
+            self.current_location.contains_key(&op_index),
+            "Releasing reservation of {stack_index} for {op_index}, \
+             but the reservation had never been used."
+        );
+
+        stack_index
+    }
+
     fn define_contents(&mut self, expr: OpIndex, loc: StackIndex) {
+        assert!(
+            !self.dead_indices.contains(&loc),
+            "Attempted to define {loc} as containing {expr}, \
+             but {loc} is currently listed as a dead index."
+        );
+        {
+            let current_loc = self.current_location.get(&expr);
+            assert!(
+                current_loc.is_none(),
+                "Attempted to define {loc} as containing {expr}, \
+                 but {expr} is already stored in {}.",
+                current_loc.unwrap(),
+            );
+        }
+
         self.current_location.insert(expr, loc);
-        self.current_contents.insert(loc, expr);
+        *self.num_aliasing.entry(loc).or_insert(0) += 1;
+    }
+
+    fn release_expr(&mut self, expr: OpIndex) -> StackIndex {
+        let Some(stack_index) = self.current_location.remove(&expr) else {
+            panic!(
+                "Internal error: \
+                 Attempted to release expr {expr}, \
+                 but it wasn't actually stored anywhere."
+            )
+        };
+
+        let Some(num_aliasing) = self.num_aliasing.get_mut(&stack_index) else {
+            panic!(
+                "Internal inconsistency: \
+                 When removing {expr} from {stack_index}, \
+                 reverse map had no entry for {stack_index}."
+            );
+        };
+
+        assert!(*num_aliasing > 0);
+
+        *num_aliasing -= 1;
+
+        if *num_aliasing == 0 {
+            // The location-to-expr map points to the current
+            // expression.  The current expression owns the stack
+            // location, and so the stack location can be reused.
+            self.num_aliasing.remove(&stack_index);
+            self.dead_indices.insert(stack_index);
+        } else {
+            // The location-to-expr map points to a different
+            // expression.  The current expression is an alias,
+            // and the original expression may still use the stack
+            // location.
+        }
+
+        stack_index
     }
 
     fn merge_conditional_branches(&mut self, mut other: Self) {
@@ -401,7 +503,10 @@ impl IndexTracking {
         // All reservations should expire after the instruction that
         // produced them.  Both branches of a conditional should
         // conclude with the same set of reserved output locations.
-        assert_eq!(self.reserved_outputs, other.reserved_outputs);
+        assert_eq!(
+            self.expr_to_reserved_location,
+            other.expr_to_reserved_location
+        );
     }
 }
 
@@ -571,40 +676,30 @@ impl ExpressionTranslator<'_> {
         usage: OpIndex,
         value: &SymbolicValue,
     ) -> Result<VMArg, Error> {
-        match value {
-            &SymbolicValue::Bool(value) => {
-                Ok(VMArg::Const(RuntimePrimValue::Bool(value)))
+        let op_index = match value {
+            SymbolicValue::Result(op_index) => *op_index,
+            other => {
+                let prim = other
+                    .as_prim_value()
+                    .expect("Argument must be primitive or a prior result");
+                let arg = VMArg::Const(prim);
+                return Ok(arg);
             }
-            &SymbolicValue::Int(value) => {
-                Ok(VMArg::Const(RuntimePrimValue::NativeUInt(value)))
-            }
-            &SymbolicValue::Ptr(ptr) => {
-                Ok(VMArg::Const(RuntimePrimValue::Ptr(ptr)))
-            }
-            SymbolicValue::Result(op_index)
-                if self
-                    .index_tracking
-                    .previously_consumed
-                    .contains_key(&op_index) =>
-            {
-                Err(Error::AttemptedUseOfConsumedValue)
-            }
-            SymbolicValue::Result(op_index) => Ok(self
-                .index_tracking
-                .current_location
-                .get(&op_index)
-                .unwrap_or_else(|| {
-                    panic!(
-                        "Internal error, \
+        };
+
+        Ok(self
+            .index_tracking
+            .expr_to_location(op_index)?
+            .unwrap_or_else(|| {
+                panic!(
+                    "Internal error, \
                          expression {usage} ({}) attempted to use \
                          {op_index} ({}), \
                          but {op_index} was not previously translated.",
-                        self.graph[usage].kind, self.graph[*op_index].kind,
-                    )
-                })
-                .clone()
-                .into()),
-        }
+                    self.graph[usage].kind, self.graph[op_index].kind,
+                )
+            })
+            .into())
     }
 
     fn annotate<Func, Annot>(&mut self, generate_annotation: Func)
@@ -627,22 +722,11 @@ impl ExpressionTranslator<'_> {
                 LocalIndexPrinter::new(op_index, graph)
             )
         });
-        self.index_tracking
-            .reserved_outputs
-            .insert(op_index, stack_index);
-        self.index_tracking.dead_indices.remove(&stack_index);
+        self.index_tracking.reserve_index(op_index, stack_index);
     }
 
-    fn release_reserved_index(&mut self, op_index: OpIndex) {
-        let Some(stack_index) =
-            self.index_tracking.reserved_outputs.remove(&op_index)
-        else {
-            unreachable!(
-                "Internal error: \
-                 Attempted to release reservation for {op_index}, \
-                 but no such reservation existed."
-            )
-        };
+    fn release_reservation(&mut self, op_index: OpIndex) {
+        let stack_index = self.index_tracking.release_reservation(op_index);
 
         self.annotate(|graph| {
             format!(
@@ -650,18 +734,6 @@ impl ExpressionTranslator<'_> {
                 LocalIndexPrinter::new(op_index, graph),
             )
         });
-
-        if !self.index_tracking.current_location.contains_key(&op_index) {
-            self.annotate(|graph| {
-                format!(
-                    "Since {} is not stored anywhere, \
-                     marking released reservation of {stack_index} \
-                     as a dead index.",
-                    LocalIndexPrinter::new(op_index, graph),
-                )
-            });
-            self.index_tracking.dead_indices.insert(stack_index);
-        }
     }
 
     fn alloc_index(&mut self) -> StackIndex {
@@ -680,7 +752,7 @@ impl ExpressionTranslator<'_> {
 
     fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
         if let Some(&index) =
-            self.index_tracking.reserved_outputs.get(&op_index)
+            self.index_tracking.expr_to_reserved_location.get(&op_index)
         {
             self.annotate(|graph| {
                 format!(
@@ -719,41 +791,18 @@ impl ExpressionTranslator<'_> {
             .iter()
             .take_while(|last_usage| last_usage.usage_point == op_index)
             .for_each(|last_usage| {
-                let Some(old_stack_index) = self
-                    .index_tracking
-                    .current_location
-                    .remove(&last_usage.expr_used)
-                else {
-                    panic!(
-                        "Internal error: \
-                         Last usage of {} occurred after {}, \
-                         (expr '{}' used in '{}') \
-                         but {} was not actually defined.  \
-                         Currently, [{}] are defined.",
-                        last_usage.expr_used,
-                        last_usage.usage_point,
-                        self.graph[last_usage.expr_used].kind,
-                        self.graph[last_usage.usage_point].kind,
-                        last_usage.expr_used,
-                        self.index_tracking
-                            .current_location
-                            .iter()
-                            .map(|(op_index, _)| *op_index)
-                            .sorted()
-                            .map(|op_index| format!("{op_index}"))
-                            .join(", "),
-                    )
-                };
+                let expr_used = last_usage.expr_used;
+
+                let stack_index = self.index_tracking.release_expr(expr_used);
 
                 self.annotate(|graph| {
                     format!(
                         "After {}, {} is no longer needed.  \
-                             Marking {old_stack_index} as dead.",
+                         Marking {stack_index} as dead.",
                         LocalIndexPrinter::new(op_index, graph),
-                        LocalIndexPrinter::new(last_usage.expr_used, graph),
+                        LocalIndexPrinter::new(expr_used, graph),
                     )
                 });
-                self.index_tracking.dead_indices.insert(old_stack_index);
             });
     }
 
@@ -1105,7 +1154,7 @@ impl ExpressionTranslator<'_> {
                 Box::new(iter_scope);
 
             self.translate(iter_scope)?;
-            self.release_reserved_index(scope_output);
+            self.release_reservation(scope_output);
 
             // In case the output was stored somewhere other than the
             // reserved address, move it to the correct location.
@@ -1183,13 +1232,14 @@ impl ExpressionTranslator<'_> {
                     || format!("produce {expr_name}"),
                 );
 
-                self.index_tracking.current_location.remove(&first_arg_op);
+                // self.index_tracking.current_location.remove(&first_arg_op);
+                // self.index_tracking.release_expr(first_arg_op);
                 self.index_tracking
                     .previously_consumed
                     .insert(first_arg_op, op_index);
 
                 if let Some(&required_output) =
-                    self.index_tracking.reserved_outputs.get(&op_index)
+                    self.index_tracking.expr_to_reserved_location.get(&op_index)
                 {
                     if first_arg_loc != required_output {
                         self.push_annotated(
@@ -1227,6 +1277,8 @@ impl ExpressionTranslator<'_> {
             )
         }
 
+        self.free_dead_indices(op_index);
+
         Ok(())
     }
 
@@ -1254,7 +1306,7 @@ impl ExpressionTranslator<'_> {
                     || {
                         format!(
                             "copy initial value \
-                                     of reduction {expr_name}"
+                             of reduction {expr_name}"
                         )
                     },
                 );
@@ -1266,7 +1318,7 @@ impl ExpressionTranslator<'_> {
                         || {
                             format!(
                                 "move initial value \
-                                         of reduction {expr_name}"
+                                 of reduction {expr_name}"
                             )
                         },
                     );
@@ -1376,6 +1428,8 @@ impl ExpressionTranslator<'_> {
 
                 self.index_tracking.current_location.remove(&accumulator);
                 self.index_tracking.current_location.remove(&index);
+                // self.index_tracking.release_expr(accumulator);
+                // self.index_tracking.release_expr(index);
             }
             ExprKind::NativeFunction(_) => {
                 let native_func_index =

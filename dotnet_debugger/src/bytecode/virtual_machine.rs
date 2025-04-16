@@ -1013,7 +1013,11 @@ impl VirtualMachine {
                     let mut args = values
                         .collect_native_function_args(args, &mut inline_consts);
                     let result =
-                        self.native_functions[index.0].apply(&mut args)?;
+                        self.native_functions[index.0].apply(&mut args)
+                        // ?
+                        .unwrap_or_else(|err| {
+                            panic!("During instruction {current_instruction}, error {err}")
+                        });
                     if let Some(output) = output {
                         values[*output] = result;
                     }
