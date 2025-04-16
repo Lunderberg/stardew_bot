@@ -79,12 +79,13 @@ struct ExpressionTranslator<'a> {
     show_steps: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 struct IndexTracking {
     next_free_index: usize,
     dead_indices: BTreeSet<StackIndex>,
     reserved_outputs: HashMap<OpIndex, StackIndex>,
     current_location: HashMap<OpIndex, StackIndex>,
+    current_contents: HashMap<StackIndex, OpIndex>,
     previously_consumed: HashMap<OpIndex, OpIndex>,
 }
 
@@ -184,10 +185,8 @@ impl SymbolicGraph {
 
         let index_tracking = IndexTracking {
             next_free_index,
-            dead_indices: BTreeSet::new(),
             reserved_outputs,
-            current_location: HashMap::new(),
-            previously_consumed: HashMap::new(),
+            ..Default::default()
         };
 
         let mut translator = ExpressionTranslator {
@@ -369,6 +368,11 @@ impl SymbolicGraph {
 }
 
 impl IndexTracking {
+    fn define_contents(&mut self, expr: OpIndex, loc: StackIndex) {
+        self.current_location.insert(expr, loc);
+        self.current_contents.insert(loc, expr);
+    }
+
     fn merge_conditional_branches(&mut self, mut other: Self) {
         self.next_free_index = self.next_free_index.max(other.next_free_index);
 
@@ -926,9 +930,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("evaluate {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }};
             }
 
@@ -939,9 +941,7 @@ impl ExpressionTranslator<'_> {
                         Instruction::Clear { loc: op_output },
                         format!("generate None for {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
 
                 ExprKind::Function { .. } => {
@@ -1046,12 +1046,10 @@ impl ExpressionTranslator<'_> {
                                     );
                                 }
                                 self.index_tracking
-                                    .current_location
-                                    .insert(op_index, required_output);
+                                    .define_contents(op_index, required_output);
                             } else {
                                 self.index_tracking
-                                    .current_location
-                                    .insert(op_index, first_arg_loc);
+                                    .define_contents(op_index, first_arg_loc);
                             }
                         } else {
                             // The function produces an output value, to
@@ -1066,8 +1064,7 @@ impl ExpressionTranslator<'_> {
                                 format!("produce {expr_name}"),
                             );
                             self.index_tracking
-                                .current_location
-                                .insert(op_index, op_output);
+                                .define_contents(op_index, op_output);
                         }
                     } else {
                         todo!(
@@ -1216,11 +1213,9 @@ impl ExpressionTranslator<'_> {
                             };
 
                             self.index_tracking
-                                .current_location
-                                .insert(accumulator, op_output);
+                                .define_contents(accumulator, op_output);
                             self.index_tracking
-                                .current_location
-                                .insert(index, loop_iter);
+                                .define_contents(index, loop_iter);
 
                             self.translate_scope(
                                 op_index,
@@ -1312,9 +1307,7 @@ impl ExpressionTranslator<'_> {
 
                     self.free_dead_indices(op_index);
 
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::NativeFunction(_) => {
                     assert!(
@@ -1336,9 +1329,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("evaluate {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
 
                 ExprKind::IfElse {
@@ -1399,9 +1390,7 @@ impl ExpressionTranslator<'_> {
 
                     self.index_tracking.merge_conditional_branches(cached);
 
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
 
                 ExprKind::Equal { lhs, rhs } => {
@@ -1440,9 +1429,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     let obj = self.value_to_arg(op_index, obj)?;
@@ -1456,9 +1443,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1472,9 +1457,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::ReadString { ptr } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1487,9 +1470,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::PointerCast { ptr, .. } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
@@ -1502,9 +1483,7 @@ impl ExpressionTranslator<'_> {
                         },
                         format!("eval {expr_name}"),
                     );
-                    self.index_tracking
-                        .current_location
-                        .insert(op_index, op_output);
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
 
                 symbolic @ (ExprKind::StaticField(_)
