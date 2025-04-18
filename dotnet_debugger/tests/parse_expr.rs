@@ -16,8 +16,20 @@ fn require_identical_graph(
         graph
     };
 
-    println!("----------- Parsed -------------\n{parsed}");
-    println!("----------- Expected -------------\n{expected}");
+    println!(
+        "----------- Parsed -------------\n{}",
+        parsed
+            .printer()
+            .expand_all_expressions()
+            .number_all_expressions()
+    );
+    println!(
+        "----------- Expected -------------\n{}",
+        expected
+            .printer()
+            .expand_all_expressions()
+            .number_all_expressions()
+    );
 
     assert!(parsed
         .graph_comparison(&expected)
@@ -273,7 +285,7 @@ fn parse_nullary_anonymous_function_without_space() {
 fn parse_function_with_arg() {
     require_identical_graph(
         "let arr = class_name.static_field;
-         fn main(index: usize) { arr[index] }",
+         pub fn main(index: usize) { arr[index] }",
         |graph| {
             let arr = graph.static_field("class_name", "static_field");
             graph.name(arr, "arr").unwrap();
@@ -282,6 +294,7 @@ fn parse_function_with_arg() {
             let item = graph.access_index(arr, index);
             let func = graph.function_def(vec![index], item);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -291,7 +304,7 @@ fn parse_function_with_multiple_returns() {
     require_identical_graph(
         "let arr1 = class_name.static_field1;
          let arr2 = class_name.static_field2;
-         fn main(index: usize) {
+         pub fn main(index: usize) {
                (arr1[index], arr2[index])
         }",
         |graph| {
@@ -307,6 +320,7 @@ fn parse_function_with_multiple_returns() {
             let tuple = graph.tuple(vec![item1, item2]);
             let func = graph.function_def(vec![index], tuple);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -364,34 +378,42 @@ fn parse_function_with_param_that_shadows_variable() {
 
 #[test]
 fn parse_addition() {
-    require_identical_graph("fn main(a: usize, b: usize) { a+b }", |graph| {
-        let a = graph.function_arg(RuntimePrimType::NativeUInt);
-        graph.name(a, "a").unwrap();
-        let b = graph.function_arg(RuntimePrimType::NativeUInt);
-        graph.name(b, "b").unwrap();
-        let sum = graph.add(a, b);
-        let func = graph.function_def(vec![a, b], sum);
-        graph.name(func, "main").unwrap();
-    });
+    require_identical_graph(
+        "pub fn main(a: usize, b: usize) { a+b }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+            let sum = graph.add(a, b);
+            let func = graph.function_def(vec![a, b], sum);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
 }
 
 #[test]
 fn parse_multiplication() {
-    require_identical_graph("fn main(a: usize, b: usize) { a*b }", |graph| {
-        let a = graph.function_arg(RuntimePrimType::NativeUInt);
-        graph.name(a, "a").unwrap();
-        let b = graph.function_arg(RuntimePrimType::NativeUInt);
-        graph.name(b, "b").unwrap();
-        let prod = graph.mul(a, b);
-        let func = graph.function_def(vec![a, b], prod);
-        graph.name(func, "main").unwrap();
-    });
+    require_identical_graph(
+        "pub fn main(a: usize, b: usize) { a*b }",
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::NativeUInt);
+            graph.name(b, "b").unwrap();
+            let prod = graph.mul(a, b);
+            let func = graph.function_def(vec![a, b], prod);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
 }
 
 #[test]
 fn parse_repeated_addition() {
     require_identical_graph(
-        "fn main(a: usize, b: usize) { a+b+a+b }",
+        "pub fn main(a: usize, b: usize) { a+b+a+b }",
         |graph| {
             let a = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(a, "a").unwrap();
@@ -404,6 +426,7 @@ fn parse_repeated_addition() {
 
             let func = graph.function_def(vec![a, b], sum);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -411,7 +434,7 @@ fn parse_repeated_addition() {
 #[test]
 fn parse_repeated_multiplication() {
     require_identical_graph(
-        "fn main(a: usize, b: usize) { a*b*a*b }",
+        "pub fn main(a: usize, b: usize) { a*b*a*b }",
         |graph| {
             let a = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(a, "a").unwrap();
@@ -424,6 +447,7 @@ fn parse_repeated_multiplication() {
 
             let func = graph.function_def(vec![a, b], prod);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -431,7 +455,7 @@ fn parse_repeated_multiplication() {
 #[test]
 fn parse_mixed_operators_with_precedence() {
     require_identical_graph(
-        "fn main(a: usize, b: usize) { a*b + b*a }",
+        "pub fn main(a: usize, b: usize) { a*b + b*a }",
         |graph| {
             let a = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(a, "a").unwrap();
@@ -444,6 +468,7 @@ fn parse_mixed_operators_with_precedence() {
 
             let func = graph.function_def(vec![a, b], sum);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -451,7 +476,7 @@ fn parse_mixed_operators_with_precedence() {
 #[test]
 fn parse_mixed_operators_with_parentheses() {
     require_identical_graph(
-        "fn main(a: usize, b: usize) { a + (a+b)*(b+a) }",
+        "pub fn main(a: usize, b: usize) { a + (a+b)*(b+a) }",
         |graph| {
             let a = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(a, "a").unwrap();
@@ -465,6 +490,7 @@ fn parse_mixed_operators_with_parentheses() {
 
             let func = graph.function_def(vec![a, b], sum);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -472,7 +498,7 @@ fn parse_mixed_operators_with_parentheses() {
 #[test]
 fn parse_mixed_operators_with_leading_parentheses() {
     require_identical_graph(
-        "fn main(a: usize, b: usize) { (a+b)*(b+a) }",
+        "pub fn main(a: usize, b: usize) { (a+b)*(b+a) }",
         |graph| {
             let a = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(a, "a").unwrap();
@@ -485,6 +511,7 @@ fn parse_mixed_operators_with_leading_parentheses() {
 
             let func = graph.function_def(vec![a, b], prod);
             graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
         },
     );
 }
@@ -494,7 +521,7 @@ fn parse_function_call() {
     require_identical_graph(
         "
         fn multiply(lhs: usize, rhs: usize) { lhs*rhs }
-        fn main(a: usize, b: usize) { multiply(a+b, b+a) }
+        pub fn main(a: usize, b: usize) { multiply(a+b, b+a) }
         ",
         |graph| {
             let lhs = graph.function_arg(RuntimePrimType::NativeUInt);
@@ -516,6 +543,7 @@ fn parse_function_call() {
 
             let main = graph.function_def(vec![a, b], call);
             graph.name(main, "main").unwrap();
+            graph.mark_extern_func(main).unwrap();
         },
     );
 }
@@ -939,4 +967,177 @@ fn parse_none() {
             graph.mark_extern_func(func_main).unwrap();
         },
     );
+}
+
+#[test]
+fn parse_boolean_or() {
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool) { a || b }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let ret = graph.boolean_or(a, b);
+            let func = graph.function_def(vec![a, b], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_boolean_and() {
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool) { a && b }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let ret = graph.boolean_and(a, b);
+            let func = graph.function_def(vec![a, b], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_boolean_not() {
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool) { !a }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let ret = graph.boolean_not(a);
+            let func = graph.function_def(vec![a], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_repeated_boolean_or() {
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool, c: bool) {
+                a || b || c
+            }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let c = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(c, "c").unwrap();
+            let ret = graph.boolean_or(a, b);
+            let ret = graph.boolean_or(ret, c);
+            let func = graph.function_def(vec![a, b, c], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_repeated_boolean_and() {
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool, c: bool) {
+                a && b && c
+            }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let c = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(c, "c").unwrap();
+            let ret = graph.boolean_and(a, b);
+            let ret = graph.boolean_and(ret, c);
+            let func = graph.function_def(vec![a, b, c], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_boolean_or_with_not() {
+    // Boolean NOT has a higher precedence than boolean OR, so this is
+    // parsed as "(!a) || b"
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool) { !a || b }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let not_a = graph.boolean_not(a);
+            let ret = graph.boolean_or(not_a, b);
+            let func = graph.function_def(vec![a, b], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn parse_boolean_and_with_not() {
+    // Boolean NOT has a higher precedence than boolean AND, so this is
+    // parsed as "(!a) && b"
+    require_identical_graph(
+        stringify! {
+            pub fn main(a: bool, b: bool) { !a && b }
+        },
+        |graph| {
+            let a = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(a, "a").unwrap();
+            let b = graph.function_arg(RuntimePrimType::Bool);
+            graph.name(b, "b").unwrap();
+            let not_a = graph.boolean_not(a);
+            let ret = graph.boolean_and(not_a, b);
+            let func = graph.function_def(vec![a, b], ret);
+            graph.name(func, "main").unwrap();
+            graph.mark_extern_func(func).unwrap();
+        },
+    );
+}
+
+#[test]
+fn error_parsing_boolean_and_with_or() {
+    // Boolean OR and AND have incomparable precedences.  While OR can
+    // be chained together as (a || b || c), and AND can be chained
+    // together as (a && b && c), they require parentheses when mixed
+    // together.
+    let mut graph = SymbolicGraph::new();
+    let res = graph.parse(stringify! {
+        pub fn main(a: bool, b: bool, c: bool) { a && b || c }
+    });
+    assert!(res.is_err());
+}
+
+#[test]
+fn error_parsing_boolean_or_with_and() {
+    // Boolean OR and AND have incomparable precedences.  While OR can
+    // be chained together as (a || b || c), and AND can be chained
+    // together as (a && b && c), they require parentheses when mixed
+    // together.
+    let mut graph = SymbolicGraph::new();
+    let res = graph.parse(stringify! {
+        pub fn main(a: bool, b: bool, c: bool) { a || b && c }
+    });
+    assert!(res.is_err());
 }

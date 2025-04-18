@@ -351,7 +351,10 @@ impl<'a> TypeInference<'a> {
                     }
                 }
 
-                ExprKind::Equal { .. }
+                ExprKind::And { .. }
+                | ExprKind::Or { .. }
+                | ExprKind::Not { .. }
+                | ExprKind::Equal { .. }
                 | ExprKind::NotEqual { .. }
                 | ExprKind::LessThan { .. }
                 | ExprKind::GreaterThan { .. }

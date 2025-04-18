@@ -176,9 +176,6 @@ pub enum ExprKind {
     /// Cast a pointer to another pointer type.
     PointerCast { ptr: SymbolicValue, ty: RuntimeType },
 
-    /// Check if a value is well-defined.
-    IsSome(SymbolicValue),
-
     /// Perform a conditional statement
     IfElse {
         /// The condition.
@@ -190,6 +187,24 @@ pub enum ExprKind {
         /// The value if the condition is false.
         else_branch: SymbolicValue,
     },
+
+    /// Take the boolean AND of two values
+    And {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Take the boolean OR of two values
+    Or {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Flip a boolean value
+    Not { arg: SymbolicValue },
+
+    /// Check if a value is well-defined.
+    IsSome(SymbolicValue),
 
     /// Returns true if the operands are equal, false otherwise
     Equal {
@@ -861,6 +876,16 @@ impl SymbolicGraph {
             if_branch,
             else_branch,
         })
+    }
+
+    binary_op! {boolean_and, And}
+    binary_op! {boolean_or, Or}
+    pub fn boolean_not(
+        &mut self,
+        arg: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let arg = arg.into();
+        self.push(ExprKind::Not { arg })
     }
 
     binary_op! {equal, Equal}
@@ -2149,6 +2174,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::InlineIteratorMap)
             .then(super::InlineIteratorFilter)
             .then(super::ConvertCollectToReduce(&analysis))
+            .then(super::ConvertBooleanOperatorToConditional)
             .then(super::LowerSymbolicExpr(&analysis));
 
         let expr = if self.optimize_symbolic_graph {
@@ -2441,6 +2467,13 @@ impl ExprKind {
                 })
             }
 
+            ExprKind::Not { arg } => {
+                remap(arg).map(|arg| ExprKind::Not { arg })
+            }
+
+            ExprKind::And { lhs, rhs } => handle_binary_op!(And, lhs, rhs),
+            ExprKind::Or { lhs, rhs } => handle_binary_op!(Or, lhs, rhs),
+
             ExprKind::Equal { lhs, rhs } => handle_binary_op!(Equal, lhs, rhs),
             ExprKind::NotEqual { lhs, rhs } => {
                 handle_binary_op!(NotEqual, lhs, rhs)
@@ -2512,6 +2545,7 @@ impl ExprKind {
                 | ExprKind::NumArrayElements { array: value }
                 | ExprKind::PointerCast { ptr: value, .. }
                 | ExprKind::IsSome(value)
+                | ExprKind::Not { arg: value }
                 | ExprKind::PrimCast { value, .. }
                 | ExprKind::PhysicalDowncast { obj: value, .. }
                 | ExprKind::ReadValue { ptr: value, .. }
@@ -2531,7 +2565,9 @@ impl ExprKind {
                 }
 
                 // Binary operators
-                &ExprKind::Equal { lhs, rhs }
+                &ExprKind::And { lhs, rhs }
+                | &ExprKind::Or { lhs, rhs }
+                | &ExprKind::Equal { lhs, rhs }
                 | &ExprKind::NotEqual { lhs, rhs }
                 | &ExprKind::LessThan { lhs, rhs }
                 | &ExprKind::GreaterThan { lhs, rhs }
@@ -2608,6 +2644,9 @@ impl ExprKind {
             ExprKind::PointerCast { .. } => "PointerCast",
             ExprKind::IsSome { .. } => "IsSome",
             ExprKind::IfElse { .. } => "IfElse",
+            ExprKind::And { .. } => "And",
+            ExprKind::Or { .. } => "Or",
+            ExprKind::Not { .. } => "Not",
             ExprKind::Equal { .. } => "Equal",
             ExprKind::NotEqual { .. } => "NotEqual",
             ExprKind::LessThan { .. } => "LessThan",
@@ -2990,6 +3029,19 @@ impl<'a> GraphComparison<'a> {
                     _ => false,
                 },
 
+                ExprKind::And { lhs, rhs } => {
+                    handle_binary_op!(And, lhs, rhs)
+                }
+                ExprKind::Or { lhs, rhs } => {
+                    handle_binary_op!(Or, lhs, rhs)
+                }
+                ExprKind::Not { arg: lhs_arg } => match rhs_kind {
+                    ExprKind::Not { arg: rhs_arg } => {
+                        equivalent_value!(lhs_arg, rhs_arg)
+                    }
+                    _ => false,
+                },
+
                 ExprKind::Equal { lhs, rhs } => {
                     handle_binary_op!(Equal, lhs, rhs)
                 }
@@ -3183,6 +3235,10 @@ impl Display for ExprKind {
                      {{ {else_branch} }}"
                 )
             }
+
+            ExprKind::And { lhs, rhs } => write!(f, "{lhs} && {rhs}"),
+            ExprKind::Or { lhs, rhs } => write!(f, "{lhs} || {rhs}"),
+            ExprKind::Not { arg } => write!(f, "!{arg}"),
 
             // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
             // parser.

@@ -1,5 +1,6 @@
 use dotnet_debugger::{RuntimePrimType, SymbolicGraph};
 use indoc::indoc;
+use paste::paste;
 
 #[test]
 fn print_expanded_graph() {
@@ -636,6 +637,327 @@ fn print_none() {
     let expected = indoc! {"
         let res_main = if true { 100 } else { None };
         pub fn main() { res_main }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+macro_rules! paren_test {
+    ($left_op: ident,
+     $right_op: ident,
+     $expected_left_first:expr,
+     $expected_right_first:expr $(,)?
+    ) => {
+        paste! {
+            #[test]
+            fn [<
+                paren_with_lhs_ $left_op _then_rhs_ $right_op
+                >] () {
+                let mut graph = SymbolicGraph::new();
+
+                let a = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(a, "a").unwrap();
+                let b = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(b, "b").unwrap();
+                let c = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(c, "c").unwrap();
+
+                let partial = graph.$left_op(a, b);
+                let ret = graph.$right_op(partial, c);
+
+                let func = graph.function_def(vec![a, b, c], ret);
+                graph.name(func, "main").unwrap();
+                graph.mark_extern_func(func).unwrap();
+
+                let printed = format!("{graph}");
+                let expected = $expected_left_first;
+                let expected = format!(
+                    "pub fn main(a: usize, b: usize, c: usize) {{ {expected} }}"
+                );
+
+                println!("-------------- Expected --------------\n{expected}");
+                println!("-------------- Actual   --------------\n{printed}");
+
+                assert_eq!(printed, expected);
+            }
+
+
+            #[test]
+            fn [<
+                paren_with_rhs_ $left_op _then_lhs_ $right_op
+                >] () {
+                let mut graph = SymbolicGraph::new();
+
+                let a = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(a, "a").unwrap();
+                let b = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(b, "b").unwrap();
+                let c = graph.function_arg(RuntimePrimType::NativeUInt);
+                graph.name(c, "c").unwrap();
+
+                let partial = graph.$right_op(b, c);
+                let ret = graph.$left_op(a, partial);
+
+                let func = graph.function_def(vec![a, b, c], ret);
+                graph.name(func, "main").unwrap();
+                graph.mark_extern_func(func).unwrap();
+
+                let printed = format!("{graph}");
+                let expected = $expected_right_first;
+                let expected = format!(
+                    "pub fn main(a: usize, b: usize, c: usize) {{ {expected} }}"
+                );
+
+                println!("-------------- Expected --------------\n{expected}");
+                println!("-------------- Actual   --------------\n{printed}");
+
+                assert_eq!(printed, expected);
+            }
+        }
+    };
+}
+
+paren_test!(mul, add, "a*b + c", "a*(b + c)");
+paren_test!(add, mul, "(a + b)*c", "a + b*c");
+paren_test!(add, equal, "a + b == c", "a + (b == c)");
+paren_test!(equal, add, "(a == b) + c", "a == b + c");
+paren_test!(boolean_and, boolean_or, "(a && b) || c", "a && (b || c)");
+
+#[test]
+fn print_boolean_or() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let ret = graph.boolean_or(a, b);
+    let func = graph.function_def(vec![a, b], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool) { a || b }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_boolean_and() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let ret = graph.boolean_and(a, b);
+    let func = graph.function_def(vec![a, b], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool) { a && b }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_boolean_not() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let ret = graph.boolean_not(a);
+    let func = graph.function_def(vec![a], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+    pub fn main(a: bool) { !a }"};
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_repeated_boolean_or() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let c = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(c, "c").unwrap();
+    let ret = graph.boolean_or(a, b);
+    let ret = graph.boolean_or(ret, c);
+    let func = graph.function_def(vec![a, b, c], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool, c: bool) { a || b || c }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_repeated_boolean_and() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let c = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(c, "c").unwrap();
+    let ret = graph.boolean_and(a, b);
+    let ret = graph.boolean_and(ret, c);
+    let func = graph.function_def(vec![a, b, c], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool, c: bool) { a && b && c }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_boolean_or_with_not() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let not_a = graph.boolean_not(a);
+    let ret = graph.boolean_or(not_a, b);
+    let func = graph.function_def(vec![a, b], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool) { !a || b }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn print_boolean_and_with_not() {
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let not_a = graph.boolean_not(a);
+    let ret = graph.boolean_and(not_a, b);
+    let func = graph.function_def(vec![a, b], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    // Boolean NOT has a higher precedence than boolean AND, so this is
+    // parsed as "(!a) && b"
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool) { !a && b }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn printing_and_with_or_requires_parentheses() {
+    // Boolean OR and AND have incomparable precedences.  While OR can
+    // be chained together as (a || b || c), and AND can be chained
+    // together as (a && b && c), they require parentheses when mixed
+    // together.
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let c = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(c, "c").unwrap();
+
+    let partial = graph.boolean_and(a, b);
+    let ret = graph.boolean_or(partial, c);
+
+    let func = graph.function_def(vec![a, b, c], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool, c: bool) { (a && b) || c }"
+    };
+
+    println!("-------------- Expected --------------\n{expected}");
+    println!("-------------- Actual   --------------\n{printed}");
+
+    assert_eq!(printed, expected);
+}
+
+#[test]
+fn printing_or_with_and_requires_parentheses() {
+    // Boolean OR and AND have incomparable precedences.  While OR can
+    // be chained together as (a || b || c), and AND can be chained
+    // together as (a && b && c), they require parentheses when mixed
+    // together.
+    let mut graph = SymbolicGraph::new();
+
+    let a = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(a, "a").unwrap();
+    let b = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(b, "b").unwrap();
+    let c = graph.function_arg(RuntimePrimType::Bool);
+    graph.name(c, "c").unwrap();
+
+    let partial = graph.boolean_or(a, b);
+    let ret = graph.boolean_and(partial, c);
+
+    let func = graph.function_def(vec![a, b, c], ret);
+    graph.name(func, "main").unwrap();
+    graph.mark_extern_func(func).unwrap();
+
+    let printed = format!("{graph}");
+    let expected = indoc! {"
+        pub fn main(a: bool, b: bool, c: bool) { (a || b) && c }"
     };
 
     println!("-------------- Expected --------------\n{expected}");

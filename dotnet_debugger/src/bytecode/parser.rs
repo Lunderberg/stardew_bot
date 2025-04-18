@@ -3,7 +3,10 @@ use std::{borrow::Cow, collections::HashMap, ops::Range};
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use super::expr::{SymbolicGraph, SymbolicType, SymbolicValue};
+use super::{
+    expr::{SymbolicGraph, SymbolicType, SymbolicValue},
+    OpPrecedence,
+};
 use crate::{Error, RuntimeType};
 
 pub(crate) struct SymbolicParser<'a> {
@@ -125,6 +128,8 @@ pub enum Punctuation {
     Multiply,
     Pipe,
     DoublePipe,
+    Ampersand,
+    DoubleAmpersand,
     Slash,
     Percent,
 }
@@ -139,16 +144,6 @@ pub enum Keyword {
     True,
     False,
     None,
-}
-
-#[derive(PartialOrd, PartialEq)]
-enum OpPrecedence {
-    MaybeTuple,
-    TupleElement,
-    ComparisonOperator,
-    RangeExtent,
-    Addition,
-    MulDiv,
 }
 
 impl TokenKind {
@@ -294,9 +289,31 @@ impl<'a> SymbolicParser<'a> {
         &mut self,
         precedence: OpPrecedence,
     ) -> Result<SymbolicValue, Error> {
+        let mut unary_ops: Vec<TokenKind> = Vec::new();
+        while let Some(token) = self.tokens.next_if(|token| {
+            matches!(token.kind, TokenKind::Punct(Punctuation::Bang))
+        })? {
+            unary_ops.push(token.kind)
+        }
+
         let mut expr = self.expect_term()?;
 
-        if precedence < OpPrecedence::MulDiv {
+        for unary_op in unary_ops.into_iter().rev() {
+            expr = match unary_op {
+                TokenKind::Punct(Punctuation::Bang) => {
+                    self.graph.boolean_not(expr)
+                }
+                _ => unreachable!(
+                    "Forbidden from earlier condition on token.kind"
+                ),
+            };
+        }
+
+        let mut upper_bound = OpPrecedence::MaxPrecedence;
+
+        if precedence < OpPrecedence::MulDiv
+            && OpPrecedence::MulDiv < upper_bound
+        {
             while let Some(token) = self.tokens.next_if(|token| {
                 matches!(
                     token.kind,
@@ -321,10 +338,13 @@ impl<'a> SymbolicParser<'a> {
                     }
                     _ => unreachable!("Due to earlier check"),
                 };
+                upper_bound = OpPrecedence::MaxPrecedence;
             }
         }
 
-        if precedence < OpPrecedence::Addition {
+        if precedence < OpPrecedence::Addition
+            && OpPrecedence::Addition < upper_bound
+        {
             while let Some(_) = self
                 .tokens
                 .next_if(|token| token.kind.is_punct(Punctuation::Plus))?
@@ -332,10 +352,13 @@ impl<'a> SymbolicParser<'a> {
                 let rhs =
                     self.expect_expr_op_precedence(OpPrecedence::Addition)?;
                 expr = self.graph.add(expr, rhs);
+                upper_bound = OpPrecedence::Addition;
             }
         }
 
-        if precedence < OpPrecedence::ComparisonOperator {
+        if precedence < OpPrecedence::ComparisonOperator
+            && OpPrecedence::ComparisonOperator < upper_bound
+        {
             if let Some(token) = self.tokens.next_if(|token| {
                 matches!(
                     token.kind,
@@ -373,10 +396,40 @@ impl<'a> SymbolicParser<'a> {
                     }
                     _ => unreachable!("Due to earlier check"),
                 };
+                upper_bound = OpPrecedence::ComparisonOperator;
             }
         }
 
-        if precedence < OpPrecedence::RangeExtent {
+        if precedence < OpPrecedence::BooleanAnd
+            && OpPrecedence::BooleanAnd < upper_bound
+        {
+            while let Some(_) = self.tokens.next_if(|token| {
+                token.kind.is_punct(Punctuation::DoubleAmpersand)
+            })? {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::BooleanAnd)?;
+                expr = self.graph.boolean_and(expr, rhs);
+                upper_bound = OpPrecedence::BooleanAnd;
+            }
+        }
+
+        if precedence < OpPrecedence::BooleanOr
+            && OpPrecedence::BooleanOr < upper_bound
+        {
+            while let Some(_) = self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::DoublePipe))?
+            {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::BooleanOr)?;
+                expr = self.graph.boolean_or(expr, rhs);
+                upper_bound = OpPrecedence::BooleanOr;
+            }
+        }
+
+        if precedence < OpPrecedence::RangeExtent
+            && OpPrecedence::RangeExtent < upper_bound
+        {
             if let Some(_) = self.tokens.next_if(|token| {
                 token.kind.is_punct(Punctuation::DoublePeriod)
             })? {
@@ -393,10 +446,12 @@ impl<'a> SymbolicParser<'a> {
                 let extent =
                     self.expect_expr_op_precedence(OpPrecedence::RangeExtent)?;
                 expr = self.graph.range(extent);
+                upper_bound = OpPrecedence::RangeExtent;
             }
         }
 
         if precedence < OpPrecedence::TupleElement
+            && OpPrecedence::TupleElement < upper_bound
             && matches!(self.peek_punct()?, Some(Punctuation::Comma))
         {
             let mut elements = vec![expr];
@@ -414,7 +469,14 @@ impl<'a> SymbolicParser<'a> {
                     self.expect_expr_op_precedence(OpPrecedence::TupleElement)?;
                 elements.push(element);
             }
-            expr = self.graph.tuple(elements)
+            expr = self.graph.tuple(elements);
+
+            // Technically, this update to `upper_bound` should be
+            // here in case anything else is implemented with a lower
+            // precedence.  However, it causes a warning for an unused
+            // assignment.
+            //
+            //upper_bound = OpPrecedence::TupleElement;
         }
 
         Ok(expr)
@@ -1201,6 +1263,11 @@ impl<'a> SymbolicTokenizer<'a> {
                 TokenKind::Punct(Punctuation::DoublePipe)
             }
             '|' => TokenKind::Punct(Punctuation::Pipe),
+            '&' if opt_char2 == Some('&') => {
+                num_bytes = 2;
+                TokenKind::Punct(Punctuation::DoubleAmpersand)
+            }
+            '&' => TokenKind::Punct(Punctuation::Ampersand),
             '/' => TokenKind::Punct(Punctuation::Slash),
             '%' => TokenKind::Punct(Punctuation::Percent),
             '0'..='9' => {

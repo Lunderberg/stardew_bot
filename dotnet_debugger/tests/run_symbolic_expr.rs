@@ -1340,3 +1340,92 @@ fn reduction_with_none_check_in_map() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn boolean_and() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(|i| {
+                        if 3<i && i<7 {
+                            10
+                        } else {
+                            1
+                        }
+                    })
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize =
+        (0..10).map(|i| if 3 < i && i < 7 { 10 } else { 1 }).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn boolean_or() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(|i| {
+                        if 3<i || i<7 {
+                            10
+                        } else {
+                            1
+                        }
+                    })
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize =
+        (0..10).map(|i| if 3 < i || i < 7 { 10 } else { 1 }).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn boolean_not() {
+    let mut graph = SymbolicGraph::new();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(|i| {
+                        if !(3<i) {
+                            10
+                        } else {
+                            1
+                        }
+                    })
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize = (0..10).map(|i| if !(3 < i) { 10 } else { 1 }).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

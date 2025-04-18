@@ -13,7 +13,8 @@ use crate::{
 };
 
 use super::{
-    expr::StaticField, OpIndex, SymbolicGraph, SymbolicType, SymbolicValue,
+    expr::StaticField, OpIndex, OpPrecedence, SymbolicGraph, SymbolicType,
+    SymbolicValue,
 };
 
 impl SymbolicGraph {
@@ -102,8 +103,8 @@ struct IndexPrinter<'a> {
 #[derive(Debug)]
 enum PrintItem<'a> {
     Stmt(OpIndex),
-    Expr(SymbolicValue),
-    ExpandedExpr(OpIndex),
+    Expr(SymbolicValue, OpPrecedence),
+    ExpandedExpr(OpIndex, OpPrecedence),
     AssignmentEnd,
     FunctionBody {
         func_index: OpIndex,
@@ -296,7 +297,8 @@ impl<'a> GraphPrinter<'a> {
         let mut to_print: Vec<PrintItem> = Vec::new();
 
         if let Some(root_value) = self.root_subgraph_node {
-            to_print.push(PrintItem::Expr(root_value));
+            to_print
+                .push(PrintItem::Expr(root_value, OpPrecedence::MinPrecedence));
         }
 
         (0..self.graph.num_operations())
@@ -437,7 +439,12 @@ impl<'a> GraphPrinter<'a> {
                                     params
                                         .iter()
                                         .filter_map(|param| param.as_op_index())
-                                        .map(PrintItem::ExpandedExpr)
+                                        .map(|param| {
+                                            PrintItem::ExpandedExpr(
+                                                param,
+                                                OpPrecedence::MinPrecedence,
+                                            )
+                                        })
                                         .comma_separated(),
                                 )
                                 .chain(Some(PrintItem::ParenClose))
@@ -463,12 +470,15 @@ impl<'a> GraphPrinter<'a> {
 
                             write!(fmt, "let {index_printer} = ")?;
                             to_print.push(PrintItem::AssignmentEnd);
-                            to_print.push(PrintItem::ExpandedExpr(index));
+                            to_print.push(PrintItem::ExpandedExpr(
+                                index,
+                                OpPrecedence::MinPrecedence,
+                            ));
                             prev_print_type = PrevPrintType::None;
                         }
                     }
                 }
-                PrintItem::Expr(value) => {
+                PrintItem::Expr(value, parent_precedence) => {
                     match prev_print_type {
                         PrevPrintType::OpenBrace | PrevPrintType::Comma => {
                             write!(fmt, " ")?
@@ -484,7 +494,10 @@ impl<'a> GraphPrinter<'a> {
                         SymbolicValue::Result(index)
                             if inline_expr[index.0] =>
                         {
-                            to_print.push(PrintItem::ExpandedExpr(index));
+                            to_print.push(PrintItem::ExpandedExpr(
+                                index,
+                                parent_precedence,
+                            ));
                         }
                         SymbolicValue::Result(index) => {
                             write!(fmt, "{}", make_index_printer(index))?;
@@ -507,7 +520,10 @@ impl<'a> GraphPrinter<'a> {
                     current_indent += self.indent_width;
 
                     to_print.push(PrintItem::FunctionClose { is_stmt });
-                    to_print.push(PrintItem::Expr(output));
+                    to_print.push(PrintItem::Expr(
+                        output,
+                        OpPrecedence::MinPrecedence,
+                    ));
                     scope
                         .iter()
                         .enumerate()
@@ -544,7 +560,7 @@ impl<'a> GraphPrinter<'a> {
                     prev_print_type = PrevPrintType::Stmt;
                 }
 
-                PrintItem::ExpandedExpr(index) => {
+                PrintItem::ExpandedExpr(index, parent_precedence) => {
                     match prev_print_type {
                         PrevPrintType::OpenBrace | PrevPrintType::Comma => {
                             write!(fmt, " ")?
@@ -556,15 +572,32 @@ impl<'a> GraphPrinter<'a> {
                     }
 
                     macro_rules! handle_binary_op {
-                        ($op:literal, $lhs:expr, $rhs:expr) => {{
-                            [
-                                PrintItem::Expr(*$lhs),
-                                PrintItem::Str($op),
-                                PrintItem::Expr(*$rhs),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                        ($op:literal, $precedence:expr, $lhs:expr, $rhs:expr) => {{
+                            let requires_paren =
+                                !($precedence >= parent_precedence);
+
+                            std::iter::empty()
+                                .chain(
+                                    requires_paren
+                                        .then(|| PrintItem::ParenOpen),
+                                )
+                                .chain(Some(PrintItem::Expr(
+                                    *$lhs,
+                                    $precedence,
+                                )))
+                                .chain(Some(PrintItem::Str($op)))
+                                .chain(Some(PrintItem::Expr(
+                                    *$rhs,
+                                    $precedence,
+                                )))
+                                .chain(
+                                    requires_paren
+                                        .then(|| PrintItem::ParenClose),
+                                )
+                                .rev()
+                                .for_each(|print_item| {
+                                    to_print.push(print_item)
+                                });
                         }};
                     }
 
@@ -582,7 +615,12 @@ impl<'a> GraphPrinter<'a> {
                                     params
                                         .iter()
                                         .filter_map(|param| param.as_op_index())
-                                        .map(PrintItem::ExpandedExpr)
+                                        .map(|param| {
+                                            PrintItem::ExpandedExpr(
+                                                param,
+                                                OpPrecedence::MinPrecedence,
+                                            )
+                                        })
                                         .comma_separated(),
                                 )
                                 .chain(Some(PrintItem::Str("|")))
@@ -598,10 +636,16 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::Map { iterator, map } => {
                             [
-                                PrintItem::Expr(*iterator),
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::Str(".map"),
                                 PrintItem::ParenOpen,
-                                PrintItem::Expr(*map),
+                                PrintItem::Expr(
+                                    *map,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::ParenClose,
                             ]
                             .into_iter()
@@ -610,10 +654,16 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::Filter { iterator, filter } => {
                             [
-                                PrintItem::Expr(*iterator),
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::Str(".filter"),
                                 PrintItem::ParenOpen,
-                                PrintItem::Expr(*filter),
+                                PrintItem::Expr(
+                                    *filter,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::ParenClose,
                             ]
                             .into_iter()
@@ -622,7 +672,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::Collect { iterator } => {
                             [
-                                PrintItem::Expr(*iterator),
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::Str(".collect()"),
                             ]
                             .into_iter()
@@ -635,12 +688,21 @@ impl<'a> GraphPrinter<'a> {
                             reduction,
                         } => {
                             [
-                                PrintItem::Expr(*iterator),
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::Str(".reduce"),
                                 PrintItem::ParenOpen,
-                                PrintItem::Expr(*initial),
+                                PrintItem::Expr(
+                                    *initial,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::Comma,
-                                PrintItem::Expr(*reduction),
+                                PrintItem::Expr(
+                                    *reduction,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::OptionalTrailingComma,
                                 PrintItem::ParenClose,
                             ]
@@ -651,12 +713,19 @@ impl<'a> GraphPrinter<'a> {
 
                         ExprKind::FunctionCall { func, args } => {
                             std::iter::empty()
-                                .chain(Some(PrintItem::Expr(*func)))
+                                .chain(Some(PrintItem::Expr(
+                                    *func,
+                                    OpPrecedence::MaxPrecedence,
+                                )))
                                 .chain(Some(PrintItem::ParenOpen))
                                 .chain(
                                     args.iter()
-                                        .cloned()
-                                        .map(PrintItem::Expr)
+                                        .map(|arg| {
+                                            PrintItem::Expr(
+                                                *arg,
+                                                OpPrecedence::MinPrecedence,
+                                            )
+                                        })
                                         .comma_separated(),
                                 )
                                 .chain(Some(PrintItem::ParenClose))
@@ -673,12 +742,21 @@ impl<'a> GraphPrinter<'a> {
                         } => {
                             [
                                 PrintItem::Str("(0.."),
-                                PrintItem::Expr(*extent),
+                                PrintItem::Expr(
+                                    *extent,
+                                    OpPrecedence::RangeExtent,
+                                ),
                                 PrintItem::Str(").reduce"),
                                 PrintItem::ParenOpen,
-                                PrintItem::Expr(*initial),
+                                PrintItem::Expr(
+                                    *initial,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::Comma,
-                                PrintItem::Expr(*reduction),
+                                PrintItem::Expr(
+                                    *reduction,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::OptionalTrailingComma,
                                 PrintItem::ParenClose,
                             ]
@@ -693,8 +771,12 @@ impl<'a> GraphPrinter<'a> {
                                 .chain(
                                     values
                                         .iter()
-                                        .cloned()
-                                        .map(PrintItem::Expr)
+                                        .map(|arg| {
+                                            PrintItem::Expr(
+                                                *arg,
+                                                OpPrecedence::MinPrecedence,
+                                            )
+                                        })
                                         .comma_separated(),
                                 )
                                 .chain(Some(PrintItem::ParenClose))
@@ -710,7 +792,10 @@ impl<'a> GraphPrinter<'a> {
                         ExprKind::Range { extent } => {
                             [
                                 PrintItem::Str("(0.."),
-                                PrintItem::Expr(*extent),
+                                PrintItem::Expr(
+                                    *extent,
+                                    OpPrecedence::RangeExtent,
+                                ),
                                 PrintItem::Str(")"),
                             ]
                             .into_iter()
@@ -733,7 +818,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::FieldAccess { obj, field } => {
                             [
-                                PrintItem::Expr(*obj),
+                                PrintItem::Expr(
+                                    *obj,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str(field),
                             ]
@@ -743,7 +831,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::SymbolicDowncast { obj, ty } => {
                             [
-                                PrintItem::Expr(*obj),
+                                PrintItem::Expr(
+                                    *obj,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::Str(".as::<"),
                                 PrintItem::SymbolicType(ty),
                                 PrintItem::Str(">()"),
@@ -753,24 +844,34 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
                         ExprKind::IndexAccess { obj, indices } => {
-                            std::iter::once(PrintItem::Expr(*obj))
-                                .chain(Some(PrintItem::SquareBracketOpen))
-                                .chain(
-                                    indices
-                                        .iter()
-                                        .cloned()
-                                        .map(PrintItem::Expr)
-                                        .comma_separated(),
-                                )
-                                .chain(Some(PrintItem::SquareBracketClose))
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev()
-                                .for_each(|item| to_print.push(item));
+                            std::iter::once(PrintItem::Expr(
+                                *obj,
+                                OpPrecedence::MaxPrecedence,
+                            ))
+                            .chain(Some(PrintItem::SquareBracketOpen))
+                            .chain(
+                                indices
+                                    .iter()
+                                    .map(|index| {
+                                        PrintItem::Expr(
+                                            *index,
+                                            OpPrecedence::MinPrecedence,
+                                        )
+                                    })
+                                    .comma_separated(),
+                            )
+                            .chain(Some(PrintItem::SquareBracketClose))
+                            .collect::<Vec<_>>()
+                            .into_iter()
+                            .rev()
+                            .for_each(|item| to_print.push(item));
                         }
                         ExprKind::NumArrayElements { array } => {
                             [
-                                PrintItem::Expr(*array),
+                                PrintItem::Expr(
+                                    *array,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("len()"),
                             ]
@@ -780,11 +881,17 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::ArrayExtent { array, dim } => {
                             [
-                                PrintItem::Expr(*array),
+                                PrintItem::Expr(
+                                    *array,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("extent"),
                                 PrintItem::ParenOpen,
-                                PrintItem::Expr(*dim),
+                                PrintItem::Expr(
+                                    *dim,
+                                    OpPrecedence::MinPrecedence,
+                                ),
                                 PrintItem::ParenClose,
                             ]
                             .into_iter()
@@ -793,7 +900,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::PointerCast { ptr, ty } => {
                             [
-                                PrintItem::Expr(*ptr),
+                                PrintItem::Expr(
+                                    *ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("ptr_cast::<"),
                                 PrintItem::RuntimeType(ty),
@@ -805,7 +915,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::IsSome(value) => {
                             [
-                                PrintItem::Expr(*value),
+                                PrintItem::Expr(
+                                    *value,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("is_some()"),
                             ]
@@ -838,19 +951,28 @@ impl<'a> GraphPrinter<'a> {
                             std::iter::empty()
                                 .chain([
                                     PrintItem::Str("if "),
-                                    PrintItem::Expr(*condition),
+                                    PrintItem::Expr(
+                                        *condition,
+                                        OpPrecedence::MinPrecedence,
+                                    ),
                                     PrintItem::BraceOpen,
                                 ])
                                 .chain(iter_if)
                                 .chain([
-                                    PrintItem::Expr(*if_branch),
+                                    PrintItem::Expr(
+                                        *if_branch,
+                                        OpPrecedence::MinPrecedence,
+                                    ),
                                     PrintItem::BraceClose,
                                     PrintItem::Str(" else"),
                                     PrintItem::BraceOpen,
                                 ])
                                 .chain(iter_else)
                                 .chain([
-                                    PrintItem::Expr(*else_branch),
+                                    PrintItem::Expr(
+                                        *else_branch,
+                                        OpPrecedence::MinPrecedence,
+                                    ),
                                     PrintItem::BraceClose,
                                 ])
                                 .rev()
@@ -858,41 +980,117 @@ impl<'a> GraphPrinter<'a> {
                                     to_print.push(print_item)
                                 });
                         }
+                        ExprKind::And { lhs, rhs } => {
+                            handle_binary_op!(
+                                " && ",
+                                OpPrecedence::BooleanAnd,
+                                lhs,
+                                rhs
+                            )
+                        }
+                        ExprKind::Or { lhs, rhs } => {
+                            handle_binary_op!(
+                                " || ",
+                                OpPrecedence::BooleanOr,
+                                lhs,
+                                rhs
+                            )
+                        }
+                        ExprKind::Not { arg } => {
+                            write!(fmt, "!")?;
+                            to_print.push(PrintItem::Expr(
+                                *arg,
+                                OpPrecedence::BooleanNot,
+                            ));
+                        }
                         ExprKind::Equal { lhs, rhs } => {
-                            handle_binary_op!(" == ", lhs, rhs)
+                            handle_binary_op!(
+                                " == ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::NotEqual { lhs, rhs } => {
-                            handle_binary_op!(" != ", lhs, rhs)
+                            handle_binary_op!(
+                                " != ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::GreaterThan { lhs, rhs } => {
-                            handle_binary_op!(" > ", lhs, rhs)
+                            handle_binary_op!(
+                                " > ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::LessThan { lhs, rhs } => {
-                            handle_binary_op!(" < ", lhs, rhs)
+                            handle_binary_op!(
+                                " < ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::GreaterThanOrEqual { lhs, rhs } => {
-                            handle_binary_op!(" >= ", lhs, rhs)
+                            handle_binary_op!(
+                                " >= ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::LessThanOrEqual { lhs, rhs } => {
-                            handle_binary_op!(" <= ", lhs, rhs)
+                            handle_binary_op!(
+                                " <= ",
+                                OpPrecedence::ComparisonOperator,
+                                lhs,
+                                rhs
+                            )
                         }
 
                         ExprKind::Add { lhs, rhs } => {
-                            handle_binary_op!(" + ", lhs, rhs)
+                            handle_binary_op!(
+                                " + ",
+                                OpPrecedence::Addition,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::Mul { lhs, rhs } => {
-                            handle_binary_op!("*", lhs, rhs)
+                            handle_binary_op!(
+                                "*",
+                                OpPrecedence::MulDiv,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::Div { lhs, rhs } => {
-                            handle_binary_op!("/", lhs, rhs)
+                            handle_binary_op!(
+                                "/",
+                                OpPrecedence::MulDiv,
+                                lhs,
+                                rhs
+                            )
                         }
                         ExprKind::Mod { lhs, rhs } => {
-                            handle_binary_op!("%", lhs, rhs)
+                            handle_binary_op!(
+                                "%",
+                                OpPrecedence::MulDiv,
+                                lhs,
+                                rhs
+                            )
                         }
 
                         ExprKind::PrimCast { value, prim_type } => {
                             [
-                                PrintItem::Expr(*value),
+                                PrintItem::Expr(
+                                    *value,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("prim_cast::<"),
                                 PrintItem::PrimType(prim_type),
@@ -905,7 +1103,10 @@ impl<'a> GraphPrinter<'a> {
 
                         ExprKind::PhysicalDowncast { obj, ty } => {
                             [
-                                PrintItem::Expr(*obj),
+                                PrintItem::Expr(
+                                    *obj,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("downcast::<"),
                                 PrintItem::MethodTablePointer(*ty),
@@ -917,7 +1118,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::ReadValue { ptr, prim_type } => {
                             [
-                                PrintItem::Expr(*ptr),
+                                PrintItem::Expr(
+                                    *ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("read::<"),
                                 PrintItem::PrimType(prim_type),
@@ -929,7 +1133,10 @@ impl<'a> GraphPrinter<'a> {
                         }
                         ExprKind::ReadString { ptr } => {
                             [
-                                PrintItem::Expr(*ptr),
+                                PrintItem::Expr(
+                                    *ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str(".read_string()"),
                             ]
