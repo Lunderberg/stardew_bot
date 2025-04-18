@@ -337,6 +337,13 @@ pub enum Error {
     SymbolicExpressionRequiresLowering(ExprKind),
 
     #[error(
+        "Short-circuit boolean operators must be lowered \
+         prior to generating VM instruction, \
+         but encountered {0}."
+    )]
+    BooleanOperatorRequiresLowering(ExprKind),
+
+    #[error(
         "Value '{value}' of type {} \
          not convertible to {prim_type}",
         value.runtime_type(),

@@ -945,6 +945,20 @@ impl ExpressionTranslator<'_> {
                     )?;
                 }
 
+                ExprKind::Not { arg } => {
+                    let arg = self.value_to_arg(op_index, arg)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Not {
+                            arg,
+                            output: op_output,
+                        },
+                        || format!("evaluate {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
                 ExprKind::Equal { lhs, rhs } => {
                     handle_binary_op!(Equal, lhs, rhs)
                 }
@@ -1036,6 +1050,12 @@ impl ExpressionTranslator<'_> {
                         || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                boolean @ (ExprKind::And { .. } | ExprKind::Or { .. }) => {
+                    return Err(Error::BooleanOperatorRequiresLowering(
+                        boolean.clone(),
+                    ));
                 }
 
                 symbolic @ (ExprKind::StaticField(_)
