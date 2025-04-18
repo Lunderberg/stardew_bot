@@ -379,6 +379,18 @@ pub enum Error {
     AttemptedConversionOfPrimitiveToNativeObject(RuntimePrimType),
 
     #[error(
+        "Attempted to convert StackValue to a scalar, \
+         but the VMResult contained `None` at that location."
+    )]
+    AttemptedConversionOfMissingValue,
+
+    #[error(
+        "Expected to VMResult to contain {expected} values, \
+         but instead found {actual} values."
+    )]
+    IncorrectNumberOfResults { expected: usize, actual: usize },
+
+    #[error(
         "Attempted to read rust-native object \
          of type {0:?} as a pointer to a .NET string."
     )]

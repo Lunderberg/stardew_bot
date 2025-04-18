@@ -1847,6 +1847,25 @@ macro_rules! stack_value_to_prim {
                 }
             }
         }
+
+        impl TryInto<$prim> for VMResults {
+            type Error = Error;
+
+            fn try_into(mut self) -> Result<$prim, Self::Error> {
+                let num_elements = self.0.len();
+                if num_elements == 1 {
+                    self.0[0]
+                        .take()
+                        .ok_or(Error::AttemptedConversionOfMissingValue)?
+                        .try_into()
+                } else {
+                    Err(Error::IncorrectNumberOfResults {
+                        expected: 1,
+                        actual: num_elements,
+                    })
+                }
+            }
+        }
     };
 }
 
