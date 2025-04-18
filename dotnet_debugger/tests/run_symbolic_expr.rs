@@ -1429,3 +1429,69 @@ fn boolean_not() {
     assert_eq!(results.len(), 1);
     assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
 }
+
+#[test]
+fn pass_string_object_to_native_function() {
+    let mut graph = SymbolicGraph::new();
+
+    let format_int = graph.native_function(|value: usize| format!("{value}"));
+    graph.name(format_int, "format_int").unwrap();
+
+    let parse_and_square = graph.native_function(|value: &String| {
+        let as_int: usize = value.parse().unwrap();
+        as_int * as_int
+    });
+    graph.name(parse_and_square, "parse_and_square").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(format_int)
+                    .map(parse_and_square)
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize = (0..10).map(|i| i * i).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}
+
+#[test]
+fn pass_str_reference_to_native_function() {
+    let mut graph = SymbolicGraph::new();
+
+    let format_int = graph.native_function(|value: usize| format!("{value}"));
+    graph.name(format_int, "format_int").unwrap();
+
+    let parse_and_square = graph.native_function(|value: &str| {
+        let as_int: usize = value.parse().unwrap();
+        as_int * as_int
+    });
+    graph.name(parse_and_square, "parse_and_square").unwrap();
+
+    graph
+        .parse(stringify! {
+            pub fn main() {
+                (0..10)
+                    .map(format_int)
+                    .map(parse_and_square)
+                    .reduce(0, |a: usize, b:usize| a+b)
+            }
+        })
+        .unwrap();
+
+    let vm = graph.compile(None).unwrap();
+    let results = vm.local_eval().unwrap();
+
+    let expected: usize = (0..10).map(|i| i * i).sum();
+
+    assert_eq!(results.len(), 1);
+    assert_eq!(results.get_as::<usize>(0).unwrap(), Some(expected));
+}

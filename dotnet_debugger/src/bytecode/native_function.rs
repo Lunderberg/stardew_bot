@@ -123,7 +123,7 @@ trait WrapReturn {
 trait UnwrapArg: Sized {
     type Unwrapped<'t>: 't;
     fn unwrap_arg<'t>(
-        arg: &'t mut Option<StackValue>,
+        opt_arg: &'t mut Option<StackValue>,
     ) -> Result<Option<Self::Unwrapped<'t>>, Error>;
 
     fn arg_signature_type() -> RuntimeType;
@@ -434,6 +434,37 @@ where
     }
 
     const IS_MUTABLE: bool = true;
+}
+
+impl<'a> UnwrapArg for &'a str {
+    type Unwrapped<'t> = &'t str;
+
+    fn unwrap_arg<'t>(
+        opt_arg: &'t mut Option<StackValue>,
+    ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
+        opt_arg
+            .as_ref()
+            .map(|arg| {
+                let err: Error =
+                    VMExecutionError::InvalidArgumentForNativeFunction {
+                        expected: Self::arg_signature_type(),
+                        actual: arg.runtime_type(),
+                    }
+                    .into();
+                match arg {
+                    StackValue::Native(native) => native
+                        .downcast_ref()
+                        .map(|string: &String| string.as_str())
+                        .ok_or(err),
+                    _ => Err(err),
+                }
+            })
+            .transpose()
+    }
+
+    fn arg_signature_type() -> RuntimeType {
+        RustType::new::<String>().into()
+    }
 }
 
 impl<T> UnwrapArg for Option<T>
