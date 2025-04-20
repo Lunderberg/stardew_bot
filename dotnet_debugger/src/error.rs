@@ -202,6 +202,12 @@ pub enum Error {
     IndexAccessRequiresArray(RuntimeType),
 
     #[error(
+        "Expressions of type {0} not convertible \
+         to an array index"
+    )]
+    TypeNotConvertibleToIndex(RuntimeType),
+
+    #[error(
         "The SymbolicOperation::NumArrayElements operation \
          returns the number of elements in an array.  \
          However, it was applied to an object of type {0}."

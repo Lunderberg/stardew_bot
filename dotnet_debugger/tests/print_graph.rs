@@ -21,9 +21,8 @@ fn print_expanded_graph() {
         let _2 = _1.active_index;
         let _3 = _1.list;
         let _4 = _3._items;
-        let _5 = _2.prim_cast::<usize>();
-        let _6 = _4[_5];
-        pub fn main() { _6 }"
+        let _5 = _4[_2];
+        pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -47,8 +46,8 @@ fn print_compact_graph() {
     let printed = format!("{graph}");
     let expected = indoc! {"
        let _1 = class_name.field_name.subfield;
-       let _6 = _1.list._items[_1.active_index.prim_cast::<usize>()];
-       pub fn main() { _6 }"
+       let _5 = _1.list._items[_1.active_index];
+       pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -76,8 +75,8 @@ fn print_named_object() {
     let printed = format!("{graph}");
     let expected = indoc! {"
         let obj = class_name.field_name.subfield;
-        let _6 = obj.list._items[obj.active_index.prim_cast::<usize>()];
-        pub fn main() { _6 }"
+        let _5 = obj.list._items[obj.active_index];
+        pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -108,8 +107,8 @@ fn print_named_intermediate_object() {
     let expected = indoc! {"
        let obj = class_name.field_name.subfield;
        let index = obj.active_index;
-       let _6 = obj.list._items[index.prim_cast::<usize>()];
-       pub fn main() { _6 }"
+       let _5 = obj.list._items[index];
+       pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -146,8 +145,8 @@ fn print_with_duplicate_names() {
     let expected = indoc! {"
         let _1_obj = class_name.field_name.subfield;
         let _2_obj = _1_obj.active_index;
-        let _6 = _1_obj.list._items[_2_obj.prim_cast::<usize>()];
-        pub fn main() { _6 }"
+        let _5 = _1_obj.list._items[_2_obj];
+        pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -172,8 +171,8 @@ fn print_nullary_function_definition() {
     let printed = format!("{graph}");
     let expected = indoc! {"
         let _1 = class_name.field_name.subfield;
-        let _6 = _1.list._items[_1.active_index.prim_cast::<usize>()];
-        pub fn main() { _6 }"
+        let _5 = _1.list._items[_1.active_index];
+        pub fn main() { _5 }"
     };
 
     println!("-------------- Expected --------------\n{expected}");
@@ -202,7 +201,7 @@ fn print_unary_function_definition() {
     let printed = format!("{graph}");
     let expected = indoc! {"
         let _4 = class_name.field_name.subfield.list._items;
-        pub fn main(index: usize) { _4[index.prim_cast::<usize>()] }"
+        pub fn main(index: usize) { _4[index] }"
     };
 
     println!("-------------- Expected --------------\n{expected}");

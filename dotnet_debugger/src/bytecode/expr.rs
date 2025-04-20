@@ -779,18 +779,7 @@ impl SymbolicGraph {
         Iter::Item: Into<SymbolicValue>,
     {
         let obj = obj.into();
-        let indices = indices
-            .into_iter()
-            .map(|index| {
-                let index = index.into();
-                // TODO: Move this into a legalization step instead of
-                // being applied during the graph construction.
-                match index {
-                    SymbolicValue::Int(_) => index,
-                    _ => self.prim_cast(index, RuntimePrimType::NativeUInt),
-                }
-            })
-            .collect();
+        let indices = indices.into_iter().map(Into::into).collect();
         self.push(ExprKind::IndexAccess { obj, indices })
     }
 
@@ -2169,6 +2158,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::RemoveUnusedPointerCast);
 
         let mandatory_lowering = super::InferFunctionParameterTypes(&analysis)
+            .then(super::LegalizeOperandTypes(&analysis))
             .then(super::InlineFunctionCalls)
             .then(super::MergeRangeReduceToSimpleReduce)
             .then(super::InlineIteratorMap)

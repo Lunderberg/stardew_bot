@@ -52,6 +52,9 @@ pub use convert_boolean_operator_to_conditional::ConvertBooleanOperatorToConditi
 mod infer_function_parameter_types;
 pub use infer_function_parameter_types::InferFunctionParameterTypes;
 
+mod legalize_operand_types;
+pub use legalize_operand_types::LegalizeOperandTypes;
+
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
 
