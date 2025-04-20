@@ -135,7 +135,8 @@ impl SymbolicGraph {
         let mut expr_to_reserved_location =
             HashMap::<OpIndex, StackIndex>::new();
         let mut next_free_index = 0;
-        match output {
+
+        let iter_elements = |value: SymbolicValue| match value {
             SymbolicValue::Result(op_index) => match &self[op_index].kind {
                 ExprKind::Tuple(elements) => {
                     Either::Left(elements.iter().cloned())
@@ -143,9 +144,9 @@ impl SymbolicGraph {
                 _ => Either::Right(Some(output).into_iter()),
             },
             _ => Either::Right(Some(output).into_iter()),
-        }
-        .enumerate()
-        .for_each(|(i, value)| {
+        };
+
+        iter_elements(output).enumerate().for_each(|(i, value)| {
             let stack_index = StackIndex(i);
             next_free_index += 1;
             match value {
@@ -205,6 +206,33 @@ impl SymbolicGraph {
             index_tracking,
         };
         translator.translate(iter_op_indices)?;
+
+        let return_instruction = Instruction::Return {
+            outputs: iter_elements(output)
+                .map(|output_value| -> Result<VMArg, Error> {
+                    Ok(match output_value {
+                        SymbolicValue::Result(output_index) => translator
+                            .index_tracking
+                            .expr_to_location(output_index)?
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "All outputs should be produced by now, \
+                                     but {output_index} was not in the index tracker."
+                                )
+                            })
+                            .into(),
+
+                        other => other
+                            .as_prim_value()
+                            .expect("Should be result or constant")
+                            .into(),
+                    })
+                })
+                .collect::<Result<_, _>>()?,
+        };
+        translator.push_annotated(return_instruction, || {
+            format!("return from top-level function")
+        });
 
         Ok(builder.num_outputs(num_outputs).build())
     }

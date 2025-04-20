@@ -11,11 +11,16 @@ use dotnet_debugger::{
 
 #[test]
 fn addition() {
-    let instructions = vec![Instruction::Add {
-        lhs: 1.into(),
-        rhs: 2.into(),
-        output: StackIndex(0),
-    }];
+    let instructions = vec![
+        Instruction::Add {
+            lhs: 1.into(),
+            rhs: 2.into(),
+            output: StackIndex(0),
+        },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
+    ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
@@ -67,12 +72,15 @@ fn triangular_number() {
             cond: StackIndex(2).into(),
             dest: InstructionIndex(2),
         },
+        // Return after the loop concludes
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -99,13 +107,16 @@ fn swap_values() {
         },
         // Swap the two values
         Instruction::Swap(StackIndex(0), StackIndex(1)),
+        // Return
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into(), StackIndex(1).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
         .num_outputs(2)
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -144,6 +155,9 @@ fn run_native_function() {
             args: vec![StackIndex(0).into(), 11.into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
@@ -156,8 +170,7 @@ fn run_native_function() {
                 let rhs: usize = args[1].as_ref().unwrap().try_into()?;
                 Ok(Some(StackValue::Prim(RuntimePrimValue::NativeUInt(lhs+rhs))))
         })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -170,17 +183,21 @@ fn run_native_function() {
 
 #[test]
 fn run_wrapped_nullary_native_function() {
-    let instructions = vec![Instruction::NativeFunctionCall {
-        index: FunctionIndex(0),
-        args: vec![],
-        output: Some(StackIndex(0)),
-    }];
+    let instructions = vec![
+        Instruction::NativeFunctionCall {
+            index: FunctionIndex(0),
+            args: vec![],
+            output: Some(StackIndex(0)),
+        },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
+    ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
         .with_native_function(|| -> usize { 42 })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -203,13 +220,15 @@ fn run_wrapped_unary_native_function() {
             args: vec![StackIndex(0).into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
         .with_native_function(|&val: &usize| -> usize { val * val })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -238,6 +257,9 @@ fn run_wrapped_binary_native_function() {
             args: vec![StackIndex(1).into(), StackIndex(2).into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
@@ -245,8 +267,7 @@ fn run_wrapped_binary_native_function() {
         .with_native_function(|&lhs: &usize, &rhs: &usize| -> usize {
             lhs + rhs
         })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -281,13 +302,15 @@ fn rust_function_returning_rust_object() {
             args: vec![StackIndex(1).into(), StackIndex(2).into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -331,14 +354,16 @@ fn rust_function_accepting_rust_object() {
             args: vec![StackIndex(3).into()],
             output: Some(StackIndex(0)),
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
         .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
         .with_native_function(|obj: &RustObj| obj.a + obj.b)
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -383,6 +408,9 @@ fn rust_function_accepting_mutable_rust_object() {
             args: vec![StackIndex(0).into(), StackIndex(1).into()],
             output: None,
         },
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
@@ -391,8 +419,7 @@ fn rust_function_accepting_mutable_rust_object() {
         .with_native_function(|obj: &mut RustObj, &c: &usize| {
             obj.a += c;
         })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 
@@ -456,6 +483,10 @@ fn rust_function_collecting_triangular_numbers() {
             cond: StackIndex(3).into(),
             dest: InstructionIndex(3),
         },
+        // Return after the loop concludes
+        Instruction::Return {
+            outputs: vec![StackIndex(0).into()],
+        },
     ];
 
     let vm = VirtualMachine::builder()
@@ -468,8 +499,7 @@ fn rust_function_collecting_triangular_numbers() {
             println!("Appending {value} to a Vec<usize>");
             vec.push(value);
         })
-        .build()
-        .simplify();
+        .build();
 
     let results = vm.local_eval().unwrap();
 

@@ -42,11 +42,8 @@ pub struct VirtualMachine {
     /// Functions in Rust that may be called from the bytecode.
     native_functions: Vec<ExposedNativeFunction>,
 
-    /// The number of output values to produce.
-    num_outputs: usize,
-
-    /// The number of additional temporary values to allocate.
-    num_temporaries: usize,
+    /// The stack size required to execute a function.
+    stack_size: usize,
 
     /// Annotations of each instruction
     annotations: HashMap<AnnotationLocation, String>,
@@ -253,6 +250,9 @@ pub enum Instruction {
     /// string, storing the result into a native Rust `String` located
     /// at the output index.
     ReadString { ptr: VMArg, output: StackIndex },
+
+    /// End execution of the VM, and return to the parent scope.
+    Return { outputs: Vec<VMArg> },
 }
 
 #[derive(Error)]
@@ -376,6 +376,12 @@ pub enum VMExecutionError {
         attempted: RuntimeType,
         actual: RuntimeType,
     },
+
+    #[error(
+        "Reached the last instruction \
+         without encountering a Return."
+    )]
+    ReachedEndWithoutReturnInstruction,
 }
 
 pub trait NormalizeStackIndex {
@@ -697,8 +703,7 @@ impl VirtualMachineBuilder {
         VirtualMachine {
             instructions: self.instructions,
             native_functions: self.native_functions,
-            num_outputs: self.num_outputs,
-            num_temporaries: num_values - self.num_outputs,
+            stack_size: num_values,
             annotations: self.annotations,
         }
     }
@@ -787,73 +792,8 @@ impl VirtualMachine {
         self.instructions.len()
     }
 
-    pub fn num_temporaries(&self) -> usize {
-        self.num_temporaries
-    }
-
-    pub fn simplify(self) -> Self {
-        self.remap_temporary_indices()
-    }
-
-    pub(crate) fn remap_temporary_indices(self) -> Self {
-        let mut remap: HashMap<StackIndex, StackIndex> = (0..self.num_outputs)
-            .map(StackIndex)
-            .map(|output| (output, output))
-            .collect();
-
-        // TODO: After the last usage of an index, allow it to be
-        // reused for a different temporary value.
-        //
-        // TODO: If all occurrences of a temporary value are before
-        // the write of an output index, allow the output index to be
-        // used as a temporary.
-        let mut do_remap = |index: StackIndex| -> StackIndex {
-            if let Some(new_index) = remap.get(&index) {
-                *new_index
-            } else {
-                let new_index = StackIndex(remap.len());
-                remap.insert(index, new_index);
-                new_index
-            }
-        };
-
-        let instructions = self
-            .instructions
-            .into_iter()
-            .map(|mut inst| {
-                inst.visit_indices(|index| {
-                    *index = do_remap(*index);
-                });
-                inst
-            })
-            .collect();
-
-        Self {
-            instructions,
-            num_temporaries: remap.len() - self.num_outputs,
-            ..self
-        }
-    }
-
-    pub fn assert_equal(&self, other: &VirtualMachine) {
-        assert_eq!(self.num_outputs, other.num_outputs);
-        assert_eq!(self.num_temporaries, other.num_temporaries);
-        assert_eq!(self.native_functions.len(), other.native_functions.len());
-        self.native_functions
-            .iter()
-            .zip(other.native_functions.iter())
-            .for_each(|(self_func, other_func)| {
-                assert_eq!(self_func, other_func);
-            });
-
-        assert_eq!(self.instructions.len(), other.instructions.len());
-
-        self.instructions
-            .iter()
-            .zip(other.instructions.iter())
-            .for_each(|(self_instruction, other_instruction)| {
-                assert_eq!(self_instruction, other_instruction);
-            });
+    pub fn stack_size(&self) -> usize {
+        self.stack_size
     }
 
     /// Evaluate the virtual machine, raising an error if any
@@ -867,8 +807,7 @@ impl VirtualMachine {
         mut reader: impl VMReader,
     ) -> Result<VMResults, Error> {
         let mut values = {
-            let stack_size = self.num_outputs + self.num_temporaries;
-            let stack = (0..stack_size).map(|_| None).collect();
+            let stack = (0..self.stack_size).map(|_| None).collect();
             VMResults(stack)
         };
 
@@ -1281,14 +1220,26 @@ impl VirtualMachine {
                         })
                         .transpose()?;
                 }
+
+                Instruction::Return { outputs } => {
+                    let mut inline_consts = Vec::new();
+                    let mut collected_outputs = values
+                        .collect_native_function_args(
+                            outputs,
+                            &mut inline_consts,
+                        );
+                    let outputs = collected_outputs
+                        .iter_mut()
+                        .map(|opt_mut| opt_mut.take())
+                        .collect();
+                    return Ok(VMResults(outputs));
+                }
             }
 
             current_instruction = next_instruction;
         }
 
-        values.0.truncate(self.num_outputs);
-
-        Ok(values)
+        Err(VMExecutionError::ReachedEndWithoutReturnInstruction.into())
     }
 }
 
@@ -1332,8 +1283,9 @@ impl Instruction {
             ),
 
             // Arbitrary arity instructions
-            Instruction::NativeFunctionCall { args, .. } => {
-                (None, None, Some(args.iter().cloned()))
+            Instruction::NativeFunctionCall { args: values, .. }
+            | Instruction::Return { outputs: values } => {
+                (None, None, Some(values.iter().cloned()))
             }
         };
 
@@ -1351,7 +1303,8 @@ impl Instruction {
         let (opt_a, opt_b) = match self {
             Instruction::NoOp
             | Instruction::NativeFunctionCall { output: None, .. }
-            | Instruction::ConditionalJump { .. } => (None, None),
+            | Instruction::ConditionalJump { .. }
+            | Instruction::Return { .. } => (None, None),
 
             Instruction::Clear { loc: output }
             | Instruction::Copy { output, .. }
@@ -1387,75 +1340,6 @@ impl Instruction {
             .chain(opt_b.into_iter())
     }
 
-    fn visit_indices(&mut self, mut callback: impl FnMut(&mut StackIndex)) {
-        match self {
-            Instruction::NoOp => {}
-
-            Instruction::Clear { loc } => callback(loc),
-
-            Instruction::IsSome { value: arg, output }
-            | Instruction::Not { arg, output }
-            | Instruction::Copy { value: arg, output }
-            | Instruction::PrimCast {
-                value: arg, output, ..
-            }
-            | Instruction::Downcast {
-                obj: arg, output, ..
-            }
-            | Instruction::Read {
-                ptr: arg, output, ..
-            }
-            | Instruction::ReadString { ptr: arg, output } => {
-                if let VMArg::SavedValue(index) = arg {
-                    callback(index);
-                }
-                callback(output);
-            }
-            Instruction::Swap(lhs, rhs) => {
-                callback(lhs);
-                callback(rhs);
-            }
-            Instruction::ConditionalJump { cond: arg, .. } => {
-                if let VMArg::SavedValue(index) = arg {
-                    callback(index);
-                }
-            }
-            Instruction::NativeFunctionCall { args, output, .. } => {
-                args.iter_mut()
-                    .filter_map(|arg| match arg {
-                        VMArg::SavedValue(index) => Some(index),
-                        VMArg::Const(_) => None,
-                    })
-                    .for_each(|arg| callback(arg));
-                if let Some(output) = output {
-                    callback(output);
-                }
-            }
-
-            Instruction::And { lhs, rhs, output }
-            | Instruction::Or { lhs, rhs, output }
-            | Instruction::Equal { lhs, rhs, output }
-            | Instruction::NotEqual { lhs, rhs, output }
-            | Instruction::LessThan { lhs, rhs, output }
-            | Instruction::GreaterThan { lhs, rhs, output }
-            | Instruction::LessThanOrEqual { lhs, rhs, output }
-            | Instruction::GreaterThanOrEqual { lhs, rhs, output }
-            | Instruction::Add { lhs, rhs, output }
-            | Instruction::Sub { lhs, rhs, output }
-            | Instruction::Mul { lhs, rhs, output }
-            | Instruction::Div { lhs, rhs, output }
-            | Instruction::Mod { lhs, rhs, output } => {
-                if let VMArg::SavedValue(index) = lhs {
-                    callback(index);
-                }
-                if let VMArg::SavedValue(index) = rhs {
-                    callback(index);
-                }
-                callback(output);
-            }
-        }
-    }
-
     fn op_name(&self) -> &'static str {
         match self {
             Instruction::NoOp => "NoOp",
@@ -1483,6 +1367,7 @@ impl Instruction {
             Instruction::Downcast { .. } => "Downcast",
             Instruction::Read { .. } => "Read",
             Instruction::ReadString { .. } => "ReadString",
+            Instruction::Return { .. } => "Return",
         }
     }
 }
@@ -1514,10 +1399,9 @@ impl Display for VirtualMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(
             f,
-            "{} instructions, {} outputs, {} temporaries",
+            "{} instructions, stack size of {}",
             self.instructions.len(),
-            self.num_outputs,
-            self.num_temporaries
+            self.stack_size,
         )?;
         for (i, instruction) in self.instructions.iter().enumerate() {
             let index = InstructionIndex(i);
@@ -1690,6 +1574,24 @@ impl Display for Instruction {
             Instruction::ReadString { ptr, output } => {
                 write!(f, "{output} = {ptr}.read_string()")
             }
+
+            Instruction::Return { outputs } => match outputs.len() {
+                0 => write!(f, "return"),
+                1 => write!(f, "return {}", outputs[0]),
+                _ => {
+                    write!(f, "return (")?;
+                    outputs.iter().enumerate().try_for_each(
+                        |(i, output)| {
+                            if i > 0 {
+                                write!(f, ", ")?;
+                            }
+                            write!(f, "{output}")
+                        },
+                    )?;
+                    write!(f, ")")?;
+                    Ok(())
+                }
+            },
         }
     }
 }

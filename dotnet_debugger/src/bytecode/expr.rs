@@ -2198,11 +2198,6 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             println!("----------- As VM --------------\n{vm}");
         }
 
-        let vm = vm.simplify();
-        if self.show_steps {
-            println!("----------- VM (simplified) --------------\n{vm}");
-        }
-
         Ok(vm)
     }
 }

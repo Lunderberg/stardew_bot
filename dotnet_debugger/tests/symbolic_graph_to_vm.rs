@@ -20,8 +20,11 @@ fn constant_folded_integers() {
 
     println!("------------- VM ------------\n{vm}");
 
-    assert!(vm.num_instructions() == 2);
-    assert!(vm.num_temporaries() <= 1);
+    // 1. Function call
+    // 2. Addition
+    // 3. Return
+    assert!(vm.num_instructions() == 3);
+    assert!(vm.stack_size() <= 2);
 }
 
 #[test]
@@ -50,7 +53,7 @@ fn register_reuse() {
          constant folding to be disabled"
     );
     assert!(
-        vm.num_temporaries() <= 1,
+        vm.stack_size() <= 2,
         "Register re-use should avoid repeated addition \
          from requiring one register per computation. "
     );
