@@ -166,7 +166,8 @@ impl SymbolicGraph {
         });
         let num_outputs = next_free_index;
 
-        let scope = self.operation_scope();
+        let reachable = self.reachable(self.iter_extern_funcs());
+        let scope = self.operation_scope(&reachable);
 
         let last_usage = self.last_usage();
 
@@ -238,7 +239,8 @@ impl SymbolicGraph {
             .map(|func_info| (func_info.scope, func_info))
             .collect();
 
-        let operation_to_scope = self.operation_scope();
+        let reachable = self.reachable(self.iter_extern_funcs());
+        let operation_to_scope = self.operation_scope(&reachable);
 
         // Step 1: Collect the body of each scope.
         operation_to_scope

@@ -436,6 +436,7 @@ impl<'a> TypeInference<'a> {
                 ExprKind::ReadValue { ptr, prim_type } => {
                     let ptr_type = expect_cache(*ptr, "ptr to read");
                     match ptr_type {
+                        RuntimeType::Unknown => Ok(()),
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
                         other => Err(Error::InvalidOperandForReadValue(
                             other.clone(),

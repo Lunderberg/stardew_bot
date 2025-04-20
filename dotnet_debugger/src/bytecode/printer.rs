@@ -180,9 +180,11 @@ impl<'a> GraphPrinter<'a> {
     }
 
     fn display(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let reachable = self.graph.reachable(self.iter_root_nodes());
+        let reachable = self.graph.reachable(
+            self.iter_root_nodes().filter_map(|node| node.as_op_index()),
+        );
 
-        let scope = self.graph.operation_scope();
+        let scope = self.graph.operation_scope(&reachable);
 
         let inline_expr: Vec<bool> = if self.expand_all_expressions {
             vec![false; self.graph.num_operations()]

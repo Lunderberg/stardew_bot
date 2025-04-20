@@ -563,6 +563,10 @@ impl SymbolicGraph {
         self.ops.len()
     }
 
+    pub fn num_extern_funcs(&self) -> usize {
+        self.extern_funcs.len()
+    }
+
     pub fn parse(&mut self, text: &str) -> Result<SymbolicValue, Error> {
         let mut parser = super::SymbolicParser::new(text, self);
         parser.parse_expr()
@@ -1046,7 +1050,7 @@ impl SymbolicGraph {
         &self,
     ) -> Result<(), Error> {
         let iter_functions = self
-            .reachable(self.extern_funcs.iter().map(|index| (*index).into()))
+            .reachable(self.iter_extern_funcs())
             .into_iter()
             .enumerate()
             .filter(|(_, reachable)| *reachable)
@@ -1082,8 +1086,7 @@ impl SymbolicGraph {
     }
 
     fn validate_all_parameters_defined(&self) -> Result<(), Error> {
-        let reachable = self
-            .reachable(self.extern_funcs.iter().map(|index| (*index).into()));
+        let reachable = self.reachable(self.iter_extern_funcs());
 
         let defined_params: HashSet<OpIndex> = reachable
             .iter()
@@ -1236,12 +1239,10 @@ impl SymbolicGraph {
     /// `Scope::IfBranch(if_else_index)`: The expression is used by
     /// the if branch of the `ExprKind::IfElse` declared at
     /// `if_else_index`, and is not used by any other
-    pub(crate) fn operation_scope(&self) -> Vec<Scope> {
-        let mut func_scope = vec![Scope::Global; self.ops.len()];
+    pub(crate) fn operation_scope(&self, reachable: &[bool]) -> Vec<Scope> {
+        assert_eq!(reachable.len(), self.ops.len());
 
-        let reachable = self.reachable(
-            self.extern_funcs.iter().cloned().map(SymbolicValue::Result),
-        );
+        let mut func_scope = vec![Scope::Global; self.ops.len()];
 
         // Step 1: Visit each function in reverse order of
         // declaration.  For each function, mark all expressions that
@@ -1279,7 +1280,7 @@ impl SymbolicGraph {
         // placing expressions in the innermost scope that may legally
         // be applied.
         let mut all_scopes: Vec<Option<Scope>> = vec![None; self.ops.len()];
-        self.extern_funcs.iter().cloned().for_each(|OpIndex(i)| {
+        self.iter_extern_funcs().for_each(|OpIndex(i)| {
             all_scopes[i] = Some(Scope::Global);
         });
 
@@ -1410,9 +1411,8 @@ impl SymbolicGraph {
         {
             let mut visited: HashSet<usize> = HashSet::new();
             let mut to_visit: Vec<(usize, usize)> = self
-                .extern_funcs
-                .iter()
-                .map(|op_index| (op_index.0 + 1, 0))
+                .iter_extern_funcs()
+                .map(|OpIndex(index)| (index + 1, 0))
                 .collect();
             let mut i_dfs = 0;
 
@@ -1562,18 +1562,17 @@ impl SymbolicGraph {
         &self,
         lookup: &HashMap<OpIndex, SymbolicValue>,
     ) -> Result<Vec<OpIndex>, Error> {
-        self.extern_funcs
-            .iter()
+        self.iter_extern_funcs()
             .map(|old_index| {
                 let new_index = lookup
-                    .get(old_index)
+                    .get(&old_index)
                     .map(|new_value| {
                         new_value.as_op_index().ok_or(
                             Error::AttemptedToMarkNonFunctionAsExternFunc,
                         )
                     })
                     .transpose()?
-                    .unwrap_or(*old_index);
+                    .unwrap_or(old_index);
                 Ok(new_index)
             })
             .collect()
@@ -1797,12 +1796,9 @@ impl SymbolicGraph {
     /// boolean vector will contain `false`.
     pub(crate) fn reachable(
         &self,
-        initial: impl IntoIterator<Item = SymbolicValue>,
+        initial: impl IntoIterator<Item = OpIndex>,
     ) -> Vec<bool> {
-        let mut to_visit: Vec<_> = initial
-            .into_iter()
-            .filter_map(|value| value.as_op_index())
-            .collect();
+        let mut to_visit: Vec<_> = initial.into_iter().collect();
 
         let mut reachable = vec![false; self.ops.len()];
         for index in &to_visit {
@@ -1828,8 +1824,7 @@ impl SymbolicGraph {
             HashMap::new();
         let mut builder = Self::new();
 
-        let reachable =
-            self.reachable(self.extern_funcs.iter().cloned().map(Into::into));
+        let reachable = self.reachable(self.iter_extern_funcs());
 
         for (prev_index, op) in self.iter_ops() {
             if reachable[prev_index.0] {
@@ -2736,11 +2731,8 @@ impl<'a> GraphComparison<'a> {
             }};
         }
 
-        for (lhs_extern_func, rhs_extern_func) in lhs
-            .extern_funcs
-            .iter()
-            .cloned()
-            .zip(rhs.extern_funcs.iter().cloned())
+        for (lhs_extern_func, rhs_extern_func) in
+            lhs.iter_extern_funcs().zip(rhs.iter_extern_funcs())
         {
             let lhs_extern_func: SymbolicValue = lhs_extern_func.into();
             let rhs_extern_func: SymbolicValue = rhs_extern_func.into();
