@@ -105,6 +105,15 @@ impl SymbolicGraph {
 
         let main_func = &self[main_func_index];
 
+        let Some(main_func_name) = &main_func.name else {
+            unreachable!(
+                "Should already be checked in \
+                 SymbolicGraph::mark_extern_func()"
+            )
+        };
+
+        builder.mark_entry_point(main_func_name)?;
+
         let ExprKind::Function { params, output } = &main_func.kind else {
             panic!(
                 "Internal error, \

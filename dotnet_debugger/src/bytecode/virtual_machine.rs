@@ -23,6 +23,7 @@ use super::{
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
     native_functions: Vec<ExposedNativeFunction>,
+    entry_points: HashMap<String, InstructionIndex>,
     num_outputs: usize,
     annotations: HashMap<AnnotationLocation, String>,
 }
@@ -42,11 +43,20 @@ pub struct VirtualMachine {
     /// Functions in Rust that may be called from the bytecode.
     native_functions: Vec<ExposedNativeFunction>,
 
-    /// The stack size required to execute a function.
+    /// A lookup table from the name of a function to its entry point.
+    entry_points: HashMap<String, InstructionIndex>,
+
+    /// The stack size required to execute the VM
     stack_size: usize,
 
     /// Annotations of each instruction
     annotations: HashMap<AnnotationLocation, String>,
+}
+
+pub struct VMEvaluator<'a> {
+    vm: &'a VirtualMachine,
+    entry_point: InstructionIndex,
+    reader: Box<dyn VMReader + 'a>,
 }
 
 #[derive(Debug, From)]
@@ -257,9 +267,15 @@ pub enum Instruction {
 
 #[derive(Error)]
 pub enum VMExecutionError {
+    #[error("Virtual machine did not contain a function named '{0}'")]
+    NoSuchFunction(String),
+
+    #[error("Cannot define function {0} multiple times")]
+    DuplicateFunctionName(String),
+
     #[error(
         "Offset must be applied to Ptr, \
-             but was instead applied to {0}."
+         but was instead applied to {0}."
     )]
     OffsetAppliedToNonPointer(RuntimePrimType),
 
@@ -591,6 +607,19 @@ impl StackValue {
 }
 
 impl VirtualMachineBuilder {
+    pub(crate) fn mark_entry_point(
+        &mut self,
+        name: impl Into<String>,
+    ) -> Result<(), Error> {
+        let name = name.into();
+        if self.entry_points.contains_key(&name) {
+            Err(VMExecutionError::DuplicateFunctionName(name).into())
+        } else {
+            self.entry_points.insert(name, self.current_index());
+            Ok(())
+        }
+    }
+
     pub(crate) fn push(&mut self, inst: Instruction) -> InstructionIndex {
         let index = InstructionIndex(self.instructions.len());
         self.instructions.push(inst);
@@ -644,6 +673,14 @@ impl VirtualMachineBuilder {
         let wrapped = WrappedNativeFunction::new(func);
         self.native_functions.push(wrapped.into());
         index
+    }
+
+    pub fn with_entry_point(
+        mut self,
+        name: impl Into<String>,
+    ) -> Result<Self, Error> {
+        self.mark_entry_point(name)?;
+        Ok(self)
     }
 
     pub fn with_instructions(self, instructions: Vec<Instruction>) -> Self {
@@ -703,6 +740,7 @@ impl VirtualMachineBuilder {
         VirtualMachine {
             instructions: self.instructions,
             native_functions: self.native_functions,
+            entry_points: self.entry_points,
             stack_size: num_values,
             annotations: self.annotations,
         }
@@ -773,19 +811,17 @@ impl VirtualMachine {
         VirtualMachineBuilder {
             instructions: Vec::new(),
             native_functions: Vec::new(),
+            entry_points: HashMap::new(),
             num_outputs: 1,
             annotations: HashMap::new(),
         }
     }
 
     pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
-        VirtualMachineBuilder {
-            instructions,
-            native_functions: Vec::new(),
-            num_outputs,
-            annotations: HashMap::new(),
-        }
-        .build()
+        Self::builder()
+            .with_instructions(instructions)
+            .num_outputs(num_outputs)
+            .build()
     }
 
     pub fn num_instructions(&self) -> usize {
@@ -796,24 +832,53 @@ impl VirtualMachine {
         self.stack_size
     }
 
+    pub fn get_function<'a>(
+        &'a self,
+        name: &str,
+    ) -> Result<VMEvaluator<'a>, Error> {
+        let entry_point = self
+            .entry_points
+            .get(name)
+            .ok_or_else(|| VMExecutionError::NoSuchFunction(name.into()))?
+            .clone();
+
+        Ok(VMEvaluator {
+            vm: self,
+            entry_point,
+            reader: Box::new(DummyReader),
+        })
+    }
+
     /// Evaluate the virtual machine, raising an error if any
     /// instructions attempt to read from the remote process.
     pub fn local_eval(&self) -> Result<VMResults, Error> {
-        self.evaluate(DummyReader)
+        self.get_function("main")?.evaluate()
     }
 
-    pub fn evaluate(
-        &self,
-        mut reader: impl VMReader,
-    ) -> Result<VMResults, Error> {
+    /// Evaluate the virtual machine, reading from the remote process
+    /// as necessary.
+    pub fn evaluate(&self, reader: impl VMReader) -> Result<VMResults, Error> {
+        self.get_function("main")?.with_reader(reader).evaluate()
+    }
+}
+
+impl<'a> VMEvaluator<'a> {
+    pub fn with_reader(self, reader: impl VMReader + 'a) -> VMEvaluator<'a> {
+        VMEvaluator {
+            reader: Box::new(reader),
+            ..self
+        }
+    }
+
+    pub fn evaluate(mut self) -> Result<VMResults, Error> {
         let mut values = {
-            let stack = (0..self.stack_size).map(|_| None).collect();
+            let stack = (0..self.vm.stack_size).map(|_| None).collect();
             VMResults(stack)
         };
 
-        let mut current_instruction = InstructionIndex(0);
-        while current_instruction.0 < self.instructions.len() {
-            let instruction = &self.instructions[current_instruction.0];
+        let mut current_instruction = self.entry_point;
+        while current_instruction.0 < self.vm.instructions.len() {
+            let instruction = &self.vm.instructions[current_instruction.0];
             let mut next_instruction =
                 InstructionIndex(current_instruction.0 + 1);
 
@@ -952,7 +1017,7 @@ impl VirtualMachine {
                     let mut args = values
                         .collect_native_function_args(args, &mut inline_consts);
                     let result =
-                        self.native_functions[index.0].apply(&mut args)?;
+                        self.vm.native_functions[index.0].apply(&mut args)?;
                     if let Some(output) = output {
                         values[*output] = result;
                     }
@@ -1145,10 +1210,10 @@ impl VirtualMachine {
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             let actual_type_ptr: Pointer = {
                                 let mut arr = [0; Pointer::SIZE];
-                                reader.read_bytes(ptr, &mut arr)?;
+                                self.reader.read_bytes(ptr, &mut arr)?;
                                 arr.into()
                             };
-                            reader
+                            self.reader
                                 .is_dotnet_base_class_of(
                                     *subtype,
                                     actual_type_ptr.into(),
@@ -1176,7 +1241,7 @@ impl VirtualMachine {
                         Some(RuntimePrimValue::Ptr(ptr)) => {
                             let bytes = {
                                 let mut vec = vec![0; prim_type.size_bytes()];
-                                reader.read_bytes(ptr, &mut vec)?;
+                                self.reader.read_bytes(ptr, &mut vec)?;
                                 vec
                             };
                             let prim_value = prim_type.parse(&bytes)?;
@@ -1208,7 +1273,7 @@ impl VirtualMachine {
                                     let num_bytes =
                                         byte_range.end - byte_range.start;
                                     let mut bytes = vec![0; num_bytes];
-                                    reader.read_bytes(
+                                    self.reader.read_bytes(
                                         byte_range.start,
                                         &mut bytes,
                                     )?;
