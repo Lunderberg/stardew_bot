@@ -1,22 +1,33 @@
 #![allow(dead_code)]
-use std::fmt::Display;
+use std::{collections::HashSet, fmt::Display};
 
 use dotnet_debugger::{CachedReader, RustNativeObject, SymbolicGraph};
+use memory_reader::Pointer;
 use ratatui::{
     layout::Constraint,
     style::Color,
     symbols::Marker,
     text::Text,
     widgets::{
-        canvas::{Canvas, Points, Rectangle as CanvasRectangle},
+        canvas::{
+            Canvas, Context as CanvasContext, Points,
+            Rectangle as CanvasRectangle,
+        },
         Block, Cell, Row, Table, Widget as _,
     },
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::Error;
+use crate::{
+    watch_point_definition::{ValueToken, WatchPointResults},
+    Error, WatchPointDefinition,
+};
 
 pub struct PathfindingUI {
+    player_x: ValueToken,
+    player_y: ValueToken,
+    current_location_token: ValueToken,
+
     current_location: String,
     position: Position,
     locations: Vec<GameLocation>,
@@ -58,6 +69,14 @@ struct GameLocation {
     water_tiles: Option<Vec<bool>>,
 
     buildings: Vec<Building>,
+
+    /// Which tiles are blocked by impassable tiles, either in the
+    /// "Back" layer or the "Buildings" layer.
+    ///
+    /// If either the layer has a non-null tile, and that tile is not
+    /// explicitly marked with the "Passable" attribute, then the tile
+    /// cannot be passed through.
+    blocked: Vec<bool>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -121,6 +140,7 @@ enum TreeKind {
 #[derive(RustNativeObject, Debug, Clone)]
 struct Litter {
     position: Position,
+    category: i32,
     kind: LitterKind,
 }
 
@@ -129,15 +149,16 @@ enum LitterKind {
     Stone,
     Wood,
     Fiber,
+    Other(String),
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone, Copy)]
 struct Rectangle {
     width: usize,
     height: usize,
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
+#[derive(RustNativeObject, Debug, Clone, Copy)]
 struct Tile {
     right: isize,
     down: isize,
@@ -171,8 +192,80 @@ struct BuildingDoor {
     inside_name: String,
 }
 
+#[derive(RustNativeObject, Default, Clone, Debug)]
+struct MapTileSheets {
+    known_sheets: HashSet<Pointer>,
+    passable: HashSet<(Pointer, usize)>,
+    shadow: HashSet<(Pointer, usize)>,
+}
+
+impl MapTileSheets {
+    fn define_sheet(&mut self, tile_sheet: Pointer) {
+        self.known_sheets.insert(tile_sheet);
+    }
+
+    fn define_property(&mut self, tile_sheet: Pointer, index_key: &str) {
+        index_key
+            .strip_prefix("@TileIndex@")
+            .and_then(|entry| entry.split_once('@'))
+            .and_then(|(index_str, property)| {
+                index_str.parse().ok().map(|index| (index, property))
+            })
+            .into_iter()
+            .for_each(|(index, property): (usize, &str)| match property {
+                "Passable" => {
+                    self.passable.insert((tile_sheet, index));
+                }
+                "Shadow" => {
+                    self.shadow.insert((tile_sheet, index));
+                }
+                _ => {}
+            });
+    }
+
+    fn has_passable_flag(
+        &self,
+        tile_sheet: Pointer,
+        tile_index: usize,
+    ) -> bool {
+        assert!(self.known_sheets.contains(&tile_sheet));
+        self.passable.contains(&(tile_sheet, tile_index))
+    }
+
+    fn has_shadow_flag(&self, tile_sheet: Pointer, tile_index: usize) -> bool {
+        self.passable.contains(&(tile_sheet, tile_index))
+    }
+}
+
 impl PathfindingUI {
-    pub fn new(reader: CachedReader) -> Result<Self, Error> {
+    pub fn new(
+        reader: CachedReader,
+        watch_point_spec: &mut WatchPointDefinition,
+    ) -> Result<Self, Error> {
+        let mut register = |value: &str| -> Result<ValueToken, Error> {
+            let expr = watch_point_spec.parse(value)?;
+            let token = watch_point_spec.mark_output(expr);
+            Ok(token)
+        };
+
+        let player_position = "StardewValley
+                .Game1
+                ._player
+                .position
+                .Field
+                .value";
+        let player_x = register(&format!("{player_position}.X"))?;
+        let player_y = register(&format!("{player_position}.Y"))?;
+        let current_location_token = register(
+            "StardewValley
+            .Game1
+            ._player
+            .currentLocationRef
+            .locationName
+            .value
+            .read_string()",
+        )?;
+
         let mut graph = SymbolicGraph::new();
 
         let location_list = graph.parse(
@@ -206,10 +299,10 @@ impl PathfindingUI {
         graph.name(new_rectangle, "new_rectangle")?;
 
         let new_warp = graph.native_function(
-            |location: &Tile, target: &Tile, target_room: &String| Warp {
+            |location: &Tile, target: &Tile, target_room: &str| Warp {
                 location: location.clone(),
                 target: target.clone(),
-                target_room: target_room.clone(),
+                target_room: target_room.into(),
             },
         );
         graph.name(new_warp, "new_warp")?;
@@ -238,7 +331,7 @@ impl PathfindingUI {
 
         let new_tree = graph.native_function(
             |position: &Position,
-             kind: &String,
+             kind: &str,
              growth_stage: i32,
              has_seed: bool,
              is_stump: bool| Tree {
@@ -252,10 +345,10 @@ impl PathfindingUI {
         graph.name(new_tree, "new_tree")?;
 
         let new_litter = graph.native_function(
-            |position: &Position, name: &String, category: i32| {
-                if category != -999 {
-                    return None;
-                }
+            |position: &Position, name: &str, category: i32| {
+                // if category != -999 {
+                //     return None;
+                // }
                 let opt_kind = if name == "Twig" {
                     Some(LitterKind::Wood)
                 } else if name == "Stone" {
@@ -263,10 +356,12 @@ impl PathfindingUI {
                 } else if name.to_lowercase().contains("weeds") {
                     Some(LitterKind::Fiber)
                 } else {
-                    None
+                    //None
+                    Some(LitterKind::Other(name.into()))
                 };
                 opt_kind.map(|kind| Litter {
                     position: position.clone(),
+                    category: category.clone(),
                     kind,
                 })
             },
@@ -281,9 +376,9 @@ impl PathfindingUI {
         graph.name(new_bush, "new_bush")?;
 
         let new_building_door = graph.native_function(
-            |relative_location: &Tile, inside_name: &String| BuildingDoor {
+            |relative_location: &Tile, inside_name: &str| BuildingDoor {
                 relative_location: relative_location.clone(),
-                inside_name: inside_name.clone(),
+                inside_name: inside_name.into(),
             },
         );
         graph.name(new_building_door, "new_building_door")?;
@@ -298,8 +393,43 @@ impl PathfindingUI {
         );
         graph.name(new_building, "new_building")?;
 
+        let new_tile_sheets =
+            graph.native_function(|_: usize| MapTileSheets::default());
+        graph.name(new_tile_sheets, "new_tile_sheets")?;
+
+        let define_tile_sheet = graph.native_function(
+            |sheets: &mut MapTileSheets, tile_sheet: Pointer| {
+                sheets.define_sheet(tile_sheet);
+            },
+        );
+        graph.name(define_tile_sheet, "define_tile_sheet")?;
+
+        let define_tile_sheets_property = graph.native_function(
+            |sheets: &mut MapTileSheets,
+             tile_sheet: Pointer,
+             index_key: &str| {
+                sheets.define_property(tile_sheet, index_key);
+            },
+        );
+        graph
+            .name(define_tile_sheets_property, "define_tile_sheets_property")?;
+
+        let check_passable_flag = graph.native_function(
+            |sheets: &MapTileSheets, tile_sheet: Pointer, tile_index: usize| {
+                sheets.has_passable_flag(tile_sheet, tile_index)
+            },
+        );
+        graph.name(check_passable_flag, "check_passable_flag")?;
+
+        let check_shadow_flag = graph.native_function(
+            |sheets: &MapTileSheets, tile_sheet: Pointer, tile_index: usize| {
+                sheets.has_shadow_flag(tile_sheet, tile_index)
+            },
+        );
+        graph.name(check_shadow_flag, "check_shadow_flag")?;
+
         let new_location = graph.native_function(
-            |name: &String,
+            |name: &str,
              shape: &Rectangle,
              warps: &Vec<Warp>,
              resource_clumps: &Vec<ResourceClump>,
@@ -308,9 +438,10 @@ impl PathfindingUI {
              bushes: &Vec<Bush>,
              litter: &Vec<Litter>,
              water_tiles: &Vec<bool>,
-             buildings: &Vec<Building>| {
+             buildings: &Vec<Building>,
+             blocked: &Vec<bool>| {
                 GameLocation {
-                    name: name.clone(),
+                    name: name.into(),
                     shape: shape.clone(),
                     warps: warps.clone(),
                     resource_clumps: resource_clumps.clone(),
@@ -321,6 +452,7 @@ impl PathfindingUI {
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
+                    blocked: blocked.clone(),
                 }
             },
         );
@@ -590,6 +722,100 @@ impl PathfindingUI {
                     })
                     .collect();
 
+                let num_tile_sheets = location
+                    .map
+                    .m_tileSheets
+                    ._size
+                    .prim_cast::<usize>();
+                let tile_sheets = (0..num_tile_sheets)
+                    .reduce(new_tile_sheets(i_loc), |tile_sheets, i_layer| {
+                        let tile_sheet = location
+                            .map
+                            .m_tileSheets
+                            ._items[i_layer];
+
+                        let tile_sheets = define_tile_sheet(
+                            tile_sheets,
+                            tile_sheet.prim_cast::<Pointer>()
+                        );
+
+                        let num_properties = tile_sheet
+                            .m_propertyCollection
+                            ._entries
+                            .len();
+                        (0..num_properties)
+                            .reduce(tile_sheets, |tile_sheets, i_property| {
+                                define_tile_sheets_property(
+                                    tile_sheets,
+                                    tile_sheet.prim_cast::<Pointer>(),
+                                    tile_sheet
+                                        .m_propertyCollection
+                                        ._entries[i_property]
+                                        .key
+                                        .read_string()
+                                )
+                            })
+
+                    });
+
+                let has_passable_flag = |tile| {
+                    let tile = tile.as::<xTile.Tiles.StaticTile>();
+                    let tile_sheet = tile
+                        .m_tileSheet
+                        .prim_cast::<Pointer>();
+                    let tile_index = tile
+                        .m_tileIndex
+                        .prim_cast::<usize>();
+                    check_passable_flag(
+                        tile_sheets,
+                        tile_sheet,
+                        tile_index,
+                    )
+                };
+
+                let has_shadow_flag = |tile| {
+                    let tile = tile.as::<xTile.Tiles.StaticTile>();
+                    let tile_sheet = tile
+                        .m_tileSheet
+                        .prim_cast::<Pointer>();
+                    let tile_index = tile
+                        .m_tileIndex
+                        .prim_cast::<usize>();
+                    check_shadow_flag(
+                        tile_sheets,
+                        tile_sheet,
+                        tile_index,
+                    )
+                };
+
+
+                let back_layer = location
+                    .backgroundLayers
+                    ._items[0]
+                    .key;
+                let building_layer = location
+                    .buildingLayers
+                    ._items[0]
+                    .key;
+
+                let blocked = (0..(height*width))
+                    .map(|i_flat| {
+                        let i = i_flat/height;
+                        let j = i_flat%height;
+                        let back_tile = back_layer.m_tiles[i,j];
+                        let building_tile = building_layer.m_tiles[i,j];
+
+                        let back_tile_blocked = back_tile.is_some()
+                            && has_passable_flag(back_tile);
+
+                        let building_tile_blocked = building_tile.is_some()
+                            && !has_passable_flag(building_tile)
+                            && !has_shadow_flag(building_tile);
+
+                        back_tile_blocked || building_tile_blocked
+                    })
+                    .collect();
+
                 new_location(
                     name,
                     shape,
@@ -601,6 +827,7 @@ impl PathfindingUI {
                     litter,
                     flattened_water_tiles,
                     buildings,
+                    blocked,
                 )
             }
 
@@ -646,15 +873,45 @@ impl PathfindingUI {
             .downcast_ref::<Vec<GameLocation>>()
             .expect("Vector should be Vec<Location>");
 
+        // locations
+        //     .iter()
+        //     .flat_map(|loc| {
+        //         loc.buildings.iter().map(move |building| (loc, building))
+        //     })
+        //     .for_each(|(loc, building)| {
+        //         println!(
+        //             "Inside location '{}' is a building at ({},{}), \
+        //              with {}",
+        //             loc.name,
+        //             building.loc.right,
+        //             building.loc.down,
+        //             if let Some(door) = &building.door {
+        //                 format!("interior named '{}'", door.inside_name)
+        //             } else {
+        //                 "no interior".into()
+        //             }
+        //         );
+        //     });
+
+        // locations.iter().for_each(|loc| {
+        //     println!("Location {} has {} objects", loc.name, loc.litter.len());
+        //     for obj in loc.litter.iter() {
+        //         println!(
+        //             "\tAt {}, object '{}' of category {}",
+        //             obj.position, obj.kind, obj.category,
+        //         );
+        //     }
+        // });
+
         let current_location = res
             .get_any(1)?
-            .expect("current_location shoudl exist")
+            .expect("current_location should exist")
             .downcast_ref::<String>()
             .expect("Current location should be string");
 
         let position = res
             .get_any(2)?
-            .expect("Player location shoudl exist")
+            .expect("Player location should exist")
             .downcast_ref::<Position>()
             .expect("Player location should be Position");
 
@@ -662,8 +919,279 @@ impl PathfindingUI {
             locations: locations.clone(),
             current_location: current_location.clone(),
             position: position.clone(),
+            player_x,
+            player_y,
+            current_location_token,
         };
+
         return Ok(pathfinding);
+    }
+}
+
+impl Into<(f64, f64)> for Position {
+    fn into(self) -> (f64, f64) {
+        let Self { right, down } = self;
+        (right.into(), down.into())
+    }
+}
+impl Into<(f64, f64)> for Tile {
+    fn into(self) -> (f64, f64) {
+        let Self { right, down } = self;
+        (right as f64, down as f64)
+    }
+}
+
+struct DrawableGameLocation<'a> {
+    room: &'a GameLocation,
+    draw_marker: Marker,
+    draw_area: ratatui::layout::Rect,
+    player_position: Position,
+}
+
+impl<'a> DrawableGameLocation<'a> {
+    fn render(&self, buf: &mut ratatui::prelude::Buffer) {
+        Canvas::default()
+            .block(Block::new().title(self.room.name.as_ref()))
+            .marker(self.draw_marker)
+            .x_bounds(self.x_bounds())
+            .y_bounds(self.y_bounds())
+            .paint(|ctx| {
+                self.paint_blocked_tiles(ctx);
+                self.paint_water_tiles(ctx);
+                self.paint_buildings(ctx);
+                self.paint_grass(ctx);
+                self.paint_resource_clumps(ctx);
+                self.paint_bushes(ctx);
+                self.paint_trees(ctx);
+
+                self.paint_litter(ctx);
+
+                ctx.print(
+                    self.player_position.right as f64,
+                    (self.room.shape.height as f64)
+                        - (self.player_position.down as f64),
+                    "x",
+                );
+            })
+            .render(self.draw_area, buf)
+    }
+
+    fn to_draw_coordinates(&self, loc: impl Into<(f64, f64)>) -> (f64, f64) {
+        let (x, y): (f64, f64) = loc.into();
+
+        let height = self.room.shape.height as f64;
+        let y = height - y;
+        (x, y)
+    }
+
+    fn to_draw_rectangle(
+        &self,
+        top_left: impl Into<(f64, f64)>,
+        shape: Rectangle,
+        color: Color,
+    ) -> CanvasRectangle {
+        let (left_x, top_y) = self.to_draw_coordinates(top_left);
+        let bottom_y = top_y - (shape.height as f64);
+
+        CanvasRectangle {
+            x: left_x,
+            y: bottom_y,
+            width: (shape.width as f64) - 1.0,
+            height: (shape.height as f64) - 1.0,
+            color,
+        }
+    }
+
+    fn x_bounds(&self) -> [f64; 2] {
+        let (x, _) = self.to_draw_coordinates(self.player_position);
+        self.compute_bounds(
+            self.room.shape.width,
+            self.draw_area.width.into(),
+            x,
+        )
+    }
+
+    fn y_bounds(&self) -> [f64; 2] {
+        let (_, y) = self.to_draw_coordinates(self.player_position);
+        self.compute_bounds(
+            self.room.shape.height,
+            self.draw_area.height.into(),
+            y,
+        )
+    }
+
+    fn compute_bounds(
+        &self,
+        game_extent_in_tiles: usize,
+        view_extent_in_terminal: usize,
+        position: f64,
+    ) -> [f64; 2] {
+        let game_tiles_per_terminal_tile = match self.draw_marker {
+            Marker::Block => 1,
+            Marker::HalfBlock => 2,
+            _ => 1,
+        };
+
+        let game_extent = game_extent_in_tiles as f64;
+        let view_extent =
+            (view_extent_in_terminal * game_tiles_per_terminal_tile) as f64;
+
+        if view_extent > game_extent {
+            [0.0, view_extent]
+        } else if position < view_extent / 2.0 {
+            [0.0, view_extent]
+        } else if position > game_extent - view_extent / 2.0 {
+            [game_extent - view_extent, game_extent]
+        } else {
+            [position - view_extent / 2.0, position + view_extent / 2.0]
+        }
+    }
+
+    fn paint_blocked_tiles(&self, ctx: &mut CanvasContext) {
+        let Rectangle { width, height } = self.room.shape;
+        assert!(width * height == self.room.blocked.len());
+
+        let blocked = self
+            .room
+            .blocked
+            .iter()
+            .enumerate()
+            .filter(|(_, is_blocked)| **is_blocked)
+            .map(|(index, _)| {
+                let i = index / height;
+                let j = index % height;
+                let x = i as f64;
+                let y = (height - j) as f64;
+                (x, y)
+            })
+            .collect::<Vec<_>>();
+        ctx.draw(&Points {
+            coords: &blocked,
+            color: Color::Red,
+        });
+    }
+
+    fn paint_water_tiles(&self, ctx: &mut CanvasContext) {
+        let Rectangle { width, height } = self.room.shape;
+
+        let Some(tiles) = &self.room.water_tiles else {
+            return;
+        };
+
+        assert!(width * height == tiles.len());
+        let points = tiles
+            .iter()
+            .enumerate()
+            .filter(|(_, is_water)| **is_water)
+            .map(|(index, _)| {
+                let i = index / height;
+                let j = index % height;
+                let x = i as f64;
+                let y = (height - j) as f64;
+                (x, y)
+            })
+            .collect::<Vec<_>>();
+
+        ctx.draw(&Points {
+            coords: &points,
+            color: Color::Blue,
+        });
+    }
+
+    fn paint_buildings(&self, ctx: &mut CanvasContext) {
+        self.room
+            .buildings
+            .iter()
+            .map(|building| {
+                self.to_draw_rectangle(
+                    building.loc,
+                    building.shape,
+                    Color::Rgb(45, 20, 0),
+                )
+            })
+            .for_each(|rect| ctx.draw(&rect));
+    }
+
+    fn paint_resource_clumps(&self, ctx: &mut CanvasContext) {
+        self.room
+            .resource_clumps
+            .iter()
+            .map(|clump| {
+                self.to_draw_rectangle(
+                    clump.location,
+                    clump.shape,
+                    match clump.kind {
+                        ResourceClumpKind::Stump => Color::Yellow,
+                        ResourceClumpKind::Boulder => Color::DarkGray,
+                        ResourceClumpKind::Meterorite => Color::Magenta,
+                        ResourceClumpKind::MineBoulder => Color::DarkGray,
+                    },
+                )
+            })
+            .for_each(|rect| ctx.draw(&rect));
+    }
+
+    fn paint_bushes(&self, ctx: &mut CanvasContext) {
+        self.room
+            .bushes
+            .iter()
+            .map(|bush| {
+                self.to_draw_rectangle(
+                    bush.position,
+                    Rectangle {
+                        width: bush.width(),
+                        height: 1,
+                    },
+                    Color::Green,
+                )
+            })
+            .for_each(|rect| ctx.draw(&rect));
+    }
+
+    fn paint_trees(&self, ctx: &mut CanvasContext) {
+        let trees = self
+            .room
+            .trees
+            .iter()
+            .map(|tree| self.to_draw_coordinates(tree.position))
+            .collect::<Vec<_>>();
+        ctx.draw(&Points {
+            coords: &trees,
+            color: Color::Rgb(133, 74, 5),
+        });
+    }
+
+    fn paint_grass(&self, ctx: &mut CanvasContext) {
+        let grass = self
+            .room
+            .grass
+            .iter()
+            .map(|grass_pos| self.to_draw_coordinates(*grass_pos))
+            .collect::<Vec<_>>();
+        ctx.draw(&Points {
+            coords: &grass,
+            color: Color::Rgb(10, 80, 10),
+        });
+    }
+
+    fn paint_litter(&self, ctx: &mut CanvasContext) {
+        for (litter_kind, color) in [
+            (LitterKind::Stone, Color::DarkGray),
+            (LitterKind::Wood, Color::Rgb(97, 25, 0)),
+            (LitterKind::Fiber, Color::LightGreen),
+        ] {
+            let litter = self
+                .room
+                .litter
+                .iter()
+                .filter(|obj| obj.kind == litter_kind)
+                .map(|obj| self.to_draw_coordinates(obj.position))
+                .collect::<Vec<_>>();
+            ctx.draw(&Points {
+                coords: &litter,
+                color,
+            });
+        }
     }
 }
 
@@ -674,10 +1202,36 @@ impl WidgetWindow<Error> for PathfindingUI {
 
     fn draw<'a>(
         &'a mut self,
-        _globals: &'a tui_utils::TuiGlobals,
+        globals: &'a tui_utils::TuiGlobals,
         area: ratatui::layout::Rect,
         buf: &mut ratatui::prelude::Buffer,
     ) {
+        let per_frame_values = globals
+            .get::<WatchPointResults>()
+            .expect("Generated for each frame");
+        let position = {
+            let right: f32 = per_frame_values[self.player_x]
+                .as_ref()
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let right = right / 64.0;
+            let down: f32 = per_frame_values[self.player_y]
+                .as_ref()
+                .unwrap()
+                .try_into()
+                .unwrap();
+            let down = down / 64.0;
+            Position { right, down }
+        };
+        let current_location: &str = per_frame_values
+            [self.current_location_token]
+            .as_ref()
+            .unwrap()
+            .as_native::<String>()
+            .map(|s| s.as_str())
+            .unwrap();
+
         let (left_column, draw_area) = area.split_from_left(30);
 
         let (top_area, table_area) = left_column.split_from_top(2);
@@ -698,70 +1252,8 @@ impl WidgetWindow<Error> for PathfindingUI {
             Row::new([name, shape])
         });
 
-        let water_rows = self.locations.iter().flat_map(|loc| {
-            let name = Cell::new(loc.name.as_str());
-            loc.water_tiles
-                .as_ref()
-                .into_iter()
-                .flat_map(|is_water| {
-                    let Rectangle { width, height } = loc.shape;
-                    assert!(width * height == is_water.len());
-                    is_water
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, is_water)| **is_water)
-                        .map(move |(index, _)| {
-                            let i = index / width;
-                            let j = index % width;
-                            Cell::new(format!(
-                                "({i},{j}) of ({width},{height})"
-                            ))
-                        })
-                })
-                .map(move |right| Row::new([name.clone(), right]))
-        });
-
-        let warp_rows = self.locations.iter().flat_map(|loc| {
-            let name = Cell::new(loc.name.as_str());
-
-            loc.warps.iter().flat_map(move |warp| {
-                [
-                    Row::new([
-                        name.clone(),
-                        Cell::new("x"),
-                        Cell::new(format!("{}", warp.location.right)),
-                    ]),
-                    Row::new([
-                        name.clone(),
-                        Cell::new("y"),
-                        Cell::new(format!("{}", warp.location.down)),
-                    ]),
-                    Row::new([
-                        name.clone(),
-                        Cell::new("target_x"),
-                        Cell::new(format!("{}", warp.target.right)),
-                    ]),
-                    Row::new([
-                        name.clone(),
-                        Cell::new("target_y"),
-                        Cell::new(format!("{}", warp.target.down)),
-                    ]),
-                    Row::new([
-                        name.clone(),
-                        Cell::new("target_name"),
-                        Cell::new(format!("{}", warp.target_room)),
-                    ]),
-                ]
-            })
-        });
-
-        let rows = std::iter::empty()
-            .chain(loc_rows)
-            .chain(water_rows)
-            .chain(warp_rows);
-
         let table = Table::new(
-            rows,
+            loc_rows,
             [
                 Constraint::Min(longest_name as u16),
                 Constraint::Min(10),
@@ -773,140 +1265,23 @@ impl WidgetWindow<Error> for PathfindingUI {
         table.render(table_area, buf);
 
         let top_text = Text::raw(format!(
-            "Current: {} ({}, {}) ({}, {})",
-            self.current_location,
-            self.position.right,
-            self.position.down,
-            self.position.right / 64.0,
-            self.position.down / 64.0,
+            "Current: {} ({:.1}, {:.1})",
+            current_location, position.right, position.down,
         ));
         top_text.render(top_area, buf);
 
-        let current_room = self
+        let opt_current_room = self
             .locations
             .iter()
-            .find(|loc| loc.name == self.current_location);
-        if let Some(loc) = current_room {
-            Canvas::default()
-                .block(Block::new().title(loc.name.as_ref()))
-                .marker(Marker::HalfBlock)
-                .x_bounds([0.0, loc.shape.width as f64])
-                .y_bounds([0.0, loc.shape.height as f64])
-                .paint(|ctx| {
-                    if let Some(tiles) = &loc.water_tiles {
-                        let Rectangle { width, height } = loc.shape;
-                        assert!(width * height == tiles.len());
-                        let points = tiles
-                            .iter()
-                            .enumerate()
-                            .filter(|(_, is_water)| **is_water)
-                            .map(|(index, _)| {
-                                let i = index / height;
-                                let j = index % height;
-                                let x = i as f64;
-                                let y = (height - j) as f64;
-                                (x, y)
-                            })
-                            .collect::<Vec<_>>();
-
-                        ctx.draw(&Points {
-                            coords: &points,
-                            color: Color::Blue,
-                        });
-                    }
-
-                    loc.resource_clumps
-                        .iter()
-                        .map(|clump| CanvasRectangle {
-                            x: clump.location.right as f64,
-                            y: (loc.shape.height as f64)
-                                - (clump.location.down as f64),
-                            width: clump.shape.width as f64,
-                            height: clump.shape.height as f64,
-                            color: match clump.kind {
-                                ResourceClumpKind::Stump => Color::Yellow,
-                                ResourceClumpKind::Boulder => Color::DarkGray,
-                                ResourceClumpKind::Meterorite => Color::Magenta,
-                                ResourceClumpKind::MineBoulder => {
-                                    Color::DarkGray
-                                }
-                            },
-                        })
-                        .for_each(|rect| ctx.draw(&rect));
-
-                    loc.bushes
-                        .iter()
-                        .map(|bush| CanvasRectangle {
-                            x: bush.position.right as f64,
-                            y: (loc.shape.height as f64)
-                                - (bush.position.down as f64),
-                            width: bush.width() as f64,
-                            height: 1.0,
-                            color: Color::Green,
-                        })
-                        .for_each(|rect| ctx.draw(&rect));
-
-                    {
-                        let trees = loc
-                            .trees
-                            .iter()
-                            .map(|tree| {
-                                (
-                                    tree.position.right as f64,
-                                    (loc.shape.height as f64)
-                                        - (tree.position.down as f64),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        ctx.draw(&Points {
-                            coords: &trees,
-                            color: Color::Rgb(133, 74, 5),
-                        });
-                    }
-
-                    {
-                        let grass = loc
-                            .grass
-                            .iter()
-                            .map(|grass_pos| {
-                                (
-                                    grass_pos.right as f64,
-                                    (loc.shape.height as f64)
-                                        - (grass_pos.down as f64),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        ctx.draw(&Points {
-                            coords: &grass,
-                            color: Color::Rgb(10, 80, 10),
-                        });
-                    }
-
-                    for (litter_kind, color) in [
-                        (LitterKind::Stone, Color::DarkGray),
-                        (LitterKind::Wood, Color::Rgb(97, 25, 0)),
-                        (LitterKind::Fiber, Color::LightGreen),
-                    ] {
-                        let litter = loc
-                            .litter
-                            .iter()
-                            .filter(|obj| obj.kind == litter_kind)
-                            .map(|obj| obj.position)
-                            .map(|pos| {
-                                (
-                                    pos.right as f64,
-                                    (loc.shape.height as f64)
-                                        - (pos.down as f64),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        ctx.draw(&Points {
-                            coords: &litter,
-                            color,
-                        });
-                    }
-                })
-                .render(draw_area, buf);
+            .find(|loc| loc.name == current_location);
+        if let Some(current_room) = opt_current_room {
+            DrawableGameLocation {
+                room: current_room,
+                draw_marker: Marker::Block,
+                draw_area,
+                player_position: position,
+            }
+            .render(buf);
         }
     }
 }
@@ -967,6 +1342,12 @@ impl std::str::FromStr for TreeKind {
     }
 }
 
+impl Display for Position {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "({}, {})", self.right, self.down)
+    }
+}
+
 impl Display for TreeKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -981,6 +1362,17 @@ impl Display for TreeKind {
             TreeKind::GreenRain => write!(f, "GreenRain"),
             TreeKind::Fir => write!(f, "Fir"),
             TreeKind::Birch => write!(f, "Birch"),
+        }
+    }
+}
+
+impl Display for LitterKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            LitterKind::Stone => write!(f, "Stone"),
+            LitterKind::Wood => write!(f, "Wood"),
+            LitterKind::Fiber => write!(f, "Fiber"),
+            LitterKind::Other(other) => write!(f, "Other({other})"),
         }
     }
 }

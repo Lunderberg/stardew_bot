@@ -50,7 +50,7 @@ struct TuiBuffers {
     draw_rate: TuiDrawRate,
     fishing: FishingUI,
     player_stats: PlayerStats,
-    pathfinding: Option<PathfindingUI>,
+    pathfinding: PathfindingUI,
 }
 
 #[allow(unused)]
@@ -110,7 +110,7 @@ impl TuiBuffers {
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(watch_point_spec)?,
             player_stats: PlayerStats::new(watch_point_spec)?,
-            pathfinding: Some(PathfindingUI::new(reader)?),
+            pathfinding: PathfindingUI::new(reader, watch_point_spec)?,
         })
     }
 
@@ -120,8 +120,7 @@ impl TuiBuffers {
             Box::new(&mut self.draw_rate),
             Box::new(&mut self.fishing),
             Box::new(&mut self.player_stats),
-            // Box::new(&mut self.pathfinding),
-            Box::new(self.pathfinding.as_mut().unwrap()),
+            Box::new(&mut self.pathfinding),
         ]
     }
 }
