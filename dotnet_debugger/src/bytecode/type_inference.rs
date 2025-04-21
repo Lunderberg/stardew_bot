@@ -180,6 +180,7 @@ impl<'a> TypeInference<'a> {
                         RuntimeType::Function(FunctionType {
                             output, ..
                         }) => Ok(output.as_ref().clone()),
+                        RuntimeType::Unknown => Ok(RuntimeType::Unknown),
                         _ => {
                             Err(TypeInferenceError::AttemptedCallOnNonFunction)
                         }

@@ -233,7 +233,7 @@ impl MapTileSheets {
     }
 
     fn has_shadow_flag(&self, tile_sheet: Pointer, tile_index: usize) -> bool {
-        self.passable.contains(&(tile_sheet, tile_index))
+        self.shadow.contains(&(tile_sheet, tile_index))
     }
 }
 
@@ -758,7 +758,7 @@ impl PathfindingUI {
 
                     });
 
-                let has_passable_flag = |tile| {
+                let has_flag = |flag_checker, tile| {
                     let tile = tile.as::<xTile.Tiles.StaticTile>();
                     let tile_sheet = tile
                         .m_tileSheet
@@ -766,28 +766,12 @@ impl PathfindingUI {
                     let tile_index = tile
                         .m_tileIndex
                         .prim_cast::<usize>();
-                    check_passable_flag(
+                    flag_checker(
                         tile_sheets,
                         tile_sheet,
                         tile_index,
                     )
                 };
-
-                let has_shadow_flag = |tile| {
-                    let tile = tile.as::<xTile.Tiles.StaticTile>();
-                    let tile_sheet = tile
-                        .m_tileSheet
-                        .prim_cast::<Pointer>();
-                    let tile_index = tile
-                        .m_tileIndex
-                        .prim_cast::<usize>();
-                    check_shadow_flag(
-                        tile_sheets,
-                        tile_sheet,
-                        tile_index,
-                    )
-                };
-
 
                 let back_layer = location
                     .backgroundLayers
@@ -806,11 +790,11 @@ impl PathfindingUI {
                         let building_tile = building_layer.m_tiles[i,j];
 
                         let back_tile_blocked = back_tile.is_some()
-                            && has_passable_flag(back_tile);
+                            && has_flag(check_passable_flag, back_tile);
 
                         let building_tile_blocked = building_tile.is_some()
-                            && !has_passable_flag(building_tile)
-                            && !has_shadow_flag(building_tile);
+                            && !has_flag(check_passable_flag, building_tile)
+                            && !has_flag(check_shadow_flag, building_tile);
 
                         back_tile_blocked || building_tile_blocked
                     })
