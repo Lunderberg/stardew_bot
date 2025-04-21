@@ -61,9 +61,9 @@ struct ExpressionTranslator<'a> {
     graph: &'a SymbolicGraph,
 
     /// The instructions being collected.
-    instructions: &'a mut VirtualMachineBuilder,
+    builder: &'a mut VirtualMachineBuilder,
 
-    instructions_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
+    operations_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
 
     /// Indicates the last time that an expression is used.
     last_usage: &'a [LastUsage],
@@ -97,8 +97,38 @@ impl SymbolicGraph {
     ) -> Result<VirtualMachine, Error> {
         let mut builder = VirtualMachine::builder();
 
+        let native_function_lookup: HashMap<OpIndex, FunctionIndex> = self
+            .iter_ops()
+            .filter_map(|(op_index, op)| match &op.kind {
+                ExprKind::NativeFunction(func) => Some((op_index, func)),
+                _ => None,
+            })
+            .map(|(op_index, func)| {
+                let func_index = builder.push_raw_native_function(func.clone());
+                (op_index, func_index)
+            })
+            .collect();
+
+        let reachable = self.reachable(self.iter_extern_funcs());
+        let scope = self.operation_scope(&reachable);
+        let last_usage = self.last_usage();
+
+        let operations_by_scope = scope
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, scope)| (scope, OpIndex::new(i)))
+            .into_group_map();
+
         self.iter_extern_funcs().try_for_each(|func_index| {
-            self.func_to_virtual_machine(&mut builder, func_index, show_steps)
+            self.func_to_virtual_machine(
+                &mut builder,
+                func_index,
+                &native_function_lookup,
+                &last_usage,
+                &operations_by_scope,
+                show_steps,
+            )
         })?;
 
         Ok(builder.build())
@@ -108,6 +138,9 @@ impl SymbolicGraph {
         &self,
         builder: &mut VirtualMachineBuilder,
         main_func_index: OpIndex,
+        native_function_lookup: &HashMap<OpIndex, FunctionIndex>,
+        last_usage: &[LastUsage],
+        operations_by_scope: &HashMap<Scope, Vec<OpIndex>>,
         show_steps: bool,
     ) -> Result<(), Error> {
         let main_func = &self[main_func_index];
@@ -121,126 +154,74 @@ impl SymbolicGraph {
 
         builder.mark_entry_point(main_func_name)?;
 
-        let ExprKind::Function { params, output } = &main_func.kind else {
+        let ExprKind::Function {
+            params,
+            output: output_value,
+        } = &main_func.kind
+        else {
             panic!(
                 "Internal error, \
                  `extern_funcs` should only point to functions."
             )
         };
-        let output = *output;
+        let output_value = *output_value;
 
         if !params.is_empty() {
             todo!("Handle extern functions with parameters");
         }
 
-        let native_function_lookup: HashMap<OpIndex, FunctionIndex> = self
-            .iter_ops()
-            .filter_map(|(op_index, op)| match &op.kind {
-                ExprKind::NativeFunction(func) => Some((op_index, func)),
-                _ => None,
-            })
-            .map(|(op_index, func)| {
-                let func_index = builder.push_raw_native_function(func.clone());
-                (op_index, func_index)
-            })
-            .collect();
-
-        let mut expr_to_reserved_location =
-            HashMap::<OpIndex, StackIndex>::new();
-        let mut next_free_index = 0;
-
-        let iter_elements = |value: SymbolicValue| match value {
-            SymbolicValue::Result(op_index) => match &self[op_index].kind {
-                ExprKind::Tuple(elements) => {
-                    Either::Left(elements.iter().cloned())
-                }
-                _ => Either::Right(Some(output).into_iter()),
-            },
-            _ => Either::Right(Some(output).into_iter()),
-        };
-
-        iter_elements(output).enumerate().for_each(|(i, value)| {
-            let stack_index = StackIndex(i);
-            next_free_index += 1;
-            match value {
-                SymbolicValue::Result(op_index) => {
-                    expr_to_reserved_location.insert(op_index, stack_index);
-                }
-                other => {
-                    let value: VMArg = other
-                        .as_prim_value()
-                        .expect("Only SymbolicValue::Result returns None")
-                        .into();
-                    builder.push(Instruction::Copy {
-                        value,
-                        output: stack_index,
-                    });
-                }
-            }
-        });
-
-        let reachable = self.reachable(self.iter_extern_funcs());
-        let scope = self.operation_scope(&reachable);
-
-        let last_usage = self.last_usage();
-
-        let operations_by_scope = scope
-            .iter()
+        let iter_op_indices = operations_by_scope
+            .get(&Scope::Global)
+            .into_iter()
+            .flatten()
             .cloned()
-            .enumerate()
-            .map(|(i, scope)| (scope, OpIndex::new(i)))
-            .into_group_map();
-
-        let iter_op_indices = scope
-            .iter()
-            .enumerate()
-            .filter(|(_, scope)| **scope == Scope::Global)
-            .map(|(i, _)| OpIndex::new(i))
             .filter(|index| {
                 !matches!(self[*index].kind, ExprKind::Function { .. })
             });
 
-        let index_tracking = IndexTracking {
-            next_free_index,
-            expr_to_reserved_location,
-            ..Default::default()
-        };
-
         let mut translator = ExpressionTranslator {
             graph: self,
-            instructions: builder,
-            instructions_by_scope: &operations_by_scope,
-            last_usage: &last_usage,
-            native_function_lookup: &native_function_lookup,
+            builder,
+            operations_by_scope,
+            last_usage,
+            native_function_lookup,
             show_steps,
             analysis: Analysis::new(None),
-            index_tracking,
+            index_tracking: IndexTracking::default(),
         };
         translator.translate(iter_op_indices)?;
 
-        let return_instruction = Instruction::Return {
-            outputs: iter_elements(output)
-                .map(|output_value| -> Result<VMArg, Error> {
-                    Ok(match output_value {
-                        SymbolicValue::Result(output_index) => translator
-                            .index_tracking
-                            .expr_to_location(output_index)?
-                            .unwrap_or_else(|| {
-                                panic!(
-                                    "All outputs should be produced by now, \
-                                     but {output_index} was not in the index tracker."
-                                )
-                            })
-                            .into(),
-
-                        other => other
-                            .as_prim_value()
-                            .expect("Should be result or constant")
-                            .into(),
+        let outputs = match output_value {
+            SymbolicValue::Result(op_index) => match &self[op_index].kind {
+                ExprKind::Tuple(elements) => {
+                    Either::Left(elements.iter().cloned())
+                }
+                _ => Either::Right(Some(output_value).into_iter()),
+            },
+            _ => Either::Right(Some(output_value).into_iter()),
+        }
+        .map(|output_value| -> Result<VMArg, Error> {
+            Ok(match output_value {
+                SymbolicValue::Result(output_index) => translator
+                    .index_tracking
+                    .expr_to_location(output_index)?
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "All outputs should be produced by now, \
+                             but {output_index} was not in the index tracker."
+                        )
                     })
-                })
-                .collect::<Result<_, _>>()?,
-        };
+                    .into(),
+
+                other => other
+                    .as_prim_value()
+                    .expect("Should be result or constant")
+                    .into(),
+            })
+        })
+        .collect::<Result<_, _>>()?;
+
+        let return_instruction = Instruction::Return { outputs };
         translator.push_annotated(return_instruction, || {
             format!("return from top-level function")
         });
@@ -749,10 +730,9 @@ impl ExpressionTranslator<'_> {
         Annot: Display,
     {
         if self.show_steps {
-            let index = self.instructions.current_index();
+            let index = self.builder.current_index();
             let loc = AnnotationLocation::Before(index);
-            self.instructions
-                .annotate(loc, generate_annotation(self.graph));
+            self.builder.annotate(loc, generate_annotation(self.graph));
         }
     }
 
@@ -856,9 +836,9 @@ impl ExpressionTranslator<'_> {
         Func: FnOnce() -> Annot,
         Annot: Display,
     {
-        let index = self.instructions.push(inst);
+        let index = self.builder.push(inst);
         if self.show_steps {
-            self.instructions.annotate(index, generate_annotation());
+            self.builder.annotate(index, generate_annotation());
         }
         index
     }
@@ -1203,7 +1183,7 @@ impl ExpressionTranslator<'_> {
             // statements in the scope to generate it.
             self.reserve_index(scope_output, out_stack_index);
             let iter_scope = self
-                .instructions_by_scope
+                .operations_by_scope
                 .get(&scope)
                 .into_iter()
                 .flatten()
@@ -1476,7 +1456,7 @@ impl ExpressionTranslator<'_> {
             || format!("initialize {loop_iter_name} for {expr_name}"),
         );
 
-        let loop_start = self.instructions.current_index();
+        let loop_start = self.builder.current_index();
 
         match &self.graph[reduction_index].kind {
             ExprKind::Function { params, output } => {
@@ -1567,8 +1547,8 @@ impl ExpressionTranslator<'_> {
         );
         self.free_index(loop_condition);
 
-        let after_loop = self.instructions.current_index();
-        self.instructions.update(
+        let after_loop = self.builder.current_index();
+        self.builder.update(
             jump_to_end_instruction_index,
             Instruction::ConditionalJump {
                 cond: can_skip_loop.into(),
@@ -1620,11 +1600,11 @@ impl ExpressionTranslator<'_> {
                 )
             });
 
-        self.instructions.update(
+        self.builder.update(
             jump_to_if_branch_index,
             Instruction::ConditionalJump {
                 cond: condition,
-                dest: self.instructions.current_index(),
+                dest: self.builder.current_index(),
             },
         );
 
@@ -1635,11 +1615,11 @@ impl ExpressionTranslator<'_> {
             Scope::IfBranch(op_index),
         )?;
 
-        self.instructions.update(
+        self.builder.update(
             jump_to_branch_end_index,
             Instruction::ConditionalJump {
                 cond: true.into(),
-                dest: self.instructions.current_index(),
+                dest: self.builder.current_index(),
             },
         );
 
