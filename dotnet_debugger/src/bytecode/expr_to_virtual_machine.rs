@@ -98,11 +98,19 @@ impl SymbolicGraph {
     ) -> Result<VirtualMachine, Error> {
         let mut builder = VirtualMachine::builder();
 
-        let main_func_index = self
-            .iter_extern_funcs()
-            .exactly_one()
-            .unwrap_or_else(|_| todo!("Handle VMs with multiple functions"));
+        self.iter_extern_funcs().try_for_each(|func_index| {
+            self.func_to_virtual_machine(&mut builder, func_index, show_steps)
+        })?;
 
+        Ok(builder.build())
+    }
+
+    fn func_to_virtual_machine(
+        &self,
+        builder: &mut VirtualMachineBuilder,
+        main_func_index: OpIndex,
+        show_steps: bool,
+    ) -> Result<(), Error> {
         let main_func = &self[main_func_index];
 
         let Some(main_func_name) = &main_func.name else {
@@ -204,7 +212,7 @@ impl SymbolicGraph {
 
         let mut translator = ExpressionTranslator {
             graph: self,
-            instructions: &mut builder,
+            instructions: builder,
             instructions_by_scope: &operations_by_scope,
             last_usage: &last_usage,
             native_functions: &native_functions,
@@ -242,7 +250,7 @@ impl SymbolicGraph {
             format!("return from top-level function")
         });
 
-        Ok(builder.build())
+        Ok(())
     }
 
     fn analyze_scopes(&self) -> Vec<ScopeInfo> {

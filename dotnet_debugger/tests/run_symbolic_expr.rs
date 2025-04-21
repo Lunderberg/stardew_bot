@@ -1377,3 +1377,27 @@ fn pass_str_reference_to_native_function() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn multiple_functions_in_one_vm() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main1() {
+            100
+        }
+
+        pub fn main2() {
+            200
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let result1: usize = vm.get_function("main1")?.evaluate()?.try_into()?;
+    let result2: usize = vm.get_function("main2")?.evaluate()?.try_into()?;
+
+    assert_eq!(result1, 100);
+    assert_eq!(result2, 200);
+
+    Ok(())
+}
