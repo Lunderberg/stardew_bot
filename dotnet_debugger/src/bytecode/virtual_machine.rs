@@ -24,7 +24,6 @@ pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
     native_functions: Vec<ExposedNativeFunction>,
     entry_points: HashMap<String, InstructionIndex>,
-    num_outputs: usize,
     annotations: HashMap<AnnotationLocation, String>,
 }
 
@@ -690,13 +689,6 @@ impl VirtualMachineBuilder {
         }
     }
 
-    pub fn num_outputs(self, num_outputs: usize) -> Self {
-        Self {
-            num_outputs,
-            ..self
-        }
-    }
-
     pub fn with_raw_native_function<T>(mut self, func: T) -> Self
     where
         T: 'static,
@@ -728,14 +720,6 @@ impl VirtualMachineBuilder {
             .map(|index| index.0 + 1)
             .max()
             .unwrap_or(0);
-
-        assert!(
-            num_values >= self.num_outputs,
-            "Virtual machine has {} output{}, \
-             but only found instructions for writing to {num_values}",
-            self.num_outputs,
-            if self.num_outputs == 1 { "" } else { "s" },
-        );
 
         VirtualMachine {
             instructions: self.instructions,
@@ -812,16 +796,8 @@ impl VirtualMachine {
             instructions: Vec::new(),
             native_functions: Vec::new(),
             entry_points: HashMap::new(),
-            num_outputs: 1,
             annotations: HashMap::new(),
         }
-    }
-
-    pub fn new(instructions: Vec<Instruction>, num_outputs: usize) -> Self {
-        Self::builder()
-            .with_instructions(instructions)
-            .num_outputs(num_outputs)
-            .build()
     }
 
     pub fn num_instructions(&self) -> usize {

@@ -121,7 +121,6 @@ fn swap_values() {
         .with_entry_point("main")
         .unwrap()
         .with_instructions(instructions)
-        .num_outputs(2)
         .build();
 
     let results = vm.local_eval().unwrap();

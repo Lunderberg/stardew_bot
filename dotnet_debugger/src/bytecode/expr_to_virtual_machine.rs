@@ -174,7 +174,6 @@ impl SymbolicGraph {
                 }
             }
         });
-        let num_outputs = next_free_index;
 
         let reachable = self.reachable(self.iter_extern_funcs());
         let scope = self.operation_scope(&reachable);
@@ -243,7 +242,7 @@ impl SymbolicGraph {
             format!("return from top-level function")
         });
 
-        Ok(builder.num_outputs(num_outputs).build())
+        Ok(builder.build())
     }
 
     fn analyze_scopes(&self) -> Vec<ScopeInfo> {
