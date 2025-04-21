@@ -15,7 +15,7 @@ use super::{
         AnnotationLocation, FunctionIndex, InstructionIndex, StackIndex,
         VirtualMachineBuilder,
     },
-    ExposedNativeFunction, Instruction, SymbolicGraph, VMArg, VirtualMachine,
+    Instruction, SymbolicGraph, TypeInferenceError, VMArg, VirtualMachine,
 };
 
 /// The result of analyzing a function
@@ -68,7 +68,6 @@ struct ExpressionTranslator<'a> {
     /// Indicates the last time that an expression is used.
     last_usage: &'a [LastUsage],
 
-    native_functions: &'a [ExposedNativeFunction],
     native_function_lookup: &'a HashMap<OpIndex, FunctionIndex>,
 
     index_tracking: IndexTracking,
@@ -134,10 +133,7 @@ impl SymbolicGraph {
             todo!("Handle extern functions with parameters");
         }
 
-        let (native_functions, native_function_lookup): (
-            Vec<ExposedNativeFunction>,
-            HashMap<OpIndex, FunctionIndex>,
-        ) = self
+        let native_function_lookup: HashMap<OpIndex, FunctionIndex> = self
             .iter_ops()
             .filter_map(|(op_index, op)| match &op.kind {
                 ExprKind::NativeFunction(func) => Some((op_index, func)),
@@ -145,9 +141,9 @@ impl SymbolicGraph {
             })
             .map(|(op_index, func)| {
                 let func_index = builder.push_raw_native_function(func.clone());
-                (func.clone(), (op_index, func_index))
+                (op_index, func_index)
             })
-            .unzip();
+            .collect();
 
         let mut expr_to_reserved_location =
             HashMap::<OpIndex, StackIndex>::new();
@@ -215,7 +211,6 @@ impl SymbolicGraph {
             instructions: builder,
             instructions_by_scope: &operations_by_scope,
             last_usage: &last_usage,
-            native_functions: &native_functions,
             native_function_lookup: &native_function_lookup,
             show_steps,
             analysis: Analysis::new(None),
@@ -1253,94 +1248,111 @@ impl ExpressionTranslator<'_> {
             panic!("Internal error, callee must be function")
         };
 
-        if let Some(&native_func_index) = self.native_function_lookup.get(&func)
-        {
-            let mut vm_args = Vec::new();
-            for arg in args {
-                vm_args.push(self.value_to_arg(op_index, arg)?);
-            }
+        match &self.graph[func].kind {
+            ExprKind::NativeFunction(native_func) => {
+                let native_func_index = self
+                    .native_function_lookup
+                    .get(&func)
+                    .expect("All functions should already be checked")
+                    .clone();
 
-            let mutates_first_argument = self.native_functions
-                [native_func_index.0]
-                .mutates_first_argument();
+                let vm_args: Vec<_> = args
+                    .iter()
+                    .map(|arg| self.value_to_arg(op_index, arg))
+                    .collect::<Result<_, _>>()?;
 
-            if mutates_first_argument {
-                // The function mutates its input
-                // argument.  No output index is required.
-                // However, the `current_location` lookup
-                // should be updated to no longer contain
-                // the first argument.
-                let first_arg_op = match &args[0] {
-                                SymbolicValue::Result(op_index) => *op_index,
-                                SymbolicValue::Bool(_) |SymbolicValue::Int(_) |
-                                SymbolicValue::Ptr(_) => todo!(
-                                    "Attempted mutation of const SymbolicValue.  \
-                                     Should handle this case earlier using \
-                                     a new ExprKind to represent mutable constants."
+                let mutates_first_argument =
+                    native_func.mutates_first_argument();
+
+                if mutates_first_argument {
+                    // The function mutates its input
+                    // argument.  No output index is required.
+                    // However, the `current_location` lookup
+                    // should be updated to no longer contain
+                    // the first argument.
+                    let first_arg_op = match &args[0] {
+                        SymbolicValue::Result(op_index) => *op_index,
+                        SymbolicValue::Bool(_)
+                        | SymbolicValue::Int(_)
+                        | SymbolicValue::Ptr(_) => todo!(
+                            "Attempted mutation of const SymbolicValue.  \
+                             Should handle this case earlier using \
+                             a new ExprKind to represent mutable constants."
+                        ),
+                    };
+                    let first_arg_loc = match &vm_args[0] {
+                        VMArg::SavedValue(stack_index) => *stack_index,
+                        VMArg::Const(_) => todo!(
+                            "Attempted mutation of VMArg::Const.  \
+                             Should handle this case earlier using \
+                             a new ExprKind to represent mutable constants."
+                        ),
+                    };
+
+                    self.push_annotated(
+                        Instruction::NativeFunctionCall {
+                            index: native_func_index,
+                            args: vm_args,
+                            output: None,
+                        },
+                        || format!("produce {expr_name}"),
+                    );
+
+                    // self.index_tracking.current_location.remove(&first_arg_op);
+                    // self.index_tracking.release_expr(first_arg_op);
+                    self.index_tracking
+                        .previously_consumed
+                        .insert(first_arg_op, op_index);
+
+                    if let Some(&required_output) = self
+                        .index_tracking
+                        .expr_to_reserved_location
+                        .get(&op_index)
+                    {
+                        if first_arg_loc != required_output {
+                            self.push_annotated(
+                                Instruction::Swap(
+                                    first_arg_loc,
+                                    required_output,
                                 ),
-
-                            };
-                let first_arg_loc = match &vm_args[0] {
-                                VMArg::SavedValue(stack_index) => *stack_index,
-                                VMArg::Const(_) => todo!(
-                                    "Attempted mutation of VMArg::Const.  \
-                                     Should handle this case earlier using \
-                                     a new ExprKind to represent mutable constants."
-                                ),
-                            };
-
-                self.push_annotated(
-                    Instruction::NativeFunctionCall {
-                        index: native_func_index,
-                        args: vm_args,
-                        output: None,
-                    },
-                    || format!("produce {expr_name}"),
-                );
-
-                // self.index_tracking.current_location.remove(&first_arg_op);
-                // self.index_tracking.release_expr(first_arg_op);
-                self.index_tracking
-                    .previously_consumed
-                    .insert(first_arg_op, op_index);
-
-                if let Some(&required_output) =
-                    self.index_tracking.expr_to_reserved_location.get(&op_index)
-                {
-                    if first_arg_loc != required_output {
-                        self.push_annotated(
-                                        Instruction::Swap(first_arg_loc, required_output),
-                                        || format!(
-                                            "swap {expr_name} \
-                                             to mandatory output loc {required_output}"
-                                        ),
-                                    );
+                                || {
+                                    format!(
+                                        "swap {expr_name} \
+                                     to mandatory output loc {required_output}"
+                                    )
+                                },
+                            );
+                        }
+                        self.index_tracking
+                            .define_contents(op_index, required_output);
+                    } else {
+                        self.index_tracking
+                            .define_contents(op_index, first_arg_loc);
                     }
-                    self.index_tracking
-                        .define_contents(op_index, required_output);
                 } else {
-                    self.index_tracking
-                        .define_contents(op_index, first_arg_loc);
+                    // The function produces an output value, to
+                    // be stored in the output index.
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::NativeFunctionCall {
+                            index: native_func_index,
+                            args: vm_args,
+                            output: Some(op_output),
+                        },
+                        || format!("produce {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
-            } else {
-                // The function produces an output value, to
-                // be stored in the output index.
-                let op_output = self.get_output_index(op_index);
-                self.push_annotated(
-                    Instruction::NativeFunctionCall {
-                        index: native_func_index,
-                        args: vm_args,
-                        output: Some(op_output),
-                    },
-                    || format!("produce {expr_name}"),
-                );
-                self.index_tracking.define_contents(op_index, op_output);
             }
-        } else {
-            todo!(
+            ExprKind::Function { .. } => todo!(
                 "Handle IR-defined function calls in the VM.  \
-                             Until then, all functions should be inlined."
-            )
+                 Until then, all functions should be inlined."
+            ),
+            _ => {
+                return Err(
+                    TypeInferenceError::AttemptedCallOnNonFunction.into()
+                );
+            }
         }
 
         self.free_dead_indices(op_index);
@@ -1497,16 +1509,14 @@ impl ExpressionTranslator<'_> {
                 // self.index_tracking.release_expr(accumulator);
                 // self.index_tracking.release_expr(index);
             }
-            ExprKind::NativeFunction(_) => {
+            ExprKind::NativeFunction(native_func) => {
                 let native_func_index =
                     self.native_function_lookup.get(&reduction_index).expect(
                         "Internal error, \
-                                     function should have \
-                                     already been encountered.",
+                         function should have already been encountered.",
                     );
-                let mutates_first_argument = self.native_functions
-                    [native_func_index.0]
-                    .mutates_first_argument();
+                let mutates_first_argument =
+                    native_func.mutates_first_argument();
 
                 let func_output = if mutates_first_argument {
                     None
