@@ -61,7 +61,10 @@ struct GameLocation {
     /// during worldgen.
     trees: Vec<Tree>,
 
-    grass: Vec<Position>,
+    /// Location of grass.  Currently, does not distinguish between
+    /// regular grass and blue grass, and does not read out the health
+    /// of the grass.
+    grass: Vec<Tile>,
 
     litter: Vec<Litter>,
 
@@ -88,7 +91,6 @@ struct Warp {
 
 #[derive(RustNativeObject, Debug, Clone)]
 struct ResourceClump {
-    location: Position,
     shape: Rectangle,
     kind: ResourceClumpKind,
 }
@@ -103,13 +105,22 @@ enum ResourceClumpKind {
 
 #[derive(RustNativeObject, Debug, Clone)]
 struct Bush {
-    size: usize,
-    position: Position,
+    /// The type of bush.  Internally, this is called `size`, but only
+    /// corresponds to a width for values 1-3.  It also encodes
+    /// whether this bush is a tea tree (4), or a golden walnut bush
+    /// (5).  To avoid confusing myself on it, naming it `kind` when I
+    /// interact with it.
+    kind: usize,
+
+    /// The position of the top-left of the bush.  This is stored
+    /// internally as a floating-point value, but since all
+    /// occurrences are aligned to tiles, I cast it to integers.
+    top_left: Tile,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
 struct Tree {
-    position: Position,
+    position: Tile,
     #[allow(dead_code)]
     kind: TreeKind,
     #[allow(dead_code)]
@@ -139,7 +150,7 @@ enum TreeKind {
 
 #[derive(RustNativeObject, Debug, Clone)]
 struct Litter {
-    position: Position,
+    tile: Tile,
     category: i32,
     kind: LitterKind,
 }
@@ -154,6 +165,7 @@ enum LitterKind {
 
 #[derive(RustNativeObject, Debug, Clone, Copy)]
 struct Rectangle {
+    top_left: Tile,
     width: usize,
     height: usize,
 }
@@ -291,11 +303,15 @@ impl PathfindingUI {
             .native_function(|right: f32, down: f32| Position { right, down });
         graph.name(new_position, "new_position")?;
 
-        let new_rectangle =
-            graph.native_function(|width: usize, height: usize| Rectangle {
-                width,
-                height,
-            });
+        let new_rectangle = graph.native_function(
+            |right: isize, down: isize, width: usize, height: usize| {
+                Rectangle {
+                    top_left: Tile { right, down },
+                    width,
+                    height,
+                }
+            },
+        );
         graph.name(new_rectangle, "new_rectangle")?;
 
         let new_warp = graph.native_function(
@@ -317,20 +333,15 @@ impl PathfindingUI {
         graph.name(new_resource_clump_kind, "new_resource_clump_kind")?;
 
         let new_resource_clump = graph.native_function(
-            |location: &Position,
-             shape: &Rectangle,
-             kind: &ResourceClumpKind| {
-                ResourceClump {
-                    location: location.clone(),
-                    shape: shape.clone(),
-                    kind: kind.clone(),
-                }
+            |shape: &Rectangle, kind: &ResourceClumpKind| ResourceClump {
+                shape: shape.clone(),
+                kind: kind.clone(),
             },
         );
         graph.name(new_resource_clump, "new_resource_clump")?;
 
         let new_tree = graph.native_function(
-            |position: &Position,
+            |position: &Tile,
              kind: &str,
              growth_stage: i32,
              has_seed: bool,
@@ -344,8 +355,8 @@ impl PathfindingUI {
         );
         graph.name(new_tree, "new_tree")?;
 
-        let new_litter = graph.native_function(
-            |position: &Position, name: &str, category: i32| {
+        let new_litter =
+            graph.native_function(|tile: &Tile, name: &str, category: i32| {
                 // if category != -999 {
                 //     return None;
                 // }
@@ -360,18 +371,17 @@ impl PathfindingUI {
                     Some(LitterKind::Other(name.into()))
                 };
                 opt_kind.map(|kind| Litter {
-                    position: position.clone(),
+                    tile: tile.clone(),
                     category: category.clone(),
                     kind,
                 })
-            },
-        );
+            });
         graph.name(new_litter, "new_litter")?;
 
         let new_bush =
-            graph.native_function(|size: usize, position: &Position| Bush {
-                size,
-                position: position.clone(),
+            graph.native_function(|kind: usize, top_left: &Tile| Bush {
+                kind,
+                top_left: top_left.clone(),
             });
         graph.name(new_bush, "new_bush")?;
 
@@ -433,7 +443,7 @@ impl PathfindingUI {
              shape: &Rectangle,
              warps: &Vec<Warp>,
              resource_clumps: &Vec<ResourceClump>,
-             grass: &Vec<Position>,
+             grass: &Vec<Tile>,
              trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
              litter: &Vec<Litter>,
@@ -479,7 +489,7 @@ impl PathfindingUI {
                     .m_layerSize;
                 let width = size.Width.prim_cast::<usize>();
                 let height = size.Height.prim_cast::<usize>();
-                let shape = new_rectangle(width,height);
+                let shape = new_rectangle(0,0,width,height);
 
                 let num_warps = location
                     .warps
@@ -528,22 +538,20 @@ impl PathfindingUI {
                             .resourceClumps
                             .list
                             ._items[i_clump];
-                        let location = {
+
+                        let shape = {
                             let right = clump.netTile.value.X;
                             let down = clump.netTile.value.Y;
-                            new_position(right,down)
-                        };
-                        let shape = {
                             let width = clump.width.value;
                             let height = clump.height.value;
-                            new_rectangle(width,height)
+                            new_rectangle(right,down,width,height)
                         };
 
                         let kind = {
                             let kind_index = clump.parentSheetIndex.value;
                             new_resource_clump_kind(kind_index)
                         };
-                        new_resource_clump(location,shape,kind)
+                        new_resource_clump(shape, kind)
                     })
                     .filter(|obj| obj.is_some())
                     .collect();
@@ -572,7 +580,7 @@ impl PathfindingUI {
                     .map(|feature| {
                         let right = feature.key.X;
                         let down = feature.key.Y;
-                        new_position(right,down)
+                        new_tile(right,down)
                     })
                     .collect();
 
@@ -590,7 +598,7 @@ impl PathfindingUI {
                         let position = {
                             let right = feature.key.X;
                             let down = feature.key.Y;
-                            new_position(right,down)
+                            new_tile(right,down)
                         };
                         // treeType looks like an integer, but has
                         // been converted to a string.
@@ -623,13 +631,13 @@ impl PathfindingUI {
                             .as::<StardewValley.TerrainFeatures.Bush>()
                     })
                     .map(|feature| {
-                        let size = feature.size.value;
-                        let position = {
+                        let kind = feature.size.value;
+                        let top_left = {
                             let right = feature.netTilePosition.value.X;
                             let down = feature.netTilePosition.value.Y;
-                            new_position(right,down)
+                            new_tile(right,down)
                         };
-                        new_bush(size,position)
+                        new_bush(kind, top_left)
                     })
                     .collect();
 
@@ -646,14 +654,14 @@ impl PathfindingUI {
                             ._entries[i]
                     })
                     .map(|obj| {
-                        let position = {
+                        let tile = {
                             let right = obj.value.tileLocation.value.X;
                             let down = obj.value.tileLocation.value.Y;
-                            new_position(right,down)
+                            new_tile(right,down)
                         };
                         let name = obj.value.netName.value.read_string();
                         let category = obj.value.category.value;
-                        new_litter(position,name,category)
+                        new_litter(tile,name,category)
                     })
                     .filter(|litter| litter.is_some())
                     .collect();
@@ -689,9 +697,11 @@ impl PathfindingUI {
                         };
 
                         let shape = {
+                            let right = building.tileX.value;
+                            let down = building.tileY.value;
                             let width = building.tilesWide.value;
                             let height = building.tilesHigh.value;
-                            new_rectangle(width,height)
+                            new_rectangle(right,down,width,height)
                         };
 
                         let door = {
@@ -912,6 +922,21 @@ impl PathfindingUI {
     }
 }
 
+impl Rectangle {
+    fn top(&self) -> isize {
+        self.top_left.down
+    }
+    fn bottom(&self) -> isize {
+        self.top_left.down + (self.height as isize)
+    }
+    fn left(&self) -> isize {
+        self.top_left.down
+    }
+    fn right(&self) -> isize {
+        self.top_left.right + (self.width as isize)
+    }
+}
+
 impl Into<(f64, f64)> for Position {
     fn into(self) -> (f64, f64) {
         let Self { right, down } = self;
@@ -970,12 +995,11 @@ impl<'a> DrawableGameLocation<'a> {
 
     fn to_draw_rectangle(
         &self,
-        top_left: impl Into<(f64, f64)>,
         shape: Rectangle,
         color: Color,
     ) -> CanvasRectangle {
-        let (left_x, top_y) = self.to_draw_coordinates(top_left);
-        let bottom_y = top_y - (shape.height as f64);
+        let (left_x, top_y) = self.to_draw_coordinates(shape.top_left);
+        let bottom_y = top_y - (shape.height as f64) + 1.0;
 
         CanvasRectangle {
             x: left_x,
@@ -1032,7 +1056,7 @@ impl<'a> DrawableGameLocation<'a> {
     }
 
     fn paint_blocked_tiles(&self, ctx: &mut CanvasContext) {
-        let Rectangle { width, height } = self.room.shape;
+        let Rectangle { width, height, .. } = self.room.shape;
         assert!(width * height == self.room.blocked.len());
 
         let blocked = self
@@ -1056,7 +1080,7 @@ impl<'a> DrawableGameLocation<'a> {
     }
 
     fn paint_water_tiles(&self, ctx: &mut CanvasContext) {
-        let Rectangle { width, height } = self.room.shape;
+        let Rectangle { width, height, .. } = self.room.shape;
 
         let Some(tiles) = &self.room.water_tiles else {
             return;
@@ -1087,11 +1111,7 @@ impl<'a> DrawableGameLocation<'a> {
             .buildings
             .iter()
             .map(|building| {
-                self.to_draw_rectangle(
-                    building.loc,
-                    building.shape,
-                    Color::Rgb(45, 20, 0),
-                )
+                self.to_draw_rectangle(building.shape, Color::Rgb(45, 20, 0))
             })
             .for_each(|rect| ctx.draw(&rect));
     }
@@ -1102,7 +1122,6 @@ impl<'a> DrawableGameLocation<'a> {
             .iter()
             .map(|clump| {
                 self.to_draw_rectangle(
-                    clump.location,
                     clump.shape,
                     match clump.kind {
                         ResourceClumpKind::Stump => Color::Yellow,
@@ -1119,16 +1138,7 @@ impl<'a> DrawableGameLocation<'a> {
         self.room
             .bushes
             .iter()
-            .map(|bush| {
-                self.to_draw_rectangle(
-                    bush.position,
-                    Rectangle {
-                        width: bush.width(),
-                        height: 1,
-                    },
-                    Color::Green,
-                )
-            })
+            .map(|bush| self.to_draw_rectangle(bush.rectangle(), Color::Green))
             .for_each(|rect| ctx.draw(&rect));
     }
 
@@ -1169,7 +1179,7 @@ impl<'a> DrawableGameLocation<'a> {
                 .litter
                 .iter()
                 .filter(|obj| obj.kind == litter_kind)
-                .map(|obj| self.to_draw_coordinates(obj.position))
+                .map(|obj| self.to_draw_coordinates(obj.tile))
                 .collect::<Vec<_>>();
             ctx.draw(&Points {
                 coords: &litter,
@@ -1199,14 +1209,17 @@ impl WidgetWindow<Error> for PathfindingUI {
                 .unwrap()
                 .try_into()
                 .unwrap();
-            let right = right / 64.0;
+
             let down: f32 = per_frame_values[self.player_y]
                 .as_ref()
                 .unwrap()
                 .try_into()
                 .unwrap();
-            let down = down / 64.0;
-            Position { right, down }
+
+            Position {
+                right: right / 64.0,
+                down: down / 64.0,
+            }
         };
         let current_location: &str = per_frame_values
             [self.current_location_token]
@@ -1272,13 +1285,21 @@ impl WidgetWindow<Error> for PathfindingUI {
 
 impl Bush {
     fn width(&self) -> usize {
-        match self.size {
+        match self.kind {
             0 => 1, // Small bush, 1x1
             1 => 2, // Medium bush, 1x2
             2 => 3, // Large bush, 1x3
             3 => 1, // Green tea bush, 1x1
             4 => 3, // Walnut bush, 1x3
             _ => 0, // Should be unreachable
+        }
+    }
+
+    fn rectangle(&self) -> Rectangle {
+        Rectangle {
+            top_left: self.top_left,
+            width: self.width(),
+            height: 1,
         }
     }
 }

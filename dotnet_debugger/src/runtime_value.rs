@@ -353,6 +353,12 @@ impl TryInto<usize> for RuntimePrimValue {
             Self::I32(val) if val >= 0 => Ok(val as usize),
             Self::I64(val) if val >= 0 => Ok(val as usize),
             Self::NativeInt(val) if val >= 0 => Ok(val as usize),
+            Self::F32(val) if val.fract() == 0.0 && val >= 0.0 => {
+                Ok(val as usize)
+            }
+            Self::F64(val) if val.fract() == 0.0 && val >= 0.0 => {
+                Ok(val as usize)
+            }
             other => Err(Error::ValueNotConvertibleToIndex(
                 other,
                 other.runtime_type(),
@@ -375,6 +381,8 @@ impl TryInto<isize> for RuntimePrimValue {
             Self::I32(val) => Ok(val as isize),
             Self::I64(val) => Ok(val as isize),
             Self::NativeInt(val) => Ok(val),
+            Self::F32(val) if val.fract() == 0.0 => Ok(val as isize),
+            Self::F64(val) if val.fract() == 0.0 => Ok(val as isize),
             other => Err(Error::ValueNotConvertibleToIndex(
                 other,
                 other.runtime_type(),
