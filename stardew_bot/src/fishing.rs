@@ -475,7 +475,7 @@ impl WidgetWindow<Error> for FishingUI {
         let get_float = |token: ValueToken| -> Result<f32, Error> {
             Ok(values[token]
                 .as_ref()
-                .ok_or(Error::ExpectedNoneEmptyValue)?
+                .ok_or(Error::ExpectedNonEmptyValue)?
                 .try_into()?)
         };
 

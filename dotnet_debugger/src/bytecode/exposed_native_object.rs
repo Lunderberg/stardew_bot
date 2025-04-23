@@ -40,6 +40,12 @@ impl ExposedNativeObject {
     }
 }
 
+impl Into<Box<dyn Any>> for ExposedNativeObject {
+    fn into(self) -> Box<dyn Any> {
+        self.obj
+    }
+}
+
 impl AsRef<dyn Any> for ExposedNativeObject {
     fn as_ref(&self) -> &dyn Any {
         self.obj.as_ref()

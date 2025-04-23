@@ -443,6 +443,34 @@ impl VMResults {
         self.get_as(index)
     }
 
+    pub fn take_obj<T: RustNativeObject>(
+        &mut self,
+        index: impl NormalizeStackIndex,
+    ) -> Result<Option<T>, Error> {
+        let index = index.normalize_stack_index();
+
+        Ok(self[index]
+            .take()
+            .map(|value| match value {
+                StackValue::Native(native) => {
+                    native.downcast::<T>().map_err(|native| {
+                        VMExecutionError::IncorrectOutputType {
+                            attempted: RustType::new::<T>().into(),
+                            actual: native.runtime_type(),
+                        }
+                    })
+                }
+                StackValue::Prim(value) => {
+                    Err(VMExecutionError::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: RuntimeType::Prim(value.runtime_type()),
+                    })
+                }
+            })
+            .transpose()?
+            .map(|boxed| *boxed))
+    }
+
     pub fn get_obj<'a, T: RustNativeObject>(
         &'a self,
         index: impl NormalizeStackIndex,
@@ -1777,6 +1805,20 @@ impl<'a> TryInto<&'a dyn Any> for &'a StackValue {
         }
     }
 }
+impl TryInto<Box<dyn Any>> for StackValue {
+    type Error = Error;
+
+    fn try_into(self) -> Result<Box<dyn Any>, Self::Error> {
+        match self {
+            StackValue::Native(native) => Ok(native.into()),
+            StackValue::Prim(value) => {
+                Err(Error::AttemptedConversionOfPrimitiveToNativeObject(
+                    value.runtime_type(),
+                ))
+            }
+        }
+    }
+}
 
 macro_rules! stack_value_to_prim {
     ($prim:ty) => {
@@ -1845,3 +1887,22 @@ stack_value_to_prim!(isize);
 stack_value_to_prim!(f32);
 stack_value_to_prim!(f64);
 stack_value_to_prim!(Pointer);
+
+impl TryInto<Box<dyn Any>> for VMResults {
+    type Error = Error;
+
+    fn try_into(mut self) -> Result<Box<dyn Any>, Self::Error> {
+        let num_elements = self.values.len();
+        if num_elements == 1 {
+            self.values[0]
+                .take()
+                .ok_or(Error::AttemptedConversionOfMissingValue)?
+                .try_into()
+        } else {
+            Err(Error::IncorrectNumberOfResults {
+                expected: 1,
+                actual: num_elements,
+            })
+        }
+    }
+}

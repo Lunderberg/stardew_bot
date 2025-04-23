@@ -26,8 +26,8 @@ pub enum Error {
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),
 
-    #[error("Expected non-empty value from PhysicalAccessChain")]
-    ExpectedNoneEmptyValue,
+    #[error("Expected non-empty output from VirtualMachine")]
+    ExpectedNonEmptyValue,
 
     #[error("Unrecognized item index {0} used as resource clump")]
     UnrecognizedResourceClump(i32),
