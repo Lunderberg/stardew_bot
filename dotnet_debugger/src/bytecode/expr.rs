@@ -840,6 +840,20 @@ impl SymbolicGraph {
         self.push(ExprKind::NativeFunction(wrapped.into()))
     }
 
+    pub fn named_native_function<Func, ArgList>(
+        &mut self,
+        name: impl Into<String>,
+        func: Func,
+    ) -> Result<SymbolicValue, Error>
+    where
+        WrappedNativeFunction<Func, ArgList>: NativeFunction,
+        WrappedNativeFunction<Func, ArgList>: 'static,
+    {
+        let func = self.native_function(func);
+        self.name(func, name.into())?;
+        Ok(func)
+    }
+
     pub fn raw_native_function(
         &mut self,
         func: ExposedNativeFunction,

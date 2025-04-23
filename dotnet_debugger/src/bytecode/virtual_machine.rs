@@ -64,7 +64,10 @@ pub enum StackValue {
     Native(ExposedNativeObject),
 }
 
-pub struct VMResults(Vec<Option<StackValue>>);
+pub struct VMResults {
+    values: Vec<Option<StackValue>>,
+    num_instructions_evaluated: usize,
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, From)]
 pub enum VMArg {
@@ -518,7 +521,7 @@ impl VMResults {
         let mut sort_indices: Vec<_> = (0..indices.len()).collect();
         sort_indices.sort_by_key(|i| indices[*i].stack_index.0);
 
-        let mut remaining = &mut self.0[..];
+        let mut remaining = &mut self.values[..];
         let mut prev_index: usize = 0;
 
         for sort_index in sort_indices {
@@ -567,6 +570,10 @@ impl VMResults {
             .collect();
 
         references
+    }
+
+    pub fn num_instructions_evaluated(&self) -> usize {
+        self.num_instructions_evaluated
     }
 }
 
@@ -849,7 +856,10 @@ impl<'a> VMEvaluator<'a> {
     pub fn evaluate(mut self) -> Result<VMResults, Error> {
         let mut values = {
             let stack = (0..self.vm.stack_size).map(|_| None).collect();
-            VMResults(stack)
+            VMResults {
+                values: stack,
+                num_instructions_evaluated: 0,
+            }
         };
 
         let mut current_instruction = self.entry_point;
@@ -857,6 +867,7 @@ impl<'a> VMEvaluator<'a> {
             let instruction = &self.vm.instructions[current_instruction.0];
             let mut next_instruction =
                 InstructionIndex(current_instruction.0 + 1);
+            values.num_instructions_evaluated += 1;
 
             macro_rules! arg_to_prim {
                 ($arg:expr, $operator:expr) => {{
@@ -1273,7 +1284,10 @@ impl<'a> VMEvaluator<'a> {
                         .iter_mut()
                         .map(|opt_mut| opt_mut.take())
                         .collect();
-                    return Ok(VMResults(outputs));
+                    return Ok(VMResults {
+                        values: outputs,
+                        ..values
+                    });
                 }
             }
 
@@ -1643,7 +1657,7 @@ impl IntoIterator for VMResults {
     type IntoIter = <Vec<Option<StackValue>> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
-        self.0.into_iter()
+        self.values.into_iter()
     }
 }
 
@@ -1651,12 +1665,12 @@ impl std::ops::Deref for VMResults {
     type Target = Vec<Option<StackValue>>;
 
     fn deref(&self) -> &Self::Target {
-        &self.0
+        &self.values
     }
 }
 impl std::ops::DerefMut for VMResults {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+        &mut self.values
     }
 }
 
@@ -1664,7 +1678,12 @@ impl std::ops::Index<usize> for VMResults {
     type Output = Option<StackValue>;
 
     fn index(&self, index: usize) -> &Self::Output {
-        &self.0[index]
+        &self.values[index]
+    }
+}
+impl std::ops::IndexMut<usize> for VMResults {
+    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
+        &mut self.values[index]
     }
 }
 
@@ -1672,36 +1691,36 @@ impl std::ops::Index<StackIndex> for VMResults {
     type Output = Option<StackValue>;
 
     fn index(&self, index: StackIndex) -> &Self::Output {
-        &self.0[index.0]
+        &self.values[index.0]
     }
 }
 impl std::ops::IndexMut<StackIndex> for VMResults {
     fn index_mut(&mut self, index: StackIndex) -> &mut Self::Output {
-        &mut self.0[index.0]
+        &mut self.values[index.0]
     }
 }
 impl std::ops::Index<Range<StackIndex>> for VMResults {
     type Output = [Option<StackValue>];
 
     fn index(&self, index: std::ops::Range<StackIndex>) -> &Self::Output {
-        &self.0[index.start.0..index.end.0]
+        &self.values[index.start.0..index.end.0]
     }
 }
 impl std::ops::IndexMut<Range<StackIndex>> for VMResults {
     fn index_mut(&mut self, index: Range<StackIndex>) -> &mut Self::Output {
-        &mut self.0[index.start.0..index.end.0]
+        &mut self.values[index.start.0..index.end.0]
     }
 }
 impl std::ops::Index<RangeFrom<StackIndex>> for VMResults {
     type Output = [Option<StackValue>];
 
     fn index(&self, index: std::ops::RangeFrom<StackIndex>) -> &Self::Output {
-        &self.0[index.start.0..]
+        &self.values[index.start.0..]
     }
 }
 impl std::ops::IndexMut<RangeFrom<StackIndex>> for VMResults {
     fn index_mut(&mut self, index: RangeFrom<StackIndex>) -> &mut Self::Output {
-        &mut self.0[index.start.0..]
+        &mut self.values[index.start.0..]
     }
 }
 
@@ -1795,9 +1814,9 @@ macro_rules! stack_value_to_prim {
             type Error = Error;
 
             fn try_into(mut self) -> Result<$prim, Self::Error> {
-                let num_elements = self.0.len();
+                let num_elements = self.values.len();
                 if num_elements == 1 {
-                    self.0[0]
+                    self.values[0]
                         .take()
                         .ok_or(Error::AttemptedConversionOfMissingValue)?
                         .try_into()

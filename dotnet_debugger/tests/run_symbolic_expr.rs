@@ -1401,3 +1401,50 @@ fn multiple_functions_in_one_vm() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn other_functions_do_not_impact_performance() -> Result<(), Error> {
+    let with_slow_function = {
+        let mut graph = SymbolicGraph::new();
+
+        graph.named_native_function("generate_num_iter", || 1000usize)?;
+
+        graph.parse(stringify! {
+            let res_fast = 100;
+            let res_slow = (0..generate_num_iter())
+                    .reduce(0, |a,b| a+b);
+
+            pub fn fast() {
+                res_fast
+            }
+
+            pub fn slow() {
+                res_slow
+            }
+        })?;
+
+        let vm = graph.compile(None)?;
+        let res = vm.get_function("fast")?.evaluate()?;
+        res.num_instructions_evaluated()
+    };
+
+    let without_slow_function = {
+        let mut graph = SymbolicGraph::new();
+
+        graph.parse(stringify! {
+            let res_fast = 100;
+
+            pub fn fast() {
+                res_fast
+            }
+        })?;
+
+        let vm = graph.compile(None)?;
+        let res = vm.get_function("fast")?.evaluate()?;
+        res.num_instructions_evaluated()
+    };
+
+    assert_eq!(with_slow_function, without_slow_function);
+
+    Ok(())
+}

@@ -109,16 +109,7 @@ impl SymbolicGraph {
             })
             .collect();
 
-        let reachable = self.reachable(self.iter_extern_funcs());
-        let scope = self.operation_scope(&reachable);
         let last_usage = self.last_usage();
-
-        let operations_by_scope = scope
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(i, scope)| (scope, OpIndex::new(i)))
-            .into_group_map();
 
         self.iter_extern_funcs().try_for_each(|func_index| {
             self.func_to_virtual_machine(
@@ -126,7 +117,6 @@ impl SymbolicGraph {
                 func_index,
                 &native_function_lookup,
                 &last_usage,
-                &operations_by_scope,
                 show_steps,
             )
         })?;
@@ -140,9 +130,18 @@ impl SymbolicGraph {
         main_func_index: OpIndex,
         native_function_lookup: &HashMap<OpIndex, FunctionIndex>,
         last_usage: &[LastUsage],
-        operations_by_scope: &HashMap<Scope, Vec<OpIndex>>,
         show_steps: bool,
     ) -> Result<(), Error> {
+        let reachable = self.reachable(Some(main_func_index));
+        let scope = self.operation_scope(&reachable);
+
+        let operations_by_scope = scope
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(i, scope)| (scope, OpIndex::new(i)))
+            .into_group_map();
+
         let main_func = &self[main_func_index];
 
         let Some(main_func_name) = &main_func.name else {
@@ -170,19 +169,17 @@ impl SymbolicGraph {
             todo!("Handle extern functions with parameters");
         }
 
-        let iter_op_indices = operations_by_scope
-            .get(&Scope::Global)
-            .into_iter()
-            .flatten()
-            .cloned()
-            .filter(|index| {
-                !matches!(self[*index].kind, ExprKind::Function { .. })
-            });
+        let iter_op_indices = self
+            .iter_ops()
+            .filter(|(_, expr)| !matches!(expr.kind, ExprKind::Function { .. }))
+            .filter(|(OpIndex(i), _)| reachable[*i])
+            .filter(|(OpIndex(i), _)| scope[*i] == Scope::Global)
+            .map(|(op_index, _)| op_index);
 
         let mut translator = ExpressionTranslator {
             graph: self,
             builder,
-            operations_by_scope,
+            operations_by_scope: &operations_by_scope,
             last_usage,
             native_function_lookup,
             show_steps,
