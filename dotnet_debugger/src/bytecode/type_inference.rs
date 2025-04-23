@@ -277,6 +277,8 @@ impl<'a> TypeInference<'a> {
                     let num_indices = indices.len();
 
                     match array_type {
+                        RuntimeType::Unknown => Ok(RuntimeType::Unknown),
+
                         RuntimeType::DotNet(DotNetType::Array { .. })
                             if num_indices != 1 =>
                         {

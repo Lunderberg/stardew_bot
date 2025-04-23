@@ -119,12 +119,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             .ok_or(Error::ArrayMissingElementType)
                             .and_then(|ptr| reader.runtime_type(ptr))?;
 
-                        Ok((element_type, component_size))
+                        (element_type, component_size)
                     }
-                    other => {
-                        Err(Error::IndexAccessRequiresArray(other.clone()))
+                    _ => {
+                        return Ok(None);
                     }
-                }?;
+                };
 
                 let (header_size_bytes, shape) = match array_type {
                     RuntimeType::DotNet(DotNetType::Array { .. }) => {
@@ -137,7 +137,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             RuntimePrimType::NativeUInt,
                         );
                         let shape = vec![num_elements];
-                        Ok((header_size_bytes, shape))
+                        (header_size_bytes, shape)
                     }
                     RuntimeType::DotNet(DotNetType::MultiDimArray {
                         rank,
@@ -166,12 +166,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                         let header_size_bytes =
                             RuntimeMultiDimArray::header_size(rank);
 
-                        Ok((header_size_bytes, shape))
+                        (header_size_bytes, shape)
                     }
-                    other => {
-                        Err(Error::IndexAccessRequiresArray(other.clone()))
+                    _ => {
+                        return Ok(None);
                     }
-                }?;
+                };
 
                 if shape.len() != indices.len() {
                     return Err(Error::IncorrectNumberOfIndices {
@@ -271,13 +271,13 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             .read_value(num_elements_ptr, RuntimePrimType::U64);
                         let expr =
                             graph.prim_cast(expr, RuntimePrimType::NativeUInt);
-                        Ok(expr)
+                        expr
                     }
 
-                    other => {
-                        Err(Error::ArrayLengthRequiresArray(other.clone()))
+                    _ => {
+                        return Ok(None);
                     }
-                }?;
+                };
 
                 Some(expr)
             }
