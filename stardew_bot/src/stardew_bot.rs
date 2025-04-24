@@ -1,8 +1,7 @@
 use crate::{
-    game_action::InputState, game_state::GameStateReader,
-    watch_point_definition::WatchPoint, Error, FishingUI, GameAction,
-    GameState, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
-    WatchPointDefinition, X11Handler,
+    game_action::InputState, game_state::GameStateReader, Error, FishingUI,
+    GameAction, GameState, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
+    X11Handler,
 };
 
 use crossterm::event::Event;
@@ -29,10 +28,6 @@ pub struct StardewBot {
     /// An object that can generate and update a `GameState` object,
     /// to reflect the current state of the game.
     game_state_reader: GameStateReader,
-
-    /// Collected values that should be read out from the remote
-    /// process at the start of each frame.
-    watch_point: WatchPoint,
 
     /// Previous frame's per-widget timers
     widget_timing_stats: Vec<WidgetTimingStatistics>,
@@ -146,8 +141,6 @@ impl StardewBot {
             x11_handler.find_window_blocking("Stardew Valley")?;
 
         let mut buffers = TuiBuffers::new();
-        let watch_point = WatchPointDefinition::default()
-            .finalize(tui_globals.cached_reader())?;
 
         buffers
             .running_log
@@ -173,7 +166,6 @@ impl StardewBot {
             layout,
             buffers,
             game_state_reader,
-            watch_point,
             widget_timing_stats: Vec::new(),
             input_state: InputState::default(),
             x11_handler,
@@ -217,7 +209,6 @@ impl StardewBot {
             let finished_handle_input = std::time::Instant::now();
 
             self.update_game_state();
-            self.update_per_frame_values()?;
             let finished_updating_per_frame_values = std::time::Instant::now();
 
             let mut side_effects = WidgetSideEffects::default();
@@ -298,19 +289,6 @@ impl StardewBot {
                 self.buffers.running_log.add_log(format!("Error: {err}"));
             }
         }
-    }
-
-    pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
-        match self.watch_point.evaluate(self.tui_globals.cached_reader()) {
-            Ok(per_frame_values) => {
-                self.tui_globals.insert(per_frame_values);
-            }
-            Err(err) => {
-                self.buffers.running_log.add_log(format!("Error: {err}"));
-            }
-        }
-
-        Ok(())
     }
 
     pub fn handle_event(&mut self, event: Event) {
