@@ -22,6 +22,9 @@ pub use tui_draw_rate::TuiDrawRate;
 mod running_log;
 pub use running_log::RunningLog;
 
+mod game_state;
+pub use game_state::GameState;
+
 mod fishing;
 pub use fishing::FishingUI;
 

@@ -1,11 +1,11 @@
 use crate::{
-    game_action::InputState, watch_point_definition::WatchPoint, Error,
-    FishingUI, GameAction, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
+    game_action::InputState, game_state::GameStateReader,
+    watch_point_definition::WatchPoint, Error, FishingUI, GameAction,
+    GameState, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
     WatchPointDefinition, X11Handler,
 };
 
 use crossterm::event::Event;
-use dotnet_debugger::CachedReader;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -25,6 +25,10 @@ pub struct StardewBot {
 
     /// Container of subwindows
     buffers: TuiBuffers,
+
+    /// An object that can generate and update a `GameState` object,
+    /// to reflect the current state of the game.
+    game_state_reader: GameStateReader,
 
     /// Collected values that should be read out from the remote
     /// process at the start of each frame.
@@ -101,16 +105,13 @@ pub(crate) struct WidgetTimingStatistics {
 }
 
 impl TuiBuffers {
-    fn new(
-        reader: CachedReader<'_>,
-        watch_point_spec: &mut WatchPointDefinition,
-    ) -> Result<Self, Error> {
+    fn new(watch_point_spec: &mut WatchPointDefinition) -> Result<Self, Error> {
         Ok(Self {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(watch_point_spec)?,
             player_stats: PlayerStats::new(watch_point_spec)?,
-            pathfinding: PathfindingUI::new(reader, watch_point_spec)?,
+            pathfinding: PathfindingUI,
         })
     }
 
@@ -130,7 +131,14 @@ impl StardewBot {
         let pid = stardew_valley_pid()?;
         let reader = MemoryReader::new(pid)?;
 
-        let tui_globals = TuiGlobals::new(reader);
+        let mut tui_globals = TuiGlobals::new(reader);
+
+        let game_state_reader =
+            GameState::build_reader(tui_globals.cached_reader())?;
+        let game_state =
+            game_state_reader.read_full_state(tui_globals.cached_reader())?;
+
+        tui_globals.insert(game_state);
 
         let x11_handler = X11Handler::new()?;
 
@@ -139,10 +147,7 @@ impl StardewBot {
 
         let mut watch_point_spec = WatchPointDefinition::default();
 
-        let mut buffers = TuiBuffers::new(
-            tui_globals.cached_reader(),
-            &mut watch_point_spec,
-        )?;
+        let mut buffers = TuiBuffers::new(&mut watch_point_spec)?;
         let watch_point =
             watch_point_spec.finalize(tui_globals.cached_reader())?;
 
@@ -169,6 +174,7 @@ impl StardewBot {
             tui_globals,
             layout,
             buffers,
+            game_state_reader,
             watch_point,
             widget_timing_stats: Vec::new(),
             input_state: InputState::default(),
@@ -212,6 +218,7 @@ impl StardewBot {
             }
             let finished_handle_input = std::time::Instant::now();
 
+            self.update_game_state();
             self.update_per_frame_values()?;
             let finished_updating_per_frame_values = std::time::Instant::now();
 
@@ -275,6 +282,24 @@ impl StardewBot {
             });
 
         frame.render_widget(&mut layout, frame.area());
+    }
+
+    pub fn update_game_state(&mut self) {
+        let res_delta = self
+            .game_state_reader
+            .read_delta_state(self.tui_globals.cached_reader());
+
+        match res_delta {
+            Ok(delta) => {
+                self.tui_globals
+                    .get_mut::<GameState>()
+                    .expect("Globals should always contain a GameState")
+                    .apply_delta(delta);
+            }
+            Err(err) => {
+                self.buffers.running_log.add_log(format!("Error: {err}"));
+            }
+        }
     }
 
     pub fn update_per_frame_values(&mut self) -> Result<(), Error> {
