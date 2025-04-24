@@ -4,12 +4,14 @@ use dotnet_debugger::{
 
 use crate::Error;
 
-use super::{Location, PlayerState};
+use super::{DailyState, FishingState, Location, PlayerState};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
-    pub player: PlayerState,
     pub locations: Vec<Location>,
+    pub player: PlayerState,
+    pub fishing: FishingState,
+    pub daily: DailyState,
 }
 
 #[derive(Debug)]
@@ -20,6 +22,8 @@ pub struct GameStateReader {
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameStateDelta {
     player: PlayerState,
+    fishing: FishingState,
+    daily: DailyState,
 }
 
 impl GameState {
@@ -28,11 +32,17 @@ impl GameState {
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
 
+        let read_location = Location::read_all(&mut graph)?;
+        graph.name(read_location, "read_location")?;
+
         let read_player = PlayerState::read_all(&mut graph)?;
         graph.name(read_player, "read_player")?;
 
-        let read_location = Location::read_all(&mut graph)?;
-        graph.name(read_location, "read_location")?;
+        let read_fishing = FishingState::read_all(&mut graph)?;
+        graph.name(read_fishing, "read_fishing")?;
+
+        let read_daily = DailyState::read_all(&mut graph)?;
+        graph.name(read_daily, "read_daily")?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -52,23 +62,30 @@ impl GameState {
 
         graph.named_native_function(
             "new_game_state",
-            |player: &PlayerState, locations: &Vec<Location>| GameState {
-                player: player.clone(),
+            |locations: &Vec<Location>,
+             player: &PlayerState,
+             fishing: &FishingState,
+             daily: &DailyState| GameState {
                 locations: locations.clone(),
+                player: player.clone(),
+                fishing: fishing.clone(),
+                daily: daily.clone(),
             },
         )?;
 
         graph.named_native_function(
             "new_game_state_delta",
-            |player: &PlayerState| GameStateDelta {
+            |player: &PlayerState,
+             fishing: &FishingState,
+             daily: &DailyState| GameStateDelta {
                 player: player.clone(),
+                fishing: fishing.clone(),
+                daily: daily.clone(),
             },
         )?;
 
         graph.parse(stringify! {
             pub fn read_full_state() {
-                let player = read_player();
-
                 let num_locations = location_list._size.prim_cast::<usize>();
 
                 let locations = (0..num_locations)
@@ -76,13 +93,19 @@ impl GameState {
                     .map(read_location)
                     .collect();
 
-                new_game_state(player, locations)
+                let player = read_player();
+                let fishing = read_fishing();
+                let daily = read_daily();
+
+                new_game_state(locations, player, fishing, daily)
             }
 
             pub fn read_delta_state() {
                 let player = read_player();
+                let fishing = read_fishing();
+                let daily = read_daily();
 
-                new_game_state_delta(player)
+                new_game_state_delta(player, fishing, daily)
             }
         })?;
 
@@ -93,6 +116,8 @@ impl GameState {
 
     pub fn apply_delta(&mut self, delta: GameStateDelta) {
         self.player = delta.player;
+        self.fishing = delta.fishing;
+        self.daily = delta.daily;
     }
 }
 

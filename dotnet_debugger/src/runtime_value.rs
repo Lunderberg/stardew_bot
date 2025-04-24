@@ -171,6 +171,48 @@ impl RuntimePrimValue {
             | (Type::F64, Self::F64(_))
             | (Type::Ptr, Self::Ptr(_)) => Ok(self),
 
+            (Type::U8, Self::NativeUInt(value))
+                if value <= u8::MAX as usize =>
+            {
+                Ok((value as u8).into())
+            }
+            (Type::U16, Self::NativeUInt(value))
+                if value <= u16::MAX as usize =>
+            {
+                Ok((value as u16).into())
+            }
+            (Type::U32, Self::NativeUInt(value))
+                if value <= u32::MAX as usize =>
+            {
+                Ok((value as u32).into())
+            }
+            (Type::U64, Self::NativeUInt(value))
+                if value <= u64::MAX as usize =>
+            {
+                Ok((value as u64).into())
+            }
+
+            (Type::I8, Self::NativeUInt(value))
+                if value <= i8::MAX as usize =>
+            {
+                Ok((value as i8).into())
+            }
+            (Type::I16, Self::NativeUInt(value))
+                if value <= i16::MAX as usize =>
+            {
+                Ok((value as i16).into())
+            }
+            (Type::I32, Self::NativeUInt(value))
+                if value <= i32::MAX as usize =>
+            {
+                Ok((value as i32).into())
+            }
+            (Type::I64, Self::NativeUInt(value))
+                if value <= i64::MAX as usize =>
+            {
+                Ok((value as i64).into())
+            }
+
             (Type::NativeUInt, Self::U8(value)) => Ok((value as usize).into()),
             (Type::NativeUInt, Self::U16(value)) => Ok((value as usize).into()),
             (Type::NativeUInt, Self::U32(value)) => Ok((value as usize).into()),

@@ -516,6 +516,13 @@ impl MethodTable {
         let bytes = reader.read_bytes(ptr..ptr + nbytes)?;
         Ok(Some(FieldDescriptions { bytes }))
     }
+
+    pub fn printable<'a>(
+        &'a self,
+        reader: crate::CachedReader<'a>,
+    ) -> impl std::fmt::Display + 'a {
+        crate::TypeHandleRef::MethodTable(self).printable(reader)
+    }
 }
 
 impl ReadTypedPointer for MethodTable {

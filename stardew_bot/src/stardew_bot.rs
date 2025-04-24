@@ -105,14 +105,14 @@ pub(crate) struct WidgetTimingStatistics {
 }
 
 impl TuiBuffers {
-    fn new(watch_point_spec: &mut WatchPointDefinition) -> Result<Self, Error> {
-        Ok(Self {
+    fn new() -> Self {
+        Self {
             running_log: RunningLog::new(100),
             draw_rate: TuiDrawRate::new(),
-            fishing: FishingUI::new(watch_point_spec)?,
-            player_stats: PlayerStats::new(watch_point_spec)?,
+            fishing: FishingUI::new(),
+            player_stats: PlayerStats::new(),
             pathfinding: PathfindingUI,
-        })
+        }
     }
 
     fn buffer_list(&mut self) -> Vec<Box<&mut dyn WidgetWindow<Error>>> {
@@ -145,11 +145,9 @@ impl StardewBot {
         let stardew_window =
             x11_handler.find_window_blocking("Stardew Valley")?;
 
-        let mut watch_point_spec = WatchPointDefinition::default();
-
-        let mut buffers = TuiBuffers::new(&mut watch_point_spec)?;
-        let watch_point =
-            watch_point_spec.finalize(tui_globals.cached_reader())?;
+        let mut buffers = TuiBuffers::new();
+        let watch_point = WatchPointDefinition::default()
+            .finalize(tui_globals.cached_reader())?;
 
         buffers
             .running_log

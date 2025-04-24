@@ -670,3 +670,56 @@ impl_wrapped_native_function! {T1,T2,T3,T4,T5,T6,T7,T8,T9}
 impl_wrapped_native_function! {T1,T2,T3,T4,T5,T6,T7,T8,T9,T10}
 impl_wrapped_native_function! {T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11}
 impl_wrapped_native_function! {T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20,T21
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20,T21,T22
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23,T24
+}
+impl_wrapped_native_function! {
+    T1,T2,T3,T4,T5,T6,T7,T8,T9,T10,T11,T12,
+    T13,T14,T15,T16,T17,T18,T19,T20,T21,T22,T23,T24,
+    T25
+}

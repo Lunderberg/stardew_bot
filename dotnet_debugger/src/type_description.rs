@@ -22,7 +22,7 @@ pub struct PrintableTypeHandle<'a> {
     reader: CachedReader<'a>,
 }
 
-enum TypeHandleRef<'a> {
+pub(crate) enum TypeHandleRef<'a> {
     MethodTable(&'a MethodTable),
     TypeDescription(&'a TypeDescription),
 }
@@ -119,6 +119,13 @@ impl TypeHandle {
 }
 
 impl<'a> TypeHandleRef<'a> {
+    pub fn printable(
+        self,
+        reader: CachedReader<'a>,
+    ) -> PrintableTypeHandle<'a> {
+        PrintableTypeHandle { ty: self, reader }
+    }
+
     fn print(
         &self,
         fmt: &mut std::fmt::Formatter<'_>,
