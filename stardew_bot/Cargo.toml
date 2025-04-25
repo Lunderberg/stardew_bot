@@ -12,6 +12,7 @@ path = "src/main.rs"
 thiserror = "*"
 itertools = "*"
 num = "0.4"
+priority-queue = "*"
 
 ratatui = "*"
 crossterm = "*"

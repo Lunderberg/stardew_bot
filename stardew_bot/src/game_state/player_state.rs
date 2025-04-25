@@ -7,6 +7,7 @@ use super::Vector;
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PlayerState {
     pub position: Vector<f32>,
+    pub facing: FacingDirection,
     pub room_name: String,
     pub skills: PlayerSkills,
 }
@@ -20,6 +21,14 @@ pub struct PlayerSkills {
     pub combat_xp: usize,
 }
 
+#[derive(RustNativeObject, Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FacingDirection {
+    North,
+    East,
+    South,
+    West,
+}
+
 impl PlayerState {
     pub(crate) fn read_all(
         graph: &mut SymbolicGraph,
@@ -27,6 +36,11 @@ impl PlayerState {
         graph.named_native_function(
             "new_f32_vector",
             |right: f32, down: f32| Vector::<f32> { right, down },
+        )?;
+
+        graph.named_native_function(
+            "new_direction",
+            FacingDirection::from_value,
         )?;
 
         graph.named_native_function(
@@ -46,9 +60,13 @@ impl PlayerState {
 
         graph.named_native_function(
             "new_player",
-            |position: &Vector<f32>, room_name: &str, skills: &PlayerSkills| {
+            |position: &Vector<f32>,
+             facing: &FacingDirection,
+             room_name: &str,
+             skills: &PlayerSkills| {
                 PlayerState {
                     position: position.clone(),
+                    facing: *facing,
                     room_name: room_name.into(),
                     skills: skills.clone(),
                 }
@@ -68,6 +86,12 @@ impl PlayerState {
                     new_f32_vector(pos.X, pos.Y)
                 };
 
+                let facing = new_direction(
+                    player
+                        .facingDirection
+                        .value
+                );
+
                 let room_name = player
                     .currentLocationRef
                     .locationName
@@ -85,10 +109,22 @@ impl PlayerState {
                     new_skills(farming, fishing, foraging, mining, combat)
                 };
 
-                new_player(position, room_name, skills)
+                new_player(position, facing, room_name, skills)
             }
         })?;
 
         Ok(player)
+    }
+}
+
+impl FacingDirection {
+    fn from_value(value: usize) -> Option<FacingDirection> {
+        match value {
+            0 => Some(FacingDirection::North),
+            1 => Some(FacingDirection::East),
+            2 => Some(FacingDirection::South),
+            3 => Some(FacingDirection::West),
+            _ => None,
+        }
     }
 }

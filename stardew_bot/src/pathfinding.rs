@@ -1,3 +1,5 @@
+use std::any::Any;
+
 use ratatui::{
     layout::Constraint,
     style::Color,
@@ -14,14 +16,16 @@ use ratatui::{
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
+    bot_logic::MoveToLocationGoal,
     game_state::{LitterKind, Location, Rectangle, ResourceClumpKind, Vector},
-    Error, GameState,
+    BotLogic, Error, GameState,
 };
 
 pub struct PathfindingUI;
 
 struct DrawableGameLocation<'a> {
     room: &'a Location,
+    bot_logic: &'a BotLogic,
     draw_marker: Marker,
     draw_area: ratatui::layout::Rect,
     player_position: Vector<f32>,
@@ -42,8 +46,13 @@ impl<'a> DrawableGameLocation<'a> {
                 self.paint_resource_clumps(ctx);
                 self.paint_bushes(ctx);
                 self.paint_trees(ctx);
-
                 self.paint_litter(ctx);
+
+                ctx.layer();
+
+                self.paint_waypoints(ctx);
+
+                ctx.layer();
 
                 ctx.print(
                     self.player_position.right as f64,
@@ -272,6 +281,25 @@ impl<'a> DrawableGameLocation<'a> {
             });
         }
     }
+
+    fn paint_waypoints(&self, ctx: &mut CanvasContext) {
+        let points: Vec<_> = self
+            .bot_logic
+            .current_goal()
+            .and_then(|goal| {
+                <dyn Any>::downcast_ref::<MoveToLocationGoal>(goal)
+            })
+            .into_iter()
+            .flat_map(|move_goal| move_goal.iter_waypoints())
+            .map(|loc| loc.as_type::<f64>())
+            .map(|loc| self.to_draw_coordinates(loc))
+            .collect();
+
+        ctx.draw(&Points {
+            coords: &points,
+            color: Color::Red,
+        });
+    }
 }
 
 impl WidgetWindow<Error> for PathfindingUI {
@@ -287,6 +315,10 @@ impl WidgetWindow<Error> for PathfindingUI {
     ) {
         let game_state = globals
             .get::<GameState>()
+            .expect("Generated/updated in top-level GUI update");
+
+        let bot_logic = globals
+            .get::<BotLogic>()
             .expect("Generated/updated in top-level GUI update");
 
         let current_location: &str = &game_state.player.room_name;
@@ -334,6 +366,7 @@ impl WidgetWindow<Error> for PathfindingUI {
         if let Some(current_room) = opt_current_room {
             DrawableGameLocation {
                 room: current_room,
+                bot_logic,
                 draw_marker: Marker::Block,
                 draw_area,
                 player_position: position,

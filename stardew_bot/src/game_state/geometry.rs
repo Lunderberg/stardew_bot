@@ -1,6 +1,6 @@
 use dotnet_debugger::RustNativeObject;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Vector<T> {
     pub right: T,
     pub down: T,
@@ -25,6 +25,24 @@ impl<T> Vector<T> {
         }
     }
 
+    pub fn new(right: T, down: T) -> Self {
+        Self { right, down }
+    }
+
+    pub fn mag2(self) -> T
+    where
+        T: num::Num + Copy,
+    {
+        self.right * self.right + self.down * self.down
+    }
+
+    pub fn mag(self) -> T
+    where
+        T: num::Float,
+    {
+        self.mag2().sqrt()
+    }
+
     pub fn map<Func, U>(self, func: Func) -> Vector<U>
     where
         Func: Fn(T) -> U,
@@ -40,6 +58,21 @@ impl<T> Vector<T> {
         T: Into<U>,
     {
         self.map(Into::into)
+    }
+}
+
+impl<T> Rectangle<T> {
+    pub fn iter_points(self) -> impl Iterator<Item = Vector<T>>
+    where
+        T: 'static,
+        T: num::PrimInt,
+    {
+        num::range_step(T::zero(), self.shape.right, T::one()).flat_map(
+            move |i| {
+                num::range_step(T::zero(), self.shape.down, T::one())
+                    .map(move |j| Vector::new(i, j))
+            },
+        )
     }
 }
 

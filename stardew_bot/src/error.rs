@@ -1,7 +1,7 @@
 use thiserror::Error;
 use tui_utils::inputs::KeySequence;
 
-use crate::X11Error;
+use crate::{bot_logic::BotError, X11Error};
 
 #[derive(Error)]
 pub enum Error {
@@ -23,6 +23,9 @@ pub enum Error {
     #[error("tui_utils::Error( {0} )")]
     TuiUtilError(#[from] tui_utils::Error),
 
+    #[error("BotError( {0} )")]
+    BotError(#[from] BotError),
+
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),
 
@@ -34,6 +37,9 @@ pub enum Error {
 
     #[error("Tree kind '{0}' did not correspond to any known tree.")]
     UnrecognizedTreeKind(String),
+
+    #[error("The bot has achieved all of its goals.")]
+    NoRemainingGoals,
 }
 
 impl std::fmt::Debug for Error {

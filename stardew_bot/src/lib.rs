@@ -22,6 +22,9 @@ pub use running_log::RunningLog;
 mod game_state;
 pub use game_state::GameState;
 
+mod bot_logic;
+pub use bot_logic::BotLogic;
+
 mod fishing;
 pub use fishing::FishingUI;
 

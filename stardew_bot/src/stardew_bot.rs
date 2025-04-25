@@ -1,7 +1,7 @@
 use crate::{
-    game_action::InputState, game_state::GameStateReader, Error, FishingUI,
-    GameAction, GameState, PathfindingUI, PlayerStats, RunningLog, TuiDrawRate,
-    X11Handler,
+    game_action::InputState, game_state::GameStateReader, BotLogic, Error,
+    FishingUI, GameAction, GameState, PathfindingUI, PlayerStats, RunningLog,
+    TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -78,6 +78,10 @@ pub(crate) struct FrameTimingStatistics {
     /// each frame.
     pub update_per_frame_values: std::time::Duration,
 
+    /// The time required to make a new decision based on the current
+    /// state of the game.
+    pub update_bot_logic: std::time::Duration,
+
     /// The time required to process per-frame updates.
     pub periodic_update: std::time::Duration,
 
@@ -134,6 +138,8 @@ impl StardewBot {
             game_state_reader.read_full_state(tui_globals.cached_reader())?;
 
         tui_globals.insert(game_state);
+
+        tui_globals.insert(BotLogic::new());
 
         let x11_handler = X11Handler::new()?;
 
@@ -211,6 +217,9 @@ impl StardewBot {
             self.update_game_state();
             let finished_updating_per_frame_values = std::time::Instant::now();
 
+            self.update_bot_logic();
+            let finished_updating_bot_logic = std::time::Instant::now();
+
             let mut side_effects = WidgetSideEffects::default();
             side_effects.broadcast(timing_stats.clone());
 
@@ -241,8 +250,10 @@ impl StardewBot {
                 handle_input: finished_handle_input - main_loop_start,
                 update_per_frame_values: finished_updating_per_frame_values
                     - finished_handle_input,
-                periodic_update: finished_periodic_update
+                update_bot_logic: finished_updating_bot_logic
                     - finished_updating_per_frame_values,
+                periodic_update: finished_periodic_update
+                    - finished_updating_bot_logic,
                 draw: main_loop_becomes_inactive - finished_periodic_update,
                 main_loop_active,
                 total_frame_time: finished_sleep - main_loop_start,
@@ -289,6 +300,34 @@ impl StardewBot {
                 self.buffers.running_log.add_log(format!("Error: {err}"));
             }
         }
+    }
+
+    pub fn update_bot_logic(&mut self) {
+        // TODO: Either extend anymap to allow mutable access to
+        // multiple keys, or add a generic parameter to WidgetWindow
+        // indicating what type of global values are expected.
+        let mut bot_logic = self
+            .tui_globals
+            .take::<BotLogic>()
+            .expect("Globals should always contain a BotLogic");
+
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        let res = bot_logic.update(game_state).and_then(|opt_action| {
+            if let Some(action) = opt_action {
+                self.apply_game_actions(std::iter::once(action))
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(err) = res {
+            self.buffers.running_log.add_log(format!("Error: {err}"));
+        }
+
+        self.tui_globals.insert(bot_logic);
     }
 
     pub fn handle_event(&mut self, event: Event) {
@@ -406,17 +445,22 @@ impl StardewBot {
                 buffer.apply_side_effects(&self.tui_globals, side_effects)
             })?;
 
+        self.apply_game_actions(side_effects.into_iter::<GameAction>())
+    }
+
+    fn apply_game_actions(
+        &mut self,
+        actions: impl IntoIterator<Item = GameAction>,
+    ) -> Result<(), Error> {
         let active_window = self.x11_handler.query_active_window()?;
         if active_window == self.stardew_window {
-            side_effects
-                .into_iter::<GameAction>()
-                .try_for_each(|action| {
-                    action.apply(
-                        &mut self.input_state,
-                        &mut self.x11_handler,
-                        self.stardew_window,
-                    )
-                })?;
+            actions.into_iter().try_for_each(|action| {
+                action.apply(
+                    &mut self.input_state,
+                    &mut self.x11_handler,
+                    self.stardew_window,
+                )
+            })?;
         }
 
         Ok(())

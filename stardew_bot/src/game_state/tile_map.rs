@@ -11,6 +11,7 @@ pub struct TileMap<T> {
 impl<T: 'static> RustNativeObject for TileMap<T> {}
 
 impl<T> TileMap<T> {
+    #[allow(dead_code)]
     pub fn new(values: Vec<T>, width: usize, height: usize) -> Self {
         Self {
             values,
@@ -19,6 +20,18 @@ impl<T> TileMap<T> {
         }
     }
 
+    pub fn full(value: T, width: usize, height: usize) -> Self
+    where
+        T: Copy,
+    {
+        Self {
+            values: vec![value; width * height],
+            height,
+            width,
+        }
+    }
+
+    #[allow(dead_code)]
     pub fn empty(width: usize, height: usize) -> Self
     where
         T: Default,
@@ -29,9 +42,20 @@ impl<T> TileMap<T> {
             width,
         }
     }
+
+    #[allow(dead_code)]
+    pub fn in_bounds(&self, index: impl AsGridPos) -> bool {
+        index.get_flat_index(self.width, self.height).is_some()
+    }
+
+    pub fn get(&self, index: impl AsGridPos) -> Option<&T> {
+        index
+            .get_flat_index(self.width, self.height)
+            .map(|flat_index| &self.values[flat_index])
+    }
 }
 
-trait AsGridPos {
+pub trait AsGridPos {
     fn get_flat_index(&self, width: usize, height: usize) -> Option<usize>;
 
     fn display(&self) -> impl std::fmt::Debug;
@@ -101,5 +125,26 @@ where
             });
 
         &self.values[index]
+    }
+}
+
+impl<I, T> std::ops::IndexMut<I> for TileMap<T>
+where
+    I: AsGridPos,
+{
+    fn index_mut(&mut self, index: I) -> &mut Self::Output {
+        let index = index
+            .get_flat_index(self.width, self.height)
+            .unwrap_or_else(|| {
+                panic!(
+                    "Index {:?} is out-of-bounds \
+                 for a TileMap of shape ({}, {})",
+                    index.display(),
+                    self.width,
+                    self.height,
+                )
+            });
+
+        &mut self.values[index]
     }
 }
