@@ -901,47 +901,47 @@ impl<'a> CachedReader<'a> {
         element_type: &RuntimeType,
         rank: Option<usize>,
     ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
-        let opt_element_method_table_ptr: Option<TypedPointer<MethodTable>> =
-            if let Some(builtin_name) = element_type.builtin_class_name() {
-                self.method_table_by_name(builtin_name)?
-            } else {
-                match element_type {
-                    RuntimeType::Prim(_) => {
-                        // With the exception of RuntimePrimType::Ptr,
-                        // all primitive types have a builtin name
-                        // within the class library.
-                        None
-                    }
-                    RuntimeType::DotNet(
-                        DotNetType::ValueType { method_table, .. }
-                        | DotNetType::Class { method_table }
-                        | DotNetType::Array { method_table, .. }
-                        | DotNetType::MultiDimArray { method_table, .. },
-                    ) => *method_table,
-                    RuntimeType::DotNet(DotNetType::String) => {
-                        unreachable!("Handled with builtin_class_name")
-                    }
-                    other @ (RuntimeType::Unknown
-                    | RuntimeType::Rust(_)
-                    | RuntimeType::Function(_)
-                    | RuntimeType::Tuple(_)
-                    | RuntimeType::Iterator(_)) => {
-                        return Err(Error::UnexpectedTypeFoundInDotNetContext(
-                            other.clone(),
-                        ));
-                    }
-                }
-            };
-
-        let Some(element_method_table_ptr) = opt_element_method_table_ptr
-        else {
-            return Ok(None);
+        let (opt_prim_element, opt_element_method_table_ptr): (
+            Option<RuntimePrimType>,
+            Option<TypedPointer<MethodTable>>,
+        ) = match element_type {
+            RuntimeType::Prim(prim) => (Some(*prim), None),
+            RuntimeType::DotNet(
+                DotNetType::ValueType { method_table, .. }
+                | DotNetType::Class { method_table }
+                | DotNetType::Array { method_table, .. }
+                | DotNetType::MultiDimArray { method_table, .. },
+            ) => (None, *method_table),
+            RuntimeType::DotNet(DotNetType::String) => {
+                let name = element_type
+                    .builtin_class_name()
+                    .expect("String has a known name");
+                let opt_method_table_ptr = self.method_table_by_name(name)?;
+                (None, opt_method_table_ptr)
+            }
+            other @ (RuntimeType::Unknown
+            | RuntimeType::Rust(_)
+            | RuntimeType::Function(_)
+            | RuntimeType::Tuple(_)
+            | RuntimeType::Iterator(_)) => {
+                return Err(Error::UnexpectedTypeFoundInDotNetContext(
+                    other.clone(),
+                ));
+            }
         };
 
-        let element_method_table =
-            self.method_table(element_method_table_ptr)?;
-
-        let module = self.runtime_module(element_method_table.module())?;
+        let module_ptr = if let Some(element_method_table_ptr) =
+            opt_element_method_table_ptr
+        {
+            let element_method_table =
+                self.method_table(element_method_table_ptr)?;
+            element_method_table.module()
+        } else if opt_prim_element.is_some() {
+            self.runtime_module_by_name("System.Private.CoreLib")?
+        } else {
+            return Ok(None);
+        };
+        let module = self.runtime_module(module_ptr)?;
 
         let opt_loaded_types = module.loaded_types(self)?;
         let Some(loaded_types) = opt_loaded_types else {
@@ -951,11 +951,32 @@ impl<'a> CachedReader<'a> {
         for res_type_handle_ptr in loaded_types.iter_method_tables(self)? {
             let type_handle_ptr = res_type_handle_ptr?;
             let type_handle = self.type_handle(type_handle_ptr)?;
+
             if let TypeHandle::MethodTable(loaded_type) = type_handle {
-                let is_correct_array = loaded_type.array_element_type()
-                    == Some(element_method_table_ptr)
-                    && rank == loaded_type.multi_dim_rank(self.reader)?;
-                if is_correct_array {
+                let is_correct_element = loaded_type
+                    .array_element_type()
+                    .map(|loaded_element_type_ptr| -> Result<bool, Error> {
+                        let is_match = if let Some(element_method_table_ptr) =
+                            opt_element_method_table_ptr
+                        {
+                            loaded_element_type_ptr == element_method_table_ptr
+                        } else if let Some(prim_element) = opt_prim_element {
+                            let loaded_element_type =
+                                self.method_table(loaded_element_type_ptr)?;
+                            let loaded_prim_element_type =
+                                loaded_element_type.runtime_prim_type(self)?;
+                            loaded_prim_element_type == Some(prim_element)
+                        } else {
+                            false
+                        };
+                        Ok(is_match)
+                    })
+                    .transpose()?
+                    .unwrap_or(false);
+
+                let is_correct_rank =
+                    rank == loaded_type.multi_dim_rank(self.reader)?;
+                if is_correct_element && is_correct_rank {
                     return Ok(Some(loaded_type.ptr()));
                 }
             }

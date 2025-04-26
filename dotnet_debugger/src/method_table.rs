@@ -10,7 +10,7 @@ use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
 use crate::{
     runtime_type::DotNetType, unpack_fields, CorElementType, Error,
     FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
-    RuntimeType, TypeHandle, TypedPointer,
+    RuntimePrimType, RuntimeType, TypeHandle, TypedPointer,
 };
 
 #[derive(Clone)]
@@ -262,7 +262,19 @@ impl MethodTable {
                 rank,
             }
             .into())
-        } else if self.is_prim_type() {
+        } else if let Some(prim_ty) = self.runtime_prim_type(reader)? {
+            Ok(prim_ty.into())
+        } else {
+            let type_flag = self.flags() & 0x000F0000;
+            Err(Error::InvalidTypeFlag(type_flag))
+        }
+    }
+
+    pub fn runtime_prim_type(
+        &self,
+        reader: impl Borrow<MemoryReader>,
+    ) -> Result<Option<RuntimePrimType>, Error> {
+        if self.is_prim_type() {
             let reader = reader.borrow();
             let ee_class = self.get_ee_class(reader)?;
             let element_type = ee_class.element_type()?;
@@ -272,8 +284,7 @@ impl MethodTable {
                 Err(Error::ExpectedPrimType(element_type))
             }
         } else {
-            let type_flag = self.flags() & 0x000F0000;
-            Err(Error::InvalidTypeFlag(type_flag))
+            Ok(None)
         }
     }
 
