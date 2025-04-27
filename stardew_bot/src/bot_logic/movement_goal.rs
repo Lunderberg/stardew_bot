@@ -10,11 +10,24 @@ use crate::{
 
 use super::bot_logic::{BotGoal, BotGoalResult};
 
+/// Epsilon distance (in tiles) to consider a target reached
+///
+/// For each waypoint, and for the final target location, consider the
+/// position to be successfully reached when it is within this
+/// distance of the desired location.
+const TOLERANCE: f32 = 0.1;
+
+/// Minimum distance (in tiles) to re-plan a route.
+///
+/// Since the planned route is tracked on a per-tile basis, the player
+/// should always be close to the next waypoint.  If something moves
+/// the player far from the expected location (e.g. lag, triggering an
+/// event, etc), then the route should be replanned.
+const REPLAN_THRESHOLD: f32 = 2.0;
+
 pub struct MoveToLocationGoal {
     room_name: &'static str,
     position: Vector<f32>,
-    tolerance: f32,
-    replan_threshold: f32,
     waypoints: Vec<Vector<f32>>,
 }
 
@@ -31,8 +44,6 @@ impl MoveToLocationGoal {
         Self {
             room_name,
             position,
-            tolerance: 0.1,
-            replan_threshold: 2.0,
             waypoints: Vec::new(),
         }
     }
@@ -45,9 +56,9 @@ impl MoveToLocationGoal {
 
         while let Some(next_waypoint) = self.waypoints.last().cloned() {
             let dist = (next_waypoint - player.position / 64.0).mag();
-            if dist < self.tolerance {
+            if dist < TOLERANCE {
                 self.waypoints.pop();
-            } else if dist > self.replan_threshold {
+            } else if dist > REPLAN_THRESHOLD {
                 self.waypoints.clear();
             } else {
                 break;
@@ -55,7 +66,7 @@ impl MoveToLocationGoal {
         }
 
         let goal_dist = (self.position - player.position / 64.0).mag();
-        if self.waypoints.is_empty() && goal_dist > self.tolerance {
+        if self.waypoints.is_empty() && goal_dist > TOLERANCE {
             self.waypoints = self.generate_plan(game_state)?;
         }
 
