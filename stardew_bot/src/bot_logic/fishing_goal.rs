@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use crate::{
     game_state::{FacingDirection, Vector},
     Error, GameAction, GameState,
@@ -15,10 +17,14 @@ pub struct FishOnceGoal;
 impl BotGoal for FishingGoal {
     fn apply(&mut self, _: &GameState) -> Result<BotGoalResult, Error> {
         let goals = SubGoals::new()
-            .then(MovementGoal::new("Forest", Vector::new(70.0, 50.4)))
+            .then(MovementGoal::new("Forest".into(), Vector::new(70.0, 50.4)))
             .then(FaceDirectionGoal(FacingDirection::South))
             .then(FishOnceGoal);
         Ok(goals.into())
+    }
+
+    fn description(&self) -> Cow<str> {
+        "River fishing".into()
     }
 }
 
@@ -54,5 +60,9 @@ impl BotGoal for FishOnceGoal {
         };
 
         Ok(BotGoalResult::Action(action))
+    }
+
+    fn description(&self) -> Cow<str> {
+        "Fish once".into()
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
-    game_action::InputState, game_state::GameStateReader, BotLogic, Error,
-    FishingUI, GameAction, GameState, KeyboardDisplay, PathfindingUI,
-    PlayerStats, RunningLog, TuiDrawRate, X11Handler,
+    game_action::InputState, game_state::GameStateReader, BotGoalDisplay,
+    BotLogic, Error, FishingUI, GameAction, GameState, KeyboardDisplay,
+    PathfindingUI, PlayerStats, RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -51,6 +51,7 @@ struct TuiBuffers {
     player_stats: PlayerStats,
     pathfinding: PathfindingUI,
     keyboard: KeyboardDisplay,
+    bot_goals: BotGoalDisplay,
 }
 
 #[allow(unused)]
@@ -113,6 +114,7 @@ impl TuiBuffers {
             player_stats: PlayerStats::new(),
             pathfinding: PathfindingUI,
             keyboard: KeyboardDisplay,
+            bot_goals: BotGoalDisplay,
         }
     }
 
@@ -124,6 +126,7 @@ impl TuiBuffers {
             Box::new(&mut self.player_stats),
             Box::new(&mut self.pathfinding),
             Box::new(&mut self.keyboard),
+            Box::new(&mut self.bot_goals),
         ]
     }
 }
@@ -161,6 +164,11 @@ impl StardewBot {
         layout.switch_to_buffer(1);
         layout.cycle_next();
 
+        // Stack of bot goals in left column
+        layout.split_horizontally(Some(25), None);
+        layout.switch_to_buffer(6);
+        layout.cycle_next();
+
         // Placeholder for main window
         layout.split_horizontally(None, Some(45));
         layout.cycle_next();
@@ -180,6 +188,7 @@ impl StardewBot {
         layout.cycle_next();
 
         // Cycle back to the main window, and display something there.
+        layout.cycle_next();
         layout.cycle_next();
         // layout.switch_to_buffer(2);
         layout.switch_to_buffer(4);

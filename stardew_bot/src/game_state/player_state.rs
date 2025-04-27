@@ -187,3 +187,14 @@ impl FacingDirection {
         }
     }
 }
+
+impl std::fmt::Display for FacingDirection {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            FacingDirection::North => write!(f, "North"),
+            FacingDirection::East => write!(f, "East"),
+            FacingDirection::South => write!(f, "South"),
+            FacingDirection::West => write!(f, "West"),
+        }
+    }
+}

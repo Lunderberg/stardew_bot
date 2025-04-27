@@ -2,6 +2,7 @@ use std::cmp::Reverse;
 use std::collections::HashSet;
 use std::hash::Hash;
 
+use itertools::Itertools as _;
 use priority_queue::PriorityQueue;
 
 /// The externally-exposed representation of a graph.
@@ -67,6 +68,34 @@ pub trait GraphSearch<T: Eq + Hash> {
                 graph: self,
             },
         )
+    }
+
+    fn iter_a_star_backrefs<'a>(
+        &'a self,
+        initial: T,
+        target: T,
+    ) -> Option<impl Iterator<Item = T> + 'a>
+    where
+        T: Clone,
+        T: 'a,
+    {
+        let mut search_nodes: Vec<_> = self
+            .a_star_search(initial, target.clone())
+            .take_while_inclusive(|(tile, _)| tile != &target)
+            .collect();
+
+        let last = search_nodes.pop().filter(|(tile, _)| tile == &target)?;
+
+        let iter_backrefs =
+            std::iter::successors(Some(last), move |(_, metadata)| {
+                let next_index =
+                    metadata.backref.as_ref().map(|b| b.initial_node)?;
+
+                Some(search_nodes.swap_remove(next_index))
+            })
+            .map(|(tile, _)| tile);
+
+        Some(iter_backrefs)
     }
 
     fn search_with_explicit_heuristic<H>(

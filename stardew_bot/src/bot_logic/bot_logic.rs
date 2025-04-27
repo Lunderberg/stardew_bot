@@ -1,4 +1,4 @@
-use std::any::Any;
+use std::{any::Any, borrow::Cow};
 
 use crate::{Error, GameAction, GameState};
 
@@ -11,6 +11,8 @@ pub struct BotLogic {
 pub trait BotGoal: Any {
     fn apply(&mut self, game_state: &GameState)
         -> Result<BotGoalResult, Error>;
+
+    fn description(&self) -> Cow<str>;
 }
 
 pub enum BotGoalResult {
@@ -63,6 +65,12 @@ impl BotLogic {
         }
     }
 
+    pub fn iter_goals(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &dyn BotGoal> + '_ {
+        self.goals.iter().map(AsRef::as_ref)
+    }
+
     pub fn current_goal(&self) -> Option<&dyn BotGoal> {
         self.goals.last().map(|v| &**v)
     }
@@ -76,6 +84,19 @@ impl SubGoals {
     pub fn then(mut self, goal: impl BotGoal + 'static) -> Self {
         self.0.push(Box::new(goal));
         self
+    }
+}
+
+impl<Goal> FromIterator<Goal> for SubGoals
+where
+    Goal: BotGoal + 'static,
+{
+    fn from_iter<T: IntoIterator<Item = Goal>>(iter: T) -> Self {
+        let mut goals = SubGoals::new();
+        for goal in iter {
+            goals = goals.then(goal);
+        }
+        goals
     }
 }
 

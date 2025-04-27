@@ -1,8 +1,10 @@
+use std::borrow::Cow;
+
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
-    game_state::{FacingDirection, TileMap, Vector},
+    game_state::{FacingDirection, Location, TileMap, Vector},
     Direction, Error, GameAction, GameState,
 };
 
@@ -27,23 +29,83 @@ const TOLERANCE: f32 = 0.1;
 const REPLAN_THRESHOLD: f32 = 2.0;
 
 pub struct MovementGoal {
-    target_room: &'static str,
+    target_room: String,
     target_position: Vector<f32>,
 }
 
 pub struct LocalMovementGoal {
-    room_name: &'static str,
+    room_name: String,
     position: Vector<f32>,
     waypoints: Vec<Vector<f32>>,
 }
 
 pub struct FaceDirectionGoal(pub FacingDirection);
 
+struct ConnectedRoomGraph<'a> {
+    locations: &'a [Location],
+}
+
+#[derive(PartialEq, Eq, Hash, Clone)]
+struct RoomSearchNode {
+    current_pos: Vector<isize>,
+    current_room: String,
+}
+
+fn point_to_point_lower_bound(
+    node_from: Vector<isize>,
+    node_to: Vector<isize>,
+) -> u64 {
+    let offset = (node_from - node_to).map(|x| x.abs() as u64);
+    let min = offset.right.min(offset.down);
+    let max = offset.right.max(offset.down);
+
+    let diagonal_movements = min;
+    let cardinal_movements = max - min;
+    // Counting the number of half-tiles means that I can stay
+    // in integer math.  3/2 as the cost of a diagonal
+    // movement is close enough to sqrt(2) for the
+    // pathfinding.
+    3 * diagonal_movements + 2 * cardinal_movements
+}
+
+impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
+    fn connections_from<'a>(
+        &'a self,
+        node: &'a RoomSearchNode,
+    ) -> impl IntoIterator<Item = (RoomSearchNode, u64)> + 'a {
+        self.locations
+            .iter()
+            .filter(|loc| loc.name == node.current_room)
+            .flat_map(|loc| {
+                loc.warps.iter().map(|warp| {
+                    if warp.location == node.current_pos {
+                        (
+                            RoomSearchNode {
+                                current_pos: warp.target,
+                                current_room: warp.target_room.clone(),
+                            },
+                            0,
+                        )
+                    } else {
+                        let dist = point_to_point_lower_bound(
+                            node.current_pos,
+                            warp.location,
+                        );
+                        (
+                            RoomSearchNode {
+                                current_pos: warp.location,
+                                current_room: node.current_room.clone(),
+                            },
+                            dist,
+                        )
+                    }
+                })
+            })
+    }
+}
+
 impl MovementGoal {
-    pub fn new(
-        target_room: &'static str,
-        target_position: Vector<f32>,
-    ) -> Self {
+    pub fn new(target_room: String, target_position: Vector<f32>) -> Self {
         Self {
             target_room,
             target_position,
@@ -54,8 +116,7 @@ impl MovementGoal {
         &self,
         game_state: &GameState,
     ) -> Result<Option<SubGoals>, Error> {
-        let current_room_name = &game_state.player.room_name;
-        if self.target_room == current_room_name {
+        if self.target_room == game_state.player.room_name {
             return Ok(None);
         }
 
@@ -70,32 +131,69 @@ impl MovementGoal {
 
         // Dijkstra's algorithm to search for connections between rooms
 
-        Ok(None)
+        let graph = ConnectedRoomGraph {
+            locations: &game_state.locations,
+        };
+        let initial = RoomSearchNode {
+            current_pos: game_state.player.position.map(|x| x.round() as isize),
+            current_room: game_state.player.room_name.clone(),
+        };
+        let search_nodes: Vec<_> = graph
+            .dijkstra_search(initial)
+            .take_while_inclusive(|(node, _)| {
+                node.current_room != self.target_room
+            })
+            .collect();
+
+        let last = search_nodes
+            .last()
+            .filter(|(node, _)| node.current_room == self.target_room)
+            .ok_or_else(|| BotError::NoRouteToTarget {
+                room: self.target_room.clone(),
+                position: self.target_position,
+            })?;
+        let goals: Vec<_> =
+            std::iter::successors(Some(last), |(_, metadata)| {
+                metadata
+                    .backref
+                    .as_ref()
+                    .and_then(|backref| search_nodes.get(backref.initial_node))
+            })
+            .map(|(node, _)| node)
+            .tuple_windows()
+            .filter(|(a, b)| a.current_room == b.current_room)
+            .map(|(a, _)| {
+                LocalMovementGoal::new(
+                    a.current_room.clone(),
+                    a.current_pos.map(|x| x as f32),
+                )
+            })
+            .collect();
+
+        let goals = goals.into_iter().rev().collect();
+
+        Ok(Some(goals))
     }
 
-    fn within_room_movement(
-        &self,
-        game_state: &GameState,
-    ) -> Result<Option<SubGoals>, Error> {
+    fn within_room_movement(&self, game_state: &GameState) -> Option<SubGoals> {
         let player = &game_state.player;
 
-        let goal_dist = (self.target_position - player.position / 64.0).mag();
-        let opt_goals = if goal_dist >= TOLERANCE {
-            let goals = SubGoals::new().then(LocalMovementGoal::new(
-                self.target_room,
-                self.target_position,
-            ));
-            Some(goals)
-        } else {
-            None
-        };
-
-        Ok(opt_goals)
+        Some(SubGoals::new().then(LocalMovementGoal::new(
+            self.target_room.clone(),
+            self.target_position,
+        )))
+        .filter(|_| self.target_room == player.room_name)
+        .filter(|_| {
+            let goal_dist =
+                (self.target_position - player.position / 64.0).mag();
+            goal_dist >= TOLERANCE
+        })
     }
 }
 
 struct TileGraph {
     clear_tiles: TileMap<bool>,
+    target_tile: Vector<isize>,
 }
 impl GraphSearch<Vector<isize>> for TileGraph {
     fn connections_from<'a>(
@@ -105,7 +203,11 @@ impl GraphSearch<Vector<isize>> for TileGraph {
         Direction::iter()
             .filter(move |dir| {
                 let is_clear_tile = |tile: Vector<isize>| {
-                    self.clear_tiles.get(tile).cloned().unwrap_or(false)
+                    // The target tile may be one tile out-of-bounds.
+                    // This happens when the target is a warp tile's
+                    // position.
+                    tile == self.target_tile
+                        || self.clear_tiles.get(tile).cloned().unwrap_or(false)
                 };
 
                 let offset = dir.offset();
@@ -135,22 +237,12 @@ impl GraphSearch<Vector<isize>> for TileGraph {
         node_from: &Vector<isize>,
         node_to: &Vector<isize>,
     ) -> Option<u64> {
-        let offset = (*node_from - *node_to).map(|x| x.abs());
-        let min = offset.right.min(offset.down) as u64;
-        let max = offset.right.max(offset.down) as u64;
-
-        let diagonal_movements = min;
-        let cardinal_movements = max - min;
-        // Counting the number of half-tiles means that I can stay
-        // in integer math.  3/2 as the cost of a diagonal
-        // movement is close enough to sqrt(2) for the
-        // pathfinding.
-        Some(3 * diagonal_movements + 2 * cardinal_movements)
+        Some(point_to_point_lower_bound(*node_from, *node_to))
     }
 }
 
 impl LocalMovementGoal {
-    pub fn new(room_name: &'static str, position: Vector<f32>) -> Self {
+    pub fn new(room_name: String, position: Vector<f32>) -> Self {
         Self {
             room_name,
             position,
@@ -161,7 +253,10 @@ impl LocalMovementGoal {
     fn update_plan(&mut self, game_state: &GameState) -> Result<(), Error> {
         let player = &game_state.player;
         if player.room_name != self.room_name {
-            todo!("Plan movement between rooms");
+            // Reached a warp to another room, so the local movement
+            // can be popped from the stack.
+            self.waypoints.clear();
+            return Ok(());
         }
 
         while let Some(next_waypoint) = self.waypoints.last().cloned() {
@@ -260,24 +355,17 @@ impl LocalMovementGoal {
         let target_tile: Vector<isize> =
             self.position.map(|x| x.round() as isize);
 
-        let search_tiles: Vec<_> = TileGraph { clear_tiles }
-            .a_star_search(player_tile, target_tile)
-            .take_while_inclusive(|(tile, _)| *tile != target_tile)
-            .collect();
+        let local_graph = TileGraph {
+            clear_tiles,
+            target_tile,
+        };
 
-        let last = search_tiles
-            .last()
-            .filter(|(tile, _)| *tile == target_tile)
-            .ok_or(BotError::NoRouteToTarget)?;
-        let iter_waypoints =
-            std::iter::successors(Some(last), |(_, metadata)| {
-                metadata
-                    .backref
-                    .as_ref()
-                    .map(|b| b.initial_node)
-                    .and_then(|index| search_tiles.get(index))
-            })
-            .map(|(tile, _)| tile)
+        let iter_waypoints = local_graph
+            .iter_a_star_backrefs(player_tile, target_tile)
+            .ok_or_else(|| BotError::NoRouteToTarget {
+                room: self.room_name.clone(),
+                position: target_tile.map(|x| x as f32),
+            })?
             .map(|vec_isize| vec_isize.map(|i| i as f32));
 
         let waypoints = std::iter::once(self.position)
@@ -302,14 +390,20 @@ impl BotGoal for MovementGoal {
         Ok(
             if let Some(subgoals) = self.room_to_room_movement(game_state)? {
                 subgoals.into()
-            } else if let Some(subgoals) =
-                self.within_room_movement(game_state)?
+            } else if let Some(subgoals) = self.within_room_movement(game_state)
             {
                 subgoals.into()
             } else {
                 BotGoalResult::Completed
             },
         )
+    }
+    fn description(&self) -> Cow<str> {
+        format!(
+            "X-room move to {} in {}",
+            self.target_position, self.target_room
+        )
+        .into()
     }
 }
 
@@ -347,6 +441,16 @@ impl BotGoal for LocalMovementGoal {
 
         Ok(BotGoalResult::Action(Some(GameAction::Move(dir))))
     }
+
+    fn description(&self) -> Cow<str> {
+        format!(
+            "Move {} tiles to {} in {}",
+            self.waypoints.len(),
+            self.position,
+            self.room_name
+        )
+        .into()
+    }
 }
 
 impl BotGoal for FaceDirectionGoal {
@@ -369,5 +473,9 @@ impl BotGoal for FaceDirectionGoal {
         };
 
         Ok(output)
+    }
+
+    fn description(&self) -> Cow<str> {
+        format!("Turn to face {}", self.0).into()
     }
 }

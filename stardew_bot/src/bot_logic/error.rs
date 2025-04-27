@@ -1,9 +1,11 @@
 use thiserror::Error;
 
+use crate::game_state::Vector;
+
 #[derive(Error)]
 pub enum BotError {
-    #[error("No route to target tile")]
-    NoRouteToTarget,
+    #[error("No route to tile {position} in {room}")]
+    NoRouteToTarget { room: String, position: Vector<f32> },
 }
 
 impl std::fmt::Debug for BotError {

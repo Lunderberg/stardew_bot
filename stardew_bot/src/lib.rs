@@ -39,3 +39,6 @@ pub use pathfinding::PathfindingUI;
 
 mod keyboard_display;
 pub use keyboard_display::KeyboardDisplay;
+
+mod bot_goal_display;
+pub use bot_goal_display::BotGoalDisplay;
