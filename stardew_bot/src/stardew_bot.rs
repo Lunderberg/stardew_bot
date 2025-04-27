@@ -1,7 +1,7 @@
 use crate::{
     game_action::InputState, game_state::GameStateReader, BotLogic, Error,
-    FishingUI, GameAction, GameState, PathfindingUI, PlayerStats, RunningLog,
-    TuiDrawRate, X11Handler,
+    FishingUI, GameAction, GameState, KeyboardDisplay, PathfindingUI,
+    PlayerStats, RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -50,6 +50,7 @@ struct TuiBuffers {
     fishing: FishingUI,
     player_stats: PlayerStats,
     pathfinding: PathfindingUI,
+    keyboard: KeyboardDisplay,
 }
 
 #[allow(unused)]
@@ -111,6 +112,7 @@ impl TuiBuffers {
             fishing: FishingUI::new(),
             player_stats: PlayerStats::new(),
             pathfinding: PathfindingUI,
+            keyboard: KeyboardDisplay,
         }
     }
 
@@ -121,6 +123,7 @@ impl TuiBuffers {
             Box::new(&mut self.fishing),
             Box::new(&mut self.player_stats),
             Box::new(&mut self.pathfinding),
+            Box::new(&mut self.keyboard),
         ]
     }
 }
@@ -153,16 +156,30 @@ impl StardewBot {
             .add_log(format!("SD window: {stardew_window:?}"));
 
         let mut layout = DynamicLayout::new();
+        // FPS and %active in top row
         layout.split_vertically(Some(3), None);
         layout.switch_to_buffer(1);
         layout.cycle_next();
+
+        // Placeholder for main window
         layout.split_horizontally(None, Some(45));
         layout.cycle_next();
+
+        // Player states in top-right
         layout.split_vertically(Some(10), None);
         layout.switch_to_buffer(3);
         layout.cycle_next();
+
+        // Keyboard outputs in center-right
+        layout.split_vertically(Some(10), None);
+        layout.switch_to_buffer(5);
+        layout.cycle_next();
+
+        // Log messages in bottom-right
         layout.switch_to_buffer(0);
         layout.cycle_next();
+
+        // Cycle back to the main window, and display something there.
         layout.cycle_next();
         // layout.switch_to_buffer(2);
         layout.switch_to_buffer(4);

@@ -222,7 +222,7 @@ impl Location {
                 };
                 opt_kind.map(|kind| Litter {
                     tile: tile.clone(),
-                    category: category.clone(),
+                    category,
                     kind,
                 })
             },

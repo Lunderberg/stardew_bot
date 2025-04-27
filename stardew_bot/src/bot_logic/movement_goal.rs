@@ -5,7 +5,7 @@ use priority_queue::PriorityQueue;
 use crate::{
     bot_logic::BotError,
     game_state::{FacingDirection, TileMap, Vector},
-    Error, GameState,
+    Direction, Error, GameAction, GameState,
 };
 
 use super::bot_logic::{BotGoal, BotGoalResult};
@@ -24,57 +24,6 @@ struct SearchItemMetadata {
     prev_dist: isize,
     backref: Option<Vector<isize>>,
     min_dist_remaining: isize,
-}
-
-#[derive(Debug, Clone, Copy)]
-enum Direction {
-    North,
-    NorthEast,
-    East,
-    SouthEast,
-    South,
-    SouthWest,
-    West,
-    NorthWest,
-}
-
-impl Direction {
-    fn offset(self) -> Vector<isize> {
-        match self {
-            Direction::North => Vector::new(0, -1),
-            Direction::NorthEast => Vector::new(1, -1),
-            Direction::East => Vector::new(1, 0),
-            Direction::SouthEast => Vector::new(1, 1),
-            Direction::South => Vector::new(0, 1),
-            Direction::SouthWest => Vector::new(-1, 1),
-            Direction::West => Vector::new(-1, 0),
-            Direction::NorthWest => Vector::new(-1, -1),
-        }
-    }
-
-    fn is_cardinal(self) -> bool {
-        matches!(
-            self,
-            Direction::North
-                | Direction::East
-                | Direction::South
-                | Direction::West
-        )
-    }
-
-    fn iter() -> impl Iterator<Item = Self> {
-        [
-            Self::North,
-            Self::NorthEast,
-            Self::East,
-            Self::SouthEast,
-            Self::South,
-            Self::SouthWest,
-            Self::West,
-            Self::NorthWest,
-        ]
-        .into_iter()
-    }
 }
 
 impl MoveToLocationGoal {
@@ -105,7 +54,8 @@ impl MoveToLocationGoal {
             }
         }
 
-        if self.waypoints.is_empty() {
+        let goal_dist = (self.position - player.position / 64.0).mag();
+        if self.waypoints.is_empty() && goal_dist > self.tolerance {
             self.waypoints = self.generate_plan(game_state)?;
         }
 
@@ -139,6 +89,18 @@ impl MoveToLocationGoal {
                     Vector::new(i, j)
                 });
 
+            let iter_water = location
+                .water_tiles
+                .iter()
+                .flat_map(|vec_bool| vec_bool.iter())
+                .enumerate()
+                .filter(|(_, is_water)| **is_water)
+                .map(|(index, _)| {
+                    let i = (index / height) as isize;
+                    let j = (index % height) as isize;
+                    Vector::new(i, j)
+                });
+
             let iter_clumps = location
                 .resource_clumps
                 .iter()
@@ -160,6 +122,7 @@ impl MoveToLocationGoal {
 
             std::iter::empty()
                 .chain(iter_blocked)
+                .chain(iter_water)
                 .chain(iter_clumps)
                 .chain(iter_bush)
                 .chain(iter_tree)
@@ -175,11 +138,23 @@ impl MoveToLocationGoal {
             clear_tiles.get(tile).cloned().unwrap_or(false)
         };
 
-        let player_tile = player.position.map(|x| (x / 64.0).floor() as isize);
+        let player_tile = player.tile();
         let target_tile: Vector<isize> =
-            self.position.map(|x| x.floor() as isize);
+            self.position.map(|x| x.round() as isize);
 
-        let heuristic = |tile: Vector<isize>| (tile - target_tile).mag2();
+        let heuristic = |tile: Vector<isize>| {
+            let offset = (tile - target_tile).map(|x| x.abs());
+            let min = offset.right.min(offset.down);
+            let max = offset.right.max(offset.down);
+
+            let diagonal_movements = min;
+            let cardinal_movements = max - min;
+            // Counting the number of half-tiles means that I can stay
+            // in integer math.  3/2 as the cost of a diagonal
+            // movement is close enough to sqrt(2) for the
+            // pathfinding.
+            3 * diagonal_movements + 2 * cardinal_movements
+        };
 
         let mut queue =
             PriorityQueue::<Vector<isize>, SearchItemMetadata>::new();
@@ -220,10 +195,13 @@ impl MoveToLocationGoal {
                 })
                 .for_each(|dir| {
                     let new_tile = tile + dir.offset();
+                    let additional_distance =
+                        if dir.is_cardinal() { 2 } else { 3 };
+
                     queue.push_increase(
                         new_tile,
                         SearchItemMetadata {
-                            prev_dist: dist_to_tile + 1,
+                            prev_dist: dist_to_tile + additional_distance,
                             backref: Some(tile),
                             min_dist_remaining: heuristic(new_tile),
                         },
@@ -235,16 +213,21 @@ impl MoveToLocationGoal {
             .get(&target_tile)
             .ok_or(BotError::NoRouteToTarget)?;
 
-        let waypoints = std::iter::successors(Some(target_tile), |tile| {
+        let iter_waypoints = std::iter::successors(Some(target_tile), |tile| {
             finished.get(tile).expect("Broken backref chain").backref
         })
-        .map(|vec| vec.map(|i| i as f32))
-        .collect();
+        .map(|vec| vec.map(|i| i as f32));
+
+        let waypoints = std::iter::once(self.position)
+            .chain(iter_waypoints.skip(1))
+            .collect();
 
         Ok(waypoints)
     }
 
-    pub fn iter_waypoints(&self) -> impl Iterator<Item = Vector<f32>> + '_ {
+    pub fn iter_waypoints(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = Vector<f32>> + '_ {
         self.waypoints.iter().copied()
     }
 }
@@ -256,41 +239,32 @@ impl BotGoal for MoveToLocationGoal {
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
         let player_position = player.position / 64.0;
-        if player.room_name == self.room_name
-            && (player_position - self.position).mag() < self.tolerance
-        {
-            return Ok(BotGoalResult::Completed);
-        }
 
         self.update_plan(game_state)?;
 
         let Some(next_waypoint) = self.waypoints.last().cloned() else {
-            return Ok(BotGoalResult::Completed);
+            return Ok(if player.movement.is_some() {
+                BotGoalResult::Action(Some(GameAction::StopMoving))
+            } else {
+                BotGoalResult::Completed
+            });
         };
         let direction = next_waypoint - player_position;
 
-        let angle = f32::atan2(-direction.down, direction.right)
-            * (360.0 / (2.0 * std::f32::consts::PI));
+        let dir = Direction::iter()
+            .max_by(|dir_a, dir_b| {
+                let do_dot_product = |dir: Direction| {
+                    let offset = dir.offset().map(|i| i as f32);
+                    let offset = offset / offset.mag();
+                    offset.dot(direction)
+                };
+                let dot_a = do_dot_product(*dir_a);
+                let dot_b = do_dot_product(*dir_b);
+                num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
+            })
+            .expect("Direction::iter is non-empty");
 
-        let _dir = if 10.0 <= angle && angle < 80.0 {
-            Direction::NorthEast
-        } else if 80.0 <= angle && angle < 100.0 {
-            Direction::North
-        } else if 100.0 <= angle && angle < 170.0 {
-            Direction::NorthWest
-        } else if 170.0 <= angle && angle < 190.0 {
-            Direction::West
-        } else if 190.0 <= angle && angle < 260.0 {
-            Direction::SouthWest
-        } else if 260.0 <= angle && angle < 280.0 {
-            Direction::South
-        } else if 280.0 <= angle && angle < 350.0 {
-            Direction::SouthEast
-        } else {
-            Direction::East
-        };
-
-        Ok(BotGoalResult::Action(None))
+        Ok(BotGoalResult::Action(Some(GameAction::Move(dir))))
     }
 }
 
@@ -299,10 +273,21 @@ impl BotGoal for FaceDirectionGoal {
         &mut self,
         game_state: &GameState,
     ) -> Result<BotGoalResult, Error> {
-        if game_state.player.facing == self.0 {
-            return Ok(BotGoalResult::Completed);
-        }
-        todo!()
+        let output = if game_state.player.facing != self.0 {
+            let dir = match self.0 {
+                FacingDirection::North => Direction::North,
+                FacingDirection::East => Direction::East,
+                FacingDirection::South => Direction::South,
+                FacingDirection::West => Direction::West,
+            };
+            BotGoalResult::Action(Some(GameAction::Move(dir)))
+        } else if game_state.player.movement.is_some() {
+            BotGoalResult::Action(Some(GameAction::StopMoving))
+        } else {
+            BotGoalResult::Completed
+        };
+
+        Ok(output)
     }
 }
 

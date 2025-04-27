@@ -19,6 +19,9 @@ pub use tui_draw_rate::TuiDrawRate;
 mod running_log;
 pub use running_log::RunningLog;
 
+mod direction;
+pub use direction::Direction;
+
 mod game_state;
 pub use game_state::GameState;
 
@@ -33,3 +36,6 @@ pub use player_stats::PlayerStats;
 
 mod pathfinding;
 pub use pathfinding::PathfindingUI;
+
+mod keyboard_display;
+pub use keyboard_display::KeyboardDisplay;

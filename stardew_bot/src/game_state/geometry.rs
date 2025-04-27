@@ -29,6 +29,13 @@ impl<T> Vector<T> {
         Self { right, down }
     }
 
+    pub fn dot(self, other: Self) -> T
+    where
+        T: num::Num,
+    {
+        self.right * other.right + self.down * other.down
+    }
+
     pub fn mag2(self) -> T
     where
         T: num::Num + Copy,
@@ -67,12 +74,12 @@ impl<T> Rectangle<T> {
         T: 'static,
         T: num::PrimInt,
     {
-        num::range_step(T::zero(), self.shape.right, T::one()).flat_map(
-            move |i| {
+        num::range_step(T::zero(), self.shape.right, T::one())
+            .flat_map(move |i| {
                 num::range_step(T::zero(), self.shape.down, T::one())
                     .map(move |j| Vector::new(i, j))
-            },
-        )
+            })
+            .map(move |p| p + self.top_left)
     }
 }
 

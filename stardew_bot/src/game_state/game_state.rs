@@ -4,7 +4,7 @@ use dotnet_debugger::{
 
 use crate::Error;
 
-use super::{DailyState, FishingState, Location, PlayerState};
+use super::{DailyState, FishingState, KeyboardState, Location, PlayerState};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
@@ -12,6 +12,7 @@ pub struct GameState {
     pub player: PlayerState,
     pub fishing: FishingState,
     pub daily: DailyState,
+    pub keyboard: KeyboardState,
 }
 
 #[derive(Debug)]
@@ -24,6 +25,7 @@ pub struct GameStateDelta {
     player: PlayerState,
     fishing: FishingState,
     daily: DailyState,
+    keyboard: KeyboardState,
 }
 
 impl GameState {
@@ -43,6 +45,9 @@ impl GameState {
 
         let read_daily = DailyState::read_all(&mut graph)?;
         graph.name(read_daily, "read_daily")?;
+
+        let read_keyboard = KeyboardState::read_all(&mut graph)?;
+        graph.name(read_keyboard, "read_keyboard")?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -65,11 +70,13 @@ impl GameState {
             |locations: &Vec<Location>,
              player: &PlayerState,
              fishing: &FishingState,
-             daily: &DailyState| GameState {
+             daily: &DailyState,
+             keyboard: &KeyboardState| GameState {
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
+                keyboard: keyboard.clone(),
             },
         )?;
 
@@ -77,10 +84,12 @@ impl GameState {
             "new_game_state_delta",
             |player: &PlayerState,
              fishing: &FishingState,
-             daily: &DailyState| GameStateDelta {
+             daily: &DailyState,
+             keyboard: &KeyboardState| GameStateDelta {
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
+                keyboard: keyboard.clone(),
             },
         )?;
 
@@ -96,16 +105,18 @@ impl GameState {
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
+                let keyboard = read_keyboard();
 
-                new_game_state(locations, player, fishing, daily)
+                new_game_state(locations, player, fishing, daily, keyboard)
             }
 
             pub fn read_delta_state() {
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
+                let keyboard = read_keyboard();
 
-                new_game_state_delta(player, fishing, daily)
+                new_game_state_delta(player, fishing, daily, keyboard)
             }
         })?;
 
@@ -118,6 +129,7 @@ impl GameState {
         self.player = delta.player;
         self.fishing = delta.fishing;
         self.daily = delta.daily;
+        self.keyboard = delta.keyboard;
     }
 }
 

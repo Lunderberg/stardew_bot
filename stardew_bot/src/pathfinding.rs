@@ -328,36 +328,31 @@ impl WidgetWindow<Error> for PathfindingUI {
 
         let (top_area, table_area) = left_column.split_from_top(2);
 
-        let longest_name = game_state
-            .locations
-            .iter()
-            .map(|loc| loc.name.len())
-            .max()
-            .unwrap_or(0);
-
-        let loc_rows = game_state.locations.iter().map(|loc| {
-            let name = Cell::new(loc.name.as_str());
-            let shape = Cell::new(format!("{}", loc.shape));
-            Row::new([name, shape])
-        });
-
-        let table = Table::new(
-            loc_rows,
-            [
-                Constraint::Min(longest_name as u16),
-                Constraint::Min(10),
-                Constraint::Min(longest_name as u16),
-                Constraint::Percentage(100),
-            ],
-        );
-
-        table.render(table_area, buf);
-
         let top_text = Text::raw(format!(
             "Current: {} ({:.1}, {:.1})",
             current_location, position.right, position.down,
         ));
         top_text.render(top_area, buf);
+
+        let waypoint_rows = bot_logic
+            .current_goal()
+            .and_then(|goal| {
+                <dyn Any>::downcast_ref::<MoveToLocationGoal>(goal)
+            })
+            .into_iter()
+            .flat_map(|move_goal| move_goal.iter_waypoints().rev())
+            .map(|waypoint| {
+                let room_name = Cell::new("TODO room");
+                let pos = Cell::new(format!("{waypoint}"));
+                Row::new([pos, room_name])
+            });
+
+        let table = Table::new(
+            waypoint_rows,
+            [Constraint::Min(15), Constraint::Percentage(100)],
+        );
+
+        table.render(table_area, buf);
 
         let opt_current_room = game_state
             .locations

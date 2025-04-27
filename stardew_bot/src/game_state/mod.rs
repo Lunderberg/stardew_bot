@@ -18,3 +18,6 @@ pub use location::*;
 
 mod tile_map;
 pub use tile_map::TileMap;
+
+mod keyboard_state;
+pub use keyboard_state::KeyboardState;

@@ -12,7 +12,7 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{game_state::FishingState, Error, GameAction, GameState};
+use crate::{game_state::FishingState, Error, GameState};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -23,12 +23,9 @@ pub struct FishingUI {
 struct FishHistory {
     tick: i32,
     bar_position: Range<f32>,
-    bar_velocity: f32,
     fish_in_bar: bool,
     fish_position: f32,
-    fish_velocity: f32,
     fish_target_position: f32,
-    fish_difficulty: f32,
 }
 
 impl FishingUI {
@@ -57,158 +54,10 @@ impl FishingUI {
             bar_position: fishing_state.bar_position
                 ..fishing_state.bar_position
                     + (fishing_state.bar_height as f32),
-            bar_velocity: fishing_state.bar_velocity,
             fish_in_bar: fishing_state.bobber_in_bar,
             fish_position: fishing_state.fish_position,
-            fish_velocity: fishing_state.fish_velocity,
             fish_target_position: fishing_state.fish_target_position,
-            fish_difficulty: fishing_state.fish_difficulty,
         })
-    }
-}
-
-impl FishHistory {
-    fn predicted_positions(&self) -> impl Fn(f32) -> f32 {
-        // m*accel + b*velocity + k*position = 0
-        // position = (A*cos(lambda*t) + B*sin(lambda*t))*exp(-lambda*t)
-        //
-        // The position here is not `fish_position`, but is
-        // relative to the `fish_target_position`, since that
-        // makes the equation simpler.
-        let k = 1.0 / (5.0 * (120.0 - self.fish_difficulty));
-
-        let b = 1.0 / 5.0;
-        let lambda = b / 2.0;
-        let determinant = lambda * lambda - k;
-
-        let initial_offset = self.fish_position - self.fish_target_position;
-        let initial_velocity = self.fish_velocity;
-
-        enum Solution {
-            // A*exp(-(lambda+tau)*t) + B*exp(-(lambda-tau)*t)
-            Overdamped {
-                tau: f32,
-                coefficient_of_pos: f32,
-                coefficient_of_neg: f32,
-            },
-
-            // (A*t + B)*exp(-lambda*t)
-            CriticallyDamped {
-                linear_offset: f32,
-                linear_slope: f32,
-            },
-
-            // (A*cos(omega*t) + B*sin(omega*t)) * exp(-lambda*t)
-            Underdamped {
-                omega: f32,
-                cos_coefficient: f32,
-                sin_coefficient: f32,
-            },
-        }
-
-        let solution = {
-            let p0 = initial_offset;
-            let v0 = initial_velocity;
-            if determinant.abs() < 1e-5 {
-                // Critically-damped oscillator, which requires special handling
-                // (p0 + t*(b*p0/2 + v0))*exp(-b*t/2)
-                // (p0 + t*(lambda*p0 + v0))*exp(-lambda*t)
-                Solution::CriticallyDamped {
-                    linear_offset: p0,
-                    linear_slope: lambda * p0 + initial_velocity,
-                }
-            } else if determinant > 0.0 {
-                let tau = determinant.sqrt();
-                let coefficient_of_pos =
-                    ((tau - lambda) * p0 - initial_velocity) / (2.0 * tau);
-                let coefficient_of_neg =
-                    ((tau + lambda) * p0 + initial_velocity) / (2.0 * tau);
-                Solution::Overdamped {
-                    tau,
-                    coefficient_of_pos,
-                    coefficient_of_neg,
-                }
-            } else {
-                let omega = (-determinant).sqrt();
-                let cos_coefficient = p0;
-                let sin_coefficient = (lambda * p0 + v0) / omega;
-
-                Solution::Underdamped {
-                    omega,
-                    cos_coefficient,
-                    sin_coefficient,
-                }
-            }
-        };
-
-        let fish_target_position = self.fish_target_position;
-
-        move |t: f32| -> f32 {
-            let offset = match solution {
-                Solution::Overdamped {
-                    tau,
-                    coefficient_of_pos,
-                    coefficient_of_neg,
-                } => {
-                    // All fish with a difficulty less than 100
-                    // (i.e. everything except the legendary fish)
-                    coefficient_of_pos * (-(lambda + tau) * t).exp()
-                        + coefficient_of_neg * (-(lambda - tau) * t).exp()
-                }
-                Solution::CriticallyDamped {
-                    linear_offset,
-                    linear_slope,
-                } => {
-                    // Fish with a difficulty of exactly 100 (i.e. the
-                    // Glacerfish, and nothing else)
-                    let linear_term = linear_offset + linear_slope * t;
-                    let exponential_term = (-lambda * t).exp();
-                    linear_term * exponential_term
-                }
-                Solution::Underdamped {
-                    omega,
-                    cos_coefficient,
-                    sin_coefficient,
-                } => {
-                    // Fish with a difficulty greater than 100
-                    // (i.e. the Legend, and nothing else)
-                    let sin_term = sin_coefficient * (omega * t).sin();
-                    let cos_term = cos_coefficient * (omega * t).cos();
-                    let exponential_term = (-lambda * t).exp();
-
-                    (sin_term + cos_term) * exponential_term
-                }
-            };
-            let predicted = fish_target_position + offset;
-
-            predicted
-        }
-    }
-
-    fn should_move_upward(&self) -> bool {
-        const LOOKAHEAD_TIME: f32 = 30.0;
-
-        let fish_position = self.predicted_positions()(LOOKAHEAD_TIME);
-
-        let bar_position =
-            (self.bar_position.start + self.bar_position.end - 28.0) / 2.0
-                - 16.0;
-
-        let bar_velocity = self.bar_velocity;
-
-        let bar_velocity_if_click = bar_velocity - 0.25;
-        let bar_velocity_if_release = bar_velocity + 0.25;
-
-        let bar_position_if_click =
-            bar_velocity_if_click * LOOKAHEAD_TIME + bar_position;
-        let bar_position_if_release =
-            bar_velocity_if_release * LOOKAHEAD_TIME + bar_position;
-
-        let distance_if_click = (fish_position - bar_position_if_click).abs();
-        let distance_if_release =
-            (fish_position - bar_position_if_release).abs();
-
-        distance_if_click < distance_if_release
     }
 }
 
@@ -220,56 +69,19 @@ impl WidgetWindow<Error> for FishingUI {
     fn periodic_update<'a>(
         &mut self,
         globals: &'a tui_utils::TuiGlobals,
-        side_effects: &'a mut tui_utils::WidgetSideEffects,
+        _: &'a mut tui_utils::WidgetSideEffects,
     ) -> Result<(), Error> {
         let game_state = globals
             .get::<GameState>()
             .expect("Generated/updated in top-level GUI update");
         let fishing_state = &game_state.fishing;
 
-        let is_holding_rod = fishing_state.is_holding_rod;
-
-        let showing_fish = fishing_state.showing_fish;
-        let minigame_in_progress = fishing_state.minigame_in_progress;
-        let is_fishing = fishing_state.is_fishing;
-        let is_nibbling =
-            !showing_fish && !minigame_in_progress && fishing_state.is_nibbling;
-        let is_casting = fishing_state.is_casting;
-        let is_timing_cast = fishing_state.is_timing_cast;
-
-        if is_casting {
+        if fishing_state.is_casting {
             self.history.clear();
         }
 
         if let Some(state) = self.current_state(fishing_state) {
             self.history.push(state);
-        }
-
-        if is_timing_cast {
-            let casting_power = fishing_state.casting_power;
-            let action = if casting_power > 0.9 {
-                GameAction::ReleaseTool
-            } else {
-                GameAction::HoldTool
-            };
-            side_effects.broadcast(action);
-        } else if minigame_in_progress {
-            if let Some(state) = self.history.last() {
-                let action = if state.should_move_upward() {
-                    GameAction::HoldTool
-                } else {
-                    GameAction::ReleaseTool
-                };
-                side_effects.broadcast(action);
-            }
-        } else if is_nibbling {
-            side_effects.broadcast(GameAction::ReleaseTool);
-        } else if is_fishing {
-            side_effects.broadcast(GameAction::HoldTool);
-        } else if showing_fish {
-            side_effects.broadcast(GameAction::HoldTool);
-        } else if is_holding_rod {
-            side_effects.broadcast(GameAction::HoldTool);
         }
 
         Ok(())
@@ -500,22 +312,18 @@ impl WidgetWindow<Error> for FishingUI {
             .collect();
 
         let prediction_size = 120;
-        let predicted_fish_points: Vec<_> = self
-            .history
-            .last()
-            .map(|state| {
-                let predictor = state.predicted_positions();
+        let predicted_fish_points: Vec<_> = {
+            let predictor = fishing_state.predicted_positions();
 
-                (0..prediction_size).map(move |i| {
+            (0..prediction_size)
+                .map(move |i| {
                     let pos = predictor(i as f32) as f64;
-                    let tick = state.tick as f64;
+                    let tick = fishing_state.game_tick as f64;
                     let i = i as f64;
                     (tick + i, MAX_SIZE - pos)
                 })
-            })
-            .into_iter()
-            .flatten()
-            .collect();
+                .collect()
+        };
 
         let datasets = vec![
             Dataset::default()

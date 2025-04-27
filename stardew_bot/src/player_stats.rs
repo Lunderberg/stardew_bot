@@ -38,6 +38,14 @@ impl WidgetWindow<Error> for PlayerStats {
         let table = Table::new(
             [
                 Row::new([
+                    "Moving".into(),
+                    player_state
+                        .movement
+                        .map(|dir| format!("{dir}"))
+                        .unwrap_or("".into()),
+                ]),
+                Row::default(),
+                Row::new([
                     "Farming XP".into(),
                     format!("{}", player_state.skills.farming_xp),
                 ]),

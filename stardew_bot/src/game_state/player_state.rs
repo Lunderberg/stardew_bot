@@ -1,6 +1,6 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
-use crate::Error;
+use crate::{Direction, Error};
 
 use super::Vector;
 
@@ -8,6 +8,7 @@ use super::Vector;
 pub struct PlayerState {
     pub position: Vector<f32>,
     pub facing: FacingDirection,
+    pub movement: Option<Direction>,
     pub room_name: String,
     pub skills: PlayerSkills,
 }
@@ -44,6 +45,44 @@ impl PlayerState {
         )?;
 
         graph.named_native_function(
+            "new_movement_direction",
+            |directions: &Vec<i32>| -> Option<Direction> {
+                let to_dir = |value: i32| -> Option<Direction> {
+                    match value {
+                        0 => Some(Direction::North),
+                        1 => Some(Direction::East),
+                        2 => Some(Direction::South),
+                        3 => Some(Direction::West),
+                        _ => None,
+                    }
+                };
+
+                let dir_0 = directions.get(0).cloned().and_then(to_dir);
+                let dir_1 = directions.get(1).cloned().and_then(to_dir);
+                match (dir_0, dir_1) {
+                    (d, None) => d,
+                    (Some(Direction::North), Some(Direction::East))
+                    | (Some(Direction::East), Some(Direction::North)) => {
+                        Some(Direction::NorthEast)
+                    }
+                    (Some(Direction::North), Some(Direction::West))
+                    | (Some(Direction::West), Some(Direction::North)) => {
+                        Some(Direction::NorthWest)
+                    }
+                    (Some(Direction::South), Some(Direction::East))
+                    | (Some(Direction::East), Some(Direction::South)) => {
+                        Some(Direction::SouthEast)
+                    }
+                    (Some(Direction::South), Some(Direction::West))
+                    | (Some(Direction::West), Some(Direction::South)) => {
+                        Some(Direction::SouthWest)
+                    }
+                    _ => None,
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_skills",
             |farming_xp: usize,
              fishing_xp: usize,
@@ -62,11 +101,13 @@ impl PlayerState {
             "new_player",
             |position: &Vector<f32>,
              facing: &FacingDirection,
+             movement: Option<&Direction>,
              room_name: &str,
              skills: &PlayerSkills| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
+                    movement: movement.cloned(),
                     room_name: room_name.into(),
                     skills: skills.clone(),
                 }
@@ -92,6 +133,17 @@ impl PlayerState {
                         .value
                 );
 
+                let num_movement_directions = player
+                    .movementDirections
+                    ._size
+                    .prim_cast::<usize>();
+                let directions = (0..num_movement_directions)
+                    .map(|i| player
+                        .movementDirections
+                        ._items[i])
+                    .collect();
+                let movement = new_movement_direction(directions);
+
                 let room_name = player
                     .currentLocationRef
                     .locationName
@@ -109,11 +161,18 @@ impl PlayerState {
                     new_skills(farming, fishing, foraging, mining, combat)
                 };
 
-                new_player(position, facing, room_name, skills)
+                new_player(position, facing, movement, room_name, skills)
             }
         })?;
 
         Ok(player)
+    }
+
+    pub fn tile(&self) -> Vector<isize> {
+        self.position
+            .map(|x| x / 64.0)
+            .map(|x| x.round())
+            .map(|x| x as isize)
     }
 }
 
