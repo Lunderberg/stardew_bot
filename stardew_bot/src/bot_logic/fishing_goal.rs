@@ -5,7 +5,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult, SubGoals},
-    movement_goal::{FaceDirectionGoal, MoveToLocationGoal},
+    movement_goal::{FaceDirectionGoal, MovementGoal},
 };
 
 pub struct FishingGoal;
@@ -15,7 +15,7 @@ pub struct FishOnceGoal;
 impl BotGoal for FishingGoal {
     fn apply(&mut self, _: &GameState) -> Result<BotGoalResult, Error> {
         let goals = SubGoals::new()
-            .then(MoveToLocationGoal::new("Forest", Vector::new(70.0, 50.4)))
+            .then(MovementGoal::new("Forest", Vector::new(70.0, 50.4)))
             .then(FaceDirectionGoal(FacingDirection::South))
             .then(FishOnceGoal);
         Ok(goals.into())

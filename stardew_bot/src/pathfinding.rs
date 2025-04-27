@@ -16,7 +16,7 @@ use ratatui::{
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
-    bot_logic::MoveToLocationGoal,
+    bot_logic::LocalMovementGoal,
     game_state::{LitterKind, Location, Rectangle, ResourceClumpKind, Vector},
     BotLogic, Error, GameState,
 };
@@ -286,9 +286,7 @@ impl<'a> DrawableGameLocation<'a> {
         let points: Vec<_> = self
             .bot_logic
             .current_goal()
-            .and_then(|goal| {
-                <dyn Any>::downcast_ref::<MoveToLocationGoal>(goal)
-            })
+            .and_then(|goal| <dyn Any>::downcast_ref::<LocalMovementGoal>(goal))
             .into_iter()
             .flat_map(|move_goal| move_goal.iter_waypoints())
             .map(|loc| loc.as_type::<f64>())
@@ -336,9 +334,7 @@ impl WidgetWindow<Error> for PathfindingUI {
 
         let waypoint_rows = bot_logic
             .current_goal()
-            .and_then(|goal| {
-                <dyn Any>::downcast_ref::<MoveToLocationGoal>(goal)
-            })
+            .and_then(|goal| <dyn Any>::downcast_ref::<LocalMovementGoal>(goal))
             .into_iter()
             .flat_map(|move_goal| move_goal.iter_waypoints().rev())
             .map(|waypoint| {

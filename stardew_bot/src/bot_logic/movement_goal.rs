@@ -1,6 +1,4 @@
-use std::collections::HashMap;
-
-use priority_queue::PriorityQueue;
+use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
@@ -8,7 +6,10 @@ use crate::{
     Direction, Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{BotGoal, BotGoalResult, SubGoals},
+    graph_search::GraphSearch,
+};
 
 /// Epsilon distance (in tiles) to consider a target reached
 ///
@@ -25,7 +26,12 @@ const TOLERANCE: f32 = 0.1;
 /// event, etc), then the route should be replanned.
 const REPLAN_THRESHOLD: f32 = 2.0;
 
-pub struct MoveToLocationGoal {
+pub struct MovementGoal {
+    target_room: &'static str,
+    target_position: Vector<f32>,
+}
+
+pub struct LocalMovementGoal {
     room_name: &'static str,
     position: Vector<f32>,
     waypoints: Vec<Vector<f32>>,
@@ -33,13 +39,117 @@ pub struct MoveToLocationGoal {
 
 pub struct FaceDirectionGoal(pub FacingDirection);
 
-struct SearchItemMetadata {
-    prev_dist: isize,
-    backref: Option<Vector<isize>>,
-    min_dist_remaining: isize,
+impl MovementGoal {
+    pub fn new(
+        target_room: &'static str,
+        target_position: Vector<f32>,
+    ) -> Self {
+        Self {
+            target_room,
+            target_position,
+        }
+    }
+
+    fn room_to_room_movement(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<SubGoals>, Error> {
+        let current_room_name = &game_state.player.room_name;
+        if self.target_room == current_room_name {
+            return Ok(None);
+        }
+
+        // TODO: Handle rooms with disconnnected regions.
+        //
+        // For example, the Backwoods connects to four other rooms,
+        // the Farm, the Mountain, the BusStop, and the Tunnel.
+        // However, from a given location in the Backwoods, the player
+        // can only reach two of those four rooms.  The current
+        // algorithm assumes that all exits can be reached from any
+        // point in the room.
+
+        // Dijkstra's algorithm to search for connections between rooms
+
+        Ok(None)
+    }
+
+    fn within_room_movement(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<SubGoals>, Error> {
+        let player = &game_state.player;
+
+        let goal_dist = (self.target_position - player.position / 64.0).mag();
+        let opt_goals = if goal_dist >= TOLERANCE {
+            let goals = SubGoals::new().then(LocalMovementGoal::new(
+                self.target_room,
+                self.target_position,
+            ));
+            Some(goals)
+        } else {
+            None
+        };
+
+        Ok(opt_goals)
+    }
 }
 
-impl MoveToLocationGoal {
+struct TileGraph {
+    clear_tiles: TileMap<bool>,
+}
+impl GraphSearch<Vector<isize>> for TileGraph {
+    fn connections_from<'a>(
+        &'a self,
+        &tile: &'a Vector<isize>,
+    ) -> impl IntoIterator<Item = (Vector<isize>, u64)> + 'a {
+        Direction::iter()
+            .filter(move |dir| {
+                let is_clear_tile = |tile: Vector<isize>| {
+                    self.clear_tiles.get(tile).cloned().unwrap_or(false)
+                };
+
+                let offset = dir.offset();
+                if dir.is_cardinal() {
+                    is_clear_tile(tile + offset)
+                } else {
+                    [
+                        Vector::new(offset.right, offset.down),
+                        Vector::new(0, offset.down),
+                        Vector::new(offset.right, 0),
+                    ]
+                    .into_iter()
+                    .all(|offset| is_clear_tile(tile + offset))
+                }
+            })
+            .map(move |dir| {
+                let offset = dir.offset();
+                let new_tile = tile + offset;
+                let additional_distance = if dir.is_cardinal() { 2 } else { 3 };
+
+                (new_tile, additional_distance)
+            })
+    }
+
+    fn heuristic_between(
+        &self,
+        node_from: &Vector<isize>,
+        node_to: &Vector<isize>,
+    ) -> Option<u64> {
+        let offset = (*node_from - *node_to).map(|x| x.abs());
+        let min = offset.right.min(offset.down) as u64;
+        let max = offset.right.max(offset.down) as u64;
+
+        let diagonal_movements = min;
+        let cardinal_movements = max - min;
+        // Counting the number of half-tiles means that I can stay
+        // in integer math.  3/2 as the cost of a diagonal
+        // movement is close enough to sqrt(2) for the
+        // pathfinding.
+        Some(3 * diagonal_movements + 2 * cardinal_movements)
+    }
+}
+
+impl LocalMovementGoal {
     pub fn new(room_name: &'static str, position: Vector<f32>) -> Self {
         Self {
             room_name,
@@ -145,89 +255,30 @@ impl MoveToLocationGoal {
 
             map
         };
-        let is_clear_tile = |tile: Vector<isize>| -> bool {
-            clear_tiles.get(tile).cloned().unwrap_or(false)
-        };
 
         let player_tile = player.tile();
         let target_tile: Vector<isize> =
             self.position.map(|x| x.round() as isize);
 
-        let heuristic = |tile: Vector<isize>| {
-            let offset = (tile - target_tile).map(|x| x.abs());
-            let min = offset.right.min(offset.down);
-            let max = offset.right.max(offset.down);
+        let search_tiles: Vec<_> = TileGraph { clear_tiles }
+            .a_star_search(player_tile, target_tile)
+            .take_while_inclusive(|(tile, _)| *tile != target_tile)
+            .collect();
 
-            let diagonal_movements = min;
-            let cardinal_movements = max - min;
-            // Counting the number of half-tiles means that I can stay
-            // in integer math.  3/2 as the cost of a diagonal
-            // movement is close enough to sqrt(2) for the
-            // pathfinding.
-            3 * diagonal_movements + 2 * cardinal_movements
-        };
-
-        let mut queue =
-            PriorityQueue::<Vector<isize>, SearchItemMetadata>::new();
-        let mut finished = HashMap::<Vector<isize>, SearchItemMetadata>::new();
-
-        queue.push(
-            player_tile,
-            SearchItemMetadata {
-                prev_dist: 0,
-                backref: None,
-                min_dist_remaining: heuristic(player_tile),
-            },
-        );
-
-        while let Some((tile, metadata)) = queue.pop() {
-            let dist_to_tile = metadata.prev_dist;
-            finished.insert(tile, metadata);
-
-            if tile == target_tile {
-                break;
-            }
-
-            Direction::iter()
-                .filter(|dir| !finished.contains_key(&(tile + dir.offset())))
-                .filter(|dir| {
-                    let offset = dir.offset();
-                    if dir.is_cardinal() {
-                        is_clear_tile(tile + offset)
-                    } else {
-                        [
-                            Vector::new(offset.right, offset.down),
-                            Vector::new(0, offset.down),
-                            Vector::new(offset.right, 0),
-                        ]
-                        .into_iter()
-                        .all(|offset| is_clear_tile(tile + offset))
-                    }
-                })
-                .for_each(|dir| {
-                    let new_tile = tile + dir.offset();
-                    let additional_distance =
-                        if dir.is_cardinal() { 2 } else { 3 };
-
-                    queue.push_increase(
-                        new_tile,
-                        SearchItemMetadata {
-                            prev_dist: dist_to_tile + additional_distance,
-                            backref: Some(tile),
-                            min_dist_remaining: heuristic(new_tile),
-                        },
-                    );
-                });
-        }
-
-        finished
-            .get(&target_tile)
+        let last = search_tiles
+            .last()
+            .filter(|(tile, _)| *tile == target_tile)
             .ok_or(BotError::NoRouteToTarget)?;
-
-        let iter_waypoints = std::iter::successors(Some(target_tile), |tile| {
-            finished.get(tile).expect("Broken backref chain").backref
-        })
-        .map(|vec| vec.map(|i| i as f32));
+        let iter_waypoints =
+            std::iter::successors(Some(last), |(_, metadata)| {
+                metadata
+                    .backref
+                    .as_ref()
+                    .map(|b| b.initial_node)
+                    .and_then(|index| search_tiles.get(index))
+            })
+            .map(|(tile, _)| tile)
+            .map(|vec_isize| vec_isize.map(|i| i as f32));
 
         let waypoints = std::iter::once(self.position)
             .chain(iter_waypoints.skip(1))
@@ -243,7 +294,26 @@ impl MoveToLocationGoal {
     }
 }
 
-impl BotGoal for MoveToLocationGoal {
+impl BotGoal for MovementGoal {
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<BotGoalResult, Error> {
+        Ok(
+            if let Some(subgoals) = self.room_to_room_movement(game_state)? {
+                subgoals.into()
+            } else if let Some(subgoals) =
+                self.within_room_movement(game_state)?
+            {
+                subgoals.into()
+            } else {
+                BotGoalResult::Completed
+            },
+        )
+    }
+}
+
+impl BotGoal for LocalMovementGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
@@ -299,30 +369,5 @@ impl BotGoal for FaceDirectionGoal {
         };
 
         Ok(output)
-    }
-}
-
-impl SearchItemMetadata {
-    fn min_distance_to_dest(&self) -> isize {
-        self.prev_dist + self.min_dist_remaining
-    }
-}
-
-impl PartialEq for SearchItemMetadata {
-    fn eq(&self, other: &Self) -> bool {
-        self.min_distance_to_dest() == other.min_distance_to_dest()
-    }
-}
-impl Eq for SearchItemMetadata {}
-impl PartialOrd for SearchItemMetadata {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-impl Ord for SearchItemMetadata {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        other
-            .min_distance_to_dest()
-            .cmp(&self.min_distance_to_dest())
     }
 }

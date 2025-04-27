@@ -8,3 +8,5 @@ mod fishing_goal;
 
 mod movement_goal;
 pub use movement_goal::*;
+
+mod graph_search;
