@@ -94,7 +94,7 @@ struct TypePrinter<'a> {
 }
 
 #[derive(Clone, Copy)]
-struct IndexPrinter<'a> {
+pub(crate) struct IndexPrinter<'a> {
     graph: &'a SymbolicGraph,
     index: OpIndex,
     requires_name_prefix: bool,
@@ -1169,6 +1169,16 @@ impl Display for MaybeZeroWidthSpace {
             write!(f, "\u{200B}")
         } else {
             Ok(())
+        }
+    }
+}
+
+impl<'a> IndexPrinter<'a> {
+    pub(crate) fn new(index: OpIndex, graph: &'a SymbolicGraph) -> Self {
+        Self {
+            graph,
+            index,
+            requires_name_prefix: true,
         }
     }
 }

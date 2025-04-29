@@ -6,7 +6,8 @@ use std::{
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    bytecode::expr::Scope, Error, ExprKind, OpIndex, RuntimeType, SymbolicValue,
+    bytecode::{expr::Scope, printer::IndexPrinter},
+    Error, ExprKind, OpIndex, RuntimeType, SymbolicValue,
 };
 
 use super::{
@@ -667,28 +668,6 @@ impl<'a> LastUsageCollector<'a> {
     }
 }
 
-struct LocalIndexPrinter<'a> {
-    index: OpIndex,
-    name: Option<&'a str>,
-}
-impl<'a> LocalIndexPrinter<'a> {
-    fn new(index: OpIndex, graph: &'a SymbolicGraph) -> Self {
-        Self {
-            index,
-            name: graph[index].name.as_ref().map(|string| string.as_str()),
-        }
-    }
-}
-impl<'a> std::fmt::Display for LocalIndexPrinter<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(name) = self.name {
-            write!(f, "'{name}' {}", self.index)
-        } else {
-            write!(f, "{}", self.index)
-        }
-    }
-}
-
 impl ExpressionTranslator<'_> {
     fn value_to_arg(
         &self,
@@ -710,11 +689,14 @@ impl ExpressionTranslator<'_> {
             .index_tracking
             .expr_to_location(op_index)?
             .unwrap_or_else(|| {
+                let current_name = IndexPrinter::new(usage, self.graph);
+                let previous_name = IndexPrinter::new(op_index, self.graph);
                 panic!(
                     "Internal error, \
-                         expression {usage} ({}) attempted to use \
-                         {op_index} ({}), \
-                         but {op_index} was not previously translated.",
+                     expression {current_name} ({}) \
+                     attempted to use \
+                     {previous_name} ({}), \
+                     but {previous_name} was not previously translated.",
                     self.graph[usage].kind, self.graph[op_index].kind,
                 )
             })
@@ -737,7 +719,7 @@ impl ExpressionTranslator<'_> {
         self.annotate(|graph| {
             format!(
                 "Reserving {stack_index} for {}",
-                LocalIndexPrinter::new(op_index, graph)
+                IndexPrinter::new(op_index, graph)
             )
         });
         self.index_tracking.reserve_index(op_index, stack_index);
@@ -749,7 +731,7 @@ impl ExpressionTranslator<'_> {
         self.annotate(|graph| {
             format!(
                 "Releasing reservation of {stack_index} for {}",
-                LocalIndexPrinter::new(op_index, graph),
+                IndexPrinter::new(op_index, graph),
             )
         });
     }
@@ -776,7 +758,7 @@ impl ExpressionTranslator<'_> {
                 format!(
                     "For op {}, \
                      using reserved output {index}",
-                    LocalIndexPrinter::new(op_index, graph),
+                    IndexPrinter::new(op_index, graph),
                 )
             });
             index
@@ -784,7 +766,7 @@ impl ExpressionTranslator<'_> {
             self.annotate(|graph| {
                 format!(
                     "For op {}, allocating output index.",
-                    LocalIndexPrinter::new(op_index, graph),
+                    IndexPrinter::new(op_index, graph),
                 )
             });
             self.alloc_index()
@@ -817,8 +799,8 @@ impl ExpressionTranslator<'_> {
                     format!(
                         "After {}, {} is no longer needed.  \
                          Marking {stack_index} as dead.",
-                        LocalIndexPrinter::new(op_index, graph),
-                        LocalIndexPrinter::new(expr_used, graph),
+                        IndexPrinter::new(op_index, graph),
+                        IndexPrinter::new(expr_used, graph),
                     )
                 });
             });
@@ -846,7 +828,7 @@ impl ExpressionTranslator<'_> {
     ) -> Result<(), Error> {
         for op_index in instructions {
             let op = &self.graph[op_index];
-            let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+            let expr_name = IndexPrinter::new(op_index, self.graph);
 
             macro_rules! handle_binary_op {
                 ($variant:ident, $lhs:expr, $rhs:expr) => {{
@@ -1111,7 +1093,7 @@ impl ExpressionTranslator<'_> {
         out_stack_index: StackIndex,
         scope: Scope,
     ) -> Result<(), Error> {
-        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+        let expr_name = IndexPrinter::new(op_index, self.graph);
 
         let scope_output = match value {
             SymbolicValue::Result(i) => i,
@@ -1219,7 +1201,7 @@ impl ExpressionTranslator<'_> {
         func: SymbolicValue,
         args: &[SymbolicValue],
     ) -> Result<(), Error> {
-        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+        let expr_name = IndexPrinter::new(op_index, self.graph);
 
         let Some(func) = func.as_op_index() else {
             panic!("Internal error, callee must be function")
@@ -1344,7 +1326,7 @@ impl ExpressionTranslator<'_> {
         extent: SymbolicValue,
         reduction: SymbolicValue,
     ) -> Result<(), Error> {
-        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+        let expr_name = IndexPrinter::new(op_index, self.graph);
 
         let initial = self.value_to_arg(op_index, &initial)?;
         let extent = self.value_to_arg(op_index, &extent)?;
@@ -1567,7 +1549,7 @@ impl ExpressionTranslator<'_> {
         if_branch: SymbolicValue,
         else_branch: SymbolicValue,
     ) -> Result<(), Error> {
-        let expr_name = LocalIndexPrinter::new(op_index, self.graph);
+        let expr_name = IndexPrinter::new(op_index, self.graph);
 
         let condition = self.value_to_arg(op_index, &condition)?;
 

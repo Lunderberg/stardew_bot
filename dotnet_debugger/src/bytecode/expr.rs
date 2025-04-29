@@ -10,6 +10,7 @@ use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
 use crate::{
+    bytecode::printer::IndexPrinter,
     runtime_type::{FunctionType, RuntimePrimType},
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
@@ -1253,10 +1254,11 @@ impl SymbolicGraph {
     /// `Scope::IfBranch(if_else_index)`: The expression is used by
     /// the if branch of the `ExprKind::IfElse` declared at
     /// `if_else_index`, and is not used by any other
+
     pub(crate) fn operation_scope(&self, reachable: &[bool]) -> Vec<Scope> {
         assert_eq!(reachable.len(), self.ops.len());
 
-        let mut func_scope = vec![Scope::Global; self.ops.len()];
+        let mut outermost_legal_scope = vec![Scope::Global; self.ops.len()];
 
         // Step 1: Visit each function in reverse order of
         // declaration.  For each function, mark all expressions that
@@ -1278,7 +1280,8 @@ impl SymbolicGraph {
                     )
                     .into_iter()
                     .for_each(|index| {
-                        func_scope[index.0] = Scope::Function(func_index);
+                        outermost_legal_scope[index.0] =
+                            Scope::Function(func_index);
                     });
                 }
                 _ => {}
@@ -1293,15 +1296,16 @@ impl SymbolicGraph {
         // This step produces a valid scope assignment, preferentially
         // placing expressions in the innermost scope that may legally
         // be applied.
-        let mut all_scopes: Vec<Option<Scope>> = vec![None; self.ops.len()];
+        let mut innermost_legal_scope: Vec<Option<Scope>> =
+            vec![None; self.ops.len()];
         self.iter_extern_funcs().for_each(|OpIndex(i)| {
-            all_scopes[i] = Some(Scope::Global);
+            innermost_legal_scope[i] = Some(Scope::Global);
         });
 
         for current_index in (0..self.ops.len()).rev().filter(|i| reachable[*i])
         {
             let current_op = OpIndex(current_index);
-            let opt_current_scope = all_scopes[current_index];
+            let opt_current_scope = innermost_legal_scope[current_index];
 
             let mut mark_scope =
                 |value: SymbolicValue, new_scope: Option<Scope>| {
@@ -1312,50 +1316,52 @@ impl SymbolicGraph {
                         return;
                     };
                     let OpIndex(upstream_index) = upstream_op;
-                    if func_scope[current_index] != func_scope[upstream_index]
-                        && !matches!(
-                            self[upstream_op].kind,
-                            ExprKind::FunctionArg(_)
-                        )
-                        && !matches!(
-                            self[current_op].kind,
-                            ExprKind::Function { .. }
-                        )
-                    {
+
+                    if matches!(
+                        self[upstream_op].kind,
+                        ExprKind::FunctionArg(_)
+                    ) && !matches!(
+                        self[current_op].kind,
+                        ExprKind::Function { .. }
+                    ) {
                         return;
                     }
 
-                    all_scopes[upstream_index] = match all_scopes
-                        [upstream_index]
-                    {
-                        None => Some(new_scope),
-                        Some(prev_scope) if prev_scope == new_scope => {
-                            Some(prev_scope)
-                        }
-                        Some(prev_scope) => {
-                            let iter_parent_scopes = |scope: Scope| {
-                                std::iter::successors(Some(scope), |scope| {
-                                    scope
-                                        .op_index()
-                                        .and_then(|OpIndex(j)| all_scopes[j])
-                                })
-                                .collect::<Vec<_>>()
-                                .into_iter()
-                                .rev()
-                            };
+                    innermost_legal_scope[upstream_index] =
+                        match innermost_legal_scope[upstream_index] {
+                            None => Some(new_scope),
+                            Some(prev_scope) if prev_scope == new_scope => {
+                                Some(prev_scope)
+                            }
+                            Some(prev_scope) => {
+                                let iter_parent_scopes = |scope: Scope| {
+                                    std::iter::successors(
+                                        Some(scope),
+                                        |scope| {
+                                            scope.op_index().and_then(
+                                                |OpIndex(j)| {
+                                                    innermost_legal_scope[j]
+                                                },
+                                            )
+                                        },
+                                    )
+                                    .collect::<Vec<_>>()
+                                    .into_iter()
+                                    .rev()
+                                };
 
-                            let joint_scope = iter_parent_scopes(prev_scope)
-                            .zip(iter_parent_scopes(new_scope))
-                            .take_while(|(a, b)| a == b)
-                            .map(|(a, _)| a)
-                            .last()
-                            .expect(
-                                "All expressions are within the Global scope",
-                            );
+                                let joint_scope = iter_parent_scopes(prev_scope)
+                                    .zip(iter_parent_scopes(new_scope))
+                                    .take_while(|(a, b)| a == b)
+                                    .map(|(a, _)| a)
+                                    .last()
+                                    .expect(
+                                        "All expressions are within the Global scope",
+                                    );
 
-                            Some(joint_scope)
-                        }
-                    };
+                                Some(joint_scope)
+                            }
+                        };
                 };
 
             match &self[current_op].kind {
@@ -1393,14 +1399,33 @@ impl SymbolicGraph {
         // funciton.  To minimize the amount of unused evaluations in
         // branching expressions, prefer to have as many expressions
         // as possible within the body of conditional branches.
-        let scope: Vec<Scope> = all_scopes
-            .into_iter()
-            .zip(func_scope)
-            .map(|(opt_scope, func_scope)| match (opt_scope, func_scope) {
-                (Some(Scope::IfBranch(_) | Scope::ElseBranch(_)), _) => {
-                    opt_scope.unwrap()
-                }
-                _ => func_scope,
+
+        let scope: Vec<Scope> = innermost_legal_scope
+            .iter()
+            .cloned()
+            .zip(outermost_legal_scope.iter().cloned())
+            .enumerate()
+            .map(|(i,(opt_scope, func_scope))| {
+                opt_scope
+                    .map(|mut scope| {
+                        loop {
+                            if scope == func_scope {
+                                break;
+                            }
+                            if let Scope::Function(func_index) = scope {
+                                let parent_scope = innermost_legal_scope[func_index.0].unwrap_or(outermost_legal_scope[func_index.0]);
+                                assert_ne!(scope,parent_scope,
+                                           "Loop in scopes, expr {} in scope {scope:?}",
+                                           IndexPrinter::new(OpIndex(i),self)
+                                );
+                                scope = parent_scope;
+                            } else {
+                                break;
+                            }
+                        }
+                        scope
+                    })
+                    .unwrap_or(func_scope)
             })
             .collect();
 
