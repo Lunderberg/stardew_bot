@@ -37,26 +37,26 @@ impl BotGoal for FishOnceGoal {
 
         let action = if fishing.is_timing_cast {
             if fishing.casting_power > 0.95 {
-                Some(GameAction::ReleaseTool)
+                GameAction::ReleaseTool
             } else {
-                Some(GameAction::HoldTool)
+                GameAction::HoldTool
             }
         } else if fishing.minigame_in_progress {
             if fishing.should_move_upward() {
-                Some(GameAction::HoldTool)
+                GameAction::HoldTool
             } else {
-                Some(GameAction::ReleaseTool)
+                GameAction::ReleaseTool
             }
         } else if fishing.is_nibbling {
-            Some(GameAction::ReleaseTool)
+            GameAction::ReleaseTool
         } else if fishing.is_fishing {
-            Some(GameAction::HoldTool)
+            GameAction::HoldTool
         } else if fishing.showing_fish {
             return Ok(BotGoalResult::Completed);
         } else if fishing.is_holding_rod {
-            Some(GameAction::HoldTool)
+            GameAction::HoldTool
         } else {
-            None
+            GameAction::Wait
         };
 
         Ok(BotGoalResult::Action(action))

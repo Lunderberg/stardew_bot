@@ -448,7 +448,7 @@ impl BotGoal for LocalMovementGoal {
 
         let Some(next_waypoint) = self.waypoints.last().cloned() else {
             return Ok(if player.movement.is_some() {
-                BotGoalResult::Action(Some(GameAction::StopMoving))
+                BotGoalResult::Action(GameAction::StopMoving)
             } else {
                 BotGoalResult::Completed
             });
@@ -481,7 +481,7 @@ impl BotGoal for LocalMovementGoal {
             GameAction::Move(dir)
         };
 
-        Ok(BotGoalResult::Action(Some(action)))
+        Ok(BotGoalResult::Action(action))
     }
 
     fn description(&self) -> Cow<str> {
@@ -507,9 +507,9 @@ impl BotGoal for FaceDirectionGoal {
                 FacingDirection::South => Direction::South,
                 FacingDirection::West => Direction::West,
             };
-            BotGoalResult::Action(Some(GameAction::Move(dir)))
+            BotGoalResult::Action(GameAction::Move(dir))
         } else if game_state.player.movement.is_some() {
-            BotGoalResult::Action(Some(GameAction::StopMoving))
+            BotGoalResult::Action(GameAction::StopMoving)
         } else {
             BotGoalResult::Completed
         };

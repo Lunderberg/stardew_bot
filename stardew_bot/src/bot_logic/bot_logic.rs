@@ -25,7 +25,7 @@ pub enum BotGoalResult {
     SubGoals(SubGoals),
 
     /// This goal has a direct action to accomplish the goal.
-    Action(Option<GameAction>),
+    Action(GameAction),
 }
 
 pub struct SubGoals(Vec<Box<dyn BotGoal>>);
@@ -59,7 +59,7 @@ impl BotLogic {
                         .for_each(|sub_goal| self.goals.push(sub_goal));
                 }
                 BotGoalResult::Action(game_action) => {
-                    return Ok(game_action);
+                    return Ok(Some(game_action));
                 }
             }
         }
