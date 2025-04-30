@@ -59,6 +59,23 @@ pub struct Warp {
     pub location: Vector<isize>,
     pub target: Vector<isize>,
     pub target_room: String,
+    pub kind: WarpKind,
+}
+
+#[derive(Debug, Clone)]
+pub enum WarpKind {
+    /// Standing on this tile will activate the warp.  This is used
+    /// for transitions between outdoor areas, and for exiting houses.
+    Automatic,
+
+    /// A door that must be explicitly activated.  This is used for
+    /// entering houses.
+    Door,
+
+    /// A door that may only be activated at certain times of the day.
+    /// The times are integer values, which show the time of day.
+    /// For example, 2:00 PM would be the integer 1400.
+    LockedDoor { opens: i32, closes: i32 },
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -178,6 +195,80 @@ impl Location {
                 location: location.clone(),
                 target: target.clone(),
                 target_room: target_room.into(),
+                kind: WarpKind::Automatic,
+            },
+        )?;
+
+        graph.named_native_function(
+            "parse_door",
+            |warps: &mut Vec<Warp>,
+             location_right: isize,
+             location_down: isize,
+             property_key: &str,
+             opt_property_value: Option<&str>| {
+                let location = Vector::new(location_right, location_down);
+
+                let parse_warp = || -> Option<Warp> {
+                    let action = opt_property_value
+                        .filter(|_| property_key == "Action")?;
+
+                    let mut iter_words = action.split(' ');
+                    match iter_words.next() {
+                        Some("Warp") => {
+                            // Warp RIGHT DOWN TARGETNAME
+                            //
+                            // e.g. 'Warp 2 4 FishShop'
+                            let target = {
+                                let right: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                let down: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                Vector::new(right, down)
+                            };
+                            let target_room = iter_words.next()?.to_string();
+                            Some(Warp {
+                                location,
+                                target,
+                                target_room,
+                                kind: WarpKind::Door,
+                            })
+                        }
+                        Some("LockedDoorWarp") => {
+                            // LockedDoorWarp RIGHT DOWN ROOM_NAME TIME_OPEN TIME_CLOSE
+                            //
+                            // e.g. 'LockedDoorWarp 6 19 AdventureGuild 1200 2600'
+                            let target = {
+                                let right: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                let down: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                Vector::new(right, down)
+                            };
+                            let target_room = iter_words.next()?.to_string();
+                            let opens: i32 = iter_words
+                                .next()
+                                .and_then(|right| right.parse().ok())?;
+                            let closes: i32 = iter_words
+                                .next()
+                                .and_then(|right| right.parse().ok())?;
+                            Some(Warp {
+                                location,
+                                target,
+                                target_room,
+                                kind: WarpKind::LockedDoor { opens, closes },
+                            })
+                        }
+                        _ => None,
+                    }
+                };
+
+                if let Some(warp) = parse_warp() {
+                    warps.push(warp)
+                }
             },
         )?;
 
@@ -366,6 +457,18 @@ impl Location {
                 let height = size.Height.prim_cast::<usize>();
                 let shape = new_isize_vector(width, height);
 
+                // Background features of the map.
+                let back_layer = location
+                    .backgroundLayers
+                    ._items[0]
+                    .key;
+                // Buildings in the map.  Accessed to determine the
+                // location and target of interactive doors.
+                let building_layer = location
+                    .buildingLayers
+                    ._items[0]
+                    .key;
+
                 let num_warps = location
                     .warps
                     .count
@@ -403,6 +506,44 @@ impl Location {
                     })
                     .filter(|obj| obj.is_some())
                     .collect();
+
+                let warps = (0..(height*width))
+                    .filter(|i_flat| {
+                        let i = i_flat/height;
+                        let j = i_flat%height;
+                        building_layer.m_tiles[i,j].is_some()
+                    })
+                    .reduce(warps, |warps_inner_0, i_flat| {
+                        let i = i_flat/height;
+                        let j = i_flat%height;
+
+                        let building_tile = building_layer.m_tiles[i,j];
+
+                        let tile_props = building_tile
+                            .m_propertyCollection;
+
+                        let num_tile_props = tile_props
+                            ._count
+                            .prim_cast::<usize>();
+
+                        (0..num_tile_props)
+                            .map(|i_prop| tile_props._entries[i_prop])
+                            .reduce(
+                                warps_inner_0,
+                                |warps_inner_1, prop| {
+                                    let key = prop.key.read_string();
+                                    let value = prop
+                                        .value
+                                        .m_value
+                                        .as::<System.String>()
+                                        .read_string();
+                                    parse_door(warps_inner_1,
+                                               i, j,
+                                               key, value)
+                                })
+
+                    });
+
 
                 let num_resource_clumps = location
                     .resourceClumps
@@ -629,8 +770,8 @@ impl Location {
 
                             let num_properties = tile_sheet
                                 .m_propertyCollection
-                                ._entries
-                                .len();
+                                ._count
+                                .prim_cast::<usize>();
                             (0..num_properties)
                                 .reduce(tile_sheets, |tile_sheets, i_property| {
                                     define_tile_sheets_property(
@@ -659,15 +800,6 @@ impl Location {
                         tile_index,
                     )
                 };
-
-                let back_layer = location
-                    .backgroundLayers
-                    ._items[0]
-                    .key;
-                let building_layer = location
-                    .buildingLayers
-                    ._items[0]
-                    .key;
 
                 let blocked = (0..(height*width))
                     .map(|i_flat| {

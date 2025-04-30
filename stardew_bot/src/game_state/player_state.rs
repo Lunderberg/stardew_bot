@@ -11,6 +11,7 @@ pub struct PlayerState {
     pub movement: Option<Direction>,
     pub room_name: String,
     pub skills: PlayerSkills,
+    pub fade_to_black: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -103,13 +104,15 @@ impl PlayerState {
              facing: &FacingDirection,
              movement: Option<&Direction>,
              room_name: &str,
-             skills: &PlayerSkills| {
+             skills: &PlayerSkills,
+             fade_to_black: bool| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
                     movement: movement.cloned(),
                     room_name: room_name.into(),
                     skills: skills.clone(),
+                    fade_to_black,
                 }
             },
         )?;
@@ -161,7 +164,18 @@ impl PlayerState {
                     new_skills(farming, fishing, foraging, mining, combat)
                 };
 
-                new_player(position, facing, movement, room_name, skills)
+                let fade_to_black = StardewValley.Game1
+                    .screenFade
+                    .fadeToBlack;
+
+                new_player(
+                    position,
+                    facing,
+                    movement,
+                    room_name,
+                    skills,
+                    fade_to_black
+                )
             }
         })?;
 

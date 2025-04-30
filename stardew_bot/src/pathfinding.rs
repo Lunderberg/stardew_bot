@@ -322,12 +322,12 @@ impl WidgetWindow<Error> for PathfindingUI {
         let current_location: &str = &game_state.player.room_name;
         let position = game_state.player.position / 64.0;
 
-        let (left_column, draw_area) = area.split_from_left(30);
+        let (left_column, draw_area) = area.split_from_left(15);
 
-        let (top_area, table_area) = left_column.split_from_top(2);
+        let (top_area, table_area) = left_column.split_from_top(3);
 
         let top_text = Text::raw(format!(
-            "Current: {} ({:.1}, {:.1})",
+            "Current: {}\n({:.1}, {:.1})",
             current_location, position.right, position.down,
         ));
         top_text.render(top_area, buf);
@@ -338,9 +338,8 @@ impl WidgetWindow<Error> for PathfindingUI {
             .into_iter()
             .flat_map(|move_goal| move_goal.iter_waypoints().rev())
             .map(|waypoint| {
-                let room_name = Cell::new("TODO room");
                 let pos = Cell::new(format!("{waypoint}"));
-                Row::new([pos, room_name])
+                Row::new([pos])
             });
 
         let table = Table::new(

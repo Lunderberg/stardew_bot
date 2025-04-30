@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
-    game_state::{FacingDirection, Location, TileMap, Vector},
+    game_state::{FacingDirection, Location, TileMap, Vector, WarpKind},
     Direction, Error, GameAction, GameState,
 };
 
@@ -37,6 +37,11 @@ pub struct LocalMovementGoal {
     room_name: String,
     position: Vector<f32>,
     waypoints: Vec<Vector<f32>>,
+
+    /// If the endpoint must be activated in order to proceed.
+    /// Initialized as `None`, to be filled out based on the game
+    /// state.
+    activate_endpoint: Option<bool>,
 }
 
 pub struct FaceDirectionGoal(pub FacingDirection);
@@ -247,6 +252,7 @@ impl LocalMovementGoal {
             room_name,
             position,
             waypoints: Vec::new(),
+            activate_endpoint: None,
         }
     }
 
@@ -273,6 +279,29 @@ impl LocalMovementGoal {
         let goal_dist = (self.position - player.position / 64.0).mag();
         if self.waypoints.is_empty() && goal_dist > TOLERANCE {
             self.waypoints = self.generate_plan(game_state)?;
+        }
+
+        if self.activate_endpoint.is_none() {
+            let location = game_state
+                .locations
+                .iter()
+                .find(|loc| loc.name == self.room_name)
+                .unwrap_or_else(|| {
+                    panic!("Cannot find room named '{}'", self.room_name)
+                });
+            let target_tile = self.position.map(|x| x.round() as isize);
+            let must_open_door = location
+                .warps
+                .iter()
+                .find(|warp| warp.location == target_tile)
+                .map(|warp| {
+                    matches!(
+                        warp.kind,
+                        WarpKind::Door | WarpKind::LockedDoor { .. }
+                    )
+                })
+                .unwrap_or(false);
+            self.activate_endpoint = Some(must_open_door);
         }
 
         Ok(())
@@ -439,7 +468,20 @@ impl BotGoal for LocalMovementGoal {
             })
             .expect("Direction::iter is non-empty");
 
-        Ok(BotGoalResult::Action(Some(GameAction::Move(dir))))
+        let must_open_door = self.activate_endpoint.unwrap_or(false)
+            && dir.is_cardinal()
+            && player_position.as_tile() + dir.offset()
+                == self.position.as_tile();
+
+        let action = if must_open_door && player.fade_to_black {
+            GameAction::StopActivatingTile
+        } else if must_open_door {
+            GameAction::ActivateTile
+        } else {
+            GameAction::Move(dir)
+        };
+
+        Ok(BotGoalResult::Action(Some(action)))
     }
 
     fn description(&self) -> Cow<str> {

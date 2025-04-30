@@ -68,6 +68,12 @@ impl<T> Vector<T> {
     }
 }
 
+impl Vector<f32> {
+    pub fn as_tile(self) -> Vector<isize> {
+        self.map(|x| x.round() as isize)
+    }
+}
+
 impl<T> Rectangle<T> {
     pub fn iter_points(self) -> impl Iterator<Item = Vector<T>>
     where

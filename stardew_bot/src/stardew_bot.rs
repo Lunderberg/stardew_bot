@@ -1,7 +1,7 @@
 use crate::{
-    game_action::InputState, game_state::GameStateReader, BotGoalDisplay,
-    BotLogic, Error, FishingUI, GameAction, GameState, KeyboardDisplay,
-    PathfindingUI, PlayerStats, RunningLog, TuiDrawRate, X11Handler,
+    game_state::GameStateReader, BotGoalDisplay, BotLogic, Error, FishingUI,
+    GameAction, GameState, KeyboardDisplay, PathfindingUI, PlayerStats,
+    RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -31,8 +31,6 @@ pub struct StardewBot {
 
     /// Previous frame's per-widget timers
     widget_timing_stats: Vec<WidgetTimingStatistics>,
-
-    input_state: InputState,
 
     x11_handler: X11Handler,
 
@@ -199,7 +197,6 @@ impl StardewBot {
             buffers,
             game_state_reader,
             widget_timing_stats: Vec::new(),
-            input_state: InputState::default(),
             x11_handler,
             should_exit: false,
             keystrokes: KeySequence::default(),
@@ -481,11 +478,7 @@ impl StardewBot {
         let active_window = self.x11_handler.query_active_window()?;
         if active_window == self.stardew_window {
             actions.into_iter().try_for_each(|action| {
-                action.apply(
-                    &mut self.input_state,
-                    &mut self.x11_handler,
-                    self.stardew_window,
-                )
+                action.apply(&mut self.x11_handler, self.stardew_window)
             })?;
         }
 
