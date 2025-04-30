@@ -7,6 +7,7 @@ use std::{
 
 use derive_more::derive::From;
 use memory_reader::{OwnedBytes, Pointer};
+use paste::paste;
 use thiserror::Error;
 
 use crate::{
@@ -54,8 +55,9 @@ pub struct VirtualMachine {
 
 pub struct VMEvaluator<'a> {
     vm: &'a VirtualMachine,
-    entry_point: InstructionIndex,
+    current_instruction: InstructionIndex,
     reader: Box<dyn VMReader + 'a>,
+    values: VMResults,
 }
 
 #[derive(Debug, From)]
@@ -853,10 +855,19 @@ impl VirtualMachine {
             .ok_or_else(|| VMExecutionError::NoSuchFunction(name.into()))?
             .clone();
 
+        let values = {
+            let stack = (0..self.stack_size).map(|_| None).collect();
+            VMResults {
+                values: stack,
+                num_instructions_evaluated: 0,
+            }
+        };
+
         Ok(VMEvaluator {
             vm: self,
-            entry_point,
+            current_instruction: entry_point,
             reader: Box::new(DummyReader),
+            values,
         })
     }
 
@@ -873,6 +884,76 @@ impl VirtualMachine {
     }
 }
 
+macro_rules! define_comparison_op {
+    ($cmp:ident) => {paste!{
+        fn [< eval_ $cmp >](
+            &mut self,
+            lhs: VMArg,
+            rhs: VMArg,
+            output: StackIndex,
+        ) -> Result<(), Error> {
+            let opt_lhs = self.arg_to_prim(lhs)?;
+            let opt_rhs = self.arg_to_prim(rhs)?;
+
+            self.values[output] = match (opt_lhs, opt_rhs) {
+                (Some(lhs), Some(rhs)) => {
+                    let res = match (lhs, rhs) {
+                        (
+                            RuntimePrimValue::NativeUInt(a),
+                            RuntimePrimValue::NativeUInt(b),
+                        ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
+                        _ => Err(Error::InvalidOperandsForNumericComparison {
+                            lhs: lhs.runtime_type().into(),
+                            rhs: rhs.runtime_type().into(),
+                        }),
+                    }?;
+                    Some(res.into())
+                }
+                _ => None,
+            };
+
+            Ok(())
+        }
+    }};
+}
+
+macro_rules! define_binary_integer_op {
+    ($func_name:ident, $op_func:ident) => {
+        fn $func_name(
+            &mut self,
+            lhs: VMArg,
+            rhs: VMArg,
+            output: StackIndex,
+        ) -> Result<(), Error> {
+            let op_name =
+                self.vm.instructions[self.current_instruction.0].op_name();
+
+            let opt_lhs = self.arg_to_prim(lhs)?;
+            let opt_rhs = self.arg_to_prim(rhs)?;
+
+            self.values[output] = match (opt_lhs, opt_rhs) {
+                (Some(lhs), Some(rhs)) => {
+                    let res = match (lhs, rhs) {
+                        (
+                            RuntimePrimValue::NativeUInt(a),
+                            RuntimePrimValue::NativeUInt(b),
+                        ) => Ok(RuntimePrimValue::NativeUInt(a.$op_func(b))),
+                        (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                            op: op_name,
+                            lhs: lhs.runtime_type().into(),
+                            rhs: rhs.runtime_type().into(),
+                        }),
+                    }?;
+                    Some(res.into())
+                }
+                _ => None,
+            };
+
+            Ok(())
+        }
+    };
+}
+
 impl<'a> VMEvaluator<'a> {
     pub fn with_reader(self, reader: impl VMReader + 'a) -> VMEvaluator<'a> {
         VMEvaluator {
@@ -882,145 +963,26 @@ impl<'a> VMEvaluator<'a> {
     }
 
     pub fn evaluate(mut self) -> Result<VMResults, Error> {
-        let mut values = {
-            let stack = (0..self.vm.stack_size).map(|_| None).collect();
-            VMResults {
-                values: stack,
-                num_instructions_evaluated: 0,
-            }
-        };
-
-        let mut current_instruction = self.entry_point;
-        while current_instruction.0 < self.vm.instructions.len() {
-            let instruction = &self.vm.instructions[current_instruction.0];
+        while self.current_instruction.0 < self.vm.instructions.len() {
+            let instruction = &self.vm.instructions[self.current_instruction.0];
             let mut next_instruction =
-                InstructionIndex(current_instruction.0 + 1);
-            values.num_instructions_evaluated += 1;
-
-            macro_rules! arg_to_prim {
-                ($arg:expr, $operator:expr) => {{
-                    let arg: &VMArg = $arg;
-                    let prim:Option<RuntimePrimValue> = match arg {
-                        VMArg::Const(value) => Ok(Some(*value)),
-                        VMArg::SavedValue(index) => {
-                            match &values[*index] {
-                                Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
-                                Some(StackValue::Native(native)) => Err(
-                                    VMExecutionError
-                                        ::OperatorExpectsPrimitiveArgument {
-                                            operator: $operator,
-                                            index: current_instruction,
-                                            arg_type: native.ty.clone(),
-                                    },
-                                ),
-                                None => Ok(None),
-                            }
-                        }
-                    }?;
-                    prim
-                }};
-            }
-
-            macro_rules! comparison_op {
-                ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $cmp:ident) => {{
-                    let lhs = $lhs;
-                    let rhs = $rhs;
-                    let output = $output;
-
-                    let opt_lhs = arg_to_prim!(lhs, $name);
-                    let opt_rhs = arg_to_prim!(rhs, $name);
-
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
-                                _ => Err(
-                                    Error::InvalidOperandsForNumericComparison {
-                                        lhs: lhs.runtime_type().into(),
-                                        rhs: rhs.runtime_type().into(),
-                                    },
-                                ),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
-                }};
-            }
-
-            macro_rules! integer_op {
-                ($lhs:expr, $rhs:expr, $output:expr, $name:literal, $op:ident) => {{
-                    let lhs = $lhs;
-                    let rhs = $rhs;
-                    let output = $output;
-                    let opt_lhs = arg_to_prim!(lhs, $name);
-                    let opt_rhs = arg_to_prim!(rhs, $name);
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::NativeUInt(a.$op(b))),
-                                (lhs, rhs) => {
-                                    Err(Error::InvalidOperandsForBinaryOp {
-                                        op: instruction.op_name(),
-                                        lhs: lhs.runtime_type().into(),
-                                        rhs: rhs.runtime_type().into(),
-                                    })
-                                }
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
-                }};
-            }
+                InstructionIndex(self.current_instruction.0 + 1);
+            self.values.num_instructions_evaluated += 1;
 
             match instruction {
                 Instruction::NoOp => {}
-                Instruction::Clear { loc } => {
-                    values[*loc] = None;
+                &Instruction::Clear { loc } => self.eval_clear(loc)?,
+                &Instruction::Copy { value, output } => {
+                    self.eval_copy(value, output)?
                 }
-                Instruction::Copy { value, output } => {
-                    let value = arg_to_prim!(value, "Copy");
-                    values[*output] = value.map(Into::into);
-                }
-                &Instruction::Swap(lhs, rhs) => {
-                    if lhs != rhs {
-                        let (a, b) = if lhs.0 < rhs.0 {
-                            (lhs, rhs)
-                        } else {
-                            (rhs, lhs)
-                        };
+                &Instruction::Swap(lhs, rhs) => self.eval_swap(lhs, rhs)?,
 
-                        let (a_slice, b_slice) =
-                            values[a..].split_at_mut(b - a);
-                        let a_mut = a_slice.first_mut().unwrap();
-                        let b_mut = b_slice.first_mut().unwrap();
-                        std::mem::swap(a_mut, b_mut);
-                    }
-                }
-
-                Instruction::ConditionalJump { cond, dest } => {
-                    let cond = arg_to_prim!(cond, "ConditionalJump");
-                    let should_jump = cond
-                        .map(|val| match val {
-                            RuntimePrimValue::Bool(val) => Ok(val),
-                            other => Err(
-                                VMExecutionError::InvalidOperandForConditionalJump(
-                                    other.runtime_type()
-                                ),
-                            ),
-                        })
-                        .transpose()?
-                        .unwrap_or(false);
-                    if should_jump {
-                        next_instruction = *dest;
-                    }
+                &Instruction::ConditionalJump { cond, dest } => {
+                    self.eval_conditional_jump(
+                        cond,
+                        dest,
+                        &mut next_instruction,
+                    )?;
                 }
 
                 Instruction::NativeFunctionCall {
@@ -1028,283 +990,86 @@ impl<'a> VMEvaluator<'a> {
                     args,
                     output,
                 } => {
-                    let mut inline_consts = Vec::new();
-                    let mut args = values
-                        .collect_native_function_args(args, &mut inline_consts);
-                    let result =
-                        self.vm.native_functions[index.0].apply(&mut args)?;
-                    if let Some(output) = output {
-                        values[*output] = result;
-                    }
+                    self.eval_native_function_call(*index, args, *output)?;
                 }
 
-                Instruction::PrimCast {
+                &Instruction::PrimCast {
                     value,
                     prim_type,
                     output,
-                } => {
-                    let value = arg_to_prim!(value, "PrimCast");
-                    values[*output] = value
-                        .map(|val| val.prim_cast(*prim_type))
-                        .transpose()?
-                        .map(Into::into);
+                } => self.eval_prim_cast(value, prim_type, output)?,
+
+                &Instruction::IsSome { value, output } => {
+                    self.eval_is_some(value, output)?
                 }
 
-                Instruction::IsSome { value, output } => {
-                    let is_some: bool = match value {
-                        VMArg::Const(_) => true,
-                        VMArg::SavedValue(stack_index) => {
-                            values[*stack_index].is_some()
-                        }
-                    };
-                    values[*output] =
-                        Some(RuntimePrimValue::Bool(is_some).into());
+                &Instruction::Add { lhs, rhs, output } => {
+                    self.eval_add(lhs, rhs, output)?
+                }
+                &Instruction::Sub { lhs, rhs, output } => {
+                    self.eval_sub(lhs, rhs, output)?
+                }
+                &Instruction::Mul { lhs, rhs, output } => {
+                    self.eval_mul(lhs, rhs, output)?
+                }
+                &Instruction::Div { lhs, rhs, output } => {
+                    self.eval_div(lhs, rhs, output)?
+                }
+                &Instruction::Mod { lhs, rhs, output } => {
+                    self.eval_mod(lhs, rhs, output)?
                 }
 
-                Instruction::Add { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "Add");
-                    let opt_rhs = arg_to_prim!(rhs, "Add");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::NativeUInt(a + b)),
-                                (
-                                    RuntimePrimValue::Ptr(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::Ptr(a + b)),
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::Ptr(b),
-                                ) => Ok(RuntimePrimValue::Ptr(b + a)),
-                                (lhs, rhs) => {
-                                    Err(Error::InvalidOperandsForBinaryOp {
-                                        op: instruction.op_name(),
-                                        lhs: lhs.runtime_type().into(),
-                                        rhs: rhs.runtime_type().into(),
-                                    })
-                                }
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
-                }
-                Instruction::Sub { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "Sub");
-                    let opt_rhs = arg_to_prim!(rhs, "Sub");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::NativeUInt(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::NativeUInt(a - b)),
-                                (
-                                    RuntimePrimValue::Ptr(a),
-                                    RuntimePrimValue::NativeUInt(b),
-                                ) => Ok(RuntimePrimValue::Ptr(a - b)),
-                                (lhs, rhs) => {
-                                    Err(Error::InvalidOperandsForBinaryOp {
-                                        op: instruction.op_name(),
-                                        lhs: lhs.runtime_type().into(),
-                                        rhs: rhs.runtime_type().into(),
-                                    })
-                                }
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
-                }
-                Instruction::Mul { lhs, rhs, output } => {
-                    integer_op! {lhs, rhs, output, "Mul", mul}
-                }
-                Instruction::Div { lhs, rhs, output } => {
-                    integer_op! {lhs, rhs, output, "Div", div_euclid}
-                }
-                Instruction::Mod { lhs, rhs, output } => {
-                    integer_op! {lhs, rhs, output, "Mod", rem_euclid}
+                &Instruction::And { lhs, rhs, output } => {
+                    self.eval_and(lhs, rhs, output)?
                 }
 
-                Instruction::And { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "And");
-                    let opt_rhs = arg_to_prim!(rhs, "And");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (None, Some(RuntimePrimValue::Bool(false)))
-                        | (Some(RuntimePrimValue::Bool(false)), None) => {
-                            Some(RuntimePrimValue::Bool(false).into())
-                        }
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::Bool(a),
-                                    RuntimePrimValue::Bool(b),
-                                ) => Ok(RuntimePrimValue::Bool(a && b)),
-                                _ => Err(Error::InvalidOperandsForBinaryOp {
-                                    op: instruction.op_name(),
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                }),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                &Instruction::Or { lhs, rhs, output } => {
+                    self.eval_or(lhs, rhs, output)?
                 }
 
-                Instruction::Or { lhs, rhs, output } => {
-                    let opt_lhs = arg_to_prim!(lhs, "Or");
-                    let opt_rhs = arg_to_prim!(rhs, "Or");
-                    values[*output] = match (opt_lhs, opt_rhs) {
-                        (None, Some(RuntimePrimValue::Bool(true)))
-                        | (Some(RuntimePrimValue::Bool(true)), None) => {
-                            Some(RuntimePrimValue::Bool(true).into())
-                        }
-                        (Some(lhs), Some(rhs)) => {
-                            let res = match (lhs, rhs) {
-                                (
-                                    RuntimePrimValue::Bool(a),
-                                    RuntimePrimValue::Bool(b),
-                                ) => Ok(RuntimePrimValue::Bool(a || b)),
-                                _ => Err(Error::InvalidOperandsForBinaryOp {
-                                    op: instruction.op_name(),
-                                    lhs: lhs.runtime_type().into(),
-                                    rhs: rhs.runtime_type().into(),
-                                }),
-                            }?;
-                            Some(res.into())
-                        }
-                        _ => None,
-                    };
+                &Instruction::Not { arg, output } => {
+                    self.eval_not(arg, output)?
                 }
 
-                Instruction::Not { arg, output } => {
-                    let opt_arg = arg_to_prim!(arg, "Not");
-                    values[*output] = match opt_arg {
-                        Some(RuntimePrimValue::Bool(b)) => {
-                            Ok(Some(RuntimePrimValue::Bool(!b).into()))
-                        }
-                        Some(other) => Err(Error::InvalidOperandForUnaryOp {
-                            op: instruction.op_name(),
-                            arg: other.runtime_type().into(),
-                        }),
-                        None => Ok(None),
-                    }?;
+                &Instruction::Equal { lhs, rhs, output } => {
+                    self.eval_eq(lhs, rhs, output)?
+                }
+                &Instruction::NotEqual { lhs, rhs, output } => {
+                    self.eval_ne(lhs, rhs, output)?
+                }
+                &Instruction::LessThan { lhs, rhs, output } => {
+                    self.eval_lt(lhs, rhs, output)?
+                }
+                &Instruction::LessThanOrEqual { lhs, rhs, output } => {
+                    self.eval_le(lhs, rhs, output)?
+                }
+                &Instruction::GreaterThan { lhs, rhs, output } => {
+                    self.eval_gt(lhs, rhs, output)?
+                }
+                &Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
+                    self.eval_ge(lhs, rhs, output)?
                 }
 
-                Instruction::Equal { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "Equal", eq}
-                }
-                Instruction::NotEqual { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "NotEqual", ne}
-                }
-                Instruction::LessThan { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "LessThan", lt}
-                }
-                Instruction::LessThanOrEqual { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "LessThanOrEqual", le}
-                }
-                Instruction::GreaterThan { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "GreaterThan", gt}
-                }
-                Instruction::GreaterThanOrEqual { lhs, rhs, output } => {
-                    comparison_op! {lhs, rhs, output, "GreaterThanOrEqual", ge}
-                }
-
-                Instruction::Downcast {
+                &Instruction::Downcast {
                     obj,
                     subtype,
                     output,
-                } => {
-                    let obj = arg_to_prim!(obj, "Downcast");
-                    values[*output] = match obj {
-                        None => None,
-                        Some(RuntimePrimValue::Ptr(ptr)) => {
-                            let actual_type_ptr: Pointer = {
-                                let mut arr = [0; Pointer::SIZE];
-                                self.reader.read_bytes(ptr, &mut arr)?;
-                                arr.into()
-                            };
-                            self.reader
-                                .is_dotnet_base_class_of(
-                                    *subtype,
-                                    actual_type_ptr.into(),
-                                )?
-                                .then(|| RuntimePrimValue::Ptr(ptr).into())
-                        }
-                        Some(other) => {
-                            return Err(
-                                VMExecutionError::DowncastAppliedToNonPointer(
-                                    other,
-                                )
-                                .into(),
-                            );
-                        }
-                    };
-                }
-                Instruction::Read {
+                } => self.eval_downcast(obj, subtype, output)?,
+
+                &Instruction::Read {
                     ptr,
                     prim_type,
                     output,
-                } => {
-                    let ptr = arg_to_prim!(ptr, "Read");
-                    values[*output] = match ptr {
-                        None => None,
-                        Some(RuntimePrimValue::Ptr(ptr)) => {
-                            let bytes = {
-                                let mut vec = vec![0; prim_type.size_bytes()];
-                                self.reader.read_bytes(ptr, &mut vec)?;
-                                vec
-                            };
-                            let prim_value = prim_type.parse(&bytes)?;
-                            match prim_value {
-                                RuntimePrimValue::Ptr(ptr) if ptr.is_null() => {
-                                    None
-                                }
-                                other => Some(other.into()),
-                            }
-                        }
-                        Some(other) => {
-                            return Err(
-                                VMExecutionError::ReadAppliedToNonPointer(
-                                    other,
-                                )
-                                .into(),
-                            );
-                        }
-                    };
-                }
-                Instruction::ReadString { ptr, output } => {
-                    let opt_prim = arg_to_prim!(ptr, "ReadString");
-                    values[*output] = opt_prim
-                        .map(|prim| -> Result<_, Error> {
-                            let ptr: Pointer = prim.try_into()?;
-                            let runtime_string = RuntimeString::read_string(
-                                ptr,
-                                |byte_range| -> Result<OwnedBytes, Error> {
-                                    let num_bytes =
-                                        byte_range.end - byte_range.start;
-                                    let mut bytes = vec![0; num_bytes];
-                                    self.reader.read_bytes(
-                                        byte_range.start,
-                                        &mut bytes,
-                                    )?;
-                                    Ok(OwnedBytes::new(byte_range.start, bytes))
-                                },
-                            )?;
-                            let string: String = runtime_string.into();
-                            Ok(ExposedNativeObject::new(string).into())
-                        })
-                        .transpose()?;
+                } => self.eval_read(ptr, prim_type, output)?,
+
+                &Instruction::ReadString { ptr, output } => {
+                    self.eval_read_string(ptr, output)?
                 }
 
                 Instruction::Return { outputs } => {
                     let mut inline_consts = Vec::new();
-                    let mut collected_outputs = values
-                        .collect_native_function_args(
+                    let mut collected_outputs =
+                        self.values.collect_native_function_args(
                             outputs,
                             &mut inline_consts,
                         );
@@ -1314,15 +1079,419 @@ impl<'a> VMEvaluator<'a> {
                         .collect();
                     return Ok(VMResults {
                         values: outputs,
-                        ..values
+                        ..self.values
                     });
                 }
             }
 
-            current_instruction = next_instruction;
+            self.current_instruction = next_instruction;
         }
 
         Err(VMExecutionError::ReachedEndWithoutReturnInstruction.into())
+    }
+
+    fn arg_to_prim(
+        &self,
+        arg: VMArg,
+    ) -> Result<Option<RuntimePrimValue>, Error> {
+        match arg {
+            VMArg::Const(value) => Ok(Some(value)),
+            VMArg::SavedValue(index) => match &self.values[index] {
+                Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
+                Some(StackValue::Native(native)) => {
+                    Err(VMExecutionError::OperatorExpectsPrimitiveArgument {
+                        operator: self.vm.instructions
+                            [self.current_instruction.0]
+                            .op_name(),
+                        index: self.current_instruction,
+                        arg_type: native.ty.clone(),
+                    }
+                    .into())
+                }
+                None => Ok(None),
+            },
+        }
+    }
+
+    fn eval_clear(&mut self, loc: StackIndex) -> Result<(), Error> {
+        self.values[loc] = None;
+        Ok(())
+    }
+
+    fn eval_copy(
+        &mut self,
+        value: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_value = self.arg_to_prim(value)?;
+
+        self.values[output] = opt_value.map(Into::into);
+        Ok(())
+    }
+
+    fn eval_swap(
+        &mut self,
+        lhs: StackIndex,
+        rhs: StackIndex,
+    ) -> Result<(), Error> {
+        if lhs != rhs {
+            let (a, b) = if lhs.0 < rhs.0 {
+                (lhs, rhs)
+            } else {
+                (rhs, lhs)
+            };
+
+            let (a_slice, b_slice) = self.values[a..].split_at_mut(b - a);
+            let a_mut = a_slice.first_mut().unwrap();
+            let b_mut = b_slice.first_mut().unwrap();
+            std::mem::swap(a_mut, b_mut);
+        }
+        Ok(())
+    }
+
+    fn eval_conditional_jump(
+        &mut self,
+        cond: VMArg,
+        dest: InstructionIndex,
+        next_instruction: &mut InstructionIndex,
+    ) -> Result<(), Error> {
+        let opt_cond = self.arg_to_prim(cond)?;
+
+        let should_jump = opt_cond
+            .map(|val| match val {
+                RuntimePrimValue::Bool(val) => Ok(val),
+                other => {
+                    Err(VMExecutionError::InvalidOperandForConditionalJump(
+                        other.runtime_type(),
+                    ))
+                }
+            })
+            .transpose()?
+            .unwrap_or(false);
+
+        if should_jump {
+            *next_instruction = dest;
+        }
+
+        Ok(())
+    }
+
+    fn eval_native_function_call(
+        &mut self,
+        func_index: FunctionIndex,
+        args: &[VMArg],
+        output: Option<StackIndex>,
+    ) -> Result<(), Error> {
+        let mut inline_consts = Vec::new();
+        let mut args = self
+            .values
+            .collect_native_function_args(args, &mut inline_consts);
+        let result = self.vm.native_functions[func_index.0].apply(&mut args)?;
+        if let Some(output) = output {
+            self.values[output] = result;
+        }
+        Ok(())
+    }
+
+    fn eval_prim_cast(
+        &mut self,
+        value: VMArg,
+        prim_type: RuntimePrimType,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_value = self.arg_to_prim(value)?;
+        self.values[output] = opt_value
+            .map(|val| val.prim_cast(prim_type))
+            .transpose()?
+            .map(Into::into);
+        Ok(())
+    }
+
+    fn eval_is_some(
+        &mut self,
+        value: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let is_some: bool = match value {
+            VMArg::Const(_) => true,
+            VMArg::SavedValue(stack_index) => {
+                self.values[stack_index].is_some()
+            }
+        };
+        self.values[output] = Some(RuntimePrimValue::Bool(is_some).into());
+        Ok(())
+    }
+
+    fn eval_add(
+        &mut self,
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_lhs = self.arg_to_prim(lhs)?;
+        let opt_rhs = self.arg_to_prim(rhs)?;
+
+        self.values[output] = match (opt_lhs, opt_rhs) {
+            (Some(lhs), Some(rhs)) => {
+                let res = match (lhs, rhs) {
+                    (
+                        RuntimePrimValue::NativeUInt(a),
+                        RuntimePrimValue::NativeUInt(b),
+                    ) => Ok(RuntimePrimValue::NativeUInt(a + b)),
+                    (
+                        RuntimePrimValue::Ptr(a),
+                        RuntimePrimValue::NativeUInt(b),
+                    ) => Ok(RuntimePrimValue::Ptr(a + b)),
+                    (
+                        RuntimePrimValue::NativeUInt(a),
+                        RuntimePrimValue::Ptr(b),
+                    ) => Ok(RuntimePrimValue::Ptr(b + a)),
+                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                        op: op_name,
+                        lhs: lhs.runtime_type().into(),
+                        rhs: rhs.runtime_type().into(),
+                    }),
+                }?;
+                Some(res.into())
+            }
+            _ => None,
+        };
+
+        Ok(())
+    }
+
+    fn eval_sub(
+        &mut self,
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_lhs = self.arg_to_prim(lhs)?;
+        let opt_rhs = self.arg_to_prim(rhs)?;
+
+        self.values[output] = match (opt_lhs, opt_rhs) {
+            (Some(lhs), Some(rhs)) => {
+                let res = match (lhs, rhs) {
+                    (
+                        RuntimePrimValue::NativeUInt(a),
+                        RuntimePrimValue::NativeUInt(b),
+                    ) => Ok(RuntimePrimValue::NativeUInt(a - b)),
+                    (
+                        RuntimePrimValue::Ptr(a),
+                        RuntimePrimValue::NativeUInt(b),
+                    ) => Ok(RuntimePrimValue::Ptr(a - b)),
+                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                        op: op_name,
+                        lhs: lhs.runtime_type().into(),
+                        rhs: rhs.runtime_type().into(),
+                    }),
+                }?;
+                Some(res.into())
+            }
+            _ => None,
+        };
+
+        Ok(())
+    }
+
+    define_binary_integer_op! {eval_mul, mul}
+    define_binary_integer_op! {eval_div, div_euclid}
+    define_binary_integer_op! {eval_mod, rem_euclid}
+
+    fn eval_and(
+        &mut self,
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_lhs = self.arg_to_prim(lhs)?;
+        let opt_rhs = self.arg_to_prim(rhs)?;
+
+        self.values[output] = match (opt_lhs, opt_rhs) {
+            (None, Some(RuntimePrimValue::Bool(false)))
+            | (Some(RuntimePrimValue::Bool(false)), None) => {
+                Some(RuntimePrimValue::Bool(false).into())
+            }
+            (Some(lhs), Some(rhs)) => {
+                let res = match (lhs, rhs) {
+                    (RuntimePrimValue::Bool(a), RuntimePrimValue::Bool(b)) => {
+                        Ok(RuntimePrimValue::Bool(a && b))
+                    }
+                    _ => Err(Error::InvalidOperandsForBinaryOp {
+                        op: op_name,
+                        lhs: lhs.runtime_type().into(),
+                        rhs: rhs.runtime_type().into(),
+                    }),
+                }?;
+                Some(res.into())
+            }
+            _ => None,
+        };
+
+        Ok(())
+    }
+
+    fn eval_or(
+        &mut self,
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_lhs = self.arg_to_prim(lhs)?;
+        let opt_rhs = self.arg_to_prim(rhs)?;
+
+        self.values[output] = match (opt_lhs, opt_rhs) {
+            (None, Some(RuntimePrimValue::Bool(true)))
+            | (Some(RuntimePrimValue::Bool(true)), None) => {
+                Some(RuntimePrimValue::Bool(true).into())
+            }
+            (Some(lhs), Some(rhs)) => {
+                let res = match (lhs, rhs) {
+                    (RuntimePrimValue::Bool(a), RuntimePrimValue::Bool(b)) => {
+                        Ok(RuntimePrimValue::Bool(a || b))
+                    }
+                    _ => Err(Error::InvalidOperandsForBinaryOp {
+                        op: op_name,
+                        lhs: lhs.runtime_type().into(),
+                        rhs: rhs.runtime_type().into(),
+                    }),
+                }?;
+                Some(res.into())
+            }
+            _ => None,
+        };
+
+        Ok(())
+    }
+
+    fn eval_not(
+        &mut self,
+        arg: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_arg = self.arg_to_prim(arg)?;
+
+        self.values[output] = match opt_arg {
+            Some(RuntimePrimValue::Bool(b)) => {
+                Ok(Some(RuntimePrimValue::Bool(!b).into()))
+            }
+            Some(other) => Err(Error::InvalidOperandForUnaryOp {
+                op: op_name,
+                arg: other.runtime_type().into(),
+            }),
+            None => Ok(None),
+        }?;
+
+        Ok(())
+    }
+
+    define_comparison_op! {eq}
+    define_comparison_op! {ne}
+    define_comparison_op! {lt}
+    define_comparison_op! {le}
+    define_comparison_op! {gt}
+    define_comparison_op! {ge}
+
+    fn eval_downcast(
+        &mut self,
+        obj: VMArg,
+        subtype: TypedPointer<MethodTable>,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let obj = self.arg_to_prim(obj)?;
+
+        self.values[output] = match obj {
+            None => Ok(None),
+            Some(RuntimePrimValue::Ptr(ptr)) => {
+                let actual_type_ptr: Pointer = {
+                    let mut arr = [0; Pointer::SIZE];
+                    self.reader.read_bytes(ptr, &mut arr)?;
+                    arr.into()
+                };
+                let is_valid_cast = self
+                    .reader
+                    .is_dotnet_base_class_of(subtype, actual_type_ptr.into())?;
+
+                Ok(is_valid_cast.then(|| RuntimePrimValue::Ptr(ptr).into()))
+            }
+            Some(other) => {
+                Err(VMExecutionError::DowncastAppliedToNonPointer(other))
+            }
+        }?;
+
+        Ok(())
+    }
+
+    fn eval_read(
+        &mut self,
+        ptr: VMArg,
+        prim_type: RuntimePrimType,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_ptr = self.arg_to_prim(ptr)?;
+
+        self.values[output] = match opt_ptr {
+            None => Ok(None),
+            Some(RuntimePrimValue::Ptr(ptr)) => {
+                let bytes = {
+                    let mut vec = vec![0; prim_type.size_bytes()];
+                    self.reader.read_bytes(ptr, &mut vec)?;
+                    vec
+                };
+                let prim_value = prim_type.parse(&bytes)?;
+                match prim_value {
+                    RuntimePrimValue::Ptr(ptr) if ptr.is_null() => Ok(None),
+                    other => Ok(Some(other.into())),
+                }
+            }
+            Some(other) => {
+                Err(VMExecutionError::ReadAppliedToNonPointer(other))
+            }
+        }?;
+
+        Ok(())
+    }
+
+    fn eval_read_string(
+        &mut self,
+        ptr: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_ptr = self.arg_to_prim(ptr)?;
+
+        self.values[output] = opt_ptr
+            .map(|prim| -> Result<_, Error> {
+                let ptr: Pointer = prim.try_into()?;
+                let runtime_string = RuntimeString::read_string(
+                    ptr,
+                    |byte_range| -> Result<OwnedBytes, Error> {
+                        let num_bytes = byte_range.end - byte_range.start;
+                        let mut bytes = vec![0; num_bytes];
+                        self.reader.read_bytes(byte_range.start, &mut bytes)?;
+                        Ok(OwnedBytes::new(byte_range.start, bytes))
+                    },
+                )?;
+                let string: String = runtime_string.into();
+                Ok(ExposedNativeObject::new(string).into())
+            })
+            .transpose()?;
+
+        Ok(())
     }
 }
 
