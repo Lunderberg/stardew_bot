@@ -1181,9 +1181,8 @@ impl ExpressionTranslator<'_> {
             let body_output = self
                 .index_tracking
                 .current_location
-                .get(&scope_output)
-                .expect("Output of scope should not be generated")
-                .clone();
+                .remove(&scope_output)
+                .expect("Output of scope should now be generated");
             if body_output != out_stack_index {
                 self.push_annotated(
                     Instruction::Swap(body_output, out_stack_index),

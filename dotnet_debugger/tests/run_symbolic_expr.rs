@@ -1448,3 +1448,36 @@ fn other_functions_do_not_impact_performance() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn use_same_reduction_function_in_multiple_locations() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        fn sum_to_n_squared(i: usize) {
+            let j = i*i;
+            let initial = 0;
+            (0..j).reduce(initial, |a,b| {
+                let reduced = a+b;
+                reduced
+            })
+        }
+
+        pub fn main() {
+            let lhs = sum_to_n_squared(5);
+            let rhs = sum_to_n_squared(10);
+            let sum = lhs + rhs;
+            sum
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected: usize = [5, 10].into_iter().flat_map(|i| 0..i * i).sum();
+
+    assert_eq!(result, expected);
+
+    Ok(())
+}
