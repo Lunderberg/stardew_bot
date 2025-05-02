@@ -1481,3 +1481,32 @@ fn use_same_reduction_function_in_multiple_locations() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn reduction_with_enclosed_variable_from_inlined_function() -> Result<(), Error>
+{
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        fn sum_to_n_squared(i: usize) {
+            (0..3).reduce(0, |a, b| a + i)
+        }
+
+        pub fn main() {
+            let lhs = sum_to_n_squared(5);
+            let rhs = sum_to_n_squared(10);
+            let sum = lhs + rhs;
+            sum
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected: usize = 3 * 5 + 3 * 10;
+
+    assert_eq!(result, expected);
+
+    Ok(())
+}

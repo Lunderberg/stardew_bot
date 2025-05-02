@@ -103,7 +103,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                     .collect::<Result<_, _>>()?;
 
                 graph
-                    .substitute(&replacements, map)?
+                    .substitute(replacements, map)?
                     .map(|new_map| graph.map(iterator, new_map))
             }
 
@@ -117,7 +117,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                     .collect::<Result<_, _>>()?;
 
                 graph
-                    .substitute(&replacements, filter)?
+                    .substitute(replacements, filter)?
                     .map(|new_filter| graph.filter(iterator, new_filter))
             }
 
@@ -138,7 +138,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                 .filter_map(|opt_pair| opt_pair.transpose())
                 .collect::<Result<_, _>>()?;
 
-                graph.substitute(&replacements, reduction)?.map(
+                graph.substitute(replacements, reduction)?.map(
                     |new_reduction| {
                         graph.reduce(initial, iterator, new_reduction)
                     },
@@ -162,7 +162,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                 .filter_map(|opt_pair| opt_pair.transpose())
                 .collect::<Result<_, _>>()?;
 
-                graph.substitute(&replacements, reduction)?.map(
+                graph.substitute(replacements, reduction)?.map(
                     |new_reduction| {
                         graph.simple_reduce(initial, extent, new_reduction)
                     },

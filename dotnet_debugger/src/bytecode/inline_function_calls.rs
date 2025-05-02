@@ -31,7 +31,7 @@ impl GraphRewrite for InlineFunctionCalls {
                     let output = *output;
                     Some(
                         graph
-                            .substitute(&replacements, output)?
+                            .substitute(replacements, output)?
                             .unwrap_or(output),
                     )
                 }

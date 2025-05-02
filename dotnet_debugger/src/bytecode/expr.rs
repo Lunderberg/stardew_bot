@@ -1725,7 +1725,7 @@ impl SymbolicGraph {
 
     pub fn substitute(
         &mut self,
-        replacements: &HashMap<OpIndex, SymbolicValue>,
+        mut replacements: HashMap<OpIndex, SymbolicValue>,
         value: SymbolicValue,
     ) -> Result<Option<SymbolicValue>, Error> {
         let Some(index) = value.as_op_index() else {
@@ -1735,19 +1735,59 @@ impl SymbolicGraph {
             return Ok(None);
         }
 
-        let subgraph = self
-            .collect_subgraph(
+        let subgraph = loop {
+            let subgraph = self.collect_subgraph(
                 replacements.iter().map(|(key, _)| (*key).into()),
                 Some(value),
-            )
+            );
+
+            let mut must_also_replace_function = false;
+
+            subgraph
+                .iter()
+                .cloned()
+                .filter(|index| !replacements.contains_key(index))
+                .filter_map(|index| match &self[index].kind {
+                    ExprKind::Function { params, .. } => Some(params),
+                    _ => None,
+                })
+                .flatten()
+                .filter_map(|value| value.as_op_index())
+                .filter(|index| !replacements.contains_key(index))
+                .collect::<Vec<_>>()
+                .into_iter()
+                .for_each(|index| {
+                    let ExprKind::FunctionArg(arg_ty) = &self[index].kind
+                    else {
+                        unreachable!(
+                            "Ill-formed SymbolicGraph, \
+                             function params must point to FunctionArg."
+                        )
+                    };
+                    let new_arg = self.function_arg(arg_ty.clone());
+                    if let Some(name) = self[index].name.clone() {
+                        self.name(new_arg, name)
+                            .expect("Existing name must be valid");
+                    }
+
+                    must_also_replace_function = true;
+                    replacements.insert(index, new_arg);
+                });
+
+            if !must_also_replace_function {
+                break subgraph;
+            }
+        };
+
+        let to_rewrite = subgraph
             .into_iter()
             .filter(|index| !replacements.contains_key(index));
 
         let mut rewrites = HashMap::new();
 
         self.rewrite_subtree(
-            Substitute(replacements),
-            subgraph,
+            Substitute(&replacements),
+            to_rewrite,
             &mut rewrites,
         )?;
 
