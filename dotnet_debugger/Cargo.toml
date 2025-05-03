@@ -11,6 +11,7 @@ derive_more = "*"
 itertools = "*"
 paste = "*"
 elsa = "*"
+lru = "0.14.0"
 
 iterator_extensions = { path = "../iterator_extensions" }
 memory_reader = { path = "../memory_reader" }

@@ -1,11 +1,13 @@
 use std::{
     any::Any,
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
     fmt::Display,
+    num::NonZeroUsize,
     ops::{Mul, Range, RangeFrom},
 };
 
 use derive_more::derive::From;
+use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
 use paste::paste;
 use thiserror::Error;
@@ -775,6 +777,14 @@ pub trait VMReader {
         output: &mut [u8],
     ) -> Result<(), Error>;
 
+    /// From the specified location, how many bytes are safe to read?
+    /// Used for caching, when reading more bytes than requested may
+    /// be beneficial, in case they can be returned for future
+    /// requests.
+    fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
+        loc..loc
+    }
+
     // TODO: Remove the need for this method.  Would be better for
     // everything to be implemented/implementable in terms of
     // `read_bytes`.
@@ -793,6 +803,16 @@ impl VMReader for CachedReader<'_> {
     ) -> Result<(), Error> {
         let reader: &memory_reader::MemoryReader = self.as_ref();
         Ok(reader.read_exact(loc, output)?)
+    }
+
+    fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
+        let reader: &memory_reader::MemoryReader = self.as_ref();
+        reader
+            .regions
+            .iter()
+            .map(|reg| reg.address_range())
+            .find(|range| range.contains(&loc))
+            .unwrap_or(loc..loc)
     }
 
     fn is_dotnet_base_class_of(
@@ -824,6 +844,93 @@ impl VMReader for DummyReader {
         Err(Error::VMExecutionError(
             VMExecutionError::ReadOccurredDuringLocalVMEvaluation,
         ))
+    }
+}
+
+struct CachedVMReader<Inner> {
+    inner: Inner,
+    max_read_ahead: usize,
+    max_read_behind: usize,
+    cache: BTreeMap<Pointer, Vec<u8>>,
+    lru_tracking: LruCache<Pointer, ()>,
+}
+
+impl<Inner> CachedVMReader<Inner> {
+    fn new(inner: Inner) -> Self {
+        Self {
+            inner,
+            cache: BTreeMap::new(),
+            lru_tracking: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            max_read_ahead: 2048 - 128,
+            max_read_behind: 128,
+        }
+    }
+}
+
+impl<Inner> VMReader for CachedVMReader<Inner>
+where
+    Inner: VMReader,
+{
+    fn read_bytes(
+        &mut self,
+        loc: Pointer,
+        output: &mut [u8],
+    ) -> Result<(), Error> {
+        let start = loc;
+        let end = loc + output.len();
+        if let Some((cache_loc, cache_data)) = self
+            .cache
+            .range(..end)
+            .last()
+            .filter(|(cache_loc, cache_data)| {
+                let cache_start = **cache_loc;
+                let cache_end = cache_start + cache_data.len();
+                cache_start <= start && end <= cache_end
+            })
+        {
+            self.lru_tracking.promote(cache_loc);
+            let index_start = loc - *cache_loc;
+            let index_end = index_start + output.len();
+            output.copy_from_slice(&cache_data[index_start..index_end]);
+            return Ok(());
+        }
+
+        let to_read = {
+            let requested_range = loc..loc + output.len();
+            let desired_range = requested_range.start - self.max_read_behind
+                ..requested_range.end + self.max_read_ahead;
+            let safe_range = self.inner.safe_read_extent(loc);
+            // Assume that the requested range is safe to read.
+            let safe_range = safe_range.start.min(requested_range.start)
+                ..safe_range.end.max(requested_range.end);
+
+            desired_range.start.max(safe_range.start)
+                ..desired_range.end.min(safe_range.end)
+        };
+
+        let mut cache_bytes = vec![0u8; to_read.end - to_read.start];
+        self.inner.read_bytes(to_read.start, &mut cache_bytes)?;
+
+        let index_start = loc - to_read.start;
+        let index_end = index_start + output.len();
+        output.copy_from_slice(&cache_bytes[index_start..index_end]);
+
+        self.cache.insert(to_read.start, cache_bytes);
+
+        if let Some((evicted, _)) = self.lru_tracking.push(to_read.start, ()) {
+            self.cache.remove(&evicted);
+        }
+
+        Ok(())
+    }
+
+    fn is_dotnet_base_class_of(
+        &mut self,
+        parent_class_ptr: TypedPointer<MethodTable>,
+        child_class_ptr: TypedPointer<MethodTable>,
+    ) -> Result<bool, Error> {
+        self.inner
+            .is_dotnet_base_class_of(parent_class_ptr, child_class_ptr)
     }
 }
 
@@ -956,6 +1063,7 @@ macro_rules! define_binary_integer_op {
 
 impl<'a> VMEvaluator<'a> {
     pub fn with_reader(self, reader: impl VMReader + 'a) -> VMEvaluator<'a> {
+        let reader = CachedVMReader::new(reader);
         VMEvaluator {
             reader: Box::new(reader),
             ..self
