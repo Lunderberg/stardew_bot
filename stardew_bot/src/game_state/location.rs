@@ -1,11 +1,11 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use memory_reader::Pointer;
 
 use crate::Error;
 
-use super::{Rectangle, Vector};
+use super::{Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -51,7 +51,7 @@ pub struct Location {
     /// If either the layer has a non-null tile, and that tile is not
     /// explicitly marked with the "Passable" attribute, then the tile
     /// cannot be passed through.
-    pub blocked: Vec<bool>,
+    pub blocked: TileMap<bool>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -176,6 +176,17 @@ struct MapTileSheets {
     known_sheets: HashSet<Pointer>,
     passable: HashSet<(Pointer, usize)>,
     shadow: HashSet<(Pointer, usize)>,
+    tiles: Vec<MapTile>,
+}
+
+#[derive(RustNativeObject, Clone, Debug)]
+struct MapTile {
+    location: Vector<isize>,
+    lookup_key: (Pointer, usize),
+    // May change this to an enum later.  Currently, 0 for the "Back"
+    // layer and 1 for the "Buildings" layer.
+    layer_num: usize,
+    properties: HashMap<String, Option<String>>,
 }
 
 impl Location {
@@ -387,21 +398,36 @@ impl Location {
             |sheets: &mut MapTileSheets,
              tile_sheet: Pointer,
              index_key: &str| {
-                sheets.define_property(tile_sheet, index_key);
+                sheets.define_sheet_property(tile_sheet, index_key);
             },
         )?;
 
         graph.named_native_function(
-            "check_passable_flag",
-            |sheets: &MapTileSheets, tile_sheet: Pointer, tile_index: usize| {
-                sheets.has_passable_flag(tile_sheet, tile_index)
+            "new_map_tile",
+            |&location: &Vector<isize>,
+             tile_sheet: Pointer,
+             tile_index: usize,
+             layer_num: usize| MapTile {
+                location,
+                lookup_key: (tile_sheet, tile_index),
+                layer_num,
+                properties: HashMap::default(),
             },
         )?;
 
         graph.named_native_function(
-            "check_shadow_flag",
-            |sheets: &MapTileSheets, tile_sheet: Pointer, tile_index: usize| {
-                sheets.has_shadow_flag(tile_sheet, tile_index)
+            "define_map_tile_property",
+            |tile: &mut MapTile, key: &str, value: Option<&str>| {
+                tile.properties.insert(key.into(), value.map(Into::into));
+            },
+        )?;
+
+        graph.named_native_function(
+            "add_map_tile",
+            |sheets: &mut MapTileSheets, opt_tile: Option<&MapTile>| {
+                if let Some(tile) = opt_tile {
+                    sheets.tiles.push(tile.clone());
+                }
             },
         )?;
 
@@ -416,8 +442,8 @@ impl Location {
              bushes: &Vec<Bush>,
              litter: &Vec<Litter>,
              water_tiles: &Vec<bool>,
-             buildings: &Vec<Building>,
-             blocked: &Vec<bool>| {
+             tiles: &MapTileSheets,
+             buildings: &Vec<Building>| {
                 Location {
                     name: name.into(),
                     shape: shape.clone(),
@@ -430,7 +456,7 @@ impl Location {
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
-                    blocked: blocked.clone(),
+                    blocked: tiles.collect_blocked_tiles(*shape),
                 }
             },
         )?;
@@ -749,6 +775,13 @@ impl Location {
                     })
                     .collect();
 
+                // Structure to hold tile-based parameters, which must
+                // be unpacked from their string representation.
+                let tile_sheets = new_tile_sheets(num_buildings);
+
+                // Iterate through all the sheets, copying data over
+                // to the MapTileSheets.  These are lookup tables that
+                // may be referenced by different tiles.
                 let num_tile_sheets = location
                     .map
                     .m_tileSheets
@@ -756,7 +789,7 @@ impl Location {
                     .prim_cast::<usize>();
                 let tile_sheets = (0..num_tile_sheets)
                     .reduce(
-                        new_tile_sheets(num_buildings),
+                        tile_sheets,
                         |tile_sheets, i_layer| {
                             let tile_sheet = location
                                 .map
@@ -786,38 +819,74 @@ impl Location {
                                 })
                         });
 
-                let has_flag = |flag_checker, tile| {
-                    let tile = tile.as::<xTile.Tiles.StaticTile>();
-                    let tile_sheet = tile
-                        .m_tileSheet
-                        .prim_cast::<Pointer>();
-                    let tile_index = tile
-                        .m_tileIndex
-                        .prim_cast::<usize>();
-                    flag_checker(
-                        tile_sheets,
-                        tile_sheet,
-                        tile_index,
-                    )
-                };
+                fn extract_map_tile(layer, layer_num, i, j) {
+                    let loc = new_isize_vector(i,j);
 
-                let blocked = (0..(height*width))
-                    .map(|i_flat| {
+                    let tile = layer.m_tiles[i,j]
+                        .as::<xTile.Tiles.StaticTile>();
+
+                    if tile.is_some() {
+                        let tile_sheet = tile
+                            .m_tileSheet
+                            .prim_cast::<Pointer>();
+                        let tile_index = tile
+                            .m_tileIndex
+                            .prim_cast::<usize>();
+                        let map_tile = new_map_tile(
+                            loc,
+                            tile_sheet,
+                            tile_index,
+                            layer_num
+                        );
+
+                        let tile_props = tile
+                            .m_propertyCollection;
+
+                        let num_tile_props = tile_props
+                            ._count
+                            .prim_cast::<usize>();
+
+                        (0..num_tile_props)
+                            .map(|i_prop| tile_props._entries[i_prop])
+                            .reduce(
+                                map_tile,
+                                |map_tile, prop| {
+                                    let key = prop.key.read_string();
+                                    let value = prop
+                                        .value
+                                        .m_value
+                                        .as::<System.String>()
+                                        .read_string();
+                                    define_map_tile_property(
+                                        map_tile,
+                                        key,
+                                        value
+                                    )
+                                })
+
+                    } else {
+                        None
+                    }
+                }
+
+                let tile_sheets = (0..(height*width))
+                    .reduce(tile_sheets, |tile_sheets, i_flat| {
                         let i = i_flat/height;
                         let j = i_flat%height;
-                        let back_tile = back_layer.m_tiles[i,j];
-                        let building_tile = building_layer.m_tiles[i,j];
 
-                        let back_tile_blocked = back_tile.is_some()
-                            && has_flag(check_passable_flag, back_tile);
+                        let back_tile = extract_map_tile(
+                            back_layer,
+                            0, i, j);
+                        let tile_sheets = add_map_tile(tile_sheets, back_tile);
 
-                        let building_tile_blocked = building_tile.is_some()
-                            && !has_flag(check_passable_flag, building_tile)
-                            && !has_flag(check_shadow_flag, building_tile);
 
-                        back_tile_blocked || building_tile_blocked
-                    })
-                    .collect();
+                        let building_tile = extract_map_tile(
+                            building_layer,
+                            1, i, j);
+                        let tile_sheets = add_map_tile(tile_sheets, building_tile);
+
+                        tile_sheets
+                    });
 
                 new_location(
                     name,
@@ -829,8 +898,8 @@ impl Location {
                     bushes,
                     litter,
                     flattened_water_tiles,
+                    tile_sheets,
                     buildings,
-                    blocked,
                 )
             }
         })?;
@@ -910,7 +979,7 @@ impl MapTileSheets {
         self.known_sheets.insert(tile_sheet);
     }
 
-    fn define_property(&mut self, tile_sheet: Pointer, index_key: &str) {
+    fn define_sheet_property(&mut self, tile_sheet: Pointer, index_key: &str) {
         index_key
             .strip_prefix("@TileIndex@")
             .and_then(|entry| entry.split_once('@'))
@@ -929,17 +998,23 @@ impl MapTileSheets {
             });
     }
 
-    fn has_passable_flag(
-        &self,
-        tile_sheet: Pointer,
-        tile_index: usize,
-    ) -> bool {
-        assert!(self.known_sheets.contains(&tile_sheet));
-        self.passable.contains(&(tile_sheet, tile_index))
-    }
-
-    fn has_shadow_flag(&self, tile_sheet: Pointer, tile_index: usize) -> bool {
-        self.shadow.contains(&(tile_sheet, tile_index))
+    fn collect_blocked_tiles(&self, shape: Vector<isize>) -> TileMap<bool> {
+        let mut map = TileMap::empty(shape.right as usize, shape.down as usize);
+        self.tiles
+            .iter()
+            .filter(|tile| match tile.layer_num {
+                0 => self.passable.contains(&tile.lookup_key),
+                1 => {
+                    !self.passable.contains(&tile.lookup_key)
+                        && !self.shadow.contains(&tile.lookup_key)
+                }
+                _ => unreachable!("Only 0 and 1 as allowed values"),
+            })
+            .map(|tile| tile.location)
+            .for_each(|loc| {
+                map[loc] = true;
+            });
+        map
     }
 }
 

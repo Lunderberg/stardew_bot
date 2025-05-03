@@ -319,20 +319,9 @@ impl LocalMovementGoal {
             .find(|loc| loc.name == player.room_name)
             .expect("Player must be in a room");
         let clear_tiles = {
-            let width = location.shape.right as usize;
             let height = location.shape.down as usize;
-            let mut map = TileMap::<bool>::full(true, width, height);
-            // TODO: Store the `blocked` tiles as a TileMap
-            let iter_blocked = location
-                .blocked
-                .iter()
-                .enumerate()
-                .filter(|(_, is_blocked)| **is_blocked)
-                .map(|(index, _)| {
-                    let i = (index / height) as isize;
-                    let j = (index % height) as isize;
-                    Vector::new(i, j)
-                });
+
+            let mut map = location.blocked.map(|b| !b);
 
             let iter_water = location
                 .water_tiles
@@ -366,7 +355,6 @@ impl LocalMovementGoal {
                 .flat_map(|building| building.shape.iter_points());
 
             std::iter::empty()
-                .chain(iter_blocked)
                 .chain(iter_water)
                 .chain(iter_clumps)
                 .chain(iter_bush)

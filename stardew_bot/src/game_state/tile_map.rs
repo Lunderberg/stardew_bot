@@ -1,5 +1,7 @@
 use dotnet_debugger::RustNativeObject;
 
+use itertools::Itertools as _;
+
 use super::Vector;
 
 #[derive(Debug, Clone)]
@@ -52,6 +54,24 @@ impl<T> TileMap<T> {
         index
             .get_flat_index(self.width, self.height)
             .map(|flat_index| &self.values[flat_index])
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (Vector<isize>, &T)> + '_ {
+        (0..self.height)
+            .cartesian_product(0..self.width)
+            .map(|(j, i)| Vector::new(i as isize, j as isize))
+            .map(|loc| (loc, &self[loc]))
+    }
+
+    pub fn map<Func, U>(&self, func: Func) -> TileMap<U>
+    where
+        Func: Fn(&T) -> U,
+    {
+        TileMap {
+            values: self.values.iter().map(func).collect(),
+            height: self.height,
+            width: self.width,
+        }
     }
 }
 

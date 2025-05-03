@@ -136,28 +136,19 @@ impl<'a> DrawableGameLocation<'a> {
     }
 
     fn paint_blocked_tiles(&self, ctx: &mut CanvasContext) {
-        let Vector {
-            right: width,
-            down: height,
-        } = self.room.shape;
-        let width = width as usize;
-        let height = height as usize;
-        assert!(width * height == self.room.blocked.len());
+        let height = self.room.shape.down as usize;
 
         let blocked = self
             .room
             .blocked
             .iter()
-            .enumerate()
             .filter(|(_, is_blocked)| **is_blocked)
-            .map(|(index, _)| {
-                let i = index / height;
-                let j = index % height;
-                let x = i as f64;
-                let y = (height - j) as f64;
-                (x, y)
+            .map(|(loc, _)| {
+                let height = height as f64;
+                (loc.right as f64, height - loc.down as f64)
             })
             .collect::<Vec<_>>();
+
         ctx.draw(&Points {
             coords: &blocked,
             color: Color::Red,
