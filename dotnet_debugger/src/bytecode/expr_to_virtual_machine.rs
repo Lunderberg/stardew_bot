@@ -1143,6 +1143,18 @@ impl ExpressionTranslator<'_> {
                     Instruction::Swap(out_stack_index, currently_at),
                     || format!("copy value to output of {expr_name}"),
                 );
+            } else if value
+                .as_op_index()
+                .map(|index| matches!(self.graph[index].kind, ExprKind::None))
+                .unwrap_or(false)
+            {
+                // A 'None' value can be generated
+                self.push_annotated(
+                    Instruction::Clear {
+                        loc: out_stack_index,
+                    },
+                    || format!("writing None to output of {expr_name}"),
+                );
             } else {
                 todo!(
                     "Limitation of current register assignment.  \
