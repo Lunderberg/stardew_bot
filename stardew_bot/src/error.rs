@@ -38,6 +38,9 @@ pub enum Error {
     #[error("Tree kind '{0}' did not correspond to any known tree.")]
     UnrecognizedTreeKind(String),
 
+    #[error("Quality should be a value from 0 to 3, but found {0}")]
+    InvalidQualityValue(i32),
+
     #[error("The bot has achieved all of its goals.")]
     NoRemainingGoals,
 }

@@ -50,6 +50,29 @@ impl<T> Vector<T> {
         self.mag2().sqrt()
     }
 
+    pub fn manhattan_dist(self, other: Self) -> T
+    where
+        T: PartialOrd,
+        T: std::ops::Sub<Output = T>,
+    {
+        let diff_x = if self.right < other.right {
+            other.right - self.right
+        } else {
+            self.right - other.right
+        };
+        let diff_y = if self.down < other.down {
+            other.down - self.down
+        } else {
+            self.down - other.down
+        };
+
+        if diff_x < diff_y {
+            diff_y
+        } else {
+            diff_x
+        }
+    }
+
     pub fn map<Func, U>(self, func: Func) -> Vector<U>
     where
         Func: Fn(T) -> U,

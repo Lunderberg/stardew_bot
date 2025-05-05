@@ -153,9 +153,9 @@ impl MovementGoal {
         let last = search_nodes
             .last()
             .filter(|(node, _)| node.current_room == self.target_room)
-            .ok_or_else(|| BotError::NoRouteToTarget {
-                room: self.target_room.clone(),
-                position: self.target_position,
+            .ok_or_else(|| BotError::NoRouteToRoom {
+                from_room: game_state.player.room_name.clone(),
+                to_room: self.target_room.clone(),
             })?;
         let goals: Vec<_> =
             std::iter::successors(Some(last), |(_, metadata)| {
@@ -347,12 +347,12 @@ impl LocalMovementGoal {
 
             let iter_tree = location.trees.iter().map(|tree| tree.position);
 
-            let iter_litter = location.litter.iter().map(|litter| litter.tile);
+            let iter_litter = location.objects.iter().map(|litter| litter.tile);
 
             let iter_buildings = location
                 .buildings
                 .iter()
-                .flat_map(|building| building.shape.iter_points());
+                .flat_map(|building| building.iter_tiles());
 
             std::iter::empty()
                 .chain(iter_water)

@@ -4,7 +4,9 @@ use dotnet_debugger::{
 
 use crate::Error;
 
-use super::{DailyState, FishingState, KeyboardState, Location, PlayerState};
+use super::{
+    DailyState, FishingState, Inventory, KeyboardState, Location, PlayerState,
+};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
@@ -33,6 +35,9 @@ impl GameState {
         reader: CachedReader,
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
+
+        let read_inventory = Inventory::read_inventory(&mut graph)?;
+        graph.name(read_inventory, "read_inventory")?;
 
         let read_location = Location::read_all(&mut graph)?;
         graph.name(read_location, "read_location")?;
@@ -138,13 +143,17 @@ impl GameStateReader {
         &self,
         cache: CachedReader,
     ) -> Result<GameState, Error> {
-        Ok(self
+        let mut state: GameState = self
             .vm
             .get_function("read_full_state")?
             .with_reader(cache)
             .evaluate()?
             .take_obj(0)?
-            .ok_or(Error::ExpectedNonEmptyValue)?)
+            .ok_or(Error::ExpectedNonEmptyValue)?;
+
+        Location::add_building_warps(&mut state.locations);
+
+        Ok(state)
     }
 
     pub fn read_delta_state(

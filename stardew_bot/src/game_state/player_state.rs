@@ -2,7 +2,7 @@ use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::{Direction, Error};
 
-use super::Vector;
+use super::{Inventory, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PlayerState {
@@ -12,6 +12,7 @@ pub struct PlayerState {
     pub room_name: String,
     pub skills: PlayerSkills,
     pub fade_to_black: bool,
+    pub inventory: Inventory,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -105,7 +106,8 @@ impl PlayerState {
              movement: Option<&Direction>,
              room_name: &str,
              skills: &PlayerSkills,
-             fade_to_black: bool| {
+             fade_to_black: bool,
+             inventory: &Inventory| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -113,6 +115,7 @@ impl PlayerState {
                     room_name: room_name.into(),
                     skills: skills.clone(),
                     fade_to_black,
+                    inventory: inventory.clone(),
                 }
             },
         )?;
@@ -168,13 +171,16 @@ impl PlayerState {
                     .screenFade
                     .fadeToBlack;
 
+                let inventory = read_inventory(player);
+
                 new_player(
                     position,
                     facing,
                     movement,
                     room_name,
                     skills,
-                    fade_to_black
+                    fade_to_black,
+                    inventory,
                 )
             }
         })?;

@@ -21,3 +21,9 @@ pub use tile_map::TileMap;
 
 mod keyboard_state;
 pub use keyboard_state::KeyboardState;
+
+mod inventory_state;
+pub use inventory_state::Inventory;
+
+mod item;
+pub use item::{Item, Quality};

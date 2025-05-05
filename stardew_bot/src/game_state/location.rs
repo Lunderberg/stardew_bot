@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use itertools::Either;
 use memory_reader::Pointer;
 
 use crate::Error;
 
-use super::{Rectangle, TileMap, Vector};
+use super::{Inventory, Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -38,7 +39,8 @@ pub struct Location {
     /// of the grass.
     pub grass: Vec<Vector<isize>>,
 
-    pub litter: Vec<Litter>,
+    /// Objects on the ground
+    pub objects: Vec<Object>,
 
     /// Which tiles have water.
     pub water_tiles: Option<Vec<bool>>,
@@ -138,17 +140,17 @@ pub enum TreeKind {
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
-pub struct Litter {
+pub struct Object {
     pub tile: Vector<isize>,
-    pub category: i32,
-    pub kind: LitterKind,
+    pub kind: ObjectKind,
 }
 
-#[derive(RustNativeObject, Debug, Clone, PartialEq, Eq)]
-pub enum LitterKind {
+#[derive(RustNativeObject, Debug, Clone)]
+pub enum ObjectKind {
     Stone,
     Wood,
     Fiber,
+    Chest(Inventory),
     Other(String),
 }
 
@@ -159,6 +161,10 @@ pub struct Building {
 
     /// The door to the inside of the building
     pub door: Option<BuildingDoor>,
+
+    /// An optional set of tiles that are solid within this building.
+    /// If not set, all tiles are solid.
+    pub collision_map: Option<Vec<Vector<isize>>>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -187,6 +193,11 @@ struct MapTile {
     // layer and 1 for the "Buildings" layer.
     layer_num: usize,
     properties: HashMap<String, Option<String>>,
+}
+
+#[derive(RustNativeObject, Default)]
+struct BuildingDataLookup {
+    collision_maps: HashMap<String, Vec<Vector<isize>>>,
 }
 
 impl Location {
@@ -307,26 +318,33 @@ impl Location {
         )?;
 
         graph.named_native_function(
-            "new_litter",
-            |tile: &Vector<isize>, name: &str, category: i32| {
-                // if category != -999 {
+            "new_litter_kind",
+            |name: &str, _category: i32| -> Option<ObjectKind> {
+                // if _category==-999 {
                 //     return None;
                 // }
-                let opt_kind = if name == "Twig" {
-                    Some(LitterKind::Wood)
+                if name == "Twig" {
+                    Some(ObjectKind::Wood)
                 } else if name == "Stone" {
-                    Some(LitterKind::Stone)
+                    Some(ObjectKind::Stone)
                 } else if name.to_lowercase().contains("weeds") {
-                    Some(LitterKind::Fiber)
+                    Some(ObjectKind::Fiber)
                 } else {
-                    //None
-                    Some(LitterKind::Other(name.into()))
-                };
-                opt_kind.map(|kind| Litter {
-                    tile: tile.clone(),
-                    category,
-                    kind,
-                })
+                    Some(ObjectKind::Other(name.into()))
+                }
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_chest_kind",
+            |inventory: &Inventory| ObjectKind::Chest(inventory.clone()),
+        )?;
+
+        graph.named_native_function(
+            "new_object",
+            |tile: &Vector<isize>, kind: &ObjectKind| Object {
+                tile: tile.clone(),
+                kind: kind.clone(),
             },
         )?;
 
@@ -373,12 +391,34 @@ impl Location {
             },
         )?;
 
+        graph.named_native_function("new_building_data_lookup", || {
+            BuildingDataLookup::default()
+        })?;
+
+        graph.named_native_function(
+            "unpack_building_data_collision_map",
+            |data: &mut BuildingDataLookup,
+             building_type: &str,
+             collision_map: &str| {
+                data.unpack_collision_map(building_type, collision_map);
+            },
+        )?;
+
         graph.named_native_function(
             "new_building",
-            |shape: &Rectangle<isize>, door: Option<&BuildingDoor>| {
+            |shape: &Rectangle<isize>,
+             door: Option<&BuildingDoor>,
+             data_lookup: &BuildingDataLookup,
+             building_type: &str| {
                 let shape = shape.clone();
                 let door = door.cloned();
-                Building { shape, door }
+                let collision_map =
+                    data_lookup.collision_maps.get(building_type).cloned();
+                Building {
+                    shape,
+                    door,
+                    collision_map,
+                }
             },
         )?;
 
@@ -440,7 +480,7 @@ impl Location {
              grass: &Vec<Vector<isize>>,
              trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
-             litter: &Vec<Litter>,
+             objects: &Vec<Object>,
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
              buildings: &Vec<Building>| {
@@ -452,13 +492,25 @@ impl Location {
                     grass: grass.clone(),
                     trees: trees.clone(),
                     bushes: bushes.clone(),
-                    litter: litter.clone(),
+                    objects: objects.clone(),
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
                     blocked: tiles.collect_blocked_tiles(*shape),
                 }
             },
+        )?;
+
+        graph.parse(
+            "
+        let building_data_dict = StardewValley
+             .Game1
+             .buildingData
+             .as::<System.Collections.Generic.Dictionary`2<
+                      System.String,
+                      StardewValley.GameData.Buildings.BuildingData
+             >>();
+        ",
         )?;
 
         let func = graph.parse(stringify! {
@@ -471,6 +523,37 @@ impl Location {
                     name
                 }
             }
+
+            let building_data = {
+                let dict = building_data_dict;
+                let num_entries = dict._entries.len();
+
+                (0..num_entries)
+                    .reduce(
+                        new_building_data_lookup(),
+                        |lookup, i| {
+                            let entry = dict._entries[i];
+
+                            let building_type = entry
+                                .key
+                                .read_string();
+
+                            let collision_map = entry
+                                .value
+                                .CollisionMap
+                                .read_string();
+
+                            let lookup = unpack_building_data_collision_map(
+                                lookup,
+                                building_type,
+                                collision_map,
+                            );
+
+                            lookup
+                        }
+                    )
+            };
+
 
             fn read_location(location) {
                 let name = get_location_name_ptr(location).read_string();
@@ -695,24 +778,34 @@ impl Location {
                     .compositeDict
                     ._entries
                     .len();
-                let litter = (0..num_objects)
+                let objects = (0..num_objects)
                     .map(|i| {
                         location
                             .objects
                             .compositeDict
                             ._entries[i]
+                            .value
                     })
                     .map(|obj| {
                         let tile = {
-                            let right = obj.value.tileLocation.value.X;
-                            let down = obj.value.tileLocation.value.Y;
+                            let right = obj.tileLocation.value.X;
+                            let down = obj.tileLocation.value.Y;
                             new_isize_vector(right,down)
                         };
-                        let name = obj.value.netName.value.read_string();
-                        let category = obj.value.category.value;
-                        new_litter(tile,name,category)
+
+                        let chest = obj.as::<StardewValley.Objects.Chest>();
+                        let kind = if chest.is_some() {
+                            let inventory = read_inventory(chest);
+                            new_chest_kind(inventory)
+                        } else {
+                            let name = obj.netName.value.read_string();
+                            let category = obj.category.value;
+                            new_litter_kind(name,category)
+                        };
+
+                        new_object(tile,kind)
                     })
-                    .filter(|litter| litter.is_some())
+                    .filter(|obj| obj.is_some())
                     .collect();
 
                 let water_tiles = location
@@ -771,7 +864,12 @@ impl Location {
                             new_building_door(relative_location, inside_name)
                         };
 
-                        new_building(shape, door)
+                        let building_type = building
+                            .buildingType
+                            .value
+                            .read_string();
+
+                        new_building(shape, door, building_data, building_type)
                     })
                     .collect();
 
@@ -896,7 +994,7 @@ impl Location {
                     grass,
                     trees,
                     bushes,
-                    litter,
+                    objects,
                     flattened_water_tiles,
                     tile_sheets,
                     buildings,
@@ -905,6 +1003,40 @@ impl Location {
         })?;
 
         Ok(func)
+    }
+
+    pub(crate) fn add_building_warps(locations: &mut [Location]) {
+        let entrance_lookup: HashMap<String, Vector<isize>> = locations
+            .iter()
+            .filter_map(|loc| {
+                loc.warps
+                    .get(0)
+                    .map(|warp| warp.location + Vector::new(0, -1))
+                    .map(|entrance| (loc.name.clone(), entrance))
+            })
+            .collect();
+
+        for location in locations.iter_mut() {
+            location
+                .buildings
+                .iter()
+                .filter_map(|building| {
+                    building.door.as_ref().map(|door| (building, door))
+                })
+                .filter_map(|(building, door)| {
+                    entrance_lookup.get(&door.inside_name).map(|target| {
+                        let location =
+                            building.shape.top_left + door.relative_location;
+                        Warp {
+                            location,
+                            target: *target,
+                            target_room: door.inside_name.clone(),
+                            kind: WarpKind::Door,
+                        }
+                    })
+                })
+                .for_each(|warp| location.warps.push(warp));
+        }
     }
 }
 
@@ -1036,13 +1168,66 @@ impl std::fmt::Display for TreeKind {
     }
 }
 
-impl std::fmt::Display for LitterKind {
+impl std::fmt::Display for ObjectKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Stone => write!(f, "Stone"),
             Self::Wood => write!(f, "Wood"),
             Self::Fiber => write!(f, "Fiber"),
+            Self::Chest(inventory) => {
+                write!(
+                    f,
+                    "Chest with {} slots, {} full",
+                    inventory.items.len(),
+                    inventory
+                        .items
+                        .iter()
+                        .filter(|item| item.is_some())
+                        .count()
+                )
+            }
             Self::Other(other) => write!(f, "Other({other})"),
+        }
+    }
+}
+
+impl BuildingDataLookup {
+    fn unpack_collision_map(
+        &mut self,
+        building_type: &str,
+        collision_map: &str,
+    ) {
+        let collision_map = collision_map
+            .trim()
+            .lines()
+            .enumerate()
+            .flat_map(|(down, line)| {
+                line.trim()
+                    .chars()
+                    .enumerate()
+                    .filter(|(_, c)| matches!(c, 'X'))
+                    .map(move |(right, _)| {
+                        Vector::new(right as isize, down as isize)
+                    })
+            })
+            .collect();
+
+        self.collision_maps
+            .insert(building_type.into(), collision_map);
+    }
+}
+
+impl Building {
+    pub fn iter_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
+        if let Some(collisions) = &self.collision_map {
+            Either::Left(
+                collisions
+                    .iter()
+                    .cloned()
+                    .map(|point| point + self.shape.top_left),
+            )
+        } else {
+            Either::Right(self.shape.iter_points())
         }
     }
 }

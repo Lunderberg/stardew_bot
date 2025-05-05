@@ -1,5 +1,6 @@
 use std::any::Any;
 
+use itertools::Itertools as _;
 use ratatui::{
     layout::Constraint,
     style::Color,
@@ -17,7 +18,7 @@ use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
     bot_logic::LocalMovementGoal,
-    game_state::{LitterKind, Location, Rectangle, ResourceClumpKind, Vector},
+    game_state::{Location, ObjectKind, Rectangle, ResourceClumpKind, Vector},
     BotLogic, Error, GameState,
 };
 
@@ -188,13 +189,18 @@ impl<'a> DrawableGameLocation<'a> {
     }
 
     fn paint_buildings(&self, ctx: &mut CanvasContext) {
-        self.room
+        let points: Vec<_> = self
+            .room
             .buildings
             .iter()
-            .map(|building| {
-                self.to_draw_rectangle(building.shape, Color::Rgb(45, 20, 0))
-            })
-            .for_each(|rect| ctx.draw(&rect));
+            .flat_map(|building| building.iter_tiles())
+            .map(|point| self.to_draw_coordinates(point.map(|x| x as f64)))
+            .collect();
+
+        ctx.draw(&Points {
+            coords: &points,
+            color: Color::Rgb(45, 20, 0),
+        });
     }
 
     fn paint_resource_clumps(&self, ctx: &mut CanvasContext) {
@@ -254,23 +260,29 @@ impl<'a> DrawableGameLocation<'a> {
     }
 
     fn paint_litter(&self, ctx: &mut CanvasContext) {
-        for (litter_kind, color) in [
-            (LitterKind::Stone, Color::DarkGray),
-            (LitterKind::Wood, Color::Rgb(97, 25, 0)),
-            (LitterKind::Fiber, Color::LightGreen),
-        ] {
-            let litter = self
-                .room
-                .litter
-                .iter()
-                .filter(|obj| obj.kind == litter_kind)
-                .map(|obj| self.to_draw_coordinates(obj.tile.map(|x| x as f64)))
-                .collect::<Vec<_>>();
-            ctx.draw(&Points {
-                coords: &litter,
-                color,
+        self.room
+            .objects
+            .iter()
+            .filter_map(|obj| {
+                let color = match &obj.kind {
+                    ObjectKind::Stone => Some(Color::DarkGray),
+                    ObjectKind::Wood => Some(Color::Rgb(97, 25, 0)),
+                    ObjectKind::Fiber => Some(Color::LightGreen),
+                    ObjectKind::Chest(_) => None,
+                    ObjectKind::Other(_) => None,
+                }?;
+                let coordinates =
+                    self.to_draw_coordinates(obj.tile.map(|x| x as f64));
+                Some((color, coordinates))
+            })
+            .into_group_map()
+            .into_iter()
+            .for_each(|(color, coords)| {
+                ctx.draw(&Points {
+                    coords: &coords,
+                    color,
+                });
             });
-        }
     }
 
     fn paint_waypoints(&self, ctx: &mut CanvasContext) {
