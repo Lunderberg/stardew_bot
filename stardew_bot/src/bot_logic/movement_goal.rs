@@ -229,7 +229,7 @@ impl MovementGoal {
         .filter(|_| self.target_room == player.room_name)
         .filter(|_| {
             let goal_dist =
-                (self.target_position - player.position / 64.0).mag();
+                self.target_position.manhattan_dist(player.position / 64.0);
             goal_dist >= self.tolerance
         })
     }
@@ -392,7 +392,7 @@ impl LocalMovementGoal {
             target_tile,
         };
 
-        let iter_waypoints = local_graph
+        let waypoints = local_graph
             .iter_a_star_backrefs(player_tile, target_tile)
             .ok_or_else(|| BotError::NoRouteToTarget {
                 room: self.room_name.clone(),
@@ -409,10 +409,7 @@ impl LocalMovementGoal {
                 // position, which avoids accidental backtracking.
                 matches!(pos, itertools::Position::Middle)
             })
-            .map(|(_, tile)| tile);
-
-        let waypoints = std::iter::once(self.position)
-            .chain(iter_waypoints)
+            .map(|(_, tile)| tile)
             .collect();
 
         Ok(waypoints)
@@ -489,7 +486,8 @@ impl BotGoal for LocalMovementGoal {
         let must_open_door = self.activate_endpoint.unwrap_or(false)
             && dir.is_cardinal()
             && player_position.as_tile() + dir.offset()
-                == self.position.as_tile();
+                == self.position.as_tile()
+            && player_position.manhattan_dist(self.position) < 1.5;
 
         let action = if must_open_door && player.fade_to_black {
             GameAction::StopActivatingTile

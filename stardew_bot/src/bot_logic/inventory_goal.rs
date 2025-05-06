@@ -64,17 +64,15 @@ impl BotGoal for InventoryGoal {
         };
 
         if chest_room != &game_state.player.room_name
-            || game_state
-                .player
-                .position
-                .as_tile()
-                .manhattan_dist(chest_tile)
-                > 1
+            || game_state.player.tile().manhattan_dist(chest_tile) > 1
         {
-            let goals = SubGoals::new().then(MovementGoal::new(
-                chest_room.into(),
-                chest_tile.map(|x| x as f32),
-            ));
+            let goals = SubGoals::new().then(
+                MovementGoal::new(
+                    chest_room.into(),
+                    chest_tile.map(|x| x as f32),
+                )
+                .with_tolerance(1.1),
+            );
             return Ok(goals.into());
         }
 
