@@ -51,6 +51,10 @@ impl Direction {
         ]
         .into_iter()
     }
+
+    pub fn iter_cardinal() -> impl Iterator<Item = Self> {
+        Self::iter().filter(|dir| dir.is_cardinal())
+    }
 }
 
 impl std::fmt::Display for Direction {

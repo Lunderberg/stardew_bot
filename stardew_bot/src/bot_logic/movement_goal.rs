@@ -87,29 +87,61 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
             .iter()
             .filter(|loc| loc.name == node.current_room)
             .flat_map(|loc| {
-                loc.warps.iter().map(|warp| {
-                    if warp.location == node.current_pos {
-                        (
-                            RoomSearchNode {
-                                current_pos: warp.target,
-                                current_room: warp.target_room.clone(),
-                            },
-                            0,
-                        )
-                    } else {
-                        let dist = point_to_point_lower_bound(
-                            node.current_pos,
-                            warp.location,
-                        );
-                        (
-                            RoomSearchNode {
-                                current_pos: warp.location,
-                                current_room: node.current_room.clone(),
-                            },
-                            dist,
-                        )
+                let clear_tiles = loc.collect_clear_tiles();
+                let mut reachable = clear_tiles.map(|_| false);
+                let mut to_visit = vec![node.current_pos];
+
+                while let Some(visiting) = to_visit.pop() {
+                    for dir in Direction::iter_cardinal() {
+                        let new_pos = visiting + dir.offset();
+                        let is_clear =
+                            clear_tiles.get(new_pos).cloned().unwrap_or(false);
+                        let was_previously_reachable =
+                            reachable.get(new_pos).cloned().unwrap_or(false);
+                        if is_clear && !was_previously_reachable {
+                            reachable[new_pos] = true;
+                            to_visit.push(new_pos);
+                        }
                     }
-                })
+                }
+
+                loc.warps
+                    .iter()
+                    .filter(move |warp| {
+                        Direction::iter_cardinal()
+                            .map(|dir| dir.offset())
+                            .chain(Some(Vector::new(0, 0)))
+                            .map(|offset| warp.location + offset)
+                            .any(|adj_tile| {
+                                reachable
+                                    .get(adj_tile)
+                                    .cloned()
+                                    .unwrap_or(false)
+                            })
+                    })
+                    .map(|warp| {
+                        if warp.location == node.current_pos {
+                            (
+                                RoomSearchNode {
+                                    current_pos: warp.target,
+                                    current_room: warp.target_room.clone(),
+                                },
+                                1,
+                            )
+                        } else {
+                            let dist = point_to_point_lower_bound(
+                                node.current_pos,
+                                warp.location,
+                            );
+                            (
+                                RoomSearchNode {
+                                    current_pos: warp.location,
+                                    current_room: node.current_room.clone(),
+                                },
+                                dist,
+                            )
+                        }
+                    })
             })
     }
 }
@@ -136,22 +168,13 @@ impl MovementGoal {
             return Ok(None);
         }
 
-        // TODO: Handle rooms with disconnnected regions.
-        //
-        // For example, the Backwoods connects to four other rooms,
-        // the Farm, the Mountain, the BusStop, and the Tunnel.
-        // However, from a given location in the Backwoods, the player
-        // can only reach two of those four rooms.  The current
-        // algorithm assumes that all exits can be reached from any
-        // point in the room.
-
         // Dijkstra's algorithm to search for connections between rooms
 
         let graph = ConnectedRoomGraph {
             locations: &game_state.locations,
         };
         let initial = RoomSearchNode {
-            current_pos: game_state.player.position.map(|x| x.round() as isize),
+            current_pos: game_state.player.tile(),
             current_room: game_state.player.room_name.clone(),
         };
         let search_nodes: Vec<_> = graph
@@ -358,55 +381,7 @@ impl LocalMovementGoal {
             .iter()
             .find(|loc| loc.name == player.room_name)
             .expect("Player must be in a room");
-        let clear_tiles = {
-            let height = location.shape.down as usize;
-
-            let mut map = location.blocked.map(|b| !b);
-
-            let iter_water = location
-                .water_tiles
-                .iter()
-                .flat_map(|vec_bool| vec_bool.iter())
-                .enumerate()
-                .filter(|(_, is_water)| **is_water)
-                .map(|(index, _)| {
-                    let i = (index / height) as isize;
-                    let j = (index % height) as isize;
-                    Vector::new(i, j)
-                });
-
-            let iter_clumps = location
-                .resource_clumps
-                .iter()
-                .flat_map(|clump| clump.shape.iter_points());
-
-            let iter_bush = location
-                .bushes
-                .iter()
-                .flat_map(|bush| bush.rectangle().iter_points());
-
-            let iter_tree = location.trees.iter().map(|tree| tree.position);
-
-            let iter_litter = location.objects.iter().map(|litter| litter.tile);
-
-            let iter_buildings = location
-                .buildings
-                .iter()
-                .flat_map(|building| building.iter_tiles());
-
-            std::iter::empty()
-                .chain(iter_water)
-                .chain(iter_clumps)
-                .chain(iter_bush)
-                .chain(iter_tree)
-                .chain(iter_litter)
-                .chain(iter_buildings)
-                .for_each(|tile| {
-                    map[tile] = false;
-                });
-
-            map
-        };
+        let clear_tiles = location.collect_clear_tiles();
 
         let player_tile = player.tile();
         let target_tile: Vector<isize> =
@@ -421,7 +396,8 @@ impl LocalMovementGoal {
             .iter_a_star_backrefs(player_tile, target_tile)
             .ok_or_else(|| BotError::NoRouteToTarget {
                 room: self.room_name.clone(),
-                position: target_tile.map(|x| x as f32),
+                start: player_tile,
+                goal: target_tile,
             })?
             .map(|vec_isize| vec_isize.map(|i| i as f32));
 

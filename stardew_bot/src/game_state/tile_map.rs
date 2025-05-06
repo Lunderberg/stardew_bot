@@ -22,6 +22,14 @@ impl<T> TileMap<T> {
         }
     }
 
+    pub fn height(&self) -> usize {
+        self.height
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
     pub fn full(value: T, width: usize, height: usize) -> Self
     where
         T: Copy,
@@ -56,6 +64,12 @@ impl<T> TileMap<T> {
             .map(|flat_index| &self.values[flat_index])
     }
 
+    pub fn get_mut(&mut self, index: impl AsGridPos) -> Option<&mut T> {
+        index
+            .get_flat_index(self.width, self.height)
+            .map(|flat_index| &mut self.values[flat_index])
+    }
+
     pub fn iter(&self) -> impl Iterator<Item = (Vector<isize>, &T)> + '_ {
         (0..self.height)
             .cartesian_product(0..self.width)
@@ -69,6 +83,26 @@ impl<T> TileMap<T> {
     {
         TileMap {
             values: self.values.iter().map(func).collect(),
+            height: self.height,
+            width: self.width,
+        }
+    }
+
+    pub fn imap<Func, U>(&self, func: Func) -> TileMap<U>
+    where
+        Func: Fn(Vector<isize>, &T) -> U,
+    {
+        TileMap {
+            values: self
+                .values
+                .iter()
+                .enumerate()
+                .map(|(i, value)| {
+                    let loc = Vector::new(i % self.width, i / self.width)
+                        .map(|x| x as isize);
+                    func(loc, value)
+                })
+                .collect(),
             height: self.height,
             width: self.width,
         }
@@ -166,5 +200,19 @@ where
             });
 
         &mut self.values[index]
+    }
+}
+
+impl std::fmt::Display for TileMap<char> {
+    fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for j in 0..self.height {
+            for i in 0..self.width {
+                write!(fmt, "{}", self[(i, j)])?;
+            }
+            if j + 1 < self.height {
+                write!(fmt, "\n")?;
+            }
+        }
+        Ok(())
     }
 }

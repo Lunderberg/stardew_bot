@@ -1038,6 +1038,56 @@ impl Location {
                 .for_each(|warp| location.warps.push(warp));
         }
     }
+
+    pub fn collect_clear_tiles(&self) -> TileMap<bool> {
+        let height = self.shape.down as usize;
+
+        let mut map = self.blocked.map(|b| !b);
+
+        let iter_water = self
+            .water_tiles
+            .iter()
+            .flat_map(|vec_bool| vec_bool.iter())
+            .enumerate()
+            .filter(|(_, is_water)| **is_water)
+            .map(|(index, _)| {
+                let i = (index / height) as isize;
+                let j = (index % height) as isize;
+                Vector::new(i, j)
+            });
+
+        let iter_clumps = self
+            .resource_clumps
+            .iter()
+            .flat_map(|clump| clump.shape.iter_points());
+
+        let iter_bush = self
+            .bushes
+            .iter()
+            .flat_map(|bush| bush.rectangle().iter_points());
+
+        let iter_tree = self.trees.iter().map(|tree| tree.position);
+
+        let iter_litter = self.objects.iter().map(|litter| litter.tile);
+
+        let iter_buildings = self
+            .buildings
+            .iter()
+            .flat_map(|building| building.iter_tiles());
+
+        std::iter::empty()
+            .chain(iter_water)
+            .chain(iter_clumps)
+            .chain(iter_bush)
+            .chain(iter_tree)
+            .chain(iter_litter)
+            .chain(iter_buildings)
+            .for_each(|tile| {
+                map[tile] = false;
+            });
+
+        map
+    }
 }
 
 impl Bush {
