@@ -18,7 +18,10 @@ use super::{
 /// For each waypoint, and for the final target location, consider the
 /// position to be successfully reached when it is within this
 /// distance of the desired location.
-const TOLERANCE: f32 = 0.1;
+///
+/// Used as the default tolerance to reach the target location.  Can
+/// be overridden for a goal using `MovementGoal::with_tolerance`.
+const WAYPOINT_TOLERANCE: f32 = 0.1;
 
 /// Minimum distance (in tiles) to re-plan a route.
 ///
@@ -31,12 +34,14 @@ const REPLAN_THRESHOLD: f32 = 2.0;
 pub struct MovementGoal {
     target_room: String,
     target_position: Vector<f32>,
+    tolerance: f32,
 }
 
 pub struct LocalMovementGoal {
     room_name: String,
     position: Vector<f32>,
     waypoints: Vec<Vector<f32>>,
+    tolerance: f32,
 
     /// If the endpoint must be activated in order to proceed.
     /// Initialized as `None`, to be filled out based on the game
@@ -114,7 +119,13 @@ impl MovementGoal {
         Self {
             target_room,
             target_position,
+            tolerance: WAYPOINT_TOLERANCE,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_tolerance(self, tolerance: f32) -> Self {
+        Self { tolerance, ..self }
     }
 
     fn room_to_room_movement(
@@ -183,15 +194,20 @@ impl MovementGoal {
     fn within_room_movement(&self, game_state: &GameState) -> Option<SubGoals> {
         let player = &game_state.player;
 
-        Some(SubGoals::new().then(LocalMovementGoal::new(
-            self.target_room.clone(),
-            self.target_position,
-        )))
+        Some(
+            SubGoals::new().then(
+                LocalMovementGoal::new(
+                    self.target_room.clone(),
+                    self.target_position,
+                )
+                .with_tolerance(self.tolerance),
+            ),
+        )
         .filter(|_| self.target_room == player.room_name)
         .filter(|_| {
             let goal_dist =
                 (self.target_position - player.position / 64.0).mag();
-            goal_dist >= TOLERANCE
+            goal_dist >= self.tolerance
         })
     }
 }
@@ -252,7 +268,32 @@ impl LocalMovementGoal {
             room_name,
             position,
             waypoints: Vec::new(),
+            tolerance: WAYPOINT_TOLERANCE,
             activate_endpoint: None,
+        }
+    }
+
+    fn with_tolerance(self, tolerance: f32) -> Self {
+        Self { tolerance, ..self }
+    }
+
+    fn is_completed(&self, game_state: &GameState) -> bool {
+        let player = &game_state.player;
+
+        if player.room_name != self.room_name {
+            // Reached a warp to another room, so the local movement
+            // can be popped from the stack.
+            true
+        } else if self.activate_endpoint.unwrap_or(true) {
+            // Even if we're within the threshold, we still need to
+            // click on the target to complete the action.  Therefore,
+            // not yet done.
+            false
+        } else {
+            // Check completion by seeing how far we are from the
+            // target position.
+            let goal_dist = (self.position - player.position / 64.0).mag();
+            goal_dist < self.tolerance
         }
     }
 
@@ -267,7 +308,7 @@ impl LocalMovementGoal {
 
         while let Some(next_waypoint) = self.waypoints.last().cloned() {
             let dist = (next_waypoint - player.position / 64.0).mag();
-            if dist < TOLERANCE {
+            if dist < WAYPOINT_TOLERANCE {
                 self.waypoints.pop();
             } else if dist > REPLAN_THRESHOLD {
                 self.waypoints.clear();
@@ -276,8 +317,7 @@ impl LocalMovementGoal {
             }
         }
 
-        let goal_dist = (self.position - player.position / 64.0).mag();
-        if self.waypoints.is_empty() && goal_dist > TOLERANCE {
+        if self.waypoints.is_empty() {
             self.waypoints = self.generate_plan(game_state)?;
         }
 
@@ -430,19 +470,23 @@ impl BotGoal for LocalMovementGoal {
         game_state: &GameState,
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
-        let player_position = player.position / 64.0;
 
-        self.update_plan(game_state)?;
-
-        let Some(next_waypoint) = self.waypoints.last().cloned() else {
-            return Ok(if player.movement.is_some() {
+        if self.is_completed(game_state) {
+            let goal = if player.movement.is_some() {
                 BotGoalResult::Action(GameAction::StopMoving)
             } else {
                 BotGoalResult::Completed
-            });
-        };
-        let direction = next_waypoint - player_position;
+            };
+            return Ok(goal);
+        }
 
+        self.update_plan(game_state)?;
+
+        let next_waypoint =
+            self.waypoints.last().cloned().unwrap_or(self.position);
+
+        let player_position = player.position / 64.0;
+        let direction = next_waypoint - player_position;
         let dir = Direction::iter()
             .max_by(|dir_a, dir_b| {
                 let do_dot_product = |dir: Direction| {

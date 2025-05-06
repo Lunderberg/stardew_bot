@@ -11,6 +11,7 @@ pub struct InventoryGoal {
 }
 
 impl InventoryGoal {
+    #[allow(dead_code)]
     pub fn new(item: Item) -> Self {
         Self { item }
     }

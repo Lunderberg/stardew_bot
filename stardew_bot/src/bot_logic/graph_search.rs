@@ -70,6 +70,7 @@ pub trait GraphSearch<T: Eq + Hash> {
         )
     }
 
+    #[allow(dead_code)]
     fn iter_a_star_backrefs<'a>(
         &'a self,
         initial: T,
