@@ -399,10 +399,20 @@ impl LocalMovementGoal {
                 start: player_tile,
                 goal: target_tile,
             })?
-            .map(|vec_isize| vec_isize.map(|i| i as f32));
+            .map(|vec_isize| vec_isize.map(|i| i as f32))
+            .with_position()
+            .filter(|(pos, _)| {
+                // Omit the first and last waypoints.  These are the
+                // tiles that include the player's current position
+                // and the goal position.  Rather than going to these
+                // waypoints, it's better to go directly to the next
+                // position, which avoids accidental backtracking.
+                matches!(pos, itertools::Position::Middle)
+            })
+            .map(|(_, tile)| tile);
 
         let waypoints = std::iter::once(self.position)
-            .chain(iter_waypoints.skip(1))
+            .chain(iter_waypoints)
             .collect();
 
         Ok(waypoints)
