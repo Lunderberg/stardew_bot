@@ -188,14 +188,7 @@ impl<'a> FieldDescription<'a> {
             let layout = module.metadata_layout(reader)?;
             let rva = RelativeVirtualAddress::new(self.offset());
             layout.virtual_address_to_raw(rva)?
-        } else if matches!(
-            self.cor_element_type()?,
-            // Based on Field::GetBaseInDomainLocalModule, this
-            // pattern should also include ValueType.  However, the
-            // fields that are unpacked that way seem a lot less
-            // sensible.  Should revisit in the future.
-            CorElementType::Class
-        ) {
+        } else if matches!(self.cor_element_type()?, CorElementType::Class) {
             // The Module contains two pointers for static values,
             // depending on whether the value must be inspected by the
             // garbage collector.  Objects that may be managed by the
@@ -203,6 +196,19 @@ impl<'a> FieldDescription<'a> {
             // objects.
             let base = module.base_ptr_of_gc_statics(reader)?;
             base + self.offset()
+        } else if matches!(self.cor_element_type()?, CorElementType::ValueType)
+        {
+            // Static value types are not stored inline, but are
+            // instead stored as if they were classes.  Need to read
+            // the pointer, dereference, then advance past a method
+            // table pointer.
+            let base = module.base_ptr_of_gc_statics(reader)?;
+            let ptr_loc = base + self.offset();
+            let ptr: Pointer = reader
+                .read_bytes(ptr_loc..ptr_loc + Pointer::SIZE)?
+                .subrange(..)
+                .unpack()?;
+            ptr + Pointer::SIZE
         } else {
             let base = module.base_ptr_of_non_gc_statics(reader)?;
             base + self.offset()

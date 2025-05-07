@@ -1124,6 +1124,17 @@ macro_rules! decl_core_coded_index_type {
 
 
             $(
+                impl From<MetadataTableIndex<$table_type>>
+                    for MetadataCodedIndex<$tag> {
+                        fn from(value: MetadataTableIndex<$table_type>) -> Self {
+                            Self{
+                                kind: <$table_type as MetadataTableTag>::KIND,
+                                index: value.index,
+                                _phantom: PhantomData,
+                            }
+                        }
+                    }
+
                 impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
                     for MetadataCodedIndex<$tag> {
                         fn eq(&self, other: &MetadataTableIndex<$table_type>) -> bool {
@@ -2200,6 +2211,31 @@ impl<'a> Metadata<'a> {
             ),
             _ => None,
         })
+    }
+
+    pub fn get_name_with_class(
+        &self,
+        kind: MetadataTableKind,
+        index: usize,
+    ) -> Result<Option<Cow<str>>, Error> {
+        let Some(name) = self.get_name(kind, index)? else {
+            return Ok(None);
+        };
+
+        let full_name: Cow<str> = match kind {
+            MetadataTableKind::Field => {
+                let field =
+                    self.field_table().get(MetadataTableIndex::new(index))?;
+                let cls = field.find_owning_class()?;
+
+                let class_name = cls.name()?;
+                let field_name = field.name()?;
+                format!("{class_name}.{field_name}").into()
+            }
+            _ => name.into(),
+        };
+
+        Ok(Some(full_name))
     }
 
     pub fn location_of<'b, Index>(

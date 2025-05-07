@@ -1,3 +1,4 @@
+use dll_unpacker::RelativeVirtualAddress;
 use memory_reader::Pointer;
 
 use crate::{
@@ -45,10 +46,79 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
         let opt_value = match expr {
             ExprKind::StaticField(static_field) => {
                 let reader = self.0.reader()?;
-                let runtime_type = static_field.runtime_type(reader)?;
-                let ptr = static_field.location(reader)?;
 
-                let ptr = SymbolicValue::Ptr(ptr);
+                let (base_method_table_ptr, field_desc) =
+                    static_field.method_table_and_field(reader)?;
+
+                if !field_desc.is_static() {
+                    return Err(
+                        Error::ExpectedStaticFieldButFoundInstanceField {
+                            class: format!("{}", static_field.class),
+                            field: static_field.field_name.clone(),
+                        },
+                    );
+                }
+
+                let runtime_type = reader.field_to_runtime_type(
+                    base_method_table_ptr,
+                    &field_desc,
+                )?;
+
+                let method_table =
+                    reader.method_table(base_method_table_ptr)?;
+                let module = reader.runtime_module(method_table.module())?;
+
+                let ptr: SymbolicValue =
+                    match (field_desc.is_rva(), &runtime_type) {
+                        (true, _) => {
+                            let layout = module.metadata_layout(&reader)?;
+                            let rva = RelativeVirtualAddress::new(
+                                field_desc.offset(),
+                            );
+                            let ptr = layout.virtual_address_to_raw(rva)?;
+                            SymbolicValue::Ptr(ptr)
+                        }
+                        (_, RuntimeType::Prim(_)) => {
+                            let base = SymbolicValue::Ptr(
+                                module.base_ptr_of_non_gc_statics(reader)?,
+                            );
+                            graph.add(base, field_desc.offset())
+                        }
+                        (
+                            _,
+                            RuntimeType::DotNet(DotNetType::ValueType {
+                                ..
+                            }),
+                        ) => {
+                            // Static value types are not stored inline, but are
+                            // instead stored as if they were classes.  Need to read
+                            // the pointer, dereference, then advance past a method
+                            // table pointer.
+                            let base = SymbolicValue::Ptr(
+                                module.base_ptr_of_gc_statics(reader)?,
+                            );
+                            let ptr_loc = graph.add(base, field_desc.offset());
+                            let ptr =
+                                graph.read_value(ptr_loc, RuntimePrimType::Ptr);
+                            graph.add(ptr, Pointer::SIZE)
+                        }
+                        (_, RuntimeType::DotNet(_)) => {
+                            let base = SymbolicValue::Ptr(
+                                module.base_ptr_of_gc_statics(reader)?,
+                            );
+                            graph.add(base, field_desc.offset())
+                        }
+
+                        (_, RuntimeType::Unknown)
+                        | (_, RuntimeType::Rust(_))
+                        | (_, RuntimeType::Function(_))
+                        | (_, RuntimeType::Tuple(_))
+                        | (_, RuntimeType::Iterator(_)) => unreachable!(
+                            "Static .NET field can only be inferred \
+                             as a primitive or a .NET type."
+                        ),
+                    };
+
                 let expr = read_value_if_required!(ptr, runtime_type);
 
                 Some(expr)

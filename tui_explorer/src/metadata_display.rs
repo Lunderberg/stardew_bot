@@ -44,7 +44,7 @@ struct DisplayRow {
     kind: MetadataTableKind,
     index: usize,
     name: Option<String>,
-    fields: Option<Vec<(Pointer, String, String)>>,
+    fields: Option<Vec<FieldAnnotation>>,
     is_expanded: bool,
 }
 
@@ -67,18 +67,9 @@ enum TreeItemMut<'a> {
 struct FieldAnnotations(Vec<FieldAnnotation>);
 
 struct FieldAnnotation {
-    loc: Pointer,
+    loc: Option<Pointer>,
     name: String,
     value: String,
-}
-
-impl FieldAnnotations {
-    fn finalize(self) -> Vec<(Pointer, String, String)> {
-        self.0
-            .into_iter()
-            .map(|field| (field.loc, field.name, field.value))
-            .collect()
-    }
 }
 
 impl dll_unpacker::Annotator for FieldAnnotations {
@@ -87,7 +78,7 @@ impl dll_unpacker::Annotator for FieldAnnotations {
         range: std::ops::Range<Pointer>,
     ) -> &mut impl dll_unpacker::Annotation {
         self.0.push(FieldAnnotation {
-            loc: range.start,
+            loc: Some(range.start),
             name: String::default(),
             value: String::default(),
         });
@@ -156,7 +147,7 @@ impl MetadataDisplay {
                             row.index,
                         )?;
 
-                        row.fields = Some(fields.finalize());
+                        row.fields = Some(fields.0);
                     }
 
                     row.is_expanded ^= true;
@@ -311,13 +302,20 @@ impl DisplayRow {
                 .filter(|_| self.is_expanded)
                 .into_iter()
                 .flatten()
-                .map(|(loc, name, value)| TreeIteratorItem {
-                    tree_depth: 3,
-                    is_leaf: true,
-                    is_expanded: false,
-                    loc: Some(*loc),
-                    name: name.into(),
-                    value: if value.is_empty() { None } else { Some(&value) },
+                .map(|field| {
+                    let FieldAnnotation { loc, name, value } = field;
+                    TreeIteratorItem {
+                        tree_depth: 3,
+                        is_leaf: true,
+                        is_expanded: false,
+                        loc: *loc,
+                        name: name.into(),
+                        value: if value.is_empty() {
+                            None
+                        } else {
+                            Some(&value)
+                        },
+                    }
                 }),
         )
     }
@@ -360,7 +358,7 @@ impl MetadataDisplay {
                         let rows = (0..num_rows)
                             .map(|index| -> Result<_, Error> {
                                 let name = metadata
-                                    .get_name(kind, index)?
+                                    .get_name_with_class(kind, index)?
                                     .map(|name| name.to_string());
                                 Ok(DisplayRow {
                                     kind,

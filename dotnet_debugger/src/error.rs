@@ -173,6 +173,13 @@ pub enum Error {
     NoSuchMethodTableFound(String),
 
     #[error(
+        "Expected a static field, \
+         but field '{field}' in class {class} \
+         was an instance field."
+    )]
+    ExpectedStaticFieldButFoundInstanceField { class: String, field: String },
+
+    #[error(
         "Could not find static field {field} within \
          method table of {class}."
     )]

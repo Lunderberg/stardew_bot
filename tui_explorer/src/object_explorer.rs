@@ -481,6 +481,7 @@ impl ObjectExplorer {
             .map(|module_ptr| -> Result<_, Error> {
                 let prefetch_statics: Vec<_> = reader
                     .static_value_ranges(module_ptr)
+                    .filter(|range| range.start > Pointer::null() + 128)
                     .map(|range| reader.read_bytes(range))
                     .collect::<Result<_, _>>()?;
 

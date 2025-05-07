@@ -487,7 +487,7 @@ impl SymbolicType {
 }
 
 impl StaticField {
-    fn method_table_and_field<'a>(
+    pub(crate) fn method_table_and_field<'a>(
         &self,
         reader: CachedReader<'a>,
     ) -> Result<(TypedPointer<MethodTable>, FieldDescription<'a>), Error> {
@@ -520,21 +520,6 @@ impl StaticField {
             reader.field_to_runtime_type(base_method_table_ptr, &field)?;
 
         Ok(base_type)
-    }
-
-    pub(crate) fn location(
-        &self,
-        reader: CachedReader<'_>,
-    ) -> Result<Pointer, Error> {
-        let (base_method_table_ptr, field) =
-            self.method_table_and_field(reader)?;
-
-        let method_table = reader.method_table(base_method_table_ptr)?;
-        let module = reader.runtime_module(method_table.module())?;
-        let location =
-            field.location(module, crate::FieldContainer::Static, &reader)?;
-
-        Ok(location)
     }
 }
 
