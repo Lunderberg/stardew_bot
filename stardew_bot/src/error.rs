@@ -50,3 +50,10 @@ impl std::fmt::Debug for Error {
         write!(f, "{}", self)
     }
 }
+
+impl From<x11rb::x11_utils::X11Error> for Error {
+    fn from(err: x11rb::x11_utils::X11Error) -> Self {
+        let err: X11Error = err.into();
+        err.into()
+    }
+}

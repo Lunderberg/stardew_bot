@@ -1,12 +1,26 @@
 use thiserror::Error;
 use x11rb::{
     connection::Connection as _,
-    protocol::xproto::{AtomEnum, ConnectionExt as _, Window},
+    protocol::{
+        xproto::{
+            AtomEnum, ButtonIndex, ConnectionExt as _,
+            EventMask as X11EventMask, KeyPressEvent, Keycode as X11KeyCode,
+            Window, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT,
+            KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT,
+        },
+        xtest::ConnectionExt as _,
+    },
     rust_connection::RustConnection,
+    x11_utils::X11Error,
 };
+
+use crate::game_state::Vector;
 
 #[derive(Error)]
 pub enum Error {
+    #[error("X11 utility error: {0:?}")]
+    UtilityError(x11rb::x11_utils::X11Error),
+
     #[error("X11 connection error: {0}")]
     ConnectionError(#[from] x11rb::errors::ConnectionError),
 
@@ -31,37 +45,25 @@ impl std::fmt::Debug for Error {
     }
 }
 
+impl From<x11rb::x11_utils::X11Error> for Error {
+    fn from(err: x11rb::x11_utils::X11Error) -> Self {
+        Error::UtilityError(err)
+    }
+}
+
 pub struct X11Handler {
     pub(crate) conn: RustConnection,
     name_atoms: [x11rb::protocol::xproto::Atom; 2],
     pid_atom: x11rb::protocol::xproto::Atom,
     active_window_atom: x11rb::protocol::xproto::Atom,
+    root: Window,
+    main_window: Option<Window>,
+    main_window_pos: Option<Vector<isize>>,
 }
 
 impl X11Handler {
     pub fn new() -> Result<Self, Error> {
         let (conn, _screen) = x11rb::connect(None)?;
-
-        // let setup = conn.setup();
-        // let root: x11rb::protocol::xproto::Window = setup
-        //     .roots
-        //     .iter()
-        //     .next()
-        //     .ok_or(Error::MissingRootWindow)?
-        //     .root;
-
-        // println!("Root window: {root:?}");
-
-        // let cookie = conn.query_tree(root)?;
-        // let reply = cookie.reply()?;
-
-        // let root = reply.root;
-        // let parent = reply.parent;
-        // let children = reply.children;
-
-        // println!("Root: {root:?}");
-        // println!("Parent: {parent:?}");
-        // println!("Children: {children:?}");
 
         let get_atom =
             |name: &str| -> Result<x11rb::protocol::xproto::Atom, Error> {
@@ -76,66 +78,31 @@ impl X11Handler {
         let pid_atom = get_atom("_NET_WM_PID")?;
         let active_window_atom = get_atom("_NET_ACTIVE_WINDOW")?;
 
-        // let active_window = {
-        //     let cookie = conn.get_property(
-        //         false,
-        //         root,
-        //         active_window_atom,
-        //         AtomEnum::WINDOW,
-        //         /*long_offset = */ 0,
-        //         /*long_length = */ 1,
-        //     )?;
-        //     let reply = cookie.reply()?;
-        //     Window::from_ne_bytes(reply.value.as_slice().try_into()?)
-        // };
+        let root = conn
+            .setup()
+            .roots
+            .iter()
+            .next()
+            .ok_or(Error::MissingRootWindow)?
+            .root;
 
         let handler = Self {
             conn,
             name_atoms,
             pid_atom,
             active_window_atom,
+            root,
+            main_window: None,
+            main_window_pos: None,
         };
-
-        // // for child in children {
-        // //     let title = handler.get_title_blocking(*child)?;
-        // //     let pid = handler.get_pid_blocking(*child)?;
-        // //     println!("Child: {child:?}, PID {pid}, {title}");
-        // }
-
-        // {
-        //     let title = handler.get_title_blocking(active_window)?;
-        //     let pid = handler.get_pid_blocking(active_window)?;
-        //     println!("Active window: {active_window:?}, PID {pid}, {title}");
-        // }
-
-        // let sd_window = handler.find_window_blocking("Stardew Valley")?;
-        // {
-        //     let title = handler.get_title_blocking(sd_window)?;
-        //     let pid = handler.get_pid_blocking(sd_window)?;
-        //     println!("SD window: {sd_window:?}, PID {pid}, {title}");
-        // }
 
         Ok(handler)
     }
 
-    pub(crate) fn get_root(
-        &self,
-    ) -> Result<x11rb::protocol::xproto::Window, Error> {
-        Ok(self
-            .conn
-            .setup()
-            .roots
-            .iter()
-            .next()
-            .ok_or(Error::MissingRootWindow)?
-            .root)
-    }
-
     pub(crate) fn query_active_window(&self) -> Result<Window, Error> {
-        let root = self.get_root()?;
         let cookie = self.conn.get_property(
             false,
-            root,
+            self.root,
             self.active_window_atom,
             AtomEnum::WINDOW,
             /* long_offset = */ 0,
@@ -147,10 +114,12 @@ impl X11Handler {
         Ok(window)
     }
 
-    pub fn get_title_blocking(
-        &self,
-        window: x11rb::protocol::xproto::Window,
-    ) -> Result<String, Error> {
+    pub fn main_window_is_active(&self) -> Result<bool, Error> {
+        let active_window = self.query_active_window()?;
+        Ok(Some(active_window) == self.main_window)
+    }
+
+    pub fn get_title_blocking(&self, window: Window) -> Result<String, Error> {
         let property = self
             .name_atoms
             .iter()
@@ -172,10 +141,7 @@ impl X11Handler {
         Ok(title)
     }
 
-    pub fn get_pid_blocking(
-        &self,
-        window: x11rb::protocol::xproto::Window,
-    ) -> Result<u32, Error> {
+    pub fn get_pid_blocking(&self, window: Window) -> Result<u32, Error> {
         let cookie = self.conn.get_property(
             false,
             window,
@@ -190,11 +156,8 @@ impl X11Handler {
         Ok(pid)
     }
 
-    pub fn find_window_blocking(
-        &self,
-        title: &str,
-    ) -> Result<x11rb::protocol::xproto::Window, Error> {
-        let mut stack: Vec<x11rb::protocol::xproto::Window> = self
+    pub fn find_window_blocking(&self, title: &str) -> Result<Window, Error> {
+        let mut stack: Vec<Window> = self
             .conn
             .setup()
             .roots
@@ -216,5 +179,123 @@ impl X11Handler {
         }
 
         Err(Error::NoSuchWindow(title.to_string()))
+    }
+
+    pub fn set_main_window(&mut self, window: Window) {
+        self.main_window = Some(window);
+    }
+
+    pub fn update_window_location(&mut self) -> Result<(), Error> {
+        let window = self
+            .main_window
+            .expect("Should set the main window before updating its location");
+
+        let query_pointer = self.conn.query_pointer(window)?.reply()?;
+
+        let window_location = Vector::<isize>::new(
+            (query_pointer.root_x - query_pointer.win_x) as isize,
+            (query_pointer.root_y - query_pointer.win_y) as isize,
+        );
+
+        self.main_window_pos = Some(window_location);
+
+        Ok(())
+    }
+
+    pub fn send_keystroke(
+        &self,
+        press: bool,
+        keycode: X11KeyCode,
+    ) -> Result<(), Error> {
+        let window = self
+            .main_window
+            .expect("Must set main window before sending keystrokes");
+
+        let response_type = if press {
+            KEY_PRESS_EVENT
+        } else {
+            KEY_RELEASE_EVENT
+        };
+
+        let event = KeyPressEvent {
+            response_type,
+            detail: keycode,
+            sequence: 0,
+            time: x11rb::CURRENT_TIME,
+            root: self.root,
+            event: window,
+            child: window,
+            root_x: 0,
+            root_y: 0,
+            event_x: 0,
+            event_y: 0,
+            state: x11rb::protocol::xproto::KeyButMask::default(),
+            same_screen: true,
+        };
+        self.conn.send_event(
+            /* propagate = */ false,
+            window,
+            X11EventMask::STRUCTURE_NOTIFY,
+            &event,
+        )?;
+
+        Ok(())
+    }
+
+    pub fn move_mouse(
+        &self,
+        window_pixel: Vector<isize>,
+    ) -> Result<(), X11Error> {
+        let offset = self.main_window_pos.expect(
+            "Must set main window position \
+             before moving the mouse",
+        );
+        let global_pixel = window_pixel + offset;
+
+        self.conn
+            .xtest_fake_input(
+                MOTION_NOTIFY_EVENT,
+                0,
+                0,
+                self.root,
+                global_pixel.right as i16,
+                global_pixel.down as i16,
+                0,
+            )
+            .unwrap();
+
+        Ok(())
+    }
+
+    pub fn send_click(
+        &self,
+        press: bool,
+        button: ButtonIndex,
+    ) -> Result<(), X11Error> {
+        let response_type = if press {
+            BUTTON_PRESS_EVENT
+        } else {
+            BUTTON_RELEASE_EVENT
+        };
+
+        self.conn
+            .xtest_fake_input(
+                response_type,
+                button.into(),
+                0,
+                self.root,
+                0,
+                0,
+                0,
+            )
+            .unwrap();
+
+        Ok(())
+    }
+
+    pub fn flush(&self) -> Result<(), Error> {
+        self.conn.flush()?;
+
+        Ok(())
     }
 }

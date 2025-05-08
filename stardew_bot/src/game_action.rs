@@ -1,10 +1,8 @@
-use x11rb::protocol::xproto::{
-    ConnectionExt as _, KeyPressEvent, Keycode as X11KeyCode, KEY_PRESS_EVENT,
-    KEY_RELEASE_EVENT,
-};
+use x11rb::protocol::xproto::{ButtonIndex, Keycode as X11KeyCode};
 
-use crate::{Direction, Error, X11Error, X11Handler};
+use crate::{game_state::Vector, Direction, Error, GameState, X11Handler};
 
+#[derive(Debug)]
 pub enum GameAction {
     Wait,
     HoldTool,
@@ -17,6 +15,11 @@ pub enum GameAction {
     // activate doors from a diagonal.
     ActivateTile,
     StopActivatingTile,
+
+    LeftClickTile(Vector<isize>),
+    ReleaseLeftClick,
+    RightClickTile(Vector<isize>),
+    ReleaseRightClick,
 }
 
 impl GameAction {
@@ -32,53 +35,22 @@ impl GameAction {
     const KEY_X: X11KeyCode = 53;
     const KEY_C: X11KeyCode = 54;
 
+    const MOUSE_LEFT: ButtonIndex = ButtonIndex::M1;
+    const MOUSE_RIGHT: ButtonIndex = ButtonIndex::M3;
+
     pub fn apply(
         &self,
         handler: &mut X11Handler,
         window: x11rb::protocol::xproto::Window,
+        game_state: &GameState,
     ) -> Result<(), Error> {
-        let root = handler.get_root()?;
-
-        let send_event =
-            |press: bool, keycode: X11KeyCode| -> Result<(), X11Error> {
-                let response_type = if press {
-                    KEY_PRESS_EVENT
-                } else {
-                    KEY_RELEASE_EVENT
-                };
-
-                let event = KeyPressEvent {
-                    response_type,
-                    detail: keycode,
-                    sequence: 0,
-                    time: x11rb::CURRENT_TIME,
-                    root,
-                    event: window,
-                    child: window,
-                    root_x: 0,
-                    root_y: 0,
-                    event_x: 0,
-                    event_y: 0,
-                    state: x11rb::protocol::xproto::KeyButMask::default(),
-                    same_screen: true,
-                };
-                handler.conn.send_event(
-                    /* propagate = */ false,
-                    window,
-                    x11rb::protocol::xproto::EventMask::STRUCTURE_NOTIFY,
-                    &event,
-                )?;
-
-                Ok(())
-            };
-
         match self {
             GameAction::Wait => {}
             GameAction::HoldTool => {
-                send_event(true, Self::KEY_C)?;
+                handler.send_keystroke(true, Self::KEY_C)?;
             }
             GameAction::ReleaseTool => {
-                send_event(false, Self::KEY_C)?;
+                handler.send_keystroke(false, Self::KEY_C)?;
             }
             GameAction::Move(direction) => {
                 let keystate = match direction {
@@ -94,16 +66,38 @@ impl GameAction {
                 keystate
                     .into_iter()
                     .zip([Self::KEY_W, Self::KEY_A, Self::KEY_S, Self::KEY_D])
-                    .try_for_each(|(state, key)| send_event(state, key))?;
+                    .try_for_each(|(state, key)| {
+                        handler.send_keystroke(state, key)
+                    })?;
             }
             GameAction::StopMoving => {
-                send_event(false, Self::KEY_W)?;
-                send_event(false, Self::KEY_A)?;
-                send_event(false, Self::KEY_S)?;
-                send_event(false, Self::KEY_D)?;
+                handler.send_keystroke(false, Self::KEY_W)?;
+                handler.send_keystroke(false, Self::KEY_A)?;
+                handler.send_keystroke(false, Self::KEY_S)?;
+                handler.send_keystroke(false, Self::KEY_D)?;
             }
-            GameAction::ActivateTile => send_event(true, Self::KEY_X)?,
-            GameAction::StopActivatingTile => send_event(false, Self::KEY_X)?,
+            GameAction::ActivateTile => {
+                handler.send_keystroke(true, Self::KEY_X)?
+            }
+            GameAction::StopActivatingTile => {
+                handler.send_keystroke(false, Self::KEY_X)?
+            }
+            &GameAction::LeftClickTile(tile) => {
+                let pixel = game_state.display.center_pixel_of_tile(tile);
+                handler.move_mouse(pixel)?;
+                handler.send_click(true, Self::MOUSE_LEFT)?
+            }
+            GameAction::ReleaseLeftClick => {
+                handler.send_click(false, Self::MOUSE_LEFT)?
+            }
+            &GameAction::RightClickTile(tile) => {
+                let pixel = game_state.display.center_pixel_of_tile(tile);
+                handler.move_mouse(pixel)?;
+                handler.send_click(true, Self::MOUSE_RIGHT)?
+            }
+            GameAction::ReleaseRightClick => {
+                handler.send_click(false, Self::MOUSE_RIGHT)?
+            }
         }
 
         Ok(())

@@ -1,6 +1,6 @@
 use crate::{
     game_state::GameStateReader, BotGoalDisplay, BotLogic, Error, FishingUI,
-    GameAction, GameState, KeyboardDisplay, PathfindingUI, PlayerStats,
+    GameAction, GameState, InputDisplay, PathfindingUI, PlayerStats,
     RunningLog, TuiDrawRate, X11Handler,
 };
 
@@ -48,7 +48,7 @@ struct TuiBuffers {
     fishing: FishingUI,
     player_stats: PlayerStats,
     pathfinding: PathfindingUI,
-    keyboard: KeyboardDisplay,
+    keyboard: InputDisplay,
     bot_goals: BotGoalDisplay,
 }
 
@@ -111,7 +111,7 @@ impl TuiBuffers {
             fishing: FishingUI::new(),
             player_stats: PlayerStats::new(),
             pathfinding: PathfindingUI,
-            keyboard: KeyboardDisplay,
+            keyboard: InputDisplay,
             bot_goals: BotGoalDisplay,
         }
     }
@@ -145,10 +145,13 @@ impl StardewBot {
 
         tui_globals.insert(BotLogic::new());
 
-        let x11_handler = X11Handler::new()?;
+        let mut x11_handler = X11Handler::new()?;
 
         let stardew_window =
             x11_handler.find_window_blocking("Stardew Valley")?;
+
+        x11_handler.set_main_window(stardew_window);
+        x11_handler.update_window_location()?;
 
         let mut buffers = TuiBuffers::new();
 
@@ -475,12 +478,18 @@ impl StardewBot {
         &mut self,
         actions: impl IntoIterator<Item = GameAction>,
     ) -> Result<(), Error> {
-        let active_window = self.x11_handler.query_active_window()?;
-        if active_window == self.stardew_window {
-            actions.into_iter().try_for_each(|action| {
-                action.apply(&mut self.x11_handler, self.stardew_window)
-            })?;
+        if !self.x11_handler.main_window_is_active()? {
+            return Ok(());
         }
+
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        actions.into_iter().try_for_each(|action| {
+            action.apply(&mut self.x11_handler, self.stardew_window, game_state)
+        })?;
 
         Ok(())
     }

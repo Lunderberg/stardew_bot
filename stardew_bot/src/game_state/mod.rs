@@ -19,8 +19,11 @@ pub use location::*;
 mod tile_map;
 pub use tile_map::TileMap;
 
-mod keyboard_state;
-pub use keyboard_state::KeyboardState;
+mod input_state;
+pub use input_state::InputState;
+
+mod display_state;
+pub use display_state::DisplayState;
 
 mod inventory_state;
 pub use inventory_state::Inventory;

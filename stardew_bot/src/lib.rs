@@ -37,8 +37,8 @@ pub use player_stats::PlayerStats;
 mod pathfinding;
 pub use pathfinding::PathfindingUI;
 
-mod keyboard_display;
-pub use keyboard_display::KeyboardDisplay;
+mod input_display;
+pub use input_display::InputDisplay;
 
 mod bot_goal_display;
 pub use bot_goal_display::BotGoalDisplay;

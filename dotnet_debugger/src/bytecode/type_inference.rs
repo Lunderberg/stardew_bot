@@ -403,9 +403,31 @@ impl<'a> TypeInference<'a> {
                     }?
                 }
 
-                ExprKind::Mul { lhs, rhs }
-                | ExprKind::Div { lhs, rhs }
-                | ExprKind::Mod { lhs, rhs } => {
+                ExprKind::Mul { lhs, rhs } => {
+                    let lhs_type = expect_cache(*lhs, "lhs of mul");
+                    let rhs_type = expect_cache(*rhs, "rhs of mul");
+                    match (lhs_type, rhs_type) {
+                        (
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::NativeUInt.into()),
+                        (
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                        ) => Ok(RuntimePrimType::F32.into()),
+                        (RuntimeType::Unknown, _)
+                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
+                        (other_lhs, other_rhs) => {
+                            Err(Error::InvalidOperandsForBinaryOp {
+                                op: expr_kind.op_name(),
+                                lhs: other_lhs.clone(),
+                                rhs: other_rhs.clone(),
+                            })
+                        }
+                    }?
+                }
+
+                ExprKind::Div { lhs, rhs } | ExprKind::Mod { lhs, rhs } => {
                     let lhs_type = expect_cache(*lhs, "lhs of mul");
                     let rhs_type = expect_cache(*rhs, "rhs of mul");
                     match (lhs_type, rhs_type) {

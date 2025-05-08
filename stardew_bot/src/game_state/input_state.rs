@@ -2,35 +2,57 @@ use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::Error;
 
+use super::Vector;
+
 #[derive(RustNativeObject, Debug, Clone)]
-pub struct KeyboardState {
-    pub keys: Vec<Key>,
+pub struct InputState {
+    pub keys_pressed: Vec<Key>,
+    pub mouse_location: Vector<isize>,
+    pub mouse_buttons: u8,
 }
 
-impl KeyboardState {
+impl InputState {
     pub(crate) fn read_all(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
-            "new_keyboard_state",
-            |keys: &Vec<i32>| KeyboardState {
-                keys: keys.iter().cloned().map(Into::into).collect(),
+            "new_input_state",
+            |keys_pressed: &Vec<i32>,
+             mouse_x: isize,
+             mouse_y: isize,
+             mouse_buttons: u8| {
+                let mouse_location = Vector::new(mouse_x, mouse_y);
+                InputState {
+                    keys_pressed: keys_pressed
+                        .iter()
+                        .cloned()
+                        .map(Into::into)
+                        .collect(),
+                    mouse_location,
+                    mouse_buttons,
+                }
             },
         )?;
 
         let func = graph.parse(stringify! {
-            fn read_keyboard() {
+            fn read_input_state() {
                 let keys = Microsoft.Xna.Framework
                     .Input
                     .Keyboard
                     ._keys;
 
                 let num_keys = keys._size.prim_cast::<usize>();
-                let keys = (0..num_keys)
+                let keys_pressed = (0..num_keys)
                     .map(|i| keys._items[i].value__)
                     .collect();
 
-                new_keyboard_state(keys)
+                let mouse = StardewValley.Game1
+                    .oldMouseState;
+
+                new_input_state(
+                    keys_pressed,
+                    mouse._x, mouse._y, mouse._buttons,
+                )
             }
         })?;
 

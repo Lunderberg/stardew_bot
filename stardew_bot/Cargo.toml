@@ -18,7 +18,7 @@ ratatui = "*"
 crossterm = "*"
 chrono = "*"
 
-x11rb = "*"
+x11rb = {version = "*", features = ["xtest"]}
 
 memory_reader = {path = "../memory_reader"}
 tui_utils = { path = "../tui_utils" }

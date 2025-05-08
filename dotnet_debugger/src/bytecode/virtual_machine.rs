@@ -3,7 +3,7 @@ use std::{
     collections::{BTreeMap, HashMap},
     fmt::Display,
     num::NonZeroUsize,
-    ops::{Mul, Range, RangeFrom},
+    ops::{Range, RangeFrom},
 };
 
 use derive_more::derive::From;
@@ -1408,7 +1408,42 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    define_binary_integer_op! {eval_mul, mul}
+    fn eval_mul(
+        &mut self,
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let op_name =
+            self.vm.instructions[self.current_instruction.0].op_name();
+
+        let opt_lhs = self.arg_to_prim(lhs)?;
+        let opt_rhs = self.arg_to_prim(rhs)?;
+
+        self.values[output] = match (opt_lhs, opt_rhs) {
+            (Some(lhs), Some(rhs)) => {
+                let res = match (lhs, rhs) {
+                    (
+                        RuntimePrimValue::NativeUInt(a),
+                        RuntimePrimValue::NativeUInt(b),
+                    ) => Ok(RuntimePrimValue::NativeUInt(a * b)),
+                    (RuntimePrimValue::F32(a), RuntimePrimValue::F32(b)) => {
+                        Ok(RuntimePrimValue::F32(a * b))
+                    }
+                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                        op: op_name,
+                        lhs: lhs.runtime_type().into(),
+                        rhs: rhs.runtime_type().into(),
+                    }),
+                }?;
+                Some(res.into())
+            }
+            _ => None,
+        };
+
+        Ok(())
+    }
+
     define_binary_integer_op! {eval_div, div_euclid}
     define_binary_integer_op! {eval_mod, rem_euclid}
 

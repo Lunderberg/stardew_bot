@@ -5,7 +5,8 @@ use dotnet_debugger::{
 use crate::Error;
 
 use super::{
-    DailyState, FishingState, Inventory, KeyboardState, Location, PlayerState,
+    DailyState, DisplayState, FishingState, InputState, Inventory, Location,
+    PlayerState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -14,7 +15,8 @@ pub struct GameState {
     pub player: PlayerState,
     pub fishing: FishingState,
     pub daily: DailyState,
-    pub keyboard: KeyboardState,
+    pub inputs: InputState,
+    pub display: DisplayState,
 }
 
 #[derive(Debug)]
@@ -27,7 +29,8 @@ pub struct GameStateDelta {
     player: PlayerState,
     fishing: FishingState,
     daily: DailyState,
-    keyboard: KeyboardState,
+    inputs: InputState,
+    display: DisplayState,
 }
 
 impl GameState {
@@ -51,8 +54,11 @@ impl GameState {
         let read_daily = DailyState::read_all(&mut graph)?;
         graph.name(read_daily, "read_daily")?;
 
-        let read_keyboard = KeyboardState::read_all(&mut graph)?;
-        graph.name(read_keyboard, "read_keyboard")?;
+        let read_input_state = InputState::read_all(&mut graph)?;
+        graph.name(read_input_state, "read_input_state")?;
+
+        let read_display_state = DisplayState::read_all(&mut graph)?;
+        graph.name(read_display_state, "read_display_state")?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -76,12 +82,14 @@ impl GameState {
              player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
-             keyboard: &KeyboardState| GameState {
+             inputs: &InputState,
+             display: &DisplayState| GameState {
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
-                keyboard: keyboard.clone(),
+                inputs: inputs.clone(),
+                display: display.clone(),
             },
         )?;
 
@@ -90,11 +98,13 @@ impl GameState {
             |player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
-             keyboard: &KeyboardState| GameStateDelta {
+             inputs: &InputState,
+             display: &DisplayState| GameStateDelta {
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
-                keyboard: keyboard.clone(),
+                inputs: inputs.clone(),
+                display: display.clone(),
             },
         )?;
 
@@ -110,18 +120,33 @@ impl GameState {
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
-                let keyboard = read_keyboard();
+                let inputs = read_input_state();
+                let display = read_display_state();
 
-                new_game_state(locations, player, fishing, daily, keyboard)
+                new_game_state(
+                    locations,
+                    player,
+                    fishing,
+                    daily,
+                    inputs,
+                    display,
+                )
             }
 
             pub fn read_delta_state() {
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
-                let keyboard = read_keyboard();
+                let inputs = read_input_state();
+                let display = read_display_state();
 
-                new_game_state_delta(player, fishing, daily, keyboard)
+                new_game_state_delta(
+                    player,
+                    fishing,
+                    daily,
+                    inputs,
+                    display,
+                )
             }
         })?;
 
@@ -134,7 +159,8 @@ impl GameState {
         self.player = delta.player;
         self.fishing = delta.fishing;
         self.daily = delta.daily;
-        self.keyboard = delta.keyboard;
+        self.inputs = delta.inputs;
+        self.display = delta.display;
     }
 }
 

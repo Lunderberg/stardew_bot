@@ -110,6 +110,17 @@ impl<T> Rectangle<T> {
             })
             .map(move |p| p + self.top_left)
     }
+
+    pub fn center(self) -> Vector<T>
+    where
+        T: Copy,
+        T: num::One,
+        T: std::ops::Add<Output = T>,
+        T: std::ops::Div<Output = T>,
+    {
+        let two = T::one() + T::one();
+        self.top_left + self.shape / two
+    }
 }
 
 impl<T, U> std::ops::Add<Vector<U>> for Vector<T>

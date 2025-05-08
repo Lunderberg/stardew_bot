@@ -484,15 +484,12 @@ impl BotGoal for LocalMovementGoal {
             .expect("Direction::iter is non-empty");
 
         let must_open_door = self.activate_endpoint.unwrap_or(false)
-            && dir.is_cardinal()
-            && player_position.as_tile() + dir.offset()
-                == self.position.as_tile()
             && player_position.manhattan_dist(self.position) < 1.5;
 
         let action = if must_open_door && player.fade_to_black {
-            GameAction::StopActivatingTile
+            GameAction::ReleaseRightClick
         } else if must_open_door {
-            GameAction::ActivateTile
+            GameAction::RightClickTile(self.position.as_tile())
         } else {
             GameAction::Move(dir)
         };
