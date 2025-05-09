@@ -98,10 +98,6 @@ impl WidgetWindow<Error> for FishingUI {
             .expect("Generated/updated in top-level GUI update");
         let fishing_state = &game_state.fishing;
 
-        fn get_value(value: impl std::fmt::Display) -> String {
-            format!("{value}")
-        }
-
         let showing_treasure = fishing_state.showing_treasure;
         let showing_fish = fishing_state.showing_fish;
         let pulling_out_of_water = fishing_state.pulling_out_of_water;
@@ -125,121 +121,121 @@ impl WidgetWindow<Error> for FishingUI {
             [
                 Row::new([
                     "Game tick:".into(),
-                    get_value(fishing_state.game_tick),
+                    format!("{}", fishing_state.game_tick),
                 ]),
                 Row::new([
                     "Selecting cast distance:".into(),
-                    get_value(fishing_state.is_timing_cast),
+                    format!("{}", fishing_state.is_timing_cast),
                 ])
                 .style(get_style(is_timing_cast)),
                 Row::new([
                     "Cast distance:".into(),
-                    get_value(fishing_state.casting_power),
+                    format!("{}", fishing_state.casting_power),
                 ])
                 .style(get_style(is_timing_cast)),
                 Row::new([
                     "Currently casting:".into(),
-                    get_value(fishing_state.is_casting),
+                    format!("{}", fishing_state.is_casting),
                 ])
                 .style(get_style(is_casting)),
                 Row::new([
                     "Bobber in air:".into(),
-                    get_value(fishing_state.is_casting),
+                    format!("{}", fishing_state.is_casting),
                 ])
                 .style(get_style(bobber_in_air)),
                 Row::new([
                     "Currently fishing:".into(),
-                    get_value(fishing_state.is_fishing),
+                    format!("{}", fishing_state.is_fishing),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Fish bites at:".into(),
-                    get_value(fishing_state.time_until_fishing_bite),
+                    format!("{}", fishing_state.time_until_fishing_bite),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Time waiting for bite:".into(),
-                    get_value(fishing_state.fishing_bite_accumulator),
+                    format!("{}", fishing_state.fishing_bite_accumulator),
                 ])
                 .style(get_style(is_fishing && !is_nibbling)),
                 Row::new([
                     "Fish nibbling hook:".into(),
-                    get_value(fishing_state.is_nibbling),
+                    format!("{}", fishing_state.is_nibbling),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Fish leaves at:".into(),
-                    get_value(fishing_state.time_until_fishing_nibble_done),
+                    format!("{}", fishing_state.time_until_fishing_nibble_done),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Time waiting with hooked fish:".into(),
-                    get_value(fishing_state.fishing_nibble_accumulator),
+                    format!("{}", fishing_state.fishing_nibble_accumulator),
                 ])
                 .style(get_style(is_nibbling)),
                 Row::new([
                     "Minigame in progress:".into(),
-                    get_value(fishing_state.minigame_in_progress),
+                    format!("{}", fishing_state.minigame_in_progress),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish difficulty:".into(),
-                    get_value(fishing_state.fish_difficulty),
+                    format!("{}", fishing_state.fish_difficulty),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish position:".into(),
-                    get_value(fishing_state.fish_position),
+                    format!("{}", fishing_state.fish_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish velocity:".into(),
-                    get_value(fishing_state.fish_velocity),
+                    format!("{}", fishing_state.fish_velocity),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fish target position:".into(),
-                    get_value(fishing_state.fish_target_position),
+                    format!("{}", fishing_state.fish_target_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar position:".into(),
-                    get_value(fishing_state.bar_position),
+                    format!("{}", fishing_state.bar_position),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar velocity:".into(),
-                    get_value(fishing_state.bar_velocity),
+                    format!("{}", fishing_state.bar_velocity),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Fishing bar height:".into(),
-                    get_value(fishing_state.bar_height),
+                    format!("{}", fishing_state.bar_height),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Bobber in bar:".into(),
-                    get_value(fishing_state.bobber_in_bar),
+                    format!("{}", fishing_state.bobber_in_bar),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Catch progress:".into(),
-                    get_value(fishing_state.catch_progress),
+                    format!("{}", fishing_state.catch_progress),
                 ])
                 .style(get_style(minigame_in_progress)),
                 Row::new([
                     "Pulling out of water:".into(),
-                    get_value(fishing_state.pulling_out_of_water),
+                    format!("{}", fishing_state.pulling_out_of_water),
                 ])
                 .style(get_style(pulling_out_of_water)),
                 Row::new([
                     "Showing fish:".into(),
-                    get_value(fishing_state.showing_fish),
+                    format!("{}", fishing_state.showing_fish),
                 ])
                 .style(get_style(showing_fish)),
                 Row::new([
                     "Showing treasure:".into(),
-                    get_value(fishing_state.showing_treasure),
+                    format!("{}", fishing_state.showing_treasure),
                 ])
                 .style(get_style(showing_treasure)),
             ],
