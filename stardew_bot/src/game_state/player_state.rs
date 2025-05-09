@@ -171,7 +171,7 @@ impl PlayerState {
                     .screenFade
                     .fadeToBlack;
 
-                let inventory = read_inventory(player);
+                let inventory = read_inventory(player.netItems.value);
 
                 new_player(
                     position,

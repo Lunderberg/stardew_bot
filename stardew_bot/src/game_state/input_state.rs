@@ -58,9 +58,17 @@ impl InputState {
 
         Ok(func)
     }
+
+    pub fn left_mouse_down(&self) -> bool {
+        (self.mouse_buttons & 1) > 0
+    }
+
+    pub fn right_mouse_down(&self) -> bool {
+        (self.mouse_buttons & 2) > 0
+    }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Key {
     Backspace,
     Tab,

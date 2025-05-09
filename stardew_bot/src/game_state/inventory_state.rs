@@ -35,10 +35,25 @@ impl Inventory {
         )?;
 
         let func = graph.parse(stringify! {
+            fn read_item(item) {
+                let item_id = item
+                    .itemId
+                    .value
+                    .read_string();
+
+                let quality = item
+                    .quality
+                    .value;
+
+                let count = item
+                    .stack
+                    .value;
+
+                new_item(item_id, quality, count)
+            }
+
             fn read_inventory(container) {
                 let items = container
-                    .netItems
-                    .value
                     .Items;
 
                 let num_items = items
@@ -55,21 +70,7 @@ impl Inventory {
                 let inventory = (0..num_items)
                     .map(|i| {
                         let item = arr[i].value;
-
-                        let item_id = item
-                            .itemId
-                            .value
-                            .read_string();
-
-                        let quality = item
-                            .quality
-                            .value;
-
-                        let count = item
-                            .stack
-                            .value;
-
-                        new_item(item_id, quality, count)
+                        read_item(item)
                     })
                     .reduce(
                         new_inventory(container),

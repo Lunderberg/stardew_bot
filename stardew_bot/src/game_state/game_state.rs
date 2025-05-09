@@ -5,8 +5,8 @@ use dotnet_debugger::{
 use crate::Error;
 
 use super::{
-    DailyState, DisplayState, FishingState, InputState, Inventory, Location,
-    PlayerState,
+    ChestMenu, DailyState, DisplayState, FishingState, InputState, Inventory,
+    Location, PlayerState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -17,6 +17,7 @@ pub struct GameState {
     pub daily: DailyState,
     pub inputs: InputState,
     pub display: DisplayState,
+    pub chest_menu: Option<ChestMenu>,
 }
 
 #[derive(Debug)]
@@ -31,6 +32,7 @@ pub struct GameStateDelta {
     daily: DailyState,
     inputs: InputState,
     display: DisplayState,
+    chest_menu: Option<ChestMenu>,
 }
 
 impl GameState {
@@ -60,6 +62,9 @@ impl GameState {
         let read_display_state = DisplayState::read_all(&mut graph)?;
         graph.name(read_display_state, "read_display_state")?;
 
+        let read_chest_menu = ChestMenu::read_all(&mut graph)?;
+        graph.name(read_chest_menu, "read_chest_menu")?;
+
         graph.parse(
             "let location_list = StardewValley
                  .Game1
@@ -83,13 +88,15 @@ impl GameState {
              fishing: &FishingState,
              daily: &DailyState,
              inputs: &InputState,
-             display: &DisplayState| GameState {
+             display: &DisplayState,
+             chest_menu: Option<&ChestMenu>| GameState {
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
                 inputs: inputs.clone(),
                 display: display.clone(),
+                chest_menu: chest_menu.cloned(),
             },
         )?;
 
@@ -99,12 +106,14 @@ impl GameState {
              fishing: &FishingState,
              daily: &DailyState,
              inputs: &InputState,
-             display: &DisplayState| GameStateDelta {
+             display: &DisplayState,
+             chest_menu: Option<&ChestMenu>| GameStateDelta {
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
                 inputs: inputs.clone(),
                 display: display.clone(),
+                chest_menu: chest_menu.cloned(),
             },
         )?;
 
@@ -122,6 +131,7 @@ impl GameState {
                 let daily = read_daily();
                 let inputs = read_input_state();
                 let display = read_display_state();
+                let chest_menu = read_chest_menu();
 
                 new_game_state(
                     locations,
@@ -130,6 +140,7 @@ impl GameState {
                     daily,
                     inputs,
                     display,
+                    chest_menu,
                 )
             }
 
@@ -139,6 +150,7 @@ impl GameState {
                 let daily = read_daily();
                 let inputs = read_input_state();
                 let display = read_display_state();
+                let chest_menu = read_chest_menu();
 
                 new_game_state_delta(
                     player,
@@ -146,6 +158,7 @@ impl GameState {
                     daily,
                     inputs,
                     display,
+                    chest_menu,
                 )
             }
         })?;
@@ -161,6 +174,7 @@ impl GameState {
         self.daily = delta.daily;
         self.inputs = delta.inputs;
         self.display = delta.display;
+        self.chest_menu = delta.chest_menu;
     }
 }
 

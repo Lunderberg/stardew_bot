@@ -1,7 +1,7 @@
 use crate::{
     bot_logic::{bot_logic::SubGoals, MovementGoal},
-    game_state::{Inventory, Item, ObjectKind, Quality},
-    Error, GameState,
+    game_state::{Inventory, Item, Key, ObjectKind, Quality},
+    Error, GameAction, GameState,
 };
 
 use super::bot_logic::{BotGoal, BotGoalResult};
@@ -38,8 +38,53 @@ impl BotGoal for InventoryGoal {
             num_found >= self.item.count
         };
 
-        if contains_target_item(&game_state.player.inventory) {
-            return Ok(BotGoalResult::Completed);
+        let item_slot = |inventory: &Inventory| -> Option<usize> {
+            inventory
+                .items
+                .iter()
+                .enumerate()
+                .filter_map(|(i, opt_item)| {
+                    opt_item.as_ref().map(|item| (i, item))
+                })
+                .find(|(_, item)| self.item.is_same_item(item))
+                .map(|(i, _)| i)
+        };
+
+        let player_has_item =
+            contains_target_item(&game_state.player.inventory);
+
+        if let Some(chest_menu) = &game_state.chest_menu {
+            let action = if game_state.inputs.right_mouse_down() {
+                BotGoalResult::Action(GameAction::ReleaseRightClick)
+            } else if game_state.inputs.left_mouse_down() {
+                BotGoalResult::Action(GameAction::ReleaseLeftClick)
+            } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
+                BotGoalResult::Action(GameAction::StopExitingMenu)
+            } else if player_has_item {
+                BotGoalResult::Action(GameAction::LeftClickPixel(
+                    chest_menu.ok_button,
+                ))
+            } else if let Some(chest_index) = item_slot(&chest_menu.chest_items)
+            {
+                let pixel = chest_menu.chest_item_locations[chest_index];
+                BotGoalResult::Action(GameAction::LeftClickPixel(pixel))
+            } else {
+                BotGoalResult::Action(GameAction::LeftClickPixel(
+                    chest_menu.ok_button,
+                ))
+            };
+            return Ok(action);
+        }
+
+        if player_has_item {
+            let action = if game_state.inputs.left_mouse_down() {
+                BotGoalResult::Action(GameAction::ReleaseLeftClick)
+            } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
+                BotGoalResult::Action(GameAction::StopExitingMenu)
+            } else {
+                BotGoalResult::Completed
+            };
+            return Ok(action);
         }
 
         let opt_chest_location = game_state
@@ -76,6 +121,8 @@ impl BotGoal for InventoryGoal {
             return Ok(goals.into());
         }
 
-        todo!()
+        Ok(BotGoalResult::Action(GameAction::RightClickTile(
+            chest_tile,
+        )))
     }
 }

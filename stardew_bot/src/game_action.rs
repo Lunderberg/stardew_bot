@@ -10,14 +10,19 @@ pub enum GameAction {
     Move(Direction),
     StopMoving,
 
+    ExitMenu,
+    StopExitingMenu,
+
     /// Send the 'x' keystroke, to activate a tile.
     // TODO: Send a mouse event instead.  This will allow the bot to
     // activate doors from a diagonal.
     ActivateTile,
     StopActivatingTile,
 
+    LeftClickPixel(Vector<isize>),
     LeftClickTile(Vector<isize>),
     ReleaseLeftClick,
+    RightClickPixel(Vector<isize>),
     RightClickTile(Vector<isize>),
     ReleaseRightClick,
 }
@@ -34,6 +39,8 @@ impl GameAction {
 
     const KEY_X: X11KeyCode = 53;
     const KEY_C: X11KeyCode = 54;
+
+    const KEY_ESCAPE: X11KeyCode = 9;
 
     const MOUSE_LEFT: ButtonIndex = ButtonIndex::M1;
     const MOUSE_RIGHT: ButtonIndex = ButtonIndex::M3;
@@ -82,6 +89,10 @@ impl GameAction {
             GameAction::StopActivatingTile => {
                 handler.send_keystroke(false, Self::KEY_X)?
             }
+            &GameAction::LeftClickPixel(pixel) => {
+                handler.move_mouse(pixel)?;
+                handler.send_click(true, Self::MOUSE_LEFT)?
+            }
             &GameAction::LeftClickTile(tile) => {
                 let pixel = game_state.display.center_pixel_of_tile(tile);
                 handler.move_mouse(pixel)?;
@@ -90,6 +101,10 @@ impl GameAction {
             GameAction::ReleaseLeftClick => {
                 handler.send_click(false, Self::MOUSE_LEFT)?
             }
+            &GameAction::RightClickPixel(pixel) => {
+                handler.move_mouse(pixel)?;
+                handler.send_click(true, Self::MOUSE_RIGHT)?
+            }
             &GameAction::RightClickTile(tile) => {
                 let pixel = game_state.display.center_pixel_of_tile(tile);
                 handler.move_mouse(pixel)?;
@@ -97,6 +112,13 @@ impl GameAction {
             }
             GameAction::ReleaseRightClick => {
                 handler.send_click(false, Self::MOUSE_RIGHT)?
+            }
+
+            GameAction::ExitMenu => {
+                handler.send_keystroke(true, Self::KEY_ESCAPE)?
+            }
+            GameAction::StopExitingMenu => {
+                handler.send_keystroke(false, Self::KEY_ESCAPE)?
             }
         }
 

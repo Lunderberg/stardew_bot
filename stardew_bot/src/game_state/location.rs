@@ -795,7 +795,7 @@ impl Location {
 
                         let chest = obj.as::<StardewValley.Objects.Chest>();
                         let kind = if chest.is_some() {
-                            let inventory = read_inventory(chest);
+                            let inventory = read_inventory(chest.netItems.value);
                             new_chest_kind(inventory)
                         } else {
                             let name = obj.netName.value.read_string();

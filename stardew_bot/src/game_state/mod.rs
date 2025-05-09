@@ -20,7 +20,7 @@ mod tile_map;
 pub use tile_map::TileMap;
 
 mod input_state;
-pub use input_state::InputState;
+pub use input_state::{InputState, Key};
 
 mod display_state;
 pub use display_state::DisplayState;
@@ -30,3 +30,6 @@ pub use inventory_state::Inventory;
 
 mod item;
 pub use item::{Item, Quality};
+
+mod chest_menu;
+pub use chest_menu::ChestMenu;
