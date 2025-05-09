@@ -48,7 +48,6 @@ impl GameAction {
     pub fn apply(
         &self,
         handler: &mut X11Handler,
-        window: x11rb::protocol::xproto::Window,
         game_state: &GameState,
     ) -> Result<(), Error> {
         match self {

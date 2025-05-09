@@ -34,8 +34,6 @@ pub struct StardewBot {
 
     x11_handler: X11Handler,
 
-    stardew_window: x11rb::protocol::xproto::Window,
-
     // Interactions owned by the top-level UI
     should_exit: bool,
     keystrokes: KeySequence,
@@ -203,7 +201,6 @@ impl StardewBot {
             x11_handler,
             should_exit: false,
             keystrokes: KeySequence::default(),
-            stardew_window,
             most_recent_unknown_key_sequence: None,
         })
     }
@@ -488,7 +485,7 @@ impl StardewBot {
             .expect("Globals should always contain a GameState");
 
         actions.into_iter().try_for_each(|action| {
-            action.apply(&mut self.x11_handler, self.stardew_window, game_state)
+            action.apply(&mut self.x11_handler, game_state)
         })?;
 
         Ok(())
