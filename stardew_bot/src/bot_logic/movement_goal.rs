@@ -457,6 +457,8 @@ impl BotGoal for LocalMovementGoal {
         if self.is_completed(game_state) {
             let goal = if player.movement.is_some() {
                 BotGoalResult::Action(GameAction::StopMoving)
+            } else if game_state.inputs.right_mouse_down() {
+                BotGoalResult::Action(GameAction::ReleaseRightClick)
             } else {
                 BotGoalResult::Completed
             };

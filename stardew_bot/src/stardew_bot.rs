@@ -169,7 +169,7 @@ impl StardewBot {
         layout.cycle_next();
 
         // Placeholder for main window
-        layout.split_horizontally(None, Some(45));
+        layout.split_horizontally(None, Some(30));
         layout.cycle_next();
 
         // Player states in top-right

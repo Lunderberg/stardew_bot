@@ -26,6 +26,17 @@ impl BotGoal for InventoryGoal {
         &mut self,
         game_state: &GameState,
     ) -> Result<BotGoalResult, Error> {
+        // TODO: Handle these are part of some return-to-default
+        // logic, rather than needing each goal to release each
+        // button.
+        if game_state.inputs.right_mouse_down() {
+            return Ok(BotGoalResult::Action(GameAction::ReleaseRightClick));
+        } else if game_state.inputs.left_mouse_down() {
+            return Ok(BotGoalResult::Action(GameAction::ReleaseLeftClick));
+        } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
+            return Ok(BotGoalResult::Action(GameAction::StopExitingMenu));
+        }
+
         let contains_target_item = |inventory: &Inventory| -> bool {
             let num_found = inventory
                 .items
@@ -54,13 +65,7 @@ impl BotGoal for InventoryGoal {
             contains_target_item(&game_state.player.inventory);
 
         if let Some(chest_menu) = &game_state.chest_menu {
-            let action = if game_state.inputs.right_mouse_down() {
-                BotGoalResult::Action(GameAction::ReleaseRightClick)
-            } else if game_state.inputs.left_mouse_down() {
-                BotGoalResult::Action(GameAction::ReleaseLeftClick)
-            } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
-                BotGoalResult::Action(GameAction::StopExitingMenu)
-            } else if player_has_item {
+            let action = if player_has_item {
                 BotGoalResult::Action(GameAction::LeftClickPixel(
                     chest_menu.ok_button,
                 ))

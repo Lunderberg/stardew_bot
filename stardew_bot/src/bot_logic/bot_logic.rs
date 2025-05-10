@@ -1,8 +1,6 @@
 use std::{any::Any, borrow::Cow};
 
-use crate::{Error, GameAction, GameState};
-
-use super::fishing_goal::FishingGoal;
+use crate::{game_state::Item, Error, GameAction, GameState};
 
 pub struct BotLogic {
     goals: Vec<Box<dyn BotGoal>>,
@@ -33,7 +31,11 @@ pub struct SubGoals(Vec<Box<dyn BotGoal>>);
 impl BotLogic {
     pub fn new() -> Self {
         Self {
-            goals: vec![Box::new(FishingGoal)],
+            goals: vec![
+                // Box::new(super::FishingGoal),
+                Box::new(super::InventoryGoal::new(Item::new("Pickaxe"))),
+                // Box::new(super::InventoryGoal::new(Item::new("BambooPole"))),
+            ],
         }
     }
 
