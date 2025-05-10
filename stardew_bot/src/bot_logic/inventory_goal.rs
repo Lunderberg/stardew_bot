@@ -17,6 +17,20 @@ impl InventoryGoal {
     }
 }
 
+impl InventoryGoal {
+    pub fn contains_target_item(&self, inventory: &Inventory) -> bool {
+        let num_found = inventory
+            .items
+            .iter()
+            .filter_map(|opt_item| opt_item.as_ref())
+            .filter(|item| self.item.is_same_item(item))
+            .map(|item| item.count)
+            .sum::<usize>();
+
+        num_found >= self.item.count
+    }
+}
+
 impl BotGoal for InventoryGoal {
     fn description(&self) -> std::borrow::Cow<str> {
         format!("Pick up {}", self.item).into()
@@ -37,18 +51,6 @@ impl BotGoal for InventoryGoal {
             return Ok(BotGoalResult::Action(GameAction::StopExitingMenu));
         }
 
-        let contains_target_item = |inventory: &Inventory| -> bool {
-            let num_found = inventory
-                .items
-                .iter()
-                .filter_map(|opt_item| opt_item.as_ref())
-                .filter(|item| self.item.is_same_item(item))
-                .map(|item| item.count)
-                .sum::<usize>();
-
-            num_found >= self.item.count
-        };
-
         let item_slot = |inventory: &Inventory| -> Option<usize> {
             inventory
                 .items
@@ -62,7 +64,7 @@ impl BotGoal for InventoryGoal {
         };
 
         let player_has_item =
-            contains_target_item(&game_state.player.inventory);
+            self.contains_target_item(&game_state.player.inventory);
 
         if let Some(chest_menu) = &game_state.chest_menu {
             let action = if player_has_item {
@@ -106,7 +108,7 @@ impl BotGoal for InventoryGoal {
                     })
                     .map(move |(tile, items)| (loc, tile, items))
             })
-            .find(|(_, _, items)| contains_target_item(items))
+            .find(|(_, _, items)| self.contains_target_item(items))
             .map(|(loc, tile, _)| (&loc.name, tile));
 
         let Some((chest_room, chest_tile)) = opt_chest_location else {

@@ -12,7 +12,7 @@ pub struct InputState {
 }
 
 impl InputState {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_input_state(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(

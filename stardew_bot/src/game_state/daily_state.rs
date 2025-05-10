@@ -9,7 +9,7 @@ pub struct DailyState {
 }
 
 impl DailyState {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_daily(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(

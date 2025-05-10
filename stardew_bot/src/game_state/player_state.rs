@@ -2,17 +2,27 @@ use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::{Direction, Error};
 
-use super::{Inventory, Vector};
+use super::{Inventory, Item, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PlayerState {
+    // Position-related info
     pub position: Vector<f32>,
     pub facing: FacingDirection,
     pub movement: Option<Direction>,
     pub room_name: String,
+
+    // Player's progression
     pub skills: PlayerSkills,
+
+    // TODO: Move this to a global game state
     pub fade_to_black: bool,
+
+    // Inventory-related info
     pub inventory: Inventory,
+    pub active_hotbar_index: usize,
+
+    pub using_tool: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -33,7 +43,7 @@ pub enum FacingDirection {
 }
 
 impl PlayerState {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_player(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
@@ -107,7 +117,9 @@ impl PlayerState {
              room_name: &str,
              skills: &PlayerSkills,
              fade_to_black: bool,
-             inventory: &Inventory| {
+             inventory: &Inventory,
+             active_hotbar_index: usize,
+             using_tool: bool| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -116,6 +128,8 @@ impl PlayerState {
                     skills: skills.clone(),
                     fade_to_black,
                     inventory: inventory.clone(),
+                    active_hotbar_index,
+                    using_tool,
                 }
             },
         )?;
@@ -173,6 +187,13 @@ impl PlayerState {
 
                 let inventory = read_inventory(player.netItems.value);
 
+                let active_hotbar_index = player
+                    .currentToolIndex
+                    .value
+                    .prim_cast::<usize>();
+
+                let using_tool = player.usingTool.value;
+
                 new_player(
                     position,
                     facing,
@@ -181,6 +202,8 @@ impl PlayerState {
                     skills,
                     fade_to_black,
                     inventory,
+                    active_hotbar_index,
+                    using_tool,
                 )
             }
         })?;
@@ -193,6 +216,14 @@ impl PlayerState {
             .map(|x| x / 64.0)
             .map(|x| x.round())
             .map(|x| x as isize)
+    }
+
+    pub fn selected_item(&self) -> Option<&Item> {
+        self.inventory
+            .items
+            .get(self.active_hotbar_index)
+            .map(|opt_item| opt_item.as_ref())
+            .flatten()
     }
 }
 

@@ -183,3 +183,9 @@ where
         write!(f, "({}, {})", self.right, self.down)
     }
 }
+
+impl Into<Vector<f32>> for Vector<isize> {
+    fn into(self) -> Vector<f32> {
+        self.map(|x| x as f32)
+    }
+}

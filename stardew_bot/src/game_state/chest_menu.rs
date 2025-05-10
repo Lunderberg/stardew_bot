@@ -14,7 +14,7 @@ pub struct ChestMenu {
 }
 
 impl ChestMenu {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_chest_menu(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(

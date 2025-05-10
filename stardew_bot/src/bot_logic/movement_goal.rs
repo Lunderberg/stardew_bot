@@ -11,6 +11,7 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult, SubGoals},
     graph_search::GraphSearch,
+    impl_tile_map_graph_search::point_to_point_lower_bound,
 };
 
 /// Epsilon distance (in tiles) to consider a target reached
@@ -59,23 +60,6 @@ struct ConnectedRoomGraph<'a> {
 struct RoomSearchNode {
     current_pos: Vector<isize>,
     current_room: String,
-}
-
-fn point_to_point_lower_bound(
-    node_from: Vector<isize>,
-    node_to: Vector<isize>,
-) -> u64 {
-    let offset = (node_from - node_to).map(|x| x.abs() as u64);
-    let min = offset.right.min(offset.down);
-    let max = offset.right.max(offset.down);
-
-    let diagonal_movements = min;
-    let cardinal_movements = max - min;
-    // Counting the number of half-tiles means that I can stay
-    // in integer math.  3/2 as the cost of a diagonal
-    // movement is close enough to sqrt(2) for the
-    // pathfinding.
-    3 * diagonal_movements + 2 * cardinal_movements
 }
 
 impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
@@ -242,38 +226,13 @@ struct TileGraph {
 impl GraphSearch<Vector<isize>> for TileGraph {
     fn connections_from<'a>(
         &'a self,
-        &tile: &'a Vector<isize>,
+        tile: &'a Vector<isize>,
     ) -> impl IntoIterator<Item = (Vector<isize>, u64)> + 'a {
-        Direction::iter()
-            .filter(move |dir| {
-                let is_clear_tile = |tile: Vector<isize>| {
-                    // The target tile may be one tile out-of-bounds.
-                    // This happens when the target is a warp tile's
-                    // position.
-                    tile == self.target_tile
-                        || self.clear_tiles.get(tile).cloned().unwrap_or(false)
-                };
-
-                let offset = dir.offset();
-                if dir.is_cardinal() {
-                    is_clear_tile(tile + offset)
-                } else {
-                    [
-                        Vector::new(offset.right, offset.down),
-                        Vector::new(0, offset.down),
-                        Vector::new(offset.right, 0),
-                    ]
-                    .into_iter()
-                    .all(|offset| is_clear_tile(tile + offset))
-                }
-            })
-            .map(move |dir| {
-                let offset = dir.offset();
-                let new_tile = tile + offset;
-                let additional_distance = if dir.is_cardinal() { 2 } else { 3 };
-
-                (new_tile, additional_distance)
-            })
+        let is_next_to_target = (self.target_tile - *tile).mag2() == 1;
+        is_next_to_target
+            .then(|| (self.target_tile, 2))
+            .into_iter()
+            .chain(self.clear_tiles.connections_from(tile))
     }
 
     fn heuristic_between(
@@ -281,7 +240,7 @@ impl GraphSearch<Vector<isize>> for TileGraph {
         node_from: &Vector<isize>,
         node_to: &Vector<isize>,
     ) -> Option<u64> {
-        Some(point_to_point_lower_bound(*node_from, *node_to))
+        self.clear_tiles.heuristic_between(node_from, node_to)
     }
 }
 

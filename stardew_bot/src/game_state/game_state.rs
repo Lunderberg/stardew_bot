@@ -2,11 +2,11 @@ use dotnet_debugger::{
     CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
 };
 
-use crate::Error;
+use crate::{bot_logic::BotError, Error};
 
 use super::{
     ChestMenu, DailyState, DisplayState, FishingState, InputState, Inventory,
-    Location, PlayerState,
+    Location, LocationDelta, PlayerState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -27,6 +27,7 @@ pub struct GameStateReader {
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameStateDelta {
+    location_delta: LocationDelta,
     player: PlayerState,
     fishing: FishingState,
     daily: DailyState,
@@ -41,29 +42,14 @@ impl GameState {
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
 
-        let read_inventory = Inventory::read_inventory(&mut graph)?;
-        graph.name(read_inventory, "read_inventory")?;
-
-        let read_location = Location::read_all(&mut graph)?;
-        graph.name(read_location, "read_location")?;
-
-        let read_player = PlayerState::read_all(&mut graph)?;
-        graph.name(read_player, "read_player")?;
-
-        let read_fishing = FishingState::read_all(&mut graph)?;
-        graph.name(read_fishing, "read_fishing")?;
-
-        let read_daily = DailyState::read_all(&mut graph)?;
-        graph.name(read_daily, "read_daily")?;
-
-        let read_input_state = InputState::read_all(&mut graph)?;
-        graph.name(read_input_state, "read_input_state")?;
-
-        let read_display_state = DisplayState::read_all(&mut graph)?;
-        graph.name(read_display_state, "read_display_state")?;
-
-        let read_chest_menu = ChestMenu::read_all(&mut graph)?;
-        graph.name(read_chest_menu, "read_chest_menu")?;
+        Inventory::def_read_inventory(&mut graph)?;
+        Location::def_read_location(&mut graph)?;
+        PlayerState::def_read_player(&mut graph)?;
+        FishingState::def_read_fishing(&mut graph)?;
+        DailyState::def_read_daily(&mut graph)?;
+        InputState::def_read_input_state(&mut graph)?;
+        DisplayState::def_read_display_state(&mut graph)?;
+        ChestMenu::def_read_chest_menu(&mut graph)?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -102,12 +88,14 @@ impl GameState {
 
         graph.named_native_function(
             "new_game_state_delta",
-            |player: &PlayerState,
+            |location_delta: &LocationDelta,
+             player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>| GameStateDelta {
+                location_delta: location_delta.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
                 daily: daily.clone(),
@@ -145,6 +133,7 @@ impl GameState {
             }
 
             pub fn read_delta_state() {
+                let location_delta = read_location_delta();
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
@@ -153,6 +142,7 @@ impl GameState {
                 let chest_menu = read_chest_menu();
 
                 new_game_state_delta(
+                    location_delta,
                     player,
                     fishing,
                     daily,
@@ -175,6 +165,21 @@ impl GameState {
         self.inputs = delta.inputs;
         self.display = delta.display;
         self.chest_menu = delta.chest_menu;
+        if let Some(loc) = self
+            .locations
+            .iter_mut()
+            .find(|loc| &loc.name == &delta.location_delta.name)
+        {
+            loc.apply_delta(delta.location_delta);
+        }
+    }
+
+    pub fn get_room<'a>(&'a self, name: &str) -> Result<&'a Location, Error> {
+        self.locations
+            .iter()
+            .find(|loc| loc.name == name)
+            .ok_or_else(|| BotError::UnknownRoom(name.into()))
+            .map_err(Into::into)
     }
 }
 

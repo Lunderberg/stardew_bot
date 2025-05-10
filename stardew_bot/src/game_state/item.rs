@@ -77,13 +77,13 @@ impl std::fmt::Display for Item {
             count,
         } = &self;
         if quality.is_normal() && *count == 1 {
-            write!(f, "Pick up {item_id}")
+            write!(f, "{item_id}")
         } else if quality.is_normal() {
-            write!(f, "Pick up {count} {item_id}")
+            write!(f, "{count} {item_id}")
         } else if *count == 1 {
-            write!(f, "Pick up {quality} {item_id}")
+            write!(f, "{quality} {item_id}")
         } else {
-            write!(f, "Pick up {count} {quality} {item_id}")
+            write!(f, "{count} {quality} {item_id}")
         }
     }
 }

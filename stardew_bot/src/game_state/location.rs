@@ -57,6 +57,15 @@ pub struct Location {
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
+pub struct LocationDelta {
+    pub(crate) name: String,
+    resource_clumps: Vec<ResourceClump>,
+    trees: Vec<Tree>,
+    grass: Vec<Vector<isize>>,
+    objects: Vec<Object>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
 pub struct Warp {
     pub location: Vector<isize>,
     pub target: Vector<isize>,
@@ -201,7 +210,7 @@ struct BuildingDataLookup {
 }
 
 impl Location {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_location(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
@@ -501,6 +510,23 @@ impl Location {
             },
         )?;
 
+        graph.named_native_function(
+            "new_location_delta",
+            |name: &str,
+             resource_clumps: &Vec<ResourceClump>,
+             grass: &Vec<Vector<isize>>,
+             trees: &Vec<Tree>,
+             objects: &Vec<Object>| {
+                LocationDelta {
+                    name: name.into(),
+                    resource_clumps: resource_clumps.clone(),
+                    grass: grass.clone(),
+                    trees: trees.clone(),
+                    objects: objects.clone(),
+                }
+            },
+        )?;
+
         graph.parse(
             "
         let building_data_dict = StardewValley
@@ -554,6 +580,168 @@ impl Location {
                     )
             };
 
+            fn read_location_resource_clumps(location) {
+                let num_resource_clumps = location
+                    .resourceClumps
+                    .list
+                    ._size
+                    .prim_cast::<usize>();
+                let resource_clumps = (0..num_resource_clumps)
+                    .map(|i_clump: usize| {
+                        location
+                            .resourceClumps
+                            .list
+                            ._items[i_clump]
+                    })
+                    .map(|clump| {
+                        let shape = {
+                            let right = clump.netTile.value.X;
+                            let down = clump.netTile.value.Y;
+                            let width = clump.width.value;
+                            let height = clump.height.value;
+                            new_rectangle(right,down,width,height)
+                        };
+
+                        let kind = {
+                            let kind_index = clump.parentSheetIndex.value;
+                            new_resource_clump_kind(kind_index)
+                        };
+                        new_resource_clump(shape, kind)
+                    })
+                    .filter(|obj| obj.is_some())
+                    .collect();
+
+                resource_clumps
+            }
+
+            fn read_location_grass(location){
+                let num_features = location
+                    .terrainFeatures
+                    .dict
+                    ._entries
+                    .len();
+                let num_features = if num_features.is_some() {
+                    num_features
+                } else {
+                    0
+                };
+                let iter_features = (0..num_features)
+                    .map(|i_feat: usize| {
+                        location
+                            .terrainFeatures
+                            .dict
+                            ._entries[i_feat]
+                    });
+
+                let grass = iter_features
+                    .filter(|feature| feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Grass>()
+                            .grassBladeHealth
+                            .is_some())
+                    .map(|feature| {
+                        let right = feature.key.X;
+                        let down = feature.key.Y;
+                        new_isize_vector(right,down)
+                    })
+                    .collect();
+
+                grass
+            }
+
+            fn read_location_trees(location) {
+                let num_features = location
+                    .terrainFeatures
+                    .dict
+                    ._entries
+                    .len();
+                let num_features = if num_features.is_some() {
+                    num_features
+                } else {
+                    0
+                };
+                let iter_features = (0..num_features)
+                    .map(|i_feat: usize| {
+                        location
+                            .terrainFeatures
+                            .dict
+                            ._entries[i_feat]
+                    });
+
+                let trees = iter_features
+                    .filter(|feature| feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Tree>()
+                            .is_some())
+                    .map(|feature| {
+                        let tree = feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.Tree>();
+                        let position = {
+                            let right = feature.key.X;
+                            let down = feature.key.Y;
+                            new_isize_vector(right,down)
+                        };
+                        // treeType looks like an integer, but has
+                        // been converted to a string.
+                        let tree_type =
+                            tree.treeType.value.read_string();
+                        let growth_stage = tree.growthStage.value;
+                        let has_seed = tree.hasSeed.value;
+                        let is_stump = tree.stump.value;
+                        new_tree(
+                            position,
+                            tree_type,
+                            growth_stage,
+                            has_seed,
+                            is_stump
+                        )
+                    })
+                    .collect();
+
+                trees
+            }
+
+            fn read_location_objects(location) {
+                let num_objects = location
+                    .objects
+                    .compositeDict
+                    ._entries
+                    .len();
+                let objects = (0..num_objects)
+                    .map(|i| {
+                        location
+                            .objects
+                            .compositeDict
+                            ._entries[i]
+                            .value
+                    })
+                    .map(|obj| {
+                        let tile = {
+                            let right = obj.tileLocation.value.X;
+                            let down = obj.tileLocation.value.Y;
+                            new_isize_vector(right,down)
+                        };
+
+                        let chest = obj.as::<StardewValley.Objects.Chest>();
+                        let kind = if chest.is_some() {
+                            let inventory = read_inventory(chest.netItems.value);
+                            new_chest_kind(inventory)
+                        } else {
+                            let name = obj.netName.value.read_string();
+                            let category = obj.category.value;
+                            new_litter_kind(name,category)
+                        };
+
+                        new_object(tile,kind)
+                    })
+                    .filter(|obj| obj.is_some())
+                    .collect();
+                objects
+            }
 
             fn read_location(location) {
                 let name = get_location_name_ptr(location).read_string();
@@ -654,100 +842,9 @@ impl Location {
                     });
 
 
-                let num_resource_clumps = location
-                    .resourceClumps
-                    .list
-                    ._size
-                    .prim_cast::<usize>();
-                let resource_clumps = (0..num_resource_clumps)
-                    .map(|i_clump: usize| {
-                        location
-                            .resourceClumps
-                            .list
-                            ._items[i_clump]
-                    })
-                    .map(|clump| {
-                        let shape = {
-                            let right = clump.netTile.value.X;
-                            let down = clump.netTile.value.Y;
-                            let width = clump.width.value;
-                            let height = clump.height.value;
-                            new_rectangle(right,down,width,height)
-                        };
-
-                        let kind = {
-                            let kind_index = clump.parentSheetIndex.value;
-                            new_resource_clump_kind(kind_index)
-                        };
-                        new_resource_clump(shape, kind)
-                    })
-                    .filter(|obj| obj.is_some())
-                    .collect();
-
-                let num_features = location
-                    .terrainFeatures
-                    .dict
-                    ._entries
-                    .len();
-                let num_features = if num_features.is_some() {
-                    num_features
-                } else {
-                    0
-                };
-                let iter_features = (0..num_features)
-                    .map(|i_feat: usize| {
-                        location
-                            .terrainFeatures
-                            .dict
-                            ._entries[i_feat]
-                    });
-
-                let grass = iter_features
-                    .filter(|feature| feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.Grass>()
-                            .grassBladeHealth
-                            .is_some())
-                    .map(|feature| {
-                        let right = feature.key.X;
-                        let down = feature.key.Y;
-                        new_isize_vector(right,down)
-                    })
-                    .collect();
-
-                let trees = iter_features
-                    .filter(|feature| feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.Tree>()
-                            .is_some())
-                    .map(|feature| {
-                        let tree = feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.Tree>();
-                        let position = {
-                            let right = feature.key.X;
-                            let down = feature.key.Y;
-                            new_isize_vector(right,down)
-                        };
-                        // treeType looks like an integer, but has
-                        // been converted to a string.
-                        let tree_type =
-                            tree.treeType.value.read_string();
-                        let growth_stage = tree.growthStage.value;
-                        let has_seed = tree.hasSeed.value;
-                        let is_stump = tree.stump.value;
-                        new_tree(
-                            position,
-                            tree_type,
-                            growth_stage,
-                            has_seed,
-                            is_stump
-                        )
-                    })
-                    .collect();
+                let resource_clumps = read_location_resource_clumps(location);
+                let grass = read_location_grass(location);
+                let trees = read_location_trees(location);
 
                 let num_large_features = location
                     .largeTerrainFeatures
@@ -773,40 +870,7 @@ impl Location {
                     })
                     .collect();
 
-                let num_objects = location
-                    .objects
-                    .compositeDict
-                    ._entries
-                    .len();
-                let objects = (0..num_objects)
-                    .map(|i| {
-                        location
-                            .objects
-                            .compositeDict
-                            ._entries[i]
-                            .value
-                    })
-                    .map(|obj| {
-                        let tile = {
-                            let right = obj.tileLocation.value.X;
-                            let down = obj.tileLocation.value.Y;
-                            new_isize_vector(right,down)
-                        };
-
-                        let chest = obj.as::<StardewValley.Objects.Chest>();
-                        let kind = if chest.is_some() {
-                            let inventory = read_inventory(chest.netItems.value);
-                            new_chest_kind(inventory)
-                        } else {
-                            let name = obj.netName.value.read_string();
-                            let category = obj.category.value;
-                            new_litter_kind(name,category)
-                        };
-
-                        new_object(tile,kind)
-                    })
-                    .filter(|obj| obj.is_some())
-                    .collect();
+                let objects = read_location_objects(location);
 
                 let water_tiles = location
                     .waterTiles
@@ -1000,6 +1064,28 @@ impl Location {
                     buildings,
                 )
             }
+
+            fn read_location_delta() {
+                let location = StardewValley.Game1
+                    ._player
+                    .currentLocationRef
+                    ._gameLocation;
+
+                let name = get_location_name_ptr(location).read_string();
+
+                let resource_clumps = read_location_resource_clumps(location);
+                let grass = read_location_grass(location);
+                let trees = read_location_trees(location);
+                let objects = read_location_objects(location);
+
+                new_location_delta(
+                    name,
+                    resource_clumps,
+                    grass,
+                    trees,
+                    objects,
+                )
+            }
         })?;
 
         Ok(func)
@@ -1087,6 +1173,13 @@ impl Location {
             });
 
         map
+    }
+
+    pub fn apply_delta(&mut self, delta: LocationDelta) {
+        self.resource_clumps = delta.resource_clumps;
+        self.trees = delta.trees;
+        self.grass = delta.grass;
+        self.objects = delta.objects;
     }
 }
 

@@ -25,6 +25,9 @@ pub enum GameAction {
     RightClickPixel(Vector<isize>),
     RightClickTile(Vector<isize>),
     ReleaseRightClick,
+
+    SelectHotbar(usize),
+    StopSelectingHotbar(usize),
 }
 
 impl GameAction {
@@ -41,6 +44,33 @@ impl GameAction {
     const KEY_C: X11KeyCode = 54;
 
     const KEY_ESCAPE: X11KeyCode = 9;
+
+    const KEY_1: X11KeyCode = 10;
+    const KEY_2: X11KeyCode = 11;
+    const KEY_3: X11KeyCode = 12;
+    const KEY_4: X11KeyCode = 13;
+    const KEY_5: X11KeyCode = 14;
+    const KEY_6: X11KeyCode = 15;
+    const KEY_7: X11KeyCode = 16;
+    const KEY_8: X11KeyCode = 17;
+    const KEY_9: X11KeyCode = 18;
+    const KEY_0: X11KeyCode = 19;
+    const KEY_MINUS: X11KeyCode = 20;
+    const KEY_EQUAL: X11KeyCode = 21;
+    const KEY_INVENTORY_SELECT: [X11KeyCode; 12] = [
+        Self::KEY_1,
+        Self::KEY_2,
+        Self::KEY_3,
+        Self::KEY_4,
+        Self::KEY_5,
+        Self::KEY_6,
+        Self::KEY_7,
+        Self::KEY_8,
+        Self::KEY_9,
+        Self::KEY_0,
+        Self::KEY_MINUS,
+        Self::KEY_EQUAL,
+    ];
 
     const MOUSE_LEFT: ButtonIndex = ButtonIndex::M1;
     const MOUSE_RIGHT: ButtonIndex = ButtonIndex::M3;
@@ -118,6 +148,13 @@ impl GameAction {
             }
             GameAction::StopExitingMenu => {
                 handler.send_keystroke(false, Self::KEY_ESCAPE)?
+            }
+
+            &GameAction::SelectHotbar(i) => {
+                handler.send_keystroke(true, Self::KEY_INVENTORY_SELECT[i])?
+            }
+            &GameAction::StopSelectingHotbar(i) => {
+                handler.send_keystroke(false, Self::KEY_INVENTORY_SELECT[i])?
             }
         }
 

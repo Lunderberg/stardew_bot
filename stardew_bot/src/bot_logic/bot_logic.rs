@@ -7,10 +7,10 @@ pub struct BotLogic {
 }
 
 pub trait BotGoal: Any {
+    fn description(&self) -> Cow<str>;
+
     fn apply(&mut self, game_state: &GameState)
         -> Result<BotGoalResult, Error>;
-
-    fn description(&self) -> Cow<str>;
 }
 
 pub enum BotGoalResult {
@@ -32,8 +32,9 @@ impl BotLogic {
     pub fn new() -> Self {
         Self {
             goals: vec![
+                Box::new(super::ClearFarmGoal),
                 // Box::new(super::FishingGoal),
-                Box::new(super::InventoryGoal::new(Item::new("Pickaxe"))),
+
                 // Box::new(super::InventoryGoal::new(Item::new("BambooPole"))),
             ],
         }
@@ -105,5 +106,29 @@ where
 impl From<SubGoals> for BotGoalResult {
     fn from(subgoals: SubGoals) -> Self {
         Self::SubGoals(subgoals)
+    }
+}
+
+impl<T> From<T> for SubGoals
+where
+    T: BotGoal,
+{
+    fn from(value: T) -> Self {
+        SubGoals::new().then(value)
+    }
+}
+
+impl<T> From<T> for BotGoalResult
+where
+    T: BotGoal,
+{
+    fn from(goal: T) -> Self {
+        BotGoalResult::SubGoals(goal.into())
+    }
+}
+
+impl From<GameAction> for BotGoalResult {
+    fn from(action: GameAction) -> Self {
+        BotGoalResult::Action(action)
     }
 }

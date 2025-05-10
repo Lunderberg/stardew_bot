@@ -13,6 +13,9 @@ pub enum BotError {
         start: Vector<isize>,
         goal: Vector<isize>,
     },
+
+    #[error("Could not find room named '{0}'")]
+    UnknownRoom(String),
 }
 
 impl std::fmt::Debug for BotError {

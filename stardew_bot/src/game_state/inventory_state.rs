@@ -11,7 +11,7 @@ pub struct Inventory {
 }
 
 impl Inventory {
-    pub(crate) fn read_inventory(
+    pub(crate) fn def_read_inventory(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function("new_inventory", |_: Pointer| {
@@ -37,8 +37,7 @@ impl Inventory {
         let func = graph.parse(stringify! {
             fn read_item(item) {
                 let item_id = item
-                    .itemId
-                    .value
+                    ._qualifiedItemId
                     .read_string();
 
                 let quality = item

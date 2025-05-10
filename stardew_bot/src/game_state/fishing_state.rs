@@ -112,7 +112,7 @@ pub struct FishingState {
 }
 
 impl FishingState {
-    pub(crate) fn read_all(
+    pub(crate) fn def_read_fishing(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
