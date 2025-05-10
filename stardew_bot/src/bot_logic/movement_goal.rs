@@ -385,6 +385,7 @@ impl BotGoal for MovementGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        _: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         Ok(
             if let Some(subgoals) = self.room_to_room_movement(game_state)? {
@@ -410,18 +411,21 @@ impl BotGoal for LocalMovementGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
         if self.is_completed(game_state) {
-            let goal = if player.movement.is_some() {
-                BotGoalResult::Action(GameAction::StopMoving)
-            } else if game_state.inputs.right_mouse_down() {
-                BotGoalResult::Action(GameAction::ReleaseRightClick)
-            } else {
-                BotGoalResult::Completed
-            };
-            return Ok(goal);
+            let mut state = BotGoalResult::Completed;
+            if player.movement.is_some() {
+                do_action(GameAction::StopMoving);
+                state = BotGoalResult::InProgress;
+            }
+            if game_state.inputs.right_mouse_down() {
+                do_action(GameAction::ReleaseRightClick);
+                state = BotGoalResult::InProgress;
+            }
+            return Ok(state);
         }
 
         self.update_plan(game_state)?;
@@ -443,19 +447,20 @@ impl BotGoal for LocalMovementGoal {
                 num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
             })
             .expect("Direction::iter is non-empty");
+        do_action(GameAction::Move(dir));
 
         let must_open_door = self.activate_endpoint.unwrap_or(false)
             && player_position.manhattan_dist(self.position) < 1.5;
 
-        let action = if must_open_door && player.fade_to_black {
-            GameAction::ReleaseRightClick
-        } else if must_open_door {
-            GameAction::RightClickTile(self.position.as_tile())
-        } else {
-            GameAction::Move(dir)
-        };
+        if must_open_door {
+            if player.fade_to_black {
+                do_action(GameAction::ReleaseRightClick);
+            } else {
+                do_action(GameAction::RightClickTile(self.position.as_tile()));
+            }
+        }
 
-        Ok(BotGoalResult::Action(action))
+        Ok(BotGoalResult::InProgress)
     }
 
     fn description(&self) -> Cow<str> {
@@ -473,22 +478,23 @@ impl BotGoal for FaceDirectionGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        let output = if game_state.player.facing != self.0 {
+        if game_state.player.facing != self.0 {
             let dir = match self.0 {
                 FacingDirection::North => Direction::North,
                 FacingDirection::East => Direction::East,
                 FacingDirection::South => Direction::South,
                 FacingDirection::West => Direction::West,
             };
-            BotGoalResult::Action(GameAction::Move(dir))
+            do_action(GameAction::Move(dir));
         } else if game_state.player.movement.is_some() {
-            BotGoalResult::Action(GameAction::StopMoving)
+            do_action(GameAction::StopMoving);
         } else {
-            BotGoalResult::Completed
-        };
+            return Ok(BotGoalResult::Completed);
+        }
 
-        Ok(output)
+        Ok(BotGoalResult::InProgress)
     }
 
     fn description(&self) -> Cow<str> {

@@ -21,9 +21,11 @@ impl BotGoal for ClearFarmGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         if game_state.inputs.left_mouse_down() {
-            return Ok(GameAction::ReleaseLeftClick.into());
+            do_action(GameAction::ReleaseLeftClick.into());
+            return Ok(BotGoalResult::InProgress);
         }
 
         let farm = game_state.get_room("Farm")?;
@@ -93,12 +95,10 @@ impl BotGoal for ClearFarmGoal {
                 return Ok(goal.into());
             }
 
-            let action = if player.using_tool {
-                GameAction::Wait
-            } else {
-                GameAction::LeftClickTile(tile).into()
-            };
-            return Ok(action.into());
+            if !player.using_tool {
+                do_action(GameAction::LeftClickTile(tile));
+            }
+            return Ok(BotGoalResult::InProgress);
         }
 
         let clear_tiles = {

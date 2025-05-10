@@ -9,8 +9,11 @@ pub struct BotLogic {
 pub trait BotGoal: Any {
     fn description(&self) -> Cow<str>;
 
-    fn apply(&mut self, game_state: &GameState)
-        -> Result<BotGoalResult, Error>;
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
+    ) -> Result<BotGoalResult, Error>;
 }
 
 pub enum BotGoalResult {
@@ -22,8 +25,9 @@ pub enum BotGoalResult {
     /// completed.
     SubGoals(SubGoals),
 
-    /// This goal has a direct action to accomplish the goal.
-    Action(GameAction),
+    /// This goal is in-progress, and should remain at the top of the
+    /// stack of goals.
+    InProgress,
 }
 
 pub struct SubGoals(Vec<Box<dyn BotGoal>>);
@@ -43,12 +47,14 @@ impl BotLogic {
     pub fn update(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<GameAction>, Error> {
+    ) -> Result<Vec<GameAction>, Error> {
+        let mut actions = Vec::new();
         loop {
             let current_goal =
                 self.goals.last_mut().ok_or(Error::NoRemainingGoals)?;
 
-            let goal_result = current_goal.apply(game_state)?;
+            let goal_result = current_goal
+                .apply(game_state, &mut |action| actions.push(action))?;
 
             match goal_result {
                 BotGoalResult::Completed => {
@@ -61,11 +67,13 @@ impl BotLogic {
                         .rev()
                         .for_each(|sub_goal| self.goals.push(sub_goal));
                 }
-                BotGoalResult::Action(game_action) => {
-                    return Ok(Some(game_action));
+                BotGoalResult::InProgress => {
+                    break;
                 }
             }
         }
+
+        Ok(actions)
     }
 
     pub fn iter_goals(
@@ -124,11 +132,5 @@ where
 {
     fn from(goal: T) -> Self {
         BotGoalResult::SubGoals(goal.into())
-    }
-}
-
-impl From<GameAction> for BotGoalResult {
-    fn from(action: GameAction) -> Self {
-        BotGoalResult::Action(action)
     }
 }

@@ -339,13 +339,9 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
-        let res = bot_logic.update(game_state).and_then(|opt_action| {
-            if let Some(action) = opt_action {
-                self.apply_game_actions(std::iter::once(action))
-            } else {
-                Ok(())
-            }
-        });
+        let res = bot_logic
+            .update(game_state)
+            .and_then(|actions| self.apply_game_actions(actions));
         if let Err(err) = res {
             self.buffers.running_log.add_log(format!("Error: {err}"));
         }

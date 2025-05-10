@@ -39,16 +39,28 @@ impl BotGoal for InventoryGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         // TODO: Handle these are part of some return-to-default
         // logic, rather than needing each goal to release each
         // button.
-        if game_state.inputs.right_mouse_down() {
-            return Ok(BotGoalResult::Action(GameAction::ReleaseRightClick));
-        } else if game_state.inputs.left_mouse_down() {
-            return Ok(BotGoalResult::Action(GameAction::ReleaseLeftClick));
-        } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
-            return Ok(BotGoalResult::Action(GameAction::StopExitingMenu));
+        {
+            let mut cleanup = false;
+            if game_state.inputs.right_mouse_down() {
+                do_action(GameAction::ReleaseRightClick);
+                cleanup = true;
+            }
+            if game_state.inputs.left_mouse_down() {
+                do_action(GameAction::ReleaseLeftClick);
+                cleanup = true;
+            }
+            if game_state.inputs.keys_pressed.contains(&Key::Escape) {
+                do_action(GameAction::StopExitingMenu);
+                cleanup = true;
+            }
+            if cleanup {
+                return Ok(BotGoalResult::InProgress);
+            }
         }
 
         let item_slot = |inventory: &Inventory| -> Option<usize> {
@@ -67,31 +79,29 @@ impl BotGoal for InventoryGoal {
             self.contains_target_item(&game_state.player.inventory);
 
         if let Some(chest_menu) = &game_state.chest_menu {
-            let action = if player_has_item {
-                BotGoalResult::Action(GameAction::LeftClickPixel(
-                    chest_menu.ok_button,
-                ))
+            if player_has_item {
+                do_action(GameAction::LeftClickPixel(chest_menu.ok_button));
             } else if let Some(chest_index) = item_slot(&chest_menu.chest_items)
             {
                 let pixel = chest_menu.chest_item_locations[chest_index];
-                BotGoalResult::Action(GameAction::LeftClickPixel(pixel))
+                do_action(GameAction::LeftClickPixel(pixel));
             } else {
-                BotGoalResult::Action(GameAction::LeftClickPixel(
-                    chest_menu.ok_button,
-                ))
+                do_action(GameAction::LeftClickPixel(chest_menu.ok_button));
             };
-            return Ok(action);
+            return Ok(BotGoalResult::InProgress);
         }
 
         if player_has_item {
-            let action = if game_state.inputs.left_mouse_down() {
-                BotGoalResult::Action(GameAction::ReleaseLeftClick)
-            } else if game_state.inputs.keys_pressed.contains(&Key::Escape) {
-                BotGoalResult::Action(GameAction::StopExitingMenu)
-            } else {
-                BotGoalResult::Completed
+            let mut state = BotGoalResult::Completed;
+            if game_state.inputs.left_mouse_down() {
+                do_action(GameAction::ReleaseLeftClick);
+                state = BotGoalResult::InProgress;
+            }
+            if game_state.inputs.keys_pressed.contains(&Key::Escape) {
+                do_action(GameAction::StopExitingMenu);
+                state = BotGoalResult::InProgress;
             };
-            return Ok(action);
+            return Ok(state);
         }
 
         let opt_chest_location = game_state
@@ -128,8 +138,8 @@ impl BotGoal for InventoryGoal {
             return Ok(goals.into());
         }
 
-        Ok(BotGoalResult::Action(GameAction::RightClickTile(
-            chest_tile,
-        )))
+        do_action(GameAction::RightClickTile(chest_tile));
+
+        Ok(BotGoalResult::InProgress)
     }
 }

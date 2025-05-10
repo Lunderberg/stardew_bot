@@ -65,6 +65,7 @@ impl BotGoal for SelectItemGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         let opt_cleanup = game_state
             .inputs
@@ -75,7 +76,8 @@ impl BotGoal for SelectItemGoal {
             .map(|index| GameAction::StopSelectingHotbar(index));
 
         if let Some(cleanup) = opt_cleanup {
-            return Ok(cleanup.into());
+            do_action(cleanup);
+            return Ok(BotGoalResult::InProgress);
         }
 
         let opt_current_slot = self.current_inventory_slot(game_state);
@@ -93,8 +95,8 @@ impl BotGoal for SelectItemGoal {
         if current_slot < 12 {
             // The item is currently in the hotbar, so we just need to
             // select it.
-            let action = GameAction::SelectHotbar(current_slot);
-            return Ok(action.into());
+            do_action(GameAction::SelectHotbar(current_slot));
+            return Ok(BotGoalResult::InProgress);
         }
 
         todo!("Handle case where item must be moved to the hotbar")

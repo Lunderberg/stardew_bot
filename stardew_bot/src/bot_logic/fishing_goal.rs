@@ -15,7 +15,11 @@ pub struct FishingGoal;
 pub struct FishOnceGoal;
 
 impl BotGoal for FishingGoal {
-    fn apply(&mut self, _: &GameState) -> Result<BotGoalResult, Error> {
+    fn apply(
+        &mut self,
+        _: &GameState,
+        _: &mut dyn FnMut(GameAction),
+    ) -> Result<BotGoalResult, Error> {
         let goals = SubGoals::new()
             .then(MovementGoal::new("Forest".into(), Vector::new(70.0, 50.4)))
             .then(FaceDirectionGoal(FacingDirection::South))
@@ -32,34 +36,35 @@ impl BotGoal for FishOnceGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         let fishing = &game_state.fishing;
 
-        let action = if fishing.is_timing_cast {
+        let mut state = BotGoalResult::InProgress;
+
+        if fishing.is_timing_cast {
             if fishing.casting_power > 0.95 {
-                GameAction::ReleaseTool
+                do_action(GameAction::ReleaseTool)
             } else {
-                GameAction::HoldTool
+                do_action(GameAction::HoldTool)
             }
         } else if fishing.minigame_in_progress {
             if fishing.should_move_upward() {
-                GameAction::HoldTool
+                do_action(GameAction::HoldTool)
             } else {
-                GameAction::ReleaseTool
+                do_action(GameAction::ReleaseTool)
             }
         } else if fishing.is_nibbling {
-            GameAction::ReleaseTool
+            do_action(GameAction::ReleaseTool)
         } else if fishing.is_fishing {
-            GameAction::HoldTool
+            do_action(GameAction::HoldTool)
         } else if fishing.showing_fish {
-            return Ok(BotGoalResult::Completed);
+            state = BotGoalResult::Completed;
         } else if fishing.is_holding_rod {
-            GameAction::HoldTool
-        } else {
-            GameAction::Wait
-        };
+            do_action(GameAction::HoldTool)
+        }
 
-        Ok(BotGoalResult::Action(action))
+        Ok(state)
     }
 
     fn description(&self) -> Cow<str> {
