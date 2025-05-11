@@ -56,10 +56,10 @@ pub enum Error {
         err: std::io::Error,
     },
 
-    #[error("Error {err} reading process memory")]
-    ProcessVM {
+    #[error("nix::errno::Errno({err})")]
+    NixError {
         #[from]
-        err: process_vm_io::Error,
+        err: nix::errno::Errno,
     },
 
     #[error(transparent)]

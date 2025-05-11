@@ -1,7 +1,6 @@
-use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::{BufWriter, Read as _, Seek as _, SeekFrom, Write};
+use std::io::{BufWriter, IoSliceMut, Write};
 use std::ops::Range;
 use std::path::PathBuf;
 
@@ -13,21 +12,20 @@ use super::{
 };
 
 use itertools::Itertools;
-use process_vm_io::ProcessVirtualMemoryIO;
+use nix::sys::uio::{process_vm_readv, RemoteIoVec};
+use nix::unistd::SysconfVar;
 
 pub struct MemoryReader {
     pid: u32,
     regions: Vec<MemoryMapRegion>,
     region_ranges: Vec<Range<Pointer>>,
-    process_io: RefCell<ProcessVirtualMemoryIO>,
+    page_size: usize,
+    max_num_iovec: usize,
 }
 
 impl MemoryReader {
     pub fn new(pid: u32) -> Result<Self> {
         let regions = Self::get_memory_regions(pid)?;
-
-        let process_io =
-            RefCell::new(unsafe { ProcessVirtualMemoryIO::new(pid, 0) }?);
 
         let region_ranges = regions
             .iter()
@@ -35,11 +33,36 @@ impl MemoryReader {
             .sorted_by_key(|range| range.start)
             .collect();
 
+        let page_size = nix::unistd::sysconf(SysconfVar::PAGE_SIZE)?
+            .map(|c_long| c_long as usize)
+            .filter(|_| {
+                std::env::var("READ_ON_PAGE_BOUNDARIES")
+                    .map(|var| {
+                        if var.is_empty() {
+                            false
+                        } else if var.eq_ignore_ascii_case("true") {
+                            true
+                        } else if let Ok(value) = var.parse::<usize>() {
+                            value > 0
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false)
+            })
+            .unwrap_or(usize::MAX);
+
+        let max_num_iovec = nix::unistd::sysconf(SysconfVar::IOV_MAX) //?
+            .unwrap()
+            .map(|c_long| c_long as usize)
+            .unwrap_or(1);
+
         Ok(Self {
             pid,
             regions,
-            process_io,
             region_ranges,
+            page_size,
+            max_num_iovec,
         })
     }
 
@@ -74,21 +97,69 @@ impl MemoryReader {
             return Err(Error::MemoryReadNullPointer);
         }
 
-        let mut process_io = self.process_io.borrow_mut();
+        // The length is often larger than a single page.  The manpage
+        // for `process_vm_readv` recommends breaking up larger reads
+        // into page-sized reads to maximize the size of a partial
+        // read, since permissions are checked prior to reading each
+        // page.  However, this quickly exceeds the maximum number of
+        // iovec instances allowed in a single call, and the bot
+        // typically reads within a single memmap region anyways.
+        let remotes = vec![RemoteIoVec {
+            base: ptr.address,
+            len: buffer.len(),
+        }];
 
-        process_io.seek(SeekFrom::Start(ptr.address as u64))?;
-        process_io.read_exact(buffer).map_err(|err| {
-            let err_string = format!("{}", err);
-            if err_string.contains("Operation not permitted") {
-                Error::MemoryReadInsufficientPermission
-            } else if err_string.contains("Bad address") {
-                Error::MemoryReadBadAddress(ptr, buffer.len())
-            } else {
-                Error::MemoryReadOther { err }
-            }
-        })?;
+        let remotes = if self.page_size != usize::MAX {
+            remotes
+                .into_iter()
+                .flat_map(|remote| self.split_on_page_boundaries(remote))
+                .collect()
+        } else {
+            remotes
+        };
+
+        let mut locals = vec![IoSliceMut::new(buffer)];
+
+        assert!(
+            remotes.len() <= self.max_num_iovec,
+            "Read of {} bytes would use {} RemoteIoVec instances, \
+             but the system can only use {} instances.",
+            buffer.len(),
+            remotes.len(),
+            self.max_num_iovec,
+        );
+
+        process_vm_readv(
+            nix::unistd::Pid::from_raw(self.pid as i32),
+            &mut locals,
+            &remotes,
+        )?;
 
         Ok(())
+    }
+
+    fn split_on_page_boundaries(
+        &self,
+        remote: RemoteIoVec,
+    ) -> impl Iterator<Item = RemoteIoVec> {
+        let RemoteIoVec { mut base, mut len } = remote;
+        let page_size = self.page_size;
+
+        std::iter::from_fn(move || {
+            if len == 0 {
+                None
+            } else {
+                let next_page = (base + 1).next_multiple_of(page_size);
+                let this_len = (next_page - base).min(len);
+                let this_page = RemoteIoVec {
+                    base,
+                    len: this_len,
+                };
+                base += this_len;
+                len -= this_len;
+                Some(this_page)
+            }
+        })
     }
 
     pub fn read_byte_array<const N: usize>(

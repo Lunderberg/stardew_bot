@@ -9,6 +9,6 @@ edition = "2021"
 thiserror = "*"
 itertools = "*"
 proc-maps = "*"
-process_vm_io = "*"
+nix = {version="0.30.1", features=["feature", "uio", "process"]}
 elf = "*"
 cpp_demangle = "0.4.3"
