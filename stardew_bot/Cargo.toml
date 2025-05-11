@@ -9,6 +9,7 @@ name = "stardew_bot"
 path = "src/main.rs"
 
 [dependencies]
+structopt = "*"
 thiserror = "*"
 itertools = "*"
 num = "0.4"

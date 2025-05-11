@@ -5,6 +5,7 @@ use crate::{
 };
 
 use crossterm::event::Event;
+use itertools::Either;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -16,6 +17,12 @@ use tui_utils::{
 use ratatui::Frame;
 
 pub struct StardewBot {
+    /// Stop after a fixed number of frames (used for profiling).
+    max_render_frames: Option<usize>,
+
+    /// Show the time required to run the bot's startup steps.
+    show_startup_times: bool,
+
     /// Information shared to all sub-windows
     tui_globals: TuiGlobals,
 
@@ -128,16 +135,40 @@ impl TuiBuffers {
 }
 
 impl StardewBot {
-    pub fn new() -> Result<Self, Error> {
+    pub fn new(show_startup_times: bool) -> Result<Self, Error> {
         let pid = stardew_valley_pid()?;
         let reader = MemoryReader::new(pid)?;
 
         let mut tui_globals = TuiGlobals::new(reader);
 
+        let before_compilation = std::time::Instant::now();
         let game_state_reader =
             GameState::build_reader(tui_globals.cached_reader())?;
+        let before_reading_state = std::time::Instant::now();
+
+        if show_startup_times {
+            println!(
+                "Time to compile: {:?}",
+                before_reading_state - before_compilation
+            );
+        }
         let game_state =
             game_state_reader.read_full_state(tui_globals.cached_reader())?;
+        let after_reading_state = std::time::Instant::now();
+
+        if show_startup_times {
+            println!(
+                "Time to read full state: {:?}",
+                after_reading_state - before_reading_state
+            );
+        }
+
+        if show_startup_times {
+            let before = std::time::Instant::now();
+            BotLogic::new().update(&game_state).unwrap();
+            let after = std::time::Instant::now();
+            println!("Time for test-run of bot logic: {:?}", after - before);
+        }
 
         tui_globals.insert(game_state);
 
@@ -193,6 +224,8 @@ impl StardewBot {
         layout.switch_to_buffer(4);
 
         Ok(Self {
+            max_render_frames: None,
+            show_startup_times,
             tui_globals,
             layout,
             buffers,
@@ -203,6 +236,13 @@ impl StardewBot {
             keystrokes: KeySequence::default(),
             most_recent_unknown_key_sequence: None,
         })
+    }
+
+    pub fn max_render_frames(self, max_render_frames: Option<usize>) -> Self {
+        Self {
+            max_render_frames,
+            ..self
+        }
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
@@ -218,7 +258,15 @@ impl StardewBot {
         let mut timing_stats = FrameTimingStatistics::default();
         let mut event_poll_result = false;
 
-        loop {
+        let before_main_loop = std::time::Instant::now();
+
+        let iter_frame = if let Some(num_frames) = self.max_render_frames {
+            Either::Left(0..num_frames)
+        } else {
+            Either::Right(0..)
+        };
+
+        for _ in iter_frame {
             let main_loop_start = std::time::Instant::now();
 
             // The `event_poll_result` is set at the end of each loop,
@@ -282,6 +330,14 @@ impl StardewBot {
                 total_frame_time: finished_sleep - main_loop_start,
             };
         }
+        let after_main_loop = std::time::Instant::now();
+
+        context.dispose()?;
+
+        if self.show_startup_times {
+            println!("Main loop: {:?}", after_main_loop - before_main_loop);
+        }
+
         Ok(())
     }
 

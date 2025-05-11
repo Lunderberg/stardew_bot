@@ -11,6 +11,7 @@ use ratatui::{backend, Terminal};
 pub struct TerminalContext {
     terminal: Terminal<backend::CrosstermBackend<std::io::Stdout>>,
     panic_info: Arc<Mutex<Option<String>>>,
+    is_disposed: bool,
 }
 
 fn make_panic_hook() -> (
@@ -125,22 +126,32 @@ impl TerminalContext {
         Ok(Self {
             terminal,
             panic_info,
+            is_disposed: false,
         })
+    }
+
+    pub fn dispose(&mut self) -> Result<(), Error> {
+        if !self.is_disposed {
+            use crossterm::{event, execute, terminal};
+
+            terminal::disable_raw_mode()?;
+            execute!(
+                self.terminal.backend_mut(),
+                terminal::LeaveAlternateScreen,
+                event::DisableMouseCapture,
+            )?;
+            self.terminal.show_cursor()?;
+
+            self.is_disposed = true;
+        }
+
+        Ok(())
     }
 }
 
 impl std::ops::Drop for TerminalContext {
     fn drop(&mut self) {
-        use crossterm::{event, execute, terminal};
-
-        terminal::disable_raw_mode().unwrap();
-        execute!(
-            self.terminal.backend_mut(),
-            terminal::LeaveAlternateScreen,
-            event::DisableMouseCapture,
-        )
-        .unwrap();
-        self.terminal.show_cursor().unwrap();
+        self.dispose().unwrap();
 
         if let Some(message) = self.panic_info.lock().unwrap().as_deref() {
             // No need to call std::panic::resume_unwind, as we
