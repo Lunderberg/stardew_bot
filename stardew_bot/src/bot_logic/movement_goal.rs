@@ -22,7 +22,7 @@ use super::{
 ///
 /// Used as the default tolerance to reach the target location.  Can
 /// be overridden for a goal using `MovementGoal::with_tolerance`.
-const WAYPOINT_TOLERANCE: f32 = 0.1;
+const WAYPOINT_TOLERANCE: f32 = 0.3;
 
 /// Minimum distance (in tiles) to re-plan a route.
 ///
