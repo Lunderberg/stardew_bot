@@ -194,14 +194,13 @@ impl RuntimeModule {
             vec![HashMap::new(); metadata.len()];
 
         reader
-            .regions
-            .iter()
+            .iter_regions()
             .filter(|region| {
                 region.is_readable
                     && region.is_writable
                     && !region.is_shared_memory
             })
-            .filter_map(|region| region.read().ok())
+            .filter_map(|region| region.read(reader).ok())
             .flat_map(|region| {
                 region
                     .into_iter_as_pointers()
@@ -282,14 +281,13 @@ impl RuntimeModule {
         let mut located = vec![NumFound::Zero; module_name_location.len()];
 
         reader
-            .regions
-            .iter()
+            .iter_regions()
             .filter(|region| {
                 region.is_readable
                     && region.is_writable
                     && !region.is_shared_memory
             })
-            .filter_map(|region| region.read().ok())
+            .filter_map(|region| region.read(reader).ok())
             .flat_map(|region| region.into_iter_as_pointers().tuple_windows())
             .filter(|(a, _)| a.value == module_vtable)
             .for_each(|(a, b)| {
@@ -341,8 +339,7 @@ impl RuntimeModule {
         opt_ptr_vec[0].ok_or_else(|| {
             let metadata_start = metadata.ptr_range().start;
             let name = reader
-                .regions
-                .iter()
+                .iter_regions()
                 .find(|region| region.contains(metadata_start))
                 .map(|region| region.short_name())
                 .unwrap_or("(unknown)")
@@ -382,8 +379,7 @@ impl RuntimeModule {
         // The extent of valid non-null pointers.  Used to quickly
         // exclude most invalid pointers.
         let valid_region: Range<Pointer> = reader
-            .regions
-            .iter()
+            .iter_regions()
             .map(|region| region.address_range())
             .reduce(|a, b| {
                 let start = a.start.min(b.start);
@@ -674,8 +670,7 @@ impl RuntimeModule {
             let image_ptr = self.image_ptr(reader)?;
 
             reader
-                .regions
-                .iter()
+                .iter_regions()
                 .filter(|region| {
                     region.contains(image_ptr) && region.file_offset() == 0
                 })
@@ -702,7 +697,7 @@ impl RuntimeModule {
     ) -> Result<&MemoryRegion, Error> {
         self.dll_region.or_try_init(|| {
             let info = self.dll_region_info(reader)?;
-            let region = info.read()?;
+            let region = info.read(reader)?;
             Ok(region)
         })
     }

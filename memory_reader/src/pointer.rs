@@ -1,11 +1,8 @@
 use std::fmt::{Debug, Display};
-use std::io::Read;
-
-use process_vm_io::ProcessVirtualMemoryIO;
 
 use crate::extensions::IterConversion;
 use crate::numeric_traits::{CheckedAdd, CheckedSub};
-use crate::{Error, MemoryValue, Result};
+use crate::MemoryValue;
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pointer {
@@ -71,47 +68,6 @@ impl Pointer {
     #[inline]
     pub fn next_multiple_of(self, alignment: usize) -> Self {
         self.address.next_multiple_of(alignment).into()
-    }
-
-    pub(crate) fn read_byte_array<const N: usize>(
-        &self,
-        pid: u32,
-    ) -> Result<[u8; N]> {
-        let mut buffer = [0u8; N];
-        self.read_exact(pid, &mut buffer)?;
-        Ok(buffer)
-    }
-
-    pub(crate) fn read_bytes(
-        &self,
-        pid: u32,
-        num_bytes: usize,
-    ) -> Result<Vec<u8>> {
-        let mut buffer = vec![0u8; num_bytes];
-        self.read_exact(pid, &mut buffer)?;
-        Ok(buffer)
-    }
-
-    pub fn read_exact(&self, pid: u32, buffer: &mut [u8]) -> Result<()> {
-        if self.is_null() {
-            return Err(Error::MemoryReadNullPointer);
-        }
-
-        let mut process_io =
-            unsafe { ProcessVirtualMemoryIO::new(pid, self.address as u64) }?;
-
-        process_io.read_exact(buffer).map_err(|err| {
-            let err_string = format!("{}", err);
-            if err_string.contains("Operation not permitted") {
-                Error::MemoryReadInsufficientPermission
-            } else if err_string.contains("Bad address") {
-                Error::MemoryReadBadAddress(*self, buffer.len())
-            } else {
-                Error::MemoryReadOther { err }
-            }
-        })?;
-
-        Ok(())
     }
 
     #[inline]

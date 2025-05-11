@@ -44,6 +44,12 @@ pub enum Error {
         end: Pointer,
     },
 
+    #[error(
+        "Expected a memory reader initialized for PID {expected}, \
+         but found a memory reader initialied for PID {actual}."
+    )]
+    IncorrectPIDForMemoryReader { expected: u32, actual: u32 },
+
     #[error("Error {err} reading process memory.")]
     MemoryReadOther {
         #[source]

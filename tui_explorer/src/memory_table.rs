@@ -55,11 +55,10 @@ impl MemoryTable {
         formatters: Vec<Box<dyn ColumnFormatter>>,
     ) -> Result<Self, Error> {
         let region = reader
-            .regions
-            .iter()
+            .iter_regions()
             .find(|region| region.contains(entry_point))
             .ok_or(Error::PointerNotFound(entry_point))?
-            .read()?;
+            .read(reader)?;
         Ok(Self {
             view_stack: NonEmptyVec::new(ViewFrame::new(region, entry_point)),
             formatters,
@@ -259,7 +258,8 @@ impl WidgetWindow<Error> for MemoryTable {
                 let pointed_map_region =
                     globals.reader().find_containing_region(as_pointer);
                 if let Some(pointed_map_region) = pointed_map_region {
-                    let pointed_region = pointed_map_region.read();
+                    let pointed_region =
+                        pointed_map_region.read(globals.reader());
                     match pointed_region {
                         Ok(region) => {
                             self.push_view(region, as_pointer);

@@ -201,8 +201,7 @@ impl<'a> CachedReader<'a> {
 
     fn iter_clr_dll_regions(&self) -> impl Iterator<Item = &MemoryMapRegion> {
         self.reader
-            .regions
-            .iter()
+            .iter_regions()
             .filter(|region| region.file_offset() == 0)
             .filter(|region| region.size_bytes() > 4096)
             .filter(|region| {
@@ -216,7 +215,7 @@ impl<'a> CachedReader<'a> {
     fn init_dlls(&self) -> Result<(), Error> {
         let dll_data = self
             .iter_clr_dll_regions()
-            .map(|region| region.read())
+            .map(|region| region.read(self))
             .collect::<Result<Vec<_>, _>>()?;
 
         let layouts = dll_data

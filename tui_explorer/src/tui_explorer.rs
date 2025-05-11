@@ -244,8 +244,7 @@ impl TuiExplorerBuilder {
         let region = self
             .tui_globals
             .reader()
-            .regions
-            .iter()
+            .iter_regions()
             .filter(|region| region.short_name() == name)
             .filter(|region| region.file_offset() == 0)
             .max_by_key(|region| {
@@ -279,7 +278,7 @@ impl TuiExplorerBuilder {
     }
 
     pub fn initialize_view_to_stack(self) -> Result<Self, Error> {
-        let stack_memory = self.tui_globals.reader().stack()?.read()?;
+        let stack_memory = self.tui_globals.reader().read_stack()?;
 
         let bottom_stack_frame = stack_memory
             .stack_pointers(self.tui_globals.reader())
@@ -329,7 +328,8 @@ impl TuiExplorerBuilder {
     }
 
     pub fn annotate_dll_metadata(mut self) -> Result<Self, Error> {
-        let region = self.stardew_valley_dll()?.read()?;
+        let region =
+            self.stardew_valley_dll()?.read(self.tui_globals.reader())?;
         let dll_info = dll_unpacker::DLLUnpacker::new(&region);
 
         dll_info.collect_annotations(&mut self)?;
@@ -592,14 +592,15 @@ impl TuiExplorerBuilder {
                 .reader()
                 .find_containing_region(self.initial_pointer)
                 .ok_or(Error::PointerNotFound(self.initial_pointer))?
-                .read()?,
+                .read(tui_globals.reader())?,
         );
 
         tui_globals
             .get_or_default::<Vec<Annotation>>()
             .sort_by_key(Annotation::sort_key);
 
-        let stack_memory = tui_globals.reader().stack()?.read()?;
+        let stack_memory =
+            tui_globals.reader().stack()?.read(tui_globals.reader())?;
         let stack_frame_table =
             StackFrameTable::new(tui_globals.reader(), &stack_memory);
         let detail_view = {
@@ -806,12 +807,12 @@ impl TuiExplorer {
             })
             .into_iter()
             .for_each(|ptr| {
-                let new_region = self
-                    .tui_globals
-                    .reader()
+                let reader = self.tui_globals.reader();
+
+                let new_region = reader
                     .find_containing_region(ptr)
                     .ok_or(Error::PointerNotFound(ptr))
-                    .and_then(|region| region.read().map_err(Into::into));
+                    .and_then(|region| region.read(reader).map_err(Into::into));
 
                 match new_region {
                     Ok(region) => {

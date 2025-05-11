@@ -1,7 +1,7 @@
 use std::path::Path;
 use std::{fmt::Display, ops::Range};
 
-use crate::Symbol;
+use crate::{MemoryReader, Symbol};
 
 use super::{Error, MemoryRegion, Pointer, Result};
 
@@ -135,10 +135,16 @@ impl MemoryMapRegion {
         )
     }
 
-    pub fn read(&self) -> Result<MemoryRegion> {
-        let bytes = self
-            .start
-            .read_bytes(self.pid, self.size_bytes())
+    pub fn read(&self, reader: &MemoryReader) -> Result<MemoryRegion> {
+        if reader.pid() != self.pid {
+            return Err(Error::IncorrectPIDForMemoryReader {
+                expected: self.pid,
+                actual: reader.pid(),
+            });
+        }
+
+        let bytes = reader
+            .read_bytes(self.address_range())
             .map_err(|err| match err {
                 Error::MemoryReadBadAddress(..) => Error::MemoryReadBadRegion {
                     name: self.name.clone(),
@@ -146,7 +152,8 @@ impl MemoryMapRegion {
                     end: self.end,
                 },
                 _ => err,
-            })?;
+            })?
+            .take();
         Ok(MemoryRegion::new(self.start, bytes, self.clone()))
     }
 

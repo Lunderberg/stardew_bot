@@ -808,8 +808,7 @@ impl VMReader for CachedReader<'_> {
     fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
         let reader: &memory_reader::MemoryReader = self.as_ref();
         reader
-            .regions
-            .iter()
+            .iter_regions()
             .map(|reg| reg.address_range())
             .find(|range| range.contains(&loc))
             .unwrap_or(loc..loc)

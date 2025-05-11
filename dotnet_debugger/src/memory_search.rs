@@ -87,8 +87,7 @@ fn iter_possible_object_instances<'a>(
         .collect();
 
     let iter = reader
-        .regions
-        .iter()
+        .iter_regions()
         .filter(|region| {
             region.is_readable && region.is_writable && !region.is_shared_memory
         })
@@ -99,7 +98,7 @@ fn iter_possible_object_instances<'a>(
                 .map(|name| name != "[heap]")
                 .unwrap_or(true)
         })
-        .flat_map(|region| region.read().unwrap().into_iter_as_pointers())
+        .flat_map(|region| region.read(reader).unwrap().into_iter_as_pointers())
         .filter(move |mem_value| {
             // The GC may use the low bits of the MethodTable*
             // pointer to mark objects.  When finding objects that

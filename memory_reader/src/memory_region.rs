@@ -218,8 +218,7 @@ impl MemoryRegion {
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = MemoryValue<Pointer>> + 'a {
         let starting_symbols: Vec<_> = reader
-            .regions
-            .iter()
+            .iter_regions()
             .filter(|region| {
                 let name = region.short_name();
                 name.starts_with("libc-") && name.ends_with(".so")

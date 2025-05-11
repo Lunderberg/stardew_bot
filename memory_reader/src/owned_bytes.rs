@@ -39,6 +39,10 @@ impl OwnedBytes {
     pub fn end(&self) -> Pointer {
         self.start + self.bytes.len()
     }
+
+    pub fn take(self) -> Vec<u8> {
+        self.bytes
+    }
 }
 
 impl IntoIterator for OwnedBytes {
