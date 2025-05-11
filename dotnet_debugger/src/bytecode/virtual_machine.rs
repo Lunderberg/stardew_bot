@@ -65,6 +65,7 @@ pub struct VMEvaluator<'a> {
 #[derive(Debug, From)]
 pub enum StackValue {
     Prim(RuntimePrimValue),
+    ByteArray(Vec<u8>),
     Native(ExposedNativeObject),
 }
 
@@ -259,6 +260,13 @@ pub enum Instruction {
     Read {
         ptr: VMArg,
         prim_type: RuntimePrimType,
+        output: StackIndex,
+    },
+
+    /// Read an array of bytes
+    ReadBytes {
+        ptr: VMArg,
+        num_bytes: VMArg,
         output: StackIndex,
     },
 
@@ -464,6 +472,12 @@ impl VMResults {
                         }
                     })
                 }
+                StackValue::ByteArray(_) => {
+                    Err(VMExecutionError::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: RuntimeType::ByteArray,
+                    })
+                }
                 StackValue::Prim(value) => {
                     Err(VMExecutionError::IncorrectOutputType {
                         attempted: RustType::new::<T>().into(),
@@ -490,6 +504,12 @@ impl VMResults {
                         attempted: RustType::new::<T>().into(),
                         actual: native.runtime_type(),
                     }),
+                StackValue::ByteArray(_) => {
+                    Err(VMExecutionError::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: RuntimeType::ByteArray,
+                    })
+                }
                 StackValue::Prim(value) => {
                     Err(VMExecutionError::IncorrectOutputType {
                         attempted: RustType::new::<T>().into(),
@@ -613,6 +633,7 @@ impl StackValue {
     pub(crate) fn runtime_type(&self) -> RuntimeType {
         match self {
             StackValue::Prim(prim) => prim.runtime_type().into(),
+            StackValue::ByteArray(_) => RuntimeType::ByteArray,
             StackValue::Native(native) => native.ty.clone(),
         }
     }
@@ -620,14 +641,21 @@ impl StackValue {
     pub fn as_prim(&self) -> Option<RuntimePrimValue> {
         match self {
             StackValue::Prim(prim) => Some(*prim),
-            StackValue::Native(_) => None,
+            StackValue::Native(_) | StackValue::ByteArray(_) => None,
         }
     }
 
     pub fn as_native<T: RustNativeObject>(&self) -> Option<&T> {
         match self {
             StackValue::Native(native) => native.downcast_ref(),
-            StackValue::Prim(_) => None,
+            StackValue::Prim(_) | StackValue::ByteArray(_) => None,
+        }
+    }
+
+    pub fn as_byte_array(&self) -> Option<&[u8]> {
+        match self {
+            StackValue::ByteArray(arr) => Some(arr),
+            StackValue::Prim(_) | StackValue::Native(_) => None,
         }
     }
 
@@ -637,6 +665,9 @@ impl StackValue {
     ) -> Result<String, Error> {
         match self {
             StackValue::Prim(prim) => prim.read_string_ptr(reader),
+            StackValue::ByteArray(_) => {
+                Err(Error::AttemptedReadOfByteArrayAsStringPtr)
+            }
             StackValue::Native(obj) => Err(
                 Error::AttemptedReadOfNativeObjectAsStringPtr(obj.type_id()),
             ),
@@ -1165,6 +1196,12 @@ impl<'a> VMEvaluator<'a> {
                     output,
                 } => self.eval_read(ptr, prim_type, output)?,
 
+                &Instruction::ReadBytes {
+                    ptr,
+                    num_bytes,
+                    output,
+                } => self.eval_read_bytes(ptr, num_bytes, output)?,
+
                 &Instruction::ReadString { ptr, output } => {
                     self.eval_read_string(ptr, output)?
                 }
@@ -1201,13 +1238,13 @@ impl<'a> VMEvaluator<'a> {
             VMArg::Const(value) => Ok(Some(value)),
             VMArg::SavedValue(index) => match &self.values[index] {
                 Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
-                Some(StackValue::Native(native)) => {
+                Some(other) => {
                     Err(VMExecutionError::OperatorExpectsPrimitiveArgument {
                         operator: self.vm.instructions
                             [self.current_instruction.0]
                             .op_name(),
                         index: self.current_instruction,
-                        arg_type: native.ty.clone(),
+                        arg_type: other.runtime_type(),
                     }
                     .into())
                 }
@@ -1605,6 +1642,32 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
+    fn eval_read_bytes(
+        &mut self,
+        ptr: VMArg,
+        num_bytes: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_ptr = self.arg_to_prim(ptr)?;
+        let opt_num_bytes = self.arg_to_prim(num_bytes)?;
+
+        self.values[output] = match (opt_ptr, opt_num_bytes) {
+            (None, _) | (_, None) => Ok(None),
+            (Some(RuntimePrimValue::Ptr(ptr)), Some(num_bytes)) => {
+                let num_bytes: usize = num_bytes.try_into()?;
+                let mut bytes = vec![0; num_bytes];
+                self.reader.read_bytes(ptr, &mut bytes)?;
+
+                Ok(Some(StackValue::ByteArray(bytes)))
+            }
+            (Some(other), _) => {
+                Err(VMExecutionError::ReadAppliedToNonPointer(other))
+            }
+        }?;
+
+        Ok(())
+    }
+
     fn eval_read_string(
         &mut self,
         ptr: VMArg,
@@ -1666,6 +1729,10 @@ impl Instruction {
                 (Some(*lhs), Some(*rhs), None)
             }
 
+            Instruction::ReadBytes { ptr, num_bytes, .. } => {
+                (Some(*ptr), Some(*num_bytes), None)
+            }
+
             Instruction::Swap(lhs, rhs) => (
                 Some(VMArg::SavedValue(*lhs)),
                 Some(VMArg::SavedValue(*rhs)),
@@ -1719,6 +1786,7 @@ impl Instruction {
             | Instruction::Mod { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::Read { output, .. }
+            | Instruction::ReadBytes { output, .. }
             | Instruction::ReadString { output, .. }
             | Instruction::IsSome { output, .. } => (Some(*output), None),
 
@@ -1756,6 +1824,7 @@ impl Instruction {
             Instruction::Mod { .. } => "Mod",
             Instruction::Downcast { .. } => "Downcast",
             Instruction::Read { .. } => "Read",
+            Instruction::ReadBytes { .. } => "ReadBytes",
             Instruction::ReadString { .. } => "ReadString",
             Instruction::Return { .. } => "Return",
         }
@@ -1830,6 +1899,7 @@ impl Display for StackValue {
             StackValue::Native(any) => {
                 write!(f, "[rust-native object of type {:?}]", any.type_id())
             }
+            StackValue::ByteArray(_) => write!(f, "ByteArray"),
         }
     }
 }
@@ -1956,11 +2026,19 @@ impl Display for Instruction {
                 subtype,
                 output,
             } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
+
             Instruction::Read {
                 ptr,
                 prim_type,
                 output,
             } => write!(f, "{output} = {ptr}.read({prim_type})"),
+
+            Instruction::ReadBytes {
+                ptr,
+                num_bytes,
+                output,
+            } => write!(f, "{output} = {ptr}.read_bytes({num_bytes})"),
+
             Instruction::ReadString { ptr, output } => {
                 write!(f, "{output} = {ptr}.read_string()")
             }
@@ -2080,9 +2158,9 @@ impl TryInto<RuntimePrimValue> for StackValue {
     fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
         match self {
             StackValue::Prim(value) => Ok(value),
-            StackValue::Native(any) => {
-                Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
-            }
+            other => Err(Error::IllegalConversionToPrimitiveValue(
+                other.runtime_type(),
+            )),
         }
     }
 }
@@ -2092,9 +2170,9 @@ impl TryInto<RuntimePrimValue> for &'_ StackValue {
     fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
         match self {
             StackValue::Prim(value) => Ok(*value),
-            StackValue::Native(any) => {
-                Err(Error::AttemptedConversionOfNativeObject(any.type_id()))
-            }
+            other => Err(Error::IllegalConversionToPrimitiveValue(
+                other.runtime_type(),
+            )),
         }
     }
 }
@@ -2104,11 +2182,9 @@ impl<'a> TryInto<&'a dyn Any> for &'a StackValue {
     fn try_into(self) -> Result<&'a dyn Any, Self::Error> {
         match self {
             StackValue::Native(native) => Ok(native.as_ref()),
-            StackValue::Prim(value) => {
-                Err(Error::AttemptedConversionOfPrimitiveToNativeObject(
-                    value.runtime_type(),
-                ))
-            }
+            other => Err(Error::IllegalConversionToNativeObject(
+                other.runtime_type(),
+            )),
         }
     }
 }
@@ -2118,11 +2194,9 @@ impl TryInto<Box<dyn Any>> for StackValue {
     fn try_into(self) -> Result<Box<dyn Any>, Self::Error> {
         match self {
             StackValue::Native(native) => Ok(native.into()),
-            StackValue::Prim(value) => {
-                Err(Error::AttemptedConversionOfPrimitiveToNativeObject(
-                    value.runtime_type(),
-                ))
-            }
+            other => Err(Error::IllegalConversionToNativeObject(
+                other.runtime_type(),
+            )),
         }
     }
 }
@@ -2135,11 +2209,9 @@ macro_rules! stack_value_to_prim {
             fn try_into(self) -> Result<$prim, Self::Error> {
                 match self {
                     StackValue::Prim(value) => value.try_into(),
-                    StackValue::Native(native) => {
-                        Err(Error::AttemptedConversionOfNativeObject(
-                            native.type_id(),
-                        ))
-                    }
+                    other => Err(Error::IllegalConversionToPrimitiveValue(
+                        other.runtime_type(),
+                    )),
                 }
             }
         }
@@ -2150,11 +2222,9 @@ macro_rules! stack_value_to_prim {
             fn try_into(self) -> Result<$prim, Self::Error> {
                 match self {
                     StackValue::Prim(value) => (*value).try_into(),
-                    StackValue::Native(native) => {
-                        Err(Error::AttemptedConversionOfNativeObject(
-                            native.type_id(),
-                        ))
-                    }
+                    other => Err(Error::IllegalConversionToPrimitiveValue(
+                        other.runtime_type(),
+                    )),
                 }
             }
         }

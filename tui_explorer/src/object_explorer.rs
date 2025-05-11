@@ -902,7 +902,8 @@ impl ObjectTreeNode {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)) => {
+            | RuntimeType::Iterator(_)
+            | RuntimeType::ByteArray) => {
                 return Err(
                     dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext(
                         other.clone(),
@@ -1030,7 +1031,8 @@ impl ObjectTreeNode {
                     | RuntimeType::Rust(_)
                     | RuntimeType::Function(_)
                     | RuntimeType::Tuple(_)
-                    | RuntimeType::Iterator(_)) => {
+                    | RuntimeType::Iterator(_)
+                    | RuntimeType::ByteArray) => {
                         use dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext as ErrVariant;
                         return Err(ErrVariant(other.clone()).into());
                     }

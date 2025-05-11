@@ -61,6 +61,9 @@ pub enum RuntimeType {
 
     // An iterator over some underlying type
     Iterator(IteratorType),
+
+    // An array of bytes that have been read from the remote process.
+    ByteArray,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
@@ -263,7 +266,8 @@ impl RuntimeType {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)) => {
+            | RuntimeType::Iterator(_)
+            | RuntimeType::ByteArray) => {
                 Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
             }
         }
@@ -286,7 +290,8 @@ impl RuntimeType {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)) => {
+            | RuntimeType::Iterator(_)
+            | RuntimeType::ByteArray) => {
                 Err(Error::UnexpectedTypeFoundInDotNetContext(other.clone()))
             }
         }
@@ -312,7 +317,8 @@ impl RuntimeType {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_) => None,
+            | RuntimeType::Iterator(_)
+            | RuntimeType::ByteArray => None,
         }
     }
 
@@ -335,7 +341,8 @@ impl RuntimeType {
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
             | RuntimeType::Iterator(_)
-            | RuntimeType::Unknown => None,
+            | RuntimeType::Unknown
+            | RuntimeType::ByteArray => None,
         }
     }
 
@@ -392,7 +399,8 @@ impl RuntimeType {
 
             RuntimeType::Prim(_)
             | RuntimeType::DotNet(DotNetType::String)
-            | RuntimeType::Rust(_) => true,
+            | RuntimeType::Rust(_)
+            | RuntimeType::ByteArray => true,
 
             RuntimeType::Function(FunctionType { params, output }) => {
                 output.is_complete()
@@ -765,6 +773,7 @@ impl std::fmt::Display for RuntimeType {
             RuntimeType::Iterator(iterator_type) => {
                 write!(f, "{iterator_type}")
             }
+            RuntimeType::ByteArray => write!(f, "ByteArray"),
         }
     }
 }

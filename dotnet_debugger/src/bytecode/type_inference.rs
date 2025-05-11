@@ -458,7 +458,7 @@ impl<'a> TypeInference<'a> {
                     }?;
                     RuntimePrimType::Ptr.into()
                 }
-                ExprKind::ReadValue { ptr, prim_type } => {
+                ExprKind::ReadPrim { ptr, prim_type } => {
                     let ptr_type = expect_cache(*ptr, "ptr to read");
                     match ptr_type {
                         RuntimeType::Unknown => Ok(()),
@@ -469,6 +469,7 @@ impl<'a> TypeInference<'a> {
                     }?;
                     (*prim_type).into()
                 }
+                ExprKind::ReadBytes { .. } => RuntimeType::ByteArray,
                 ExprKind::ReadString { .. } => RustType::new::<String>().into(),
             };
 

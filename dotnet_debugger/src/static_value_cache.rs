@@ -922,7 +922,8 @@ impl<'a> CachedReader<'a> {
             | RuntimeType::Rust(_)
             | RuntimeType::Function(_)
             | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)) => {
+            | RuntimeType::Iterator(_)
+            | RuntimeType::ByteArray) => {
                 return Err(Error::UnexpectedTypeFoundInDotNetContext(
                     other.clone(),
                 ));

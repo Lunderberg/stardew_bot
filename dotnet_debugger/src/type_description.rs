@@ -323,6 +323,7 @@ impl<'a> TypeHandleRef<'a> {
                 Self::print_runtime_type(item, fmt, reader)?;
                 write!(fmt, ">")?;
             }
+            RuntimeType::ByteArray => write!(fmt, "ByteArray")?,
         }
         Ok(())
     }

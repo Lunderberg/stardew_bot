@@ -109,11 +109,15 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             graph.add(base, field_desc.offset())
                         }
 
-                        (_, RuntimeType::Unknown)
-                        | (_, RuntimeType::Rust(_))
-                        | (_, RuntimeType::Function(_))
-                        | (_, RuntimeType::Tuple(_))
-                        | (_, RuntimeType::Iterator(_)) => unreachable!(
+                        (
+                            _,
+                            RuntimeType::Unknown
+                            | RuntimeType::Rust(_)
+                            | RuntimeType::Function(_)
+                            | RuntimeType::Tuple(_)
+                            | RuntimeType::Iterator(_)
+                            | RuntimeType::ByteArray,
+                        ) => unreachable!(
                             "Static .NET field can only be inferred \
                              as a primitive or a .NET type."
                         ),

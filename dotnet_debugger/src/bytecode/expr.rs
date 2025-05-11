@@ -301,9 +301,18 @@ pub enum ExprKind {
     ///
     /// Given a pointer to a location in the remote process, read a
     /// value at that location.
-    ReadValue {
+    ReadPrim {
         ptr: SymbolicValue,
         prim_type: RuntimePrimType,
+    },
+
+    /// Read a value from memory
+    ///
+    /// Given a pointer to a location in the remote process, read a
+    /// value at that location.
+    ReadBytes {
+        ptr: SymbolicValue,
+        num_bytes: SymbolicValue,
     },
 
     /// Read a .NET string
@@ -917,7 +926,17 @@ impl SymbolicGraph {
         prim_type: RuntimePrimType,
     ) -> SymbolicValue {
         let ptr = ptr.into();
-        self.push(ExprKind::ReadValue { ptr, prim_type })
+        self.push(ExprKind::ReadPrim { ptr, prim_type })
+    }
+
+    pub fn read_bytes(
+        &mut self,
+        ptr: impl Into<SymbolicValue>,
+        num_bytes: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let ptr = ptr.into();
+        let num_bytes = num_bytes.into();
+        self.push(ExprKind::ReadBytes { ptr, num_bytes })
     }
 
     pub fn read_string(
@@ -2546,10 +2565,21 @@ impl ExprKind {
                     ty: ty.clone(),
                 })
             }
-            ExprKind::ReadValue { ptr, prim_type } => {
-                remap(ptr).map(|ptr| ExprKind::ReadValue {
+            ExprKind::ReadPrim { ptr, prim_type } => {
+                remap(ptr).map(|ptr| ExprKind::ReadPrim {
                     ptr,
                     prim_type: prim_type.clone(),
+                })
+            }
+            ExprKind::ReadBytes { ptr, num_bytes } => {
+                let opt_ptr = remap(ptr);
+                let opt_num_bytes = remap(num_bytes);
+                let requires_remap =
+                    opt_ptr.is_some() || opt_num_bytes.is_some();
+                requires_remap.then(|| {
+                    let ptr = opt_ptr.unwrap_or_else(|| *ptr);
+                    let num_bytes = opt_num_bytes.unwrap_or_else(|| *num_bytes);
+                    ExprKind::ReadBytes { ptr, num_bytes }
                 })
             }
             ExprKind::ReadString { ptr } => {
@@ -2592,7 +2622,7 @@ impl ExprKind {
                 | ExprKind::Not { arg: value }
                 | ExprKind::PrimCast { value, .. }
                 | ExprKind::PhysicalDowncast { obj: value, .. }
-                | ExprKind::ReadValue { ptr: value, .. }
+                | ExprKind::ReadPrim { ptr: value, .. }
                 | ExprKind::ReadString { ptr: value } => {
                     ([Some(*value), None, None], None)
                 }
@@ -2606,6 +2636,9 @@ impl ExprKind {
                 }
                 &ExprKind::ArrayExtent { array, dim } => {
                     ([Some(array), Some(dim), None], None)
+                }
+                &ExprKind::ReadBytes { ptr, num_bytes } => {
+                    ([Some(ptr), Some(num_bytes), None], None)
                 }
 
                 // Binary operators
@@ -2703,7 +2736,8 @@ impl ExprKind {
             ExprKind::Mod { .. } => "Mod",
             ExprKind::PrimCast { .. } => "PrimCast",
             ExprKind::PhysicalDowncast { .. } => "PhysicalDowncast",
-            ExprKind::ReadValue { .. } => "ReadValue",
+            ExprKind::ReadPrim { .. } => "ReadValue",
+            ExprKind::ReadBytes { .. } => "ReadBytes",
             ExprKind::ReadString { .. } => "ReadString",
         }
     }
@@ -3132,16 +3166,29 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
-                ExprKind::ReadValue {
+                ExprKind::ReadPrim {
                     ptr: lhs_ptr,
                     prim_type: lhs_prim_type,
                 } => match rhs_kind {
-                    ExprKind::ReadValue {
+                    ExprKind::ReadPrim {
                         ptr: rhs_ptr,
                         prim_type: rhs_prim_type,
                     } => {
                         equivalent_value!(lhs_ptr, rhs_ptr)
                             && lhs_prim_type == rhs_prim_type
+                    }
+                    _ => false,
+                },
+                ExprKind::ReadBytes {
+                    ptr: lhs_ptr,
+                    num_bytes: lhs_num_bytes,
+                } => match rhs_kind {
+                    ExprKind::ReadBytes {
+                        ptr: rhs_ptr,
+                        num_bytes: rhs_num_bytes,
+                    } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr)
+                            && equivalent_value!(lhs_num_bytes, rhs_num_bytes)
                     }
                     _ => false,
                 },
@@ -3304,8 +3351,11 @@ impl Display for ExprKind {
             ExprKind::PrimCast { value, prim_type } => {
                 write!(f, "{value}.prim_cast::<{prim_type}>()")
             }
-            ExprKind::ReadValue { ptr, prim_type } => {
-                write!(f, "{ptr}.read::<{prim_type}>()")
+            ExprKind::ReadPrim { ptr, prim_type } => {
+                write!(f, "{ptr}.read_value::<{prim_type}>()")
+            }
+            ExprKind::ReadBytes { ptr, num_bytes } => {
+                write!(f, "{ptr}.read_bytes({ptr}, {num_bytes})")
             }
             ExprKind::ReadString { ptr } => {
                 write!(f, "{ptr}.read_string()")

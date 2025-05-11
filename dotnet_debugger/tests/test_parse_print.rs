@@ -1322,3 +1322,46 @@ test_print_and_parse! {
         graph.mark_extern_func(func).unwrap();
     },
 }
+
+test_print_and_parse! {
+    read_primitive,
+    indoc! {"
+    pub fn main(a: Ptr) {
+        let b = a.read_prim::<usize>();
+        let c = b + 10;
+        c
+    }"},
+    |graph| {
+        let a = graph.function_arg(RuntimePrimType::Ptr);
+        graph.name(a, "a").unwrap();
+
+        let b = graph.read_value(a, RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+        let c = graph.add(b, 10);
+        graph.name(c, "c").unwrap();
+
+        let func = graph.function_def(vec![a], c);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}
+
+test_print_and_parse! {
+    read_bytes,
+    indoc! {"
+    pub fn main(a: Ptr) {
+        let bytes = a.read_bytes(8);
+        bytes
+    }"},
+    |graph| {
+        let a = graph.function_arg(RuntimePrimType::Ptr);
+        graph.name(a, "a").unwrap();
+
+        let bytes = graph.read_bytes(a, 8);
+        graph.name(bytes, "bytes").unwrap();
+
+        let func = graph.function_def(vec![a], bytes);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}

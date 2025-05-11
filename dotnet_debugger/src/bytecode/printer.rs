@@ -1118,16 +1118,35 @@ impl<'a> GraphPrinter<'a> {
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
                         }
-                        ExprKind::ReadValue { ptr, prim_type } => {
+                        ExprKind::ReadPrim { ptr, prim_type } => {
                             [
                                 PrintItem::Expr(
                                     *ptr,
                                     OpPrecedence::MaxPrecedence,
                                 ),
                                 PrintItem::MemberAccess,
-                                PrintItem::Str("read::<"),
+                                PrintItem::Str("read_prim::<"),
                                 PrintItem::PrimType(prim_type),
                                 PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ReadBytes { ptr, num_bytes } => {
+                            [
+                                PrintItem::Expr(
+                                    *ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("read_bytes"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *num_bytes,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::ParenClose,
                             ]
                             .into_iter()
                             .rev()

@@ -385,6 +385,12 @@ pub enum Error {
     )]
     AttemptedConversionOfNativeObject(std::any::TypeId),
 
+    #[error("Invalid conversion from {0:?} to primitive.")]
+    IllegalConversionToPrimitiveValue(RuntimeType),
+
+    #[error("Invalid conversion from {0:?} to rust-native object.")]
+    IllegalConversionToNativeObject(RuntimeType),
+
     #[error(
         "Attempted to convert primitive of type {0} \
          into rust-native object."
@@ -408,6 +414,12 @@ pub enum Error {
          of type {0:?} as a pointer to a .NET string."
     )]
     AttemptedReadOfNativeObjectAsStringPtr(std::any::TypeId),
+
+    #[error(
+        "Attempted to read a byte array \
+         as a pointer to a .NET string."
+    )]
+    AttemptedReadOfByteArrayAsStringPtr,
 
     #[error(
         "Analysis routine attempted to inspect remote process, \

@@ -910,7 +910,7 @@ impl<'a> SymbolicParser<'a> {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.is_some(obj))
                 }
-                "read" => {
+                "read_prim" => {
                     let (type_args, _) =
                         self.expect_function_arguments(1, 0)?;
                     let ty = type_args
@@ -921,6 +921,14 @@ impl<'a> SymbolicParser<'a> {
                         .try_prim_type()
                         .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
                     Ok(self.graph.read_value(obj, prim_type))
+                }
+                "read_bytes" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let num_bytes = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.read_bytes(obj, num_bytes))
                 }
                 "read_string" => {
                     self.expect_function_arguments(0, 0)?;
