@@ -18,6 +18,7 @@ use process_vm_io::ProcessVirtualMemoryIO;
 pub struct MemoryReader {
     pid: u32,
     regions: Vec<MemoryMapRegion>,
+    region_ranges: Vec<Range<Pointer>>,
     process_io: RefCell<ProcessVirtualMemoryIO>,
 }
 
@@ -28,10 +29,17 @@ impl MemoryReader {
         let process_io =
             RefCell::new(unsafe { ProcessVirtualMemoryIO::new(pid, 0) }?);
 
+        let region_ranges = regions
+            .iter()
+            .map(|region| region.address_range())
+            .sorted_by_key(|range| range.start)
+            .collect();
+
         Ok(Self {
             pid,
             regions,
             process_io,
+            region_ranges,
         })
     }
 
@@ -180,6 +188,26 @@ impl MemoryReader {
         }
 
         self.iter_regions().find(|region| region.contains(ptr))
+    }
+
+    pub fn find_containing_region_range(
+        &self,
+        ptr: Pointer,
+    ) -> Option<Range<Pointer>> {
+        if ptr.is_null() {
+            return None;
+        }
+
+        match self
+            .region_ranges
+            .binary_search_by_key(&ptr, |range| range.start)
+        {
+            Ok(i) => Some(i),
+            Err(0) => None,
+            Err(i) => Some(i - 1),
+        }
+        .map(|i| self.region_ranges[i].clone())
+        .filter(|range| range.contains(&ptr))
     }
 
     pub fn print_stack(&self) -> Result<()> {

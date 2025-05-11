@@ -807,11 +807,7 @@ impl VMReader for CachedReader<'_> {
 
     fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
         let reader: &memory_reader::MemoryReader = self.as_ref();
-        reader
-            .iter_regions()
-            .map(|reg| reg.address_range())
-            .find(|range| range.contains(&loc))
-            .unwrap_or(loc..loc)
+        reader.find_containing_region_range(loc).unwrap_or(loc..loc)
     }
 
     fn is_dotnet_base_class_of(
