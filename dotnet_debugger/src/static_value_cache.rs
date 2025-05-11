@@ -212,7 +212,7 @@ impl<'a> CachedReader<'a> {
             })
     }
 
-    fn init_dlls(&self) -> Result<(), Error> {
+    pub fn init_dlls(&self) -> Result<(), Error> {
         let dll_data = self
             .iter_clr_dll_regions()
             .map(|region| region.read(self))

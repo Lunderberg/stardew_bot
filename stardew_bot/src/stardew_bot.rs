@@ -141,33 +141,38 @@ impl StardewBot {
 
         let mut tui_globals = TuiGlobals::new(reader);
 
-        let before_compilation = std::time::Instant::now();
-        let game_state_reader =
-            GameState::build_reader(tui_globals.cached_reader())?;
-        let before_reading_state = std::time::Instant::now();
-
-        if show_startup_times {
-            println!(
-                "Time to compile: {:?}",
-                before_reading_state - before_compilation
-            );
-        }
-        let game_state =
-            game_state_reader.read_full_state(tui_globals.cached_reader())?;
-        let after_reading_state = std::time::Instant::now();
-
-        if show_startup_times {
-            println!(
-                "Time to read full state: {:?}",
-                after_reading_state - before_reading_state
-            );
+        macro_rules! time_it {
+            ($step:literal, $expr:expr) => {{
+                let start = std::time::Instant::now();
+                let res = $expr;
+                let end = std::time::Instant::now();
+                if show_startup_times {
+                    println!("{}: {:?}", $step, end - start);
+                }
+                res
+            }};
         }
 
+        time_it!(
+            "Initialize from DLLs",
+            tui_globals.cached_reader().init_dlls()
+        )?;
+
+        let game_state_reader = time_it!(
+            "Compile",
+            GameState::build_reader(tui_globals.cached_reader())
+        )?;
+
+        let game_state = time_it!(
+            "Read current state",
+            game_state_reader.read_full_state(tui_globals.cached_reader())
+        )?;
+
         if show_startup_times {
-            let before = std::time::Instant::now();
-            BotLogic::new().update(&game_state).unwrap();
-            let after = std::time::Instant::now();
-            println!("Time for test-run of bot logic: {:?}", after - before);
+            time_it!(
+                "Test-run of bot logic",
+                BotLogic::new().update(&game_state)
+            )?;
         }
 
         tui_globals.insert(game_state);
