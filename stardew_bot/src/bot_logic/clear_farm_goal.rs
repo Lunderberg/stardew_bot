@@ -90,13 +90,23 @@ impl BotGoal for ClearFarmGoal {
             .map(|dir| player_tile + dir.offset())
             .find_map(|tile| clutter.get(&tile).map(|tool| (tile, *tool)));
         if let Some((tile, tool)) = opt_adjacent_clutter {
+            do_action(GameAction::MouseOverTile(tile));
+
             let goal = SelectItemGoal::new(Item::new(tool));
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
 
-            if !player.using_tool {
-                do_action(GameAction::LeftClickTile(tile));
+            // Swinging a tool by clicking the mouse uses the previous
+            // frame's mouse position, not the current mouse position.
+            // While both the MovementGoal and the `MouseOverTile`
+            // prior to `SelectItemGoal` try to preemptively move the
+            // cursor, if neither substep was necessary then the
+            // cursor may not have been updated yet.
+            if !player.using_tool
+                && tile == game_state.inputs.mouse_tile_location
+            {
+                do_action(GameAction::LeftClick);
             }
             return Ok(BotGoalResult::InProgress);
         }

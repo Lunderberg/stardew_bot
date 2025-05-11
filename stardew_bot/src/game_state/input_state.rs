@@ -7,7 +7,8 @@ use super::Vector;
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct InputState {
     pub keys_pressed: Vec<Key>,
-    pub mouse_location: Vector<isize>,
+    pub mouse_pixel_location: Vector<isize>,
+    pub mouse_tile_location: Vector<isize>,
     pub mouse_buttons: u8,
 }
 
@@ -18,17 +19,23 @@ impl InputState {
         graph.named_native_function(
             "new_input_state",
             |keys_pressed: &Vec<i32>,
-             mouse_x: isize,
-             mouse_y: isize,
+             mouse_pixel_x: isize,
+             mouse_pixel_y: isize,
+             mouse_tile_x: isize,
+             mouse_tile_y: isize,
              mouse_buttons: u8| {
-                let mouse_location = Vector::new(mouse_x, mouse_y);
+                let mouse_pixel_location =
+                    Vector::new(mouse_pixel_x, mouse_pixel_y);
+                let mouse_tile_location =
+                    Vector::new(mouse_tile_x, mouse_tile_y);
                 InputState {
                     keys_pressed: keys_pressed
                         .iter()
                         .cloned()
                         .map(Into::into)
                         .collect(),
-                    mouse_location,
+                    mouse_pixel_location,
+                    mouse_tile_location,
                     mouse_buttons,
                 }
             },
@@ -49,9 +56,13 @@ impl InputState {
                 let mouse = StardewValley.Game1
                     .oldMouseState;
 
+                let mouse_tile = StardewValley.Game1.currentCursorTile;
+
                 new_input_state(
                     keys_pressed,
-                    mouse._x, mouse._y, mouse._buttons,
+                    mouse._x, mouse._y,
+                    mouse_tile.X, mouse_tile.Y,
+                    mouse._buttons,
                 )
             }
         })?;

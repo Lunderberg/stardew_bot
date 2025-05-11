@@ -19,11 +19,12 @@ pub enum GameAction {
     ActivateTile,
     StopActivatingTile,
 
-    LeftClickPixel(Vector<isize>),
-    LeftClickTile(Vector<isize>),
+    MouseOverTile(Vector<isize>),
+    MouseOverPixel(Vector<isize>),
+
+    LeftClick,
     ReleaseLeftClick,
-    RightClickPixel(Vector<isize>),
-    RightClickTile(Vector<isize>),
+    RightClick,
     ReleaseRightClick,
 
     SelectHotbar(usize),
@@ -118,25 +119,22 @@ impl GameAction {
             GameAction::StopActivatingTile => {
                 handler.send_keystroke(false, Self::KEY_X)?
             }
-            &GameAction::LeftClickPixel(pixel) => {
-                handler.move_mouse(pixel)?;
-                handler.send_click(true, Self::MOUSE_LEFT)?
-            }
-            &GameAction::LeftClickTile(tile) => {
+
+            &GameAction::MouseOverTile(tile) => {
                 let pixel = game_state.display.center_pixel_of_tile(tile);
                 handler.move_mouse(pixel)?;
+            }
+            &GameAction::MouseOverPixel(pixel) => {
+                handler.move_mouse(pixel)?;
+            }
+
+            GameAction::LeftClick => {
                 handler.send_click(true, Self::MOUSE_LEFT)?
             }
             GameAction::ReleaseLeftClick => {
                 handler.send_click(false, Self::MOUSE_LEFT)?
             }
-            &GameAction::RightClickPixel(pixel) => {
-                handler.move_mouse(pixel)?;
-                handler.send_click(true, Self::MOUSE_RIGHT)?
-            }
-            &GameAction::RightClickTile(tile) => {
-                let pixel = game_state.display.center_pixel_of_tile(tile);
-                handler.move_mouse(pixel)?;
+            GameAction::RightClick => {
                 handler.send_click(true, Self::MOUSE_RIGHT)?
             }
             GameAction::ReleaseRightClick => {

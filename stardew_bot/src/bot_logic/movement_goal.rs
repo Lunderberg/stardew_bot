@@ -447,7 +447,9 @@ impl BotGoal for LocalMovementGoal {
                 num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
             })
             .expect("Direction::iter is non-empty");
+        let target_tile = self.position.as_tile();
         do_action(GameAction::Move(dir));
+        do_action(GameAction::MouseOverTile(target_tile));
 
         let must_open_door = self.activate_endpoint.unwrap_or(false)
             && player_position.manhattan_dist(self.position) < 1.5;
@@ -456,7 +458,7 @@ impl BotGoal for LocalMovementGoal {
             if player.fade_to_black {
                 do_action(GameAction::ReleaseRightClick);
             } else {
-                do_action(GameAction::RightClickTile(self.position.as_tile()));
+                do_action(GameAction::RightClick);
             }
         }
 

@@ -80,13 +80,16 @@ impl BotGoal for InventoryGoal {
 
         if let Some(chest_menu) = &game_state.chest_menu {
             if player_has_item {
-                do_action(GameAction::LeftClickPixel(chest_menu.ok_button));
+                do_action(GameAction::MouseOverPixel(chest_menu.ok_button));
+                do_action(GameAction::LeftClick);
             } else if let Some(chest_index) = item_slot(&chest_menu.chest_items)
             {
                 let pixel = chest_menu.chest_item_locations[chest_index];
-                do_action(GameAction::LeftClickPixel(pixel));
+                do_action(GameAction::MouseOverPixel(pixel));
+                do_action(GameAction::LeftClick);
             } else {
-                do_action(GameAction::LeftClickPixel(chest_menu.ok_button));
+                do_action(GameAction::MouseOverPixel(chest_menu.ok_button));
+                do_action(GameAction::LeftClick);
             };
             return Ok(BotGoalResult::InProgress);
         }
@@ -138,7 +141,8 @@ impl BotGoal for InventoryGoal {
             return Ok(goals.into());
         }
 
-        do_action(GameAction::RightClickTile(chest_tile));
+        do_action(GameAction::MouseOverTile(chest_tile));
+        do_action(GameAction::RightClick);
 
         Ok(BotGoalResult::InProgress)
     }

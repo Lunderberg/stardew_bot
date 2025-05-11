@@ -20,7 +20,8 @@ impl WidgetWindow<Error> for InputDisplay {
             .get::<GameState>()
             .expect("Generated/updated in top-level GUI update");
 
-        let mouse_pos = format!("Mouse: {}", game_state.inputs.mouse_location);
+        let mouse_pos =
+            format!("Mouse: {}", game_state.inputs.mouse_pixel_location);
         let mouse_buttons = format!("M: {}", game_state.inputs.mouse_buttons);
 
         let iter_keys = game_state
