@@ -22,7 +22,9 @@ pub struct PlayerState {
     pub inventory: Inventory,
     pub active_hotbar_index: usize,
 
+    // Info related to the current action being performed
     pub using_tool: bool,
+    pub last_click: Vector<isize>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -49,6 +51,11 @@ impl PlayerState {
         graph.named_native_function(
             "new_f32_vector",
             |right: f32, down: f32| Vector::<f32> { right, down },
+        )?;
+
+        graph.named_native_function(
+            "new_isize_vector",
+            |right: isize, down: isize| Vector::<isize> { right, down },
         )?;
 
         graph.named_native_function(
@@ -119,7 +126,8 @@ impl PlayerState {
              fade_to_black: bool,
              inventory: &Inventory,
              active_hotbar_index: usize,
-             using_tool: bool| {
+             using_tool: bool,
+             last_click: &Vector<isize>| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -130,6 +138,7 @@ impl PlayerState {
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
+                    last_click: *last_click,
                 }
             },
         )?;
@@ -193,6 +202,10 @@ impl PlayerState {
                     .prim_cast::<usize>();
 
                 let using_tool = player.usingTool.value;
+                let last_click = {
+                    let pos = StardewValley.Game1._player.lastClick;
+                    new_isize_vector(pos.X, pos.Y)
+                };
 
                 new_player(
                     position,
@@ -204,6 +217,7 @@ impl PlayerState {
                     inventory,
                     active_hotbar_index,
                     using_tool,
+                    last_click,
                 )
             }
         })?;

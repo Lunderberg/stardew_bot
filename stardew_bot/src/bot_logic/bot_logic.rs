@@ -38,8 +38,6 @@ impl BotLogic {
             goals: vec![
                 Box::new(super::ClearFarmGoal),
                 // Box::new(super::FishingGoal),
-
-                // Box::new(super::InventoryGoal::new(Item::new("BambooPole"))),
             ],
         }
     }

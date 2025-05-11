@@ -29,6 +29,9 @@ pub enum GameAction {
 
     SelectHotbar(usize),
     StopSelectingHotbar(usize),
+
+    AnimationCancel,
+    StopAnimationCanceling,
 }
 
 impl GameAction {
@@ -72,6 +75,12 @@ impl GameAction {
         Self::KEY_MINUS,
         Self::KEY_EQUAL,
     ];
+
+    const KEY_RIGHT_SHIFT: X11KeyCode = 62;
+    const KEY_R: X11KeyCode = 27;
+    const KEY_DELETE: X11KeyCode = 119;
+    const KEY_ANIMATION_CANCEL: [X11KeyCode; 3] =
+        [Self::KEY_RIGHT_SHIFT, Self::KEY_R, Self::KEY_DELETE];
 
     const MOUSE_LEFT: ButtonIndex = ButtonIndex::M1;
     const MOUSE_RIGHT: ButtonIndex = ButtonIndex::M3;
@@ -153,6 +162,17 @@ impl GameAction {
             }
             &GameAction::StopSelectingHotbar(i) => {
                 handler.send_keystroke(false, Self::KEY_INVENTORY_SELECT[i])?
+            }
+
+            GameAction::AnimationCancel => {
+                for key in Self::KEY_ANIMATION_CANCEL {
+                    handler.send_keystroke(true, key)?
+                }
+            }
+            GameAction::StopAnimationCanceling => {
+                for key in Self::KEY_ANIMATION_CANCEL {
+                    handler.send_keystroke(false, key)?
+                }
             }
         }
 
