@@ -315,6 +315,13 @@ pub enum ExprKind {
         num_bytes: SymbolicValue,
     },
 
+    /// Cast from byte array to a primitive value
+    CastBytes {
+        bytes: SymbolicValue,
+        offset: SymbolicValue,
+        prim_type: RuntimePrimType,
+    },
+
     /// Read a .NET string
     ///
     /// Given a location of a .NET string, produces a Rust-native
@@ -937,6 +944,20 @@ impl SymbolicGraph {
         let ptr = ptr.into();
         let num_bytes = num_bytes.into();
         self.push(ExprKind::ReadBytes { ptr, num_bytes })
+    }
+
+    pub fn cast_bytes(
+        &mut self,
+        bytes: SymbolicValue,
+        offset: impl Into<SymbolicValue>,
+        prim_type: RuntimePrimType,
+    ) -> SymbolicValue {
+        let offset = offset.into();
+        self.push(ExprKind::CastBytes {
+            bytes,
+            offset,
+            prim_type,
+        })
     }
 
     pub fn read_string(
@@ -2582,6 +2603,25 @@ impl ExprKind {
                     ExprKind::ReadBytes { ptr, num_bytes }
                 })
             }
+            ExprKind::CastBytes {
+                bytes,
+                offset,
+                prim_type,
+            } => {
+                let opt_bytes = remap(bytes);
+                let opt_offset = remap(offset);
+                let requires_remap =
+                    opt_bytes.is_some() || opt_offset.is_some();
+                requires_remap.then(|| {
+                    let bytes = opt_bytes.unwrap_or_else(|| *bytes);
+                    let offset = opt_offset.unwrap_or_else(|| *offset);
+                    ExprKind::CastBytes {
+                        bytes,
+                        offset,
+                        prim_type: *prim_type,
+                    }
+                })
+            }
             ExprKind::ReadString { ptr } => {
                 remap(ptr).map(|ptr| ExprKind::ReadString { ptr })
             }
@@ -2639,6 +2679,9 @@ impl ExprKind {
                 }
                 &ExprKind::ReadBytes { ptr, num_bytes } => {
                     ([Some(ptr), Some(num_bytes), None], None)
+                }
+                &ExprKind::CastBytes { bytes, offset, .. } => {
+                    ([Some(bytes), Some(offset), None], None)
                 }
 
                 // Binary operators
@@ -2738,6 +2781,7 @@ impl ExprKind {
             ExprKind::PhysicalDowncast { .. } => "PhysicalDowncast",
             ExprKind::ReadPrim { .. } => "ReadValue",
             ExprKind::ReadBytes { .. } => "ReadBytes",
+            ExprKind::CastBytes { .. } => "CastBytes",
             ExprKind::ReadString { .. } => "ReadString",
         }
     }
@@ -3192,6 +3236,22 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::CastBytes {
+                    bytes: lhs_bytes,
+                    offset: lhs_offset,
+                    prim_type: lhs_prim_type,
+                } => match rhs_kind {
+                    ExprKind::CastBytes {
+                        bytes: rhs_bytes,
+                        offset: rhs_offset,
+                        prim_type: rhs_prim_type,
+                    } => {
+                        equivalent_value!(lhs_bytes, rhs_bytes)
+                            && equivalent_value!(lhs_offset, rhs_offset)
+                            && lhs_prim_type == rhs_prim_type
+                    }
+                    _ => false,
+                },
                 ExprKind::ReadString { ptr: lhs_ptr } => match rhs_kind {
                     ExprKind::ReadString { ptr: rhs_ptr } => {
                         equivalent_value!(lhs_ptr, rhs_ptr)
@@ -3356,6 +3416,13 @@ impl Display for ExprKind {
             }
             ExprKind::ReadBytes { ptr, num_bytes } => {
                 write!(f, "{ptr}.read_bytes({ptr}, {num_bytes})")
+            }
+            ExprKind::CastBytes {
+                bytes,
+                offset,
+                prim_type,
+            } => {
+                write!(f, "{bytes}.cast_bytes::<{prim_type}>({offset})")
             }
             ExprKind::ReadString { ptr } => {
                 write!(f, "{ptr}.read_string()")

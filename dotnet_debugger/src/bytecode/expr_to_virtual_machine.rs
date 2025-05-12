@@ -1016,7 +1016,7 @@ impl ExpressionTranslator<'_> {
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     self.push_annotated(
-                        Instruction::Read {
+                        Instruction::ReadPrim {
                             ptr,
                             prim_type: *prim_type,
                             output: op_output,
@@ -1034,6 +1034,26 @@ impl ExpressionTranslator<'_> {
                         Instruction::ReadBytes {
                             ptr,
                             num_bytes,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+                ExprKind::CastBytes {
+                    bytes,
+                    offset,
+                    prim_type,
+                } => {
+                    let bytes = self.value_to_arg(op_index, bytes)?;
+                    let offset = self.value_to_arg(op_index, offset)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::CastBytes {
+                            bytes,
+                            offset,
+                            prim_type: *prim_type,
                             output: op_output,
                         },
                         || format!("eval {expr_name}"),

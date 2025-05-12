@@ -1152,6 +1152,31 @@ impl<'a> GraphPrinter<'a> {
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
                         }
+                        ExprKind::CastBytes {
+                            bytes,
+                            offset,
+                            prim_type,
+                        } => {
+                            [
+                                PrintItem::Expr(
+                                    *bytes,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("cast_bytes::<"),
+                                PrintItem::PrimType(prim_type),
+                                PrintItem::Str(">"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *offset,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
                         ExprKind::ReadString { ptr } => {
                             [
                                 PrintItem::Expr(

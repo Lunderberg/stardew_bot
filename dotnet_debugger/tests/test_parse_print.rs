@@ -1365,3 +1365,27 @@ test_print_and_parse! {
         graph.mark_extern_func(func).unwrap();
     },
 }
+
+test_print_and_parse! {
+    cast_bytes,
+    indoc! {"
+    pub fn main(a: Ptr) {
+        let bytes = a.read_bytes(8);
+        let value = bytes.cast_bytes::<usize>(0);
+        value
+    }"},
+    |graph| {
+        let a = graph.function_arg(RuntimePrimType::Ptr);
+        graph.name(a, "a").unwrap();
+
+        let bytes = graph.read_bytes(a, 8);
+        graph.name(bytes, "bytes").unwrap();
+
+        let value = graph.cast_bytes(bytes, 0, RuntimePrimType::NativeUInt);
+        graph.name(value, "value").unwrap();
+
+        let func = graph.function_def(vec![a], value);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}

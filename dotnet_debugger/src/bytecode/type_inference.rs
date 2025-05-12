@@ -470,6 +470,7 @@ impl<'a> TypeInference<'a> {
                     (*prim_type).into()
                 }
                 ExprKind::ReadBytes { .. } => RuntimeType::ByteArray,
+                ExprKind::CastBytes { prim_type, .. } => (*prim_type).into(),
                 ExprKind::ReadString { .. } => RustType::new::<String>().into(),
             };
 

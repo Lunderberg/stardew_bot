@@ -915,7 +915,7 @@ impl<'a> SymbolicParser<'a> {
                         self.expect_function_arguments(1, 0)?;
                     let ty = type_args
                         .into_iter()
-                        .next()
+                        .exactly_one()
                         .expect("Protected by length check");
                     let prim_type = ty
                         .try_prim_type()
@@ -929,6 +929,22 @@ impl<'a> SymbolicParser<'a> {
                         .exactly_one()
                         .expect("Protected by length check");
                     Ok(self.graph.read_bytes(obj, num_bytes))
+                }
+                "cast_bytes" => {
+                    let (type_args, args) =
+                        self.expect_function_arguments(1, 1)?;
+                    let ty = type_args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    let prim_type = ty
+                        .try_prim_type()
+                        .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                    let offset = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.cast_bytes(obj, offset, prim_type))
                 }
                 "read_string" => {
                     self.expect_function_arguments(0, 0)?;

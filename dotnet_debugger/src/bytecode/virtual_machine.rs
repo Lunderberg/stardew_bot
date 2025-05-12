@@ -257,7 +257,7 @@ pub enum Instruction {
     /// Cast operator the operates on a subset of those bytes.  This
     /// would allow access of multiple fields of an object to share the
     /// same read.
-    Read {
+    ReadPrim {
         ptr: VMArg,
         prim_type: RuntimePrimType,
         output: StackIndex,
@@ -267,6 +267,14 @@ pub enum Instruction {
     ReadBytes {
         ptr: VMArg,
         num_bytes: VMArg,
+        output: StackIndex,
+    },
+
+    /// Cast from bytes into a primitive value.
+    CastBytes {
+        bytes: VMArg,
+        offset: VMArg,
+        prim_type: RuntimePrimType,
         output: StackIndex,
     },
 
@@ -354,6 +362,29 @@ pub enum VMExecutionError {
         operator: &'static str,
         index: InstructionIndex,
         arg_type: RuntimeType,
+    },
+
+    #[error(
+        "Operator {operator} in instruction {index} \
+         expected a byte array, \
+         but received argument of type {arg_type:?}"
+    )]
+    OperatorExpectsByteArray {
+        operator: &'static str,
+        index: InstructionIndex,
+        arg_type: RuntimeType,
+    },
+
+    #[error(
+        "Operator {operator} in instruction {index} \
+         attention to access byte {byte_index} \
+         in byte array of size {array_size}."
+    )]
+    OutOfBoundsByteIndex {
+        operator: &'static str,
+        index: InstructionIndex,
+        byte_index: usize,
+        array_size: usize,
     },
 
     #[error(
@@ -1190,17 +1221,24 @@ impl<'a> VMEvaluator<'a> {
                     output,
                 } => self.eval_downcast(obj, subtype, output)?,
 
-                &Instruction::Read {
+                &Instruction::ReadPrim {
                     ptr,
                     prim_type,
                     output,
-                } => self.eval_read(ptr, prim_type, output)?,
+                } => self.eval_read_prim(ptr, prim_type, output)?,
 
                 &Instruction::ReadBytes {
                     ptr,
                     num_bytes,
                     output,
                 } => self.eval_read_bytes(ptr, num_bytes, output)?,
+
+                &Instruction::CastBytes {
+                    bytes,
+                    offset,
+                    prim_type,
+                    output,
+                } => self.eval_cast_bytes(bytes, offset, prim_type, output)?,
 
                 &Instruction::ReadString { ptr, output } => {
                     self.eval_read_string(ptr, output)?
@@ -1240,6 +1278,34 @@ impl<'a> VMEvaluator<'a> {
                 Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
                 Some(other) => {
                     Err(VMExecutionError::OperatorExpectsPrimitiveArgument {
+                        operator: self.vm.instructions
+                            [self.current_instruction.0]
+                            .op_name(),
+                        index: self.current_instruction,
+                        arg_type: other.runtime_type(),
+                    }
+                    .into())
+                }
+                None => Ok(None),
+            },
+        }
+    }
+
+    fn arg_to_byte_array(&self, arg: VMArg) -> Result<Option<&[u8]>, Error> {
+        match arg {
+            VMArg::Const(value) => {
+                Err(VMExecutionError::OperatorExpectsByteArray {
+                    operator: self.vm.instructions[self.current_instruction.0]
+                        .op_name(),
+                    index: self.current_instruction,
+                    arg_type: value.runtime_type().into(),
+                }
+                .into())
+            }
+            VMArg::SavedValue(index) => match &self.values[index] {
+                Some(StackValue::ByteArray(bytes)) => Ok(Some(bytes)),
+                Some(other) => {
+                    Err(VMExecutionError::OperatorExpectsByteArray {
                         operator: self.vm.instructions
                             [self.current_instruction.0]
                             .op_name(),
@@ -1612,7 +1678,7 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    fn eval_read(
+    fn eval_read_prim(
         &mut self,
         ptr: VMArg,
         prim_type: RuntimePrimType,
@@ -1668,6 +1734,44 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
+    fn eval_cast_bytes(
+        &mut self,
+        bytes: VMArg,
+        offset: VMArg,
+        prim_type: RuntimePrimType,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let opt_offset = self.arg_to_prim(offset)?;
+        let opt_bytes = self.arg_to_byte_array(bytes)?;
+
+        self.values[output] = match (opt_bytes, opt_offset) {
+            (None, _) | (_, None) => None,
+            (Some(bytes), Some(offset)) => {
+                let offset: usize = offset.try_into()?;
+                let (_, bytes) =
+                    bytes.split_at_checked(offset).ok_or_else(|| {
+                        VMExecutionError::OutOfBoundsByteIndex {
+                            operator: self.vm.instructions
+                                [self.current_instruction.0]
+                                .op_name(),
+                            index: self.current_instruction,
+                            byte_index: offset,
+                            array_size: bytes.len(),
+                        }
+                    })?;
+
+                let prim_value = prim_type.parse(bytes)?;
+
+                match prim_value {
+                    RuntimePrimValue::Ptr(ptr) if ptr.is_null() => None,
+                    other => Some(other.into()),
+                }
+            }
+        };
+
+        Ok(())
+    }
+
     fn eval_read_string(
         &mut self,
         ptr: VMArg,
@@ -1707,7 +1811,7 @@ impl Instruction {
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::Downcast { obj: arg, .. }
-            | Instruction::Read { ptr: arg, .. }
+            | Instruction::ReadPrim { ptr: arg, .. }
             | Instruction::ReadString { ptr: arg, .. }
             | Instruction::IsSome { value: arg, .. }
             | Instruction::Not { arg, .. } => (Some(*arg), None, None),
@@ -1731,6 +1835,9 @@ impl Instruction {
 
             Instruction::ReadBytes { ptr, num_bytes, .. } => {
                 (Some(*ptr), Some(*num_bytes), None)
+            }
+            Instruction::CastBytes { bytes, offset, .. } => {
+                (Some(*bytes), Some(*offset), None)
             }
 
             Instruction::Swap(lhs, rhs) => (
@@ -1785,8 +1892,9 @@ impl Instruction {
             | Instruction::Div { output, .. }
             | Instruction::Mod { output, .. }
             | Instruction::Downcast { output, .. }
-            | Instruction::Read { output, .. }
+            | Instruction::ReadPrim { output, .. }
             | Instruction::ReadBytes { output, .. }
+            | Instruction::CastBytes { output, .. }
             | Instruction::ReadString { output, .. }
             | Instruction::IsSome { output, .. } => (Some(*output), None),
 
@@ -1823,8 +1931,9 @@ impl Instruction {
             Instruction::Div { .. } => "Div",
             Instruction::Mod { .. } => "Mod",
             Instruction::Downcast { .. } => "Downcast",
-            Instruction::Read { .. } => "Read",
+            Instruction::ReadPrim { .. } => "Read",
             Instruction::ReadBytes { .. } => "ReadBytes",
+            Instruction::CastBytes { .. } => "CastBytes",
             Instruction::ReadString { .. } => "ReadString",
             Instruction::Return { .. } => "Return",
         }
@@ -2027,7 +2136,7 @@ impl Display for Instruction {
                 output,
             } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
 
-            Instruction::Read {
+            Instruction::ReadPrim {
                 ptr,
                 prim_type,
                 output,
@@ -2038,6 +2147,16 @@ impl Display for Instruction {
                 num_bytes,
                 output,
             } => write!(f, "{output} = {ptr}.read_bytes({num_bytes})"),
+
+            Instruction::CastBytes {
+                bytes,
+                offset,
+                prim_type,
+                output,
+            } => write!(
+                f,
+                "{output} = {bytes}.cast_bytes::<{prim_type}>({offset})"
+            ),
 
             Instruction::ReadString { ptr, output } => {
                 write!(f, "{output} = {ptr}.read_string()")
