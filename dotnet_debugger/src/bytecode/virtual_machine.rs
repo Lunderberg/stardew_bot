@@ -7,6 +7,7 @@ use std::{
 };
 
 use derive_more::derive::From;
+use itertools::Either;
 use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
 use paste::paste;
@@ -250,8 +251,7 @@ pub enum Instruction {
 
     /// Read an array of bytes
     ReadBytes {
-        ptr: VMArg,
-        num_bytes: VMArg,
+        regions: Vec<VMByteRange>,
         output: StackIndex,
     },
 
@@ -270,6 +270,12 @@ pub enum Instruction {
 
     /// End execution of the VM, and return to the parent scope.
     Return { outputs: Vec<VMArg> },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct VMByteRange {
+    pub ptr: VMArg,
+    pub num_bytes: VMArg,
 }
 
 #[derive(Error)]
@@ -370,6 +376,16 @@ pub enum VMExecutionError {
         index: InstructionIndex,
         byte_index: usize,
         array_size: usize,
+    },
+
+    #[error(
+        "Operator {operator} in instruction {index} \
+         attempted to use {value} as an integer number of bytes."
+    )]
+    ByteCountNotConvertibleToInt {
+        operator: &'static str,
+        index: InstructionIndex,
+        value: RuntimePrimValue,
     },
 
     #[error(
@@ -1206,11 +1222,9 @@ impl<'a> VMEvaluator<'a> {
                     output,
                 } => self.eval_downcast(obj, subtype, output)?,
 
-                &Instruction::ReadBytes {
-                    ptr,
-                    num_bytes,
-                    output,
-                } => self.eval_read_bytes(ptr, num_bytes, output)?,
+                Instruction::ReadBytes { regions, output } => {
+                    self.eval_read_bytes(regions, *output)?
+                }
 
                 &Instruction::CastBytes {
                     bytes,
@@ -1659,26 +1673,37 @@ impl<'a> VMEvaluator<'a> {
 
     fn eval_read_bytes(
         &mut self,
-        ptr: VMArg,
-        num_bytes: VMArg,
+        regions: &[VMByteRange],
         output: StackIndex,
     ) -> Result<(), Error> {
-        let opt_ptr = self.arg_to_prim(ptr)?;
-        let opt_num_bytes = self.arg_to_prim(num_bytes)?;
+        let mut remote_ranges = Vec::<Range<Pointer>>::new();
+        for region in regions.iter() {
+            let opt_ptr = self.arg_to_prim(region.ptr)?;
+            let opt_num_bytes = self.arg_to_prim(region.num_bytes)?;
 
-        self.values[output] = match (opt_ptr, opt_num_bytes) {
-            (None, _) | (_, None) => Ok(None),
-            (Some(RuntimePrimValue::Ptr(ptr)), Some(num_bytes)) => {
-                let num_bytes: usize = num_bytes.try_into()?;
-                let mut bytes = vec![0; num_bytes];
-                self.reader.read_bytes(ptr, &mut bytes)?;
+            if opt_ptr.is_none() || opt_num_bytes.is_none() {
+                self.values[output] = None;
+                return Ok(());
+            }
 
-                Ok(Some(StackValue::ByteArray(bytes)))
-            }
-            (Some(other), _) => {
-                Err(VMExecutionError::ReadAppliedToNonPointer(other))
-            }
-        }?;
+            let ptr: Pointer = opt_ptr.unwrap().try_into()?;
+            let num_bytes: RuntimePrimValue = opt_num_bytes.unwrap();
+            let num_bytes: usize = num_bytes.try_into().map_err(|_| {
+                VMExecutionError::ByteCountNotConvertibleToInt {
+                    operator: self.vm.instructions[self.current_instruction.0]
+                        .op_name(),
+                    index: self.current_instruction,
+                    value: num_bytes,
+                }
+            })?;
+            remote_ranges.push(ptr..ptr + num_bytes);
+        }
+
+        assert_eq!(remote_ranges.len(), 1, "TODO: Implement multi-range reads");
+        let mut bytes =
+            vec![0u8; remote_ranges[0].end - remote_ranges[0].start];
+        self.reader.read_bytes(remote_ranges[0].start, &mut bytes)?;
+        self.values[output] = Some(StackValue::ByteArray(bytes));
 
         Ok(())
     }
@@ -1781,9 +1806,6 @@ impl Instruction {
                 (Some(*lhs), Some(*rhs), None)
             }
 
-            Instruction::ReadBytes { ptr, num_bytes, .. } => {
-                (Some(*ptr), Some(*num_bytes), None)
-            }
             Instruction::CastBytes { bytes, offset, .. } => {
                 (Some(*bytes), Some(*offset), None)
             }
@@ -1797,8 +1819,17 @@ impl Instruction {
             // Arbitrary arity instructions
             Instruction::NativeFunctionCall { args: values, .. }
             | Instruction::Return { outputs: values } => {
-                (None, None, Some(values.iter().cloned()))
+                (None, None, Some(Either::Left(values.iter().cloned())))
             }
+            Instruction::ReadBytes { regions, .. } => (
+                None,
+                None,
+                Some(Either::Right(
+                    regions
+                        .iter()
+                        .flat_map(|region| [region.ptr, region.num_bytes]),
+                )),
+            ),
         };
 
         std::iter::empty()
@@ -2082,11 +2113,26 @@ impl Display for Instruction {
                 output,
             } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
 
-            Instruction::ReadBytes {
-                ptr,
-                num_bytes,
-                output,
-            } => write!(f, "{output} = {ptr}.read_bytes({num_bytes})"),
+            Instruction::ReadBytes { regions, output }
+                if regions.len() == 1 =>
+            {
+                let ptr = &regions[0].ptr;
+                let num_bytes = &regions[0].num_bytes;
+                write!(f, "{output} = {ptr}.read_bytes({num_bytes})")
+            }
+
+            Instruction::ReadBytes { regions, output } => {
+                write!(f, "{output} = read_bytes(")?;
+                regions.iter().enumerate().try_for_each(|(i, region)| {
+                    write!(f, "{}, {}", region.ptr, region.num_bytes)?;
+                    if i + 1 < regions.len() {
+                        write!(f, ", ")?;
+                    }
+                    Ok(())
+                })?;
+                write!(f, ")")?;
+                Ok(())
+            }
 
             Instruction::CastBytes {
                 bytes,

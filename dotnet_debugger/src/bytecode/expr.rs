@@ -310,10 +310,12 @@ pub enum ExprKind {
     ///
     /// Given a pointer to a location in the remote process, read a
     /// value at that location.
-    ReadBytes {
-        ptr: SymbolicValue,
-        num_bytes: SymbolicValue,
-    },
+    ///
+    /// This accepts a vector of regions to read, to enable
+    /// optimizations that reduce the number of reads.  In the VM,
+    /// this operator is implemented in terms of `process_vm_readv`,
+    /// which reads from multiple distinct locations.
+    ReadBytes(Vec<ByteRegion>),
 
     /// Cast from byte array to a primitive value
     CastBytes {
@@ -348,6 +350,12 @@ pub struct SymbolicType {
 pub struct StaticField {
     pub class: SymbolicType,
     pub field_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct ByteRegion {
+    pub ptr: SymbolicValue,
+    pub num_bytes: SymbolicValue,
 }
 
 struct RewriteResults {
@@ -943,7 +951,15 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let ptr = ptr.into();
         let num_bytes = num_bytes.into();
-        self.push(ExprKind::ReadBytes { ptr, num_bytes })
+        let region = ByteRegion { ptr, num_bytes };
+        self.push(ExprKind::ReadBytes(vec![region]))
+    }
+
+    pub fn read_byte_regions(
+        &mut self,
+        regions: impl IntoIterator<Item = ByteRegion>,
+    ) -> SymbolicValue {
+        self.push(ExprKind::ReadBytes(regions.into_iter().collect()))
     }
 
     pub fn cast_bytes(
@@ -2254,7 +2270,8 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         let optional_optimizations = super::ConstantFold
             .then(super::RemoveUnusedDowncast(&analysis))
             .then(super::RemoveUnusedPrimcast(&analysis))
-            .then(super::RemoveUnusedPointerCast);
+            .then(super::RemoveUnusedPointerCast)
+            .then(super::MergeParallelReads);
 
         let mandatory_lowering = super::InferFunctionParameterTypes(&analysis)
             .then(super::LegalizeOperandTypes(&analysis))
@@ -2593,15 +2610,23 @@ impl ExprKind {
                     prim_type: prim_type.clone(),
                 })
             }
-            ExprKind::ReadBytes { ptr, num_bytes } => {
-                let opt_ptr = remap(ptr);
-                let opt_num_bytes = remap(num_bytes);
-                let requires_remap =
-                    opt_ptr.is_some() || opt_num_bytes.is_some();
+            ExprKind::ReadBytes(regions) => {
+                let requires_remap = regions.iter().any(|region| {
+                    remap(&region.ptr).is_some()
+                        || remap(&region.num_bytes).is_some()
+                });
+
                 requires_remap.then(|| {
-                    let ptr = opt_ptr.unwrap_or_else(|| *ptr);
-                    let num_bytes = opt_num_bytes.unwrap_or_else(|| *num_bytes);
-                    ExprKind::ReadBytes { ptr, num_bytes }
+                    let regions = regions
+                        .iter()
+                        .map(|region| {
+                            let ptr = remap(&region.ptr).unwrap_or(region.ptr);
+                            let num_bytes = remap(&region.num_bytes)
+                                .unwrap_or(region.num_bytes);
+                            ByteRegion { ptr, num_bytes }
+                        })
+                        .collect();
+                    ExprKind::ReadBytes(regions)
                 })
             }
             ExprKind::CastBytes {
@@ -2632,100 +2657,115 @@ impl ExprKind {
     pub(crate) fn iter_input_values(
         &self,
     ) -> impl Iterator<Item = SymbolicValue> + '_ {
-        let (static_inputs, dynamic_inputs): (_, Option<&[SymbolicValue]>) =
-            match self {
-                // No upstream inputs
-                ExprKind::None
-                | ExprKind::NativeFunction(_)
-                | ExprKind::FunctionArg(_)
-                | ExprKind::StaticField(_) => ([None, None, None], None),
+        let (static_inputs, dynamic_inputs_a, dynamic_inputs_b): (
+            _,
+            Option<&[SymbolicValue]>,
+            Option<_>,
+        ) = match self {
+            // No upstream inputs
+            ExprKind::None
+            | ExprKind::NativeFunction(_)
+            | ExprKind::FunctionArg(_)
+            | ExprKind::StaticField(_) => ([None, None, None], None, None),
 
-                // Dynamic number of upstream inputs
-                ExprKind::Function { params, output } => {
-                    ([Some(*output), None, None], Some(&params))
-                }
-                ExprKind::FunctionCall { func, args } => {
-                    ([Some(*func), None, None], Some(&args))
-                }
-                ExprKind::Tuple(items) => ([None, None, None], Some(&items)),
-                ExprKind::IndexAccess { obj, indices } => {
-                    ([Some(*obj), None, None], Some(&indices))
-                }
-
-                // One upstream input
-                ExprKind::Range { extent: value }
-                | ExprKind::Collect { iterator: value }
-                | ExprKind::FieldAccess { obj: value, .. }
-                | ExprKind::SymbolicDowncast { obj: value, .. }
-                | ExprKind::NumArrayElements { array: value }
-                | ExprKind::PointerCast { ptr: value, .. }
-                | ExprKind::IsSome(value)
-                | ExprKind::Not { arg: value }
-                | ExprKind::PrimCast { value, .. }
-                | ExprKind::PhysicalDowncast { obj: value, .. }
-                | ExprKind::ReadPrim { ptr: value, .. }
-                | ExprKind::ReadString { ptr: value } => {
-                    ([Some(*value), None, None], None)
-                }
-
-                // Two upstreams inputs
-                &ExprKind::Map { iterator, map } => {
-                    ([Some(iterator), Some(map), None], None)
-                }
-                &ExprKind::Filter { iterator, filter } => {
-                    ([Some(iterator), Some(filter), None], None)
-                }
-                &ExprKind::ArrayExtent { array, dim } => {
-                    ([Some(array), Some(dim), None], None)
-                }
-                &ExprKind::ReadBytes { ptr, num_bytes } => {
-                    ([Some(ptr), Some(num_bytes), None], None)
-                }
-                &ExprKind::CastBytes { bytes, offset, .. } => {
-                    ([Some(bytes), Some(offset), None], None)
-                }
-
-                // Binary operators
-                &ExprKind::And { lhs, rhs }
-                | &ExprKind::Or { lhs, rhs }
-                | &ExprKind::Equal { lhs, rhs }
-                | &ExprKind::NotEqual { lhs, rhs }
-                | &ExprKind::LessThan { lhs, rhs }
-                | &ExprKind::GreaterThan { lhs, rhs }
-                | &ExprKind::LessThanOrEqual { lhs, rhs }
-                | &ExprKind::GreaterThanOrEqual { lhs, rhs }
-                | &ExprKind::Add { lhs, rhs }
-                | &ExprKind::Mul { lhs, rhs }
-                | &ExprKind::Div { lhs, rhs }
-                | &ExprKind::Mod { lhs, rhs } => {
-                    ([Some(lhs), Some(rhs), None], None)
-                }
-
-                // Three upstreams inputs
-                &ExprKind::Reduce {
-                    initial,
-                    iterator,
-                    reduction,
-                } => ([Some(initial), Some(iterator), Some(reduction)], None),
-                &ExprKind::SimpleReduce {
-                    initial,
-                    extent,
-                    reduction,
-                } => ([Some(initial), Some(extent), Some(reduction)], None),
-                &ExprKind::IfElse {
-                    condition,
-                    if_branch,
-                    else_branch,
-                } => (
-                    [Some(condition), Some(if_branch), Some(else_branch)],
-                    None,
+            // Dynamic number of upstream inputs
+            ExprKind::Function { params, output } => {
+                ([Some(*output), None, None], Some(&params), None)
+            }
+            ExprKind::FunctionCall { func, args } => {
+                ([Some(*func), None, None], Some(&args), None)
+            }
+            ExprKind::Tuple(items) => ([None, None, None], Some(&items), None),
+            ExprKind::IndexAccess { obj, indices } => {
+                ([Some(*obj), None, None], Some(&indices), None)
+            }
+            ExprKind::ReadBytes(regions) => (
+                [None, None, None],
+                None,
+                Some(
+                    regions
+                        .iter()
+                        .flat_map(|region| [region.ptr, region.num_bytes]),
                 ),
-            };
+            ),
+
+            // One upstream input
+            ExprKind::Range { extent: value }
+            | ExprKind::Collect { iterator: value }
+            | ExprKind::FieldAccess { obj: value, .. }
+            | ExprKind::SymbolicDowncast { obj: value, .. }
+            | ExprKind::NumArrayElements { array: value }
+            | ExprKind::PointerCast { ptr: value, .. }
+            | ExprKind::IsSome(value)
+            | ExprKind::Not { arg: value }
+            | ExprKind::PrimCast { value, .. }
+            | ExprKind::PhysicalDowncast { obj: value, .. }
+            | ExprKind::ReadPrim { ptr: value, .. }
+            | ExprKind::ReadString { ptr: value } => {
+                ([Some(*value), None, None], None, None)
+            }
+
+            // Two upstreams inputs
+            &ExprKind::Map { iterator, map } => {
+                ([Some(iterator), Some(map), None], None, None)
+            }
+            &ExprKind::Filter { iterator, filter } => {
+                ([Some(iterator), Some(filter), None], None, None)
+            }
+            &ExprKind::ArrayExtent { array, dim } => {
+                ([Some(array), Some(dim), None], None, None)
+            }
+            &ExprKind::CastBytes { bytes, offset, .. } => {
+                ([Some(bytes), Some(offset), None], None, None)
+            }
+
+            // Binary operators
+            &ExprKind::And { lhs, rhs }
+            | &ExprKind::Or { lhs, rhs }
+            | &ExprKind::Equal { lhs, rhs }
+            | &ExprKind::NotEqual { lhs, rhs }
+            | &ExprKind::LessThan { lhs, rhs }
+            | &ExprKind::GreaterThan { lhs, rhs }
+            | &ExprKind::LessThanOrEqual { lhs, rhs }
+            | &ExprKind::GreaterThanOrEqual { lhs, rhs }
+            | &ExprKind::Add { lhs, rhs }
+            | &ExprKind::Mul { lhs, rhs }
+            | &ExprKind::Div { lhs, rhs }
+            | &ExprKind::Mod { lhs, rhs } => {
+                ([Some(lhs), Some(rhs), None], None, None)
+            }
+
+            // Three upstreams inputs
+            &ExprKind::Reduce {
+                initial,
+                iterator,
+                reduction,
+            } => ([Some(initial), Some(iterator), Some(reduction)], None, None),
+            &ExprKind::SimpleReduce {
+                initial,
+                extent,
+                reduction,
+            } => ([Some(initial), Some(extent), Some(reduction)], None, None),
+            &ExprKind::IfElse {
+                condition,
+                if_branch,
+                else_branch,
+            } => (
+                [Some(condition), Some(if_branch), Some(else_branch)],
+                None,
+                None,
+            ),
+        };
 
         let iter_static =
             static_inputs.into_iter().filter_map(|opt_value| opt_value);
-        let iter_dynamic = dynamic_inputs.into_iter().flatten().cloned();
-        iter_static.chain(iter_dynamic)
+        let iter_dynamic_a = dynamic_inputs_a.into_iter().flatten().cloned();
+        let iter_dynamic_b = dynamic_inputs_b.into_iter().flatten();
+
+        std::iter::empty()
+            .chain(iter_static)
+            .chain(iter_dynamic_a)
+            .chain(iter_dynamic_b)
     }
 
     pub(crate) fn iter_input_nodes(
@@ -3224,16 +3264,20 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
-                ExprKind::ReadBytes {
-                    ptr: lhs_ptr,
-                    num_bytes: lhs_num_bytes,
-                } => match rhs_kind {
-                    ExprKind::ReadBytes {
-                        ptr: rhs_ptr,
-                        num_bytes: rhs_num_bytes,
-                    } => {
-                        equivalent_value!(lhs_ptr, rhs_ptr)
-                            && equivalent_value!(lhs_num_bytes, rhs_num_bytes)
+                ExprKind::ReadBytes(lhs_regions) => match rhs_kind {
+                    ExprKind::ReadBytes(rhs_regions) => {
+                        lhs_regions.len() == rhs_regions.len()
+                            && lhs_regions.iter().zip(rhs_regions.iter()).all(
+                                |(lhs_region, rhs_region)| {
+                                    equivalent_value!(
+                                        &lhs_region.ptr,
+                                        &rhs_region.ptr
+                                    ) && equivalent_value!(
+                                        &lhs_region.num_bytes,
+                                        &rhs_region.num_bytes
+                                    )
+                                },
+                            )
                     }
                     _ => false,
                 },
@@ -3415,8 +3459,20 @@ impl Display for ExprKind {
             ExprKind::ReadPrim { ptr, prim_type } => {
                 write!(f, "{ptr}.read_value::<{prim_type}>()")
             }
-            ExprKind::ReadBytes { ptr, num_bytes } => {
-                write!(f, "{ptr}.read_bytes({ptr}, {num_bytes})")
+            ExprKind::ReadBytes(regions) if regions.len() == 1 => {
+                let ptr = &regions[0].ptr;
+                let num_bytes = &regions[0].num_bytes;
+                write!(f, "{ptr}.read_bytes({num_bytes})")
+            }
+            ExprKind::ReadBytes(regions) => {
+                write!(f, "read_bytes(")?;
+                for region in regions.iter() {
+                    let ptr = &region.ptr;
+                    let num_bytes = &region.num_bytes;
+                    write!(f, "{ptr}, {num_bytes}, ")?;
+                }
+                write!(f, ")")?;
+                Ok(())
             }
             ExprKind::CastBytes {
                 bytes,

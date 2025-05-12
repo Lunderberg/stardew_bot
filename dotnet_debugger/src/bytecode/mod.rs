@@ -31,6 +31,9 @@ pub use lower_symbolic_expr::LowerSymbolicExpr;
 mod separate_read_and_parse_bytes;
 pub use separate_read_and_parse_bytes::SeparateReadAndParseBytes;
 
+mod merge_parallel_reads;
+pub use merge_parallel_reads::MergeParallelReads;
+
 mod remove_unused_pointer_cast;
 pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
 

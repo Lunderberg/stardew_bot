@@ -1133,17 +1133,19 @@ impl<'a> GraphPrinter<'a> {
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
                         }
-                        ExprKind::ReadBytes { ptr, num_bytes } => {
+                        ExprKind::ReadBytes(regions) if regions.len() == 1 => {
+                            let ptr = regions[0].ptr;
+                            let num_bytes = regions[0].num_bytes;
                             [
                                 PrintItem::Expr(
-                                    *ptr,
+                                    ptr,
                                     OpPrecedence::MaxPrecedence,
                                 ),
                                 PrintItem::MemberAccess,
                                 PrintItem::Str("read_bytes"),
                                 PrintItem::ParenOpen,
                                 PrintItem::Expr(
-                                    *num_bytes,
+                                    num_bytes,
                                     OpPrecedence::MaxPrecedence,
                                 ),
                                 PrintItem::ParenClose,
@@ -1151,6 +1153,40 @@ impl<'a> GraphPrinter<'a> {
                             .into_iter()
                             .rev()
                             .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ReadBytes(regions) => {
+                            std::iter::empty()
+                                .chain([
+                                    PrintItem::Str("read_bytes"),
+                                    PrintItem::ParenOpen,
+                                ])
+                                .chain(regions.iter().enumerate().flat_map(
+                                    |(i, region)| {
+                                        let ptr = PrintItem::Expr(
+                                            region.ptr,
+                                            OpPrecedence::TupleElement,
+                                        );
+                                        let num_bytes = PrintItem::Expr(
+                                            region.num_bytes,
+                                            OpPrecedence::TupleElement,
+                                        );
+                                        [
+                                            Some(ptr),
+                                            Some(PrintItem::Comma),
+                                            Some(num_bytes),
+                                            Some(PrintItem::Comma).filter(
+                                                |_| (i + 1) < regions.len(),
+                                            ),
+                                        ]
+                                        .into_iter()
+                                        .flatten()
+                                    },
+                                ))
+                                .chain(Some(PrintItem::ParenClose))
+                                .rev()
+                                .for_each(|print_item| {
+                                    to_print.push(print_item)
+                                });
                         }
                         ExprKind::CastBytes {
                             bytes,

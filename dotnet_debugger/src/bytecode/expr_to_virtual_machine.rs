@@ -6,7 +6,9 @@ use std::{
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    bytecode::{expr::Scope, printer::IndexPrinter},
+    bytecode::{
+        expr::Scope, printer::IndexPrinter, virtual_machine::VMByteRange,
+    },
     Error, ExprKind, OpIndex, RuntimeType, SymbolicValue,
 };
 
@@ -1011,15 +1013,22 @@ impl ExpressionTranslator<'_> {
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
-                ExprKind::ReadBytes { ptr, num_bytes } => {
-                    let ptr = self.value_to_arg(op_index, ptr)?;
-                    let num_bytes = self.value_to_arg(op_index, num_bytes)?;
+                ExprKind::ReadBytes(regions) => {
+                    let regions = regions
+                        .iter()
+                        .map(|region| {
+                            let ptr =
+                                self.value_to_arg(op_index, &region.ptr)?;
+                            let num_bytes =
+                                self.value_to_arg(op_index, &region.num_bytes)?;
+                            Ok(VMByteRange { ptr, num_bytes })
+                        })
+                        .collect::<Result<_, Error>>()?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     self.push_annotated(
                         Instruction::ReadBytes {
-                            ptr,
-                            num_bytes,
+                            regions,
                             output: op_output,
                         },
                         || format!("eval {expr_name}"),
