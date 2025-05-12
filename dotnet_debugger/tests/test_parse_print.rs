@@ -1389,3 +1389,38 @@ test_print_and_parse! {
         graph.mark_extern_func(func).unwrap();
     },
 }
+
+test_print_and_parse! {
+    read_multiple_remote_regions,
+    indoc! {"
+    pub fn main(ptr_a: Ptr, ptr_b: Ptr) {
+        let bytes = read_bytes(ptr_a, 4, ptr_b, 8);
+        let value_a = bytes.cast_bytes::<u32>(0).prim_cast::<usize>();
+        let value_b = bytes.cast_bytes::<u64>(4).prim_cast::<usize>();
+        let sum = value_a + value_b;
+        sum
+    }"},
+    |graph| {
+        let ptr_a = graph.function_arg(RuntimePrimType::Ptr);
+        graph.name(ptr_a, "ptr_a").unwrap();
+        let ptr_b = graph.function_arg(RuntimePrimType::Ptr);
+        graph.name(ptr_b, "ptr_b").unwrap();
+
+        let bytes = graph.read_byte_regions([(ptr_a, 4), (ptr_b,8)]);
+        graph.name(bytes, "bytes").unwrap();
+
+        let value_a = graph.cast_bytes(bytes, 0, RuntimePrimType::U32);
+        let value_a = graph.prim_cast(value_a, RuntimePrimType::NativeUInt);
+        graph.name(value_a, "value_a").unwrap();
+        let value_b = graph.cast_bytes(bytes, 4, RuntimePrimType::U64);
+        let value_b = graph.prim_cast(value_b, RuntimePrimType::NativeUInt);
+        graph.name(value_b, "value_b").unwrap();
+
+        let sum = graph.add(value_a, value_b);
+        graph.name(sum, "sum").unwrap();
+
+        let func = graph.function_def(vec![ptr_a, ptr_b], sum);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}

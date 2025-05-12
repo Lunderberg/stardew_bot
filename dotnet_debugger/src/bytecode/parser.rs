@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 use thiserror::Error;
 
 use super::{
-    expr::{SymbolicGraph, SymbolicType, SymbolicValue},
+    expr::{ByteRegion, SymbolicGraph, SymbolicType, SymbolicValue},
     OpPrecedence,
 };
 use crate::{Error, RuntimeType};
@@ -55,7 +55,7 @@ pub enum ParseError {
 
     #[error(
         "Function call expected {expected} arguments, \
-             but received {actual} arguments."
+         but received {actual} arguments."
     )]
     UnexpectedNumberOfArguments { expected: usize, actual: usize },
 
@@ -78,8 +78,21 @@ pub enum ParseError {
     )]
     ExpectedDefinedVariable(String),
 
-    #[error("")]
+    #[error(
+        "Range expressions are currently only supported \
+         when the start of the range is zero."
+    )]
     RangeExpressionsMustStartAtZero,
+
+    #[error("Missing argument list following function name '{0}'")]
+    MissingArgumentList(String),
+
+    #[error(
+        "The read_bytes() function requires an even number of arguments \
+         (ptr, num_bytes, ..., ptr, num_bytes).  \
+         However, received {0} arguments."
+    )]
+    IncorrectArgumentCountForReadBytes(usize),
 }
 
 struct SymbolicTokenizer<'a> {
@@ -496,17 +509,21 @@ impl<'a> SymbolicParser<'a> {
 
             TokenKind::Keyword(Keyword::None) => self.expect_none(),
 
-            TokenKind::Ident
-                if self.identifiers.contains_key(peek_token.text) =>
-            {
-                // TODO: Implement a way to specify a static field, even if
-                // the leading identifier would otherwise resolve to a
-                // variable definition.  Maybe with a leading . to specify the
-                // global scope?
-                self.expect_previously_defined_var()
+            TokenKind::Ident => {
+                if self.identifiers.contains_key(peek_token.text) {
+                    // TODO: Implement a way to specify a static field, even if
+                    // the leading identifier would otherwise resolve to a
+                    // variable definition.  Maybe with a leading . to specify the
+                    // global scope?
+                    self.expect_previously_defined_var()
+                } else if let Some(global_function_call) =
+                    self.try_global_function()?
+                {
+                    Ok(global_function_call)
+                } else {
+                    self.expect_static_field()
+                }
             }
-
-            TokenKind::Ident => self.next_static_field(),
 
             TokenKind::Punct(Punctuation::LeftParen) => {
                 self.tokens.next()?;
@@ -800,7 +817,7 @@ impl<'a> SymbolicParser<'a> {
         Ok(arg)
     }
 
-    fn next_static_field(&mut self) -> Result<SymbolicValue, Error> {
+    fn expect_static_field(&mut self) -> Result<SymbolicValue, Error> {
         let class = self.expect_ident(|| "class and static field")?.text;
         self.expect_punct(
             || {
@@ -1009,6 +1026,42 @@ impl<'a> SymbolicParser<'a> {
         }
 
         Ok((type_args, args))
+    }
+
+    fn try_global_function(&mut self) -> Result<Option<SymbolicValue>, Error> {
+        let peek_token = self
+            .tokens
+            .peek()?
+            .ok_or(ParseError::UnexpectedEndOfString("expression".into()))?;
+
+        if !matches!(peek_token.kind, TokenKind::Ident) {
+            return Ok(None);
+        }
+
+        let opt_value = match peek_token.text {
+            "read_bytes" => {
+                self.tokens.next()?;
+                let args = self.try_function_arguments()?.ok_or_else(|| {
+                    ParseError::MissingArgumentList("read_bytes".into())
+                })?;
+                if args.len() % 2 != 0 {
+                    return Err(
+                        ParseError::IncorrectArgumentCountForReadBytes(
+                            args.len(),
+                        )
+                        .into(),
+                    );
+                }
+                let bytes = self.graph.read_byte_regions(
+                    args.into_iter()
+                        .tuples()
+                        .map(|(ptr, num_bytes)| ByteRegion { ptr, num_bytes }),
+                );
+                Some(bytes)
+            }
+            _ => None,
+        };
+        Ok(opt_value)
     }
 
     fn try_container_access(

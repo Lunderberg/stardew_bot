@@ -955,11 +955,17 @@ impl SymbolicGraph {
         self.push(ExprKind::ReadBytes(vec![region]))
     }
 
-    pub fn read_byte_regions(
+    pub fn read_byte_regions<Regions>(
         &mut self,
-        regions: impl IntoIterator<Item = ByteRegion>,
-    ) -> SymbolicValue {
-        self.push(ExprKind::ReadBytes(regions.into_iter().collect()))
+        regions: Regions,
+    ) -> SymbolicValue
+    where
+        Regions: IntoIterator,
+        <Regions as IntoIterator>::Item: Into<ByteRegion>,
+    {
+        self.push(ExprKind::ReadBytes(
+            regions.into_iter().map(Into::into).collect(),
+        ))
     }
 
     pub fn cast_bytes(
@@ -3498,6 +3504,17 @@ impl From<StaticField> for Expr {
     fn from(value: StaticField) -> Self {
         let kind: ExprKind = value.into();
         kind.into()
+    }
+}
+
+impl<T> From<(SymbolicValue, T)> for ByteRegion
+where
+    T: Into<SymbolicValue>,
+{
+    fn from(region: (SymbolicValue, T)) -> Self {
+        let (ptr, num_bytes) = region;
+        let num_bytes = num_bytes.into();
+        Self { ptr, num_bytes }
     }
 }
 
