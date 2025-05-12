@@ -28,6 +28,9 @@ pub use sequential_rewrite::SequentialRewrite;
 mod lower_symbolic_expr;
 pub use lower_symbolic_expr::LowerSymbolicExpr;
 
+mod separate_read_and_parse_bytes;
+pub use separate_read_and_parse_bytes::SeparateReadAndParseBytes;
+
 mod remove_unused_pointer_cast;
 pub use remove_unused_pointer_cast::RemoveUnusedPointerCast;
 

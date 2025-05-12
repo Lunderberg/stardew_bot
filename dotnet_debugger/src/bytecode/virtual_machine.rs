@@ -248,21 +248,6 @@ pub enum Instruction {
         output: StackIndex,
     },
 
-    /// Read a value.
-    ///
-    /// Assumes the register contains a pointer.  Reads a value of the
-    /// specified type from the register's location into the register.
-    ///
-    /// TODO: Change Read to produce a byte array, followed by a later
-    /// Cast operator the operates on a subset of those bytes.  This
-    /// would allow access of multiple fields of an object to share the
-    /// same read.
-    ReadPrim {
-        ptr: VMArg,
-        prim_type: RuntimePrimType,
-        output: StackIndex,
-    },
-
     /// Read an array of bytes
     ReadBytes {
         ptr: VMArg,
@@ -1221,12 +1206,6 @@ impl<'a> VMEvaluator<'a> {
                     output,
                 } => self.eval_downcast(obj, subtype, output)?,
 
-                &Instruction::ReadPrim {
-                    ptr,
-                    prim_type,
-                    output,
-                } => self.eval_read_prim(ptr, prim_type, output)?,
-
                 &Instruction::ReadBytes {
                     ptr,
                     num_bytes,
@@ -1678,36 +1657,6 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    fn eval_read_prim(
-        &mut self,
-        ptr: VMArg,
-        prim_type: RuntimePrimType,
-        output: StackIndex,
-    ) -> Result<(), Error> {
-        let opt_ptr = self.arg_to_prim(ptr)?;
-
-        self.values[output] = match opt_ptr {
-            None => Ok(None),
-            Some(RuntimePrimValue::Ptr(ptr)) => {
-                let bytes = {
-                    let mut vec = vec![0; prim_type.size_bytes()];
-                    self.reader.read_bytes(ptr, &mut vec)?;
-                    vec
-                };
-                let prim_value = prim_type.parse(&bytes)?;
-                match prim_value {
-                    RuntimePrimValue::Ptr(ptr) if ptr.is_null() => Ok(None),
-                    other => Ok(Some(other.into())),
-                }
-            }
-            Some(other) => {
-                Err(VMExecutionError::ReadAppliedToNonPointer(other))
-            }
-        }?;
-
-        Ok(())
-    }
-
     fn eval_read_bytes(
         &mut self,
         ptr: VMArg,
@@ -1811,7 +1760,6 @@ impl Instruction {
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::Downcast { obj: arg, .. }
-            | Instruction::ReadPrim { ptr: arg, .. }
             | Instruction::ReadString { ptr: arg, .. }
             | Instruction::IsSome { value: arg, .. }
             | Instruction::Not { arg, .. } => (Some(*arg), None, None),
@@ -1892,7 +1840,6 @@ impl Instruction {
             | Instruction::Div { output, .. }
             | Instruction::Mod { output, .. }
             | Instruction::Downcast { output, .. }
-            | Instruction::ReadPrim { output, .. }
             | Instruction::ReadBytes { output, .. }
             | Instruction::CastBytes { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1931,7 +1878,6 @@ impl Instruction {
             Instruction::Div { .. } => "Div",
             Instruction::Mod { .. } => "Mod",
             Instruction::Downcast { .. } => "Downcast",
-            Instruction::ReadPrim { .. } => "Read",
             Instruction::ReadBytes { .. } => "ReadBytes",
             Instruction::CastBytes { .. } => "CastBytes",
             Instruction::ReadString { .. } => "ReadString",
@@ -2135,12 +2081,6 @@ impl Display for Instruction {
                 subtype,
                 output,
             } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
-
-            Instruction::ReadPrim {
-                ptr,
-                prim_type,
-                output,
-            } => write!(f, "{output} = {ptr}.read({prim_type})"),
 
             Instruction::ReadBytes {
                 ptr,

@@ -357,6 +357,14 @@ pub enum Error {
     BooleanOperatorRequiresLowering(ExprKind),
 
     #[error(
+        "ReadPrim operators must be lowered \
+         to ReadBytes and CastBytes operators\
+         prior to generating VM instruction, \
+         but encountered {0}."
+    )]
+    ReadPrimOperatorRequiresLowering(ExprKind),
+
+    #[error(
         "Value '{value}' of type {} \
          not convertible to {prim_type}",
         value.runtime_type(),

@@ -2264,7 +2264,8 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::InlineIteratorFilter)
             .then(super::ConvertCollectToReduce(&analysis))
             .then(super::ConvertBooleanOperatorToConditional)
-            .then(super::LowerSymbolicExpr(&analysis));
+            .then(super::LowerSymbolicExpr(&analysis))
+            .then(super::SeparateReadAndParseBytes);
 
         let expr = if self.optimize_symbolic_graph {
             self.apply_rewrites(

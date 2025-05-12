@@ -1011,20 +1011,6 @@ impl ExpressionTranslator<'_> {
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
-                ExprKind::ReadPrim { ptr, prim_type } => {
-                    let ptr = self.value_to_arg(op_index, ptr)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::ReadPrim {
-                            ptr,
-                            prim_type: *prim_type,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
                 ExprKind::ReadBytes { ptr, num_bytes } => {
                     let ptr = self.value_to_arg(op_index, ptr)?;
                     let num_bytes = self.value_to_arg(op_index, num_bytes)?;
@@ -1085,6 +1071,12 @@ impl ExpressionTranslator<'_> {
                         || format!("eval {expr_name}"),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                read_prim @ ExprKind::ReadPrim { .. } => {
+                    return Err(Error::ReadPrimOperatorRequiresLowering(
+                        read_prim.clone(),
+                    ));
                 }
 
                 boolean @ (ExprKind::And { .. } | ExprKind::Or { .. }) => {
