@@ -1510,3 +1510,48 @@ fn reduction_with_enclosed_variable_from_inlined_function() -> Result<(), Error>
 
     Ok(())
 }
+
+#[test]
+fn reduction_with_identical_subexpr_in_condition_and_branch(
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..100)
+                .reduce(0, |cumsum, n| {
+                    let i = n / 10;
+                    let j = n % 10;
+
+                    if i+j < 15 {
+                        let i = n / 10;
+                        let j = n % 10;
+                        cumsum + i*j
+                    } else {
+                        cumsum
+                    }
+                })
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected: usize = (0..100)
+        .filter(|n| {
+            let i = n / 10;
+            let j = n % 10;
+            i + j < 15
+        })
+        .map(|n| {
+            let i = n / 10;
+            let j = n % 10;
+            i * j
+        })
+        .sum();
+
+    assert_eq!(result, expected);
+
+    Ok(())
+}
