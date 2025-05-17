@@ -66,6 +66,12 @@ impl Pointer {
     }
 
     #[inline]
+    pub fn prev_multiple_of(self, alignment: usize) -> Self {
+        let aligned = (self.address / alignment) * alignment;
+        aligned.into()
+    }
+
+    #[inline]
     pub fn next_multiple_of(self, alignment: usize) -> Self {
         self.address.next_multiple_of(alignment).into()
     }

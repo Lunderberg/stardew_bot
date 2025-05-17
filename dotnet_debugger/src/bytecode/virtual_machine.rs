@@ -924,8 +924,6 @@ impl VMReader for DummyReader {
 
 struct CachedVMReader<Inner> {
     inner: Inner,
-    max_read_ahead: usize,
-    max_read_behind: usize,
     cache: BTreeMap<Pointer, Vec<u8>>,
     lru_tracking: LruCache<Pointer, ()>,
     lru_capacity: usize,
@@ -938,8 +936,6 @@ impl<Inner> CachedVMReader<Inner> {
             cache: BTreeMap::new(),
             lru_tracking: LruCache::unbounded(),
             lru_capacity: 100,
-            max_read_ahead: 2048 - 128,
-            max_read_behind: 128,
         }
     }
 
@@ -978,10 +974,12 @@ impl<Inner> CachedVMReader<Inner> {
     where
         Inner: VMReader,
     {
-        // Ideally, we're going to expand the read-region by the
-        // number of bytes configured for the cache.
-        let desired_range = requested_range.start - self.max_read_behind
-            ..requested_range.end + self.max_read_ahead;
+        // Ideally, we're going to read whichever pages contain the
+        // pointer-range that we're reading out.
+        const PAGE_SIZE: usize = 4096;
+        let page_start = requested_range.start.prev_multiple_of(PAGE_SIZE);
+        let page_end = requested_range.end.next_multiple_of(PAGE_SIZE);
+        let desired_range = page_start..page_end;
 
         // However, it may not be safe to do so in all cases.  If the
         // requested range is close to the beginning or end of a
