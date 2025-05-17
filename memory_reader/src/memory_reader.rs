@@ -133,7 +133,11 @@ impl MemoryReader {
             nix::unistd::Pid::from_raw(self.pid as i32),
             &mut locals,
             &remotes,
-        )?;
+        )
+        .map_err(|err| match err {
+            nix::errno::Errno::EPERM => Error::MemoryReadInsufficientPermission,
+            _ => err.into(),
+        })?;
 
         Ok(())
     }
