@@ -62,10 +62,13 @@ pub struct VMEvaluator<'a> {
     values: VMResults,
 }
 
+const SMALL_BYTE_ARRAY_SIZE: usize = 8;
+
 #[derive(Debug, From)]
 pub enum StackValue {
     Prim(RuntimePrimValue),
     ByteArray(Vec<u8>),
+    SmallByteArray([u8; SMALL_BYTE_ARRAY_SIZE]),
     Native(ExposedNativeObject),
 }
 
@@ -517,18 +520,10 @@ impl VMResults {
                         }
                     })
                 }
-                StackValue::ByteArray(_) => {
-                    Err(VMExecutionError::IncorrectOutputType {
-                        attempted: RustType::new::<T>().into(),
-                        actual: RuntimeType::ByteArray,
-                    })
-                }
-                StackValue::Prim(value) => {
-                    Err(VMExecutionError::IncorrectOutputType {
-                        attempted: RustType::new::<T>().into(),
-                        actual: RuntimeType::Prim(value.runtime_type()),
-                    })
-                }
+                other => Err(VMExecutionError::IncorrectOutputType {
+                    attempted: RustType::new::<T>().into(),
+                    actual: other.runtime_type(),
+                }),
             })
             .transpose()?
             .map(|boxed| *boxed))
@@ -549,18 +544,10 @@ impl VMResults {
                         attempted: RustType::new::<T>().into(),
                         actual: native.runtime_type(),
                     }),
-                StackValue::ByteArray(_) => {
-                    Err(VMExecutionError::IncorrectOutputType {
-                        attempted: RustType::new::<T>().into(),
-                        actual: RuntimeType::ByteArray,
-                    })
-                }
-                StackValue::Prim(value) => {
-                    Err(VMExecutionError::IncorrectOutputType {
-                        attempted: RustType::new::<T>().into(),
-                        actual: RuntimeType::Prim(value.runtime_type()),
-                    })
-                }
+                other => Err(VMExecutionError::IncorrectOutputType {
+                    attempted: RustType::new::<T>().into(),
+                    actual: other.runtime_type(),
+                }),
             })
             .transpose()?;
 
@@ -678,7 +665,9 @@ impl StackValue {
     pub(crate) fn runtime_type(&self) -> RuntimeType {
         match self {
             StackValue::Prim(prim) => prim.runtime_type().into(),
-            StackValue::ByteArray(_) => RuntimeType::ByteArray,
+            StackValue::ByteArray(_) | StackValue::SmallByteArray(_) => {
+                RuntimeType::ByteArray
+            }
             StackValue::Native(native) => native.ty.clone(),
         }
     }
@@ -686,20 +675,33 @@ impl StackValue {
     pub fn as_prim(&self) -> Option<RuntimePrimValue> {
         match self {
             StackValue::Prim(prim) => Some(*prim),
-            StackValue::Native(_) | StackValue::ByteArray(_) => None,
+            StackValue::Native(_)
+            | StackValue::ByteArray(_)
+            | StackValue::SmallByteArray(_) => None,
         }
     }
 
     pub fn as_native<T: RustNativeObject>(&self) -> Option<&T> {
         match self {
             StackValue::Native(native) => native.downcast_ref(),
-            StackValue::Prim(_) | StackValue::ByteArray(_) => None,
+            StackValue::Prim(_)
+            | StackValue::ByteArray(_)
+            | StackValue::SmallByteArray(_) => None,
         }
     }
 
     pub fn as_byte_array(&self) -> Option<&[u8]> {
         match self {
             StackValue::ByteArray(arr) => Some(arr),
+            StackValue::SmallByteArray(arr) => Some(arr),
+            StackValue::Prim(_) | StackValue::Native(_) => None,
+        }
+    }
+
+    pub fn as_mut_byte_array(&mut self) -> Option<&mut [u8]> {
+        match self {
+            StackValue::ByteArray(arr) => Some(arr),
+            StackValue::SmallByteArray(arr) => Some(arr),
             StackValue::Prim(_) | StackValue::Native(_) => None,
         }
     }
@@ -710,12 +712,10 @@ impl StackValue {
     ) -> Result<String, Error> {
         match self {
             StackValue::Prim(prim) => prim.read_string_ptr(reader),
-            StackValue::ByteArray(_) => {
-                Err(Error::AttemptedReadOfByteArrayAsStringPtr)
+            other => {
+                Err(Error::InvalidOperandForDotnetString(other.runtime_type())
+                    .into())
             }
-            StackValue::Native(obj) => Err(
-                Error::AttemptedReadOfNativeObjectAsStringPtr(obj.type_id()),
-            ),
         }
     }
 }
@@ -1476,16 +1476,18 @@ impl<'a> VMEvaluator<'a> {
                 .into())
             }
             VMArg::SavedValue(index) => match &self.values[index] {
-                Some(StackValue::ByteArray(bytes)) => Ok(Some(bytes)),
-                Some(other) => {
-                    Err(VMExecutionError::OperatorExpectsByteArray {
-                        operator: self.vm.instructions
-                            [self.current_instruction.0]
-                            .op_name(),
-                        index: self.current_instruction,
-                        arg_type: other.runtime_type(),
-                    }
-                    .into())
+                Some(stack_value) => {
+                    let bytes =
+                        stack_value.as_byte_array().ok_or_else(|| {
+                            VMExecutionError::OperatorExpectsByteArray {
+                                operator: self.vm.instructions
+                                    [self.current_instruction.0]
+                                    .op_name(),
+                                index: self.current_instruction,
+                                arg_type: stack_value.runtime_type(),
+                            }
+                        })?;
+                    Ok(Some(bytes))
                 }
                 None => Ok(None),
             },
@@ -1907,16 +1909,27 @@ impl<'a> VMEvaluator<'a> {
             remote_ranges.push(ptr..ptr + num_bytes);
         }
 
-        let num_bytes = remote_ranges
-            .iter()
-            .map(|range| range.end - range.start)
-            .sum::<usize>();
-        let mut bytes = vec![0u8; num_bytes];
+        let bytes: &mut [u8] = {
+            let num_bytes = remote_ranges
+                .iter()
+                .map(|range| range.end - range.start)
+                .sum::<usize>();
+            self.values[output] = Some(if num_bytes <= SMALL_BYTE_ARRAY_SIZE {
+                StackValue::SmallByteArray([0u8; SMALL_BYTE_ARRAY_SIZE])
+            } else {
+                StackValue::ByteArray(vec![0u8; num_bytes])
+            });
+
+            self.values[output]
+                .as_mut()
+                .and_then(|stack_value| stack_value.as_mut_byte_array())
+                .expect("Byte array was just assigned")
+        };
 
         if remote_ranges.len() == 1 {
             let start = remote_ranges[0].start;
             if !start.is_null() {
-                self.reader.read_bytes(start, &mut bytes)?;
+                self.reader.read_bytes(start, bytes)?;
             }
         } else {
             let mut regions: Vec<(Pointer, &mut [u8])> = Vec::new();
@@ -1931,8 +1944,6 @@ impl<'a> VMEvaluator<'a> {
             }
             self.reader.read_byte_regions(&mut regions)?;
         }
-
-        self.values[output] = Some(StackValue::ByteArray(bytes));
 
         Ok(())
     }
@@ -2221,6 +2232,7 @@ impl Display for StackValue {
                 write!(f, "[rust-native object of type {:?}]", any.type_id())
             }
             StackValue::ByteArray(_) => write!(f, "ByteArray"),
+            StackValue::SmallByteArray(_) => write!(f, "SmallByteArray"),
         }
     }
 }

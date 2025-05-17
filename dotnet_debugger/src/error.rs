@@ -418,16 +418,10 @@ pub enum Error {
     IncorrectNumberOfResults { expected: usize, actual: usize },
 
     #[error(
-        "Attempted to read rust-native object \
-         of type {0:?} as a pointer to a .NET string."
-    )]
-    AttemptedReadOfNativeObjectAsStringPtr(std::any::TypeId),
-
-    #[error(
-        "Attempted to read a byte array \
+        "Object of type {0:?} cannot be used \
          as a pointer to a .NET string."
     )]
-    AttemptedReadOfByteArrayAsStringPtr,
+    InvalidOperandForDotnetString(RuntimeType),
 
     #[error(
         "Analysis routine attempted to inspect remote process, \
