@@ -1894,8 +1894,13 @@ impl<'a> VMEvaluator<'a> {
             .sum::<usize>();
         let mut bytes = vec![0u8; num_bytes];
 
-        let mut regions: Vec<(Pointer, &mut [u8])> = Vec::new();
-        {
+        if remote_ranges.len() == 1 {
+            let start = remote_ranges[0].start;
+            if !start.is_null() {
+                self.reader.read_bytes(start, &mut bytes)?;
+            }
+        } else {
+            let mut regions: Vec<(Pointer, &mut [u8])> = Vec::new();
             let mut remaining = &mut bytes[..];
             for range in remote_ranges {
                 let num_bytes = range.end - range.start;
@@ -1905,8 +1910,8 @@ impl<'a> VMEvaluator<'a> {
                 }
                 remaining = right;
             }
+            self.reader.read_byte_regions(&mut regions)?;
         }
-        self.reader.read_byte_regions(&mut regions)?;
 
         self.values[output] = Some(StackValue::ByteArray(bytes));
 
