@@ -6,7 +6,7 @@ use std::{
 };
 
 use derive_more::derive::From;
-use itertools::{Either, Itertools as _};
+use itertools::Either;
 use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
 use paste::paste;
@@ -1006,29 +1006,6 @@ impl<Inner> CachedVMReader<Inner> {
     }
 
     fn add_to_cache(&mut self, cached_entries: Vec<(Pointer, Vec<u8>)>) {
-        for (ptr, new_cache) in &cached_entries {
-            if let Some(cached) = self.cache.get(ptr) {
-                panic!(
-                    "Ptr at {ptr} is already cached.  \
-                     Previously, cached with {} bytes, \
-                     now cached with {} bytes",
-                    cached.len(),
-                    new_cache.len(),
-                );
-            }
-        }
-        cached_entries
-            .iter()
-            .map(|(ptr, _)| *ptr)
-            .counts()
-            .into_iter()
-            .for_each(|(ptr, counts)| {
-                assert_eq!(
-                    counts, 1,
-                    "Cache update had {counts} entries for {ptr}"
-                );
-            });
-
         // Normally, the eviction would be automatically handled by
         // `self.lru_tracking.push`.  However, if a batched read
         // produces more cache entries than are configured to be in
@@ -1052,15 +1029,7 @@ impl<Inner> CachedVMReader<Inner> {
         }
 
         for (ptr, bytes) in cached_entries {
-            if let Some((evicted, _)) = self.lru_tracking.push(ptr, ()) {
-                assert!(self.cache.contains_key(&evicted));
-                unreachable!(
-                    "Automatic LRU evictions are disabled, \
-                     to allow a batch of cache entries \
-                     to temporarily exceed the specified LRU capacity.  \
-                     However, found eviction of pointer {evicted}"
-                );
-            }
+            self.lru_tracking.push(ptr, ());
             self.cache.insert(ptr, bytes);
         }
     }
