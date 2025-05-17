@@ -1055,25 +1055,26 @@ where
                 if let Some(cached) = self.from_cache(remote_range.clone()) {
                     output.copy_from_slice(cached);
                 } else {
-                    // A single batch of reads will usually be avoided
-                    // by CSE at the IR level.  However, it's also
-                    // possible that two distinct expressions will
-                    // evaluate to the same pointer, resulting in two
-                    // reads being issued to the same location.
-                    let is_new_read = to_read.iter().all(|queued_read| {
-                        let queued_range =
-                            queued_read.0..queued_read.0 + queued_read.1.len();
-                        queued_range.end < remote_range.start
-                            || remote_range.end < queued_range.start
-                    });
-                    if is_new_read {
-                        let cache_range =
-                            self.choose_cache_range(remote_range.clone());
+                    let cache_range =
+                        self.choose_cache_range(remote_range.clone());
+
+                    // De-duplicate reads based on the page that will
+                    // be read out.
+                    let queued_read = to_read
+                        .iter_mut()
+                        .find(|(loc, _)| *loc == cache_range.start);
+                    if let Some((_, bytes)) = queued_read {
+                        let new_size = bytes
+                            .len()
+                            .max(cache_range.end - cache_range.start);
+                        bytes.resize(new_size, 0u8);
+                    } else {
                         to_read.push((
                             cache_range.start,
                             vec![0u8; cache_range.end - cache_range.start],
                         ));
                     }
+
                     update_after_read.push(i);
                 }
             });
