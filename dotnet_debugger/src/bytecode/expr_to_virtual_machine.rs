@@ -999,6 +999,24 @@ impl ExpressionTranslator<'_> {
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
+                ExprKind::IsSubclassOf {
+                    method_table_ptr,
+                    ty,
+                } => {
+                    let method_table_ptr =
+                        self.value_to_arg(op_index, method_table_ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::IsSubclassOf {
+                            method_table_ptr,
+                            base_type: *ty,
+                            output: op_output,
+                        },
+                        || format!("eval {expr_name}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
                 ExprKind::PhysicalDowncast { obj, ty } => {
                     let obj = self.value_to_arg(op_index, obj)?;
                     self.free_dead_indices(op_index);

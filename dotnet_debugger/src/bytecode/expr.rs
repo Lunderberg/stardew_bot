@@ -11,6 +11,7 @@ use memory_reader::Pointer;
 
 use crate::{
     bytecode::printer::IndexPrinter,
+    env_var_flag,
     runtime_type::{FunctionType, RuntimePrimType},
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
@@ -285,6 +286,16 @@ pub enum ExprKind {
     PrimCast {
         value: SymbolicValue,
         prim_type: RuntimePrimType,
+    },
+
+    /// Check if a .NET type is a subclass of another .NET type
+    IsSubclassOf {
+        /// The pointer to a method table, as read out from the
+        /// Object's header.
+        method_table_ptr: SymbolicValue,
+
+        /// A pointer to the type being checked against.
+        ty: TypedPointer<MethodTable>,
     },
 
     /// Downcast into a subclass.
@@ -924,6 +935,18 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let value = value.into();
         self.push(ExprKind::PrimCast { value, prim_type })
+    }
+
+    pub fn is_subclass_of(
+        &mut self,
+        method_table_ptr: impl Into<SymbolicValue>,
+        base_type: TypedPointer<MethodTable>,
+    ) -> SymbolicValue {
+        let method_table_ptr = method_table_ptr.into();
+        self.push(ExprKind::IsSubclassOf {
+            method_table_ptr,
+            ty: base_type,
+        })
     }
 
     pub fn physical_downcast(
@@ -2125,23 +2148,8 @@ impl Scope {
 
 impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
     pub(crate) fn from_graph(graph: &'a SymbolicGraph) -> Self {
-        let get_env_var = |name: &'static str| -> bool {
-            std::env::var(name)
-                .map(|var| {
-                    if var.is_empty() {
-                        false
-                    } else if var.eq_ignore_ascii_case("true") {
-                        true
-                    } else if let Ok(value) = var.parse::<usize>() {
-                        value > 0
-                    } else {
-                        false
-                    }
-                })
-                .unwrap_or(false)
-        };
-        let show_steps = get_env_var("SHOW_STEPS");
-        let interactive_substeps = get_env_var("INTERACTIVE_SUBSTEPS");
+        let show_steps = env_var_flag("SHOW_STEPS");
+        let interactive_substeps = env_var_flag("INTERACTIVE_SUBSTEPS");
 
         Self {
             graph,
@@ -2604,6 +2612,16 @@ impl ExprKind {
             ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
             ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
+            ExprKind::IsSubclassOf {
+                method_table_ptr,
+                ty,
+            } => remap(method_table_ptr).map(|method_table_ptr| {
+                ExprKind::IsSubclassOf {
+                    method_table_ptr,
+                    ty: ty.clone(),
+                }
+            }),
+
             ExprKind::PhysicalDowncast { obj, ty } => {
                 remap(obj).map(|obj| ExprKind::PhysicalDowncast {
                     obj,
@@ -2706,6 +2724,10 @@ impl ExprKind {
             | ExprKind::Not { arg: value }
             | ExprKind::PrimCast { value, .. }
             | ExprKind::PhysicalDowncast { obj: value, .. }
+            | ExprKind::IsSubclassOf {
+                method_table_ptr: value,
+                ..
+            }
             | ExprKind::ReadPrim { ptr: value, .. }
             | ExprKind::ReadString { ptr: value } => {
                 ([Some(*value), None, None], None, None)
@@ -2825,6 +2847,7 @@ impl ExprKind {
             ExprKind::Div { .. } => "Div",
             ExprKind::Mod { .. } => "Mod",
             ExprKind::PrimCast { .. } => "PrimCast",
+            ExprKind::IsSubclassOf { .. } => "IsSubclassOf",
             ExprKind::PhysicalDowncast { .. } => "PhysicalDowncast",
             ExprKind::ReadPrim { .. } => "ReadValue",
             ExprKind::ReadBytes { .. } => "ReadBytes",
@@ -3257,6 +3280,21 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::IsSubclassOf {
+                    method_table_ptr: lhs_method_table_ptr,
+                    ty: lhs_ty,
+                } => match rhs_kind {
+                    ExprKind::IsSubclassOf {
+                        method_table_ptr: rhs_method_table_ptr,
+                        ty: rhs_ty,
+                    } => {
+                        equivalent_value!(
+                            lhs_method_table_ptr,
+                            rhs_method_table_ptr
+                        ) && lhs_ty == rhs_ty
+                    }
+                    _ => false,
+                },
                 ExprKind::ReadPrim {
                     ptr: lhs_ptr,
                     prim_type: lhs_prim_type,
@@ -3456,6 +3494,12 @@ impl Display for ExprKind {
             ExprKind::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
             ExprKind::Div { lhs, rhs } => write!(f, "{lhs}/{rhs}"),
             ExprKind::Mod { lhs, rhs } => write!(f, "{lhs}%{rhs}"),
+            ExprKind::IsSubclassOf {
+                method_table_ptr,
+                ty,
+            } => {
+                write!(f, "{method_table_ptr}.is_subclass_of({ty})")
+            }
             ExprKind::PhysicalDowncast { obj, ty } => {
                 write!(f, "{obj}.downcast({ty})")
             }

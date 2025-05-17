@@ -448,6 +448,7 @@ impl<'a> TypeInference<'a> {
                 }
 
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
+                ExprKind::IsSubclassOf { .. } => RuntimePrimType::Bool.into(),
                 ExprKind::PhysicalDowncast { obj, .. } => {
                     let obj_type = expect_cache(*obj, "obj to downcast");
                     match obj_type {

@@ -2,6 +2,7 @@ use dll_unpacker::RelativeVirtualAddress;
 use memory_reader::Pointer;
 
 use crate::{
+    env_var_flag,
     runtime_type::{DotNetType, RuntimePrimType},
     Error, RuntimeArray, RuntimeMultiDimArray, RuntimeType,
 };
@@ -10,6 +11,9 @@ use super::{
     graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
     SymbolicValue,
 };
+
+static USE_PHYSICAL_DOWNCAST: std::sync::LazyLock<bool> =
+    std::sync::LazyLock::new(|| env_var_flag("USE_PHYSICAL_DOWNCAST"));
 
 pub struct LowerSymbolicExpr<'a>(pub &'a Analysis<'a>);
 
@@ -320,7 +324,20 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 let target_method_table_ptr = ty.method_table(reader)?;
                 let ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
-                let ptr = graph.physical_downcast(ptr, target_method_table_ptr);
+
+                let ptr = if *USE_PHYSICAL_DOWNCAST {
+                    graph.physical_downcast(ptr, target_method_table_ptr)
+                } else {
+                    let method_table_ptr =
+                        graph.read_value(ptr, RuntimePrimType::Ptr);
+                    let is_target_type = graph.is_subclass_of(
+                        method_table_ptr,
+                        target_method_table_ptr,
+                    );
+                    let none = graph.none();
+                    graph.if_else(is_target_type, ptr, none)
+                };
+
                 let expr = graph.pointer_cast(
                     ptr,
                     DotNetType::Class {

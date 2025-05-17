@@ -1103,6 +1103,25 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
 
+                        ExprKind::IsSubclassOf {
+                            method_table_ptr,
+                            ty,
+                        } => {
+                            [
+                                PrintItem::Expr(
+                                    *method_table_ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("is_subclass_of::<"),
+                                PrintItem::MethodTablePointer(*ty),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
                         ExprKind::PhysicalDowncast { obj, ty } => {
                             [
                                 PrintItem::Expr(

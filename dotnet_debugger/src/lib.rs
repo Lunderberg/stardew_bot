@@ -3,6 +3,9 @@ pub use error::Error;
 
 pub(crate) mod macros;
 
+mod env_var_flags;
+pub(crate) use env_var_flags::*;
+
 pub use bytecode_proc_macros::*;
 
 mod typed_pointer;

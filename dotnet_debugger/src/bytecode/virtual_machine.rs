@@ -233,6 +233,14 @@ pub enum Instruction {
         output: StackIndex,
     },
 
+    /// Check if an object's method table indicates that it is an
+    /// instance of a given type, or a subclass of the given type.
+    IsSubclassOf {
+        method_table_ptr: VMArg,
+        base_type: TypedPointer<MethodTable>,
+        output: StackIndex,
+    },
+
     /// Downcast a type.  Assumes the register contains a pointer to an
     /// object.  If the object is of type `ty`, then the register is
     /// unchanged.  If the object is not of type `ty`, then the
@@ -311,6 +319,12 @@ pub enum VMExecutionError {
          but index instead contained {0}."
     )]
     DynamicOffsetNotConvertibleToIndex(RuntimePrimValue),
+
+    #[error(
+        "IsSubclassOf requires the argument to be a Pointer, \
+         but instead received {0}."
+    )]
+    InvalidArgumentForSubclassCheck(RuntimePrimValue),
 
     #[error(
         "Downcast requires the register to contain a pointer, \
@@ -1372,6 +1386,16 @@ impl<'a> VMEvaluator<'a> {
                     self.eval_ge(lhs, rhs, output)?
                 }
 
+                &Instruction::IsSubclassOf {
+                    method_table_ptr,
+                    base_type,
+                    output,
+                } => self.eval_is_subclass_of(
+                    method_table_ptr,
+                    base_type,
+                    output,
+                )?,
+
                 &Instruction::Downcast {
                     obj,
                     subtype,
@@ -1797,6 +1821,31 @@ impl<'a> VMEvaluator<'a> {
     define_comparison_op! {gt}
     define_comparison_op! {ge}
 
+    fn eval_is_subclass_of(
+        &mut self,
+        method_table_ptr: VMArg,
+        base_type: TypedPointer<MethodTable>,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let method_table_ptr = self.arg_to_prim(method_table_ptr)?;
+
+        self.values[output] = match method_table_ptr {
+            None => Ok(None),
+            Some(RuntimePrimValue::Ptr(ptr)) => {
+                let is_subclass = self
+                    .reader
+                    .is_dotnet_base_class_of(base_type, ptr.into())?;
+
+                Ok(Some(RuntimePrimValue::Bool(is_subclass).into()))
+            }
+            Some(other) => {
+                Err(VMExecutionError::InvalidArgumentForSubclassCheck(other))
+            }
+        }?;
+
+        Ok(())
+    }
+
     fn eval_downcast(
         &mut self,
         obj: VMArg,
@@ -1965,6 +2014,10 @@ impl Instruction {
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::Downcast { obj: arg, .. }
+            | Instruction::IsSubclassOf {
+                method_table_ptr: arg,
+                ..
+            }
             | Instruction::ReadString { ptr: arg, .. }
             | Instruction::IsSome { value: arg, .. }
             | Instruction::Not { arg, .. } => (Some(*arg), None, None),
@@ -2050,6 +2103,7 @@ impl Instruction {
             | Instruction::Mul { output, .. }
             | Instruction::Div { output, .. }
             | Instruction::Mod { output, .. }
+            | Instruction::IsSubclassOf { output, .. }
             | Instruction::Downcast { output, .. }
             | Instruction::ReadBytes { output, .. }
             | Instruction::CastBytes { output, .. }
@@ -2088,6 +2142,7 @@ impl Instruction {
             Instruction::Mul { .. } => "Mul",
             Instruction::Div { .. } => "Div",
             Instruction::Mod { .. } => "Mod",
+            Instruction::IsSubclassOf { .. } => "IsSubclassOf",
             Instruction::Downcast { .. } => "Downcast",
             Instruction::ReadBytes { .. } => "ReadBytes",
             Instruction::CastBytes { .. } => "CastBytes",
@@ -2286,6 +2341,15 @@ impl Display for Instruction {
             Instruction::Mod { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs} % {rhs}")
             }
+
+            Instruction::IsSubclassOf {
+                method_table_ptr,
+                base_type,
+                output,
+            } => write!(
+                f,
+                "{output} = {method_table_ptr}.is_subclass_of::<{base_type}>()"
+            ),
 
             Instruction::Downcast {
                 obj,
