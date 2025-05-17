@@ -142,6 +142,58 @@ impl MemoryReader {
         Ok(())
     }
 
+    pub fn read_regions(
+        &self,
+        regions: &mut [(Pointer, &mut [u8])],
+    ) -> Result<()> {
+        let remotes: Vec<RemoteIoVec> = regions
+            .iter()
+            .map(|(ptr, output)| RemoteIoVec {
+                base: ptr.address,
+                len: output.len(),
+            })
+            .flat_map(|remote_io_vec| {
+                self.split_on_page_boundaries(remote_io_vec)
+            })
+            .collect();
+
+        assert!(
+            remotes.len() <= self.max_num_iovec,
+            "Read of {} bytes from {} regions \
+             would use {} RemoteIoVec instances, \
+             but the system can only use {} instances.",
+            regions
+                .iter()
+                .map(|(_, output)| output.len())
+                .sum::<usize>(),
+            regions.len(),
+            remotes.len(),
+            self.max_num_iovec,
+        );
+
+        let mut locals = Vec::<IoSliceMut>::new();
+        {
+            let mut remaining = &mut regions[..];
+            while !remaining.is_empty() {
+                let (left, right) = remaining.split_at_mut(1);
+                locals.push(IoSliceMut::new(left[0].1));
+                remaining = right;
+            }
+        }
+
+        process_vm_readv(
+            nix::unistd::Pid::from_raw(self.pid as i32),
+            &mut locals,
+            &remotes,
+        )
+        .map_err(|err| match err {
+            nix::errno::Errno::EPERM => Error::MemoryReadInsufficientPermission,
+            _ => err.into(),
+        })?;
+
+        Ok(())
+    }
+
     fn split_on_page_boundaries(
         &self,
         remote: RemoteIoVec,

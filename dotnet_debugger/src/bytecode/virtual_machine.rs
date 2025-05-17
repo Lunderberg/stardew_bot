@@ -2,12 +2,11 @@ use std::{
     any::Any,
     collections::{BTreeMap, HashMap},
     fmt::Display,
-    num::NonZeroUsize,
     ops::{Range, RangeFrom},
 };
 
 use derive_more::derive::From;
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
 use paste::paste;
@@ -840,6 +839,16 @@ pub trait VMReader {
         output: &mut [u8],
     ) -> Result<(), Error>;
 
+    fn read_byte_regions(
+        &mut self,
+        regions: &mut [(Pointer, &mut [u8])],
+    ) -> Result<(), Error> {
+        for (ptr, buf) in regions.into_iter() {
+            self.read_bytes(*ptr, *buf)?;
+        }
+        Ok(())
+    }
+
     /// From the specified location, how many bytes are safe to read?
     /// Used for caching, when reading more bytes than requested may
     /// be beneficial, in case they can be returned for future
@@ -866,6 +875,14 @@ impl VMReader for CachedReader<'_> {
     ) -> Result<(), Error> {
         let reader: &memory_reader::MemoryReader = self.as_ref();
         Ok(reader.read_exact(loc, output)?)
+    }
+
+    fn read_byte_regions(
+        &mut self,
+        regions: &mut [(Pointer, &mut [u8])],
+    ) -> Result<(), Error> {
+        let reader: &memory_reader::MemoryReader = self.as_ref();
+        Ok(reader.read_regions(regions)?)
     }
 
     fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
@@ -911,6 +928,7 @@ struct CachedVMReader<Inner> {
     max_read_behind: usize,
     cache: BTreeMap<Pointer, Vec<u8>>,
     lru_tracking: LruCache<Pointer, ()>,
+    lru_capacity: usize,
 }
 
 impl<Inner> CachedVMReader<Inner> {
@@ -918,9 +936,134 @@ impl<Inner> CachedVMReader<Inner> {
         Self {
             inner,
             cache: BTreeMap::new(),
-            lru_tracking: LruCache::new(NonZeroUsize::new(100).unwrap()),
+            lru_tracking: LruCache::unbounded(),
+            lru_capacity: 100,
             max_read_ahead: 2048 - 128,
             max_read_behind: 128,
+        }
+    }
+
+    fn from_cache(&mut self, range: Range<Pointer>) -> Option<&[u8]> {
+        let start = range.start;
+        let end = range.end;
+        let num_bytes = end - start;
+
+        self.cache
+            .range(..end)
+            .rev()
+            // In the majority of cases, we only need to check the
+            // first cache entry where (cache.start <= region.end).
+            // However, if the cache contains two nearby reads, such
+            // that the a cache entry starts partway through the
+            // requested remote region, then preceding cache entry may
+            // also be the correct one for the region.
+            .take(2)
+            .find(|(cache_loc, cache_data)| {
+                let cache_start = **cache_loc;
+                let cache_end = cache_start + cache_data.len();
+                cache_start <= start && end <= cache_end
+            })
+            .map(|(cache_loc, cache_data)| {
+                self.lru_tracking.promote(cache_loc);
+                let index_start = start - *cache_loc;
+                let index_end = index_start + num_bytes;
+                &cache_data[index_start..index_end]
+            })
+    }
+
+    fn choose_cache_range(
+        &self,
+        requested_range: Range<Pointer>,
+    ) -> Range<Pointer>
+    where
+        Inner: VMReader,
+    {
+        // Ideally, we're going to expand the read-region by the
+        // number of bytes configured for the cache.
+        let desired_range = requested_range.start - self.max_read_behind
+            ..requested_range.end + self.max_read_ahead;
+
+        // However, it may not be safe to do so in all cases.  If the
+        // requested range is close to the beginning or end of a
+        // memmap region, then the expanded size of the read may be
+        // unsafe, even if a read of the requested region would have
+        // succeeded.
+        let safe_range = self.inner.safe_read_extent(requested_range.start);
+
+        // Since the `safe_read_extent` function may not identify a
+        // safe extent, we can still assume that the requested range
+        // is safe to read.  This ensures that a read always populates
+        // the cache for the requested byte range, even if it can't
+        // read anything more.
+        let safe_range = safe_range.start.min(requested_range.start)
+            ..safe_range.end.max(requested_range.end);
+
+        // The actual region to be read out will be the intersection
+        // of the region that we'd like to read, with the region that
+        // is safe to read.
+        let cache_range = desired_range.start.max(safe_range.start)
+            ..desired_range.end.min(safe_range.end);
+
+        cache_range
+    }
+
+    fn add_to_cache(&mut self, cached_entries: Vec<(Pointer, Vec<u8>)>) {
+        for (ptr, new_cache) in &cached_entries {
+            if let Some(cached) = self.cache.get(ptr) {
+                panic!(
+                    "Ptr at {ptr} is already cached.  \
+                     Previously, cached with {} bytes, \
+                     now cached with {} bytes",
+                    cached.len(),
+                    new_cache.len(),
+                );
+            }
+        }
+        cached_entries
+            .iter()
+            .map(|(ptr, _)| *ptr)
+            .counts()
+            .into_iter()
+            .for_each(|(ptr, counts)| {
+                assert_eq!(
+                    counts, 1,
+                    "Cache update had {counts} entries for {ptr}"
+                );
+            });
+
+        // Normally, the eviction would be automatically handled by
+        // `self.lru_tracking.push`.  However, if a batched read
+        // produces more cache entries than are configured to be in
+        // the cache, the cache size should temporarily increase to
+        // contain the cached entries.
+        //
+        // That is, after calling `add_to_cache`, all entries provided
+        // must be in the cache.
+        let size_with_new_entries =
+            self.lru_tracking.len() + cached_entries.len();
+        let cache_entries_to_pop = size_with_new_entries
+            .saturating_sub(self.lru_capacity)
+            .clamp(0, self.lru_tracking.len());
+        for _ in 0..cache_entries_to_pop {
+            let evicted = self
+                .lru_tracking
+                .pop_lru()
+                .expect("Protected by earlier length check")
+                .0;
+            self.cache.remove(&evicted);
+        }
+
+        for (ptr, bytes) in cached_entries {
+            if let Some((evicted, _)) = self.lru_tracking.push(ptr, ()) {
+                assert!(self.cache.contains_key(&evicted));
+                unreachable!(
+                    "Automatic LRU evictions are disabled, \
+                     to allow a batch of cache entries \
+                     to temporarily exceed the specified LRU capacity.  \
+                     However, found eviction of pointer {evicted}"
+                );
+            }
+            self.cache.insert(ptr, bytes);
         }
     }
 }
@@ -929,54 +1072,99 @@ impl<Inner> VMReader for CachedVMReader<Inner>
 where
     Inner: VMReader,
 {
+    fn read_byte_regions(
+        &mut self,
+        regions: &mut [(Pointer, &mut [u8])],
+    ) -> Result<(), Error> {
+        let mut to_read = Vec::<(Pointer, Vec<u8>)>::new();
+        let mut update_after_read = Vec::<usize>::new();
+
+        regions
+            .iter_mut()
+            .enumerate()
+            .for_each(|(i, (loc, output))| {
+                let loc = *loc;
+                let remote_range = loc..loc + output.len();
+                if let Some(cached) = self.from_cache(remote_range.clone()) {
+                    output.copy_from_slice(cached);
+                } else {
+                    // A single batch of reads will usually be avoided
+                    // by CSE at the IR level.  However, it's also
+                    // possible that two distinct expressions will
+                    // evaluate to the same pointer, resulting in two
+                    // reads being issued to the same location.
+                    let is_new_read = to_read.iter().all(|queued_read| {
+                        let queued_range =
+                            queued_read.0..queued_read.0 + queued_read.1.len();
+                        queued_range.end < remote_range.start
+                            || remote_range.end < queued_range.start
+                    });
+                    if is_new_read {
+                        let cache_range =
+                            self.choose_cache_range(remote_range.clone());
+                        to_read.push((
+                            cache_range.start,
+                            vec![0u8; cache_range.end - cache_range.start],
+                        ));
+                    }
+                    update_after_read.push(i);
+                }
+            });
+
+        if to_read.is_empty() {
+            // Early bail-out for the case where all reads were
+            // present in the cache.
+            return Ok(());
+        }
+
+        {
+            let mut regions = Vec::<(Pointer, &mut [u8])>::new();
+            let mut remaining = &mut to_read[..];
+            while !remaining.is_empty() {
+                let (left, right) = remaining.split_at_mut(1);
+                let (start, slice) = &mut left[0];
+                regions.push((*start, slice));
+                remaining = right;
+            }
+            self.inner.read_byte_regions(&mut regions)?;
+        }
+        self.add_to_cache(to_read);
+
+        update_after_read.into_iter().for_each(|i| {
+            let (loc, output) = &mut regions[i];
+            let loc = *loc;
+            let remote_range = loc..loc + output.len();
+            if let Some(cached) = self.from_cache(remote_range.clone()) {
+                output.copy_from_slice(cached);
+            } else {
+                unreachable!("Cache should be populated by add_to_cache()");
+            }
+        });
+
+        Ok(())
+    }
+
     fn read_bytes(
         &mut self,
         loc: Pointer,
         output: &mut [u8],
     ) -> Result<(), Error> {
-        let start = loc;
-        let end = loc + output.len();
-        if let Some((cache_loc, cache_data)) = self
-            .cache
-            .range(..end)
-            .last()
-            .filter(|(cache_loc, cache_data)| {
-                let cache_start = **cache_loc;
-                let cache_end = cache_start + cache_data.len();
-                cache_start <= start && end <= cache_end
-            })
-        {
-            self.lru_tracking.promote(cache_loc);
-            let index_start = loc - *cache_loc;
-            let index_end = index_start + output.len();
-            output.copy_from_slice(&cache_data[index_start..index_end]);
+        let remote_range = loc..loc + output.len();
+        if let Some(cached) = self.from_cache(remote_range.clone()) {
+            output.copy_from_slice(cached);
             return Ok(());
         }
 
-        let to_read = {
-            let requested_range = loc..loc + output.len();
-            let desired_range = requested_range.start - self.max_read_behind
-                ..requested_range.end + self.max_read_ahead;
-            let safe_range = self.inner.safe_read_extent(loc);
-            // Assume that the requested range is safe to read.
-            let safe_range = safe_range.start.min(requested_range.start)
-                ..safe_range.end.max(requested_range.end);
+        let cache_range = self.choose_cache_range(remote_range.clone());
 
-            desired_range.start.max(safe_range.start)
-                ..desired_range.end.min(safe_range.end)
-        };
+        let mut cache_bytes = vec![0u8; cache_range.end - cache_range.start];
+        self.inner.read_bytes(cache_range.start, &mut cache_bytes)?;
 
-        let mut cache_bytes = vec![0u8; to_read.end - to_read.start];
-        self.inner.read_bytes(to_read.start, &mut cache_bytes)?;
-
-        let index_start = loc - to_read.start;
-        let index_end = index_start + output.len();
-        output.copy_from_slice(&cache_bytes[index_start..index_end]);
-
-        self.cache.insert(to_read.start, cache_bytes);
-
-        if let Some((evicted, _)) = self.lru_tracking.push(to_read.start, ()) {
-            self.cache.remove(&evicted);
+        self.add_to_cache(vec![(cache_range.start, cache_bytes)]);
+        if let Some(cached) = self.from_cache(remote_range.clone()) {
+            output.copy_from_slice(cached);
+        } else {
+            unreachable!("Cache should be populated after add_to_cache().");
         }
 
         Ok(())
@@ -1681,12 +1869,15 @@ impl<'a> VMEvaluator<'a> {
             let opt_ptr = self.arg_to_prim(region.ptr)?;
             let opt_num_bytes = self.arg_to_prim(region.num_bytes)?;
 
-            if opt_ptr.is_none() || opt_num_bytes.is_none() {
+            if opt_num_bytes.is_none() {
                 self.values[output] = None;
                 return Ok(());
             }
 
-            let ptr: Pointer = opt_ptr.unwrap().try_into()?;
+            let ptr: Pointer = opt_ptr
+                .map(TryInto::try_into)
+                .transpose()?
+                .unwrap_or_else(Pointer::null);
             let num_bytes: RuntimePrimValue = opt_num_bytes.unwrap();
             let num_bytes: usize = num_bytes.try_into().map_err(|_| {
                 VMExecutionError::ByteCountNotConvertibleToInt {
@@ -1699,10 +1890,26 @@ impl<'a> VMEvaluator<'a> {
             remote_ranges.push(ptr..ptr + num_bytes);
         }
 
-        assert_eq!(remote_ranges.len(), 1, "TODO: Implement multi-range reads");
-        let mut bytes =
-            vec![0u8; remote_ranges[0].end - remote_ranges[0].start];
-        self.reader.read_bytes(remote_ranges[0].start, &mut bytes)?;
+        let num_bytes = remote_ranges
+            .iter()
+            .map(|range| range.end - range.start)
+            .sum::<usize>();
+        let mut bytes = vec![0u8; num_bytes];
+
+        let mut regions: Vec<(Pointer, &mut [u8])> = Vec::new();
+        {
+            let mut remaining = &mut bytes[..];
+            for range in remote_ranges {
+                let num_bytes = range.end - range.start;
+                let (left, right) = remaining.split_at_mut(num_bytes);
+                if !range.start.is_null() {
+                    regions.push((range.start, left));
+                }
+                remaining = right;
+            }
+        }
+        self.reader.read_byte_regions(&mut regions)?;
+
         self.values[output] = Some(StackValue::ByteArray(bytes));
 
         Ok(())
