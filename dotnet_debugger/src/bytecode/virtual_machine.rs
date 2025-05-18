@@ -1,12 +1,14 @@
 use std::{
     any::Any,
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     fmt::Display,
+    num::NonZeroUsize,
     ops::{Range, RangeFrom},
 };
 
+use arrayvec::ArrayVec;
 use derive_more::derive::From;
-use itertools::Either;
+use itertools::{Either, Itertools};
 use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
 use paste::paste;
@@ -936,116 +938,95 @@ impl VMReader for DummyReader {
     }
 }
 
+const PAGE_SIZE: usize = 4096;
+const NUM_CACHE_PAGES: usize = 100;
+
 struct CachedVMReader<Inner> {
     inner: Inner,
-    cache: BTreeMap<Pointer, Vec<u8>>,
-    lru_tracking: LruCache<Pointer, ()>,
-    lru_capacity: usize,
+
+    /// The cached data
+    cache: Vec<u8>,
+
+    /// Lookup from remote address to index within the cache
+    lru_cache: LruCache<Pointer, usize>,
 }
 
 impl<Inner> CachedVMReader<Inner> {
     fn new(inner: Inner) -> Self {
+        let cache = vec![0; NUM_CACHE_PAGES * PAGE_SIZE];
+
+        // Initialize the cache with dummy pointers, and valid indices.
+        let mut lru_cache =
+            LruCache::new(NonZeroUsize::new(NUM_CACHE_PAGES).unwrap());
+        for i in 0..NUM_CACHE_PAGES {
+            lru_cache.push(Pointer::null() + 1 + i, i * PAGE_SIZE);
+        }
+
         Self {
             inner,
-            cache: BTreeMap::new(),
-            lru_tracking: LruCache::unbounded(),
-            lru_capacity: 100,
+            cache,
+            lru_cache,
         }
     }
 
-    fn from_cache(&mut self, range: Range<Pointer>) -> Option<&[u8]> {
-        let start = range.start;
-        let end = range.end;
-        let num_bytes = end - start;
+    fn from_cache<'a>(
+        lru_cache: &mut LruCache<Pointer, usize>,
+        cache: &'a [u8],
+        range: Range<Pointer>,
+    ) -> Option<(&'a [u8], &'a [u8])> {
+        let page_start = range.start.prev_multiple_of(PAGE_SIZE);
+        let page_end = range.end.next_multiple_of(PAGE_SIZE);
 
-        self.cache
-            .range(..end)
-            .rev()
-            // In the majority of cases, we only need to check the
-            // first cache entry where (cache.start <= region.end).
-            // However, if the cache contains two nearby reads, such
-            // that the a cache entry starts partway through the
-            // requested remote region, then preceding cache entry may
-            // also be the correct one for the region.
-            .take(2)
-            .find(|(cache_loc, cache_data)| {
-                let cache_start = **cache_loc;
-                let cache_end = cache_start + cache_data.len();
-                cache_start <= start && end <= cache_end
-            })
-            .map(|(cache_loc, cache_data)| {
-                self.lru_tracking.promote(cache_loc);
-                let index_start = start - *cache_loc;
-                let index_end = index_start + num_bytes;
-                &cache_data[index_start..index_end]
-            })
+        let num_pages = (page_end - page_start) / PAGE_SIZE;
+
+        let empty_slice = &[0u8; 0];
+
+        match num_pages {
+            0 => Some((empty_slice, empty_slice)),
+            1 => {
+                let page_index = lru_cache.get(&page_start)?;
+                let cache_index = page_index + (range.start - page_start);
+                let num_bytes = range.end - range.start;
+                let from_cache = &cache[cache_index..cache_index + num_bytes];
+                Some((from_cache, empty_slice))
+            }
+            2 => {
+                let page_boundary = page_start + PAGE_SIZE;
+                let num_bytes_page_0 = page_boundary - range.start;
+                let num_bytes_page_1 = range.end - page_boundary;
+
+                let page_0_start_index = *lru_cache.get(&page_start)?;
+                let page_0_end_index = page_0_start_index + PAGE_SIZE;
+                let cache_range_0 =
+                    page_0_end_index - num_bytes_page_0..page_0_end_index;
+
+                let page_1_start_index = *lru_cache.get(&page_boundary)?;
+                let cache_range_1 =
+                    page_1_start_index..page_1_start_index + num_bytes_page_1;
+
+                let slice_0 = &cache[cache_range_0];
+                let slice_1 = &cache[cache_range_1];
+
+                Some((slice_0, slice_1))
+            }
+            _ => panic!(
+                "Region in cached read may cross at most one page boundary"
+            ),
+        }
     }
 
-    fn choose_cache_range(
-        &self,
-        requested_range: Range<Pointer>,
-    ) -> Range<Pointer>
-    where
-        Inner: VMReader,
-    {
-        // Ideally, we're going to read whichever pages contain the
-        // pointer-range that we're reading out.
-        const PAGE_SIZE: usize = 4096;
+    fn choose_cache_range(requested_range: Range<Pointer>) -> Range<Pointer> {
         let page_start = requested_range.start.prev_multiple_of(PAGE_SIZE);
         let page_end = requested_range.end.next_multiple_of(PAGE_SIZE);
-        let desired_range = page_start..page_end;
-
-        // However, it may not be safe to do so in all cases.  If the
-        // requested range is close to the beginning or end of a
-        // memmap region, then the expanded size of the read may be
-        // unsafe, even if a read of the requested region would have
-        // succeeded.
-        let safe_range = self.inner.safe_read_extent(requested_range.start);
-
-        // Since the `safe_read_extent` function may not identify a
-        // safe extent, we can still assume that the requested range
-        // is safe to read.  This ensures that a read always populates
-        // the cache for the requested byte range, even if it can't
-        // read anything more.
-        let safe_range = safe_range.start.min(requested_range.start)
-            ..safe_range.end.max(requested_range.end);
-
-        // The actual region to be read out will be the intersection
-        // of the region that we'd like to read, with the region that
-        // is safe to read.
-        let cache_range = desired_range.start.max(safe_range.start)
-            ..desired_range.end.min(safe_range.end);
-
-        cache_range
+        page_start..page_end
     }
 
-    fn add_to_cache(&mut self, cached_entries: Vec<(Pointer, Vec<u8>)>) {
-        // Normally, the eviction would be automatically handled by
-        // `self.lru_tracking.push`.  However, if a batched read
-        // produces more cache entries than are configured to be in
-        // the cache, the cache size should temporarily increase to
-        // contain the cached entries.
-        //
-        // That is, after calling `add_to_cache`, all entries provided
-        // must be in the cache.
-        let size_with_new_entries =
-            self.lru_tracking.len() + cached_entries.len();
-        let cache_entries_to_pop = size_with_new_entries
-            .saturating_sub(self.lru_capacity)
-            .clamp(0, self.lru_tracking.len());
-        for _ in 0..cache_entries_to_pop {
-            let evicted = self
-                .lru_tracking
-                .pop_lru()
-                .expect("Protected by earlier length check")
-                .0;
-            self.cache.remove(&evicted);
-        }
-
-        for (ptr, bytes) in cached_entries {
-            self.lru_tracking.push(ptr, ());
-            self.cache.insert(ptr, bytes);
-        }
+    fn iter_pages(region: Range<Pointer>) -> impl Iterator<Item = Pointer> {
+        let start = region.start.prev_multiple_of(PAGE_SIZE);
+        let end = region.end;
+        (0..)
+            .map(move |i| start + i * PAGE_SIZE)
+            .take_while(move |ptr| *ptr < end)
     }
 }
 
@@ -1057,71 +1038,137 @@ where
         &mut self,
         regions: &mut [(Pointer, &mut [u8])],
     ) -> Result<(), Error> {
-        let mut to_read = Vec::<(Pointer, Vec<u8>)>::new();
-        let mut update_after_read = Vec::<usize>::new();
+        assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
 
-        regions
-            .iter_mut()
-            .enumerate()
-            .for_each(|(i, (loc, output))| {
-                let loc = *loc;
-                let remote_range = loc..loc + output.len();
-                if let Some(cached) = self.from_cache(remote_range.clone()) {
-                    output.copy_from_slice(cached);
-                } else {
-                    let cache_range =
-                        self.choose_cache_range(remote_range.clone());
+        const MAX_PAGES_PER_READ: usize = 16;
+        let mut to_read =
+            ArrayVec::<(Pointer, usize), MAX_PAGES_PER_READ>::new();
+        const MAX_DELAYED_UPDATES: usize = 64;
+        let mut update_after_read =
+            ArrayVec::<usize, MAX_DELAYED_UPDATES>::new();
 
-                    // De-duplicate reads based on the page that will
-                    // be read out.
-                    let queued_read = to_read
-                        .iter_mut()
-                        .find(|(loc, _)| *loc == cache_range.start);
-                    if let Some((_, bytes)) = queued_read {
-                        let new_size = bytes
-                            .len()
-                            .max(cache_range.end - cache_range.start);
-                        bytes.resize(new_size, 0u8);
-                    } else {
-                        to_read.push((
-                            cache_range.start,
-                            vec![0u8; cache_range.end - cache_range.start],
-                        ));
+        const _: () = assert!(
+            MAX_PAGES_PER_READ < NUM_CACHE_PAGES,
+            "Cannot read more pages in a batched read \
+             than are contained in the cache.."
+        );
+
+        macro_rules! flush {
+            () => {{
+                to_read.sort_by_key(|(_, index)| *index);
+
+                {
+                    let mut subregions = ArrayVec::<
+                        (Pointer, &mut [u8]),
+                        MAX_PAGES_PER_READ,
+                    >::new();
+
+                    let mut prev_index = None;
+                    let mut remaining_slice = &mut self.cache[..];
+                    for (page, index) in to_read.iter().cloned() {
+                        let split = match prev_index {
+                            Some(prev_index) => index - prev_index,
+                            None => index + PAGE_SIZE,
+                        };
+                        assert!(split >= PAGE_SIZE);
+                        assert!(
+                            split <= remaining_slice.len(),
+                            "Split location {split}, \
+                             derived from index={index} and prev_index={prev_index:?}, \
+                             exceeds remaining length {}.  \
+                             Initial length {} has been consumed at indices [{}].",
+                            remaining_slice.len(),
+                            100usize*PAGE_SIZE,
+                            to_read.iter().map(|(_,index)| *index).format(", "),
+                        );
+                        let (left, right) = remaining_slice.split_at_mut(split);
+                        let page_slice = &mut left[split-PAGE_SIZE..];
+                        subregions.push((page, page_slice));
+                        remaining_slice = right;
+                        prev_index = Some(index);
                     }
 
-                    update_after_read.push(i);
+                    self.inner.read_byte_regions(&mut subregions)?;
                 }
-            });
 
-        if to_read.is_empty() {
-            // Early bail-out for the case where all reads were
-            // present in the cache.
-            return Ok(());
+                for (page, index) in to_read.iter().cloned() {
+                    let evicted = self.lru_cache.push(page, index);
+                    assert!(
+                        evicted.is_none(),
+                        "No evictions should be required, \
+                         since this only contains pages not in cache, \
+                         and LRU was already popped to decide the index.  \
+                         Pages in current batch = [{}].",
+                        to_read.iter().map(|(page,_)| *page)
+                            .counts()
+                            .into_iter()
+                            .sorted_by_key(|(page,counts)| (std::cmp::Reverse(*counts),*page))
+                            .map(|(page,counts)| format!("{page}: {counts}"))
+                            .format(", ")
+                    );
+                }
+
+                for i in update_after_read.iter().cloned() {
+                    let loc = regions[i].0;
+                    let output = &mut regions[i].1;
+                    let remote_range = loc..loc + output.len();
+                    let (cache_a, cache_b) = Self::from_cache(
+                        &mut self.lru_cache,
+                        &self.cache,
+                        remote_range.clone(),
+                    )
+                    .expect("Cache entry should be populated");
+                    output[..cache_a.len()].copy_from_slice(cache_a);
+                    output[cache_a.len()..].copy_from_slice(cache_b);
+                }
+
+                to_read.clear();
+                update_after_read.clear();
+            }};
         }
 
-        {
-            let mut regions = Vec::<(Pointer, &mut [u8])>::new();
-            let mut remaining = &mut to_read[..];
-            while !remaining.is_empty() {
-                let (left, right) = remaining.split_at_mut(1);
-                let (start, slice) = &mut left[0];
-                regions.push((*start, slice));
-                remaining = right;
-            }
-            self.inner.read_byte_regions(&mut regions)?;
-        }
-        self.add_to_cache(to_read);
-
-        update_after_read.into_iter().for_each(|i| {
-            let (loc, output) = &mut regions[i];
-            let loc = *loc;
+        for i in 0..regions.len() {
+            // Looping over indices rather than `regions.iter_mut()`,
+            // because ownership of `regions` needs to be dropped
+            // whenever flushing out the collected
+            // `update_after_read`.
+            let loc = regions[i].0;
+            let output = &mut regions[i].1;
             let remote_range = loc..loc + output.len();
-            if let Some(cached) = self.from_cache(remote_range.clone()) {
-                output.copy_from_slice(cached);
-            } else {
-                unreachable!("Cache should be populated by add_to_cache()");
+            if let Some((cache_a, cache_b)) = Self::from_cache(
+                &mut self.lru_cache,
+                &self.cache,
+                remote_range.clone(),
+            ) {
+                output[..cache_a.len()].copy_from_slice(cache_a);
+                output[cache_a.len()..].copy_from_slice(cache_b);
+                continue;
             }
-        });
+
+            for page in Self::iter_pages(remote_range.clone()) {
+                let already_in_next_batch =
+                    to_read.iter().any(|(queued_page, _)| *queued_page == page);
+                if !already_in_next_batch {
+                    let index = self
+                        .lru_cache
+                        .pop_lru()
+                        .map(|(_, index)| index)
+                        .expect("Cache should never be empty");
+                    to_read.push((page, index));
+                }
+            }
+            update_after_read.push(i);
+
+            if to_read.len() + 1 >= to_read.capacity()
+                || update_after_read.len() == update_after_read.capacity()
+            {
+                flush!();
+                assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
+            }
+        }
+
+        flush!();
+        assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
 
         Ok(())
     }
@@ -1132,23 +1179,60 @@ where
         output: &mut [u8],
     ) -> Result<(), Error> {
         let remote_range = loc..loc + output.len();
-        if let Some(cached) = self.from_cache(remote_range.clone()) {
-            output.copy_from_slice(cached);
-            return Ok(());
+        let cache_range = Self::choose_cache_range(remote_range.clone());
+        let num_pages = (cache_range.end - cache_range.start) / PAGE_SIZE;
+
+        for page in Self::iter_pages(remote_range.clone()) {
+            self.lru_cache.promote(&page);
+        }
+        assert!(
+            num_pages <= self.lru_cache.len(),
+            "Read of {} bytes would use {num_pages} pages, \
+             more than are the {} pages in the cache.",
+            output.len(),
+            self.lru_cache.len(),
+        );
+
+        for page in Self::iter_pages(remote_range.clone()) {
+            if self.lru_cache.contains(&page) {
+                continue;
+            }
+
+            let index = self
+                .lru_cache
+                .pop_lru()
+                .map(|(_, index)| index)
+                .expect("Cache should never be empty");
+
+            let res = self
+                .inner
+                .read_bytes(page, &mut self.cache[index..index + PAGE_SIZE]);
+
+            if res.is_ok() {
+                self.lru_cache.push(page, index);
+            } else {
+                self.lru_cache.push(page + 1, index);
+                self.lru_cache.demote(&(page + 1));
+            }
+
+            res?;
         }
 
-        let cache_range = self.choose_cache_range(remote_range.clone());
+        let (cache_a, cache_b) = Self::from_cache(
+            &mut self.lru_cache,
+            &self.cache,
+            remote_range.clone(),
+        )
+        .unwrap_or_else(|| {
+            panic!(
+                "Cache should be populated at this point, \
+                     but doesn't contain {}-{}.",
+                remote_range.start, remote_range.end,
+            )
+        });
 
-        let mut cache_bytes = vec![0u8; cache_range.end - cache_range.start];
-        self.inner.read_bytes(cache_range.start, &mut cache_bytes)?;
-
-        self.add_to_cache(vec![(cache_range.start, cache_bytes)]);
-        if let Some(cached) = self.from_cache(remote_range.clone()) {
-            output.copy_from_slice(cached);
-        } else {
-            unreachable!("Cache should be populated after add_to_cache().");
-        }
-
+        output[..cache_a.len()].copy_from_slice(cache_a);
+        output[cache_a.len()..].copy_from_slice(cache_b);
         Ok(())
     }
 
