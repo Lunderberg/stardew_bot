@@ -2,6 +2,7 @@ use std::{
     any::Any,
     collections::HashMap,
     fmt::Display,
+    mem::MaybeUninit,
     num::NonZeroUsize,
     ops::{Range, RangeFrom},
 };
@@ -556,105 +557,81 @@ impl VMResults {
         Ok(opt_obj)
     }
 
+    fn collect_native_function_args_impl<'a, 'b>(
+        &'a mut self,
+        vm_args: &[VMArg],
+        inline_consts: &'a mut [Option<StackValue>],
+        collected_args: &'b mut [MaybeUninit<&'a mut Option<StackValue>>],
+    ) {
+        assert_eq!(vm_args.len(), inline_consts.len());
+        assert_eq!(vm_args.len(), collected_args.len());
+
+        vm_args
+            .iter()
+            .zip(inline_consts.iter_mut())
+            .filter_map(|(vm_arg, scratch)| match vm_arg {
+                VMArg::Const(prim) => Some((*prim, scratch)),
+                _ => None,
+            })
+            .for_each(|(prim, inline_const)| {
+                *inline_const = Some(StackValue::Prim(prim));
+            });
+
+        inline_consts
+            .iter_mut()
+            .zip(collected_args.iter_mut())
+            .for_each(|(opt_const, collected_arg)| {
+                if opt_const.is_some() {
+                    *collected_arg = MaybeUninit::new(opt_const);
+                }
+            });
+
+        const MAX_STACK_ARGS: usize = 32;
+        struct ArgInfo {
+            arg_index: usize,
+            stack_index: usize,
+        }
+        let mut arg_info_array = ArrayVec::<ArgInfo, MAX_STACK_ARGS>::new();
+        vm_args.iter().enumerate().for_each(|(i, vm_arg)| {
+            if let VMArg::SavedValue(stack_index) = vm_arg {
+                arg_info_array.push(ArgInfo {
+                    arg_index: i,
+                    stack_index: stack_index.0,
+                });
+            }
+        });
+        arg_info_array.sort_by_key(|info| info.stack_index);
+
+        let mut prev_stack_index = None;
+        let mut remaining_values = &mut self.values[..];
+        for info in arg_info_array {
+            let split_index = match prev_stack_index {
+                Some(prev) => info.stack_index - prev,
+                None => info.stack_index + 1,
+            };
+            let (left, right) = remaining_values.split_at_mut(split_index);
+            collected_args[info.arg_index] =
+                MaybeUninit::new(left.last_mut().unwrap());
+            remaining_values = right;
+            prev_stack_index = Some(info.stack_index);
+        }
+    }
+
     fn collect_native_function_args<'a>(
         &'a mut self,
         args: &[VMArg],
-        scratch: &'a mut Vec<Option<StackValue>>,
+        inline_consts: &'a mut [Option<StackValue>],
     ) -> Vec<&'a mut Option<StackValue>> {
-        let mut opt_references: Vec<_> =
-            (0..args.len()).map(|_| None).collect();
-
-        struct ArgInfo {
-            arg_index: usize,
-            stack_index: StackIndex,
-        }
-
-        let mut indices: Vec<ArgInfo> = Vec::new();
-
-        let initial_scratch_size = scratch.len();
-
-        args.iter().cloned().enumerate().for_each(
-            |(arg_index, arg)| match arg {
-                VMArg::Const(prim) => {
-                    scratch.push(Some(StackValue::Prim(prim)));
-                }
-                VMArg::SavedValue(stack_index) => {
-                    indices.push(ArgInfo {
-                        arg_index,
-                        stack_index,
-                    });
-                }
-            },
+        let mut references: Vec<&mut Option<StackValue>> =
+            Vec::with_capacity(args.len());
+        self.collect_native_function_args_impl(
+            args,
+            inline_consts,
+            references.spare_capacity_mut(),
         );
-
-        {
-            // The scratch space now contains a copy of each constant.
-            // The list of references may now be populated with
-            // references to those constants.  After this point, no
-            // further elements may be pushed onto the scratch vector.
-            let mut remaining_scratch = &mut scratch[initial_scratch_size..];
-            for (i, arg) in args.iter().enumerate() {
-                if matches!(arg, VMArg::Const(_)) {
-                    let (scratch_arg, rest) = remaining_scratch
-                        .split_first_mut()
-                        .expect("Each VMArg::Const exists in the scratch Vec");
-                    opt_references[i] = Some(scratch_arg);
-                    remaining_scratch = rest;
-                }
-            }
+        unsafe {
+            references.set_len(args.len());
         }
-
-        let mut sort_indices: Vec<_> = (0..indices.len()).collect();
-        sort_indices.sort_by_key(|i| indices[*i].stack_index.0);
-
-        let mut remaining = &mut self.values[..];
-        let mut prev_index: usize = 0;
-
-        for sort_index in sort_indices {
-            let stack_index = indices[sort_index].stack_index;
-            let rel_index = (stack_index.0 + 1)
-                .checked_sub(prev_index)
-                .expect("Internal error, indices should be sorted");
-
-            // The `.split_at_mut_checked` method is the trick
-            // required to turn one mutable reference into several.
-            // Normally, the expression `&mut slice[index]` would
-            // borrow the entire `slice` for the duration of the
-            // element's borrow.  However, `.split_at_mut_checked`
-            // returns two independent borrows, one for each side of
-            // the split.
-            //
-            // This function requires the indices to be unique, such
-            // that each mutable reference is unique.  If the indices
-            // are not unique, then `rel_index` will be zero for the
-            // repeated index.  When `rel_index` is zero,
-            // `lhs.last_mut()` will return `None`, preventing the
-            // duplicate mutable reference from being created.  If
-            // this error occurs at runtime, it means that the
-            // compilation produced an invalid
-            // Instruction::NativeFunctionCall that contained repeated
-            // indices in the argument list.
-            let (lhs, rhs) = remaining
-                .split_at_mut_checked(rel_index)
-                .expect("StackIndex must be in-bound");
-            let ref_at_index =
-                lhs.last_mut().expect("Indices should be unique");
-            let arg_index = indices[sort_index].arg_index;
-            opt_references[arg_index] = Some(ref_at_index);
-            remaining = rhs;
-            prev_index = stack_index.0 + 1;
-        }
-
-        // Now that all `Option<&mut StackValue>` elements have been
-        // populated, they can be unwrapped to produce the
-        // NativeFunction arguments.
-        let references: Vec<_> = opt_references
-            .into_iter()
-            .map(|opt| {
-                opt.expect("All references should be filled at this point")
-            })
-            .collect();
-
         references
     }
 
@@ -1512,7 +1489,8 @@ impl<'a> VMEvaluator<'a> {
                 }
 
                 Instruction::Return { outputs } => {
-                    let mut inline_consts = Vec::new();
+                    let mut inline_consts = Vec::with_capacity(outputs.len());
+                    inline_consts.resize_with(outputs.len(), Default::default);
                     let mut collected_outputs =
                         self.values.collect_native_function_args(
                             outputs,
@@ -1654,14 +1632,51 @@ impl<'a> VMEvaluator<'a> {
     fn eval_native_function_call(
         &mut self,
         func_index: FunctionIndex,
-        args: &[VMArg],
+        vm_args: &[VMArg],
         output: Option<StackIndex>,
     ) -> Result<(), Error> {
-        let mut inline_consts = Vec::new();
-        let mut args = self
-            .values
-            .collect_native_function_args(args, &mut inline_consts);
-        let result = self.vm.native_functions[func_index.0].apply(&mut args)?;
+        const MAX_STACK_ARGS: usize = 16;
+        let result = if vm_args.len() <= MAX_STACK_ARGS {
+            let mut inline_consts: [Option<StackValue>; MAX_STACK_ARGS] =
+                Default::default();
+            let inline_consts = &mut inline_consts[..vm_args.len()];
+
+            let mut collected_args =
+                [const { MaybeUninit::<&mut Option<StackValue>>::uninit() };
+                    MAX_STACK_ARGS];
+            let arg_slice = &mut collected_args[..vm_args.len()];
+
+            self.values.collect_native_function_args_impl(
+                vm_args,
+                inline_consts,
+                arg_slice,
+            );
+            let arg_slice = unsafe {
+                std::mem::transmute::<
+                    &mut [MaybeUninit<&mut Option<StackValue>>],
+                    &mut [&mut Option<StackValue>],
+                >(arg_slice)
+            };
+
+            self.vm.native_functions[func_index.0].apply(arg_slice)?
+        } else {
+            let mut inline_consts = Vec::with_capacity(vm_args.len());
+            inline_consts.resize_with(vm_args.len(), Default::default);
+
+            let mut collected_args: Vec<&mut Option<StackValue>> =
+                Vec::with_capacity(vm_args.len());
+            self.values.collect_native_function_args_impl(
+                vm_args,
+                &mut inline_consts,
+                collected_args.spare_capacity_mut(),
+            );
+            unsafe {
+                collected_args.set_len(vm_args.len());
+            }
+
+            self.vm.native_functions[func_index.0].apply(&mut collected_args)?
+        };
+
         if let Some(output) = output {
             self.values[output] = result;
         }
