@@ -1182,9 +1182,19 @@ where
         let cache_range = Self::choose_cache_range(remote_range.clone());
         let num_pages = (cache_range.end - cache_range.start) / PAGE_SIZE;
 
+        if num_pages > self.lru_cache.len() {
+            // This single read would exceed the capacity of the
+            // entire cache (e.g. a large string).  Since this read
+            // occupies several entire page, it probably wouldn't be
+            // shared by other objects, so we can just let it skip the
+            // cache altogether.
+            return self.inner.read_bytes(loc, output);
+        }
+
         for page in Self::iter_pages(remote_range.clone()) {
             self.lru_cache.promote(&page);
         }
+
         assert!(
             num_pages <= self.lru_cache.len(),
             "Read of {} bytes would use {num_pages} pages, \
@@ -1967,67 +1977,85 @@ impl<'a> VMEvaluator<'a> {
         regions: &[VMByteRange],
         output: StackIndex,
     ) -> Result<(), Error> {
-        let mut remote_ranges = Vec::<Range<Pointer>>::new();
+        let mut num_bytes = 0usize;
         for region in regions.iter() {
-            let opt_ptr = self.arg_to_prim(region.ptr)?;
-            let opt_num_bytes = self.arg_to_prim(region.num_bytes)?;
-
-            if opt_num_bytes.is_none() {
+            let Some(region_bytes) = self.arg_to_prim(region.num_bytes)? else {
                 self.values[output] = None;
                 return Ok(());
-            }
-
-            let ptr: Pointer = opt_ptr
-                .map(TryInto::try_into)
-                .transpose()?
-                .unwrap_or_else(Pointer::null);
-            let num_bytes: RuntimePrimValue = opt_num_bytes.unwrap();
-            let num_bytes: usize = num_bytes.try_into().map_err(|_| {
-                VMExecutionError::ByteCountNotConvertibleToInt {
-                    operator: self.vm.instructions[self.current_instruction.0]
-                        .op_name(),
-                    index: self.current_instruction,
-                    value: num_bytes,
-                }
-            })?;
-            remote_ranges.push(ptr..ptr + num_bytes);
+            };
+            let region_bytes: usize =
+                region_bytes.try_into().map_err(|_| {
+                    VMExecutionError::ByteCountNotConvertibleToInt {
+                        operator: self.vm.instructions
+                            [self.current_instruction.0]
+                            .op_name(),
+                        index: self.current_instruction,
+                        value: region_bytes,
+                    }
+                })?;
+            num_bytes += region_bytes;
         }
 
-        let bytes: &mut [u8] = {
-            let num_bytes = remote_ranges
-                .iter()
-                .map(|range| range.end - range.start)
-                .sum::<usize>();
-            self.values[output] = Some(if num_bytes <= SMALL_BYTE_ARRAY_SIZE {
-                StackValue::SmallByteArray([0u8; SMALL_BYTE_ARRAY_SIZE])
-            } else {
-                StackValue::ByteArray(vec![0u8; num_bytes])
-            });
-
-            self.values[output]
-                .as_mut()
-                .and_then(|stack_value| stack_value.as_mut_byte_array())
-                .expect("Byte array was just assigned")
+        let mut new_stack_value = if num_bytes <= SMALL_BYTE_ARRAY_SIZE {
+            StackValue::SmallByteArray([0u8; SMALL_BYTE_ARRAY_SIZE])
+        } else {
+            StackValue::ByteArray(vec![0u8; num_bytes])
         };
 
-        if remote_ranges.len() == 1 {
-            let start = remote_ranges[0].start;
-            if !start.is_null() {
-                self.reader.read_bytes(start, bytes)?;
+        {
+            let mut bytes = new_stack_value
+                .as_mut_byte_array()
+                .expect("Just constructed as byte array");
+
+            const MAX_BATCHED_RANGES: usize = 16;
+            let mut to_read =
+                ArrayVec::<(Pointer, &mut [u8]), MAX_BATCHED_RANGES>::new();
+
+            macro_rules! flush {
+                () => {
+                    match to_read.len() {
+                        0 => {}
+                        1 => {
+                            let (ptr, region_bytes) = to_read.pop().unwrap();
+                            if !ptr.is_null() {
+                                self.reader.read_bytes(ptr, region_bytes)?;
+                            }
+                        }
+                        _ => {
+                            self.reader.read_byte_regions(&mut to_read)?;
+                        }
+                    }
+                    to_read.clear();
+                };
             }
-        } else {
-            let mut regions: Vec<(Pointer, &mut [u8])> = Vec::new();
-            let mut remaining = &mut bytes[..];
-            for range in remote_ranges {
-                let num_bytes = range.end - range.start;
-                let (left, right) = remaining.split_at_mut(num_bytes);
-                if !range.start.is_null() {
-                    regions.push((range.start, left));
+
+            for region in regions.iter() {
+                let ptr: Pointer = self
+                    .arg_to_prim(region.ptr)?
+                    .map(TryInto::try_into)
+                    .transpose()?
+                    .unwrap_or_else(Pointer::null);
+
+                let region_bytes: usize = self
+                    .arg_to_prim(region.num_bytes)
+                    .expect("No error from first check")
+                    .expect("Was Some(_) in first check")
+                    .try_into()
+                    .expect("Was convertible to usize in first check");
+
+                let (left, right) = bytes.split_at_mut(region_bytes);
+                bytes = right;
+                if !ptr.is_null() {
+                    to_read.push((ptr, left));
+                    if to_read.len() == to_read.capacity() {
+                        flush!();
+                    }
                 }
-                remaining = right;
             }
-            self.reader.read_byte_regions(&mut regions)?;
+            flush!();
         }
+
+        self.values[output] = Some(new_stack_value);
 
         Ok(())
     }
