@@ -2285,7 +2285,11 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::RemoveUnusedDowncast(&analysis))
             .then(super::RemoveUnusedPrimcast(&analysis))
             .then(super::RemoveUnusedPointerCast)
-            .then(super::MergeParallelReads);
+            // Currently, the MergeParallelReads pass works, but
+            // doesn't seem to provide a performance benefit.
+            //
+            // .then(super::MergeParallelReads)
+            ;
 
         let mandatory_lowering = super::InferFunctionParameterTypes(&analysis)
             .then(super::LegalizeOperandTypes(&analysis))
