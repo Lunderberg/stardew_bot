@@ -380,20 +380,20 @@ where
         opt_arg
             .as_ref()
             .map(|arg| {
-                let err: Error =
+                match arg {
+                    StackValue::Native(native) => Some(native),
+                    _ => None,
+                }
+                .and_then(|native| native.downcast_ref())
+                .ok_or_else(|| {
                     VMExecutionError::InvalidArgumentForNativeFunction {
                         expected: RuntimeType::Rust(RustType::new::<T>()),
                         actual: arg.runtime_type(),
                     }
-                    .into();
-                match arg {
-                    StackValue::Native(native) => {
-                        native.downcast_ref().ok_or(err)
-                    }
-                    _ => Err(err),
-                }
+                })
             })
             .transpose()
+            .map_err(Into::into)
     }
 
     fn arg_signature_type() -> RuntimeType {
