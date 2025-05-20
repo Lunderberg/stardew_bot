@@ -36,6 +36,13 @@ impl<T> Vector<T> {
         self.right * other.right + self.down * other.down
     }
 
+    pub fn dist2(self, other: Self) -> T
+    where
+        T: num::Num + Copy,
+    {
+        (self - other).mag2()
+    }
+
     pub fn mag2(self) -> T
     where
         T: num::Num + Copy,

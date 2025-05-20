@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 use memory_reader::Pointer;
 
 use crate::Error;
@@ -580,7 +580,7 @@ impl Location {
                     )
             };
 
-            fn read_location_resource_clumps(location) {
+            fn read_location_resource_clumps(location, filter) {
                 let num_resource_clumps = location
                     .resourceClumps
                     .list
@@ -593,6 +593,7 @@ impl Location {
                             .list
                             ._items[i_clump]
                     })
+                    .filter(|clump| filter.is_none() || filter(clump))
                     .map(|clump| {
                         let shape = {
                             let right = clump.netTile.value.X;
@@ -614,7 +615,7 @@ impl Location {
                 resource_clumps
             }
 
-            fn read_location_grass(location){
+            fn read_location_grass(location, filter) {
                 let num_features = location
                     .terrainFeatures
                     .dict
@@ -640,6 +641,7 @@ impl Location {
                             .as::<StardewValley.TerrainFeatures.Grass>()
                             .grassBladeHealth
                             .is_some())
+                    .filter(|feature| filter.is_none() || filter(feature))
                     .map(|feature| {
                         let right = feature.key.X;
                         let down = feature.key.Y;
@@ -650,7 +652,7 @@ impl Location {
                 grass
             }
 
-            fn read_location_trees(location) {
+            fn read_location_trees(location, filter) {
                 let num_features = location
                     .terrainFeatures
                     .dict
@@ -675,6 +677,7 @@ impl Location {
                             .value
                             .as::<StardewValley.TerrainFeatures.Tree>()
                             .is_some())
+                    .filter(|feature| filter.is_none() || filter(feature))
                     .map(|feature| {
                         let tree = feature
                             .value
@@ -705,7 +708,7 @@ impl Location {
                 trees
             }
 
-            fn read_location_objects(location) {
+            fn read_location_objects(location, filter) {
                 let num_objects = location
                     .objects
                     .compositeDict
@@ -719,6 +722,7 @@ impl Location {
                             ._entries[i]
                             .value
                     })
+                    .filter(|obj| filter.is_none() || filter(obj))
                     .map(|obj| {
                         let tile = {
                             let right = obj.tileLocation.value.X;
@@ -842,9 +846,10 @@ impl Location {
                     });
 
 
-                let resource_clumps = read_location_resource_clumps(location);
-                let grass = read_location_grass(location);
-                let trees = read_location_trees(location);
+                let resource_clumps = read_location_resource_clumps(
+                    location, None);
+                let grass = read_location_grass(location, None);
+                let trees = read_location_trees(location, None);
 
                 let num_large_features = location
                     .largeTerrainFeatures
@@ -870,7 +875,7 @@ impl Location {
                     })
                     .collect();
 
-                let objects = read_location_objects(location);
+                let objects = read_location_objects(location, None);
 
                 let water_tiles = location
                     .waterTiles
@@ -1066,17 +1071,53 @@ impl Location {
             }
 
             fn read_location_delta() {
-                let location = StardewValley.Game1
-                    ._player
+                let player = StardewValley.Game1._player;
+                let location = player
                     .currentLocationRef
                     ._gameLocation;
 
                 let name = get_location_name_ptr(location).read_string();
 
-                let resource_clumps = read_location_resource_clumps(location);
-                let grass = read_location_grass(location);
-                let trees = read_location_trees(location);
-                let objects = read_location_objects(location);
+                let player_pos = player.position.Field.value;
+                let player_x = player_pos.X / 64;
+                let player_y = player_pos.Y / 64;
+
+                fn is_close_to_player(x,y) {
+                    let diff_x = player_x - x;
+                    let diff_y = player_y - y;
+                    let dist2 = diff_x*diff_x + diff_y*diff_y;
+
+                    dist2.is_some() && dist2 < 36
+                }
+
+                let resource_clumps = read_location_resource_clumps(
+                    location,
+                    |clump| {
+                        let pos = clump.netTile.value;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
+                let grass = read_location_grass(
+                    location,
+                    |feature| {
+                        let pos = feature.key;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
+                let trees = read_location_trees(
+                    location,
+                    |feature| {
+                        let pos = feature.key;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
+                let objects = read_location_objects(
+                    location,
+                    |obj| {
+                        let pos = obj.tileLocation.value;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
 
                 new_location_delta(
                     name,
@@ -1175,11 +1216,61 @@ impl Location {
         map
     }
 
-    pub fn apply_delta(&mut self, delta: LocationDelta) {
-        self.resource_clumps = delta.resource_clumps;
-        self.trees = delta.trees;
-        self.grass = delta.grass;
-        self.objects = delta.objects;
+    pub fn apply_delta(
+        &mut self,
+        delta: LocationDelta,
+        player_pos: Vector<f32>,
+    ) {
+        let player_tile = player_pos / 64.0;
+        let is_far_from_player = |tile: Vector<isize>| {
+            let pos = tile.map(|x| x as f32);
+            let dist2 = pos.dist2(player_tile);
+            dist2 >= 25.0
+        };
+
+        self.resource_clumps = delta
+            .resource_clumps
+            .into_iter()
+            .chain(
+                self.resource_clumps
+                    .drain(..)
+                    .filter(|clump| is_far_from_player(clump.shape.center())),
+            )
+            .unique_by(|clump| clump.shape.center())
+            .collect();
+
+        self.trees = delta
+            .trees
+            .into_iter()
+            .chain(
+                self.trees
+                    .drain(..)
+                    .filter(|tree| is_far_from_player(tree.position)),
+            )
+            .unique_by(|tree| tree.position)
+            .collect();
+
+        self.grass = delta
+            .grass
+            .into_iter()
+            .chain(
+                self.grass
+                    .drain(..)
+                    .filter(|grass_pos| is_far_from_player(*grass_pos)),
+            )
+            .unique()
+            .collect();
+
+        self.objects = delta
+            .objects
+            .into_iter()
+            .chain(
+                self.objects
+                    .drain(..)
+                    .filter(|obj| is_far_from_player(obj.tile)),
+            )
+            .unique_by(|obj| obj.tile)
+            .collect();
     }
 }
 

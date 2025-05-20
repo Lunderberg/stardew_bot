@@ -159,6 +159,8 @@ impl GameState {
     }
 
     pub fn apply_delta(&mut self, delta: GameStateDelta) {
+        let player_pos = delta.player.position;
+
         self.player = delta.player;
         self.fishing = delta.fishing;
         self.daily = delta.daily;
@@ -170,7 +172,7 @@ impl GameState {
             .iter_mut()
             .find(|loc| &loc.name == &delta.location_delta.name)
         {
-            loc.apply_delta(delta.location_delta);
+            loc.apply_delta(delta.location_delta, player_pos);
         }
     }
 
