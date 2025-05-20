@@ -923,6 +923,11 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.reduce(initial, obj, reduction))
                 }
+                "is_none" => {
+                    self.expect_function_arguments(0, 0)?;
+                    let is_some = self.graph.is_some(obj);
+                    Ok(self.graph.boolean_not(is_some))
+                }
                 "is_some" => {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.is_some(obj))
