@@ -237,8 +237,28 @@ impl RuntimePrimValue {
             (Type::NativeInt, Self::I32(value)) => Ok((value as isize).into()),
             (Type::NativeInt, Self::I64(value)) => Ok((value as isize).into()),
 
+            (Type::F32, Self::I8(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::I16(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::I32(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::I64(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::NativeInt(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::U8(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::U16(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::U32(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::U64(value)) => Ok((value as f32).into()),
+            (Type::F32, Self::NativeUInt(value)) => Ok((value as f32).into()),
             (Type::F32, Self::F64(value)) => Ok((value as f32).into()),
 
+            (Type::F64, Self::I8(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::I16(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::I32(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::I64(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::NativeInt(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::U8(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::U16(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::U32(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::U64(value)) => Ok((value as f64).into()),
+            (Type::F64, Self::NativeUInt(value)) => Ok((value as f64).into()),
             (Type::F64, Self::F32(value)) => Ok((value as f64).into()),
 
             (prim_type, value) => {

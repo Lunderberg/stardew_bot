@@ -138,6 +138,7 @@ pub enum Punctuation {
     Bang,
     BangEquals,
     Plus,
+    Minus,
     Multiply,
     Pipe,
     DoublePipe,
@@ -357,17 +358,28 @@ impl<'a> SymbolicParser<'a> {
             }
         }
 
-        if precedence < OpPrecedence::Addition
-            && OpPrecedence::Addition < upper_bound
+        if precedence < OpPrecedence::AddSub
+            && OpPrecedence::AddSub < upper_bound
         {
-            while let Some(_) = self
-                .tokens
-                .next_if(|token| token.kind.is_punct(Punctuation::Plus))?
-            {
+            while let Some(token) = self.tokens.next_if(|token| {
+                matches!(
+                    token.kind,
+                    TokenKind::Punct(Punctuation::Plus | Punctuation::Minus)
+                )
+            })? {
                 let rhs =
-                    self.expect_expr_op_precedence(OpPrecedence::Addition)?;
-                expr = self.graph.add(expr, rhs);
-                upper_bound = OpPrecedence::Addition;
+                    self.expect_expr_op_precedence(OpPrecedence::AddSub)?;
+
+                expr = match &token.kind {
+                    TokenKind::Punct(Punctuation::Plus) => {
+                        self.graph.add(expr, rhs)
+                    }
+                    TokenKind::Punct(Punctuation::Minus) => {
+                        self.graph.sub(expr, rhs)
+                    }
+                    _ => unreachable!("Due to earlier check"),
+                };
+                upper_bound = OpPrecedence::AddSub;
             }
         }
 
@@ -1367,6 +1379,7 @@ impl<'a> SymbolicTokenizer<'a> {
             }
             '!' => TokenKind::Punct(Punctuation::Bang),
             '+' => TokenKind::Punct(Punctuation::Plus),
+            '-' => TokenKind::Punct(Punctuation::Minus),
             '*' => TokenKind::Punct(Punctuation::Multiply),
             ':' if opt_char2 == Some(':') => {
                 num_bytes = 2;

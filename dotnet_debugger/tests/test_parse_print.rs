@@ -549,6 +549,21 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    subtraction,
+    "pub fn main(a: usize, b: usize) { a - b }",
+    |graph| {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+        let sum = graph.sub(a, b);
+        let func = graph.function_def(vec![a, b], sum);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}
+
+test_print_and_parse! {
     multiplication,
     "pub fn main(a: usize, b: usize) { a*b }",
     |graph| {
@@ -580,7 +595,25 @@ test_print_and_parse! {
         graph.name(func, "main").unwrap();
         graph.mark_extern_func(func).unwrap();
     },
+}
 
+test_print_and_parse! {
+    mixed_addition_and_subtraction,
+    "pub fn main(a: usize, b: usize) { a - b + a - b }",
+    |graph| {
+        let a = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(a, "a").unwrap();
+        let b = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(b, "b").unwrap();
+
+        let sum = graph.sub(a, b);
+        let sum = graph.add(sum, a);
+        let sum = graph.sub(sum, b);
+
+        let func = graph.function_def(vec![a, b], sum);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
 }
 
 test_print_and_parse! {

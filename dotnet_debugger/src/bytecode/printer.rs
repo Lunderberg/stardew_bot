@@ -1057,7 +1057,15 @@ impl<'a> GraphPrinter<'a> {
                         ExprKind::Add { lhs, rhs } => {
                             handle_binary_op!(
                                 " + ",
-                                OpPrecedence::Addition,
+                                OpPrecedence::AddSub,
+                                lhs,
+                                rhs
+                            )
+                        }
+                        ExprKind::Sub { lhs, rhs } => {
+                            handle_binary_op!(
+                                " - ",
+                                OpPrecedence::AddSub,
                                 lhs,
                                 rhs
                             )

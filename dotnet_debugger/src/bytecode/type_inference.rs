@@ -390,6 +390,61 @@ impl<'a> TypeInference<'a> {
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                         ) => Ok(RuntimePrimType::NativeUInt.into()),
 
+                        (
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                        ) => Ok(RuntimePrimType::F32.into()),
+
+                        (RuntimeType::Unknown, _)
+                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
+
+                        (other_lhs, other_rhs) => {
+                            Err(Error::InvalidOperandsForBinaryOp {
+                                op: expr_kind.op_name(),
+                                lhs: other_lhs.clone(),
+                                rhs: other_rhs.clone(),
+                            })
+                        }
+                    }?
+                }
+
+                ExprKind::Sub { lhs, rhs } => {
+                    let lhs_type = expect_cache(*lhs, "lhs of add");
+                    let rhs_type = expect_cache(*rhs, "rhs of add");
+                    match (lhs_type, rhs_type) {
+                        (ptr_a, ptr_b)
+                            if matches!(
+                                (ptr_a.storage_type(), ptr_b.storage_type()),
+                                (
+                                    Some(RuntimePrimType::Ptr),
+                                    Some(RuntimePrimType::Ptr)
+                                )
+                            ) =>
+                        {
+                            Ok(RuntimePrimType::NativeUInt.into())
+                        }
+
+                        (
+                            ptr,
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                        ) if matches!(
+                            ptr.storage_type(),
+                            Some(RuntimePrimType::Ptr)
+                        ) =>
+                        {
+                            Ok(RuntimePrimType::Ptr.into())
+                        }
+
+                        (
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::NativeUInt.into()),
+
+                        (
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                        ) => Ok(RuntimePrimType::F32.into()),
+
                         (RuntimeType::Unknown, _)
                         | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
 
@@ -435,6 +490,17 @@ impl<'a> TypeInference<'a> {
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                             RuntimeType::Prim(RuntimePrimType::NativeUInt),
                         ) => Ok(RuntimePrimType::NativeUInt.into()),
+
+                        (
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                        ) => Ok(RuntimePrimType::F32.into()),
+
+                        (
+                            RuntimeType::Prim(RuntimePrimType::F32),
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::F32.into()),
+
                         (RuntimeType::Unknown, _)
                         | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
                         (other_lhs, other_rhs) => {

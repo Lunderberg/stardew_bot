@@ -12,7 +12,6 @@ use derive_more::derive::From;
 use itertools::{Either, Itertools};
 use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer};
-use paste::paste;
 use thiserror::Error;
 
 use crate::{
@@ -1290,41 +1289,14 @@ impl VirtualMachine {
     }
 }
 
-macro_rules! define_comparison_op {
-    ($cmp:ident) => {paste!{
-        fn [< eval_ $cmp >](
-            &mut self,
-            lhs: VMArg,
-            rhs: VMArg,
-            output: StackIndex,
-        ) -> Result<(), Error> {
-            let opt_lhs = self.arg_to_prim(lhs)?;
-            let opt_rhs = self.arg_to_prim(rhs)?;
-
-            self.values[output] = match (opt_lhs, opt_rhs) {
-                (Some(lhs), Some(rhs)) => {
-                    let res = match (lhs, rhs) {
-                        (
-                            RuntimePrimValue::NativeUInt(a),
-                            RuntimePrimValue::NativeUInt(b),
-                        ) => Ok(RuntimePrimValue::Bool(a.$cmp(&b))),
-                        _ => Err(Error::InvalidOperandsForNumericComparison {
-                            lhs: lhs.runtime_type().into(),
-                            rhs: rhs.runtime_type().into(),
-                        }),
-                    }?;
-                    Some(res.into())
-                }
-                _ => None,
-            };
-
-            Ok(())
-        }
-    }};
-}
-
-macro_rules! define_binary_integer_op {
-    ($func_name:ident, $op_func:ident) => {
+macro_rules! define_binary_op {
+    ($func_name:ident,
+     $(
+         ($lhs_ty:ident($lhs_var:ident) ,
+          $rhs_ty:ident($rhs_var:ident) $(,)?
+         ) => $result:expr
+     ),* $(,)?
+    ) => {
         fn $func_name(
             &mut self,
             lhs: VMArg,
@@ -1339,23 +1311,43 @@ macro_rules! define_binary_integer_op {
 
             self.values[output] = match (opt_lhs, opt_rhs) {
                 (Some(lhs), Some(rhs)) => {
-                    let res = match (lhs, rhs) {
-                        (
-                            RuntimePrimValue::NativeUInt(a),
-                            RuntimePrimValue::NativeUInt(b),
-                        ) => Ok(RuntimePrimValue::NativeUInt(a.$op_func(b))),
-                        (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
-                            op: op_name,
-                            lhs: lhs.runtime_type().into(),
-                            rhs: rhs.runtime_type().into(),
-                        }),
+                    let res: RuntimePrimValue = match (lhs, rhs) {
+                        $(
+                            (
+                                RuntimePrimValue::$lhs_ty($lhs_var),
+                                RuntimePrimValue::$rhs_ty($rhs_var),
+                            ) => Ok($result.into()),
+                        )*
+                            (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                                op: op_name,
+                                lhs: lhs.runtime_type().into(),
+                                rhs: rhs.runtime_type().into(),
+                            }),
                     }?;
-                    Some(res.into())
+
+                    let res: StackValue = res.into();
+
+                    Some(res)
                 }
                 _ => None,
             };
 
             Ok(())
+        }
+    };
+}
+
+macro_rules! define_comparison_op {
+    ($func_name:ident, $cmp:ident) => {
+        define_binary_op! {
+            $func_name,
+            ( NativeUInt(a), NativeUInt(b) ) => a.$cmp(&b),
+            ( F32(a), F32(b) ) => a.$cmp(&b),
+            ( NativeUInt(a), F32(b) ) => (a as f32).$cmp(&b),
+            ( F32(a), NativeUInt(b) ) => a.$cmp(&(b as f32)),
+            ( F64(a), F64(b) ) => a.$cmp(&b),
+            ( NativeUInt(a), F64(b) ) => (a as f64).$cmp(&b),
+            ( F64(a), NativeUInt(b) ) => a.$cmp(&(b as f64)),
         }
     };
 }
@@ -1712,122 +1704,42 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    fn eval_add(
-        &mut self,
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    ) -> Result<(), Error> {
-        let op_name =
-            self.vm.instructions[self.current_instruction.0].op_name();
-
-        let opt_lhs = self.arg_to_prim(lhs)?;
-        let opt_rhs = self.arg_to_prim(rhs)?;
-
-        self.values[output] = match (opt_lhs, opt_rhs) {
-            (Some(lhs), Some(rhs)) => {
-                let res = match (lhs, rhs) {
-                    (
-                        RuntimePrimValue::NativeUInt(a),
-                        RuntimePrimValue::NativeUInt(b),
-                    ) => Ok(RuntimePrimValue::NativeUInt(a + b)),
-                    (
-                        RuntimePrimValue::Ptr(a),
-                        RuntimePrimValue::NativeUInt(b),
-                    ) => Ok(RuntimePrimValue::Ptr(a + b)),
-                    (
-                        RuntimePrimValue::NativeUInt(a),
-                        RuntimePrimValue::Ptr(b),
-                    ) => Ok(RuntimePrimValue::Ptr(b + a)),
-                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
-                        op: op_name,
-                        lhs: lhs.runtime_type().into(),
-                        rhs: rhs.runtime_type().into(),
-                    }),
-                }?;
-                Some(res.into())
-            }
-            _ => None,
-        };
-
-        Ok(())
+    define_binary_op! {
+        eval_add,
+        (NativeUInt(a), NativeUInt(b)) => a + b,
+        (Ptr(a), NativeUInt(b)) => a + b,
+        (NativeUInt(a), Ptr(b)) => b + a,
+        (F32(a), F32(b)) => a + b,
+        (F64(a), F64(b)) => a + b,
     }
 
-    fn eval_sub(
-        &mut self,
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    ) -> Result<(), Error> {
-        let op_name =
-            self.vm.instructions[self.current_instruction.0].op_name();
-
-        let opt_lhs = self.arg_to_prim(lhs)?;
-        let opt_rhs = self.arg_to_prim(rhs)?;
-
-        self.values[output] = match (opt_lhs, opt_rhs) {
-            (Some(lhs), Some(rhs)) => {
-                let res = match (lhs, rhs) {
-                    (
-                        RuntimePrimValue::NativeUInt(a),
-                        RuntimePrimValue::NativeUInt(b),
-                    ) => Ok(RuntimePrimValue::NativeUInt(a - b)),
-                    (
-                        RuntimePrimValue::Ptr(a),
-                        RuntimePrimValue::NativeUInt(b),
-                    ) => Ok(RuntimePrimValue::Ptr(a - b)),
-                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
-                        op: op_name,
-                        lhs: lhs.runtime_type().into(),
-                        rhs: rhs.runtime_type().into(),
-                    }),
-                }?;
-                Some(res.into())
-            }
-            _ => None,
-        };
-
-        Ok(())
+    define_binary_op! {
+        eval_sub,
+        (NativeUInt(a), NativeUInt(b)) => a - b,
+        (Ptr(a), NativeUInt(b)) => a - b,
+        (Ptr(a), Ptr(b)) => a - b,
+        (F32(a), F32(b)) => a - b,
+        (F64(a), F64(b)) => a - b,
     }
 
-    fn eval_mul(
-        &mut self,
-        lhs: VMArg,
-        rhs: VMArg,
-        output: StackIndex,
-    ) -> Result<(), Error> {
-        let op_name =
-            self.vm.instructions[self.current_instruction.0].op_name();
-
-        let opt_lhs = self.arg_to_prim(lhs)?;
-        let opt_rhs = self.arg_to_prim(rhs)?;
-
-        self.values[output] = match (opt_lhs, opt_rhs) {
-            (Some(lhs), Some(rhs)) => {
-                let res = match (lhs, rhs) {
-                    (
-                        RuntimePrimValue::NativeUInt(a),
-                        RuntimePrimValue::NativeUInt(b),
-                    ) => Ok(RuntimePrimValue::NativeUInt(a * b)),
-                    (RuntimePrimValue::F32(a), RuntimePrimValue::F32(b)) => {
-                        Ok(RuntimePrimValue::F32(a * b))
-                    }
-                    (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
-                        op: op_name,
-                        lhs: lhs.runtime_type().into(),
-                        rhs: rhs.runtime_type().into(),
-                    }),
-                }?;
-                Some(res.into())
-            }
-            _ => None,
-        };
-
-        Ok(())
+    define_binary_op! {
+        eval_mul,
+        (NativeUInt(a), NativeUInt(b)) => a*b,
+        (F32(a), F32(b)) => a*b,
+        (F64(a), F64(b)) => a*b,
     }
 
-    define_binary_integer_op! {eval_div, div_euclid}
-    define_binary_integer_op! {eval_mod, rem_euclid}
+    define_binary_op! {
+        eval_div,
+        (NativeUInt(a),NativeUInt(b)) => a.div_euclid(b),
+        (F32(a),NativeUInt(b)) => a / (b as f32),
+        (F64(a),NativeUInt(b)) => a / (b as f64),
+    }
+
+    define_binary_op! {
+        eval_mod,
+        (NativeUInt(a),NativeUInt(b)) => a.rem_euclid(b)
+    }
 
     fn eval_and(
         &mut self,
@@ -1925,12 +1837,12 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    define_comparison_op! {eq}
-    define_comparison_op! {ne}
-    define_comparison_op! {lt}
-    define_comparison_op! {le}
-    define_comparison_op! {gt}
-    define_comparison_op! {ge}
+    define_comparison_op! {eval_eq, eq}
+    define_comparison_op! {eval_ne, ne}
+    define_comparison_op! {eval_lt, lt}
+    define_comparison_op! {eval_le, le}
+    define_comparison_op! {eval_gt, gt}
+    define_comparison_op! {eval_ge, ge}
 
     fn eval_is_subclass_of(
         &mut self,

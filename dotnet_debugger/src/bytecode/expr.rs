@@ -257,6 +257,15 @@ pub enum ExprKind {
         rhs: SymbolicValue,
     },
 
+    /// Perform subtraction of the LHS and RHS.
+    ///
+    /// This operation is used for both pointer arithmetic and numeric
+    /// arithmetic.
+    Sub {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
     /// Perform numeric multiplication of the LHS and RHS.
     Mul {
         lhs: SymbolicValue,
@@ -924,6 +933,7 @@ impl SymbolicGraph {
     binary_op! {greater_than_or_equal, GreaterThanOrEqual}
 
     binary_op! {add, Add}
+    binary_op! {sub, Sub}
     binary_op! {mul, Mul}
     binary_op! {div, Div}
     binary_op! {modulo, Mod}
@@ -2559,6 +2569,7 @@ impl ExprKind {
             }
 
             ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+            ExprKind::Sub { lhs, rhs } => handle_binary_op!(Sub, lhs, rhs),
             ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
             ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
             ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
@@ -2708,6 +2719,7 @@ impl ExprKind {
             | &ExprKind::LessThanOrEqual { lhs, rhs }
             | &ExprKind::GreaterThanOrEqual { lhs, rhs }
             | &ExprKind::Add { lhs, rhs }
+            | &ExprKind::Sub { lhs, rhs }
             | &ExprKind::Mul { lhs, rhs }
             | &ExprKind::Div { lhs, rhs }
             | &ExprKind::Mod { lhs, rhs } => {
@@ -2794,6 +2806,7 @@ impl ExprKind {
             ExprKind::LessThanOrEqual { .. } => "LessThanOrEqual",
             ExprKind::GreaterThanOrEqual { .. } => "GreaterThanOrEqual",
             ExprKind::Add { .. } => "Add",
+            ExprKind::Sub { .. } => "Sub",
             ExprKind::Mul { .. } => "Mul",
             ExprKind::Div { .. } => "Div",
             ExprKind::Mod { .. } => "Mod",
@@ -3202,6 +3215,7 @@ impl<'a> GraphComparison<'a> {
                 }
 
                 ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+                ExprKind::Sub { lhs, rhs } => handle_binary_op!(Sub, lhs, rhs),
                 ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
                 ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
                 ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
@@ -3442,6 +3456,7 @@ impl Display for ExprKind {
             }
 
             ExprKind::Add { lhs, rhs } => write!(f, "{lhs} + {rhs}"),
+            ExprKind::Sub { lhs, rhs } => write!(f, "{lhs} - {rhs}"),
             ExprKind::Mul { lhs, rhs } => write!(f, "{lhs}*{rhs}"),
             ExprKind::Div { lhs, rhs } => write!(f, "{lhs}/{rhs}"),
             ExprKind::Mod { lhs, rhs } => write!(f, "{lhs}%{rhs}"),

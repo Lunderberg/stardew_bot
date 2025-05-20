@@ -7,7 +7,7 @@ pub(crate) enum OpPrecedence {
     BooleanOr,
     ComparisonOperator,
     RangeExtent,
-    Addition,
+    AddSub,
     MulDiv,
     BooleanNot,
     MaxPrecedence,
@@ -28,7 +28,7 @@ impl PartialOrd for OpPrecedence {
                     | Self::BooleanOr
                     | Self::ComparisonOperator
                     | Self::RangeExtent
-                    | Self::Addition
+                    | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
                 ) => true,
@@ -38,7 +38,7 @@ impl PartialOrd for OpPrecedence {
                     | Self::BooleanOr
                     | Self::ComparisonOperator
                     | Self::RangeExtent
-                    | Self::Addition
+                    | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
                 ) => true,
@@ -173,19 +173,19 @@ impl PartialOrd for OpPrecedence {
                     Self::BooleanAnd | Self::BooleanOr,
                     Self::ComparisonOperator
                     | Self::RangeExtent
-                    | Self::Addition
+                    | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
                 ) => true,
 
                 (
                     Self::ComparisonOperator,
-                    Self::RangeExtent | Self::MulDiv | Self::Addition,
+                    Self::RangeExtent | Self::MulDiv | Self::AddSub,
                 ) => true,
 
-                (Self::RangeExtent, Self::MulDiv | Self::Addition) => true,
+                (Self::RangeExtent, Self::MulDiv | Self::AddSub) => true,
 
-                (Self::Addition, Self::MulDiv) => true,
+                (Self::AddSub, Self::MulDiv) => true,
                 _ => false,
             }
         };

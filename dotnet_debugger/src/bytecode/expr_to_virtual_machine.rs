@@ -981,6 +981,7 @@ impl ExpressionTranslator<'_> {
                 }
 
                 ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
+                ExprKind::Sub { lhs, rhs } => handle_binary_op!(Sub, lhs, rhs),
                 ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),
                 ExprKind::Div { lhs, rhs } => handle_binary_op!(Div, lhs, rhs),
                 ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),

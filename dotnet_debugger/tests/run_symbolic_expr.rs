@@ -31,6 +31,20 @@ fn eval_integer_addition() -> Result<(), Error> {
 }
 
 #[test]
+fn eval_integer_subtraction() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+    let sum = graph.sub(7, 5);
+    let func = graph.function_def(vec![], sum);
+    graph.name(func, "main")?;
+    graph.mark_extern_func(func)?;
+
+    let vm = graph.compile(None)?;
+    let result: usize = vm.local_eval()?.try_into()?;
+    assert_eq!(result, 7 - 5);
+    Ok(())
+}
+
+#[test]
 fn eval_integer_multiplication() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let prod = graph.mul(5, 7);
@@ -41,6 +55,23 @@ fn eval_integer_multiplication() -> Result<(), Error> {
     let vm = graph.compile(None)?;
     let result: usize = vm.local_eval()?.try_into()?;
     assert_eq!(result, 5 * 7);
+    Ok(())
+}
+
+#[test]
+fn eval_fp32_multiplication() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+    let lhs = graph.prim_cast(5, RuntimePrimType::F32);
+    let rhs = graph.prim_cast(7, RuntimePrimType::F32);
+    let prod = graph.mul(lhs, rhs);
+    let div = graph.div(prod, 2);
+    let func = graph.function_def(vec![], div);
+    graph.name(func, "main")?;
+    graph.mark_extern_func(func)?;
+
+    let vm = graph.compile(None)?;
+    let result: f32 = vm.local_eval()?.try_into()?;
+    assert_eq!(result, (5.0 * 7.0) / 2.0);
     Ok(())
 }
 
