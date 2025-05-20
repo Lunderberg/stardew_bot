@@ -6,7 +6,7 @@ use crate::{bot_logic::BotError, Error};
 
 use super::{
     ChestMenu, DailyState, DialogueMenu, DisplayState, FishingState,
-    InputState, Inventory, Location, LocationDelta, PlayerState,
+    InputState, Inventory, Location, LocationDelta, PlayerState, RngState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -19,6 +19,7 @@ pub struct GameState {
     pub display: DisplayState,
     pub chest_menu: Option<ChestMenu>,
     pub dialogue_menu: Option<DialogueMenu>,
+    pub rng_state: RngState,
 }
 
 #[derive(Debug)]
@@ -36,6 +37,7 @@ pub struct GameStateDelta {
     display: DisplayState,
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
+    rng_state: RngState,
 }
 
 impl GameState {
@@ -53,6 +55,7 @@ impl GameState {
         DisplayState::def_read_display_state(&mut graph)?;
         ChestMenu::def_read_chest_menu(&mut graph)?;
         DialogueMenu::def_read_dialogue_menu(&mut graph)?;
+        RngState::def_read_rng_state(&mut graph)?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -79,7 +82,8 @@ impl GameState {
              inputs: &InputState,
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
-             dialogue_menu: Option<&DialogueMenu>| GameState {
+             dialogue_menu: Option<&DialogueMenu>,
+             rng_state: &RngState| GameState {
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -88,6 +92,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
+                rng_state: rng_state.clone(),
             },
         )?;
 
@@ -100,7 +105,8 @@ impl GameState {
              inputs: &InputState,
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
-             dialogue_menu: Option<&DialogueMenu>| GameStateDelta {
+             dialogue_menu: Option<&DialogueMenu>,
+             rng_state: &RngState| GameStateDelta {
                 location_delta: location_delta.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -109,6 +115,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
+                rng_state: rng_state.clone(),
             },
         )?;
 
@@ -128,6 +135,7 @@ impl GameState {
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
+                let rng_state = read_rng_state();
 
                 new_game_state(
                     locations,
@@ -138,6 +146,7 @@ impl GameState {
                     display,
                     chest_menu,
                     dialogue_menu,
+                    rng_state,
                 )
             }
 
@@ -150,6 +159,7 @@ impl GameState {
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
+                let rng_state = read_rng_state();
 
                 new_game_state_delta(
                     location_delta,
@@ -160,6 +170,7 @@ impl GameState {
                     display,
                     chest_menu,
                     dialogue_menu,
+                    rng_state,
                 )
             }
         })?;
@@ -179,6 +190,8 @@ impl GameState {
         self.display = delta.display;
         self.chest_menu = delta.chest_menu;
         self.dialogue_menu = delta.dialogue_menu;
+        self.rng_state = delta.rng_state;
+
         if let Some(loc) = self
             .locations
             .iter_mut()

@@ -36,3 +36,6 @@ pub use chest_menu::ChestMenu;
 
 mod dialogue_menu;
 pub use dialogue_menu::DialogueMenu;
+
+mod rng_state;
+pub use rng_state::RngState;

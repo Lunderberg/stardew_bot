@@ -300,7 +300,11 @@ impl<'a> CachedReader<'a> {
                 let row = metadata.get(method_table.token().unwrap())?;
                 let namespace = row.namespace()?;
                 let name = row.name()?;
-                let lookup_key = format!("{namespace}.{name}");
+                let lookup_key = if namespace.is_empty() {
+                    format!("{name}")
+                } else {
+                    format!("{namespace}.{name}")
+                };
                 self.state
                     .method_table_by_name
                     .insert(lookup_key, Box::new(method_table.ptr()));

@@ -42,3 +42,6 @@ pub use input_display::InputDisplay;
 
 mod bot_goal_display;
 pub use bot_goal_display::BotGoalDisplay;
+
+mod rng_display;
+pub use rng_display::RngDisplay;
