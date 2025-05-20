@@ -1876,66 +1876,6 @@ impl SymbolicGraph {
         }
     }
 
-    /// Determine which arguments
-    pub(crate) fn undefined_args(
-        &self,
-        initial: impl IntoIterator<Item = SymbolicValue>,
-    ) -> Vec<OpIndex> {
-        enum VisitItem {
-            PreVisit(OpIndex),
-            RemoveDefinition(OpIndex),
-        }
-
-        let mut to_visit: Vec<_> = initial
-            .into_iter()
-            .filter_map(|value| value.as_op_index())
-            .map(VisitItem::PreVisit)
-            .collect();
-
-        let mut used_without_definition = HashSet::<OpIndex>::new();
-        let mut currently_defined = HashSet::<OpIndex>::new();
-
-        while let Some(visiting) = to_visit.pop() {
-            match visiting {
-                VisitItem::PreVisit(op_index) => match &self[op_index].kind {
-                    ExprKind::FunctionArg(_) => {
-                        if !currently_defined.contains(&op_index) {
-                            used_without_definition.insert(op_index);
-                        }
-                    }
-                    ExprKind::Function { params, output } => {
-                        params.iter().filter_map(|p| p.as_op_index()).for_each(
-                            |param_index| {
-                                assert!(
-                                    !currently_defined.contains(&param_index)
-                                );
-                                currently_defined.insert(param_index);
-                                to_visit.push(VisitItem::RemoveDefinition(
-                                    param_index,
-                                ));
-                            },
-                        );
-                        if let Some(out_index) = output.as_op_index() {
-                            to_visit.push(VisitItem::PreVisit(out_index));
-                        }
-                    }
-                    other => {
-                        other.visit_reachable_nodes(|value| {
-                            if let Some(prev_index) = value.as_op_index() {
-                                to_visit.push(VisitItem::PreVisit(prev_index));
-                            }
-                        });
-                    }
-                },
-                VisitItem::RemoveDefinition(op_index) => {
-                    currently_defined.remove(&op_index);
-                }
-            }
-        }
-
-        used_without_definition.into_iter().sorted().collect()
-    }
-
     /// Determine which expressions are used by some expression.
     ///
     /// Given a set of initial expressions, returns a boolean vector

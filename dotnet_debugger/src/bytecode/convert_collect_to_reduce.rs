@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
 use itertools::Itertools as _;
 
 use crate::{
     bytecode::ExposedNativeFunction,
     runtime_type::{FunctionType, IteratorType},
-    Error, RuntimeType, TypeInferenceError,
+    Error, OpIndex, RuntimeType, TypeInferenceError,
 };
 
 use super::{
@@ -79,48 +81,117 @@ impl NativeFunction for CollectIntoVector {
     }
 }
 
+fn collect_dummy_args(
+    graph: &SymbolicGraph,
+    initial: SymbolicValue,
+) -> Vec<SymbolicValue> {
+    let SymbolicValue::Result(initial) = initial else {
+        return Vec::new();
+    };
+
+    enum VisitItem {
+        PreVisit(OpIndex),
+        RemoveDefinition(OpIndex),
+    }
+
+    let mut to_visit = vec![VisitItem::PreVisit(initial)];
+
+    let mut used_without_definition = HashSet::<OpIndex>::new();
+    let mut used_as_function = HashSet::<OpIndex>::new();
+    let mut currently_defined = HashSet::<OpIndex>::new();
+
+    while let Some(visiting) = to_visit.pop() {
+        match visiting {
+            VisitItem::PreVisit(op_index) => match &graph[op_index].kind {
+                ExprKind::FunctionArg(_) => {
+                    if !currently_defined.contains(&op_index) {
+                        used_without_definition.insert(op_index);
+                    }
+                }
+                ExprKind::Function { params, output } => {
+                    params.iter().filter_map(|p| p.as_op_index()).for_each(
+                        |param_index| {
+                            assert!(!currently_defined.contains(&param_index));
+                            currently_defined.insert(param_index);
+                            to_visit
+                                .push(VisitItem::RemoveDefinition(param_index));
+                        },
+                    );
+                    if let Some(out_index) = output.as_op_index() {
+                        to_visit.push(VisitItem::PreVisit(out_index));
+                    }
+                }
+                ExprKind::FunctionCall { func, args } => {
+                    if let Some(func_index) = func.as_op_index() {
+                        used_as_function.insert(func_index);
+                    }
+                    args.iter()
+                        .chain([func])
+                        .filter_map(|value| value.as_op_index())
+                        .map(VisitItem::PreVisit)
+                        .for_each(|item| {
+                            to_visit.push(item);
+                        });
+                }
+                other => {
+                    other.iter_input_nodes().map(VisitItem::PreVisit).for_each(
+                        |item| {
+                            to_visit.push(item);
+                        },
+                    );
+                }
+            },
+            VisitItem::RemoveDefinition(op_index) => {
+                currently_defined.remove(&op_index);
+            }
+        }
+    }
+
+    used_without_definition
+        .into_iter()
+        .sorted()
+        .filter(|index| !used_as_function.contains(index))
+        .map(Into::into)
+        .collect()
+}
+
 impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
     ) -> Result<Option<SymbolicValue>, Error> {
-        Ok(match expr {
-            &ExprKind::Collect { iterator } => {
-                let iterator_type = self.0.infer_type(graph, iterator)?;
-                let item_type = match iterator_type {
-                    RuntimeType::Iterator(IteratorType { item }) => Ok(item),
-                    other => Err(TypeInferenceError::CollectRequiresIterator(
-                        other.clone(),
-                    )),
-                }?;
+        let &ExprKind::Collect { iterator } = expr else {
+            return Ok(None);
+        };
 
-                let make_vector = graph.raw_native_function(
-                    ExposedNativeFunction::new(MakeVector {
-                        element_type: *item_type.clone(),
-                    }),
-                );
-                let collect_into_vector = graph.raw_native_function(
-                    ExposedNativeFunction::new(CollectIntoVector {
-                        element_type: *item_type.clone(),
-                    }),
-                );
-
-                let dummy_initial_args = graph
-                    .undefined_args(Some(iterator))
-                    .into_iter()
-                    .map(|op_index| op_index.into())
-                    .collect();
-
-                let initial =
-                    graph.function_call(make_vector, dummy_initial_args);
-
-                let collected =
-                    graph.reduce(initial, iterator, collect_into_vector);
-
-                Some(collected)
+        let iterator_type = self.0.infer_type(graph, iterator)?;
+        let item_type = match iterator_type {
+            RuntimeType::Iterator(IteratorType { item }) => Ok(item),
+            other => {
+                Err(TypeInferenceError::CollectRequiresIterator(other.clone()))
             }
-            _ => None,
-        })
+        }?;
+
+        let make_vector =
+            graph.raw_native_function(ExposedNativeFunction::new(MakeVector {
+                element_type: *item_type.clone(),
+            }));
+        let collect_into_vector = graph.raw_native_function(
+            ExposedNativeFunction::new(CollectIntoVector {
+                element_type: *item_type.clone(),
+            }),
+        );
+
+        let dummy_initial_args = collect_dummy_args(graph, iterator)
+            .into_iter()
+            .map(|op_index| op_index.into())
+            .collect();
+
+        let initial = graph.function_call(make_vector, dummy_initial_args);
+
+        let collected = graph.reduce(initial, iterator, collect_into_vector);
+
+        Ok(Some(collected))
     }
 }
