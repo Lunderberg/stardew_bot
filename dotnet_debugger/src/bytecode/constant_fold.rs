@@ -93,6 +93,79 @@ impl GraphRewrite for ConstantFold {
                 _ => None,
             },
 
+            &ExprKind::IsSome(SymbolicValue::Result(arg)) => {
+                match &graph[arg].kind {
+                    // (None).is_some() => false
+                    &ExprKind::None => Some(SymbolicValue::Bool(false)),
+
+                    // Function definitions are always non-None.
+                    &ExprKind::Function { .. } => {
+                        Some(SymbolicValue::Bool(true))
+                    }
+
+                    _ => None,
+                }
+            }
+
+            // (not true) == false
+            // (not false) == true
+            &ExprKind::Not {
+                arg: SymbolicValue::Bool(b),
+            } => Some(SymbolicValue::Bool(!b)),
+
+            // (X or true) == (true or X) == true
+            ExprKind::Or {
+                lhs: SymbolicValue::Bool(true),
+                ..
+            }
+            | ExprKind::Or {
+                rhs: SymbolicValue::Bool(true),
+                ..
+            } => Some(SymbolicValue::Bool(true)),
+
+            // (X or false) == (false or X) == X
+            ExprKind::Or {
+                lhs: SymbolicValue::Bool(false),
+                rhs: other,
+            }
+            | ExprKind::Or {
+                rhs: SymbolicValue::Bool(false),
+                lhs: other,
+            } => Some(*other),
+
+            // (X and false) == (false and X) == false
+            ExprKind::And {
+                lhs: SymbolicValue::Bool(false),
+                ..
+            }
+            | ExprKind::And {
+                rhs: SymbolicValue::Bool(false),
+                ..
+            } => Some(SymbolicValue::Bool(false)),
+
+            // (X and true) == (true and X) == X
+            &ExprKind::And {
+                lhs: SymbolicValue::Bool(true),
+                rhs: other,
+            }
+            | &ExprKind::And {
+                rhs: SymbolicValue::Bool(true),
+                lhs: other,
+            } => Some(other),
+
+            // if true {if_branch} else {else_branch} => if_branch
+            // if false {if_branch} else {else_branch} => else_branch
+            &ExprKind::IfElse {
+                condition: SymbolicValue::Bool(true),
+                if_branch: always_branch,
+                ..
+            }
+            | &ExprKind::IfElse {
+                condition: SymbolicValue::Bool(false),
+                else_branch: always_branch,
+                ..
+            } => Some(always_branch),
+
             _ => None,
         };
 
