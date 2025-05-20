@@ -271,6 +271,7 @@ impl StardewBot {
             Either::Right(0..)
         };
 
+        let mut num_frames = 0;
         for _ in iter_frame {
             let main_loop_start = std::time::Instant::now();
 
@@ -334,13 +335,17 @@ impl StardewBot {
                 main_loop_active,
                 total_frame_time: finished_sleep - main_loop_start,
             };
+
+            num_frames += 1;
         }
         let after_main_loop = std::time::Instant::now();
 
         context.dispose()?;
 
         if self.show_startup_times {
-            println!("Main loop: {:?}", after_main_loop - before_main_loop);
+            let main_loop_time = after_main_loop - before_main_loop;
+            println!("Main loop: {:?}", main_loop_time);
+            println!("Main loop per frame: {:?}", main_loop_time / num_frames);
         }
 
         Ok(())
