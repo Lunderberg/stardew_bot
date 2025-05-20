@@ -915,7 +915,7 @@ impl VMReader for DummyReader {
 }
 
 const PAGE_SIZE: usize = 4096;
-const NUM_CACHE_PAGES: usize = 100;
+const NUM_CACHE_PAGES: usize = 1024;
 
 struct CachedVMReader<Inner> {
     inner: Inner,
