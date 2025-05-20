@@ -1475,7 +1475,7 @@ impl SymbolicGraph {
             .cloned()
             .zip(outermost_legal_scope.iter().cloned())
             .enumerate()
-            .map(|(i,(opt_scope, func_scope))| {
+            .map(|(i, (opt_scope, func_scope))| {
                 opt_scope
                     .map(|mut scope| {
                         loop {
@@ -1483,10 +1483,17 @@ impl SymbolicGraph {
                                 break;
                             }
                             if let Scope::Function(func_index) = scope {
-                                let parent_scope = innermost_legal_scope[func_index.0].unwrap_or(outermost_legal_scope[func_index.0]);
-                                assert_ne!(scope,parent_scope,
-                                           "Loop in scopes, expr {} in scope {scope:?}",
-                                           IndexPrinter::new(OpIndex(i),self)
+                                let parent_scope = innermost_legal_scope
+                                    [func_index.0]
+                                    .unwrap_or(
+                                        outermost_legal_scope[func_index.0],
+                                    );
+                                assert_ne!(
+                                    scope,
+                                    parent_scope,
+                                    "Loop in scopes, \
+                                     expr {} in scope {scope:?}",
+                                    IndexPrinter::new(OpIndex(i), self)
                                 );
                                 scope = parent_scope;
                             } else {
