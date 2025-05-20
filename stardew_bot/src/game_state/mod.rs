@@ -33,3 +33,6 @@ pub use item::{Item, Quality};
 
 mod chest_menu;
 pub use chest_menu::ChestMenu;
+
+mod dialogue_menu;
+pub use dialogue_menu::DialogueMenu;

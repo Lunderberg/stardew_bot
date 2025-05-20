@@ -5,8 +5,8 @@ use dotnet_debugger::{
 use crate::{bot_logic::BotError, Error};
 
 use super::{
-    ChestMenu, DailyState, DisplayState, FishingState, InputState, Inventory,
-    Location, LocationDelta, PlayerState,
+    ChestMenu, DailyState, DialogueMenu, DisplayState, FishingState,
+    InputState, Inventory, Location, LocationDelta, PlayerState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -18,6 +18,7 @@ pub struct GameState {
     pub inputs: InputState,
     pub display: DisplayState,
     pub chest_menu: Option<ChestMenu>,
+    pub dialogue_menu: Option<DialogueMenu>,
 }
 
 #[derive(Debug)]
@@ -34,6 +35,7 @@ pub struct GameStateDelta {
     inputs: InputState,
     display: DisplayState,
     chest_menu: Option<ChestMenu>,
+    dialogue_menu: Option<DialogueMenu>,
 }
 
 impl GameState {
@@ -50,6 +52,7 @@ impl GameState {
         InputState::def_read_input_state(&mut graph)?;
         DisplayState::def_read_display_state(&mut graph)?;
         ChestMenu::def_read_chest_menu(&mut graph)?;
+        DialogueMenu::def_read_dialogue_menu(&mut graph)?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -75,7 +78,8 @@ impl GameState {
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
-             chest_menu: Option<&ChestMenu>| GameState {
+             chest_menu: Option<&ChestMenu>,
+             dialogue_menu: Option<&DialogueMenu>| GameState {
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -83,6 +87,7 @@ impl GameState {
                 inputs: inputs.clone(),
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
+                dialogue_menu: dialogue_menu.cloned(),
             },
         )?;
 
@@ -94,7 +99,8 @@ impl GameState {
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
-             chest_menu: Option<&ChestMenu>| GameStateDelta {
+             chest_menu: Option<&ChestMenu>,
+             dialogue_menu: Option<&DialogueMenu>| GameStateDelta {
                 location_delta: location_delta.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -102,6 +108,7 @@ impl GameState {
                 inputs: inputs.clone(),
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
+                dialogue_menu: dialogue_menu.cloned(),
             },
         )?;
 
@@ -120,6 +127,7 @@ impl GameState {
                 let inputs = read_input_state();
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
+                let dialogue_menu = read_dialogue_menu();
 
                 new_game_state(
                     locations,
@@ -129,6 +137,7 @@ impl GameState {
                     inputs,
                     display,
                     chest_menu,
+                    dialogue_menu,
                 )
             }
 
@@ -140,6 +149,7 @@ impl GameState {
                 let inputs = read_input_state();
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
+                let dialogue_menu = read_dialogue_menu();
 
                 new_game_state_delta(
                     location_delta,
@@ -149,6 +159,7 @@ impl GameState {
                     inputs,
                     display,
                     chest_menu,
+                    dialogue_menu,
                 )
             }
         })?;
@@ -167,6 +178,7 @@ impl GameState {
         self.inputs = delta.inputs;
         self.display = delta.display;
         self.chest_menu = delta.chest_menu;
+        self.dialogue_menu = delta.dialogue_menu;
         if let Some(loc) = self
             .locations
             .iter_mut()

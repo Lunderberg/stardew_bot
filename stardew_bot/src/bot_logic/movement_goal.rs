@@ -415,17 +415,33 @@ impl BotGoal for LocalMovementGoal {
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
+        let mut cleanup = false;
+        if game_state.inputs.left_mouse_down() {
+            do_action(GameAction::ReleaseLeftClick);
+            cleanup = true;
+        }
+        if game_state.inputs.right_mouse_down() {
+            do_action(GameAction::ReleaseRightClick);
+            cleanup = true;
+        }
+
         if self.is_completed(game_state) {
             let mut state = BotGoalResult::Completed;
             if player.movement.is_some() {
                 do_action(GameAction::StopMoving);
                 state = BotGoalResult::InProgress;
             }
-            if game_state.inputs.right_mouse_down() {
-                do_action(GameAction::ReleaseRightClick);
+            if cleanup {
                 state = BotGoalResult::InProgress;
             }
             return Ok(state);
+        }
+
+        if game_state.dialogue_menu.is_some() {
+            if !game_state.inputs.left_mouse_down() {
+                do_action(GameAction::LeftClick);
+            }
+            return Ok(BotGoalResult::InProgress);
         }
 
         self.update_plan(game_state)?;
