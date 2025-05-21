@@ -12,7 +12,7 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{game_state::FishingState, Error, GameState};
+use crate::{Error, GameState};
 
 pub struct FishingUI {
     table_state: TableState,
@@ -36,12 +36,11 @@ impl FishingUI {
         }
     }
 
-    fn current_state(
-        &self,
-        fishing_state: &FishingState,
-    ) -> Option<FishHistory> {
+    fn current_state(&self, game_state: &GameState) -> Option<FishHistory> {
+        let fishing_state = &game_state.fishing;
+
         let minigame_in_progress = fishing_state.minigame_in_progress;
-        let tick = fishing_state.game_tick;
+        let tick = game_state.global_game_state.game_tick;
 
         let is_new_tick = self
             .history
@@ -80,7 +79,7 @@ impl WidgetWindow<Error> for FishingUI {
             self.history.clear();
         }
 
-        if let Some(state) = self.current_state(fishing_state) {
+        if let Some(state) = self.current_state(game_state) {
             self.history.push(state);
         }
 
@@ -121,7 +120,7 @@ impl WidgetWindow<Error> for FishingUI {
             [
                 Row::new([
                     "Game tick:".into(),
-                    format!("{}", fishing_state.game_tick),
+                    format!("{}", game_state.global_game_state.game_tick),
                 ]),
                 Row::new([
                     "Selecting cast distance:".into(),
@@ -314,7 +313,7 @@ impl WidgetWindow<Error> for FishingUI {
             (0..prediction_size)
                 .map(move |i| {
                     let pos = predictor(i as f32) as f64;
-                    let tick = fishing_state.game_tick as f64;
+                    let tick = game_state.global_game_state.game_tick as f64;
                     let i = i as f64;
                     (tick + i, MAX_SIZE - pos)
                 })

@@ -471,7 +471,7 @@ impl BotGoal for LocalMovementGoal {
             && player_position.manhattan_dist(self.position) < 1.5;
 
         if must_open_door {
-            if player.fade_to_black {
+            if game_state.global_game_state.currently_fading_to_black {
                 do_action(GameAction::ReleaseRightClick);
             } else {
                 do_action(GameAction::RightClick);

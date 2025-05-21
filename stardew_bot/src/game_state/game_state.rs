@@ -6,11 +6,13 @@ use crate::{bot_logic::BotError, Error};
 
 use super::{
     ChestMenu, DailyState, DialogueMenu, DisplayState, FishingState,
-    InputState, Inventory, Location, LocationDelta, PlayerState, RngState,
+    GlobalGameState, InputState, Inventory, Location, LocationDelta,
+    PlayerState, RngState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
+    pub global_game_state: GlobalGameState,
     pub locations: Vec<Location>,
     pub player: PlayerState,
     pub fishing: FishingState,
@@ -29,6 +31,7 @@ pub struct GameStateReader {
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameStateDelta {
+    global_game_state: GlobalGameState,
     location_delta: LocationDelta,
     player: PlayerState,
     fishing: FishingState,
@@ -46,6 +49,7 @@ impl GameState {
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
 
+        GlobalGameState::def_read_global_game_state(&mut graph)?;
         Inventory::def_read_inventory(&mut graph)?;
         Location::def_read_location(&mut graph)?;
         PlayerState::def_read_player(&mut graph)?;
@@ -75,7 +79,8 @@ impl GameState {
 
         graph.named_native_function(
             "new_game_state",
-            |locations: &Vec<Location>,
+            |global_game_state: &GlobalGameState,
+             locations: &Vec<Location>,
              player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
@@ -84,6 +89,7 @@ impl GameState {
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              rng_state: &RngState| GameState {
+                global_game_state: global_game_state.clone(),
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -98,7 +104,8 @@ impl GameState {
 
         graph.named_native_function(
             "new_game_state_delta",
-            |location_delta: &LocationDelta,
+            |global_game_state: &GlobalGameState,
+             location_delta: &LocationDelta,
              player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
@@ -107,6 +114,7 @@ impl GameState {
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              rng_state: &RngState| GameStateDelta {
+                global_game_state: global_game_state.clone(),
                 location_delta: location_delta.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -121,6 +129,8 @@ impl GameState {
 
         graph.parse(stringify! {
             pub fn read_full_state() {
+                let global_game_state = read_global_game_state();
+
                 let num_locations = location_list._size.prim_cast::<usize>();
 
                 let locations = (0..num_locations)
@@ -138,6 +148,7 @@ impl GameState {
                 let rng_state = read_rng_state();
 
                 new_game_state(
+                    global_game_state,
                     locations,
                     player,
                     fishing,
@@ -151,6 +162,7 @@ impl GameState {
             }
 
             pub fn read_delta_state() {
+                let global_game_state = read_global_game_state();
                 let location_delta = read_location_delta();
                 let player = read_player();
                 let fishing = read_fishing();
@@ -162,6 +174,7 @@ impl GameState {
                 let rng_state = read_rng_state();
 
                 new_game_state_delta(
+                    global_game_state,
                     location_delta,
                     player,
                     fishing,
@@ -183,6 +196,7 @@ impl GameState {
     pub fn apply_delta(&mut self, delta: GameStateDelta) {
         let player_pos = delta.player.position;
 
+        self.global_game_state = delta.global_game_state;
         self.player = delta.player;
         self.fishing = delta.fishing;
         self.daily = delta.daily;

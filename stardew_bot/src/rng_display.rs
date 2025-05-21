@@ -59,7 +59,7 @@ impl WidgetWindow<Error> for RngDisplay {
         let iter_rows = [
             Row::new([
                 "Game tick:".into(),
-                format!("{}", game_state.fishing.game_tick),
+                format!("{}", game_state.global_game_state.game_tick),
             ]),
             Row::new([
                 "Current index:".into(),

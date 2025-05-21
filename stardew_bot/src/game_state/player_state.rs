@@ -15,9 +15,6 @@ pub struct PlayerState {
     // Player's progression
     pub skills: PlayerSkills,
 
-    // TODO: Move this to a global game state
-    pub fade_to_black: bool,
-
     // Inventory-related info
     pub inventory: Inventory,
     pub active_hotbar_index: usize,
@@ -123,7 +120,6 @@ impl PlayerState {
              movement: Option<&Direction>,
              room_name: &str,
              skills: &PlayerSkills,
-             fade_to_black: bool,
              inventory: &Inventory,
              active_hotbar_index: usize,
              using_tool: bool,
@@ -134,7 +130,6 @@ impl PlayerState {
                     movement: movement.cloned(),
                     room_name: room_name.into(),
                     skills: skills.clone(),
-                    fade_to_black,
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
@@ -190,10 +185,6 @@ impl PlayerState {
                     new_skills(farming, fishing, foraging, mining, combat)
                 };
 
-                let fade_to_black = StardewValley.Game1
-                    .screenFade
-                    .fadeToBlack;
-
                 let inventory = read_inventory(player.netItems.value);
 
                 let active_hotbar_index = player
@@ -213,7 +204,6 @@ impl PlayerState {
                     movement,
                     room_name,
                     skills,
-                    fade_to_black,
                     inventory,
                     active_hotbar_index,
                     using_tool,

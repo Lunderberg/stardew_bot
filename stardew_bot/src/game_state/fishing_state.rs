@@ -4,9 +4,6 @@ use crate::Error;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct FishingState {
-    /// The number of game ticks that have elapsed
-    pub game_tick: i32,
-
     pub is_holding_rod: bool,
 
     /// True while the power of the cast is being selected.
@@ -117,8 +114,7 @@ impl FishingState {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_fishing_state",
-            |game_tick: i32,
-             is_holding_rod: bool,
+            |is_holding_rod: bool,
              is_timing_cast: bool,
              casting_power: f32,
              is_casting: bool,
@@ -142,7 +138,6 @@ impl FishingState {
              pulling_out_of_water: bool,
              showing_fish: bool,
              showing_treasure: bool| FishingState {
-                game_tick,
                 is_holding_rod,
                 is_timing_cast,
                 casting_power,
@@ -176,8 +171,6 @@ impl FishingState {
         let func = graph.parse(stringify! {
             fn read_fishing() {
                 let nan = make_nan();
-
-                let game_tick = StardewValley.Game1.ticks;
 
                 let player = StardewValley
                     .Game1
@@ -286,7 +279,6 @@ impl FishingState {
                     fishing_rod.is_some() && fishing_rod.showingTreasure;
 
                 new_fishing_state(
-                    game_tick,
                     fishing_rod.is_some(),
                     is_timing_cast,
                     casting_power,

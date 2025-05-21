@@ -10,6 +10,9 @@ pub use player_state::{FacingDirection, PlayerState};
 mod fishing_state;
 pub use fishing_state::FishingState;
 
+mod global_game_state;
+pub use global_game_state::GlobalGameState;
+
 mod daily_state;
 pub use daily_state::DailyState;
 
