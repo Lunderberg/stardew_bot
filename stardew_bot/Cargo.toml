@@ -15,6 +15,8 @@ itertools = "*"
 num = "0.4"
 priority-queue = "*"
 
+xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
+
 ratatui = "*"
 crossterm = "*"
 chrono = "*"

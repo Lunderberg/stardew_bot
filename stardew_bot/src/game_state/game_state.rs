@@ -5,9 +5,9 @@ use dotnet_debugger::{
 use crate::{bot_logic::BotError, Error};
 
 use super::{
-    ChestMenu, DailyState, DialogueMenu, DisplayState, FishingState,
-    GlobalGameState, InputState, Inventory, Location, LocationDelta,
-    PlayerState, RngState,
+    rng_state::RngState, ChestMenu, DailyState, DialogueMenu, DisplayState,
+    FishingState, GlobalGameState, InputState, Inventory, Location,
+    LocationDelta, PlayerState, SeededRng,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -40,7 +40,7 @@ pub struct GameStateDelta {
     display: DisplayState,
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
-    rng_state: RngState,
+    current_rng_state: SeededRng,
 }
 
 impl GameState {
@@ -59,7 +59,7 @@ impl GameState {
         DisplayState::def_read_display_state(&mut graph)?;
         ChestMenu::def_read_chest_menu(&mut graph)?;
         DialogueMenu::def_read_dialogue_menu(&mut graph)?;
-        RngState::def_read_rng_state(&mut graph)?;
+        SeededRng::def_read_rng_state(&mut graph)?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -88,7 +88,7 @@ impl GameState {
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
-             rng_state: &RngState| GameState {
+             current_rng: &SeededRng| GameState {
                 global_game_state: global_game_state.clone(),
                 locations: locations.clone(),
                 player: player.clone(),
@@ -98,7 +98,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
-                rng_state: rng_state.clone(),
+                rng_state: RngState::new(current_rng.clone()),
             },
         )?;
 
@@ -113,7 +113,7 @@ impl GameState {
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
-             rng_state: &RngState| GameStateDelta {
+             rng_state: &SeededRng| GameStateDelta {
                 global_game_state: global_game_state.clone(),
                 location_delta: location_delta.clone(),
                 player: player.clone(),
@@ -123,7 +123,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
-                rng_state: rng_state.clone(),
+                current_rng_state: rng_state.clone(),
             },
         )?;
 
@@ -196,6 +196,10 @@ impl GameState {
     pub fn apply_delta(&mut self, delta: GameStateDelta) {
         let player_pos = delta.player.position;
 
+        self.rng_state.apply_delta(
+            delta.current_rng_state,
+            delta.global_game_state.game_mode_tick,
+        );
         self.global_game_state = delta.global_game_state;
         self.player = delta.player;
         self.fishing = delta.fishing;
@@ -204,7 +208,6 @@ impl GameState {
         self.display = delta.display;
         self.chest_menu = delta.chest_menu;
         self.dialogue_menu = delta.dialogue_menu;
-        self.rng_state = delta.rng_state;
 
         if let Some(loc) = self
             .locations

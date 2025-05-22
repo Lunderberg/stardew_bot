@@ -12,6 +12,9 @@ pub struct GlobalGameState {
     /// The number of game ticks that have elapsed
     pub game_tick: i32,
 
+    /// The number of game ticks that have elapsed
+    pub game_mode_tick: i32,
+
     /// If the screen is currently fading to black.
     pub currently_fading_to_black: bool,
 
@@ -29,10 +32,12 @@ impl GlobalGameState {
             "new_global_game_state",
             |unique_id: u64,
              game_tick: i32,
+             game_mode_tick: i32,
              stats: &Stats,
              currently_fading_to_black: bool| GlobalGameState {
                 game_tick,
                 unique_id,
+                game_mode_tick,
                 stats: stats.0.clone(),
                 currently_fading_to_black,
             },
@@ -45,6 +50,12 @@ impl GlobalGameState {
                 stats.0.insert(name.to_string(), value);
             },
         )?;
+
+        let game_mode_tick = graph.static_field(
+            "StardewValley.Game1",
+            "<gameModeTicks>k__BackingField",
+        );
+        graph.name(game_mode_tick, "game_mode_tick")?;
 
         let func = graph.parse(stringify! {
             fn read_global_game_state() {
@@ -70,6 +81,7 @@ impl GlobalGameState {
                 new_global_game_state(
                     unique_id,
                     game_tick,
+                    game_mode_tick,
                     stat_dict,
                     currently_fading_to_black,
                 )

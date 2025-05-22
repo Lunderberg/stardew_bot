@@ -119,7 +119,7 @@ impl TuiBuffers {
             pathfinding: PathfindingUI,
             keyboard: InputDisplay,
             bot_goals: BotGoalDisplay,
-            rng_display: RngDisplay::new(),
+            rng_display: RngDisplay,
         }
     }
 
