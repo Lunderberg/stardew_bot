@@ -25,17 +25,10 @@ impl WidgetWindow<Error> for RngDisplay {
             .get::<GameState>()
             .expect("Generated/updated in top-level GUI update");
 
-        let average_calls = game_state
+        let (mean, std) = game_state
             .rng_state
-            .iter_prev_calls()
-            .fold(Some((0, 0)), |state, calls_this_frame: Option<usize>| {
-                let (calls, ticks) = state?;
-                Some((calls + calls_this_frame?, ticks + 1))
-            })
-            .map(|(num_calls, num_frames)| {
-                (num_calls as f32) / (num_frames as f32)
-            })
-            .unwrap_or(f32::NAN);
+            .mean_stddev_calls_per_frame()
+            .unwrap_or((f32::NAN, f32::NAN));
 
         let iter_rows = [
             Row::new([
@@ -46,7 +39,7 @@ impl WidgetWindow<Error> for RngDisplay {
                 "Game mode tick:".into(),
                 format!("{}", game_state.global_game_state.game_mode_tick),
             ]),
-            Row::new(["Avg calls/tick:".into(), format!("{average_calls:.1}")]),
+            Row::new(["Calls/tick:".into(), format!("{mean:.1} ± {std:.1}")]),
         ]
         .into_iter()
         .chain([Row::new([Text::default()])])

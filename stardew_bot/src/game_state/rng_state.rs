@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::{collections::VecDeque, ops::Range};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
@@ -83,6 +83,47 @@ impl RngState {
 
     pub fn iter_prev_calls(&self) -> impl Iterator<Item = Option<usize>> + '_ {
         self.calls_per_tick.iter().cloned()
+    }
+
+    pub fn mean_stddev_calls_per_frame(&self) -> Option<(f32, f32)> {
+        if self.calls_per_tick.is_empty() {
+            return None;
+        }
+
+        let mut sum_calls = 0;
+        let mut sum_calls_squared = 0;
+
+        for opt_calls in self.calls_per_tick.iter().cloned() {
+            let calls = opt_calls?;
+            sum_calls += calls;
+            sum_calls_squared += calls * calls;
+        }
+
+        let n_samples = self.calls_per_tick.len() as f32;
+
+        let mean = (sum_calls as f32) / n_samples;
+        let variance = (sum_calls_squared as f32) / n_samples - mean * mean;
+        let stddev = variance.sqrt();
+
+        Some((mean, stddev))
+    }
+
+    pub fn estimate_num_calls(
+        &self,
+        num_frames: usize,
+    ) -> Option<Range<usize>> {
+        let (mean, stddev) = self.mean_stddev_calls_per_frame()?;
+
+        let sum_mean = mean * (num_frames as f32);
+        let sum_stddev = stddev * (num_frames as f32).sqrt();
+
+        let lower = sum_mean - sum_stddev;
+        let upper = sum_mean + sum_stddev;
+
+        let lower = lower.floor() as usize;
+        let upper = upper.ceil() as usize;
+
+        Some(lower..upper + 1)
     }
 }
 
