@@ -3,7 +3,7 @@ use x11rb::{
     connection::Connection as _,
     protocol::{
         xproto::{
-            AtomEnum, ButtonIndex, ConnectionExt as _,
+            AtomEnum, ButtonIndex, ConfigureWindowAux, ConnectionExt as _,
             EventMask as X11EventMask, KeyPressEvent, Keycode as X11KeyCode,
             Window, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT,
             KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT,
@@ -32,6 +32,12 @@ pub enum Error {
 
     #[error("No root X11 window found")]
     MissingRootWindow,
+
+    #[error(
+        "Attempted to perform operation on main Stardew window, \
+         but Stardew window was not yet defined."
+    )]
+    MainStardewWindowNotSet,
 
     #[error("TryFromSliceError {0}")]
     TryFromSliceError(#[from] std::array::TryFromSliceError),
@@ -185,10 +191,12 @@ impl X11Handler {
         self.main_window = Some(window);
     }
 
-    pub fn update_window_location(&mut self) -> Result<(), Error> {
-        let window = self
-            .main_window
-            .expect("Should set the main window before updating its location");
+    fn get_main_window(&self) -> Result<Window, Error> {
+        self.main_window.ok_or(Error::MainStardewWindowNotSet)
+    }
+
+    pub fn query_window_location(&mut self) -> Result<(), Error> {
+        let window = self.get_main_window()?;
 
         let query_pointer = self.conn.query_pointer(window)?.reply()?;
 
@@ -202,14 +210,35 @@ impl X11Handler {
         Ok(())
     }
 
+    pub fn move_and_resize_window(
+        &mut self,
+        x: usize,
+        y: usize,
+        width: usize,
+        height: usize,
+    ) -> Result<(), Error> {
+        let window = self.get_main_window()?;
+
+        self.conn.configure_window(
+            window,
+            &ConfigureWindowAux {
+                x: Some(x as i32),
+                y: Some(y as i32),
+                width: Some(width as u32),
+                height: Some(height as u32),
+                ..Default::default()
+            },
+        )?;
+
+        Ok(())
+    }
+
     pub fn send_keystroke(
         &self,
         press: bool,
         keycode: X11KeyCode,
     ) -> Result<(), Error> {
-        let window = self
-            .main_window
-            .expect("Must set main window before sending keystrokes");
+        let window = self.get_main_window()?;
 
         let response_type = if press {
             KEY_PRESS_EVENT

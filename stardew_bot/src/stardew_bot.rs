@@ -188,7 +188,8 @@ impl StardewBot {
             x11_handler.find_window_blocking("Stardew Valley")?;
 
         x11_handler.set_main_window(stardew_window);
-        x11_handler.update_window_location()?;
+        x11_handler.move_and_resize_window(30, 68, 1000, 700)?;
+        x11_handler.query_window_location()?;
 
         let mut buffers = TuiBuffers::new();
 
