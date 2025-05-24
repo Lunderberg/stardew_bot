@@ -23,4 +23,7 @@ pub use select_item_goal::*;
 mod clear_farm_goal;
 pub use clear_farm_goal::*;
 
+mod clay_farming_goal;
+pub use clay_farming_goal::*;
+
 mod impl_tile_map_graph_search;

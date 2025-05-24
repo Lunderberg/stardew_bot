@@ -18,7 +18,9 @@ use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
     bot_logic::LocalMovementGoal,
-    game_state::{Location, ObjectKind, Rectangle, ResourceClumpKind, Vector},
+    game_state::{
+        Location, ObjectKind, Rectangle, ResourceClumpKind, TileMap, Vector,
+    },
     BotLogic, Error, GameState,
 };
 
@@ -40,6 +42,7 @@ impl<'a> DrawableGameLocation<'a> {
             .x_bounds(self.x_bounds())
             .y_bounds(self.y_bounds())
             .paint(|ctx| {
+                self.paint_diggable_tiles(ctx);
                 self.paint_blocked_tiles(ctx);
                 self.paint_water_tiles(ctx);
                 self.paint_buildings(ctx);
@@ -136,12 +139,14 @@ impl<'a> DrawableGameLocation<'a> {
         }
     }
 
-    fn paint_blocked_tiles(&self, ctx: &mut CanvasContext) {
-        let height = self.room.shape.down as usize;
+    fn paint_bool_map(
+        ctx: &mut CanvasContext,
+        map: &TileMap<bool>,
+        color: Color,
+    ) {
+        let height = map.height();
 
-        let blocked = self
-            .room
-            .blocked
+        let tiles = map
             .iter()
             .filter(|(_, is_blocked)| **is_blocked)
             .map(|(loc, _)| {
@@ -151,9 +156,17 @@ impl<'a> DrawableGameLocation<'a> {
             .collect::<Vec<_>>();
 
         ctx.draw(&Points {
-            coords: &blocked,
-            color: Color::Red,
+            coords: &tiles,
+            color,
         });
+    }
+
+    fn paint_blocked_tiles(&self, ctx: &mut CanvasContext) {
+        Self::paint_bool_map(ctx, &self.room.blocked, Color::Red);
+    }
+
+    fn paint_diggable_tiles(&self, ctx: &mut CanvasContext) {
+        Self::paint_bool_map(ctx, &self.room.diggable, Color::Rgb(20, 20, 20));
     }
 
     fn paint_water_tiles(&self, ctx: &mut CanvasContext) {

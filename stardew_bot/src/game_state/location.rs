@@ -29,6 +29,9 @@ pub struct Location {
     /// player-planted tea tree bushes, and walnut bushes.
     pub bushes: Vec<Bush>,
 
+    /// Dirt that has been cleared with a Hoe
+    pub hoe_dirt: Vec<HoeDirt>,
+
     /// Trees.  This includes the small 1x1 stumps left behind after
     /// chopping down a tree, but not the larger 2x2 stumps made
     /// during worldgen.
@@ -54,12 +57,17 @@ pub struct Location {
     /// explicitly marked with the "Passable" attribute, then the tile
     /// cannot be passed through.
     pub blocked: TileMap<bool>,
+
+    /// Which tiles are marked as diggable, by having the "Diggable"
+    /// property in the "Back" layer.
+    pub diggable: TileMap<bool>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct LocationDelta {
     pub(crate) name: String,
     resource_clumps: Vec<ResourceClump>,
+    hoe_dirt: Vec<HoeDirt>,
     trees: Vec<Tree>,
     grass: Vec<Vector<isize>>,
     objects: Vec<Object>,
@@ -116,6 +124,11 @@ pub struct Bush {
     /// internally as a floating-point value, but since all
     /// occurrences are aligned to tiles, I cast it to integers.
     pub top_left: Vector<isize>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct HoeDirt {
+    pub position: Vector<isize>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -191,6 +204,7 @@ struct MapTileSheets {
     known_sheets: HashSet<Pointer>,
     passable: HashSet<(Pointer, usize)>,
     shadow: HashSet<(Pointer, usize)>,
+    diggable: HashSet<(Pointer, usize)>,
     tiles: Vec<MapTile>,
 }
 
@@ -300,6 +314,13 @@ impl Location {
                 if let Some(warp) = parse_warp() {
                     warps.push(warp)
                 }
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_hoe_dirt",
+            |position: &Vector<isize>| HoeDirt {
+                position: position.clone(),
             },
         )?;
 
@@ -487,6 +508,7 @@ impl Location {
              warps: &Vec<Warp>,
              resource_clumps: &Vec<ResourceClump>,
              grass: &Vec<Vector<isize>>,
+             hoe_dirt: &Vec<HoeDirt>,
              trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
              objects: &Vec<Object>,
@@ -499,6 +521,7 @@ impl Location {
                     warps: warps.clone(),
                     resource_clumps: resource_clumps.clone(),
                     grass: grass.clone(),
+                    hoe_dirt: hoe_dirt.clone(),
                     trees: trees.clone(),
                     bushes: bushes.clone(),
                     objects: objects.clone(),
@@ -506,6 +529,7 @@ impl Location {
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
                     blocked: tiles.collect_blocked_tiles(*shape),
+                    diggable: tiles.collect_diggable_tiles(*shape),
                 }
             },
         )?;
@@ -515,12 +539,14 @@ impl Location {
             |name: &str,
              resource_clumps: &Vec<ResourceClump>,
              grass: &Vec<Vector<isize>>,
+             hoe_dirt: &Vec<HoeDirt>,
              trees: &Vec<Tree>,
              objects: &Vec<Object>| {
                 LocationDelta {
                     name: name.into(),
                     resource_clumps: resource_clumps.clone(),
                     grass: grass.clone(),
+                    hoe_dirt: hoe_dirt.clone(),
                     trees: trees.clone(),
                     objects: objects.clone(),
                 }
@@ -650,6 +676,51 @@ impl Location {
                     .collect();
 
                 grass
+            }
+
+            fn read_location_hoe_dirt(location, filter) {
+                let num_features = location
+                    .terrainFeatures
+                    .dict
+                    ._entries
+                    .len();
+                let num_features = if num_features.is_some() {
+                    num_features
+                } else {
+                    0
+                };
+                let iter_features = (0..num_features)
+                    .map(|i_feat: usize| {
+                        location
+                            .terrainFeatures
+                            .dict
+                            ._entries[i_feat]
+                    });
+
+                let hoe_dirt = iter_features
+                    .filter(|feature| feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.HoeDirt>()
+                            .is_some())
+                    .filter(|feature| filter.is_none() || filter(feature))
+                    .map(|feature| {
+                        let hoe_dirt = feature
+                            .value
+                            .value
+                            .as::<StardewValley.TerrainFeatures.HoeDirt>();
+                        let position = {
+                            let right = feature.key.X;
+                            let down = feature.key.Y;
+                            new_isize_vector(right,down)
+                        };
+                        new_hoe_dirt(
+                            position,
+                        )
+                    })
+                    .collect();
+
+                hoe_dirt
             }
 
             fn read_location_trees(location, filter) {
@@ -849,6 +920,7 @@ impl Location {
                 let resource_clumps = read_location_resource_clumps(
                     location, None);
                 let grass = read_location_grass(location, None);
+                let hoe_dirt = read_location_hoe_dirt(location, None);
                 let trees = read_location_trees(location, None);
 
                 let num_large_features = location
@@ -1061,6 +1133,7 @@ impl Location {
                     warps,
                     resource_clumps,
                     grass,
+                    hoe_dirt,
                     trees,
                     bushes,
                     objects,
@@ -1104,6 +1177,13 @@ impl Location {
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
+                let hoe_dirt = read_location_hoe_dirt(
+                    location,
+                    |feature| {
+                        let pos = feature.key;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
                 let trees = read_location_trees(
                     location,
                     |feature| {
@@ -1123,6 +1203,7 @@ impl Location {
                     name,
                     resource_clumps,
                     grass,
+                    hoe_dirt,
                     trees,
                     objects,
                 )
@@ -1250,6 +1331,17 @@ impl Location {
             .unique_by(|tree| tree.position)
             .collect();
 
+        self.hoe_dirt = delta
+            .hoe_dirt
+            .into_iter()
+            .chain(
+                self.hoe_dirt
+                    .drain(..)
+                    .filter(|hoe_dirt| is_far_from_player(hoe_dirt.position)),
+            )
+            .unique_by(|hoe_dirt| hoe_dirt.position)
+            .collect();
+
         self.grass = delta
             .grass
             .into_iter()
@@ -1360,6 +1452,9 @@ impl MapTileSheets {
                 "Shadow" => {
                     self.shadow.insert((tile_sheet, index));
                 }
+                "Diggable" => {
+                    self.diggable.insert((tile_sheet, index));
+                }
                 _ => {}
             });
     }
@@ -1375,6 +1470,21 @@ impl MapTileSheets {
                         && !self.shadow.contains(&tile.lookup_key)
                 }
                 _ => unreachable!("Only 0 and 1 as allowed values"),
+            })
+            .map(|tile| tile.location)
+            .for_each(|loc| {
+                map[loc] = true;
+            });
+        map
+    }
+
+    fn collect_diggable_tiles(&self, shape: Vector<isize>) -> TileMap<bool> {
+        let mut map = TileMap::empty(shape.right as usize, shape.down as usize);
+        self.tiles
+            .iter()
+            .filter(|tile| match tile.layer_num {
+                0 => self.diggable.contains(&tile.lookup_key),
+                _ => false,
             })
             .map(|tile| tile.location)
             .for_each(|loc| {

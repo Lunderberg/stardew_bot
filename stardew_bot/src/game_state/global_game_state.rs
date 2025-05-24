@@ -90,4 +90,11 @@ impl GlobalGameState {
 
         Ok(func)
     }
+
+    pub(crate) fn get_stat(&self, stat_name: &str) -> Result<u32, Error> {
+        self.stats
+            .get(stat_name)
+            .cloned()
+            .ok_or_else(|| Error::MissingStat(stat_name.to_string()))
+    }
 }

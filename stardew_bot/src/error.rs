@@ -43,6 +43,12 @@ pub enum Error {
 
     #[error("The bot has achieved all of its goals.")]
     NoRemainingGoals,
+
+    #[error(
+        "Expected to have player stat '{0}' defined, \
+         but it was missing."
+    )]
+    MissingStat(String),
 }
 
 impl std::fmt::Debug for Error {
