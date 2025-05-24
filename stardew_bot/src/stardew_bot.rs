@@ -354,7 +354,12 @@ impl StardewBot {
         if self.show_startup_times {
             let main_loop_time = after_main_loop - before_main_loop;
             println!("Main loop: {:?}", main_loop_time);
-            println!("Main loop per frame: {:?}", main_loop_time / num_frames);
+            if num_frames > 0 {
+                println!(
+                    "Main loop per frame: {:?}",
+                    main_loop_time / num_frames
+                );
+            }
         }
 
         Ok(())
