@@ -12,6 +12,9 @@ pub use fishing_goal::*;
 mod movement_goal;
 pub use movement_goal::*;
 
+mod go_to_action_tile;
+pub use go_to_action_tile::*;
+
 mod graph_search;
 
 mod inventory_goal;

@@ -16,6 +16,9 @@ pub enum BotError {
 
     #[error("Could not find room named '{0}'")]
     UnknownRoom(String),
+
+    #[error("Could not find any tile with action '{0}'")]
+    NoTileWithAction(String),
 }
 
 impl std::fmt::Debug for BotError {

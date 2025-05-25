@@ -61,6 +61,9 @@ pub struct Location {
     /// Which tiles are marked as diggable, by having the "Diggable"
     /// property in the "Back" layer.
     pub diggable: TileMap<bool>,
+
+    /// Tiles that can have some action performed on them.
+    pub action_tiles: Vec<(Vector<isize>, String)>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -530,6 +533,7 @@ impl Location {
                     buildings: buildings.clone(),
                     blocked: tiles.collect_blocked_tiles(*shape),
                     diggable: tiles.collect_diggable_tiles(*shape),
+                    action_tiles: tiles.collect_action_tiles(),
                 }
             },
         )?;
@@ -1491,6 +1495,37 @@ impl MapTileSheets {
                 map[loc] = true;
             });
         map
+    }
+
+    fn collect_action_tiles(&self) -> Vec<(Vector<isize>, String)> {
+        self.tiles
+            .iter()
+            .filter(|tile| tile.layer_num == 1)
+            .flat_map(|tile| {
+                tile.properties
+                    .iter()
+                    .filter(|(key, _)| key.as_str() == "Action")
+                    .filter_map(|(_, opt_value)| opt_value.as_ref())
+                    .map(|value| (tile.location, value))
+            })
+            .filter(|(_, action)| {
+                // Filter out some actions that are either handled
+                // elsewhere, such as warps and doors, or aren't worth
+                // tracking for now, such as messages.
+                [
+                    "Message",
+                    "Letter",
+                    "Warp",
+                    "Door",
+                    "Notes",
+                    "playSound",
+                    "LockedDoorWarp",
+                ]
+                .into_iter()
+                .all(|special| !action.starts_with(special))
+            })
+            .map(|(tile, action)| (tile, action.to_string()))
+            .collect()
     }
 }
 

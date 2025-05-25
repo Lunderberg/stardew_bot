@@ -225,6 +225,10 @@ impl GameState {
             .ok_or_else(|| BotError::UnknownRoom(name.into()))
             .map_err(Into::into)
     }
+
+    pub fn current_room(&self) -> Result<&Location, Error> {
+        self.get_room(&self.player.room_name)
+    }
 }
 
 impl GameStateReader {
