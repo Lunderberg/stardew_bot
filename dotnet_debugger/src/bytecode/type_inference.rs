@@ -492,6 +492,11 @@ impl<'a> TypeInference<'a> {
                         ) => Ok(RuntimePrimType::NativeUInt.into()),
 
                         (
+                            RuntimeType::Prim(RuntimePrimType::I32),
+                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
+                        ) => Ok(RuntimePrimType::I32.into()),
+
+                        (
                             RuntimeType::Prim(RuntimePrimType::F32),
                             RuntimeType::Prim(RuntimePrimType::F32),
                         ) => Ok(RuntimePrimType::F32.into()),

@@ -19,7 +19,8 @@ use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 use crate::{
     bot_logic::LocalMovementGoal,
     game_state::{
-        Location, ObjectKind, Rectangle, ResourceClumpKind, TileMap, Vector,
+        FurnitureKind, Location, ObjectKind, Rectangle, ResourceClumpKind,
+        TileMap, Vector,
     },
     BotLogic, Error, GameState,
 };
@@ -51,6 +52,7 @@ impl<'a> DrawableGameLocation<'a> {
                 self.paint_bushes(ctx);
                 self.paint_trees(ctx);
                 self.paint_litter(ctx);
+                self.paint_furniture(ctx);
 
                 ctx.layer();
 
@@ -290,6 +292,34 @@ impl<'a> DrawableGameLocation<'a> {
                 let coordinates =
                     self.to_draw_coordinates(obj.tile.map(|x| x as f64));
                 Some((color, coordinates))
+            })
+            .into_group_map()
+            .into_iter()
+            .for_each(|(color, coords)| {
+                ctx.draw(&Points {
+                    coords: &coords,
+                    color,
+                });
+            });
+    }
+
+    fn paint_furniture(&self, ctx: &mut CanvasContext) {
+        self.room
+            .furniture
+            .iter()
+            .flat_map(|piece| {
+                let color = match &piece.kind {
+                    FurnitureKind::Rug => Color::Rgb(11, 13, 58),
+                    FurnitureKind::Bed => Color::Rgb(75, 131, 186),
+                    _ => Color::Rgb(253, 196, 0),
+                };
+                piece
+                    .shape
+                    .iter_points()
+                    .map(|tile| {
+                        self.to_draw_coordinates(tile.map(|x| x as f64))
+                    })
+                    .map(move |coord| (color, coord))
             })
             .into_group_map()
             .into_iter()

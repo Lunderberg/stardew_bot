@@ -1732,6 +1732,7 @@ impl<'a> VMEvaluator<'a> {
     define_binary_op! {
         eval_div,
         (NativeUInt(a),NativeUInt(b)) => a.div_euclid(b),
+        (I32(a),NativeUInt(b)) => a.div_euclid(b as i32),
         (F32(a),NativeUInt(b)) => a / (b as f32),
         (F64(a),NativeUInt(b)) => a / (b as f64),
     }

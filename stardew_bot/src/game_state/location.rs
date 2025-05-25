@@ -45,6 +45,9 @@ pub struct Location {
     /// Objects on the ground
     pub objects: Vec<Object>,
 
+    /// Placable furniture in the location
+    pub furniture: Vec<Furniture>,
+
     /// Which tiles have water.
     pub water_tiles: Option<Vec<bool>>,
 
@@ -178,6 +181,34 @@ pub enum ObjectKind {
     Fiber,
     Chest(Inventory),
     Other(String),
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Furniture {
+    pub shape: Rectangle<isize>,
+    pub kind: FurnitureKind,
+}
+
+#[derive(RustNativeObject, Debug, Clone, Copy)]
+pub enum FurnitureKind {
+    Chair,
+    Bench,
+    Couch,
+    Armchair,
+    Dresser,
+    LongTable,
+    Painting,
+    Lamp,
+    Decor,
+    Other,
+    Bookcase,
+    Table,
+    Rug,
+    Window,
+    Fireplace,
+    Bed,
+    Torch,
+    Sconce,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -383,6 +414,26 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_furniture_kind",
+            |kind: i32| -> FurnitureKind {
+                kind.try_into().expect(
+                    "TODO: Allow NativeFunction to propagate \
+                     user-defined error types",
+                )
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_furniture",
+            |shape: &Rectangle<isize>, kind: &FurnitureKind| -> Furniture {
+                Furniture {
+                    shape: shape.clone(),
+                    kind: *kind,
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_rectangle",
             |right: isize, down: isize, width: isize, height: isize| {
                 Rectangle::<isize> {
@@ -520,6 +571,7 @@ impl Location {
              trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
              objects: &Vec<Object>,
+             furniture: &Vec<Furniture>,
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
              buildings: &Vec<Building>| {
@@ -533,6 +585,7 @@ impl Location {
                     trees: trees.clone(),
                     bushes: bushes.clone(),
                     objects: objects.clone(),
+                    furniture: furniture.clone(),
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
@@ -835,6 +888,41 @@ impl Location {
                 objects
             }
 
+            fn read_location_furniture(location, filter) {
+                let furniture_list = location
+                    .furniture
+                    .list;
+
+                let num_furniture = furniture_list
+                    ._size
+                    .prim_cast::<usize>();
+
+                let furniture = (0..num_furniture)
+                    .map(|i| {
+                        furniture_list
+                            ._items[i]
+                    })
+                    .filter(|piece| filter.is_none() || filter(piece))
+                    .map(|piece| {
+                        let shape = {
+                            let right = piece.tileLocation.value.X;
+                            let down = piece.tileLocation.value.Y;
+                            let width = piece.boundingBox.value.Width / 64;
+                            let height = piece.boundingBox.value.Height / 64;
+                            new_rectangle(right, down, width, height)
+                        };
+
+                        let kind = new_furniture_kind(
+                            piece.furniture_type.value
+                        );
+
+                        new_furniture(shape, kind)
+                    })
+                    .collect();
+
+                furniture
+            }
+
             fn read_location(location) {
                 let name = get_location_name_ptr(location).read_string();
                 let size = location
@@ -965,6 +1053,7 @@ impl Location {
                     .collect();
 
                 let objects = read_location_objects(location, None);
+                let furniture = read_location_furniture(location, None);
 
                 let water_tiles = location
                     .waterTiles
@@ -1154,6 +1243,7 @@ impl Location {
                     trees,
                     bushes,
                     objects,
+                    furniture,
                     flattened_water_tiles,
                     tile_sheets,
                     buildings,
@@ -1293,7 +1383,13 @@ impl Location {
 
         let iter_tree = self.trees.iter().map(|tree| tree.position);
 
-        let iter_litter = self.objects.iter().map(|litter| litter.tile);
+        let iter_objects = self.objects.iter().map(|obj| obj.tile);
+
+        let iter_furniture = self
+            .furniture
+            .iter()
+            .filter(|piece| !matches!(piece.kind, FurnitureKind::Rug))
+            .flat_map(|piece| piece.shape.iter_points());
 
         let iter_buildings = self
             .buildings
@@ -1305,7 +1401,8 @@ impl Location {
             .chain(iter_clumps)
             .chain(iter_bush)
             .chain(iter_tree)
-            .chain(iter_litter)
+            .chain(iter_objects)
+            .chain(iter_furniture)
             .chain(iter_buildings)
             .for_each(|tile| {
                 map[tile] = false;
@@ -1443,6 +1540,35 @@ impl TryFrom<i32> for ResourceClumpKind {
             672 => Ok(Self::Boulder),
             622 => Ok(Self::Meteorite),
             752 | 754 | 756 | 758 => Ok(Self::MineBoulder),
+
+            other => Err(Error::UnrecognizedResourceClump(other)),
+        }
+    }
+}
+
+impl TryFrom<i32> for FurnitureKind {
+    type Error = Error;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Self::Chair),
+            1 => Ok(Self::Bench),
+            2 => Ok(Self::Couch),
+            3 => Ok(Self::Armchair),
+            4 => Ok(Self::Dresser),
+            5 => Ok(Self::LongTable),
+            6 => Ok(Self::Painting),
+            7 => Ok(Self::Lamp),
+            8 => Ok(Self::Decor),
+            9 => Ok(Self::Other),
+            10 => Ok(Self::Bookcase),
+            11 => Ok(Self::Table),
+            12 => Ok(Self::Rug),
+            13 => Ok(Self::Window),
+            14 => Ok(Self::Fireplace),
+            15 => Ok(Self::Bed),
+            16 => Ok(Self::Torch),
+            17 => Ok(Self::Sconce),
 
             other => Err(Error::UnrecognizedResourceClump(other)),
         }
