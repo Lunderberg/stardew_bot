@@ -196,3 +196,22 @@ impl Into<Vector<f32>> for Vector<isize> {
         self.map(|x| x as f32)
     }
 }
+
+impl<T> std::fmt::Display for Rectangle<T>
+where
+    T: std::fmt::Display,
+    T: std::ops::Add<Output = T>,
+    T: Copy,
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let bottom_right = self.top_left + self.shape;
+        write!(
+            f,
+            "({}..{}, {}..{})",
+            self.top_left.right,
+            bottom_right.right,
+            self.top_left.down,
+            bottom_right.down,
+        )
+    }
+}
