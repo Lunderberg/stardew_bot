@@ -106,12 +106,13 @@ pub struct ResourceClump {
     pub kind: ResourceClumpKind,
 }
 
-#[derive(RustNativeObject, Debug, Clone, Copy)]
+#[derive(RustNativeObject, Debug, Clone)]
 pub enum ResourceClumpKind {
     Stump,
     Boulder,
     Meterorite,
     MineBoulder,
+    GiantCrop(String),
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -404,6 +405,10 @@ impl Location {
             },
         )?;
 
+        graph.named_native_function("new_giant_crop_kind", |name: &str| {
+            ResourceClumpKind::GiantCrop(name.to_string())
+        })?;
+
         graph.named_native_function(
             "new_resource_clump",
             |shape: &Rectangle<isize>, kind: &ResourceClumpKind| {
@@ -633,7 +638,15 @@ impl Location {
                             new_rectangle(right,down,width,height)
                         };
 
-                        let kind = {
+                        let giant_crop_kind = clump
+                            .as::<StardewValley.TerrainFeatures.GiantCrop>()
+                            .netId
+                            .value
+                            .read_string();
+
+                        let kind = if giant_crop_kind.is_some() {
+                            new_giant_crop_kind(giant_crop_kind)
+                        } else {
                             let kind_index = clump.parentSheetIndex.value;
                             new_resource_clump_kind(kind_index)
                         };

@@ -228,6 +228,9 @@ impl<'a> DrawableGameLocation<'a> {
                         ResourceClumpKind::Boulder => Color::DarkGray,
                         ResourceClumpKind::Meterorite => Color::Magenta,
                         ResourceClumpKind::MineBoulder => Color::DarkGray,
+                        ResourceClumpKind::GiantCrop(_) => {
+                            Color::Rgb(41, 192, 80)
+                        }
                     },
                 )
             })
