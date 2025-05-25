@@ -72,6 +72,49 @@ pub enum TypeInferenceError {
     ChainRequiresSameIteratorType(RuntimeType, RuntimeType),
 }
 
+macro_rules! infer_binary_op {
+    ($func_name:ident,
+     $(
+         (
+             $lhs_ty:ident,
+             $rhs_ty:ident $(,)?
+         ) => $result_ty:ident
+     ),* $(,)?
+    ) => {
+        fn $func_name(
+            &self,
+            expr_kind: &ExprKind,
+            lhs: SymbolicValue,
+            rhs: SymbolicValue,
+        ) -> Result<RuntimeType, Error> {
+            let lhs_type = self.expect_cache(lhs);
+            let rhs_type = self.expect_cache(rhs);
+            match (lhs_type, rhs_type) {
+                (RuntimeType::Unknown, _) | (_, RuntimeType::Unknown) => {
+                    Ok(RuntimeType::Unknown)
+                }
+
+                $(
+                    (
+                        RuntimeType::Prim(RuntimePrimType::$lhs_ty),
+                        RuntimeType::Prim(RuntimePrimType::$rhs_ty),
+                    ) => Ok(RuntimeType::Prim(
+                        RuntimePrimType::$result_ty
+                    )),
+                )*
+
+                (other_lhs, other_rhs) => {
+                    Err(Error::InvalidOperandsForBinaryOp {
+                        op: expr_kind.op_name(),
+                        lhs: other_lhs.clone(),
+                        rhs: other_rhs.clone(),
+                    })
+                }
+            }
+        }
+    };
+}
+
 impl<'a> TypeInference<'a> {
     pub fn new(reader: Option<CachedReader<'a>>) -> Self {
         let opt_reader = reader.into();
@@ -85,11 +128,7 @@ impl<'a> TypeInference<'a> {
         self.opt_reader.ok_or(TypeInferenceError::NoRemoteProcess)
     }
 
-    fn expect_cache<'b>(
-        &'b self,
-        value: SymbolicValue,
-        context: &'static str,
-    ) -> &'b RuntimeType {
+    fn expect_cache<'b>(&'b self, value: SymbolicValue) -> &'b RuntimeType {
         match value {
             SymbolicValue::Bool(_) => &RuntimeType::Prim(RuntimePrimType::Bool),
             SymbolicValue::Int(_) => {
@@ -100,8 +139,7 @@ impl<'a> TypeInference<'a> {
                 self.cache.get(&op_index).unwrap_or_else(|| {
                     panic!(
                         "Internal error: \
-                         No cached value for '{context}' \
-                         located at {op_index}.  \
+                         No cached value for operation at {op_index}. \
                          Topologic sort should ensure that \
                          all input expressions have their type inferred."
                     )
@@ -169,20 +207,16 @@ impl<'a> TypeInference<'a> {
                     let params = Some(
                         params
                             .iter()
-                            .map(|param| {
-                                self.expect_cache(*param, "function param")
-                            })
+                            .map(|param| self.expect_cache(*param))
                             .cloned()
                             .collect(),
                     );
-                    let output = Box::new(
-                        self.expect_cache(*output, "function output").clone(),
-                    );
+                    let output = Box::new(self.expect_cache(*output).clone());
                     FunctionType { params, output }.into()
                 }
                 ExprKind::FunctionArg(ty) => ty.clone(),
                 ExprKind::FunctionCall { func, .. } => match self
-                    .expect_cache(*func, "function definition")
+                    .expect_cache(*func)
                 {
                     RuntimeType::Function(FunctionType { output, .. }) => {
                         Ok(output.as_ref().clone())
@@ -198,7 +232,7 @@ impl<'a> TypeInference<'a> {
                     .into()
                 }
                 ExprKind::Map { map, .. } => {
-                    let map = self.expect_cache(*map, "mapping function");
+                    let map = self.expect_cache(*map);
                     match map {
                         RuntimeType::Function(FunctionType {
                             output, ..
@@ -210,15 +244,12 @@ impl<'a> TypeInference<'a> {
                     }?
                 }
                 ExprKind::Filter { iterator, .. } => {
-                    let iter =
-                        self.expect_cache(*iterator, "iterator being filtered");
+                    let iter = self.expect_cache(*iterator);
                     iter.clone()
                 }
                 ExprKind::Chain(iter_a, iter_b) => {
-                    let iter_a_type =
-                        self.expect_cache(*iter_a, "iterator being chained");
-                    let iter_b_type =
-                        self.expect_cache(*iter_b, "iterator being chained");
+                    let iter_a_type = self.expect_cache(*iter_a);
+                    let iter_b_type = self.expect_cache(*iter_b);
                     if iter_a_type == iter_b_type {
                         Ok(iter_a_type.clone())
                     } else if matches!(iter_a_type, RuntimeType::Unknown) {
@@ -233,8 +264,7 @@ impl<'a> TypeInference<'a> {
                     }?
                 }
                 ExprKind::Collect { iterator } => {
-                    let iter = self
-                        .expect_cache(*iterator, "iterator being collected");
+                    let iter = self.expect_cache(*iterator);
                     match iter {
                         RuntimeType::Unknown => RuntimeType::Unknown,
 
@@ -253,16 +283,14 @@ impl<'a> TypeInference<'a> {
                     }
                 }
                 ExprKind::Reduce { initial, .. }
-                | ExprKind::SimpleReduce { initial, .. } => self
-                    .expect_cache(*initial, "initial reduction value")
-                    .clone(),
+                | ExprKind::SimpleReduce { initial, .. } => {
+                    self.expect_cache(*initial).clone()
+                }
                 ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {
                     let elements = elements
                         .iter()
-                        .map(|element| {
-                            self.expect_cache(*element, "tuple element")
-                        })
+                        .map(|element| self.expect_cache(*element))
                         .cloned()
                         .collect();
                     TupleType(elements).into()
@@ -272,8 +300,7 @@ impl<'a> TypeInference<'a> {
                     static_field.runtime_type(reader)?
                 }
                 ExprKind::FieldAccess { obj, field } => {
-                    let obj_type =
-                        self.expect_cache(*obj, "object of field access");
+                    let obj_type = self.expect_cache(*obj);
 
                     match obj_type {
                         RuntimeType::Unknown => RuntimeType::Unknown,
@@ -303,7 +330,7 @@ impl<'a> TypeInference<'a> {
                     obj: array,
                     indices,
                 } => {
-                    let array_type = self.expect_cache(*array, "array");
+                    let array_type = self.expect_cache(*array);
                     let num_indices = indices.len();
 
                     match array_type {
@@ -374,9 +401,8 @@ impl<'a> TypeInference<'a> {
                     else_branch,
                     ..
                 } => {
-                    let if_branch = self.expect_cache(*if_branch, "if branch");
-                    let else_branch =
-                        self.expect_cache(*else_branch, "else branch");
+                    let if_branch = self.expect_cache(*if_branch);
+                    let else_branch = self.expect_cache(*else_branch);
 
                     match (if_branch, else_branch) {
                         (ty, RuntimeType::Unknown)
@@ -398,161 +424,25 @@ impl<'a> TypeInference<'a> {
                 }
 
                 ExprKind::Add { lhs, rhs } => {
-                    let lhs_type = self.expect_cache(*lhs, "lhs of add");
-                    let rhs_type = self.expect_cache(*rhs, "rhs of add");
-                    match (lhs_type, rhs_type) {
-                        (
-                            ptr,
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        )
-                        | (
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            ptr,
-                        ) if matches!(
-                            ptr.storage_type(),
-                            Some(RuntimePrimType::Ptr)
-                        ) =>
-                        {
-                            Ok(RuntimePrimType::Ptr.into())
-                        }
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt.into()),
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                        ) => Ok(RuntimePrimType::F32.into()),
-
-                        (RuntimeType::Unknown, _)
-                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
-
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForBinaryOp {
-                                op: expr_kind.op_name(),
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
+                    self.infer_add(expr_kind, *lhs, *rhs)?
                 }
-
                 ExprKind::Sub { lhs, rhs } => {
-                    let lhs_type = self.expect_cache(*lhs, "lhs of add");
-                    let rhs_type = self.expect_cache(*rhs, "rhs of add");
-                    match (lhs_type, rhs_type) {
-                        (ptr_a, ptr_b)
-                            if matches!(
-                                (ptr_a.storage_type(), ptr_b.storage_type()),
-                                (
-                                    Some(RuntimePrimType::Ptr),
-                                    Some(RuntimePrimType::Ptr)
-                                )
-                            ) =>
-                        {
-                            Ok(RuntimePrimType::NativeUInt.into())
-                        }
-
-                        (
-                            ptr,
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) if matches!(
-                            ptr.storage_type(),
-                            Some(RuntimePrimType::Ptr)
-                        ) =>
-                        {
-                            Ok(RuntimePrimType::Ptr.into())
-                        }
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt.into()),
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                        ) => Ok(RuntimePrimType::F32.into()),
-
-                        (RuntimeType::Unknown, _)
-                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
-
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForBinaryOp {
-                                op: expr_kind.op_name(),
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
+                    self.infer_sub(expr_kind, *lhs, *rhs)?
                 }
-
                 ExprKind::Mul { lhs, rhs } => {
-                    let lhs_type = self.expect_cache(*lhs, "lhs of mul");
-                    let rhs_type = self.expect_cache(*rhs, "rhs of mul");
-                    match (lhs_type, rhs_type) {
-                        (
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt.into()),
-                        (
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                        ) => Ok(RuntimePrimType::F32.into()),
-                        (RuntimeType::Unknown, _)
-                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForBinaryOp {
-                                op: expr_kind.op_name(),
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
+                    self.infer_mul(expr_kind, *lhs, *rhs)?
                 }
-
-                ExprKind::Div { lhs, rhs } | ExprKind::Mod { lhs, rhs } => {
-                    let lhs_type = self.expect_cache(*lhs, "lhs of mul");
-                    let rhs_type = self.expect_cache(*rhs, "rhs of mul");
-                    match (lhs_type, rhs_type) {
-                        (
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::NativeUInt.into()),
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::I32),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::I32.into()),
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                        ) => Ok(RuntimePrimType::F32.into()),
-
-                        (
-                            RuntimeType::Prim(RuntimePrimType::F32),
-                            RuntimeType::Prim(RuntimePrimType::NativeUInt),
-                        ) => Ok(RuntimePrimType::F32.into()),
-
-                        (RuntimeType::Unknown, _)
-                        | (_, RuntimeType::Unknown) => Ok(RuntimeType::Unknown),
-                        (other_lhs, other_rhs) => {
-                            Err(Error::InvalidOperandsForBinaryOp {
-                                op: expr_kind.op_name(),
-                                lhs: other_lhs.clone(),
-                                rhs: other_rhs.clone(),
-                            })
-                        }
-                    }?
+                ExprKind::Div { lhs, rhs } => {
+                    self.infer_div(expr_kind, *lhs, *rhs)?
+                }
+                ExprKind::Mod { lhs, rhs } => {
+                    self.infer_mod(expr_kind, *lhs, *rhs)?
                 }
 
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
                 ExprKind::IsSubclassOf { .. } => RuntimePrimType::Bool.into(),
                 ExprKind::PhysicalDowncast { obj, .. } => {
-                    let obj_type = self.expect_cache(*obj, "obj to downcast");
+                    let obj_type = self.expect_cache(*obj);
                     match obj_type {
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
                         other => Err(Error::InvalidOperandForPhysicalDowncast(
@@ -562,7 +452,7 @@ impl<'a> TypeInference<'a> {
                     RuntimePrimType::Ptr.into()
                 }
                 ExprKind::ReadPrim { ptr, prim_type } => {
-                    let ptr_type = self.expect_cache(*ptr, "ptr to read");
+                    let ptr_type = self.expect_cache(*ptr);
                     match ptr_type {
                         RuntimeType::Unknown => Ok(()),
                         RuntimeType::Prim(RuntimePrimType::Ptr) => Ok(()),
@@ -585,6 +475,45 @@ impl<'a> TypeInference<'a> {
              Topologic sort should ensure that \
              all input expressions have their type inferred.",
         ))
+    }
+
+    infer_binary_op! {
+        infer_add,
+        (Ptr,NativeUInt) => Ptr,
+        (NativeUInt,Ptr) => Ptr,
+        (NativeUInt,NativeUInt) => NativeUInt,
+        (I32,I32) => I32,
+        (F32,F32) => F32,
+        (F64,F64) => F64,
+    }
+    infer_binary_op! {
+        infer_sub,
+        (Ptr,NativeUInt) => Ptr,
+        (Ptr,Ptr) => NativeUInt,
+        (NativeUInt,NativeUInt) => NativeUInt,
+        (I32,I32) => I32,
+        (F32,F32) => F32,
+        (F64,F64) => F64,
+    }
+    infer_binary_op! {
+        infer_mul,
+        (NativeUInt,NativeUInt) => NativeUInt,
+        (I32,I32) => I32,
+        (F32,F32) => F32,
+        (F64,F64) => F64,
+    }
+    infer_binary_op! {
+        infer_div,
+        (NativeUInt,NativeUInt) => NativeUInt,
+        (I32,I32) => I32,
+        (I32,NativeUInt) => I32,
+        (F32,F32) => F32,
+        (F32,NativeUInt) => F32,
+        (F64,F64) => F64,
+    }
+    infer_binary_op! {
+        infer_mod,
+        (NativeUInt,NativeUInt) => NativeUInt,
     }
 }
 

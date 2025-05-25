@@ -206,8 +206,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 let (header_size_bytes, shape) = match array_type {
                     RuntimeType::DotNet(DotNetType::Array { .. }) => {
+                        let array_ptr =
+                            graph.prim_cast(array, RuntimePrimType::Ptr);
+
                         let header_size_bytes = RuntimeArray::HEADER_SIZE;
-                        let num_elements_ptr = graph.add(array, Pointer::SIZE);
+                        let num_elements_ptr =
+                            graph.add(array_ptr, Pointer::SIZE);
                         let num_elements = graph
                             .read_value(num_elements_ptr, RuntimePrimType::U64);
                         let num_elements = graph.prim_cast(
@@ -223,8 +227,10 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                     }) => {
                         let rank = *rank;
 
+                        let array_ptr =
+                            graph.prim_cast(array, RuntimePrimType::Ptr);
                         let shape_start =
-                            graph.add(array, RuntimeArray::HEADER_SIZE);
+                            graph.add(array_ptr, RuntimeArray::HEADER_SIZE);
                         let shape = (0..rank)
                             .map(|i| {
                                 let extent_ptr = graph.add(
@@ -259,8 +265,9 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 }
 
                 let ptr = {
-                    let ptr = graph.prim_cast(array, RuntimePrimType::Ptr);
-                    let first_element = graph.add(ptr, header_size_bytes);
+                    let array_ptr =
+                        graph.prim_cast(array, RuntimePrimType::Ptr);
+                    let first_element = graph.add(array_ptr, header_size_bytes);
                     let byte_offset = {
                         let strides = {
                             let mut strides = Vec::new();

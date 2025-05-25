@@ -1709,6 +1709,7 @@ impl<'a> VMEvaluator<'a> {
         (NativeUInt(a), NativeUInt(b)) => a + b,
         (Ptr(a), NativeUInt(b)) => a + b,
         (NativeUInt(a), Ptr(b)) => b + a,
+        (I32(a), I32(b)) => a + b,
         (F32(a), F32(b)) => a + b,
         (F64(a), F64(b)) => a + b,
     }
@@ -1718,6 +1719,7 @@ impl<'a> VMEvaluator<'a> {
         (NativeUInt(a), NativeUInt(b)) => a - b,
         (Ptr(a), NativeUInt(b)) => a - b,
         (Ptr(a), Ptr(b)) => a - b,
+        (I32(a), I32(b)) => a - b,
         (F32(a), F32(b)) => a - b,
         (F64(a), F64(b)) => a - b,
     }
