@@ -661,7 +661,18 @@ impl<'a> SymbolicParser<'a> {
             Keyword::Else,
         )?;
 
-        let else_branch = self.expect_block()?;
+        let is_chained_else_if = self
+            .tokens
+            .peek()?
+            .ok_or(ParseError::UnexpectedEndOfString("else block".into()))?
+            .kind
+            .is_keyword(Keyword::If);
+
+        let else_branch = if is_chained_else_if {
+            self.expect_if_else()?
+        } else {
+            self.expect_block()?
+        };
 
         let if_else = self.graph.if_else(condition, if_branch, else_branch);
         Ok(if_else)

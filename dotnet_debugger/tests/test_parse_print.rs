@@ -1002,6 +1002,23 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    if_else_if_else,
+    indoc! {"
+        let res_main = if true { 20 } else if false { 30 } else { 40 };
+        pub fn main() { res_main }
+    "},
+    |graph| {
+        let else_if = graph.if_else(false, 30, 40);
+        let res_main = graph.if_else(true, 20, else_if);
+        graph.name(res_main, "res_main").unwrap();
+
+        let func_main = graph.function_def(vec![], res_main);
+        graph.name(func_main, "main").unwrap();
+        graph.mark_extern_func(func_main).unwrap();
+    },
+}
+
+test_print_and_parse! {
     comparisons,
 
     indoc!{"

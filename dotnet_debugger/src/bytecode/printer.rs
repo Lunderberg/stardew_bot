@@ -956,7 +956,7 @@ impl<'a> GraphPrinter<'a> {
                             if_branch,
                             else_branch,
                         } => {
-                            let iter_if = scope
+                            let iter_if_statements = scope
                                 .iter()
                                 .enumerate()
                                 .filter(|(_, op_scope)| {
@@ -964,14 +964,51 @@ impl<'a> GraphPrinter<'a> {
                                 })
                                 .filter(|(i, _)| !inline_expr[*i])
                                 .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
-                            let iter_else = scope
-                                .iter()
-                                .enumerate()
-                                .filter(|(_, op_scope)| {
-                                    **op_scope == Scope::ElseBranch(index)
-                                })
-                                .filter(|(i, _)| !inline_expr[*i])
-                                .map(|(i, _)| PrintItem::Stmt(OpIndex::new(i)));
+                            let make_iter_else_statements = || {
+                                scope
+                                    .iter()
+                                    .enumerate()
+                                    .filter(|(_, op_scope)| {
+                                        **op_scope == Scope::ElseBranch(index)
+                                    })
+                                    .filter(|(i, _)| !inline_expr[*i])
+                                    .map(|(i, _)| {
+                                        PrintItem::Stmt(OpIndex::new(i))
+                                    })
+                            };
+
+                            let print_chained_else_if =
+                                make_iter_else_statements().next().is_none()
+                                    && else_branch
+                                        .as_op_index()
+                                        .map(|else_index| {
+                                            matches!(
+                                                self.graph[else_index].kind,
+                                                ExprKind::IfElse { .. }
+                                            )
+                                        })
+                                        .unwrap_or(false);
+
+                            let else_branch_value = PrintItem::Expr(
+                                *else_branch,
+                                OpPrecedence::MinPrecedence,
+                            );
+
+                            let iter_else = if print_chained_else_if {
+                                Either::Left(
+                                    [PrintItem::Str(" "), else_branch_value]
+                                        .into_iter(),
+                                )
+                            } else {
+                                let iter = std::iter::empty()
+                                    .chain([PrintItem::BraceOpen])
+                                    .chain(make_iter_else_statements())
+                                    .chain([
+                                        else_branch_value,
+                                        PrintItem::BraceClose,
+                                    ]);
+                                Either::Right(iter)
+                            };
 
                             std::iter::empty()
                                 .chain([
@@ -982,7 +1019,7 @@ impl<'a> GraphPrinter<'a> {
                                     ),
                                     PrintItem::BraceOpen,
                                 ])
-                                .chain(iter_if)
+                                .chain(iter_if_statements)
                                 .chain([
                                     PrintItem::Expr(
                                         *if_branch,
@@ -990,16 +1027,8 @@ impl<'a> GraphPrinter<'a> {
                                     ),
                                     PrintItem::BraceClose,
                                     PrintItem::Str(" else"),
-                                    PrintItem::BraceOpen,
                                 ])
                                 .chain(iter_else)
-                                .chain([
-                                    PrintItem::Expr(
-                                        *else_branch,
-                                        OpPrecedence::MinPrecedence,
-                                    ),
-                                    PrintItem::BraceClose,
-                                ])
                                 .rev()
                                 .for_each(|print_item| {
                                     to_print.push(print_item)
