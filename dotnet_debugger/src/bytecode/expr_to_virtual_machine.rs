@@ -896,6 +896,7 @@ impl ExpressionTranslator<'_> {
                 iterator @ (ExprKind::Range { .. }
                 | ExprKind::Map { .. }
                 | ExprKind::Filter { .. }
+                | ExprKind::Chain { .. }
                 | ExprKind::Collect { .. }
                 | ExprKind::Reduce { .. }) => panic!(
                     "All {} expressions should be simplified \

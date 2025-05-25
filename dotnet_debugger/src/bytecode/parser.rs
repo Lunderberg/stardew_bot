@@ -922,6 +922,14 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.filter(obj, filter))
                 }
+                "chain" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let iter_b = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.chain(obj, iter_b))
+                }
                 "collect" => {
                     let _ = self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.collect(obj))

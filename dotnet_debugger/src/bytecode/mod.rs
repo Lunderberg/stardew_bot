@@ -49,6 +49,9 @@ pub use inline_iterator_map::InlineIteratorMap;
 mod inline_iterator_filter;
 pub use inline_iterator_filter::InlineIteratorFilter;
 
+mod split_iterator_chain_reduce;
+pub use split_iterator_chain_reduce::SplitIteratorChainReduce;
+
 mod convert_collect_to_reduce;
 pub use convert_collect_to_reduce::ConvertCollectToReduce;
 

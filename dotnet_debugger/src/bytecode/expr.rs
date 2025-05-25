@@ -82,6 +82,9 @@ pub enum ExprKind {
         map: SymbolicValue,
     },
 
+    /// Chain two iterators together.
+    Chain(SymbolicValue, SymbolicValue),
+
     /// Filter the elements of an iterator, retaining elements of the
     /// iterator for which the filter function returns true.
     Filter {
@@ -743,6 +746,14 @@ impl SymbolicGraph {
             iterator,
             reduction,
         })
+    }
+
+    pub fn chain(
+        &mut self,
+        iter_a: SymbolicValue,
+        iter_b: SymbolicValue,
+    ) -> SymbolicValue {
+        self.push(ExprKind::Chain(iter_a, iter_b))
     }
 
     pub fn collect(&mut self, iterator: SymbolicValue) -> SymbolicValue {
@@ -2254,6 +2265,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::MergeRangeReduceToSimpleReduce)
             .then(super::InlineIteratorMap)
             .then(super::InlineIteratorFilter)
+            .then(super::SplitIteratorChainReduce)
             .then(super::ConvertCollectToReduce(&analysis))
             .then(super::ConvertBooleanOperatorToConditional)
             .then(super::LowerSymbolicExpr(&analysis))
@@ -2410,6 +2422,15 @@ impl ExprKind {
                     let iterator = opt_iterator.unwrap_or_else(|| *iterator);
                     let filter = opt_filter.unwrap_or_else(|| *filter);
                     ExprKind::Filter { iterator, filter }
+                })
+            }
+            ExprKind::Chain(iter_a, iter_b) => {
+                let opt_iter_a = remap(iter_a);
+                let opt_iter_b = remap(iter_b);
+                (opt_iter_a.is_some() || opt_iter_b.is_some()).then(|| {
+                    let iter_a = opt_iter_a.unwrap_or_else(|| *iter_a);
+                    let iter_b = opt_iter_b.unwrap_or_else(|| *iter_b);
+                    ExprKind::Chain(iter_a, iter_b)
                 })
             }
             ExprKind::Collect { iterator } => {
@@ -2702,6 +2723,9 @@ impl ExprKind {
             &ExprKind::Filter { iterator, filter } => {
                 ([Some(iterator), Some(filter), None], None, None)
             }
+            &ExprKind::Chain(iter_a, iter_b) => {
+                ([Some(iter_a), Some(iter_b), None], None, None)
+            }
             &ExprKind::ArrayExtent { array, dim } => {
                 ([Some(array), Some(dim), None], None, None)
             }
@@ -2784,6 +2808,7 @@ impl ExprKind {
             ExprKind::Range { .. } => "Range",
             ExprKind::Map { .. } => "Map",
             ExprKind::Filter { .. } => "Filter",
+            ExprKind::Chain { .. } => "Chain",
             ExprKind::Collect { .. } => "Collect",
             ExprKind::Reduce { .. } => "Reduce",
             ExprKind::SimpleReduce { .. } => "SimpleReduce",
@@ -3013,6 +3038,14 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::Chain(lhs_iter_a, lhs_iter_b) => match rhs_kind {
+                    ExprKind::Chain(rhs_iter_a, rhs_iter_b) => {
+                        equivalent_value!(lhs_iter_a, rhs_iter_a)
+                            && equivalent_value!(lhs_iter_b, rhs_iter_b)
+                    }
+                    _ => false,
+                },
+
                 ExprKind::Collect {
                     iterator: lhs_iterator,
                 } => match rhs_kind {
@@ -3366,6 +3399,9 @@ impl Display for ExprKind {
             }
             ExprKind::Filter { iterator, filter } => {
                 write!(f, "{iterator}.filter({filter})")
+            }
+            ExprKind::Chain(iter_a, iter_b) => {
+                write!(f, "{iter_a}.chain({iter_b})")
             }
             ExprKind::Collect { iterator } => {
                 write!(f, "{iterator}.collect()")

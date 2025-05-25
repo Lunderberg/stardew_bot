@@ -989,6 +989,35 @@ fn eval_iterator_map_collect() -> Result<(), Error> {
 }
 
 #[test]
+fn eval_iterator_chain_collect() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        let iter_doubles = (0..10).map(|i| i*2);
+        let iter_squares = (0..10).map(|j| j*j);
+        let res_main = iter_doubles.chain(iter_squares).collect();
+        pub fn main() { res_main }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let results = vm.local_eval()?;
+    let vec = results
+        .get_any(0)?
+        .unwrap()
+        .downcast_ref::<Vec<usize>>()
+        .unwrap();
+
+    let expected: Vec<usize> = {
+        let iter_doubles = (0..10).map(|i| i * 2);
+        let iter_squares = (0..10).map(|i| i * i);
+        iter_doubles.chain(iter_squares).collect()
+    };
+
+    assert_eq!(vec, &expected);
+    Ok(())
+}
+
+#[test]
 fn eval_iterator_map_collect_native_obj() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 

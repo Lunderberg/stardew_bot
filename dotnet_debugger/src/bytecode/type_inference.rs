@@ -64,6 +64,12 @@ pub enum TypeInferenceError {
          but only iterators can be collected."
     )]
     CollectRequiresIterator(RuntimeType),
+
+    #[error(
+        "Cannot chain iterator of type '{0}' \
+         with iterator of type '{1}'."
+    )]
+    ChainRequiresSameIteratorType(RuntimeType, RuntimeType),
 }
 
 impl<'a> TypeInference<'a> {
@@ -210,14 +216,37 @@ impl<'a> TypeInference<'a> {
                         expect_cache(*iterator, "iterator being filtered");
                     iter.clone()
                 }
+                ExprKind::Chain(iter_a, iter_b) => {
+                    let iter_a_type =
+                        expect_cache(*iter_a, "iterator being chained");
+                    let iter_b_type =
+                        expect_cache(*iter_b, "iterator being chained");
+                    if iter_a_type == iter_b_type {
+                        Ok(iter_a_type.clone())
+                    } else if matches!(iter_a_type, RuntimeType::Unknown) {
+                        Ok(iter_b_type.clone())
+                    } else if matches!(iter_b_type, RuntimeType::Unknown) {
+                        Ok(iter_a_type.clone())
+                    } else {
+                        Err(TypeInferenceError::ChainRequiresSameIteratorType(
+                            iter_a_type.clone(),
+                            iter_b_type.clone(),
+                        ))
+                    }?
+                }
                 ExprKind::Collect { iterator } => {
                     let iter =
                         expect_cache(*iterator, "iterator being collected");
                     match iter {
                         RuntimeType::Unknown => RuntimeType::Unknown,
+
                         RuntimeType::Iterator(IteratorType { item }) => {
-                            item.as_ref().vector_type()?
+                            match item.as_ref() {
+                                RuntimeType::Unknown => RuntimeType::Unknown,
+                                other => other.vector_type()?,
+                            }
                         }
+
                         other => {
                             Err(TypeInferenceError::CollectRequiresIterator(
                                 other.clone(),

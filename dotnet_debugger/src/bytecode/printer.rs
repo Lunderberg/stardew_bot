@@ -606,6 +606,11 @@ impl<'a> GraphPrinter<'a> {
                     match &self.graph[index].kind {
                         ExprKind::None => write!(fmt, "None")?,
 
+                        ExprKind::FunctionArg(RuntimeType::Unknown) => {
+                            let index = make_index_printer(index);
+                            write!(fmt, "{index}")?;
+                        }
+
                         ExprKind::FunctionArg(ty) => {
                             let index = make_index_printer(index);
                             write!(fmt, "{index}: {ty}")?;
@@ -664,6 +669,24 @@ impl<'a> GraphPrinter<'a> {
                                 PrintItem::ParenOpen,
                                 PrintItem::Expr(
                                     *filter,
+                                    OpPrecedence::MinPrecedence,
+                                ),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::Chain(iter_a, iter_b) => {
+                            [
+                                PrintItem::Expr(
+                                    *iter_a,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::Str(".chain"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *iter_b,
                                     OpPrecedence::MinPrecedence,
                                 ),
                                 PrintItem::ParenClose,

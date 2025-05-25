@@ -1,5 +1,6 @@
 use dotnet_debugger::{
-    Error, RuntimePrimType, SymbolicGraph, SymbolicType, SymbolicValue,
+    Error, RuntimePrimType, RuntimeType, SymbolicGraph, SymbolicType,
+    SymbolicValue,
 };
 use indoc::indoc;
 use paste::paste;
@@ -1152,6 +1153,50 @@ test_print_and_parse! {
         let func_main = graph.function_def(vec![], res_main);
         graph.name(func_main, "main").unwrap();
         graph.mark_extern_func(func_main).unwrap();
+    },
+}
+
+test_print_and_parse! {
+    iterator_chain,
+
+    indoc!{"
+        let iter_doubles = (0..10).map(|i| { i*2 });
+        let iter_squares = (0..10).map(|j| { j*j });
+        let res_main = iter_doubles.chain(iter_squares).collect();
+        pub fn main() { res_main }
+    "},
+    |graph| -> Result<(), Error> {
+        let iter_doubles = {
+            let iter = graph.range(10);
+            let i = graph.function_arg(RuntimeType::Unknown);
+            graph.name(i, "i").unwrap();
+            let res = graph.mul(i,2);
+            let map = graph.function_def(vec![i], res);
+            let mapped = graph.map(iter, map);
+            graph.name(mapped, "iter_doubles")?;
+            mapped
+        };
+
+        let iter_squares = {
+            let iter = graph.range(10);
+            let j = graph.function_arg(RuntimeType::Unknown);
+            graph.name(j, "j").unwrap();
+            let res = graph.mul(j,j);
+            let map = graph.function_def(vec![j], res);
+            let mapped = graph.map(iter, map);
+            graph.name(mapped, "iter_squares")?;
+            mapped
+        };
+
+        let chained = graph.chain(iter_doubles, iter_squares);
+        let res_main = graph.collect(chained);
+        graph.name(res_main, "res_main").unwrap();
+
+        let func_main = graph.function_def(vec![], res_main);
+        graph.name(func_main, "main").unwrap();
+        graph.mark_extern_func(func_main).unwrap();
+
+        Ok(())
     },
 }
 
