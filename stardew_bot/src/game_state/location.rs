@@ -110,7 +110,7 @@ pub struct ResourceClump {
 pub enum ResourceClumpKind {
     Stump,
     Boulder,
-    Meterorite,
+    Meteorite,
     MineBoulder,
     GiantCrop(String),
 }
@@ -1441,7 +1441,7 @@ impl TryFrom<i32> for ResourceClumpKind {
         match value {
             600 | 602 => Ok(Self::Stump),
             672 => Ok(Self::Boulder),
-            622 => Ok(Self::Meterorite),
+            622 => Ok(Self::Meteorite),
             752 | 754 | 756 | 758 => Ok(Self::MineBoulder),
 
             other => Err(Error::UnrecognizedResourceClump(other)),

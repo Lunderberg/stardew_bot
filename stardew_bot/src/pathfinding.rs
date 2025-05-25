@@ -226,7 +226,7 @@ impl<'a> DrawableGameLocation<'a> {
                     match clump.kind {
                         ResourceClumpKind::Stump => Color::Yellow,
                         ResourceClumpKind::Boulder => Color::DarkGray,
-                        ResourceClumpKind::Meterorite => Color::Magenta,
+                        ResourceClumpKind::Meteorite => Color::Magenta,
                         ResourceClumpKind::MineBoulder => Color::DarkGray,
                         ResourceClumpKind::GiantCrop(_) => {
                             Color::Rgb(41, 192, 80)
