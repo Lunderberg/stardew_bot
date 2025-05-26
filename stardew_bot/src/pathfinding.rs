@@ -58,12 +58,25 @@ impl<'a> DrawableGameLocation<'a> {
 
                 ctx.layer();
 
-                ctx.print(
-                    self.player_position.right as f64,
-                    (self.room.shape.down as f64)
-                        - (self.player_position.down as f64),
-                    "x",
-                );
+                {
+                    let player_coords = self.to_draw_coordinates(
+                        self.player_position.map(|x| x as f64),
+                    );
+                    // Hack to reset the foreground color before
+                    // printing the 'x' for a player.  Otherwise, the
+                    // 'x' will be printed in whichever color was
+                    // previously used for that tile.
+                    //
+                    // TODO: Remove use of the
+                    // ratatui::widgets::canvas::Canvas altogether,
+                    // since its fp64-representation is overkill for
+                    // printing a tiled map.
+                    ctx.draw(&Points {
+                        coords: &[player_coords],
+                        color: Color::White,
+                    });
+                    ctx.print(player_coords.0, player_coords.1, "x");
+                }
             })
             .render(self.draw_area, buf)
     }

@@ -6,6 +6,9 @@ pub use error::BotError;
 mod bot_logic;
 pub use bot_logic::BotLogic;
 
+mod first_day;
+pub use first_day::*;
+
 mod fishing_goal;
 pub use fishing_goal::*;
 
