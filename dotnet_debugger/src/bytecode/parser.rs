@@ -7,7 +7,7 @@ use super::{
     expr::{ByteRegion, SymbolicGraph, SymbolicType, SymbolicValue},
     OpPrecedence,
 };
-use crate::{Error, RuntimePrimValue, RuntimeType};
+use crate::{Error, RuntimePrimType, RuntimePrimValue, RuntimeType};
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
@@ -93,6 +93,16 @@ pub enum ParseError {
          However, received {0} arguments."
     )]
     IncorrectArgumentCountForReadBytes(usize),
+
+    #[error(
+        "Suffix for integer literal must be an integer type \
+         (e.g. 'i32' or 'usize'), \
+         but instead found suffix '{0}'."
+    )]
+    InvalidSuffixForIntegerLiteral(String),
+
+    #[error("Cannot define negative value of type '{0}'")]
+    InvalidNegativeConstant(RuntimePrimType),
 }
 
 struct SymbolicTokenizer<'a> {
@@ -110,7 +120,7 @@ struct Token<'a> {
 #[derive(Debug, Clone, Copy)]
 pub enum TokenKind {
     Ident,
-    Int(usize),
+    Const(RuntimePrimValue),
     Punct(Punctuation),
     Keyword(Keyword),
 }
@@ -515,7 +525,11 @@ impl<'a> SymbolicParser<'a> {
             .peek()?
             .ok_or(ParseError::UnexpectedEndOfString("expression".into()))?;
         let mut obj = match &peek_token.kind {
-            TokenKind::Int(_) => self.expect_int(),
+            TokenKind::Const(_) => self.expect_const(),
+            TokenKind::Punct(Punctuation::Minus) => {
+                self.expect_negative_const()
+            }
+
             TokenKind::Keyword(Keyword::True)
             | TokenKind::Keyword(Keyword::False) => self.expect_bool(),
 
@@ -603,18 +617,54 @@ impl<'a> SymbolicParser<'a> {
         Ok(opt_keyword)
     }
 
-    fn expect_int(&mut self) -> Result<SymbolicValue, Error> {
+    fn expect_const(&mut self) -> Result<SymbolicValue, Error> {
         let token = self.expect_kind(
-            || "integer",
-            |kind| matches!(kind, TokenKind::Int(_)),
+            || "constant",
+            |kind| matches!(kind, TokenKind::Const(_)),
         )?;
 
         let value = match token.kind {
-            TokenKind::Int(value) => value.into(),
+            TokenKind::Const(value) => value.into(),
             _ => unreachable!("Handled by earlier check"),
         };
 
         Ok(value)
+    }
+
+    fn expect_negative_const(&mut self) -> Result<SymbolicValue, Error> {
+        self.expect_punct(
+            || "negative sign at start of negative constant",
+            Punctuation::Minus,
+        )?;
+
+        let token = self.expect_kind(
+            || "constant following negative sign",
+            |kind| matches!(kind, TokenKind::Const(_)),
+        )?;
+
+        let value: RuntimePrimValue = match token.kind {
+            TokenKind::Const(value) => value.into(),
+            _ => unreachable!("Handled by earlier check"),
+        };
+
+        // TODO: Handle edge cases correctly for types with asymmetric
+        // ranges.  For example, current implementation will fail when
+        // attempting to parse "-128i8", since it must first form
+        // "128i8", and i8 must always be within the range [-128,127].
+        let value: RuntimePrimValue = match value {
+            RuntimePrimValue::I8(val) => Ok((-val).into()),
+            RuntimePrimValue::I16(val) => Ok((-val).into()),
+            RuntimePrimValue::I32(val) => Ok((-val).into()),
+            RuntimePrimValue::I64(val) => Ok((-val).into()),
+            RuntimePrimValue::NativeInt(val) => Ok((-val).into()),
+            RuntimePrimValue::F32(val) => Ok((-val).into()),
+            RuntimePrimValue::F64(val) => Ok((-val).into()),
+            other => {
+                Err(ParseError::InvalidNegativeConstant(other.runtime_type()))
+            }
+        }?;
+
+        Ok(SymbolicValue::Const(value))
     }
 
     fn expect_none(&mut self) -> Result<SymbolicValue, Error> {
@@ -1363,7 +1413,7 @@ impl<'a> SymbolicTokenizer<'a> {
             .map(|(i, _)| i)
             .unwrap_or_else(|| self.text.len() - start);
 
-        let kind = match char1 {
+        let kind: TokenKind = match char1 {
             '.' if opt_char2 == Some('.') => {
                 num_bytes = 2;
                 TokenKind::Punct(Punctuation::DoublePeriod)
@@ -1418,7 +1468,7 @@ impl<'a> SymbolicTokenizer<'a> {
             '/' => TokenKind::Punct(Punctuation::Slash),
             '%' => TokenKind::Punct(Punctuation::Percent),
             '0'..='9' => {
-                let mut value = 0;
+                let mut value: usize = 0;
                 let mut index = None;
 
                 for (i, c) in self.text[start..].char_indices() {
@@ -1432,7 +1482,7 @@ impl<'a> SymbolicTokenizer<'a> {
                 }
                 num_bytes = index.unwrap_or_else(|| self.text.len() - start);
 
-                TokenKind::Int(value)
+                TokenKind::Const(RuntimePrimValue::NativeUInt(value))
             }
             '_' | 'a'..='z' | 'A'..='Z' => {
                 num_bytes = self.text[start..]
@@ -1458,6 +1508,50 @@ impl<'a> SymbolicTokenizer<'a> {
                 .into());
             }
         };
+
+        let suffix_start = start + num_bytes;
+        let (kind, num_bytes) =
+            match (kind, self.text[suffix_start..].chars().next()) {
+                (
+                    TokenKind::Const(RuntimePrimValue::NativeUInt(value)),
+                    Some('_' | 'a'..='z' | 'A'..='Z'),
+                ) => {
+                    let num_suffix_bytes = self.text[start + num_bytes..]
+                        .char_indices()
+                        .find(|(_, c)| {
+                            !matches!(
+                            c, '_'|'a'..='z'|'A'..='Z'|'0'..='9'|'`'
+                            )
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or_else(|| self.text.len() - suffix_start);
+
+                    let suffix = &self.text
+                        [suffix_start..suffix_start + num_suffix_bytes];
+
+                    let new_value: RuntimePrimValue = match suffix {
+                        "i8" => Ok((value as i8).into()),
+                        "i16" => Ok((value as i16).into()),
+                        "i32" => Ok((value as i32).into()),
+                        "i64" => Ok((value as i64).into()),
+                        "isize" => Ok((value as isize).into()),
+                        "u8" => Ok((value as u8).into()),
+                        "u16" => Ok((value as u16).into()),
+                        "u32" => Ok((value as u32).into()),
+                        "u64" => Ok((value as u64).into()),
+                        "usize" => Ok((value as usize).into()),
+
+                        other => {
+                            Err(ParseError::InvalidSuffixForIntegerLiteral(
+                                other.to_string(),
+                            ))
+                        }
+                    }?;
+
+                    (TokenKind::Const(new_value), num_bytes + num_suffix_bytes)
+                }
+                (other, _) => (other, num_bytes),
+            };
 
         let end = start + num_bytes;
         self.peek = Some(Token {

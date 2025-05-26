@@ -550,6 +550,40 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    positive_i32_literals,
+    indoc!{"
+        let res_main = 100i32 + 50i32;
+        pub fn main() { res_main }
+    "},
+    |graph| -> Result<_,Error> {
+        let res_main = graph.add(100i32, 50i32);
+        graph.name(res_main, "res_main")?;
+
+        let main = graph.function_def(vec![], res_main);
+        graph.name(main, "main")?;
+        graph.mark_extern_func(main)?;
+        Ok(())
+    },
+}
+
+test_print_and_parse! {
+    negative_i32_literals,
+    indoc!{"
+        let res_main = -100i32 + -50i32;
+        pub fn main() { res_main }
+    "},
+    |graph| -> Result<_,Error> {
+        let res_main = graph.add(-100i32, -50i32);
+        graph.name(res_main, "res_main")?;
+
+        let main = graph.function_def(vec![], res_main);
+        graph.name(main, "main")?;
+        graph.mark_extern_func(main)?;
+        Ok(())
+    },
+}
+
+test_print_and_parse! {
     subtraction,
     "pub fn main(a: usize, b: usize) { a - b }",
     |graph| {
