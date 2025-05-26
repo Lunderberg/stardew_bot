@@ -209,12 +209,7 @@ impl StardewBot {
         layout.cycle_next();
 
         // Placeholder for main window
-        layout.split_horizontally(None, Some(60));
-        layout.cycle_next();
-
-        // Next-to-right column
         layout.split_horizontally(None, Some(30));
-        layout.switch_to_buffer(7);
         layout.cycle_next();
 
         // Player states in top-right
