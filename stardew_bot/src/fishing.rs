@@ -40,7 +40,7 @@ impl FishingUI {
         let fishing_state = &game_state.fishing;
 
         let minigame_in_progress = fishing_state.minigame_in_progress;
-        let tick = game_state.global_game_state.game_tick;
+        let tick = game_state.globals.game_tick;
 
         let is_new_tick = self
             .history
@@ -120,7 +120,7 @@ impl WidgetWindow<Error> for FishingUI {
             [
                 Row::new([
                     "Game tick:".into(),
-                    format!("{}", game_state.global_game_state.game_tick),
+                    format!("{}", game_state.globals.game_tick),
                 ]),
                 Row::new([
                     "Selecting cast distance:".into(),
@@ -313,7 +313,7 @@ impl WidgetWindow<Error> for FishingUI {
             (0..prediction_size)
                 .map(move |i| {
                     let pos = predictor(i as f32) as f64;
-                    let tick = game_state.global_game_state.game_tick as f64;
+                    let tick = game_state.globals.game_tick as f64;
                     let i = i as f64;
                     (tick + i, MAX_SIZE - pos)
                 })

@@ -12,7 +12,7 @@ use super::{
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
-    pub global_game_state: GlobalGameState,
+    pub globals: GlobalGameState,
     pub locations: Vec<Location>,
     pub player: PlayerState,
     pub fishing: FishingState,
@@ -89,7 +89,7 @@ impl GameState {
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              current_rng: &SeededRng| GameState {
-                global_game_state: global_game_state.clone(),
+                globals: global_game_state.clone(),
                 locations: locations.clone(),
                 player: player.clone(),
                 fishing: fishing.clone(),
@@ -200,7 +200,7 @@ impl GameState {
             delta.current_rng_state,
             delta.global_game_state.game_mode_tick,
         );
-        self.global_game_state = delta.global_game_state;
+        self.globals = delta.global_game_state;
         self.player = delta.player;
         self.fishing = delta.fishing;
         self.daily = delta.daily;

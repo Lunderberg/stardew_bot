@@ -84,13 +84,10 @@ impl BotGoal for ClayFarmingGoal {
 
         let player_tile = player.tile();
 
-        let total_dirt_hoed = game_state
-            .global_game_state
-            .get_stat("dirtHoed")
-            .unwrap_or(0);
+        let total_dirt_hoed =
+            game_state.globals.get_stat("dirtHoed").unwrap_or(0);
 
-        let days_played =
-            game_state.global_game_state.get_stat("daysPlayed")?;
+        let days_played = game_state.globals.get_stat("daysPlayed")?;
 
         let clay_tiles: HashSet<Vector<isize>> = beach
             .diggable
@@ -100,7 +97,7 @@ impl BotGoal for ClayFarmingGoal {
             .filter(|tile| {
                 let mut rng = SeededRng::from_stardew_seed([
                     days_played as f64,
-                    (game_state.global_game_state.unique_id / 2) as f64,
+                    (game_state.globals.unique_id / 2) as f64,
                     (tile.right * 2000) as f64,
                     (tile.down * 77) as f64,
                     total_dirt_hoed as f64,

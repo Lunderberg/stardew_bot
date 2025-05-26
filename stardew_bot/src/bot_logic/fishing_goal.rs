@@ -21,7 +21,7 @@ impl BotGoal for FishingGoal {
         _: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         let goals = SubGoals::new()
-            .then(super::InventoryGoal::new(Item::new("(T)BambooPole")))
+            // .then(super::InventoryGoal::new(Item::new("(T)BambooPole")))
             .then(MovementGoal::new("Forest".into(), Vector::new(70.0, 50.4)))
             .then(FaceDirectionGoal(FacingDirection::South))
             .then(FishOnceGoal);

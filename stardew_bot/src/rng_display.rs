@@ -33,11 +33,11 @@ impl WidgetWindow<Error> for RngDisplay {
         let iter_rows = [
             Row::new([
                 "Game tick:".into(),
-                format!("{}", game_state.global_game_state.game_tick),
+                format!("{}", game_state.globals.game_tick),
             ]),
             Row::new([
                 "Game mode tick:".into(),
-                format!("{}", game_state.global_game_state.game_mode_tick),
+                format!("{}", game_state.globals.game_mode_tick),
             ]),
             Row::new(["Calls/tick:".into(), format!("{mean:.1} ± {std:.1}")]),
         ]
