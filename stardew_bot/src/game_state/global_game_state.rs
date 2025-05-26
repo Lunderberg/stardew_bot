@@ -15,6 +15,23 @@ pub struct GlobalGameState {
     /// The number of game ticks that have elapsed
     pub game_mode_tick: i32,
 
+    /// The current in-game time.
+    ///
+    /// This is a kind of weird field, because while it is an integer,
+    /// it shows a 24-hour clock.  It is set to 600 at the start of
+    /// each day, and is incremented by 10 within
+    /// `Game1.performTenMinuteClockUpdate`, advancing to the next
+    /// multiple of 100 whenever the tens digit is 6 or higher.
+    /// Effectively, thiis number is human-readable as a 24-hour
+    /// clock.
+    ///
+    /// At some point, if more precise timings are required (e.g. to
+    /// arrive at a shop just before it closes), may need to also
+    /// check `Game1.gameTimeInterval`,
+    /// `Game1.realMilliSecondsPerGameTenMinutes`, and the current
+    /// location's `ExtraMillisecondsPerInGameMinute` field.
+    pub in_game_time: i32,
+
     /// If the screen is currently fading to black.
     pub currently_fading_to_black: bool,
 
@@ -33,11 +50,13 @@ impl GlobalGameState {
             |unique_id: u64,
              game_tick: i32,
              game_mode_tick: i32,
+             in_game_time: i32,
              stats: &Stats,
              currently_fading_to_black: bool| GlobalGameState {
                 game_tick,
                 unique_id,
                 game_mode_tick,
+                in_game_time,
                 stats: stats.0.clone(),
                 currently_fading_to_black,
             },
@@ -62,6 +81,8 @@ impl GlobalGameState {
                 let game_tick = StardewValley.Game1.ticks;
                 let unique_id = StardewValley.Game1.uniqueIDForThisGame;
 
+                let in_game_time = StardewValley.Game1.timeOfDay;
+
                 let currently_fading_to_black = StardewValley.Game1
                     .screenFade
                     .fadeToBlack;
@@ -82,6 +103,7 @@ impl GlobalGameState {
                     unique_id,
                     game_tick,
                     game_mode_tick,
+                    in_game_time,
                     stat_dict,
                     currently_fading_to_black,
                 )

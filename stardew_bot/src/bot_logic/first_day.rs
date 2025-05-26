@@ -5,7 +5,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    MovementGoal,
+    ClayFarmingGoal, MovementGoal,
 };
 
 pub struct FirstDay;
@@ -73,6 +73,13 @@ impl BotGoal for FirstDay {
             }
 
             return Ok(BotGoalResult::InProgress);
+        }
+
+        let clay_farming = ClayFarmingGoal::new()
+            .stop_at_time(1200)
+            .stop_at_stamina(4.0);
+        if !clay_farming.is_completed(game_state) {
+            return Ok(clay_farming.into());
         }
 
         Ok(BotGoalResult::InProgress)

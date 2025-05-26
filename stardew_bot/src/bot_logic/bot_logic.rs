@@ -36,8 +36,11 @@ impl BotLogic {
     pub fn new() -> Self {
         Self {
             goals: vec![
-                Box::new(super::ClearFarmGoal),
-                // Box::new(super::FishingGoal),
+                // Box::new(super::ClearFarmGoal),
+                // Box::new(super::ClayFarmingGoal::new()),
+                // Box::new(super::GoToActionTile::new("Carpenter")),
+                Box::new(super::FishingGoal),
+                Box::new(super::FirstDay),
             ],
         }
     }

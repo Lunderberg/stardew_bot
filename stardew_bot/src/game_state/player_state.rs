@@ -14,10 +14,13 @@ pub struct PlayerState {
 
     // Player's progression
     pub skills: PlayerSkills,
+    pub current_stamina: f32,
+    pub max_stamina: i32,
 
     // Inventory-related info
     pub inventory: Inventory,
     pub active_hotbar_index: usize,
+    pub current_money: i32,
 
     // Info related to the current action being performed
     pub using_tool: bool,
@@ -122,8 +125,11 @@ impl PlayerState {
              skills: &PlayerSkills,
              inventory: &Inventory,
              active_hotbar_index: usize,
+             current_money: i32,
              using_tool: bool,
-             last_click: &Vector<isize>| {
+             last_click: &Vector<isize>,
+             current_stamina: f32,
+             max_stamina: i32| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -133,7 +139,10 @@ impl PlayerState {
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
+                    current_money,
                     last_click: *last_click,
+                    current_stamina,
+                    max_stamina,
                 }
             },
         )?;
@@ -198,6 +207,11 @@ impl PlayerState {
                     new_isize_vector(pos.X, pos.Y)
                 };
 
+                let current_stamina = player.netStamina.value;
+                let max_stamina = player.maxStamina.value;
+
+                let current_money = player.teamRoot.value.money.value;
+
                 new_player(
                     position,
                     facing,
@@ -206,8 +220,11 @@ impl PlayerState {
                     skills,
                     inventory,
                     active_hotbar_index,
+                    current_money,
                     using_tool,
                     last_click,
+                    current_stamina,
+                    max_stamina,
                 )
             }
         })?;
@@ -215,11 +232,29 @@ impl PlayerState {
         Ok(player)
     }
 
+    fn center_pixel(&self) -> Vector<isize> {
+        let offset = Vector::<isize>::new(8, 0);
+        let bounding_box = Vector::<isize>::new(48, 32);
+
+        let position = self.position.map(|x| x as isize);
+        position + offset + bounding_box / 2
+    }
+
+    /// The tile that contains the center of the player's bounding
+    /// box.  This is the tile used to determine tool reach (may only
+    /// target tiles at or adjacent to the player's tile).
     pub fn tile(&self) -> Vector<isize> {
-        self.position
-            .map(|x| x / 64.0)
-            .map(|x| x.round())
-            .map(|x| x as isize)
+        self.center_pixel().map(|x| x / 64)
+    }
+
+    /// The center of the player's bounding box, adjusted to be
+    /// directly comparable to tile coordinates.
+    pub fn center_pos(&self) -> Vector<f32> {
+        self.center_pixel().map(|x| {
+            let x = x - 32;
+            let x = x as f32;
+            x / 64.0
+        })
     }
 
     pub fn selected_item(&self) -> Option<&Item> {

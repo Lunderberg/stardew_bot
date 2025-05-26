@@ -144,6 +144,17 @@ impl MovementGoal {
         Self { tolerance, ..self }
     }
 
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        let player = &game_state.player;
+
+        let goal_dist = (self.target_position - player.position / 64.0).mag();
+
+        let is_correct_room = player.room_name == self.target_room;
+        let is_correct_location_within_room = goal_dist < self.tolerance;
+
+        is_correct_room && is_correct_location_within_room
+    }
+
     fn room_to_room_movement(
         &self,
         game_state: &GameState,
@@ -387,16 +398,21 @@ impl BotGoal for MovementGoal {
         game_state: &GameState,
         _: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        Ok(
-            if let Some(subgoals) = self.room_to_room_movement(game_state)? {
-                subgoals.into()
-            } else if let Some(subgoals) = self.within_room_movement(game_state)
-            {
-                subgoals.into()
-            } else {
-                BotGoalResult::Completed
-            },
-        )
+        let goal: BotGoalResult = if self.is_completed(game_state) {
+            BotGoalResult::Completed
+        } else if let Some(subgoals) = self.room_to_room_movement(game_state)? {
+            subgoals.into()
+        } else if let Some(subgoals) = self.within_room_movement(game_state) {
+            subgoals.into()
+        } else {
+            unreachable!(
+                "Unless the MovementGoal is completed, \
+                 should always be able to produced either \
+                 a room-to-room or within-room movement"
+            )
+        };
+
+        Ok(goal)
     }
     fn description(&self) -> Cow<str> {
         format!(
