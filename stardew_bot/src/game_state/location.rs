@@ -29,20 +29,7 @@ pub struct Location {
     /// player-planted tea tree bushes, and walnut bushes.
     pub bushes: Vec<Bush>,
 
-    /// Dirt that has been cleared with a Hoe
-    pub hoe_dirt: Vec<HoeDirt>,
-
-    /// Trees.  This includes the small 1x1 stumps left behind after
-    /// chopping down a tree, but not the larger 2x2 stumps made
-    /// during worldgen.
-    pub trees: Vec<Tree>,
-
-    /// Location of grass.  Currently, does not distinguish between
-    /// regular grass and blue grass, and does not read out the health
-    /// of the grass.
-    pub grass: Vec<Vector<isize>>,
-
-    /// Objects on the ground
+    /// Objects that occupy a single tile of the map.
     pub objects: Vec<Object>,
 
     /// Placable furniture in the location
@@ -73,9 +60,6 @@ pub struct Location {
 pub struct LocationDelta {
     pub(crate) name: String,
     resource_clumps: Vec<ResourceClump>,
-    hoe_dirt: Vec<HoeDirt>,
-    trees: Vec<Tree>,
-    grass: Vec<Vector<isize>>,
     objects: Vec<Object>,
 }
 
@@ -133,14 +117,18 @@ pub struct Bush {
     pub top_left: Vector<isize>,
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
+/// A tile of dirt that has been cleared with a Hoe.
+#[derive(Debug, Clone)]
 pub struct HoeDirt {
-    pub position: Vector<isize>,
+    // TODO: Read parameters on what is in the HoeDirt, whether it has
+    // been watered, etc.
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
+/// Non-fruit trees.  This includes the small 1x1 stumps left behind
+/// after chopping down a tree, but not the larger 2x2 stumps made
+/// during worldgen.
+#[derive(Debug, Clone)]
 pub struct Tree {
-    pub position: Vector<isize>,
     #[allow(dead_code)]
     pub kind: TreeKind,
     #[allow(dead_code)]
@@ -151,7 +139,7 @@ pub struct Tree {
     pub is_stump: bool,
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub enum TreeKind {
     Oak,
     Maple,
@@ -176,11 +164,40 @@ pub struct Object {
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub enum ObjectKind {
+    /// The small 1x1 stones on the farm.
     Stone,
+
+    /// The small 1x1 logs on the farm.  Larger 2x2 stumps are under
+    /// LargeTerrainFeatures.
     Wood,
+
+    /// The weeds that grow on the farm.
     Fiber,
+
+    /// Grass.  Currently, only indicates the presence of grass, and
+    /// does not distinguish between regular grass and blue grass, nor
+    /// does it specify the health of the grass.
+    Grass,
+
+    /// A non-fruit tree (e.g. Oak/Maple)
+    Tree(Tree),
+
+    /// A tile that has been cleared with the Hoe.  May or may not
+    /// contain a crop.
+    HoeDirt(HoeDirt),
+
+    /// A tile that contains a chest, which may contain items inside
+    /// it.
     Chest(Inventory),
+
+    /// A tile that contains an unknown object or terrain feature
+    /// whose name is known, but for which unpacking has not yet been
+    /// implemented.
     Other(String),
+
+    /// A tile that contains an unknown object or terrain feature,
+    /// where not even the name is known.
+    Unknown,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -352,27 +369,25 @@ impl Location {
             },
         )?;
 
+        graph.named_native_function("new_hoe_dirt", |_: Pointer| {
+            ObjectKind::HoeDirt(HoeDirt {})
+        })?;
+
         graph.named_native_function(
-            "new_hoe_dirt",
-            |position: &Vector<isize>| HoeDirt {
-                position: position.clone(),
+            "new_tree_kind",
+            |kind: &str, growth_stage: i32, has_seed: bool, is_stump: bool| {
+                ObjectKind::Tree(Tree {
+                    kind: kind.parse().unwrap(),
+                    growth_stage,
+                    has_seed,
+                    is_stump,
+                })
             },
         )?;
 
-        graph.named_native_function(
-            "new_tree",
-            |position: &Vector<isize>,
-             kind: &str,
-             growth_stage: i32,
-             has_seed: bool,
-             is_stump: bool| Tree {
-                position: position.clone(),
-                kind: kind.parse().unwrap(),
-                growth_stage,
-                has_seed,
-                is_stump,
-            },
-        )?;
+        graph.named_native_function("new_grass_kind", |_: Pointer| {
+            ObjectKind::Grass
+        })?;
 
         graph.named_native_function(
             "new_bush",
@@ -384,20 +399,31 @@ impl Location {
 
         graph.named_native_function(
             "new_litter_kind",
-            |name: &str, _category: i32| -> Option<ObjectKind> {
-                // if _category==-999 {
-                //     return None;
-                // }
+            |name: &str| -> ObjectKind {
                 if name == "Twig" {
-                    Some(ObjectKind::Wood)
+                    ObjectKind::Wood
                 } else if name == "Stone" {
-                    Some(ObjectKind::Stone)
+                    ObjectKind::Stone
                 } else if name.to_lowercase().contains("weeds") {
-                    Some(ObjectKind::Fiber)
+                    ObjectKind::Fiber
                 } else {
-                    Some(ObjectKind::Other(name.into()))
+                    todo!(
+                        "Handle item '{name}', \
+                         when it occurs as a type of litter \
+                         (category == -999)"
+                    )
                 }
             },
+        )?;
+
+        graph.named_native_function(
+            "new_other_object_kind",
+            |name: &str| -> ObjectKind { ObjectKind::Other(name.to_string()) },
+        )?;
+
+        graph.named_native_function(
+            "new_unknown_object_kind",
+            |_: Pointer| ObjectKind::Unknown,
         )?;
 
         graph.named_native_function(
@@ -566,9 +592,6 @@ impl Location {
              shape: &Vector<isize>,
              warps: &Vec<Warp>,
              resource_clumps: &Vec<ResourceClump>,
-             grass: &Vec<Vector<isize>>,
-             hoe_dirt: &Vec<HoeDirt>,
-             trees: &Vec<Tree>,
              bushes: &Vec<Bush>,
              objects: &Vec<Object>,
              furniture: &Vec<Furniture>,
@@ -580,9 +603,6 @@ impl Location {
                     shape: shape.clone(),
                     warps: warps.clone(),
                     resource_clumps: resource_clumps.clone(),
-                    grass: grass.clone(),
-                    hoe_dirt: hoe_dirt.clone(),
-                    trees: trees.clone(),
                     bushes: bushes.clone(),
                     objects: objects.clone(),
                     furniture: furniture.clone(),
@@ -600,16 +620,10 @@ impl Location {
             "new_location_delta",
             |name: &str,
              resource_clumps: &Vec<ResourceClump>,
-             grass: &Vec<Vector<isize>>,
-             hoe_dirt: &Vec<HoeDirt>,
-             trees: &Vec<Tree>,
              objects: &Vec<Object>| {
                 LocationDelta {
                     name: name.into(),
                     resource_clumps: resource_clumps.clone(),
-                    grass: grass.clone(),
-                    hoe_dirt: hoe_dirt.clone(),
-                    trees: trees.clone(),
                     objects: objects.clone(),
                 }
             },
@@ -711,7 +725,7 @@ impl Location {
                 resource_clumps
             }
 
-            fn read_location_grass(location, filter) {
+            fn iter_location_terrain_features(location, filter) {
                 let num_features = location
                     .terrainFeatures
                     .dict
@@ -722,140 +736,67 @@ impl Location {
                 } else {
                     0
                 };
-                let iter_features = (0..num_features)
+                (0..num_features)
                     .map(|i_feat: usize| {
                         location
                             .terrainFeatures
                             .dict
                             ._entries[i_feat]
-                    });
-
-                let grass = iter_features
-                    .filter(|feature| feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.Grass>()
-                            .grassBladeHealth
-                            .is_some())
-                    .filter(|feature| filter.is_none() || filter(feature))
-                    .map(|feature| {
-                        let right = feature.key.X;
-                        let down = feature.key.Y;
-                        new_isize_vector(right,down)
                     })
-                    .collect();
-
-                grass
-            }
-
-            fn read_location_hoe_dirt(location, filter) {
-                let num_features = location
-                    .terrainFeatures
-                    .dict
-                    ._entries
-                    .len();
-                let num_features = if num_features.is_some() {
-                    num_features
-                } else {
-                    0
-                };
-                let iter_features = (0..num_features)
-                    .map(|i_feat: usize| {
-                        location
-                            .terrainFeatures
-                            .dict
-                            ._entries[i_feat]
-                    });
-
-                let hoe_dirt = iter_features
-                    .filter(|feature| feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.HoeDirt>()
-                            .is_some())
                     .filter(|feature| filter.is_none() || filter(feature))
                     .map(|feature| {
-                        let hoe_dirt = feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.HoeDirt>();
-                        let position = {
+                        let tile = {
                             let right = feature.key.X;
                             let down = feature.key.Y;
                             new_isize_vector(right,down)
                         };
-                        new_hoe_dirt(
-                            position,
-                        )
-                    })
-                    .collect();
 
-                hoe_dirt
-            }
+                        let feature_value = feature
+                            .value
+                            .value;
 
-            fn read_location_trees(location, filter) {
-                let num_features = location
-                    .terrainFeatures
-                    .dict
-                    ._entries
-                    .len();
-                let num_features = if num_features.is_some() {
-                    num_features
-                } else {
-                    0
-                };
-                let iter_features = (0..num_features)
-                    .map(|i_feat: usize| {
-                        location
-                            .terrainFeatures
-                            .dict
-                            ._entries[i_feat]
-                    });
-
-                let trees = iter_features
-                    .filter(|feature| feature
-                            .value
-                            .value
-                            .as::<StardewValley.TerrainFeatures.Tree>()
-                            .is_some())
-                    .filter(|feature| filter.is_none() || filter(feature))
-                    .map(|feature| {
-                        let tree = feature
-                            .value
-                            .value
+                        let tree = feature_value
                             .as::<StardewValley.TerrainFeatures.Tree>();
-                        let position = {
-                            let right = feature.key.X;
-                            let down = feature.key.Y;
-                            new_isize_vector(right,down)
-                        };
-                        // treeType looks like an integer, but has
-                        // been converted to a string.
-                        let tree_type =
-                            tree.treeType.value.read_string();
-                        let growth_stage = tree.growthStage.value;
-                        let has_seed = tree.hasSeed.value;
-                        let is_stump = tree.stump.value;
-                        new_tree(
-                            position,
-                            tree_type,
-                            growth_stage,
-                            has_seed,
-                            is_stump
-                        )
-                    })
-                    .collect();
+                        let grass = feature_value
+                            .as::<StardewValley.TerrainFeatures.Grass>();
+                        let hoe_dirt = feature_value
+                            .as::<StardewValley.TerrainFeatures.HoeDirt>();
 
-                trees
+                        let kind = if tree.is_some() {
+                            // treeType looks like an integer, but has
+                            // been converted to a string.
+                            let tree_type =
+                                tree.treeType.value.read_string();
+                            let growth_stage = tree.growthStage.value;
+                            let has_seed = tree.hasSeed.value;
+                            let is_stump = tree.stump.value;
+                            new_tree_kind(
+                                tree_type,
+                                growth_stage,
+                                has_seed,
+                                is_stump
+                            )
+                        } else if grass.is_some() {
+                            new_grass_kind(grass.prim_cast::<Ptr>())
+                        } else if hoe_dirt.is_some() {
+                            new_hoe_dirt(hoe_dirt.prim_cast::<Ptr>())
+                        } else {
+                            new_unknown_object_kind(feature_value)
+                        };
+
+                        new_object(tile, kind)
+                    })
+                    .filter(|obj| obj.is_some())
             }
 
-            fn read_location_objects(location, filter) {
+            fn iter_location_objects(location, filter) {
                 let num_objects = location
                     .objects
                     .compositeDict
                     ._entries
                     .len();
-                let objects = (0..num_objects)
+
+                (0..num_objects)
                     .map(|i| {
                         location
                             .objects
@@ -872,20 +813,22 @@ impl Location {
                         };
 
                         let chest = obj.as::<StardewValley.Objects.Chest>();
+
+
                         let kind = if chest.is_some() {
                             let inventory = read_inventory(chest.netItems.value);
                             new_chest_kind(inventory)
+                        } else if obj.category.value == -999i32 {
+                            let name = obj.netName.value.read_string();
+                            new_litter_kind(name)
                         } else {
                             let name = obj.netName.value.read_string();
-                            let category = obj.category.value;
-                            new_litter_kind(name,category)
+                            new_other_object_kind(name)
                         };
 
                         new_object(tile,kind)
                     })
                     .filter(|obj| obj.is_some())
-                    .collect();
-                objects
             }
 
             fn read_location_furniture(location, filter) {
@@ -1022,11 +965,6 @@ impl Location {
                     });
 
 
-                let resource_clumps = read_location_resource_clumps(
-                    location, None);
-                let grass = read_location_grass(location, None);
-                let hoe_dirt = read_location_hoe_dirt(location, None);
-                let trees = read_location_trees(location, None);
 
                 let num_large_features = location
                     .largeTerrainFeatures
@@ -1052,8 +990,6 @@ impl Location {
                     })
                     .collect();
 
-                let objects = read_location_objects(location, None);
-                let furniture = read_location_furniture(location, None);
 
                 let water_tiles = location
                     .waterTiles
@@ -1233,14 +1169,21 @@ impl Location {
                         tile_sheets
                     });
 
+                let resource_clumps = read_location_resource_clumps(
+                    location, None);
+                let furniture = read_location_furniture(location, None);
+
+                let iter_objects = iter_location_objects(location,None);
+                let iter_features = iter_location_terrain_features(location,None);
+                let objects = iter_objects
+                    .chain(iter_features)
+                    .collect();
+
                 new_location(
                     name,
                     shape,
                     warps,
                     resource_clumps,
-                    grass,
-                    hoe_dirt,
-                    trees,
                     bushes,
                     objects,
                     furniture,
@@ -1277,41 +1220,27 @@ impl Location {
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
-                let grass = read_location_grass(
-                    location,
-                    |feature| {
-                        let pos = feature.key;
-                        is_close_to_player(pos.X, pos.Y)
-                    }
-                );
-                let hoe_dirt = read_location_hoe_dirt(
-                    location,
-                    |feature| {
-                        let pos = feature.key;
-                        is_close_to_player(pos.X, pos.Y)
-                    }
-                );
-                let trees = read_location_trees(
-                    location,
-                    |feature| {
-                        let pos = feature.key;
-                        is_close_to_player(pos.X, pos.Y)
-                    }
-                );
-                let objects = read_location_objects(
+                let iter_objects = iter_location_objects(
                     location,
                     |obj| {
                         let pos = obj.tileLocation.value;
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
+                let iter_features = iter_location_terrain_features(
+                    location,
+                    |feature| {
+                        let pos = feature.key;
+                        is_close_to_player(pos.X, pos.Y)
+                    }
+                );
+                let objects = iter_objects
+                    .chain(iter_features)
+                    .collect();
 
                 new_location_delta(
                     name,
                     resource_clumps,
-                    grass,
-                    hoe_dirt,
-                    trees,
                     objects,
                 )
             }
@@ -1381,9 +1310,11 @@ impl Location {
             .iter()
             .flat_map(|bush| bush.rectangle().iter_points());
 
-        let iter_tree = self.trees.iter().map(|tree| tree.position);
-
-        let iter_objects = self.objects.iter().map(|obj| obj.tile);
+        let iter_objects = self
+            .objects
+            .iter()
+            .filter(|obj| !obj.is_walkable())
+            .map(|obj| obj.tile);
 
         let iter_furniture = self
             .furniture
@@ -1400,7 +1331,6 @@ impl Location {
             .chain(iter_water)
             .chain(iter_clumps)
             .chain(iter_bush)
-            .chain(iter_tree)
             .chain(iter_objects)
             .chain(iter_furniture)
             .chain(iter_buildings)
@@ -1434,39 +1364,6 @@ impl Location {
             .unique_by(|clump| clump.shape.center())
             .collect();
 
-        self.trees = delta
-            .trees
-            .into_iter()
-            .chain(
-                self.trees
-                    .drain(..)
-                    .filter(|tree| is_far_from_player(tree.position)),
-            )
-            .unique_by(|tree| tree.position)
-            .collect();
-
-        self.hoe_dirt = delta
-            .hoe_dirt
-            .into_iter()
-            .chain(
-                self.hoe_dirt
-                    .drain(..)
-                    .filter(|hoe_dirt| is_far_from_player(hoe_dirt.position)),
-            )
-            .unique_by(|hoe_dirt| hoe_dirt.position)
-            .collect();
-
-        self.grass = delta
-            .grass
-            .into_iter()
-            .chain(
-                self.grass
-                    .drain(..)
-                    .filter(|grass_pos| is_far_from_player(*grass_pos)),
-            )
-            .unique()
-            .collect();
-
         self.objects = delta
             .objects
             .into_iter()
@@ -1477,6 +1374,30 @@ impl Location {
             )
             .unique_by(|obj| obj.tile)
             .collect();
+    }
+}
+
+impl Object {
+    pub fn is_walkable(&self) -> bool {
+        match &self.kind {
+            ObjectKind::Stone
+            | ObjectKind::Wood
+            | ObjectKind::Fiber
+            | ObjectKind::Chest(_) => false,
+            ObjectKind::Grass => true,
+            ObjectKind::Tree(_) => {
+                // TODO: Check for just-planted trees, which can be
+                // walked over.
+                false
+            }
+            ObjectKind::HoeDirt(_) => {
+                // TODO: Check for crops that use a trellis, which
+                // cannot be walked over.
+                true
+            }
+            ObjectKind::Other(_) => false,
+            ObjectKind::Unknown => false,
+        }
     }
 }
 
@@ -1704,7 +1625,11 @@ impl std::fmt::Display for ObjectKind {
                         .count()
                 )
             }
+            Self::Grass => write!(f, "Grass"),
+            Self::Tree(tree) => write!(f, "{}", tree.kind),
+            Self::HoeDirt(_) => write!(f, "HoeDirt"),
             Self::Other(other) => write!(f, "Other({other})"),
+            Self::Unknown => write!(f, "Unknown"),
         }
     }
 }

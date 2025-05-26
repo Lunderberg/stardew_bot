@@ -47,11 +47,9 @@ impl<'a> DrawableGameLocation<'a> {
                 self.paint_blocked_tiles(ctx);
                 self.paint_water_tiles(ctx);
                 self.paint_buildings(ctx);
-                self.paint_grass(ctx);
                 self.paint_resource_clumps(ctx);
                 self.paint_bushes(ctx);
-                self.paint_trees(ctx);
-                self.paint_litter(ctx);
+                self.paint_objects(ctx);
                 self.paint_furniture(ctx);
 
                 ctx.layer();
@@ -247,37 +245,7 @@ impl<'a> DrawableGameLocation<'a> {
             .for_each(|rect| ctx.draw(&rect));
     }
 
-    fn paint_trees(&self, ctx: &mut CanvasContext) {
-        let trees = self
-            .room
-            .trees
-            .iter()
-            .map(|tree| {
-                self.to_draw_coordinates(tree.position.map(|x| x as f64))
-            })
-            .collect::<Vec<_>>();
-        ctx.draw(&Points {
-            coords: &trees,
-            color: Color::Rgb(133, 74, 5),
-        });
-    }
-
-    fn paint_grass(&self, ctx: &mut CanvasContext) {
-        let grass = self
-            .room
-            .grass
-            .iter()
-            .map(|grass_pos| {
-                self.to_draw_coordinates(grass_pos.map(|x| x as f64))
-            })
-            .collect::<Vec<_>>();
-        ctx.draw(&Points {
-            coords: &grass,
-            color: Color::Rgb(10, 80, 10),
-        });
-    }
-
-    fn paint_litter(&self, ctx: &mut CanvasContext) {
+    fn paint_objects(&self, ctx: &mut CanvasContext) {
         self.room
             .objects
             .iter()
@@ -286,8 +254,12 @@ impl<'a> DrawableGameLocation<'a> {
                     ObjectKind::Stone => Some(Color::DarkGray),
                     ObjectKind::Wood => Some(Color::Rgb(97, 25, 0)),
                     ObjectKind::Fiber => Some(Color::LightGreen),
+                    ObjectKind::Tree(_) => Some(Color::Rgb(133, 74, 5)),
+                    ObjectKind::Grass => Some(Color::Rgb(10, 80, 10)),
                     ObjectKind::Chest(_) => None,
                     ObjectKind::Other(_) => None,
+                    ObjectKind::HoeDirt(_) => Some(Color::Rgb(40, 40, 40)),
+                    ObjectKind::Unknown => None,
                 }?;
                 let coordinates =
                     self.to_draw_coordinates(obj.tile.map(|x| x as f64));

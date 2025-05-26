@@ -115,8 +115,11 @@ impl BotGoal for ClayFarmingGoal {
         if let Some(tile) = opt_adjacent_clay {
             do_action(GameAction::MouseOverTile(tile));
 
-            let has_hoe_dirt =
-                beach.hoe_dirt.iter().any(|dirt| dirt.position == tile);
+            let has_hoe_dirt = beach
+                .objects
+                .iter()
+                .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
+                .any(|obj| obj.tile == tile);
             let tool = if has_hoe_dirt { pickaxe } else { hoe };
 
             let goal = SelectItemGoal::new(tool);

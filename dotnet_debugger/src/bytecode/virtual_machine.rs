@@ -1342,6 +1342,7 @@ macro_rules! define_comparison_op {
         define_binary_op! {
             $func_name,
             ( NativeUInt(a), NativeUInt(b) ) => a.$cmp(&b),
+            ( I32(a), I32(b) ) => a.$cmp(&b),
             ( F32(a), F32(b) ) => a.$cmp(&b),
             ( NativeUInt(a), F32(b) ) => (a as f32).$cmp(&b),
             ( F32(a), NativeUInt(b) ) => a.$cmp(&(b as f32)),
