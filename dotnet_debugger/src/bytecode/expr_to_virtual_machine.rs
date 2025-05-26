@@ -1298,9 +1298,7 @@ impl ExpressionTranslator<'_> {
                     // the first argument.
                     let first_arg_op = match &args[0] {
                         SymbolicValue::Result(op_index) => *op_index,
-                        SymbolicValue::Bool(_)
-                        | SymbolicValue::Int(_)
-                        | SymbolicValue::Ptr(_) => todo!(
+                        SymbolicValue::Const(_) => todo!(
                             "Attempted mutation of const SymbolicValue.  \
                              Should handle this case earlier using \
                              a new ExprKind to represent mutable constants."

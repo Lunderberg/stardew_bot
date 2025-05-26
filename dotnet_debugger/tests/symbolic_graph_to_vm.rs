@@ -10,7 +10,7 @@ fn constant_folded_integers() {
 
     let mut value = graph.function_call(func, vec![]);
     for _ in 0..100 {
-        value = graph.add(value, 1);
+        value = graph.add(value, 1usize);
     }
     let main_func = graph.function_def(vec![], value);
     graph.name(main_func, "main").unwrap();
@@ -37,7 +37,7 @@ fn register_reuse() {
 
     let mut value = graph.function_call(func, vec![]);
     for _ in 0..100 {
-        value = graph.add(value, 1);
+        value = graph.add(value, 1usize);
     }
     let main_func = graph.function_def(vec![], value);
     graph.name(main_func, "main").unwrap();

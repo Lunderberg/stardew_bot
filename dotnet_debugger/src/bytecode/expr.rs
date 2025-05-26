@@ -3,7 +3,6 @@ use std::{
     fmt::Display,
 };
 
-use derive_more::derive::From;
 use itertools::Itertools as _;
 
 use iterator_extensions::ResultIteratorExt as _;
@@ -354,11 +353,9 @@ pub enum ExprKind {
     ReadString { ptr: SymbolicValue },
 }
 
-#[derive(Debug, PartialEq, Eq, Hash, Clone, Copy, From)]
+#[derive(Debug, Clone, Copy)]
 pub enum SymbolicValue {
-    Bool(bool),
-    Int(usize),
-    Ptr(Pointer),
+    Const(RuntimePrimValue),
     Result(OpIndex),
 }
 
@@ -634,9 +631,7 @@ impl SymbolicGraph {
                 }
                 self.ops[op_index.0].name = Some(name);
             }
-            SymbolicValue::Bool(_)
-            | SymbolicValue::Int(_)
-            | SymbolicValue::Ptr(_) => {
+            SymbolicValue::Const(_) => {
                 // Currently, constants are stored in-line at their
                 // point-of-use, and can't be named.  If constants are
                 // ever moved to be represented as their own nodes,
@@ -2321,9 +2316,7 @@ impl SymbolicValue {
 
     pub(crate) fn as_prim_value(self) -> Option<RuntimePrimValue> {
         match self {
-            SymbolicValue::Bool(val) => Some(RuntimePrimValue::Bool(val)),
-            SymbolicValue::Int(val) => Some(RuntimePrimValue::NativeUInt(val)),
-            SymbolicValue::Ptr(ptr) => Some(RuntimePrimValue::Ptr(ptr)),
+            SymbolicValue::Const(prim) => Some(prim),
             SymbolicValue::Result(_) => None,
         }
     }
@@ -2357,9 +2350,7 @@ impl ExprKind {
         let vec_requires_remap = |slice: &[SymbolicValue]| -> bool {
             slice.iter().any(|item| match item {
                 SymbolicValue::Result(op_index) => map.contains_key(op_index),
-                SymbolicValue::Bool(_)
-                | SymbolicValue::Int(_)
-                | SymbolicValue::Ptr(_) => false,
+                SymbolicValue::Const(_) => false,
             })
         };
 
@@ -3585,9 +3576,7 @@ where
 impl Display for SymbolicValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            SymbolicValue::Bool(value) => write!(f, "{value}"),
-            SymbolicValue::Int(value) => write!(f, "{value}"),
-            SymbolicValue::Ptr(ptr) => write!(f, "{ptr}"),
+            SymbolicValue::Const(prim) => write!(f, "{prim}"),
             SymbolicValue::Result(op_index) => write!(f, "{op_index}"),
         }
     }
@@ -3604,5 +3593,158 @@ impl std::ops::Index<OpIndex> for SymbolicGraph {
 
     fn index(&self, index: OpIndex) -> &Self::Output {
         &self.ops[index.0]
+    }
+}
+
+impl From<OpIndex> for SymbolicValue {
+    fn from(op_index: OpIndex) -> Self {
+        Self::Result(op_index)
+    }
+}
+impl From<RuntimePrimValue> for SymbolicValue {
+    fn from(prim: RuntimePrimValue) -> Self {
+        Self::Const(prim)
+    }
+}
+macro_rules! symbolic_value_from_prim {
+    ($prim:ty) => {
+        impl From<$prim> for SymbolicValue {
+            fn from(prim: $prim) -> Self {
+                Self::Const(prim.into())
+            }
+        }
+    };
+}
+symbolic_value_from_prim!(bool);
+symbolic_value_from_prim!(u8);
+symbolic_value_from_prim!(u16);
+symbolic_value_from_prim!(u32);
+symbolic_value_from_prim!(u64);
+symbolic_value_from_prim!(usize);
+symbolic_value_from_prim!(i8);
+symbolic_value_from_prim!(i16);
+symbolic_value_from_prim!(i32);
+symbolic_value_from_prim!(i64);
+symbolic_value_from_prim!(isize);
+symbolic_value_from_prim!(f32);
+symbolic_value_from_prim!(f64);
+symbolic_value_from_prim!(Pointer);
+
+/// SymbolicValue implements PartialEq and Eq, with f32 and f64
+/// compared by their bitwise representations.  The IEEE rules for
+/// comparisons make sense for the outputs of computations, but not
+/// for the inputs of computations.  Because SymbolicValue is always
+/// used as an input to computations, defining PartialEq/Eq/Hash based
+/// on the bitwise comparisons is a better match to the semantics.
+impl std::cmp::PartialEq for SymbolicValue {
+    fn eq(&self, other: &Self) -> bool {
+        match self {
+            SymbolicValue::Const(RuntimePrimValue::Bool(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::Bool(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::Char(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::Char(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::U8(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::U8(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::U16(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::U16(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::U32(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::U32(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::U64(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::U64(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::NativeUInt(lhs)) => {
+                match other {
+                    SymbolicValue::Const(RuntimePrimValue::NativeUInt(rhs)) => {
+                        lhs == rhs
+                    }
+                    _ => false,
+                }
+            }
+            SymbolicValue::Const(RuntimePrimValue::I8(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::I8(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::I16(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::I16(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::I32(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::I32(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::I64(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::I64(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::NativeInt(lhs)) => {
+                match other {
+                    SymbolicValue::Const(RuntimePrimValue::NativeInt(rhs)) => {
+                        lhs == rhs
+                    }
+                    _ => false,
+                }
+            }
+            SymbolicValue::Const(RuntimePrimValue::F32(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::F32(rhs)) => {
+                    lhs.to_bits() == rhs.to_bits()
+                }
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::F64(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::F64(rhs)) => {
+                    lhs.to_bits() == rhs.to_bits()
+                }
+                _ => false,
+            },
+            SymbolicValue::Const(RuntimePrimValue::Ptr(lhs)) => match other {
+                SymbolicValue::Const(RuntimePrimValue::Ptr(rhs)) => lhs == rhs,
+                _ => false,
+            },
+            SymbolicValue::Result(lhs) => match other {
+                SymbolicValue::Result(rhs) => lhs == rhs,
+                _ => false,
+            },
+        }
+    }
+}
+impl std::cmp::Eq for SymbolicValue {}
+
+impl std::hash::Hash for SymbolicValue {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        core::mem::discriminant(self).hash(state);
+        match self {
+            SymbolicValue::Const(prim) => {
+                core::mem::discriminant(prim).hash(state);
+                match prim {
+                    RuntimePrimValue::Bool(value) => value.hash(state),
+                    RuntimePrimValue::Char(value) => value.hash(state),
+                    RuntimePrimValue::U8(value) => value.hash(state),
+                    RuntimePrimValue::U16(value) => value.hash(state),
+                    RuntimePrimValue::U32(value) => value.hash(state),
+                    RuntimePrimValue::U64(value) => value.hash(state),
+                    RuntimePrimValue::NativeUInt(value) => value.hash(state),
+                    RuntimePrimValue::I8(value) => value.hash(state),
+                    RuntimePrimValue::I16(value) => value.hash(state),
+                    RuntimePrimValue::I32(value) => value.hash(state),
+                    RuntimePrimValue::I64(value) => value.hash(state),
+                    RuntimePrimValue::NativeInt(value) => value.hash(state),
+                    RuntimePrimValue::F32(value) => value.to_bits().hash(state),
+                    RuntimePrimValue::F64(value) => value.to_bits().hash(state),
+                    RuntimePrimValue::Ptr(value) => value.hash(state),
+                }
+            }
+            SymbolicValue::Result(op_index) => op_index.hash(state),
+        }
     }
 }

@@ -3,7 +3,7 @@ use memory_reader::{MemoryReader, Pointer};
 use crate::runtime_type::RuntimePrimType;
 use crate::{
     Error, MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeObject,
-    RuntimeString, TypedPointer,
+    RuntimeString, RuntimeType, TypedPointer,
 };
 
 /// A value read out from the remote process.  This only handles
@@ -152,6 +152,52 @@ impl RuntimePrimValue {
         }
     }
 
+    pub(crate) fn static_runtime_type_ref(&self) -> &'static RuntimeType {
+        match self {
+            RuntimePrimValue::Bool(_) => {
+                &RuntimeType::Prim(RuntimePrimType::Bool)
+            }
+            RuntimePrimValue::Char(_) => {
+                &RuntimeType::Prim(RuntimePrimType::Char)
+            }
+            RuntimePrimValue::U8(_) => &RuntimeType::Prim(RuntimePrimType::U8),
+            RuntimePrimValue::U16(_) => {
+                &RuntimeType::Prim(RuntimePrimType::U16)
+            }
+            RuntimePrimValue::U32(_) => {
+                &RuntimeType::Prim(RuntimePrimType::U32)
+            }
+            RuntimePrimValue::U64(_) => {
+                &RuntimeType::Prim(RuntimePrimType::U64)
+            }
+            RuntimePrimValue::NativeUInt(_) => {
+                &RuntimeType::Prim(RuntimePrimType::NativeUInt)
+            }
+            RuntimePrimValue::I8(_) => &RuntimeType::Prim(RuntimePrimType::I8),
+            RuntimePrimValue::I16(_) => {
+                &RuntimeType::Prim(RuntimePrimType::I16)
+            }
+            RuntimePrimValue::I32(_) => {
+                &RuntimeType::Prim(RuntimePrimType::I32)
+            }
+            RuntimePrimValue::I64(_) => {
+                &RuntimeType::Prim(RuntimePrimType::I64)
+            }
+            RuntimePrimValue::NativeInt(_) => {
+                &RuntimeType::Prim(RuntimePrimType::NativeInt)
+            }
+            RuntimePrimValue::F32(_) => {
+                &RuntimeType::Prim(RuntimePrimType::F32)
+            }
+            RuntimePrimValue::F64(_) => {
+                &RuntimeType::Prim(RuntimePrimType::F64)
+            }
+            RuntimePrimValue::Ptr(_) => {
+                &RuntimeType::Prim(RuntimePrimType::Ptr)
+            }
+        }
+    }
+
     pub fn prim_cast(self, prim_type: RuntimePrimType) -> Result<Self, Error> {
         use RuntimePrimType as Type;
         match (prim_type, self) {
@@ -282,7 +328,7 @@ impl RuntimePrimValue {
         self.try_into()
     }
 
-    fn type_name(&self) -> &'static str {
+    pub(crate) fn type_name(&self) -> &'static str {
         match self {
             RuntimePrimValue::Bool(_) => "bool",
             RuntimePrimValue::Char(_) => "char",

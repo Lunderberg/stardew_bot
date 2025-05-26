@@ -7,7 +7,7 @@ use super::{
     expr::{ByteRegion, SymbolicGraph, SymbolicType, SymbolicValue},
     OpPrecedence,
 };
-use crate::{Error, RuntimeType};
+use crate::{Error, RuntimePrimValue, RuntimeType};
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,
@@ -461,7 +461,7 @@ impl<'a> SymbolicParser<'a> {
                 token.kind.is_punct(Punctuation::DoublePeriod)
             })? {
                 match expr {
-                    SymbolicValue::Int(0) => {
+                    SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)) => {
                         // Ranges must all start with zero.
                     }
                     _ => {
@@ -610,7 +610,7 @@ impl<'a> SymbolicParser<'a> {
         )?;
 
         let value = match token.kind {
-            TokenKind::Int(value) => SymbolicValue::Int(value),
+            TokenKind::Int(value) => value.into(),
             _ => unreachable!("Handled by earlier check"),
         };
 
@@ -639,8 +639,8 @@ impl<'a> SymbolicParser<'a> {
         )?;
 
         let value = match token.kind {
-            TokenKind::Keyword(Keyword::True) => SymbolicValue::Bool(true),
-            TokenKind::Keyword(Keyword::False) => SymbolicValue::Bool(false),
+            TokenKind::Keyword(Keyword::True) => true.into(),
+            TokenKind::Keyword(Keyword::False) => false.into(),
             _ => unreachable!("Handled by earlier check"),
         };
 

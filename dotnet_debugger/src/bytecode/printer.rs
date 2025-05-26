@@ -8,8 +8,8 @@ use itertools::{Either, Itertools, Position};
 use format_utils::Indent;
 
 use crate::{
-    bytecode::expr::Scope, ExprKind, MethodTable, RuntimePrimType, RuntimeType,
-    TypedPointer,
+    bytecode::expr::Scope, ExprKind, MethodTable, RuntimePrimType,
+    RuntimePrimValue, RuntimeType, TypedPointer,
 };
 
 use super::{
@@ -505,8 +505,17 @@ impl<'a> GraphPrinter<'a> {
                             write!(fmt, "{}", make_index_printer(index))?;
                             prev_print_type = PrevPrintType::Expr;
                         }
-                        _ => {
-                            write!(fmt, "{value}")?;
+                        SymbolicValue::Const(
+                            prim @ (RuntimePrimValue::NativeUInt(_)
+                            | RuntimePrimValue::Bool(_)
+                            | RuntimePrimValue::Ptr(_)),
+                        ) => {
+                            write!(fmt, "{prim}")?;
+                            prev_print_type = PrevPrintType::Expr;
+                        }
+                        SymbolicValue::Const(prim) => {
+                            let suffix = prim.type_name();
+                            write!(fmt, "{prim}{suffix}")?;
                             prev_print_type = PrevPrintType::Expr;
                         }
                     }

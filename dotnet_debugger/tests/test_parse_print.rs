@@ -211,7 +211,7 @@ test_print_and_parse! {
     "class_name.static_field[123]",
     |graph| {
         let obj = graph.static_field("class_name", "static_field");
-        graph.access_index(obj, 123)
+        graph.access_index(obj, 123usize)
     },
 }
 
@@ -230,7 +230,7 @@ test_print_and_parse! {
     "class_name.static_field[123, 456, 789]",
     |graph| {
         let obj = graph.static_field("class_name", "static_field");
-        graph.access_indices(obj, [123, 456, 789])
+        graph.access_indices(obj, [123usize, 456usize, 789usize])
     },
 }
 
@@ -248,7 +248,7 @@ test_print_and_parse! {
     "class_name.static_field.extent(0)",
     |graph| {
         let obj = graph.static_field("class_name", "static_field");
-        graph.array_extent(obj, 0)
+        graph.array_extent(obj, 0usize)
     },
 }
 
@@ -356,7 +356,7 @@ test_print_and_parse! {
         pub fn main() { 42 }
     "},
     |graph| {
-        let func = graph.function_def(vec![], 42.into());
+        let func = graph.function_def(vec![], 42usize.into());
         graph.name(func, "main")?;
         graph.mark_extern_func(func)?;
         Ok(())
@@ -370,7 +370,7 @@ test_print_and_parse! {
         let arg = graph.function_arg(RuntimePrimType::NativeUInt);
         graph.name(arg, "arg").unwrap();
 
-        let product = graph.mul(arg, 2);
+        let product = graph.mul(arg, 2usize);
 
         graph.function_def(vec![arg], product)
     },
@@ -383,7 +383,7 @@ test_parse! {
         let arg = graph.function_arg(RuntimePrimType::NativeUInt);
         graph.name(arg, "arg").unwrap();
 
-        let product = graph.mul(arg, 2);
+        let product = graph.mul(arg, 2usize);
 
         graph.function_def(vec![arg], product)
     },
@@ -396,7 +396,7 @@ test_parse! {
     // TokenKind::Pipe tokens.
     "let _0 = | | 42*2;",
     |graph| {
-        let product = graph.mul(42, 2);
+        let product = graph.mul(42usize, 2usize);
         graph.function_def(vec![], product);
     },
 }
@@ -415,7 +415,7 @@ test_parse! {
     // not.
     "let _0 = || 42*2;",
     |graph| {
-        let product = graph.mul(42, 2);
+        let product = graph.mul(42usize, 2usize);
         graph.function_def(vec![], product)
     },
 }
@@ -468,21 +468,21 @@ test_print_and_parse! {
         let arr2 = class_name.static_field2;
         pub fn main(index: usize) { (arr1[index], arr2[index]) }
     "},
-        |graph| {
-            let arr1 = graph.static_field("class_name", "static_field1");
-            graph.name(arr1, "arr1").unwrap();
-            let arr2 = graph.static_field("class_name", "static_field2");
-            graph.name(arr2, "arr2").unwrap();
-            let index = graph.function_arg(RuntimePrimType::NativeUInt);
-            graph.name(index, "index").unwrap();
-            let item1 = graph.access_index(arr1, index);
-            let item2 = graph.access_index(arr2, index);
+    |graph| {
+        let arr1 = graph.static_field("class_name", "static_field1");
+        graph.name(arr1, "arr1").unwrap();
+        let arr2 = graph.static_field("class_name", "static_field2");
+        graph.name(arr2, "arr2").unwrap();
+        let index = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(index, "index").unwrap();
+        let item1 = graph.access_index(arr1, index);
+        let item2 = graph.access_index(arr2, index);
 
-            let tuple = graph.tuple(vec![item1, item2]);
-            let func = graph.function_def(vec![index], tuple);
-            graph.name(func, "main").unwrap();
-            graph.mark_extern_func(func).unwrap();
-        },
+        let tuple = graph.tuple(vec![item1, item2]);
+        let func = graph.function_def(vec![index], tuple);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
 }
 
 test_parse! {
@@ -496,19 +496,19 @@ test_parse! {
         }
         func(x)
     "},
-        |graph| {
-            let x_outer = graph.add(1, 1);
-            graph.name(x_outer, "x").unwrap();
-            let y = graph.function_arg(RuntimePrimType::NativeUInt);
-            graph.name(y, "y").unwrap();
-            let x_inner = graph.add(100, 100);
-            graph.name(x_inner, "x").unwrap();
-            let sum = graph.add(x_inner, y);
-            let func = graph.function_def(vec![y], sum);
-            graph.name(func, "func").unwrap();
+    |graph| {
+        let x_outer = graph.add(1, 1);
+        graph.name(x_outer, "x").unwrap();
+        let y = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(y, "y").unwrap();
+        let x_inner = graph.add(100usize, 100usize);
+        graph.name(x_inner, "x").unwrap();
+        let sum = graph.add(x_inner, y);
+        let func = graph.function_def(vec![y], sum);
+        graph.name(func, "func").unwrap();
 
-            graph.function_call(func, vec![x_outer]);
-        },
+        graph.function_call(func, vec![x_outer]);
+    },
 }
 
 test_parse! {
@@ -521,17 +521,17 @@ test_parse! {
         }
         func(x)
     "},
-        |graph| {
-            let x_outer = graph.add(1, 1);
-            graph.name(x_outer, "x").unwrap();
-            let x_param = graph.function_arg(RuntimePrimType::NativeUInt);
-            graph.name(x_param, "x").unwrap();
-            let sum = graph.add(x_param, 1000);
-            let func = graph.function_def(vec![x_param], sum);
-            graph.name(func, "func").unwrap();
+    |graph| {
+        let x_outer = graph.add(1usize, 1usize);
+        graph.name(x_outer, "x").unwrap();
+        let x_param = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(x_param, "x").unwrap();
+        let sum = graph.add(x_param, 1000usize);
+        let func = graph.function_def(vec![x_param], sum);
+        graph.name(func, "func").unwrap();
 
-            graph.function_call(func, vec![x_outer]);
-        },
+        graph.function_call(func, vec![x_outer]);
+    },
 }
 
 test_print_and_parse! {
@@ -733,7 +733,7 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let var = graph.add(1, 2);
+        let var = graph.add(1usize, 2usize);
         graph.name(var, "var").unwrap();
 
         graph.parse(stringify!{
@@ -749,7 +749,7 @@ test_print_and_parse! {
     static_range,
     "(0..42)",
     |graph| {
-        graph.range(42)
+        graph.range(42usize)
     },
 }
 
@@ -757,7 +757,7 @@ test_print_and_parse! {
     dynamic_range,
     "(0..5 + 10)",
     |graph| {
-        let extent = graph.add(5, 10);
+        let extent = graph.add(5usize, 10usize);
         graph.range(extent)
     },
 }
@@ -768,7 +768,7 @@ test_print_and_parse! {
         (0..42).reduce(0, |a: usize, b: usize| { a + b })
     "},
     |graph| {
-        let iter = graph.range(42);
+        let iter = graph.range(42usize);
 
         let a = graph.function_arg(RuntimePrimType::NativeUInt);
         graph.name(a, "a").unwrap();
@@ -778,7 +778,7 @@ test_print_and_parse! {
         let sum = graph.add(a, b);
         let func = graph.function_def(vec![a, b], sum);
 
-        graph.reduce(0, iter, func)
+        graph.reduce(0usize, iter, func)
     },
 }
 
@@ -806,17 +806,17 @@ test_print_and_parse! {
         let sum = graph.add(arg_outer, arg_inner);
         graph.name(sum, "sum").unwrap();
 
-        let res_inner = graph.mul(sum, 10);
+        let res_inner = graph.mul(sum, 10usize);
         graph.name(res_inner, "res_inner").unwrap();
         let func_inner = graph.function_def(vec![arg_inner], res_inner);
         graph.name(func_inner, "func_inner").unwrap();
 
-        let res_outer = graph.function_call(func_inner, vec![1000.into()]);
+        let res_outer = graph.function_call(func_inner, vec![1000usize.into()]);
         graph.name(res_outer, "res_outer").unwrap();
         let func_outer = graph.function_def(vec![arg_outer], res_outer);
         graph.name(func_outer, "func_outer").unwrap();
 
-        let res_main = graph.function_call(func_outer, vec![42.into()]);
+        let res_main = graph.function_call(func_outer, vec![42usize.into()]);
         graph.name(res_main, "res_main").unwrap();
         let func_main = graph.function_def(vec![], res_main);
         graph.name(func_main, "main").unwrap();
@@ -841,8 +841,8 @@ test_print_and_parse! {
         let reduction = graph.function_def(vec![a, b], sum);
         graph.name(reduction, "reduction").unwrap();
 
-        let iterator = graph.range(10);
-        let res_main = graph.reduce(0, iterator, reduction);
+        let iterator = graph.range(10usize);
+        let res_main = graph.reduce(0usize, iterator, reduction);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -858,7 +858,7 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let iterator = graph.range(10);
+        let iterator = graph.range(10usize);
 
         let a = graph.function_arg(RuntimePrimType::NativeUInt);
         graph.name(a, "a").unwrap();
@@ -868,7 +868,7 @@ test_print_and_parse! {
         let sum = graph.add(a, b);
         let reduction = graph.function_def(vec![a, b], sum);
 
-        let res_main = graph.reduce(0, iterator, reduction);
+        let res_main = graph.reduce(0usize, iterator, reduction);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -899,8 +899,8 @@ test_print_and_parse! {
         let reduction = graph.function_def(vec![a, b], sum);
         graph.name(reduction, "reduction").unwrap();
 
-        let iterator = graph.range(10);
-        let res_main = graph.reduce(0, iterator, reduction);
+        let iterator = graph.range(10usize);
+        let res_main = graph.reduce(0usize, iterator, reduction);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -929,8 +929,8 @@ test_print_and_parse! {
         let sum = graph.add(prod, b);
         let reduction = graph.function_def(vec![a, b], sum);
 
-        let iterator = graph.range(10);
-        let res_main = graph.reduce(0, iterator, reduction);
+        let iterator = graph.range(10usize);
+        let res_main = graph.reduce(0usize, iterator, reduction);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -948,7 +948,7 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let iterator = graph.range(10);
+        let iterator = graph.range(10usize);
 
         let map = {
             let i = graph.function_arg(RuntimePrimType::NativeUInt);
@@ -969,7 +969,7 @@ test_print_and_parse! {
             graph.function_def(vec![a, b], sum)
         };
 
-        let res_main = graph.reduce(0, mapped, reduction);
+        let res_main = graph.reduce(0usize, mapped, reduction);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -987,9 +987,9 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let a = graph.if_else(true, 20, 30);
+        let a = graph.if_else(true, 20usize, 30usize);
         graph.name(a, "a").unwrap();
-        let b = graph.if_else(false, 2, 3);
+        let b = graph.if_else(false, 2usize, 3usize);
         graph.name(b, "b").unwrap();
 
         let res_main = graph.add(a, b);
@@ -1008,8 +1008,8 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let else_if = graph.if_else(false, 30, 40);
-        let res_main = graph.if_else(true, 20, else_if);
+        let else_if = graph.if_else(false, 30usize, 40usize);
+        let res_main = graph.if_else(true, 20usize, else_if);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -1032,12 +1032,12 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let a = graph.equal(5, 10);
-        let b = graph.not_equal(5, 10);
-        let c = graph.less_than(5, 10);
-        let d = graph.greater_than(5, 10);
-        let e = graph.less_than_or_equal(5, 10);
-        let f = graph.greater_than_or_equal(5, 10);
+        let a = graph.equal(5usize, 10usize);
+        let b = graph.not_equal(5usize, 10usize);
+        let c = graph.less_than(5usize, 10usize);
+        let d = graph.greater_than(5usize, 10usize);
+        let e = graph.less_than_or_equal(5usize, 10usize);
+        let f = graph.greater_than_or_equal(5usize, 10usize);
 
         graph.name(a, "a").unwrap();
         graph.name(b, "b").unwrap();
@@ -1064,8 +1064,8 @@ test_parse! {
         }
     "},
     |graph| {
-        let a = graph.add(5, 10);
-        let res_main = graph.add(a, 20);
+        let a = graph.add(5usize, 10usize);
+        let res_main = graph.add(a, 20usize);
 
         let func_main = graph.function_def(vec![], res_main);
         graph.name(func_main, "main").unwrap();
@@ -1084,14 +1084,14 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let div = graph.div(5, 3);
+        let div = graph.div(5usize, 3usize);
         graph.name(div, "div").unwrap();
-        let modulo = graph.modulo(5, 3);
+        let modulo = graph.modulo(5usize, 3usize);
         graph.name(modulo, "modulo").unwrap();
 
-        let mul = graph.mul(div, 3);
+        let mul = graph.mul(div, 3usize);
         let sum = graph.add(mul, modulo);
-        let validation = graph.equal(sum, 5);
+        let validation = graph.equal(sum, 5usize);
         graph.name(validation, "validation").unwrap();
 
         let res_main = graph.tuple(vec![div, modulo, validation]);
@@ -1114,14 +1114,14 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let iter = graph.range(100);
+        let iter = graph.range(100usize);
 
         let filter = {
             let i = graph.function_arg(RuntimePrimType::NativeUInt);
             graph.name(i, "i").unwrap();
 
-            let rem = graph.modulo(i, 2);
-            let eq = graph.equal(rem, 0);
+            let rem = graph.modulo(i, 2usize);
+            let eq = graph.equal(rem, 0usize);
             graph.function_def(vec![i], eq)
         };
         let iter = graph.filter(iter, filter);
@@ -1145,7 +1145,7 @@ test_print_and_parse! {
             let sum = graph.add(a, b);
             graph.function_def(vec![a, b], sum)
         };
-        let res_main = graph.reduce(0, iter, reduce);
+        let res_main = graph.reduce(0usize, iter, reduce);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -1162,7 +1162,7 @@ test_print_and_parse! {
         pub fn main() { res_main }
     "},
     |graph| {
-        let iter = graph.range(100);
+        let iter = graph.range(100usize);
 
         let res_main = graph.collect(iter);
         graph.name(res_main, "res_main").unwrap();
@@ -1184,10 +1184,10 @@ test_print_and_parse! {
     "},
     |graph| -> Result<(), Error> {
         let iter_doubles = {
-            let iter = graph.range(10);
+            let iter = graph.range(10usize);
             let i = graph.function_arg(RuntimeType::Unknown);
             graph.name(i, "i").unwrap();
-            let res = graph.mul(i,2);
+            let res = graph.mul(i,2usize);
             let map = graph.function_def(vec![i], res);
             let mapped = graph.map(iter, map);
             graph.name(mapped, "iter_doubles")?;
@@ -1195,7 +1195,7 @@ test_print_and_parse! {
         };
 
         let iter_squares = {
-            let iter = graph.range(10);
+            let iter = graph.range(10usize);
             let j = graph.function_arg(RuntimeType::Unknown);
             graph.name(j, "j").unwrap();
             let res = graph.mul(j,j);
@@ -1226,7 +1226,7 @@ test_print_and_parse! {
     "},
     |graph| {
         let else_branch = graph.none();
-        let res_main = graph.if_else(true, 100, else_branch);
+        let res_main = graph.if_else(true, 100usize, else_branch);
         graph.name(res_main, "res_main").unwrap();
 
         let func_main = graph.function_def(vec![], res_main);
@@ -1432,7 +1432,7 @@ test_print_and_parse! {
 
         let b = graph.read_value(a, RuntimePrimType::NativeUInt);
         graph.name(b, "b").unwrap();
-        let c = graph.add(b, 10);
+        let c = graph.add(b, 10usize);
         graph.name(c, "c").unwrap();
 
         let func = graph.function_def(vec![a], c);
@@ -1452,7 +1452,7 @@ test_print_and_parse! {
         let a = graph.function_arg(RuntimePrimType::Ptr);
         graph.name(a, "a").unwrap();
 
-        let bytes = graph.read_bytes(a, 8);
+        let bytes = graph.read_bytes(a, 8usize);
         graph.name(bytes, "bytes").unwrap();
 
         let func = graph.function_def(vec![a], bytes);
@@ -1473,10 +1473,10 @@ test_print_and_parse! {
         let a = graph.function_arg(RuntimePrimType::Ptr);
         graph.name(a, "a").unwrap();
 
-        let bytes = graph.read_bytes(a, 8);
+        let bytes = graph.read_bytes(a, 8usize);
         graph.name(bytes, "bytes").unwrap();
 
-        let value = graph.cast_bytes(bytes, 0, RuntimePrimType::NativeUInt);
+        let value = graph.cast_bytes(bytes, 0usize, RuntimePrimType::NativeUInt);
         graph.name(value, "value").unwrap();
 
         let func = graph.function_def(vec![a], value);
@@ -1501,13 +1501,16 @@ test_print_and_parse! {
         let ptr_b = graph.function_arg(RuntimePrimType::Ptr);
         graph.name(ptr_b, "ptr_b").unwrap();
 
-        let bytes = graph.read_byte_regions([(ptr_a, 4), (ptr_b,8)]);
+        let bytes = graph.read_byte_regions([
+            (ptr_a, 4usize),
+            (ptr_b, 8usize),
+        ]);
         graph.name(bytes, "bytes").unwrap();
 
-        let value_a = graph.cast_bytes(bytes, 0, RuntimePrimType::U32);
+        let value_a = graph.cast_bytes(bytes, 0usize, RuntimePrimType::U32);
         let value_a = graph.prim_cast(value_a, RuntimePrimType::NativeUInt);
         graph.name(value_a, "value_a").unwrap();
-        let value_b = graph.cast_bytes(bytes, 4, RuntimePrimType::U64);
+        let value_b = graph.cast_bytes(bytes, 4usize, RuntimePrimType::U64);
         let value_b = graph.prim_cast(value_b, RuntimePrimType::NativeUInt);
         graph.name(value_b, "value_b").unwrap();
 

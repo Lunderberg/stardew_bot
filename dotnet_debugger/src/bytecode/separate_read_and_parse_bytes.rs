@@ -11,7 +11,7 @@ impl GraphRewrite for SeparateReadAndParseBytes {
         Ok(match expr {
             &ExprKind::ReadPrim { ptr, prim_type } => {
                 let bytes = graph.read_bytes(ptr, prim_type.size_bytes());
-                let value = graph.cast_bytes(bytes, 0, prim_type);
+                let value = graph.cast_bytes(bytes, 0usize, prim_type);
                 Some(value)
             }
             _ => None,

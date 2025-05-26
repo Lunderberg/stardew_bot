@@ -130,11 +130,7 @@ impl<'a> TypeInference<'a> {
 
     fn expect_cache<'b>(&'b self, value: SymbolicValue) -> &'b RuntimeType {
         match value {
-            SymbolicValue::Bool(_) => &RuntimeType::Prim(RuntimePrimType::Bool),
-            SymbolicValue::Int(_) => {
-                &RuntimeType::Prim(RuntimePrimType::NativeUInt)
-            }
-            SymbolicValue::Ptr(_) => &RuntimeType::Prim(RuntimePrimType::Ptr),
+            SymbolicValue::Const(prim) => prim.static_runtime_type_ref(),
             SymbolicValue::Result(op_index) => {
                 self.cache.get(&op_index).unwrap_or_else(|| {
                     panic!(
@@ -154,14 +150,8 @@ impl<'a> TypeInference<'a> {
         value: SymbolicValue,
     ) -> Result<&'a RuntimeType, Error> {
         let op_index = match value {
-            SymbolicValue::Bool(_) => {
-                return Ok(&RuntimeType::Prim(RuntimePrimType::Bool));
-            }
-            SymbolicValue::Int(_) => {
-                return Ok(&RuntimeType::Prim(RuntimePrimType::NativeUInt));
-            }
-            SymbolicValue::Ptr(_) => {
-                return Ok(&RuntimeType::Prim(RuntimePrimType::Ptr));
+            SymbolicValue::Const(prim) => {
+                return Ok(prim.static_runtime_type_ref());
             }
             SymbolicValue::Result(op_index) => op_index,
         };

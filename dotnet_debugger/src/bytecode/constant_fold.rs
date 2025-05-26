@@ -1,4 +1,4 @@
-use crate::Error;
+use crate::{Error, RuntimePrimValue};
 
 use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
 
@@ -12,96 +12,97 @@ impl GraphRewrite for ConstantFold {
     ) -> Result<Option<SymbolicValue>, Error> {
         let opt_value = match expr {
             &ExprKind::Add {
-                lhs: SymbolicValue::Int(a),
-                rhs: SymbolicValue::Int(b),
-            } => Some(SymbolicValue::Int(a + b)),
+                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(a)),
+                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(b)),
+            } => Some((a + b).into()),
 
             &ExprKind::Mul {
-                lhs: SymbolicValue::Int(a),
-                rhs: SymbolicValue::Int(b),
-            } => Some(SymbolicValue::Int(a * b)),
+                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(a)),
+                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(b)),
+            } => Some((a * b).into()),
 
             // lhs + 0 => lhs
-            &ExprKind::Add {
-                lhs,
-                rhs: SymbolicValue::Int(0),
-            } => Some(lhs),
-
             // 0 + rhs => rhs
-            &ExprKind::Add {
-                lhs: SymbolicValue::Int(0),
-                rhs,
-            } => Some(rhs),
+            ExprKind::Add {
+                lhs: other,
+                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)),
+            }
+            | ExprKind::Add {
+                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)),
+                rhs: other,
+            } => Some(*other),
 
             // 0 * rhs => 0
-            ExprKind::Mul {
-                rhs: SymbolicValue::Int(0),
-                ..
-            } => Some(SymbolicValue::Int(0)),
-
             // lhs * 0 => 0
             ExprKind::Mul {
-                lhs: SymbolicValue::Int(0),
+                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)),
                 ..
-            } => Some(SymbolicValue::Int(0)),
+            }
+            | ExprKind::Mul {
+                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)),
+                ..
+            } => Some(0usize.into()),
 
             // lhs * 1 => lhs
-            &ExprKind::Mul {
-                lhs,
-                rhs: SymbolicValue::Int(1),
-            } => Some(lhs),
-
             // 1 * rhs => rhs
-            &ExprKind::Mul {
-                lhs: SymbolicValue::Int(1),
-                rhs,
-            } => Some(rhs),
+            ExprKind::Mul {
+                lhs: other,
+                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(1)),
+            }
+            | ExprKind::Mul {
+                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(1)),
+                rhs: other,
+            } => Some(*other),
 
             // const + rhs => rhs + const
             &ExprKind::Add {
-                lhs: lhs @ SymbolicValue::Int(_),
-                rhs,
+                lhs: lhs @ SymbolicValue::Const(_),
+                rhs: rhs @ SymbolicValue::Result(_),
             } => Some(graph.add(rhs, lhs)),
 
             // const * rhs => rhs * const
             &ExprKind::Mul {
-                lhs: lhs @ SymbolicValue::Int(_),
-                rhs,
+                lhs: lhs @ SymbolicValue::Const(_),
+                rhs: rhs @ SymbolicValue::Result(_),
             } => Some(graph.mul(rhs, lhs)),
 
             // lhs + a + b => lhs + (a+b)
             &ExprKind::Add {
                 lhs: SymbolicValue::Result(lhs),
-                rhs: SymbolicValue::Int(b),
+                rhs: SymbolicValue::Const(b),
             } => match graph[lhs].as_ref() {
                 &ExprKind::Add {
                     lhs,
-                    rhs: SymbolicValue::Int(a),
-                } => Some(graph.add(lhs, a + b)),
+                    rhs: SymbolicValue::Const(a),
+                } => {
+                    let const_sum = graph.add(a, b);
+                    Some(graph.add(lhs, const_sum))
+                }
                 _ => None,
             },
 
             // lhs * a * b => lhs * (a*b)
             &ExprKind::Mul {
                 lhs: SymbolicValue::Result(lhs),
-                rhs: SymbolicValue::Int(b),
+                rhs: SymbolicValue::Const(b),
             } => match graph[lhs].as_ref() {
                 &ExprKind::Mul {
                     lhs,
-                    rhs: SymbolicValue::Int(a),
-                } => Some(graph.mul(lhs, a * b)),
+                    rhs: SymbolicValue::Const(a),
+                } => {
+                    let const_prod = graph.mul(a, b);
+                    Some(graph.mul(lhs, const_prod))
+                }
                 _ => None,
             },
 
             &ExprKind::IsSome(SymbolicValue::Result(arg)) => {
                 match &graph[arg].kind {
                     // (None).is_some() => false
-                    &ExprKind::None => Some(SymbolicValue::Bool(false)),
+                    &ExprKind::None => Some(false.into()),
 
                     // Function definitions are always non-None.
-                    &ExprKind::Function { .. } => {
-                        Some(SymbolicValue::Bool(true))
-                    }
+                    &ExprKind::Function { .. } => Some(true.into()),
 
                     _ => None,
                 }
@@ -110,58 +111,58 @@ impl GraphRewrite for ConstantFold {
             // (not true) == false
             // (not false) == true
             &ExprKind::Not {
-                arg: SymbolicValue::Bool(b),
-            } => Some(SymbolicValue::Bool(!b)),
+                arg: SymbolicValue::Const(RuntimePrimValue::Bool(b)),
+            } => Some((!b).into()),
 
             // (X or true) == (true or X) == true
             ExprKind::Or {
-                lhs: SymbolicValue::Bool(true),
+                lhs: SymbolicValue::Const(RuntimePrimValue::Bool(true)),
                 ..
             }
             | ExprKind::Or {
-                rhs: SymbolicValue::Bool(true),
+                rhs: SymbolicValue::Const(RuntimePrimValue::Bool(true)),
                 ..
-            } => Some(SymbolicValue::Bool(true)),
+            } => Some(true.into()),
 
             // (X or false) == (false or X) == X
             ExprKind::Or {
-                lhs: SymbolicValue::Bool(false),
+                lhs: SymbolicValue::Const(RuntimePrimValue::Bool(false)),
                 rhs: other,
             }
             | ExprKind::Or {
-                rhs: SymbolicValue::Bool(false),
+                rhs: SymbolicValue::Const(RuntimePrimValue::Bool(false)),
                 lhs: other,
             } => Some(*other),
 
             // (X and false) == (false and X) == false
             ExprKind::And {
-                lhs: SymbolicValue::Bool(false),
+                lhs: SymbolicValue::Const(RuntimePrimValue::Bool(false)),
                 ..
             }
             | ExprKind::And {
-                rhs: SymbolicValue::Bool(false),
+                rhs: SymbolicValue::Const(RuntimePrimValue::Bool(false)),
                 ..
-            } => Some(SymbolicValue::Bool(false)),
+            } => Some(false.into()),
 
             // (X and true) == (true and X) == X
             &ExprKind::And {
-                lhs: SymbolicValue::Bool(true),
+                lhs: SymbolicValue::Const(RuntimePrimValue::Bool(true)),
                 rhs: other,
             }
             | &ExprKind::And {
-                rhs: SymbolicValue::Bool(true),
+                rhs: SymbolicValue::Const(RuntimePrimValue::Bool(true)),
                 lhs: other,
             } => Some(other),
 
             // if true {if_branch} else {else_branch} => if_branch
             // if false {if_branch} else {else_branch} => else_branch
             &ExprKind::IfElse {
-                condition: SymbolicValue::Bool(true),
+                condition: SymbolicValue::Const(RuntimePrimValue::Bool(true)),
                 if_branch: always_branch,
                 ..
             }
             | &ExprKind::IfElse {
-                condition: SymbolicValue::Bool(false),
+                condition: SymbolicValue::Const(RuntimePrimValue::Bool(false)),
                 else_branch: always_branch,
                 ..
             } => Some(always_branch),

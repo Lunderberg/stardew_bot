@@ -47,7 +47,7 @@ fn eval_integer_subtraction() -> Result<(), Error> {
 #[test]
 fn eval_integer_multiplication() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
-    let prod = graph.mul(5, 7);
+    let prod = graph.mul(5usize, 7usize);
     let func = graph.function_def(vec![], prod);
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
@@ -64,7 +64,7 @@ fn eval_fp32_multiplication() -> Result<(), Error> {
     let lhs = graph.prim_cast(5, RuntimePrimType::F32);
     let rhs = graph.prim_cast(7, RuntimePrimType::F32);
     let prod = graph.mul(lhs, rhs);
-    let div = graph.div(prod, 2);
+    let div = graph.div(prod, 2usize);
     let func = graph.function_def(vec![], div);
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
@@ -78,8 +78,8 @@ fn eval_fp32_multiplication() -> Result<(), Error> {
 #[test]
 fn eval_nested_integer_expression() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
-    let lhs = graph.add(2, 3);
-    let rhs = graph.add(5, 7);
+    let lhs = graph.add(2usize, 3usize);
+    let rhs = graph.add(5usize, 7usize);
     let prod = graph.mul(lhs, rhs);
     let func = graph.function_def(vec![], prod);
     graph.name(func, "main")?;
@@ -103,8 +103,8 @@ fn eval_function_call() -> Result<(), Error> {
     let multiply = graph.function_def(vec![lhs, rhs], prod);
     graph.name(multiply, "multiply")?;
 
-    let lhs = graph.add(3, 5);
-    let rhs = graph.add(7, 11);
+    let lhs = graph.add(3usize, 5usize);
+    let rhs = graph.add(7usize, 11usize);
     let call = graph.function_call(multiply, vec![lhs, rhs]);
 
     let main = graph.function_def(vec![], call);
@@ -143,10 +143,10 @@ fn eval_native_function_call() -> Result<(), Error> {
 
     let func = graph.native_function(|a: usize, b: usize| a * b);
 
-    let lhs = graph.add(3, 5);
-    let rhs = graph.add(7, 11);
+    let lhs = graph.add(3usize, 5usize);
+    let rhs = graph.add(7usize, 11usize);
     let call = graph.function_call(func, vec![lhs, rhs]);
-    let output = graph.add(call, 13);
+    let output = graph.add(call, 13usize);
 
     let main = graph.function_def(vec![], output);
     graph.name(main, "main")?;

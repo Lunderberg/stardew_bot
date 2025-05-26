@@ -106,7 +106,7 @@ impl GraphRewrite for MergeParallelReads {
                 reads.iter().flat_map(|read| read.regions.iter()).cloned(),
             );
 
-            let mut cumulative_offset = SymbolicValue::Int(0);
+            let mut cumulative_offset: SymbolicValue = 0usize.into();
             let mut replacements = HashMap::<OpIndex, SymbolicValue>::new();
 
             for read in reads {

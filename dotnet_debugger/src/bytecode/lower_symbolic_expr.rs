@@ -79,13 +79,13 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             let rva = RelativeVirtualAddress::new(
                                 field_desc.offset(),
                             );
-                            let ptr = layout.virtual_address_to_raw(rva)?;
-                            SymbolicValue::Ptr(ptr)
+                            let ptr: Pointer =
+                                layout.virtual_address_to_raw(rva)?;
+                            ptr.into()
                         }
                         (_, RuntimeType::Prim(_)) => {
-                            let base = SymbolicValue::Ptr(
-                                module.base_ptr_of_non_gc_statics(reader)?,
-                            );
+                            let base =
+                                module.base_ptr_of_non_gc_statics(reader)?;
                             graph.add(base, field_desc.offset())
                         }
                         (
@@ -98,18 +98,15 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             // instead stored as if they were classes.  Need to read
                             // the pointer, dereference, then advance past a method
                             // table pointer.
-                            let base = SymbolicValue::Ptr(
-                                module.base_ptr_of_gc_statics(reader)?,
-                            );
+                            let base: Pointer =
+                                module.base_ptr_of_gc_statics(reader)?;
                             let ptr_loc = graph.add(base, field_desc.offset());
                             let ptr =
                                 graph.read_value(ptr_loc, RuntimePrimType::Ptr);
                             graph.add(ptr, Pointer::SIZE)
                         }
                         (_, RuntimeType::DotNet(_)) => {
-                            let base = SymbolicValue::Ptr(
-                                module.base_ptr_of_gc_statics(reader)?,
-                            );
+                            let base = module.base_ptr_of_gc_statics(reader)?;
                             graph.add(base, field_desc.offset())
                         }
 
@@ -281,7 +278,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                             strides
                         };
 
-                        let mut total_offset: SymbolicValue = 0.into();
+                        let mut total_offset: SymbolicValue = 0usize.into();
                         for (stride, index) in
                             strides.into_iter().zip(indices.iter().cloned())
                         {
