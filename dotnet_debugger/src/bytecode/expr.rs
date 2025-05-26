@@ -2293,6 +2293,12 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 
         if self.show_steps {
             println!("----------- After CSE --------------\n{expr}");
+            println!(
+                "----------- Before VM Conversion --------------\n{}",
+                expr.printer()
+                    .expand_all_expressions()
+                    .number_all_expressions()
+            );
         }
 
         // Virtual machine, in terms of sequential operations.
