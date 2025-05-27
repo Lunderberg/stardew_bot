@@ -7,6 +7,7 @@ use super::{Rectangle, Vector};
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct DialogueMenu {
     pub pixel_location: Rectangle<isize>,
+    pub responses: Vec<Vector<isize>>,
 }
 
 impl DialogueMenu {
@@ -15,11 +16,16 @@ impl DialogueMenu {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_dialogue_menu",
-            |x: isize, y: isize, width: isize, height: isize| DialogueMenu {
+            |x: isize,
+             y: isize,
+             width: isize,
+             height: isize,
+             responses: &Vec<Vector<isize>>| DialogueMenu {
                 pixel_location: Rectangle {
                     top_left: Vector::new(x, y),
                     shape: Vector::new(width, height),
                 },
+                responses: responses.clone(),
             },
         )?;
 
@@ -34,8 +40,20 @@ impl DialogueMenu {
                 let width = menu.width;
                 let height = menu.height;
 
+                let num_responses = menu
+                    .responseCC
+                    ._size
+                    .prim_cast::<usize>();
+                let responses = (0..num_responses)
+                    .map(|i| menu.responseCC._items[i])
+                    .map(|response| center_of_gui_rect(response))
+                    .collect();
+
                 if menu.is_some(){
-                    new_dialogue_menu(x,y,width,height)
+                    new_dialogue_menu(
+                        x, y, width,height,
+                        responses,
+                    )
                 } else {
                     None
                 }

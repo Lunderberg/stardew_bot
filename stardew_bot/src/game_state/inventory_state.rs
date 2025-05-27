@@ -20,10 +20,10 @@ impl Inventory {
 
         graph.named_native_function(
             "new_item",
-            |item_id: &str, quality: i32, count: usize| Item {
-                item_id: item_id.to_string(),
-                quality: quality.try_into().unwrap(),
-                count,
+            |item_id: &str, quality: i32, count: usize| {
+                Item::new(item_id.to_string())
+                    .with_quality(quality.try_into().unwrap())
+                    .with_count(count)
             },
         )?;
 
@@ -81,5 +81,13 @@ impl Inventory {
         })?;
 
         Ok(func)
+    }
+
+    pub fn iter_slots(&self) -> impl Iterator<Item = Option<&Item>> + '_ {
+        self.items.iter().map(|item| item.as_ref())
+    }
+
+    pub fn iter_items(&self) -> impl Iterator<Item = &Item> + '_ {
+        self.iter_slots().flatten()
     }
 }

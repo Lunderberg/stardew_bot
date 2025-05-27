@@ -1,10 +1,12 @@
+use std::borrow::Cow;
+
 use dotnet_debugger::RustNativeObject;
 
 use crate::Error;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
-    pub item_id: String,
+    pub item_id: Cow<'static, str>,
     pub quality: Quality,
     pub count: usize,
 }
@@ -25,7 +27,9 @@ pub enum Quality {
 }
 
 impl Item {
-    pub fn new(item_id: impl Into<String>) -> Self {
+    pub const CLAY: Item = Item::new_const("(O)330");
+
+    pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),
             quality: Quality::Normal,
@@ -33,8 +37,20 @@ impl Item {
         }
     }
 
+    const fn new_const(item_id: &'static str) -> Self {
+        Self {
+            item_id: Cow::Borrowed(item_id),
+            quality: Quality::Normal,
+            count: 1,
+        }
+    }
+
     pub fn with_quality(self, quality: Quality) -> Self {
         Self { quality, ..self }
+    }
+
+    pub fn with_count(self, count: usize) -> Self {
+        Self { count, ..self }
     }
 
     pub fn is_same_item(&self, other: &Item) -> bool {

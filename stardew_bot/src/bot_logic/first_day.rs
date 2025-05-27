@@ -1,11 +1,11 @@
 use crate::{
-    game_state::{ObjectKind, Vector},
+    game_state::{Item, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    ClayFarmingGoal, GoToActionTile, MovementGoal,
+    ClayFarmingGoal, GoToActionTile, MovementGoal, SellToMerchantGoal,
 };
 
 pub struct FirstDay;
@@ -45,35 +45,35 @@ impl BotGoal for FirstDay {
         // currently unpacked as I want to keep the bot compatible
         // with vanilla Stardew, so it shows up as an
         // `ObjectKind::Unknown`.
-        let can_pick_up_forest_sword = game_state
-            .locations
-            .iter()
-            .find(|loc| loc.name == "Custom_ForestWest")
-            .into_iter()
-            .flat_map(|loc| loc.objects.iter())
-            .find(|obj| {
-                matches!(obj.kind, ObjectKind::Unknown)
-                    && obj.tile == Vector::new(60, 148)
-            })
-            .is_some();
-        if can_pick_up_forest_sword {
-            let tile = Vector::<isize>::new(60, 148);
-            let movement = MovementGoal::new(
-                "Custom_ForestWest".into(),
-                tile.map(|x| x as f32),
-            )
-            .with_tolerance(1.1);
-            if !movement.is_completed(game_state) {
-                return Ok(movement.into());
-            }
+        // let can_pick_up_forest_sword = game_state
+        //     .locations
+        //     .iter()
+        //     .find(|loc| loc.name == "Custom_ForestWest")
+        //     .into_iter()
+        //     .flat_map(|loc| loc.objects.iter())
+        //     .find(|obj| {
+        //         matches!(obj.kind, ObjectKind::Unknown)
+        //             && obj.tile == Vector::new(60, 148)
+        //     })
+        //     .is_some();
+        // if can_pick_up_forest_sword {
+        //     let tile = Vector::<isize>::new(60, 148);
+        //     let movement = MovementGoal::new(
+        //         "Custom_ForestWest".into(),
+        //         tile.map(|x| x as f32),
+        //     )
+        //     .with_tolerance(1.1);
+        //     if !movement.is_completed(game_state) {
+        //         return Ok(movement.into());
+        //     }
 
-            do_action(GameAction::MouseOverTile(tile));
-            if tile == game_state.inputs.mouse_tile_location {
-                do_action(GameAction::RightClick);
-            }
+        //     do_action(GameAction::MouseOverTile(tile));
+        //     if tile == game_state.inputs.mouse_tile_location {
+        //         do_action(GameAction::RightClick);
+        //     }
 
-            return Ok(BotGoalResult::InProgress);
-        }
+        //     return Ok(BotGoalResult::InProgress);
+        // }
 
         let clay_farming = ClayFarmingGoal::new()
             .stop_at_time(1200)
@@ -82,8 +82,8 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        let goal = GoToActionTile::new("Carpenter");
-        if !goal.is_completed(game_state)? {
+        let goal = SellToMerchantGoal::new("Carpenter", Item::CLAY);
+        if !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
 

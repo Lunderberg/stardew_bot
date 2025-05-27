@@ -5,9 +5,9 @@ use dotnet_debugger::{
 use crate::{bot_logic::BotError, Error};
 
 use super::{
-    rng_state::RngState, ChestMenu, DailyState, DialogueMenu, DisplayState,
-    FishingState, GlobalGameState, InputState, Inventory, Location,
-    LocationDelta, PlayerState, SeededRng,
+    define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
+    DialogueMenu, DisplayState, FishingState, GlobalGameState, InputState,
+    Inventory, Location, LocationDelta, PlayerState, SeededRng, ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -21,6 +21,7 @@ pub struct GameState {
     pub display: DisplayState,
     pub chest_menu: Option<ChestMenu>,
     pub dialogue_menu: Option<DialogueMenu>,
+    pub shop_menu: Option<ShopMenu>,
     pub rng_state: RngState,
 }
 
@@ -40,6 +41,7 @@ pub struct GameStateDelta {
     display: DisplayState,
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
+    shop_menu: Option<ShopMenu>,
     current_rng_state: SeededRng,
 }
 
@@ -49,6 +51,7 @@ impl GameState {
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
 
+        define_utility_functions(&mut graph)?;
         GlobalGameState::def_read_global_game_state(&mut graph)?;
         Inventory::def_read_inventory(&mut graph)?;
         Location::def_read_location(&mut graph)?;
@@ -59,6 +62,7 @@ impl GameState {
         DisplayState::def_read_display_state(&mut graph)?;
         ChestMenu::def_read_chest_menu(&mut graph)?;
         DialogueMenu::def_read_dialogue_menu(&mut graph)?;
+        ShopMenu::def_read_shop_menu(&mut graph)?;
         SeededRng::def_read_rng_state(&mut graph)?;
 
         graph.parse(
@@ -88,6 +92,7 @@ impl GameState {
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
+             shop_menu: Option<&ShopMenu>,
              current_rng: &SeededRng| GameState {
                 globals: global_game_state.clone(),
                 locations: locations.clone(),
@@ -98,6 +103,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
+                shop_menu: shop_menu.cloned(),
                 rng_state: RngState::new(current_rng.clone()),
             },
         )?;
@@ -113,6 +119,7 @@ impl GameState {
              display: &DisplayState,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
+             shop_menu: Option<&ShopMenu>,
              rng_state: &SeededRng| GameStateDelta {
                 global_game_state: global_game_state.clone(),
                 location_delta: location_delta.clone(),
@@ -123,6 +130,7 @@ impl GameState {
                 display: display.clone(),
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
+                shop_menu: shop_menu.cloned(),
                 current_rng_state: rng_state.clone(),
             },
         )?;
@@ -145,6 +153,7 @@ impl GameState {
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
+                let shop_menu = read_shop_menu();
                 let rng_state = read_rng_state();
 
                 new_game_state(
@@ -157,6 +166,7 @@ impl GameState {
                     display,
                     chest_menu,
                     dialogue_menu,
+                    shop_menu,
                     rng_state,
                 )
             }
@@ -171,6 +181,7 @@ impl GameState {
                 let display = read_display_state();
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
+                let shop_menu = read_shop_menu();
                 let rng_state = read_rng_state();
 
                 new_game_state_delta(
@@ -183,6 +194,7 @@ impl GameState {
                     display,
                     chest_menu,
                     dialogue_menu,
+                    shop_menu,
                     rng_state,
                 )
             }
@@ -208,6 +220,7 @@ impl GameState {
         self.display = delta.display;
         self.chest_menu = delta.chest_menu;
         self.dialogue_menu = delta.dialogue_menu;
+        self.shop_menu = delta.shop_menu;
 
         if let Some(loc) = self
             .locations

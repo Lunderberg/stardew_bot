@@ -4,6 +4,9 @@ pub use game_state::{GameState, GameStateReader};
 mod geometry;
 pub use geometry::{Rectangle, Vector};
 
+mod define_utility_functions;
+pub use define_utility_functions::define_utility_functions;
+
 mod player_state;
 pub use player_state::{FacingDirection, PlayerState};
 
@@ -39,6 +42,9 @@ pub use chest_menu::ChestMenu;
 
 mod dialogue_menu;
 pub use dialogue_menu::DialogueMenu;
+
+mod shop_menu;
+pub use shop_menu::ShopMenu;
 
 mod rng_state;
 pub use rng_state::SeededRng;

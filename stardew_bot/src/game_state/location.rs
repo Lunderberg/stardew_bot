@@ -290,11 +290,6 @@ impl Location {
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
-            "new_isize_vector",
-            |right: isize, down: isize| Vector::<isize> { right, down },
-        )?;
-
-        graph.named_native_function(
             "new_warp",
             |location: &Vector<isize>,
              target: &Vector<isize>,
@@ -454,7 +449,7 @@ impl Location {
             |right: f32, down: f32, item_id: &str, item_quality: i32| {
                 FloatingItem {
                     position: Vector::new(right, down),
-                    item: Item::new(item_id)
+                    item: Item::new(item_id.to_string())
                         .with_quality(item_quality.try_into().unwrap()),
                 }
             },
@@ -476,19 +471,6 @@ impl Location {
                 Furniture {
                     shape: shape.clone(),
                     kind: *kind,
-                }
-            },
-        )?;
-
-        graph.named_native_function(
-            "new_rectangle",
-            |right: isize, down: isize, width: isize, height: isize| {
-                Rectangle::<isize> {
-                    top_left: Vector { right, down },
-                    shape: Vector {
-                        right: width,
-                        down: height,
-                    },
                 }
             },
         )?;
@@ -773,7 +755,7 @@ impl Location {
                         let tile = {
                             let right = feature.key.X;
                             let down = feature.key.Y;
-                            new_isize_vector(right,down)
+                            new_vector_isize(right,down)
                         };
 
                         let feature_value = feature
@@ -834,7 +816,7 @@ impl Location {
                         let tile = {
                             let right = obj.tileLocation.value.X;
                             let down = obj.tileLocation.value.Y;
-                            new_isize_vector(right,down)
+                            new_vector_isize(right,down)
                         };
 
                         let chest = obj.as::<StardewValley.Objects.Chest>();
@@ -932,7 +914,7 @@ impl Location {
                     .m_layerSize;
                 let width = size.Width.prim_cast::<usize>();
                 let height = size.Height.prim_cast::<usize>();
-                let shape = new_isize_vector(width, height);
+                let shape = new_vector_isize(width, height);
 
                 // Background features of the map.
                 let back_layer = location
@@ -963,11 +945,11 @@ impl Location {
                             .value
                     })
                     .map(|warp| {
-                        let location = new_isize_vector(
+                        let location = new_vector_isize(
                             warp.x.value,
                             warp.y.value,
                         );
-                        let target = new_isize_vector(
+                        let target = new_vector_isize(
                             warp.targetX.value,
                             warp.targetY.value,
                         );
@@ -1041,7 +1023,7 @@ impl Location {
                         let top_left = {
                             let right = feature.netTilePosition.value.X;
                             let down = feature.netTilePosition.value.Y;
-                            new_isize_vector(right,down)
+                            new_vector_isize(right,down)
                         };
                         new_bush(kind, top_left)
                     })
@@ -1084,7 +1066,7 @@ impl Location {
                             let relative_location = {
                                 let right = building.humanDoor.value.X;
                                 let down = building.humanDoor.value.Y;
-                                new_isize_vector(right,down)
+                                new_vector_isize(right,down)
                             };
 
                             let inside = building
@@ -1158,7 +1140,7 @@ impl Location {
                         });
 
                 fn extract_map_tile(layer, layer_num, i, j) {
-                    let loc = new_isize_vector(i,j);
+                    let loc = new_vector_isize(i,j);
 
                     let tile = layer.m_tiles[i,j]
                         .as::<xTile.Tiles.StaticTile>();

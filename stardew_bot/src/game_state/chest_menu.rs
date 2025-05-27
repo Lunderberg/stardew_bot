@@ -18,13 +18,6 @@ impl ChestMenu {
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
-            "center_of_rectangle",
-            |left: isize, top: isize, width: isize, height: isize| {
-                Vector::<isize>::new(left + width / 2, top + height / 2)
-            },
-        )?;
-
-        graph.named_native_function(
             "new_chest_menu",
             |player_item_locations: &Vec<Vector<isize>>,
              chest_item_locations: &Vec<Vector<isize>>,
@@ -45,16 +38,6 @@ impl ChestMenu {
                     ._activeClickableMenu
                     .as::<StardewValley.Menus.ItemGrabMenu>();
 
-                fn center_of_bounds(obj) {
-                    let bounds = obj.bounds;
-                    center_of_rectangle(
-                        bounds.X,
-                        bounds.Y,
-                        bounds.Width,
-                        bounds.Height,
-                    )
-                }
-
                 fn get_item_locations(inventory_menu) {
                     let num_slots = inventory_menu
                         .capacity
@@ -62,7 +45,7 @@ impl ChestMenu {
 
                     let item_locations = (0..num_slots)
                         .map(|i| inventory_menu.inventory._items[i])
-                        .map(|tile| center_of_bounds(tile))
+                        .map(|tile| center_of_gui_rect(tile))
                         .collect();
 
                     item_locations
@@ -80,7 +63,7 @@ impl ChestMenu {
                     read_inventory(items)
                 };
 
-                let ok_button = center_of_bounds(menu.okButton);
+                let ok_button = center_of_gui_rect(menu.okButton);
 
                 if menu.is_some(){
                     new_chest_menu(

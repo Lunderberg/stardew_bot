@@ -32,4 +32,7 @@ pub use clear_farm_goal::*;
 mod clay_farming_goal;
 pub use clay_farming_goal::*;
 
+mod sell_to_merchant_goal;
+pub use sell_to_merchant_goal::*;
+
 mod impl_tile_map_graph_search;
