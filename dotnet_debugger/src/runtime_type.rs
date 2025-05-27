@@ -739,8 +739,13 @@ impl std::fmt::Display for RuntimeType {
             }) => {
                 write!(f, "struct({size} bytes, unknown vtable)")
             }
-            RuntimeType::DotNet(DotNetType::Class { .. }) => {
-                write!(f, "Object")
+            RuntimeType::DotNet(DotNetType::Class {
+                method_table: Some(method_table),
+            }) => {
+                write!(f, "Object(vtable {method_table})")
+            }
+            RuntimeType::DotNet(DotNetType::Class { method_table: None }) => {
+                write!(f, "Object(unknown vtable)")
             }
             RuntimeType::DotNet(DotNetType::String) => write!(f, "String"),
             RuntimeType::DotNet(DotNetType::Array {

@@ -138,7 +138,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 let method_table_ptr =
                     obj_type.method_table_for_field_access(|| {
-                        format!("{}", graph.print(obj))
+                        format!(
+                            "{}, \
+                             of type {obj_type}, \
+                             for access of field {field}",
+                            graph.print(obj),
+                        )
                     })?;
                 let reader = self.0.reader()?;
                 let (parent_of_field, field_description) = reader
