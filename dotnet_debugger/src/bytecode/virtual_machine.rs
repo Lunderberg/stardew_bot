@@ -986,7 +986,13 @@ impl<Inner> CachedVMReader<Inner> {
                 Some((slice_0, slice_1))
             }
             _ => panic!(
-                "Region in cached read may cross at most one page boundary"
+                "Region in cached read may cross at most one page boundary, \
+                 but pointer range from {} to {} consists of {} bytes, \
+                 and would require reading from {} cached pages.",
+                range.start,
+                range.end,
+                range.end - range.start,
+                num_pages,
             ),
         }
     }
