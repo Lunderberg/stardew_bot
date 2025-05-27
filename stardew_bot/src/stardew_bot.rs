@@ -174,13 +174,13 @@ impl StardewBot {
         if show_startup_times {
             time_it!(
                 "Test-run of bot logic",
-                BotLogic::new().update(&game_state)
+                BotLogic::new(true).update(&game_state)
             )?;
         }
 
         tui_globals.insert(game_state);
 
-        tui_globals.insert(BotLogic::new());
+        tui_globals.insert(BotLogic::new(false));
 
         let mut x11_handler = X11Handler::new()?;
 

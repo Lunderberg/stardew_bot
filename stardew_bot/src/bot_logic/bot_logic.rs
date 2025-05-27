@@ -4,6 +4,7 @@ use crate::{game_state::Item, Error, GameAction, GameState};
 
 pub struct BotLogic {
     goals: Vec<Box<dyn BotGoal>>,
+    verbose: bool,
 }
 
 pub trait BotGoal: Any {
@@ -33,7 +34,7 @@ pub enum BotGoalResult {
 pub struct SubGoals(Vec<Box<dyn BotGoal>>);
 
 impl BotLogic {
-    pub fn new() -> Self {
+    pub fn new(verbose: bool) -> Self {
         Self {
             goals: vec![
                 // Box::new(super::ClearFarmGoal),
@@ -42,6 +43,7 @@ impl BotLogic {
                 Box::new(super::FishingGoal),
                 Box::new(super::FirstDay),
             ],
+            verbose,
         }
     }
 
@@ -54,21 +56,54 @@ impl BotLogic {
             let current_goal =
                 self.goals.last_mut().ok_or(Error::NoRemainingGoals)?;
 
+            if self.verbose {
+                println!("Running top goal '{}'", current_goal.description());
+            }
             let goal_result = current_goal
                 .apply(game_state, &mut |action| actions.push(action))?;
 
             match goal_result {
                 BotGoalResult::Completed => {
+                    if self.verbose {
+                        println!("\tGoal completed, removing from stack",);
+                    }
+
+                    if let Some(prev) = previously_produced_subgoals {
+                        assert!(
+                            self.goals.len() > prev + 2,
+                            "Infinite loop detected.  \
+                             Current goal '{0}' has completed, \
+                             but this returns control to the preceding goal '{1}'.  \
+                             Since this preceding goal '{1}' has already been run, \
+                             and chose to delegate to '{0}', \
+                             executing it again would enter an infinite loop.",
+                            self.goals.last().unwrap().description(),
+                            self.goals[prev].description(),
+                        );
+                    }
+
                     self.goals.pop();
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
-                    sub_goals
-                        .0
-                        .into_iter()
-                        .rev()
-                        .for_each(|sub_goal| self.goals.push(sub_goal));
+                    previously_produced_subgoals = Some(self.goals.len() - 1);
+                    sub_goals.0.into_iter().rev().for_each(|sub_goal| {
+                        if self.verbose {
+                            println!(
+                                "\tGoal requires sub-goal '{}', \
+                                 pushing sub-goal to top of stack.",
+                                sub_goal.description(),
+                            );
+                        }
+                        self.goals.push(sub_goal);
+                    });
                 }
                 BotGoalResult::InProgress => {
+                    if self.verbose {
+                        println!(
+                            "\tGoal is in progress, \
+                             waiting until next frame"
+                        );
+                    }
                     break;
                 }
             }
