@@ -4,13 +4,13 @@ use crate::{
 
 use super::bot_logic::{BotGoal, BotGoalResult};
 
-pub struct SellToMerchantGoal {
+pub struct BuyFromMerchantGoal {
     merchant: String,
     item: Item,
     movement_goal: GoToActionTile,
 }
 
-impl SellToMerchantGoal {
+impl BuyFromMerchantGoal {
     pub fn new(merchant: impl Into<String>, item: Item) -> Self {
         let merchant = merchant.into();
         Self {
@@ -21,17 +21,20 @@ impl SellToMerchantGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        game_state
+        let num_in_inventory = game_state
             .player
             .inventory
             .iter_items()
-            .all(|item| !item.is_same_item(&self.item))
+            .filter(|item| item.is_same_item(&self.item))
+            .map(|item| item.count)
+            .sum::<usize>();
+        num_in_inventory >= self.item.count
     }
 }
 
-impl BotGoal for SellToMerchantGoal {
+impl BotGoal for BuyFromMerchantGoal {
     fn description(&self) -> std::borrow::Cow<str> {
-        format!("Sell {} to {}", self.item, self.merchant).into()
+        format!("Buy {} from {}", self.item, self.merchant).into()
     }
 
     fn apply(
@@ -50,20 +53,7 @@ impl BotGoal for SellToMerchantGoal {
         }
 
         if let Some(menu) = &game_state.shop_menu {
-            let pixel = menu
-                .player_item_locations
-                .iter()
-                .zip(game_state.player.inventory.iter_slots())
-                .find(|(_, opt_item)| {
-                    opt_item
-                        .map(|item| item.is_same_item(&self.item))
-                        .unwrap_or(false)
-                })
-                .map(|(pixel, _)| *pixel)
-                .expect("Already checked that player has the item to sell");
-            do_action(GameAction::MouseOverPixel(pixel));
-            do_action(GameAction::LeftClick);
-            Ok(BotGoalResult::InProgress)
+            todo!()
         } else if let Some(menu) = &game_state.dialogue_menu {
             if let Some(pixel) = menu.responses.get(0) {
                 do_action(GameAction::MouseOverPixel(*pixel));

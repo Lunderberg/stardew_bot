@@ -23,26 +23,6 @@ impl BotGoal for ClearFarmGoal {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        // TODO: Handle these are part of some return-to-default
-        // logic, rather than needing each goal to release each
-        // button.
-        {
-            let mut cleanup = false;
-            if game_state.inputs.left_mouse_down() {
-                do_action(GameAction::ReleaseLeftClick.into());
-                cleanup = true;
-            }
-            if game_state.inputs.keys_pressed.iter().any(|key| {
-                matches!(key, Key::Delete | Key::RightShift | Key::R)
-            }) {
-                do_action(GameAction::StopAnimationCanceling);
-                cleanup = true;
-            }
-            if cleanup {
-                return Ok(BotGoalResult::InProgress);
-            }
-        }
-
         let farm = game_state.get_room("Farm")?;
         let player = &game_state.player;
 

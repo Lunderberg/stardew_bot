@@ -28,6 +28,7 @@ pub enum Quality {
 
 impl Item {
     pub const CLAY: Item = Item::new_const("(O)330");
+    pub const SALAD: Item = Item::new_const("(O)197");
 
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {

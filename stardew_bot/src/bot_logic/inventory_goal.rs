@@ -41,28 +41,6 @@ impl BotGoal for InventoryGoal {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        // TODO: Handle these are part of some return-to-default
-        // logic, rather than needing each goal to release each
-        // button.
-        {
-            let mut cleanup = false;
-            if game_state.inputs.right_mouse_down() {
-                do_action(GameAction::ReleaseRightClick);
-                cleanup = true;
-            }
-            if game_state.inputs.left_mouse_down() {
-                do_action(GameAction::ReleaseLeftClick);
-                cleanup = true;
-            }
-            if game_state.inputs.keys_pressed.contains(&Key::Escape) {
-                do_action(GameAction::StopExitingMenu);
-                cleanup = true;
-            }
-            if cleanup {
-                return Ok(BotGoalResult::InProgress);
-            }
-        }
-
         let item_slot = |inventory: &Inventory| -> Option<usize> {
             inventory
                 .items
@@ -95,16 +73,7 @@ impl BotGoal for InventoryGoal {
         }
 
         if player_has_item {
-            let mut state = BotGoalResult::Completed;
-            if game_state.inputs.left_mouse_down() {
-                do_action(GameAction::ReleaseLeftClick);
-                state = BotGoalResult::InProgress;
-            }
-            if game_state.inputs.keys_pressed.contains(&Key::Escape) {
-                do_action(GameAction::StopExitingMenu);
-                state = BotGoalResult::InProgress;
-            };
-            return Ok(state);
+            return Ok(BotGoalResult::Completed);
         }
 
         let opt_chest_location = game_state

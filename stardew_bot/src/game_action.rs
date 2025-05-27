@@ -4,7 +4,6 @@ use crate::{game_state::Vector, Direction, Error, GameState, X11Handler};
 
 #[derive(Debug)]
 pub enum GameAction {
-    Wait,
     HoldTool,
     ReleaseTool,
     Move(Direction),
@@ -91,7 +90,6 @@ impl GameAction {
         game_state: &GameState,
     ) -> Result<(), Error> {
         match self {
-            GameAction::Wait => {}
             GameAction::HoldTool => {
                 handler.send_keystroke(true, Self::KEY_C)?;
             }

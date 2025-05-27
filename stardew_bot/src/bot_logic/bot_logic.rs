@@ -1,6 +1,9 @@
 use std::{any::Any, borrow::Cow};
 
-use crate::{game_state::Item, Error, GameAction, GameState};
+use crate::{
+    game_state::{Item, Key},
+    Error, GameAction, GameState,
+};
 
 pub struct BotLogic {
     goals: Vec<Box<dyn BotGoal>>,
@@ -52,6 +55,42 @@ impl BotLogic {
         game_state: &GameState,
     ) -> Result<Vec<GameAction>, Error> {
         let mut actions = Vec::new();
+
+        let is_activating_tile =
+            game_state.inputs.keys_pressed.contains(&Key::X);
+        let is_animation_cancelling =
+            game_state.inputs.keys_pressed.iter().any(|key| {
+                matches!(key, Key::Delete | Key::RightShift | Key::R)
+            });
+        let is_exiting_menu =
+            game_state.inputs.keys_pressed.contains(&Key::Escape);
+
+        let mut on_goal_action = |action| {
+            // Some actions, such as moving the character around, are
+            // continuous, while others are instantaneous.  For an
+            // instantaneous action, Stardew checks whether the
+            // button/key are in a different state than they were on
+            // the previous frame.  Therefore, even if we were to send
+            // the input, it wouldn't cause the game action to be
+            // repeated.
+            //
+            // TL;DR: Don't press the mouse down unless the game will
+            // recognize it as pressing the mouse down.
+            let should_perform = match action {
+                GameAction::LeftClick => !game_state.inputs.left_mouse_down(),
+                GameAction::RightClick => !game_state.inputs.right_mouse_down(),
+                GameAction::AnimationCancel => !is_animation_cancelling,
+                GameAction::ActivateTile => !is_activating_tile,
+                GameAction::ExitMenu => !is_exiting_menu,
+                _ => true,
+            };
+            if should_perform {
+                actions.push(action);
+            }
+        };
+
+        let mut previously_produced_subgoals: Option<usize> = None;
+
         loop {
             let current_goal =
                 self.goals.last_mut().ok_or(Error::NoRemainingGoals)?;
@@ -59,8 +98,9 @@ impl BotLogic {
             if self.verbose {
                 println!("Running top goal '{}'", current_goal.description());
             }
-            let goal_result = current_goal
-                .apply(game_state, &mut |action| actions.push(action))?;
+
+            let goal_result =
+                current_goal.apply(game_state, &mut on_goal_action)?;
 
             match goal_result {
                 BotGoalResult::Completed => {
@@ -107,6 +147,39 @@ impl BotLogic {
                     break;
                 }
             }
+        }
+
+        // Reset mouse/keyboard state back to their unpressed state.
+        //
+        // For buttons/keys that have an instant effect, such as
+        // left-clicking, the button/key is released as soon as it is
+        // recognized as being pressed down, so that it can be ready
+        // to be pressed down again.
+        //
+        // For buttons/keys that have a continuous effect, such as
+        // moving, the button/key remains pressed down as long as the
+        // `BotGoal` keeps producing `GameAction::Move` commands.
+        if game_state.inputs.left_mouse_down() {
+            actions.push(GameAction::ReleaseLeftClick.into());
+        }
+        if game_state.inputs.right_mouse_down() {
+            actions.push(GameAction::ReleaseRightClick.into());
+        }
+        if is_animation_cancelling {
+            actions.push(GameAction::StopAnimationCanceling);
+        }
+        if is_activating_tile {
+            actions.push(GameAction::StopActivatingTile);
+        }
+        if is_exiting_menu {
+            actions.push(GameAction::StopExitingMenu);
+        }
+        if game_state.player.movement.is_some()
+            && actions
+                .iter()
+                .all(|action| !matches!(action, GameAction::Move(_)))
+        {
+            actions.push(GameAction::StopMoving);
         }
 
         Ok(actions)

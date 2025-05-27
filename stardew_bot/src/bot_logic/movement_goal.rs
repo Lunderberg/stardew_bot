@@ -431,32 +431,12 @@ impl BotGoal for LocalMovementGoal {
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
-        let mut cleanup = false;
-        if game_state.inputs.left_mouse_down() {
-            do_action(GameAction::ReleaseLeftClick);
-            cleanup = true;
-        }
-        if game_state.inputs.right_mouse_down() {
-            do_action(GameAction::ReleaseRightClick);
-            cleanup = true;
-        }
-
         if self.is_completed(game_state) {
-            let mut state = BotGoalResult::Completed;
-            if player.movement.is_some() {
-                do_action(GameAction::StopMoving);
-                state = BotGoalResult::InProgress;
-            }
-            if cleanup {
-                state = BotGoalResult::InProgress;
-            }
-            return Ok(state);
+            return Ok(BotGoalResult::Completed);
         }
 
         if game_state.dialogue_menu.is_some() {
-            if !game_state.inputs.left_mouse_down() {
-                do_action(GameAction::LeftClick);
-            }
+            do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -486,12 +466,10 @@ impl BotGoal for LocalMovementGoal {
         let must_open_door = self.activate_endpoint.unwrap_or(false)
             && player_position.manhattan_dist(self.position) < 1.5;
 
-        if must_open_door {
-            if game_state.globals.currently_fading_to_black {
-                do_action(GameAction::ReleaseRightClick);
-            } else {
-                do_action(GameAction::RightClick);
-            }
+        if must_open_door
+            && game_state.inputs.mouse_tile_location == target_tile
+        {
+            do_action(GameAction::RightClick);
         }
 
         Ok(BotGoalResult::InProgress)
@@ -522,8 +500,6 @@ impl BotGoal for FaceDirectionGoal {
                 FacingDirection::West => Direction::West,
             };
             do_action(GameAction::Move(dir));
-        } else if game_state.player.movement.is_some() {
-            do_action(GameAction::StopMoving);
         } else {
             return Ok(BotGoalResult::Completed);
         }

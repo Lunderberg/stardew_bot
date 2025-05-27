@@ -51,20 +51,6 @@ impl BotGoal for GoToActionTile {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        // TODO: Handle these are part of some return-to-default
-        // logic, rather than needing each goal to release each
-        // button.
-        {
-            let mut cleanup = false;
-            if game_state.inputs.right_mouse_down() {
-                do_action(GameAction::ReleaseRightClick.into());
-                cleanup = true;
-            }
-            if cleanup {
-                return Ok(BotGoalResult::InProgress);
-            }
-        }
-
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);
         }
