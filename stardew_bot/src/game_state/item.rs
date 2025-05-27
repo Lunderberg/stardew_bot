@@ -33,6 +33,10 @@ impl Item {
         }
     }
 
+    pub fn with_quality(self, quality: Quality) -> Self {
+        Self { quality, ..self }
+    }
+
     pub fn is_same_item(&self, other: &Item) -> bool {
         self.item_id == other.item_id && self.quality == other.quality
     }

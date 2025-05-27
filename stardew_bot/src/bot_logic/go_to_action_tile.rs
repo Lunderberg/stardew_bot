@@ -35,7 +35,7 @@ impl GoToActionTile {
         Ok(opt_tile)
     }
 
-    pub fn is_done(&self, game_state: &GameState) -> Result<bool, Error> {
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         Ok(self.adjacent_action_tile(game_state)?.is_some())
     }
 }
@@ -50,10 +50,10 @@ impl BotGoal for GoToActionTile {
         game_state: &GameState,
         _do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        Ok(if self.is_done(game_state)? {
+        Ok(if self.is_completed(game_state)? {
             BotGoalResult::Completed
         } else {
-            let (target_room, action_tile) = game_state
+            let (target_room, target_position) = game_state
                 .locations
                 .iter()
                 .flat_map(|loc| {
@@ -64,12 +64,21 @@ impl BotGoal for GoToActionTile {
                 .filter(|(_, _, action)| {
                     action.as_str() == self.action.as_str()
                 })
-                .map(|(loc, tile, _)| (loc.name.clone(), *tile))
-                .next()
+                .map(|(loc, tile, _)| {
+                    (loc.name.clone(), tile.map(|x| x as f32))
+                })
+                .reduce(|(lhs_loc, lhs_tile), (rhs_loc, rhs_tile)| {
+                    if lhs_loc == rhs_loc {
+                        (lhs_loc, (lhs_tile + rhs_tile) / 2.0)
+                    } else {
+                        (lhs_loc, lhs_tile)
+                    }
+                })
                 .ok_or_else(|| {
                     BotError::NoTileWithAction(self.action.clone())
                 })?;
-            let target_position = action_tile.map(|x| x as f32);
+            let target_position = target_position.map(|x| x.round());
+
             let goal = MovementGoal::new(target_room, target_position)
                 .with_tolerance(1.1);
             goal.into()

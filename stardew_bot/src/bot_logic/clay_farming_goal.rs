@@ -47,7 +47,7 @@ impl ClayFarmingGoal {
         }
     }
 
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
+    pub fn done_digging(&self, game_state: &GameState) -> bool {
         let after_stopping_time = self
             .stop_at_time
             .map(|time| game_state.globals.in_game_time >= time)
@@ -56,6 +56,28 @@ impl ClayFarmingGoal {
             game_state.player.current_stamina <= self.stop_at_stamina;
 
         after_stopping_time || below_stopping_stamina
+    }
+
+    pub fn clay_to_pick_up(
+        &self,
+        game_state: &GameState,
+    ) -> Option<Vector<f32>> {
+        let clay_id = "(O)330";
+        let player_loc = game_state.player.center_pos();
+        game_state
+            .get_room("Beach")
+            .into_iter()
+            .flat_map(|loc| loc.items.iter())
+            .filter(|floating_item| floating_item.item.item_id == clay_id)
+            .min_by_key(|item| {
+                (item.position / 64.0).dist2(player_loc) as isize
+            })
+            .map(|item| item.position)
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        self.done_digging(game_state)
+            && self.clay_to_pick_up(game_state).is_none()
     }
 }
 
@@ -89,8 +111,21 @@ impl BotGoal for ClayFarmingGoal {
             }
         }
 
-        if self.is_completed(game_state) {
-            return Ok(BotGoalResult::Completed);
+        if self.done_digging(game_state) {
+            let finalizing =
+                if let Some(clay_item_pos) = self.clay_to_pick_up(game_state) {
+                    let goal =
+                        MovementGoal::new("Beach".into(), clay_item_pos / 64.0)
+                            .with_tolerance(0.5);
+                    if goal.is_completed(game_state) {
+                        BotGoalResult::InProgress
+                    } else {
+                        goal.into()
+                    }
+                } else {
+                    BotGoalResult::Completed
+                };
+            return Ok(finalizing);
         }
 
         let beach = game_state.get_room("Beach")?;

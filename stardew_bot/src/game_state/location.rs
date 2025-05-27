@@ -6,7 +6,7 @@ use memory_reader::Pointer;
 
 use crate::Error;
 
-use super::{Inventory, Rectangle, TileMap, Vector};
+use super::{Inventory, Item, Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -31,6 +31,9 @@ pub struct Location {
 
     /// Objects that occupy a single tile of the map.
     pub objects: Vec<Object>,
+
+    /// Items that may be picked up.
+    pub items: Vec<FloatingItem>,
 
     /// Placable furniture in the location
     pub furniture: Vec<Furniture>,
@@ -61,6 +64,7 @@ pub struct LocationDelta {
     pub(crate) name: String,
     resource_clumps: Vec<ResourceClump>,
     objects: Vec<Object>,
+    items: Vec<FloatingItem>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -198,6 +202,12 @@ pub enum ObjectKind {
     /// A tile that contains an unknown object or terrain feature,
     /// where not even the name is known.
     Unknown,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct FloatingItem {
+    pub position: Vector<f32>,
+    pub item: Item,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -440,6 +450,17 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_floating_item",
+            |right: f32, down: f32, item_id: &str, item_quality: i32| {
+                FloatingItem {
+                    position: Vector::new(right, down),
+                    item: Item::new(item_id)
+                        .with_quality(item_quality.try_into().unwrap()),
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_furniture_kind",
             |kind: i32| -> FurnitureKind {
                 kind.try_into().expect(
@@ -594,6 +615,7 @@ impl Location {
              resource_clumps: &Vec<ResourceClump>,
              bushes: &Vec<Bush>,
              objects: &Vec<Object>,
+             items: &Vec<FloatingItem>,
              furniture: &Vec<Furniture>,
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
@@ -605,6 +627,7 @@ impl Location {
                     resource_clumps: resource_clumps.clone(),
                     bushes: bushes.clone(),
                     objects: objects.clone(),
+                    items: items.clone(),
                     furniture: furniture.clone(),
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
@@ -620,11 +643,13 @@ impl Location {
             "new_location_delta",
             |name: &str,
              resource_clumps: &Vec<ResourceClump>,
-             objects: &Vec<Object>| {
+             objects: &Vec<Object>,
+             items: &Vec<FloatingItem>| {
                 LocationDelta {
                     name: name.into(),
                     resource_clumps: resource_clumps.clone(),
                     objects: objects.clone(),
+                    items: items.clone(),
                 }
             },
         )?;
@@ -829,6 +854,38 @@ impl Location {
                         new_object(tile,kind)
                     })
                     .filter(|obj| obj.is_some())
+            }
+
+            fn read_location_items(location, filter) {
+                let debris_list = location
+                    .debris
+                    .list;
+                let num_debris = debris_list
+                    ._size
+                    .prim_cast::<usize>();
+
+                (0..num_debris)
+                    .map(|i| debris_list._items[i])
+                    .filter(|debris| {
+                        let ty = debris.debrisType.value;
+                        ty == 4i32
+                    })
+                    .filter(|debris| {
+                        debris.chunks.array.elements._size == 1i32
+                    })
+                    .filter(|debris| filter.is_none() || {
+                        let chunk = debris.chunks.array.elements._items[0].value;
+                        let pos = chunk.position.Field.value;
+                        filter(pos.X, pos.Y)
+                    })
+                    .map(|debris| {
+                        let chunk = debris.chunks.array.elements._items[0].value;
+                        let pos = chunk.position.Field.value;
+                        let item_id = debris.itemId.value.read_string();
+                        let item_quality = debris.netItemQuality.value;
+                        new_floating_item(pos.X, pos.Y, item_id, item_quality)
+                    })
+                    .collect()
             }
 
             fn read_location_furniture(location, filter) {
@@ -1179,6 +1236,8 @@ impl Location {
                     .chain(iter_features)
                     .collect();
 
+                let items = read_location_items(location, None);
+
                 new_location(
                     name,
                     shape,
@@ -1186,6 +1245,7 @@ impl Location {
                     resource_clumps,
                     bushes,
                     objects,
+                    items,
                     furniture,
                     flattened_water_tiles,
                     tile_sheets,
@@ -1238,10 +1298,13 @@ impl Location {
                     .chain(iter_features)
                     .collect();
 
+                let items = read_location_items(location, None);
+
                 new_location_delta(
                     name,
                     resource_clumps,
                     objects,
+                    items,
                 )
             }
         })?;
@@ -1374,6 +1437,11 @@ impl Location {
             )
             .unique_by(|obj| obj.tile)
             .collect();
+
+        // Can't de-duplicate the items by their position, because
+        // more than one item may be on a given tile.  So for now,
+        // just reading all of them.
+        self.items = delta.items;
     }
 }
 
