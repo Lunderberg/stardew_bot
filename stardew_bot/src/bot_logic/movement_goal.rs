@@ -54,6 +54,7 @@ pub struct FaceDirectionGoal(pub FacingDirection);
 
 struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
+    in_game_time: i32,
 }
 
 #[derive(PartialEq, Eq, Hash, Clone)]
@@ -85,6 +86,16 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
 
                 loc.warps
                     .iter()
+                    .filter(|warp| {
+                        // TODO: Handle case where the player has the
+                        // key to the town.
+                        if let WarpKind::LockedDoor { closes, .. } = &warp.kind
+                        {
+                            self.in_game_time < *closes
+                        } else {
+                            true
+                        }
+                    })
                     .filter(move |warp| {
                         Direction::iter_cardinal()
                             .map(|dir| dir.offset())
@@ -169,6 +180,7 @@ impl MovementGoal {
 
         let graph = ConnectedRoomGraph {
             locations: &game_state.locations,
+            in_game_time: game_state.globals.in_game_time,
         };
         let initial = RoomSearchNode {
             current_pos: game_state.player.tile(),
@@ -303,7 +315,21 @@ impl LocalMovementGoal {
     fn is_completed(&self, game_state: &GameState) -> bool {
         let player = &game_state.player;
 
-        if player.room_name != self.room_name {
+        // TODO: Handle case where the player has the key to the town.
+        let door_has_closed = if let Some(WarpKind::LockedDoor {
+            closes, ..
+        }) = &self.warp_kind
+        {
+            game_state.globals.in_game_time >= *closes
+        } else {
+            false
+        };
+
+        if door_has_closed {
+            // We haven't reached the goal location, but it's too late
+            // in the day to get there anyways.
+            true
+        } else if player.room_name != self.room_name {
             // Reached a warp to another room, so the local movement
             // can be popped from the stack.
             true
