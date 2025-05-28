@@ -12,6 +12,7 @@ use super::{
     bot_logic::{BotGoal, BotGoalResult, SubGoals},
     graph_search::GraphSearch,
     impl_tile_map_graph_search::point_to_point_lower_bound,
+    WaitUntilTimeOfDay,
 };
 
 /// Epsilon distance (in tiles) to consider a target reached
@@ -502,7 +503,17 @@ impl BotGoal for LocalMovementGoal {
         if must_open_door
             && game_state.inputs.mouse_tile_location == target_tile
         {
-            do_action(GameAction::RightClick);
+            match self.warp_kind {
+                Some(WarpKind::LockedDoor { opens, .. })
+                    if game_state.globals.in_game_time < opens =>
+                {
+                    let goal = WaitUntilTimeOfDay::new(opens);
+                    return Ok(goal.into());
+                }
+                _ => {
+                    do_action(GameAction::RightClick);
+                }
+            }
         }
 
         Ok(BotGoalResult::InProgress)

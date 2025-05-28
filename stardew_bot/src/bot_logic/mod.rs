@@ -18,6 +18,9 @@ pub use movement_goal::*;
 mod go_to_action_tile;
 pub use go_to_action_tile::*;
 
+mod wait_until_time_of_day;
+pub use wait_until_time_of_day::*;
+
 mod graph_search;
 
 mod inventory_goal;
