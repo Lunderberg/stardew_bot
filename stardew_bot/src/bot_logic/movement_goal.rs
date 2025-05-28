@@ -59,7 +59,17 @@ struct ConnectedRoomGraph<'a> {
 #[derive(PartialEq, Eq, Hash, Clone)]
 struct RoomSearchNode {
     current_pos: Vector<isize>,
-    current_room: String,
+    current_room_index: usize,
+}
+
+impl ConnectedRoomGraph<'_> {
+    fn get_room_index(&self, room_name: &str) -> Option<usize> {
+        self.locations
+            .iter()
+            .enumerate()
+            .find(|(_, loc)| loc.name == room_name)
+            .map(|(i, _)| i)
+    }
 }
 
 impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
@@ -68,8 +78,8 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
         node: &'a RoomSearchNode,
     ) -> impl IntoIterator<Item = (RoomSearchNode, u64)> + 'a {
         self.locations
-            .iter()
-            .filter(|loc| loc.name == node.current_room)
+            .get(node.current_room_index)
+            .into_iter()
             .flat_map(|loc| {
                 let reachable = loc.find_reachable_tiles(node.current_pos);
 
@@ -87,27 +97,31 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                                     .unwrap_or(false)
                             })
                     })
-                    .map(|warp| {
+                    .filter_map(|warp| {
                         if warp.location == node.current_pos {
-                            (
-                                RoomSearchNode {
-                                    current_pos: warp.target,
-                                    current_room: warp.target_room.clone(),
+                            self.get_room_index(&warp.target_room).map(
+                                |next_room_index| {
+                                    (
+                                        RoomSearchNode {
+                                            current_pos: warp.target,
+                                            current_room_index: next_room_index,
+                                        },
+                                        1,
+                                    )
                                 },
-                                1,
                             )
                         } else {
                             let dist = point_to_point_lower_bound(
                                 node.current_pos,
                                 warp.location,
                             );
-                            (
+                            Some((
                                 RoomSearchNode {
                                     current_pos: warp.location,
-                                    current_room: node.current_room.clone(),
+                                    current_room_index: node.current_room_index,
                                 },
                                 dist,
-                            )
+                            ))
                         }
                     })
             })
@@ -158,18 +172,24 @@ impl MovementGoal {
         };
         let initial = RoomSearchNode {
             current_pos: game_state.player.tile(),
-            current_room: game_state.player.room_name.clone(),
+            current_room_index: graph
+                .get_room_index(&game_state.player.room_name)
+                .unwrap(),
         };
+        let target_room_index = graph
+            .get_room_index(&self.target_room)
+            .ok_or_else(|| BotError::UnknownRoom(self.target_room.clone()))?;
+
         let search_nodes: Vec<_> = graph
             .dijkstra_search(initial)
             .take_while_inclusive(|(node, _)| {
-                node.current_room != self.target_room
+                node.current_room_index != target_room_index
             })
             .collect();
 
         let last = search_nodes
             .last()
-            .filter(|(node, _)| node.current_room == self.target_room)
+            .filter(|(node, _)| node.current_room_index == target_room_index)
             .ok_or_else(|| BotError::NoRouteToRoom {
                 from_room: game_state.player.room_name.clone(),
                 to_room: self.target_room.clone(),
@@ -183,10 +203,11 @@ impl MovementGoal {
             })
             .map(|(node, _)| node)
             .tuple_windows()
-            .filter(|(a, b)| a.current_room == b.current_room)
+            .filter(|(a, b)| a.current_room_index == b.current_room_index)
             .map(|(a, _)| {
+                let loc = &game_state.locations[a.current_room_index];
                 LocalMovementGoal::new(
-                    a.current_room.clone(),
+                    loc.name.clone(),
                     a.current_pos.map(|x| x as f32),
                 )
             })
