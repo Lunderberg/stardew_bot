@@ -44,10 +44,10 @@ pub struct LocalMovementGoal {
     waypoints: Vec<Vector<f32>>,
     tolerance: f32,
 
-    /// If the endpoint must be activated in order to proceed.
-    /// Initialized as `None`, to be filled out based on the game
-    /// state.
-    activate_endpoint: Option<bool>,
+    /// The type of warp to be used at the end of the movement, if
+    /// any.  Used to determine if the final tile should be clicked
+    /// on, and if the player needs to wait until a given time.
+    warp_kind: Option<WarpKind>,
 }
 
 pub struct FaceDirectionGoal(pub FacingDirection);
@@ -206,9 +206,16 @@ impl MovementGoal {
             .filter(|(a, b)| a.current_room_index == b.current_room_index)
             .map(|(a, _)| {
                 let loc = &game_state.locations[a.current_room_index];
+                let tile = a.current_pos;
+                let warp_kind = loc
+                    .warps
+                    .iter()
+                    .find(|warp| warp.location == tile)
+                    .map(|warp| warp.kind.clone());
                 LocalMovementGoal::new(
                     loc.name.clone(),
-                    a.current_pos.map(|x| x as f32),
+                    tile.map(|x| x as f32),
+                    warp_kind,
                 )
             })
             .collect();
@@ -226,6 +233,7 @@ impl MovementGoal {
                 LocalMovementGoal::new(
                     self.target_room.clone(),
                     self.target_position,
+                    None,
                 )
                 .with_tolerance(self.tolerance),
             ),
@@ -265,18 +273,31 @@ impl GraphSearch<Vector<isize>> for TileGraph {
 }
 
 impl LocalMovementGoal {
-    pub fn new(room_name: String, position: Vector<f32>) -> Self {
+    pub fn new(
+        room_name: String,
+        position: Vector<f32>,
+        warp_kind: Option<WarpKind>,
+    ) -> Self {
         Self {
             room_name,
             position,
             waypoints: Vec::new(),
             tolerance: WAYPOINT_TOLERANCE,
-            activate_endpoint: None,
+            warp_kind,
         }
     }
 
     fn with_tolerance(self, tolerance: f32) -> Self {
         Self { tolerance, ..self }
+    }
+
+    fn activate_endpoint(&self) -> bool {
+        self.warp_kind
+            .as_ref()
+            .map(|kind| {
+                matches!(kind, WarpKind::Door | WarpKind::LockedDoor { .. })
+            })
+            .unwrap_or(false)
     }
 
     fn is_completed(&self, game_state: &GameState) -> bool {
@@ -286,7 +307,7 @@ impl LocalMovementGoal {
             // Reached a warp to another room, so the local movement
             // can be popped from the stack.
             true
-        } else if self.activate_endpoint.unwrap_or(true) {
+        } else if self.activate_endpoint() {
             // Even if we're within the threshold, we still need to
             // click on the target to complete the action.  Therefore,
             // not yet done.
@@ -321,29 +342,6 @@ impl LocalMovementGoal {
 
         if self.waypoints.is_empty() {
             self.waypoints = self.generate_plan(game_state)?;
-        }
-
-        if self.activate_endpoint.is_none() {
-            let location = game_state
-                .locations
-                .iter()
-                .find(|loc| loc.name == self.room_name)
-                .unwrap_or_else(|| {
-                    panic!("Cannot find room named '{}'", self.room_name)
-                });
-            let target_tile = self.position.map(|x| x.round() as isize);
-            let must_open_door = location
-                .warps
-                .iter()
-                .find(|warp| warp.location == target_tile)
-                .map(|warp| {
-                    matches!(
-                        warp.kind,
-                        WarpKind::Door | WarpKind::LockedDoor { .. }
-                    )
-                })
-                .unwrap_or(false);
-            self.activate_endpoint = Some(must_open_door);
         }
 
         Ok(())
@@ -472,7 +470,7 @@ impl BotGoal for LocalMovementGoal {
         do_action(GameAction::Move(dir));
         do_action(GameAction::MouseOverTile(target_tile));
 
-        let must_open_door = self.activate_endpoint.unwrap_or(false)
+        let must_open_door = self.activate_endpoint()
             && player_position.manhattan_dist(self.position) < 1.5;
 
         if must_open_door
