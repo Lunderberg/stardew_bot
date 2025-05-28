@@ -18,6 +18,10 @@ pub enum GameAction {
     ActivateTile,
     StopActivatingTile,
 
+    /// Send the 'y' keystroke, to confirm an action in a menu
+    ConfirmMenu,
+    StopConfirmingMenu,
+
     MouseOverTile(Vector<isize>),
     MouseOverPixel(Vector<isize>),
 
@@ -45,6 +49,7 @@ impl GameAction {
 
     const KEY_X: X11KeyCode = 53;
     const KEY_C: X11KeyCode = 54;
+    const KEY_Y: X11KeyCode = 29;
 
     const KEY_ESCAPE: X11KeyCode = 9;
 
@@ -125,6 +130,12 @@ impl GameAction {
             }
             GameAction::StopActivatingTile => {
                 handler.send_keystroke(false, Self::KEY_X)?
+            }
+            GameAction::ConfirmMenu => {
+                handler.send_keystroke(true, Self::KEY_Y)?
+            }
+            GameAction::StopConfirmingMenu => {
+                handler.send_keystroke(false, Self::KEY_Y)?
             }
 
             &GameAction::MouseOverTile(tile) => {

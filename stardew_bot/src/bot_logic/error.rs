@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use crate::game_state::Vector;
+use crate::game_state::{Item, Vector};
 
 #[derive(Error)]
 pub enum BotError {
@@ -19,6 +19,9 @@ pub enum BotError {
 
     #[error("Could not find any tile with action '{0}'")]
     NoTileWithAction(String),
+
+    #[error("Cannot buy {item} from {merchant}")]
+    ItemNotSold { merchant: String, item: Item },
 }
 
 impl std::fmt::Debug for BotError {

@@ -1,3 +1,5 @@
+use std::ops::Range;
+
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::Error;
@@ -6,6 +8,7 @@ use super::{Item, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct ShopMenu {
+    pub held_item: Option<Item>,
     pub for_sale: Vec<Item>,
     pub for_sale_buttons: Vec<Vector<isize>>,
     pub for_sale_scroll_index: usize,
@@ -19,11 +22,13 @@ impl ShopMenu {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_shop_menu",
-            |for_sale: &Vec<Item>,
+            |held_item: Option<&Item>,
+             for_sale: &Vec<Item>,
              for_sale_buttons: &Vec<Vector<isize>>,
              for_sale_scroll_index: usize,
              player_item_locations: &Vec<Vector<isize>>,
              exit_button: &Vector<isize>| ShopMenu {
+                held_item: held_item.cloned(),
                 for_sale: for_sale.clone(),
                 for_sale_buttons: for_sale_buttons.clone(),
                 for_sale_scroll_index,
@@ -38,6 +43,13 @@ impl ShopMenu {
                     .Game1
                     ._activeClickableMenu
                     .as::<StardewValley.Menus.ShopMenu>();
+
+                let held_item = menu.heldItem.as::<StardewValley.Item>();
+                let held_item = if held_item.is_some() {
+                    read_item(held_item)
+                } else {
+                    None
+                };
 
                 let num_for_sale = menu
                     .forSale
@@ -78,6 +90,7 @@ impl ShopMenu {
 
                 if menu.is_some() {
                     new_shop_menu(
+                        held_item,
                         for_sale,
                         for_sale_buttons,
                         for_sale_scroll_index,
@@ -91,5 +104,11 @@ impl ShopMenu {
         })?;
 
         Ok(func)
+    }
+
+    pub fn visible_items(&self) -> Range<usize> {
+        let start = self.for_sale_scroll_index;
+        let len = self.for_sale_buttons.len();
+        start..start + len
     }
 }

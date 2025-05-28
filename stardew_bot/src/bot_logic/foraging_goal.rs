@@ -115,7 +115,7 @@ impl BotGoal for ForagingGoal {
             .filter(|item_pos| item_pos.dist(player_pos) < 5.0)
             .next();
         if let Some(pos) = opt_fruit {
-            if pos.dist(player_pos) < 1.5 {
+            if pos.dist(player_pos) < 2.0 {
                 return Ok(BotGoalResult::InProgress);
             } else {
                 return Ok(MovementGoal::new("Farm", pos).into());

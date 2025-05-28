@@ -29,6 +29,9 @@ pub use inventory_goal::*;
 mod select_item_goal;
 pub use select_item_goal::*;
 
+mod recover_stamina_goal;
+pub use recover_stamina_goal::*;
+
 mod clear_farm_goal;
 pub use clear_farm_goal::*;
 

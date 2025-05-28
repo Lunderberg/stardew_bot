@@ -58,6 +58,8 @@ impl BotLogic {
 
         let is_activating_tile =
             game_state.inputs.keys_pressed.contains(&Key::X);
+        let is_confirming_menu =
+            game_state.inputs.keys_pressed.contains(&Key::Y);
         let is_animation_cancelling =
             game_state.inputs.keys_pressed.iter().any(|key| {
                 matches!(key, Key::Delete | Key::RightShift | Key::R)
@@ -81,6 +83,7 @@ impl BotLogic {
                 GameAction::RightClick => !game_state.inputs.right_mouse_down(),
                 GameAction::AnimationCancel => !is_animation_cancelling,
                 GameAction::ActivateTile => !is_activating_tile,
+                GameAction::ConfirmMenu => !is_confirming_menu,
                 GameAction::ExitMenu => !is_exiting_menu,
                 _ => true,
             };
@@ -170,6 +173,9 @@ impl BotLogic {
         }
         if is_activating_tile {
             actions.push(GameAction::StopActivatingTile);
+        }
+        if is_confirming_menu {
+            actions.push(GameAction::StopConfirmingMenu);
         }
         if is_exiting_menu {
             actions.push(GameAction::StopExitingMenu);
