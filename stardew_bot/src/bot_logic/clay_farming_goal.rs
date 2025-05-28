@@ -94,9 +94,8 @@ impl BotGoal for ClayFarmingGoal {
         if self.done_digging(game_state) {
             let finalizing =
                 if let Some(clay_item_pos) = self.clay_to_pick_up(game_state) {
-                    let goal =
-                        MovementGoal::new("Beach".into(), clay_item_pos / 64.0)
-                            .with_tolerance(0.5);
+                    let goal = MovementGoal::new("Beach", clay_item_pos / 64.0)
+                        .with_tolerance(0.5);
                     if goal.is_completed(game_state) {
                         BotGoalResult::InProgress
                     } else {
@@ -137,12 +136,9 @@ impl BotGoal for ClayFarmingGoal {
         // local movement afterwards.  In this case, I want to go to
         // the farm, but don't care where I start out within the farm.
         if player.room_name != "Beach" {
-            return Ok(MovementGoal::new(
-                "Beach".into(),
-                Vector::new(38.0, 1.0),
-            )
-            .with_tolerance(100.0)
-            .into());
+            return Ok(MovementGoal::new("Beach", Vector::new(38.0, 1.0))
+                .with_tolerance(100.0)
+                .into());
         }
 
         let player_tile = player.tile();
@@ -243,7 +239,7 @@ impl BotGoal for ClayFarmingGoal {
                     .next()
                     .expect("At least one direction should be accessible");
                 Some(MovementGoal::new(
-                    "Beach".into(),
+                    "Beach",
                     (closest_clay + dir.offset()).into(),
                 ))
             }
@@ -251,7 +247,7 @@ impl BotGoal for ClayFarmingGoal {
             _ => {
                 // Move to within range of the clay tile
                 Some(
-                    MovementGoal::new("Beach".into(), closest_clay.into())
+                    MovementGoal::new("Beach", closest_clay.into())
                         .with_tolerance(1.1),
                 )
             }

@@ -39,3 +39,9 @@ mod buy_from_merchant_goal;
 pub use buy_from_merchant_goal::*;
 
 mod impl_tile_map_graph_search;
+
+mod foraging_goal;
+pub use foraging_goal::*;
+
+mod activate_tile;
+pub use activate_tile::*;

@@ -71,23 +71,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
             .iter()
             .filter(|loc| loc.name == node.current_room)
             .flat_map(|loc| {
-                let clear_tiles = loc.collect_clear_tiles();
-                let mut reachable = clear_tiles.map(|_| false);
-                let mut to_visit = vec![node.current_pos];
-
-                while let Some(visiting) = to_visit.pop() {
-                    for dir in Direction::iter_cardinal() {
-                        let new_pos = visiting + dir.offset();
-                        let is_clear =
-                            clear_tiles.get(new_pos).cloned().unwrap_or(false);
-                        let was_previously_reachable =
-                            reachable.get(new_pos).cloned().unwrap_or(false);
-                        if is_clear && !was_previously_reachable {
-                            reachable[new_pos] = true;
-                            to_visit.push(new_pos);
-                        }
-                    }
-                }
+                let reachable = loc.find_reachable_tiles(node.current_pos);
 
                 loc.warps
                     .iter()
@@ -131,7 +115,11 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
 }
 
 impl MovementGoal {
-    pub fn new(target_room: String, target_position: Vector<f32>) -> Self {
+    pub fn new(
+        target_room: impl Into<String>,
+        target_position: Vector<f32>,
+    ) -> Self {
+        let target_room = target_room.into();
         Self {
             target_room,
             target_position,

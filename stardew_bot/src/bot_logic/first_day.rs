@@ -2,13 +2,13 @@ use dotnet_debugger::env_var_flag;
 
 use crate::{
     game_state::{Item, ObjectKind, Vector},
-    Error, GameAction, GameState,
+    Direction, Error, GameAction, GameState,
 };
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    BuyFromMerchantGoal, ClayFarmingGoal, GoToActionTile, MovementGoal,
-    SellToMerchantGoal,
+    BuyFromMerchantGoal, ClayFarmingGoal, ForagingGoal, GoToActionTile,
+    MovementGoal, SellToMerchantGoal,
 };
 
 pub struct FirstDay;
@@ -48,11 +48,9 @@ impl BotGoal for FirstDay {
             .is_some();
         if should_pick_up_forest_sword && can_pick_up_forest_sword {
             let tile = Vector::<isize>::new(60, 148);
-            let movement = MovementGoal::new(
-                "Custom_ForestWest".into(),
-                tile.map(|x| x as f32),
-            )
-            .with_tolerance(1.1);
+            let movement =
+                MovementGoal::new("Custom_ForestWest", tile.map(|x| x as f32))
+                    .with_tolerance(1.1);
             if !movement.is_completed(game_state) {
                 return Ok(movement.into());
             }
@@ -63,6 +61,12 @@ impl BotGoal for FirstDay {
             }
 
             return Ok(BotGoalResult::InProgress);
+        }
+
+        let foraging =
+            ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
+        if !foraging.is_completed(game_state) {
+            return Ok(foraging.into());
         }
 
         let clay_farming = ClayFarmingGoal::new()

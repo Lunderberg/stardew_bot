@@ -9,6 +9,8 @@ pub struct Item {
     pub item_id: Cow<'static, str>,
     pub quality: Quality,
     pub count: usize,
+    pub price: i32,
+    pub edibility: i32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -35,6 +37,8 @@ impl Item {
             item_id: item_id.into(),
             quality: Quality::Normal,
             count: 1,
+            price: 0,
+            edibility: -300,
         }
     }
 
@@ -43,6 +47,8 @@ impl Item {
             item_id: Cow::Borrowed(item_id),
             quality: Quality::Normal,
             count: 1,
+            price: 0,
+            edibility: -300,
         }
     }
 
@@ -52,6 +58,30 @@ impl Item {
 
     pub fn with_count(self, count: usize) -> Self {
         Self { count, ..self }
+    }
+
+    pub fn with_price(self, price: i32) -> Self {
+        Self { price, ..self }
+    }
+
+    pub fn with_edibility(self, edibility: i32) -> Self {
+        Self { edibility, ..self }
+    }
+
+    pub fn stamina_recovery(&self) -> Option<f32> {
+        if self.edibility == -300 {
+            None
+        } else {
+            Some((self.edibility as f32) * 2.5)
+        }
+    }
+
+    pub fn health_recovery(&self) -> Option<f32> {
+        if self.edibility == -300 {
+            None
+        } else {
+            Some((self.edibility as f32) * 1.125)
+        }
     }
 
     pub fn is_same_item(&self, other: &Item) -> bool {
@@ -96,6 +126,7 @@ impl std::fmt::Display for Item {
             item_id,
             quality,
             count,
+            ..
         } = &self;
         if quality.is_normal() && *count == 1 {
             write!(f, "{item_id}")

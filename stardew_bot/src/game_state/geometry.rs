@@ -36,6 +36,13 @@ impl<T> Vector<T> {
         self.right * other.right + self.down * other.down
     }
 
+    pub fn dist(self, other: Self) -> T
+    where
+        T: num::Float,
+    {
+        self.dist2(other).sqrt()
+    }
+
     pub fn dist2(self, other: Self) -> T
     where
         T: num::Num + Copy,

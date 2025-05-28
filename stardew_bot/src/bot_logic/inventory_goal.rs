@@ -102,7 +102,7 @@ impl BotGoal for InventoryGoal {
         {
             let goals = SubGoals::new().then(
                 MovementGoal::new(
-                    chest_room.into(),
+                    chest_room.clone(),
                     chest_tile.map(|x| x as f32),
                 )
                 .with_tolerance(1.1),

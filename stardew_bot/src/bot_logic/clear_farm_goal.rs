@@ -84,7 +84,7 @@ impl BotGoal for ClearFarmGoal {
                 .find(|warp| warp.target_room == "Farm")
                 .map(|warp| warp.target.map(|x| x as f32))
                 .ok_or_else(|| BotError::UnknownRoom("Farm".into()))?;
-            return Ok(MovementGoal::new("Farm".into(), target_pos)
+            return Ok(MovementGoal::new("Farm", target_pos)
                 .with_tolerance(100.0)
                 .into());
         }
@@ -131,7 +131,7 @@ impl BotGoal for ClearFarmGoal {
             .find(|tile| clutter.contains_key(&tile));
 
         if let Some(closest_clutter) = opt_closest_clutter {
-            let goal = MovementGoal::new("Farm".into(), closest_clutter.into())
+            let goal = MovementGoal::new("Farm", closest_clutter.into())
                 .with_tolerance(1.1);
             Ok(goal.into())
         } else {

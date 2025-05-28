@@ -20,10 +20,16 @@ impl Inventory {
 
         graph.named_native_function(
             "new_item",
-            |item_id: &str, quality: i32, count: usize| {
+            |item_id: &str,
+             quality: i32,
+             count: usize,
+             price: i32,
+             edibility: i32| {
                 Item::new(item_id.to_string())
                     .with_quality(quality.try_into().unwrap())
                     .with_count(count)
+                    .with_price(price)
+                    .with_edibility(edibility)
             },
         )?;
 
@@ -48,7 +54,28 @@ impl Inventory {
                     .stack
                     .value;
 
-                new_item(item_id, quality, count)
+                let object = item
+                    .as::<StardewValley.Object>();
+
+                let price = if object.is_some() {
+                    object.price.value
+                } else {
+                    0i32
+                };
+
+                let edibility = if object.is_some() {
+                    object.edibility.value
+                } else {
+                    -300i32
+                };
+
+                new_item(
+                    item_id,
+                    quality,
+                    count,
+                    price,
+                    edibility,
+                )
             }
 
             fn read_inventory(container) {

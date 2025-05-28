@@ -4,7 +4,7 @@ use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use itertools::{Either, Itertools as _};
 use memory_reader::Pointer;
 
-use crate::Error;
+use crate::{Direction, Error};
 
 use super::{Inventory, Item, Rectangle, TileMap, Vector};
 
@@ -160,6 +160,30 @@ pub enum TreeKind {
     Birch,
 }
 
+#[derive(Debug, Clone)]
+pub struct FruitTree {
+    pub kind: FruitTreeKind,
+    pub num_fruit: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum FruitTreeKind {
+    Cherry,
+    Apricot,
+    Orange,
+    Peach,
+    Pomegranate,
+    Apple,
+    // From Stardew Expanded
+    Pear,
+    // From Stardew Expanded
+    Nectarine,
+    // From Stardew Expanded
+    Persimmon,
+    // From Stardew Expanded
+    Money,
+}
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Object {
     pub tile: Vector<isize>,
@@ -185,6 +209,9 @@ pub enum ObjectKind {
 
     /// A non-fruit tree (e.g. Oak/Maple)
     Tree(Tree),
+
+    /// A fruit-producing tree (e.g. Apple/Pomegranate)
+    FruitTree(FruitTree),
 
     /// A tile that has been cleared with the Hoe.  May or may not
     /// contain a crop.
@@ -390,6 +417,16 @@ impl Location {
             },
         )?;
 
+        graph.named_native_function(
+            "new_fruit_tree_kind",
+            |kind: &str, num_fruit: usize| {
+                ObjectKind::FruitTree(FruitTree {
+                    kind: kind.parse().unwrap(),
+                    num_fruit,
+                })
+            },
+        )?;
+
         graph.named_native_function("new_grass_kind", |_: Pointer| {
             ObjectKind::Grass
         })?;
@@ -446,12 +483,9 @@ impl Location {
 
         graph.named_native_function(
             "new_floating_item",
-            |right: f32, down: f32, item_id: &str, item_quality: i32| {
-                FloatingItem {
-                    position: Vector::new(right, down),
-                    item: Item::new(item_id.to_string())
-                        .with_quality(item_quality.try_into().unwrap()),
-                }
+            |right: f32, down: f32, item: &Item| FloatingItem {
+                position: Vector::new(right, down),
+                item: item.clone(),
             },
         )?;
 
@@ -764,6 +798,8 @@ impl Location {
 
                         let tree = feature_value
                             .as::<StardewValley.TerrainFeatures.Tree>();
+                        let fruit_tree = feature_value
+                            .as::<StardewValley.TerrainFeatures.FruitTree>();
                         let grass = feature_value
                             .as::<StardewValley.TerrainFeatures.Grass>();
                         let hoe_dirt = feature_value
@@ -782,6 +818,22 @@ impl Location {
                                 growth_stage,
                                 has_seed,
                                 is_stump
+                            )
+                        } else if fruit_tree.is_some() {
+                            let tree_type = fruit_tree
+                                .treeId
+                                .value
+                                .read_string();
+
+                            let num_fruit = fruit_tree
+                                .fruit
+                                .count
+                                .value
+                                .prim_cast::<usize>();
+
+                            new_fruit_tree_kind(
+                                tree_type,
+                                num_fruit,
                             )
                         } else if grass.is_some() {
                             new_grass_kind(grass.prim_cast::<Ptr>())
@@ -863,10 +915,18 @@ impl Location {
                     .map(|debris| {
                         let chunk = debris.chunks.array.elements._items[0].value;
                         let pos = chunk.position.Field.value;
-                        let item_id = debris.itemId.value.read_string();
-                        let item_quality = debris.netItemQuality.value;
-                        new_floating_item(pos.X, pos.Y, item_id, item_quality)
+                        // Use the final resting Y position of the
+                        // chunk, not the current Y position.  The
+                        // current Y position will be closer to the
+                        // top of the screen to simulate a Z axis.
+                        let debris_Y = debris
+                            .netChunkFinalYLevel
+                            .value
+                            .prim_cast::<f32>();
+                        let item = read_item(debris.netItem.value);
+                        new_floating_item(pos.X, debris_Y, item)
                     })
+                    .filter(|floating_item| floating_item.is_some())
                     .collect()
             }
 
@@ -1386,6 +1446,31 @@ impl Location {
         map
     }
 
+    pub fn find_reachable_tiles(
+        &self,
+        starting_tile: Vector<isize>,
+    ) -> TileMap<bool> {
+        let clear_tiles = self.collect_clear_tiles();
+        let mut reachable = clear_tiles.map(|_| false);
+        let mut to_visit = vec![starting_tile];
+
+        while let Some(visiting) = to_visit.pop() {
+            for dir in Direction::iter_cardinal() {
+                let new_pos = visiting + dir.offset();
+                let is_clear =
+                    clear_tiles.get(new_pos).cloned().unwrap_or(false);
+                let was_previously_reachable =
+                    reachable.get(new_pos).cloned().unwrap_or(false);
+                if is_clear && !was_previously_reachable {
+                    reachable[new_pos] = true;
+                    to_visit.push(new_pos);
+                }
+            }
+        }
+
+        reachable
+    }
+
     pub fn apply_delta(
         &mut self,
         delta: LocationDelta,
@@ -1435,6 +1520,7 @@ impl Object {
             | ObjectKind::Fiber
             | ObjectKind::Chest(_) => false,
             ObjectKind::Grass => true,
+            ObjectKind::FruitTree(_) => false,
             ObjectKind::Tree(_) => {
                 // TODO: Check for just-planted trees, which can be
                 // walked over.
@@ -1497,6 +1583,32 @@ impl std::str::FromStr for TreeKind {
             "FlashShifter.StardewValleyExpandedCP_Birch_Tree" => {
                 Ok(Self::Birch)
             }
+            other => Err(Error::UnrecognizedTreeKind(other.to_string())),
+        }
+    }
+}
+
+impl std::str::FromStr for FruitTreeKind {
+    type Err = Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "628" => Ok(Self::Cherry),
+            "629" => Ok(Self::Apricot),
+            "630" => Ok(Self::Orange),
+            "631" => Ok(Self::Peach),
+            "632" => Ok(Self::Pomegranate),
+            "633" => Ok(Self::Apple),
+            "FlashShifter.StardewValleyExpandedCP_Pear_Sapling" => {
+                Ok(Self::Pear)
+            }
+            "FlashShifter.StardewValleyExpandedCP_Nectarine_Sapling" => {
+                Ok(Self::Nectarine)
+            }
+            "FlashShifter.StardewValleyExpandedCP_Persimmon_Sapling" => {
+                Ok(Self::Persimmon)
+            }
+            "FlashShifter.StardewValleyExpandedCP_Tree_Coin" => Ok(Self::Money),
             other => Err(Error::UnrecognizedTreeKind(other.to_string())),
         }
     }
@@ -1657,6 +1769,23 @@ impl std::fmt::Display for TreeKind {
     }
 }
 
+impl std::fmt::Display for FruitTreeKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Cherry => write!(f, "Cherry"),
+            Self::Apricot => write!(f, "Apricot"),
+            Self::Orange => write!(f, "Orange"),
+            Self::Peach => write!(f, "Peach"),
+            Self::Pomegranate => write!(f, "Pomegranate"),
+            Self::Apple => write!(f, "Apple"),
+            Self::Pear => write!(f, "Pear"),
+            Self::Nectarine => write!(f, "Nectarine"),
+            Self::Persimmon => write!(f, "Persimmon"),
+            Self::Money => write!(f, "Money"),
+        }
+    }
+}
+
 impl std::fmt::Display for ObjectKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -1677,6 +1806,7 @@ impl std::fmt::Display for ObjectKind {
             }
             Self::Grass => write!(f, "Grass"),
             Self::Tree(tree) => write!(f, "{}", tree.kind),
+            Self::FruitTree(tree) => write!(f, "{}", tree.kind),
             Self::HoeDirt(_) => write!(f, "HoeDirt"),
             Self::Other(other) => write!(f, "Other({other})"),
             Self::Unknown => write!(f, "Unknown"),
@@ -1722,5 +1852,12 @@ impl Building {
         } else {
             Either::Right(self.shape.iter_points())
         }
+    }
+}
+
+impl FloatingItem {
+    /// The location of the item, in tile coordinates
+    pub fn tile_pos(&self) -> Vector<f32> {
+        self.position / 64.0
     }
 }
