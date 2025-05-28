@@ -19,7 +19,7 @@ impl GoToActionTile {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        game_state.dialogue_menu.is_some()
+        game_state.dialogue_menu.is_some() || game_state.shop_menu.is_some()
     }
 }
 
