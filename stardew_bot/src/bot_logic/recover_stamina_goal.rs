@@ -67,6 +67,12 @@ impl BotGoal for RecoverStaminaGoal {
             self.initial_stamina = Some(game_state.player.current_stamina);
         }
 
+        if game_state.player.is_eating {
+            // Avoid sending additional inputs until the previous
+            // consumption has completed.
+            return Ok(BotGoalResult::InProgress);
+        }
+
         let Some(item_to_eat) = self.item_to_eat(game_state) else {
             return Ok(BotGoalResult::Completed);
         };

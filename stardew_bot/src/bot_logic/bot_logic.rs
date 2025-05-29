@@ -1,3 +1,4 @@
+use derive_more::From;
 use std::{any::Any, borrow::Cow};
 
 use crate::{
@@ -6,8 +7,14 @@ use crate::{
 };
 
 pub struct BotLogic {
-    goals: Vec<Box<dyn BotGoal>>,
+    stack: Vec<LogicStackItem>,
     verbose: bool,
+}
+
+#[derive(From)]
+enum LogicStackItem {
+    Goal(Box<dyn BotGoal>),
+    Interrupt(Box<dyn Fn(&GameState) -> bool>),
 }
 
 pub trait BotGoal: Any {
@@ -34,17 +41,20 @@ pub enum BotGoalResult {
     InProgress,
 }
 
-pub struct SubGoals(Vec<Box<dyn BotGoal>>);
+pub struct SubGoals {
+    goals: Vec<Box<dyn BotGoal>>,
+    interrupt: Option<Box<dyn Fn(&GameState) -> bool>>,
+}
 
 impl BotLogic {
     pub fn new(verbose: bool) -> Self {
         Self {
-            goals: vec![
+            stack: vec![
                 // Box::new(super::ClearFarmGoal),
                 // Box::new(super::ClayFarmingGoal::new()),
                 // Box::new(super::GoToActionTile::new("Carpenter")),
-                Box::new(super::FishingGoal),
-                Box::new(super::FirstDay),
+                LogicStackItem::Goal(Box::new(super::FishingGoal)),
+                LogicStackItem::Goal(Box::new(super::FirstDay)),
             ],
             verbose,
         }
@@ -95,8 +105,48 @@ impl BotLogic {
         let mut previously_produced_subgoals: Option<usize> = None;
 
         loop {
-            let current_goal =
-                self.goals.last_mut().ok_or(Error::NoRemainingGoals)?;
+            // Check if any interrupts should be triggered.  If so,
+            // everything above that position in the stack gets
+            // removed.
+            let opt_interrupt = self
+                .stack
+                .iter()
+                .enumerate()
+                .find(|(_, item)| match item {
+                    LogicStackItem::Interrupt(cond) => cond(game_state),
+                    LogicStackItem::Goal(_) => false,
+                })
+                .map(|(i, _)| i);
+            if let Some(interrupt) = opt_interrupt {
+                if self.verbose {
+                    println!(
+                        "Interrupt {interrupt} triggered, \
+                         removing all goals above it."
+                    )
+                }
+                self.stack.shrink_to(interrupt);
+            }
+
+            // Any interrupts on the top of the stack no longer have
+            // anything remaining that they can interrupt.
+            while self
+                .stack
+                .last()
+                .map(|item| matches!(item, LogicStackItem::Interrupt(_)))
+                .unwrap_or(false)
+            {
+                self.stack.pop();
+            }
+
+            let current_goal: &mut dyn BotGoal = self
+                .stack
+                .iter_mut()
+                .filter_map(|item| match item {
+                    LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_mut()),
+                    LogicStackItem::Interrupt(_) => None,
+                })
+                .last()
+                .ok_or(Error::NoRemainingGoals)?;
 
             if self.verbose {
                 println!("Running top goal '{}'", current_goal.description());
@@ -113,23 +163,31 @@ impl BotLogic {
 
                     if let Some(prev) = previously_produced_subgoals {
                         assert!(
-                            self.goals.len() > prev + 2,
+                            self.stack.len() > prev + 2,
                             "Infinite loop detected.  \
                              Current goal '{0}' has completed, \
                              but this returns control to the preceding goal '{1}'.  \
                              Since this preceding goal '{1}' has already been run, \
                              and chose to delegate to '{0}', \
                              executing it again would enter an infinite loop.",
-                            self.goals.last().unwrap().description(),
-                            self.goals[prev].description(),
+                            self.current_goal().unwrap().description(),
+                            match &self.stack[prev] {
+                                LogicStackItem::Goal(prev_goal) => prev_goal.description(),
+                                _ => unreachable!("Contained a BotGoal first time around")
+                            }
                         );
                     }
 
-                    self.goals.pop();
+                    self.stack.pop();
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
-                    previously_produced_subgoals = Some(self.goals.len() - 1);
-                    sub_goals.0.into_iter().rev().for_each(|sub_goal| {
+                    previously_produced_subgoals = Some(self.stack.len() - 1);
+
+                    if let Some(interrupt) = sub_goals.interrupt {
+                        self.stack.push(interrupt.into());
+                    }
+
+                    sub_goals.goals.into_iter().rev().for_each(|sub_goal| {
                         if self.verbose {
                             println!(
                                 "\tGoal requires sub-goal '{}', \
@@ -137,7 +195,7 @@ impl BotLogic {
                                 sub_goal.description(),
                             );
                         }
-                        self.goals.push(sub_goal);
+                        self.stack.push(sub_goal.into());
                     });
                 }
                 BotGoalResult::InProgress => {
@@ -194,21 +252,35 @@ impl BotLogic {
     pub fn iter_goals(
         &self,
     ) -> impl DoubleEndedIterator<Item = &dyn BotGoal> + '_ {
-        self.goals.iter().map(AsRef::as_ref)
+        self.stack.iter().filter_map(|item| match item {
+            LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_ref()),
+            LogicStackItem::Interrupt(_) => None,
+        })
     }
 
     pub fn current_goal(&self) -> Option<&dyn BotGoal> {
-        self.goals.last().map(|v| &**v)
+        self.iter_goals().last()
     }
 }
 
 impl SubGoals {
     pub fn new() -> Self {
-        Self(Vec::new())
+        Self {
+            goals: Vec::new(),
+            interrupt: None,
+        }
     }
 
     pub fn then(mut self, goal: impl BotGoal + 'static) -> Self {
-        self.0.push(Box::new(goal));
+        self.goals.push(Box::new(goal));
+        self
+    }
+
+    pub fn with_interrupt(
+        mut self,
+        condition: impl Fn(&GameState) -> bool + 'static,
+    ) -> Self {
+        self.interrupt = Some(Box::new(condition));
         self
     }
 }

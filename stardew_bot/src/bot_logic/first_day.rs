@@ -70,7 +70,7 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new()
-            .stop_at_time(1200)
+            .stop_at_time(1100)
             .stop_at_stamina(4.0);
         if !clay_farming.is_completed(game_state) {
             return Ok(clay_farming.into());
@@ -81,9 +81,9 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let goal =
-            BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(5));
-        if !goal.is_completed(game_state) {
+        if game_state.player.inventory.count_item(&Item::SALAD) == 0 {
+            let goal =
+                BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(5));
             return Ok(goal.into());
         }
 
@@ -92,6 +92,45 @@ impl BotGoal for FirstDay {
             if goal.item_to_eat(game_state).is_some() {
                 return Ok(goal.into());
             }
+        }
+
+        let clay_farming = ClayFarmingGoal::new()
+            .stop_at_time(1500)
+            .stop_at_stamina(4.0);
+        if !clay_farming.is_completed(game_state) {
+            return Ok(clay_farming.into());
+        }
+
+        if game_state.player.inventory.items.len() < 24
+            && game_state.player.current_money > 2000
+        {
+            if let Some(menu) = &game_state.dialogue_menu {
+                if let Some(pixel) = menu.responses.get(0) {
+                    do_action(GameAction::MouseOverPixel(*pixel));
+                    do_action(GameAction::LeftClick);
+                }
+                return Ok(BotGoalResult::InProgress);
+            } else {
+                let goal = GoToActionTile::new("BuyBackpack");
+                return Ok(goal.into());
+            }
+        }
+        if let Some(menu) = &game_state.dialogue_menu {
+            if menu.responses.is_empty() {
+                do_action(GameAction::ExitMenu);
+                return Ok(BotGoalResult::InProgress);
+            }
+        }
+
+        if game_state.player.inventory.count_item(&Item::PARSNIP_SEEDS) == 0
+            && game_state.globals.in_game_time < 1700
+            && game_state.player.current_money > 1200
+        {
+            let goal = BuyFromMerchantGoal::new(
+                "Buy General",
+                Item::PARSNIP_SEEDS.with_count(60),
+            );
+            return Ok(goal.into());
         }
 
         Ok(BotGoalResult::InProgress)

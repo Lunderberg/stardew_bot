@@ -1199,6 +1199,7 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "crossterm",
+ "derive_more",
  "dotnet_debugger",
  "itertools 0.13.0",
  "memory_reader",

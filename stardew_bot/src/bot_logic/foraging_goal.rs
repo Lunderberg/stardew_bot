@@ -104,13 +104,6 @@ impl BotGoal for ForagingGoal {
         let opt_fruit = farm
             .items
             .iter()
-            .filter(|floating_item| {
-                floating_item
-                    .item
-                    .stamina_recovery()
-                    .map(|stamina| stamina > 10.0)
-                    .unwrap_or(false)
-            })
             .map(|item| item.tile_pos())
             .filter(|item_pos| item_pos.dist(player_pos) < 5.0)
             .next();

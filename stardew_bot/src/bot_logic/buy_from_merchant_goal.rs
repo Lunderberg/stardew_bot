@@ -23,13 +23,8 @@ impl BuyFromMerchantGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        let num_in_inventory = game_state
-            .player
-            .inventory
-            .iter_items()
-            .filter(|item| item.is_same_item(&self.item))
-            .map(|item| item.count)
-            .sum::<usize>();
+        let num_in_inventory =
+            game_state.player.inventory.count_item(&self.item);
         num_in_inventory >= self.item.count
     }
 }

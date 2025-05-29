@@ -6,7 +6,7 @@ use memory_reader::Pointer;
 
 use crate::{Direction, Error};
 
-use super::{Inventory, Item, Rectangle, TileMap, Vector};
+use super::{Inventory, Quality, Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -231,10 +231,16 @@ pub enum ObjectKind {
     Unknown,
 }
 
+/// An item on the ground that may be picked up
+///
+/// Deliberately does not use the `Item` struct internally, as not all
+/// fields are populated until the item has been picked up.
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct FloatingItem {
     pub position: Vector<f32>,
-    pub item: Item,
+    pub item_id: String,
+    pub quality: Quality,
+    pub count: usize,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -483,9 +489,15 @@ impl Location {
 
         graph.named_native_function(
             "new_floating_item",
-            |right: f32, down: f32, item: &Item| FloatingItem {
+            |right: f32,
+             down: f32,
+             item_id: &str,
+             quality: i32,
+             count: usize| FloatingItem {
                 position: Vector::new(right, down),
-                item: item.clone(),
+                quality: quality.try_into().unwrap(),
+                item_id: item_id.to_string(),
+                count,
             },
         )?;
 
@@ -915,6 +927,8 @@ impl Location {
                     .map(|debris| {
                         let chunk = debris.chunks.array.elements._items[0].value;
                         let pos = chunk.position.Field.value;
+                        let item_id = debris.itemId.value.read_string();
+                        let item_quality = debris.netItemQuality.value;
                         // Use the final resting Y position of the
                         // chunk, not the current Y position.  The
                         // current Y position will be closer to the
@@ -923,8 +937,21 @@ impl Location {
                             .netChunkFinalYLevel
                             .value
                             .prim_cast::<f32>();
-                        let item = read_item(debris.netItem.value);
-                        new_floating_item(pos.X, debris_Y, item)
+
+                        let item = debris.netItem.value;
+                        let count = if item.is_some() {
+                            item.stack.value
+                        } else {
+                            1i32
+                        };
+
+                        new_floating_item(
+                            pos.X,
+                            debris_Y,
+                            item_id,
+                            item_quality,
+                            count,
+                        )
                     })
                     .filter(|floating_item| floating_item.is_some())
                     .collect()

@@ -16,6 +16,7 @@ pub struct PlayerState {
     pub skills: PlayerSkills,
     pub current_stamina: f32,
     pub max_stamina: i32,
+    pub is_eating: bool,
 
     // Inventory-related info
     pub inventory: Inventory,
@@ -129,7 +130,8 @@ impl PlayerState {
              using_tool: bool,
              last_click: &Vector<isize>,
              current_stamina: f32,
-             max_stamina: i32| {
+             max_stamina: i32,
+             is_eating: bool| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -143,6 +145,7 @@ impl PlayerState {
                     last_click: *last_click,
                     current_stamina,
                     max_stamina,
+                    is_eating,
                 }
             },
         )?;
@@ -209,6 +212,7 @@ impl PlayerState {
 
                 let current_stamina = player.netStamina.value;
                 let max_stamina = player.maxStamina.value;
+                let is_eating = player.isEating;
 
                 let current_money = player.teamRoot.value.money.value;
 
@@ -225,6 +229,7 @@ impl PlayerState {
                     last_click,
                     current_stamina,
                     max_stamina,
+                    is_eating,
                 )
             }
         })?;

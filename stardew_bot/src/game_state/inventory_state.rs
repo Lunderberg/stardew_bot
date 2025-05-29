@@ -117,4 +117,11 @@ impl Inventory {
     pub fn iter_items(&self) -> impl Iterator<Item = &Item> + '_ {
         self.iter_slots().flatten()
     }
+
+    pub fn count_item(&self, item: &Item) -> usize {
+        self.iter_items()
+            .filter(|inv_item| inv_item.is_same_item(item))
+            .map(|inv_item| inv_item.count)
+            .sum::<usize>()
+    }
 }

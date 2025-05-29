@@ -11,6 +11,7 @@ path = "src/main.rs"
 [dependencies]
 structopt = "*"
 thiserror = "*"
+derive_more = "*"
 itertools = "*"
 num = "0.4"
 priority-queue = "*"

@@ -71,7 +71,7 @@ impl ClayFarmingGoal {
             .get_room("Beach")
             .into_iter()
             .flat_map(|loc| loc.items.iter())
-            .filter(|floating_item| floating_item.item.item_id == clay_id)
+            .filter(|floating_item| floating_item.item_id == clay_id)
             .min_by_key(|item| {
                 (item.position / 64.0).dist2(player_loc) as isize
             })
@@ -256,10 +256,16 @@ impl BotGoal for ClayFarmingGoal {
             }
         };
         if let Some(movement) = opt_movement {
+            let movement =
+                SubGoals::new().then(movement).with_interrupt(move |state| {
+                    let updated_hoe_count =
+                        state.globals.get_stat("dirtHoed").unwrap_or(0);
+                    updated_hoe_count != total_dirt_hoed
+                });
             return Ok(movement.into());
         }
 
-        if game_state.player.current_stamina < 200.0 {
+        if game_state.player.current_stamina < 30.0 {
             let goal = RecoverStaminaGoal::new();
             if goal.item_to_eat(game_state).is_some() {
                 return Ok(goal.into());
