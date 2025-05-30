@@ -124,8 +124,8 @@ pub struct Bush {
 /// A tile of dirt that has been cleared with a Hoe.
 #[derive(Debug, Clone)]
 pub struct HoeDirt {
-    // TODO: Read parameters on what is in the HoeDirt, whether it has
-    // been watered, etc.
+    pub is_watered: bool,
+    pub has_crop: bool,
 }
 
 /// Non-fruit trees.  This includes the small 1x1 stumps left behind
@@ -407,9 +407,15 @@ impl Location {
             },
         )?;
 
-        graph.named_native_function("new_hoe_dirt", |_: Pointer| {
-            ObjectKind::HoeDirt(HoeDirt {})
-        })?;
+        graph.named_native_function(
+            "new_hoe_dirt",
+            |is_watered: bool, has_crop: bool| {
+                ObjectKind::HoeDirt(HoeDirt {
+                    is_watered,
+                    has_crop,
+                })
+            },
+        )?;
 
         graph.named_native_function(
             "new_tree_kind",
@@ -850,7 +856,12 @@ impl Location {
                         } else if grass.is_some() {
                             new_grass_kind(grass.prim_cast::<Ptr>())
                         } else if hoe_dirt.is_some() {
-                            new_hoe_dirt(hoe_dirt.prim_cast::<Ptr>())
+                            let state = hoe_dirt.state.value;
+                            let is_watered = state == 1i32;
+
+                            let crop = hoe_dirt.netCrop.value;
+
+                            new_hoe_dirt(is_watered, crop.is_some())
                         } else {
                             new_unknown_object_kind(feature_value)
                         };
@@ -1415,32 +1426,67 @@ impl Location {
         }
     }
 
-    pub fn collect_clear_tiles(&self) -> TileMap<bool> {
+    pub fn is_water(&self, tile: Vector<isize>) -> bool {
+        // TODO: Replace `Location.water_tiles` with a
+        // `TileMap<bool>`, and just look up the result.
+
+        let Some(water_tiles) = &self.water_tiles else {
+            return false;
+        };
+
+        let Vector {
+            right: width,
+            down: height,
+        } = self.shape;
+        if (0..width).contains(&tile.right) && (0..height).contains(&tile.down)
+        {
+            let index = tile.right * height + tile.down;
+            water_tiles[index as usize]
+        } else {
+            false
+        }
+    }
+
+    pub fn iter_water_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
         let height = self.shape.down as usize;
 
-        let mut map = self.blocked.map(|b| !b);
-
-        let iter_water = self
-            .water_tiles
+        self.water_tiles
             .iter()
             .flat_map(|vec_bool| vec_bool.iter())
             .enumerate()
             .filter(|(_, is_water)| **is_water)
-            .map(|(index, _)| {
+            .map(move |(index, _)| {
                 let i = (index / height) as isize;
                 let j = (index % height) as isize;
                 Vector::new(i, j)
-            });
+            })
+    }
+
+    pub fn iter_bush_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.bushes
+            .iter()
+            .flat_map(|bush| bush.rectangle().iter_points())
+    }
+
+    pub fn iter_building_tiles(
+        &self,
+    ) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.buildings
+            .iter()
+            .flat_map(|building| building.iter_tiles())
+    }
+
+    pub fn collect_clear_tiles(&self) -> TileMap<bool> {
+        let mut map = self.blocked.map(|b| !b);
+
+        let iter_water = self.iter_water_tiles();
 
         let iter_clumps = self
             .resource_clumps
             .iter()
             .flat_map(|clump| clump.shape.iter_points());
 
-        let iter_bush = self
-            .bushes
-            .iter()
-            .flat_map(|bush| bush.rectangle().iter_points());
+        let iter_bush = self.iter_bush_tiles();
 
         let iter_objects = self
             .objects
@@ -1454,10 +1500,7 @@ impl Location {
             .filter(|piece| !matches!(piece.kind, FurnitureKind::Rug))
             .flat_map(|piece| piece.shape.iter_points());
 
-        let iter_buildings = self
-            .buildings
-            .iter()
-            .flat_map(|building| building.iter_tiles());
+        let iter_buildings = self.iter_building_tiles();
 
         std::iter::empty()
             .chain(iter_water)

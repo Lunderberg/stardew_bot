@@ -29,11 +29,14 @@ pub use inventory_goal::*;
 mod select_item_goal;
 pub use select_item_goal::*;
 
-mod recover_stamina_goal;
-pub use recover_stamina_goal::*;
+mod maintain_stamina_goal;
+pub use maintain_stamina_goal::*;
 
 mod clear_farm_goal;
 pub use clear_farm_goal::*;
+
+mod plant_crops_goal;
+pub use plant_crops_goal::*;
 
 mod clay_farming_goal;
 pub use clay_farming_goal::*;
@@ -51,3 +54,6 @@ pub use foraging_goal::*;
 
 mod activate_tile;
 pub use activate_tile::*;
+
+mod use_item_on_tile;
+pub use use_item_on_tile::*;

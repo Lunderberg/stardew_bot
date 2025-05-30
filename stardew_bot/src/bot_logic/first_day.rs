@@ -8,7 +8,7 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
     BuyFromMerchantGoal, ClayFarmingGoal, ForagingGoal, GoToActionTile,
-    MovementGoal, RecoverStaminaGoal, SellToMerchantGoal,
+    MaintainStaminaGoal, MovementGoal, PlantCropsGoal, SellToMerchantGoal,
 };
 
 pub struct FirstDay;
@@ -27,6 +27,9 @@ impl BotGoal for FirstDay {
         if current_day != 1 {
             return Ok(BotGoalResult::Completed);
         }
+
+        let in_game_time = game_state.globals.in_game_time;
+        let current_money = game_state.player.current_money;
 
         // If we are playing StardewValleyExpanded, pick up the
         // freebie ForestSword.  The `class PlacedItem:
@@ -69,29 +72,9 @@ impl BotGoal for FirstDay {
             return Ok(foraging.into());
         }
 
-        let clay_farming = ClayFarmingGoal::new()
-            .stop_at_time(1100)
-            .stop_at_stamina(4.0);
-        if !clay_farming.is_completed(game_state) {
-            return Ok(clay_farming.into());
-        }
-
-        let goal = SellToMerchantGoal::new("Carpenter", Item::CLAY);
+        let goal = MaintainStaminaGoal::new();
         if !goal.is_completed(game_state) {
             return Ok(goal.into());
-        }
-
-        if game_state.player.inventory.count_item(&Item::SALAD) == 0 {
-            let goal =
-                BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(5));
-            return Ok(goal.into());
-        }
-
-        if game_state.player.current_stamina < 20.0 {
-            let goal = RecoverStaminaGoal::new();
-            if goal.item_to_eat(game_state).is_some() {
-                return Ok(goal.into());
-            }
         }
 
         let clay_farming = ClayFarmingGoal::new()
@@ -101,8 +84,18 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        if game_state.player.inventory.items.len() < 24
-            && game_state.player.current_money > 2000
+        let goal = SellToMerchantGoal::new("Carpenter", Item::CLAY);
+        if goal.item_count(game_state) > 100 && in_game_time < 1630 {
+            return Ok(goal.into());
+        }
+
+        let goal =
+            BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(10));
+        if goal.item_count(game_state) == 0 && in_game_time < 1900 {
+            return Ok(goal.into());
+        }
+
+        if game_state.player.inventory.items.len() < 24 && current_money > 2000
         {
             if let Some(menu) = &game_state.dialogue_menu {
                 if let Some(pixel) = menu.responses.get(0) {
@@ -123,14 +116,19 @@ impl BotGoal for FirstDay {
         }
 
         if game_state.player.inventory.count_item(&Item::PARSNIP_SEEDS) == 0
-            && game_state.globals.in_game_time < 1700
-            && game_state.player.current_money > 1200
+            && in_game_time < 1700
+            && current_money > 1200
         {
             let goal = BuyFromMerchantGoal::new(
                 "Buy General",
                 Item::PARSNIP_SEEDS.with_count(60),
             );
             return Ok(goal.into());
+        }
+
+        let plant_crops = PlantCropsGoal::new();
+        if !plant_crops.is_completed(game_state) {
+            return Ok(plant_crops.into());
         }
 
         Ok(BotGoalResult::InProgress)

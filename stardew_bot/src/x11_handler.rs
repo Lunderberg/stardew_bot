@@ -14,7 +14,7 @@ use x11rb::{
     x11_utils::X11Error,
 };
 
-use crate::game_state::Vector;
+use crate::game_state::{Rectangle, Vector};
 
 #[derive(Error)]
 pub enum Error {
@@ -64,7 +64,8 @@ pub struct X11Handler {
     active_window_atom: x11rb::protocol::xproto::Atom,
     root: Window,
     main_window: Option<Window>,
-    main_window_pos: Option<Vector<isize>>,
+    main_window_pos: Option<Rectangle<isize>>,
+    border_width: isize,
 }
 
 impl X11Handler {
@@ -100,6 +101,7 @@ impl X11Handler {
             root,
             main_window: None,
             main_window_pos: None,
+            border_width: 0,
         };
 
         Ok(handler)
@@ -198,14 +200,24 @@ impl X11Handler {
     pub fn query_window_location(&mut self) -> Result<(), Error> {
         let window = self.get_main_window()?;
 
+        let geometry = self.conn.get_geometry(window)?.reply()?;
         let query_pointer = self.conn.query_pointer(window)?.reply()?;
 
-        let window_location = Vector::<isize>::new(
+        let top_left = Vector::<isize>::new(
             (query_pointer.root_x - query_pointer.win_x) as isize,
             (query_pointer.root_y - query_pointer.win_y) as isize,
         );
 
-        self.main_window_pos = Some(window_location);
+        let pos = Rectangle {
+            top_left,
+            shape: Vector::new(
+                geometry.width as isize,
+                geometry.height as isize,
+            ),
+        };
+
+        self.main_window_pos = Some(pos);
+        self.border_width = geometry.border_width as isize;
 
         Ok(())
     }
@@ -275,11 +287,20 @@ impl X11Handler {
         &self,
         window_pixel: Vector<isize>,
     ) -> Result<(), X11Error> {
-        let offset = self.main_window_pos.expect(
+        let window_pos = self.main_window_pos.expect(
             "Must set main window position \
              before moving the mouse",
         );
-        let global_pixel = window_pixel + offset;
+        let global_pixel = window_pixel + window_pos.top_left;
+        let global_pixel = {
+            let border_width = self.border_width + 3;
+            let border_offset = Vector::new(border_width, border_width);
+            let narrowed_window = Rectangle {
+                top_left: window_pos.top_left + border_offset,
+                shape: window_pos.shape - border_offset * 2isize,
+            };
+            narrowed_window.clamp(global_pixel)
+        };
 
         self.conn
             .xtest_fake_input(

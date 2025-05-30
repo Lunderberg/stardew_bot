@@ -1,5 +1,7 @@
 use dotnet_debugger::RustNativeObject;
 
+use crate::Direction;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Vector<T> {
     pub right: T,
@@ -111,6 +113,28 @@ impl Vector<f32> {
     }
 }
 
+impl Vector<isize> {
+    /// Iterates over all neighboring locations, including diagonals,
+    /// and including the current tile.
+    pub fn iter_nearby(self) -> impl Iterator<Item = Self> {
+        std::iter::once(self).chain(self.iter_adjacent())
+    }
+
+    /// Iterates over all neighboring locations, including diagonals,
+    /// and excluding the current tile.
+    pub fn iter_adjacent(self) -> impl Iterator<Item = Self> {
+        Direction::iter().map(move |dir| self + dir.offset())
+    }
+
+    /// Iterates over all neighboring locations, excluding diagonals,
+    /// and excluding the current tile.
+    pub fn iter_cardinal(self) -> impl Iterator<Item = Self> {
+        Direction::iter()
+            .filter(|dir| dir.is_cardinal())
+            .map(move |dir| self + dir.offset())
+    }
+}
+
 impl<T> Rectangle<T> {
     pub fn iter_points(self) -> impl Iterator<Item = Vector<T>>
     where
@@ -134,6 +158,50 @@ impl<T> Rectangle<T> {
     {
         let two = T::one() + T::one();
         self.top_left + self.shape / two
+    }
+}
+
+impl Rectangle<isize> {
+    pub fn clamp(&self, pos: Vector<isize>) -> Vector<isize> {
+        let bottom_right = self.top_left + self.shape;
+        let x_range = self.top_left.right..bottom_right.right;
+        let y_range = self.top_left.down..bottom_right.down;
+
+        if x_range.contains(&pos.right) && y_range.contains(&pos.down) {
+            return pos;
+        }
+
+        let center = (self.top_left + bottom_right) / 2;
+        let Vector {
+            right: dx,
+            down: dy,
+        } = pos - center;
+        let Vector {
+            right: width,
+            down: height,
+        } = self.shape;
+
+        // Hits top/bottom if
+        //     abs(dy/dx) > height/width
+        //     abs(dy)/abs(dx) > height/width
+        //     abs(dy)*width > height*abs(dx)
+        let new_offset = if dy.abs() * width > dx.abs() * height {
+            // scale*abs(dy) == height/2
+            // scale = height/(2*abs(dy))
+            //
+            // new_dx = scale*dx = dx*height/(2*abs(dy))
+            // new_dy = scale*dy = dy*height/(2*abs(dy)) = height/2 * sign(dy)
+            Vector::new(dx * height / (2 * dy.abs()), dy.signum() * height / 2)
+        } else {
+            // scale*abs(dx) == width/2
+            // scale = width/(2*abs(dx))
+            //
+            // new_dx = scale*dx = dx*width/(2*abs(dx)) = width/2 * sign(dx)
+            // new_dy = scale*dy = dy*width/(2*abs(dx))
+            Vector::new(dx.signum() * width / 2, dy * width / (2 * dx.abs()))
+        };
+
+        center + new_offset
     }
 }
 

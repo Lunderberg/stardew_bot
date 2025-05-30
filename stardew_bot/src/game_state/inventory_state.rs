@@ -3,7 +3,10 @@ use memory_reader::Pointer;
 
 use crate::Error;
 
-use super::Item;
+use super::{
+    item::{ItemKind, WateringCan},
+    Item,
+};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Inventory {
@@ -19,17 +22,29 @@ impl Inventory {
         })?;
 
         graph.named_native_function(
+            "new_watering_can_kind",
+            |remaining_water: i32, max_water: i32| {
+                ItemKind::WateringCan(WateringCan {
+                    remaining_water,
+                    max_water,
+                })
+            },
+        )?;
+
+        graph.named_native_function(
             "new_item",
             |item_id: &str,
              quality: i32,
              count: usize,
              price: i32,
-             edibility: i32| {
+             edibility: i32,
+             kind: Option<&ItemKind>| {
                 Item::new(item_id.to_string())
                     .with_quality(quality.try_into().unwrap())
                     .with_count(count)
                     .with_price(price)
                     .with_edibility(edibility)
+                    .with_item_kind(kind.cloned())
             },
         )?;
 
@@ -56,6 +71,8 @@ impl Inventory {
 
                 let object = item
                     .as::<StardewValley.Object>();
+                let watering_can = item
+                    .as::<StardewValley.Tools.WateringCan>();
 
                 let price = if object.is_some() {
                     object.price.value
@@ -69,12 +86,27 @@ impl Inventory {
                     -300i32
                 };
 
+                let kind = if watering_can.is_some() {
+                    let remaining_water = watering_can
+                        .waterLeft
+                        .value;
+                    let max_water = watering_can
+                        .waterCanMax;
+                    new_watering_can_kind(
+                        remaining_water,
+                        max_water,
+                    )
+                } else {
+                    None
+                };
+
                 new_item(
                     item_id,
                     quality,
                     count,
                     price,
                     edibility,
+                    kind,
                 )
             }
 

@@ -20,12 +20,18 @@ impl SellToMerchantGoal {
         }
     }
 
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
+    pub fn item_count(&self, game_state: &GameState) -> usize {
         game_state
             .player
             .inventory
             .iter_items()
-            .all(|item| !item.is_same_item(&self.item))
+            .filter(|item| item.is_same_item(&self.item))
+            .map(|item| item.count)
+            .sum::<usize>()
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        self.item_count(game_state) == 0
     }
 }
 

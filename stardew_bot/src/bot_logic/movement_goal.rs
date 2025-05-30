@@ -161,7 +161,8 @@ impl MovementGoal {
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         let player = &game_state.player;
 
-        let goal_dist = (self.target_position - player.position / 64.0).mag();
+        let goal_dist =
+            self.target_position.manhattan_dist(player.center_pos());
 
         let is_correct_room = player.room_name == self.target_room;
         let is_correct_location_within_room = goal_dist < self.tolerance;
@@ -254,7 +255,7 @@ impl MovementGoal {
         .filter(|_| self.target_room == player.room_name)
         .filter(|_| {
             let goal_dist =
-                self.target_position.manhattan_dist(player.position / 64.0);
+                self.target_position.manhattan_dist(player.center_pos());
             goal_dist >= self.tolerance
         })
     }
@@ -342,7 +343,7 @@ impl LocalMovementGoal {
         } else {
             // Check completion by seeing how far we are from the
             // target position.
-            let goal_dist = (self.position - player.position / 64.0).mag();
+            let goal_dist = self.position.manhattan_dist(player.center_pos());
             goal_dist < self.tolerance
         }
     }
@@ -442,7 +443,14 @@ impl BotGoal for MovementGoal {
             unreachable!(
                 "Unless the MovementGoal is completed, \
                  should always be able to produced either \
-                 a room-to-room or within-room movement"
+                 a room-to-room or within-room movement.  \
+                 However, could not make a path to {}/{} \
+                 from current location of {}/{}/{}",
+                self.target_room,
+                self.target_position,
+                game_state.player.room_name,
+                game_state.player.tile(),
+                game_state.player.center_pos(),
             )
         };
 

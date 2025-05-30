@@ -4,22 +4,26 @@ use crate::{
 
 use super::bot_logic::{BotGoal, BotGoalResult};
 
-pub struct RecoverStaminaGoal {
-    /// The stamina of the player when the goal started.  Used to
-    /// determine whether stamina has been recovered.
-    initial_stamina: Option<f32>,
+pub struct MaintainStaminaGoal {
+    /// The target stamina to stay above.
+    min_stamina: f32,
 
     /// The maximum gold that should be spent in per energy restored.
     /// Any item that is outside of this threshold will not be eaten.
     max_gold_per_energy: f32,
 }
 
-impl RecoverStaminaGoal {
+impl MaintainStaminaGoal {
     pub fn new() -> Self {
         Self {
-            initial_stamina: None,
+            min_stamina: 10.0,
             max_gold_per_energy: 2.5,
         }
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        game_state.player.current_stamina > self.min_stamina
+            || self.item_to_eat(game_state).is_none()
     }
 
     pub fn item_to_eat<'a>(
@@ -46,7 +50,7 @@ impl RecoverStaminaGoal {
     }
 }
 
-impl BotGoal for RecoverStaminaGoal {
+impl BotGoal for MaintainStaminaGoal {
     fn description(&self) -> std::borrow::Cow<str> {
         "Recover stamina".into()
     }
@@ -56,15 +60,8 @@ impl BotGoal for RecoverStaminaGoal {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        if let Some(initial_stamina) = self.initial_stamina {
-            // Check if the stamina has increased.  If so, return
-            // control to the parent goal.
-            if game_state.player.current_stamina > initial_stamina {
-                return Ok(BotGoalResult::Completed);
-            }
-        } else {
-            // This is the first invocation, remember the current stamina
-            self.initial_stamina = Some(game_state.player.current_stamina);
+        if self.is_completed(game_state) {
+            return Ok(BotGoalResult::Completed);
         }
 
         if game_state.player.is_eating {
@@ -74,7 +71,7 @@ impl BotGoal for RecoverStaminaGoal {
         }
 
         let Some(item_to_eat) = self.item_to_eat(game_state) else {
-            return Ok(BotGoalResult::Completed);
+            unreachable!("Guarded by self.is_completed() check")
         };
 
         let select_item = SelectItemGoal::new(item_to_eat.clone());

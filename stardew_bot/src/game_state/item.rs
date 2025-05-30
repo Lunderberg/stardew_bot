@@ -11,6 +11,19 @@ pub struct Item {
     pub count: usize,
     pub price: i32,
     pub edibility: i32,
+    pub kind: Option<ItemKind>,
+}
+
+/// Contains extra fields for specific item types.
+#[derive(RustNativeObject, Debug, Clone)]
+pub enum ItemKind {
+    WateringCan(WateringCan),
+}
+
+#[derive(Debug, Clone)]
+pub struct WateringCan {
+    pub remaining_water: i32,
+    pub max_water: i32,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -40,16 +53,18 @@ impl Item {
             count: 1,
             price: 0,
             edibility: -300,
+            kind: None,
         }
     }
 
-    const fn new_const(item_id: &'static str) -> Self {
+    pub const fn new_const(item_id: &'static str) -> Self {
         Self {
             item_id: Cow::Borrowed(item_id),
             quality: Quality::Normal,
             count: 1,
             price: 0,
             edibility: -300,
+            kind: None,
         }
     }
 
@@ -67,6 +82,10 @@ impl Item {
 
     pub fn with_edibility(self, edibility: i32) -> Self {
         Self { edibility, ..self }
+    }
+
+    pub fn with_item_kind(self, kind: Option<ItemKind>) -> Self {
+        Self { kind, ..self }
     }
 
     pub fn stamina_recovery(&self) -> Option<f32> {
@@ -87,6 +106,12 @@ impl Item {
 
     pub fn is_same_item(&self, other: &Item) -> bool {
         self.item_id == other.item_id && self.quality == other.quality
+    }
+
+    pub fn as_watering_can(&self) -> Option<&WateringCan> {
+        self.kind.as_ref().and_then(|kind| match kind {
+            ItemKind::WateringCan(can) => Some(can),
+        })
     }
 }
 

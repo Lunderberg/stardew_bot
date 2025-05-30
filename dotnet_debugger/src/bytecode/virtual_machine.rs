@@ -1164,12 +1164,13 @@ where
         let cache_range = Self::choose_cache_range(remote_range.clone());
         let num_pages = (cache_range.end - cache_range.start) / PAGE_SIZE;
 
-        if num_pages > self.lru_cache.len() {
+        if num_pages > self.lru_cache.len().min(2) {
             // This single read would exceed the capacity of the
-            // entire cache (e.g. a large string).  Since this read
-            // occupies several entire page, it probably wouldn't be
-            // shared by other objects, so we can just let it skip the
-            // cache altogether.
+            // entire cache (e.g. a large string), or would exceed the
+            // size of a single cached read.  For a read occupies
+            // several entire page, it probably wouldn't be shared by
+            // other objects, so we can just let it skip the cache
+            // altogether.
             return self.inner.read_bytes(loc, output);
         }
 

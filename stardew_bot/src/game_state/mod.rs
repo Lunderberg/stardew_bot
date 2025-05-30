@@ -35,7 +35,7 @@ mod inventory_state;
 pub use inventory_state::Inventory;
 
 mod item;
-pub use item::{Item, Quality};
+pub use item::*;
 
 mod chest_menu;
 pub use chest_menu::ChestMenu;

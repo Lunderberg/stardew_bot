@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    RecoverStaminaGoal,
+    MaintainStaminaGoal,
 };
 
 pub struct ClayFarmingGoal {
@@ -265,11 +265,9 @@ impl BotGoal for ClayFarmingGoal {
             return Ok(movement.into());
         }
 
-        if game_state.player.current_stamina < 30.0 {
-            let goal = RecoverStaminaGoal::new();
-            if goal.item_to_eat(game_state).is_some() {
-                return Ok(goal.into());
-            }
+        let goal = MaintainStaminaGoal::new();
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
         }
 
         do_action(GameAction::MouseOverTile(closest_clay));
