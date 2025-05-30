@@ -1,6 +1,6 @@
 use crate::{
     game_state::GameStateReader, BotGoalDisplay, BotLogic, Error, FishingUI,
-    GameAction, GameState, InputDisplay, PathfindingUI, PlayerStats,
+    GameAction, GameState, InputDisplay, LocationDisplay, PlayerStats,
     RngDisplay, RunningLog, TuiDrawRate, X11Handler,
 };
 
@@ -52,7 +52,7 @@ struct TuiBuffers {
     draw_rate: TuiDrawRate,
     fishing: FishingUI,
     player_stats: PlayerStats,
-    pathfinding: PathfindingUI,
+    location: LocationDisplay,
     keyboard: InputDisplay,
     bot_goals: BotGoalDisplay,
     rng_display: RngDisplay,
@@ -116,7 +116,7 @@ impl TuiBuffers {
             draw_rate: TuiDrawRate::new(),
             fishing: FishingUI::new(),
             player_stats: PlayerStats::new(),
-            pathfinding: PathfindingUI,
+            location: LocationDisplay,
             keyboard: InputDisplay,
             bot_goals: BotGoalDisplay,
             rng_display: RngDisplay,
@@ -129,7 +129,7 @@ impl TuiBuffers {
             Box::new(&mut self.draw_rate),
             Box::new(&mut self.fishing),
             Box::new(&mut self.player_stats),
-            Box::new(&mut self.pathfinding),
+            Box::new(&mut self.location),
             Box::new(&mut self.keyboard),
             Box::new(&mut self.bot_goals),
             Box::new(&mut self.rng_display),

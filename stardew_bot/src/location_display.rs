@@ -25,7 +25,7 @@ use crate::{
     BotLogic, Error, GameState,
 };
 
-pub struct PathfindingUI;
+pub struct LocationDisplay;
 
 struct DrawableGameLocation<'a> {
     room: &'a Location,
@@ -336,7 +336,7 @@ impl<'a> DrawableGameLocation<'a> {
     }
 }
 
-impl WidgetWindow<Error> for PathfindingUI {
+impl WidgetWindow<Error> for LocationDisplay {
     fn title(&self) -> std::borrow::Cow<str> {
         "Pathfinding".into()
     }

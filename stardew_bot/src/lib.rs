@@ -34,8 +34,8 @@ pub use fishing::FishingUI;
 mod player_stats;
 pub use player_stats::PlayerStats;
 
-mod pathfinding;
-pub use pathfinding::PathfindingUI;
+mod location_display;
+pub use location_display::LocationDisplay;
 
 mod input_display;
 pub use input_display::InputDisplay;
