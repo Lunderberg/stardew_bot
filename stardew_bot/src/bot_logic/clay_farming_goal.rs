@@ -26,6 +26,7 @@ pub struct ClayFarmingGoal {
     // after itself.
     stop_at_stamina: f32,
     stop_at_time: Option<i32>,
+    hard_stop: bool,
 }
 
 impl ClayFarmingGoal {
@@ -33,6 +34,7 @@ impl ClayFarmingGoal {
         Self {
             stop_at_stamina: 4.0,
             stop_at_time: None,
+            hard_stop: false,
         }
     }
 
@@ -46,6 +48,13 @@ impl ClayFarmingGoal {
     pub fn stop_at_time(self, time: i32) -> Self {
         Self {
             stop_at_time: Some(time),
+            ..self
+        }
+    }
+
+    pub fn hard_stop(self) -> Self {
+        Self {
+            hard_stop: true,
             ..self
         }
     }
@@ -65,6 +74,10 @@ impl ClayFarmingGoal {
         &self,
         game_state: &GameState,
     ) -> Option<Vector<f32>> {
+        if self.hard_stop || game_state.player.room_name != "Beach" {
+            return None;
+        }
+
         let clay_id = "(O)330";
         let player_loc = game_state.player.center_pos();
         game_state

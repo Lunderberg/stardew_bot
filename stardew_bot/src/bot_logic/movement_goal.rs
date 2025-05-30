@@ -358,7 +358,7 @@ impl LocalMovementGoal {
         }
 
         while let Some(next_waypoint) = self.waypoints.last().cloned() {
-            let dist = (next_waypoint - player.position / 64.0).mag();
+            let dist = next_waypoint.manhattan_dist(player.center_pos());
             if dist < WAYPOINT_TOLERANCE {
                 self.waypoints.pop();
             } else if dist > REPLAN_THRESHOLD {
@@ -398,7 +398,9 @@ impl LocalMovementGoal {
         };
 
         let waypoints = local_graph
-            .iter_a_star_backrefs(player_tile, target_tile)
+            .iter_a_star_backrefs(player_tile, target_tile, |tile| {
+                (tile.manhattan_dist(target_tile) as f32) < self.tolerance
+            })
             .ok_or_else(|| BotError::NoRouteToTarget {
                 room: self.room_name.clone(),
                 start: player_tile,
@@ -412,7 +414,13 @@ impl LocalMovementGoal {
                 // and the goal position.  Rather than going to these
                 // waypoints, it's better to go directly to the next
                 // position, which avoids accidental backtracking.
-                matches!(pos, itertools::Position::Middle)
+                match pos {
+                    itertools::Position::Last | itertools::Position::Only => {
+                        false
+                    }
+                    itertools::Position::Middle => true,
+                    itertools::Position::First => self.tolerance >= 1.0,
+                }
             })
             .map(|(_, tile)| tile)
             .collect();

@@ -42,6 +42,12 @@ pub enum Quality {
 }
 
 impl Item {
+    pub const PICKAXE: Item = Item::new_const("(T)Pickaxe");
+    pub const AXE: Item = Item::new_const("(T)Axe");
+    pub const SCYTHE: Item = Item::new_const("(W)47");
+    pub const HOE: Item = Item::new_const("(T)Hoe");
+    pub const WATERING_CAN: Item = Item::new_const("(T)WateringCan");
+
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const SALAD: Item = Item::new_const("(O)196");
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");

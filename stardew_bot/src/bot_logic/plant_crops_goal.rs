@@ -136,12 +136,6 @@ impl BotGoal for PlantCropsGoal {
         let farm = game_state.get_room("Farm")?;
         let player_tile = game_state.player.tile();
 
-        const PICKAXE: Item = Item::new_const("(T)Pickaxe");
-        const AXE: Item = Item::new_const("(T)Axe");
-        const SCYTHE: Item = Item::new_const("(W)47");
-        const HOE: Item = Item::new_const("(T)Hoe");
-        const WATERING_CAN: Item = Item::new_const("(T)WateringCan");
-
         let current_contents: HashMap<Vector<isize>, &ObjectKind> = farm
             .objects
             .iter()
@@ -154,13 +148,17 @@ impl BotGoal for PlantCropsGoal {
             .iter()
             .filter_map(|tile| {
                 let opt_action = match current_contents.get(tile) {
-                    Some(ObjectKind::Stone) => Some(PICKAXE),
-                    Some(ObjectKind::Fiber | ObjectKind::Grass) => Some(SCYTHE),
-                    Some(ObjectKind::Wood | ObjectKind::Tree(_)) => Some(AXE),
+                    Some(ObjectKind::Stone) => Some(Item::PICKAXE),
+                    Some(ObjectKind::Fiber | ObjectKind::Grass) => {
+                        Some(Item::SCYTHE)
+                    }
+                    Some(ObjectKind::Wood | ObjectKind::Tree(_)) => {
+                        Some(Item::AXE)
+                    }
                     Some(ObjectKind::HoeDirt(hoe_dirt))
                         if !hoe_dirt.is_watered =>
                     {
-                        Some(WATERING_CAN)
+                        Some(Item::WATERING_CAN)
                     }
                     Some(ObjectKind::HoeDirt(hoe_dirt))
                         if !hoe_dirt.has_crop =>
@@ -168,7 +166,7 @@ impl BotGoal for PlantCropsGoal {
                         Some(Item::PARSNIP_SEEDS)
                     }
                     Some(ObjectKind::HoeDirt(_)) => None,
-                    None => Some(HOE),
+                    None => Some(Item::HOE),
 
                     Some(
                         ObjectKind::Other(_)
@@ -199,7 +197,7 @@ impl BotGoal for PlantCropsGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        if item.is_same_item(&WATERING_CAN) {
+        if item.is_same_item(&Item::WATERING_CAN) {
             let current_water = game_state
                 .player
                 .inventory

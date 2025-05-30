@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use dotnet_debugger::env_var_flag;
 
 use crate::{
@@ -7,11 +9,67 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
+    graph_search::GraphSearch as _,
     BuyFromMerchantGoal, ClayFarmingGoal, ForagingGoal, GoToActionTile,
     MaintainStaminaGoal, MovementGoal, PlantCropsGoal, SellToMerchantGoal,
+    UseItemOnTile,
 };
 
 pub struct FirstDay;
+
+fn scythe_path_to_water(
+    game_state: &GameState,
+) -> Result<Option<BotGoalResult>, Error> {
+    let farm = game_state.get_room("Farm")?;
+    let farm_door = farm
+        .buildings
+        .iter()
+        .find_map(|building| {
+            building
+                .door
+                .as_ref()
+                .filter(|door| door.inside_name == "FarmHouse")
+                .map(|door| building.shape.top_left + door.relative_location)
+        })
+        .unwrap();
+
+    let mut clear_tiles = farm.collect_clear_tiles();
+    let mut can_scythe = HashSet::new();
+    for obj in &farm.objects {
+        match &obj.kind {
+            ObjectKind::Grass => {
+                can_scythe.insert(obj.tile);
+            }
+            ObjectKind::Fiber => {
+                clear_tiles[obj.tile] = true;
+                can_scythe.insert(obj.tile);
+            }
+            _ => {}
+        }
+    }
+
+    let closest_water = clear_tiles
+        .dijkstra_search(farm_door)
+        .map(|(tile, _)| tile)
+        .find(|tile| tile.iter_adjacent().any(|adj| farm.is_water(adj)))
+        .expect("Handle case where no water on farm is reachable");
+
+    let tile_to_scythe = clear_tiles
+        .iter_a_star_backrefs(farm_door, closest_water, |tile| {
+            tile.manhattan_dist(closest_water) <= 1
+        })
+        .into_iter()
+        .flatten()
+        .filter_map(|tile| {
+            tile.iter_nearby().find(|adj| can_scythe.contains(adj))
+        })
+        .last();
+
+    let opt_action = tile_to_scythe
+        .map(|tile| UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile));
+
+    Ok(opt_action.map(Into::into))
+}
 
 impl BotGoal for FirstDay {
     fn description(&self) -> std::borrow::Cow<str> {
@@ -26,6 +84,10 @@ impl BotGoal for FirstDay {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day != 1 {
             return Ok(BotGoalResult::Completed);
+        }
+
+        if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {
+            return Ok(tile_to_scythe.into());
         }
 
         let in_game_time = game_state.globals.in_game_time;
@@ -78,8 +140,9 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new()
-            .stop_at_time(1500)
-            .stop_at_stamina(4.0);
+            .stop_at_time(1130)
+            .stop_at_stamina(4.0)
+            .hard_stop();
         if !clay_farming.is_completed(game_state) {
             return Ok(clay_farming.into());
         }
@@ -93,6 +156,11 @@ impl BotGoal for FirstDay {
             BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(10));
         if goal.item_count(game_state) == 0 && in_game_time < 1900 {
             return Ok(goal.into());
+        }
+
+        let clay_farming = ClayFarmingGoal::new().stop_at_time(1500);
+        if !clay_farming.is_completed(game_state) {
+            return Ok(clay_farming.into());
         }
 
         if game_state.player.inventory.items.len() < 24 && current_money > 2000

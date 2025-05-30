@@ -1,8 +1,13 @@
 use crate::{
-    bot_logic::SelectItemGoal, game_state::Item, Error, GameAction, GameState,
+    bot_logic::SelectItemGoal,
+    game_state::{FacingDirection, Item},
+    Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{BotGoal, BotGoalResult},
+    FaceDirectionGoal,
+};
 
 pub struct MaintainStaminaGoal {
     /// The target stamina to stay above.
@@ -77,6 +82,28 @@ impl BotGoal for MaintainStaminaGoal {
         let select_item = SelectItemGoal::new(item_to_eat.clone());
         if !select_item.is_completed(game_state) {
             return Ok(select_item.into());
+        }
+
+        let player_tile = game_state.player.tile();
+        let facing_tile = player_tile + game_state.player.facing.offset();
+
+        let loc = game_state.current_room()?;
+
+        let is_facing_action_tile = loc
+            .action_tiles
+            .iter()
+            .any(|(action_tile, _)| (action_tile == &facing_tile));
+        if is_facing_action_tile {
+            let safe_facing_direction = FacingDirection::iter()
+                .find(|dir| {
+                    let facing_tile = player_tile + dir.offset();
+                    loc.action_tiles
+                        .iter()
+                        .all(|(action_tile, _)| (action_tile != &facing_tile))
+                })
+                .expect("TODO: Handle case where all directions have action");
+            let goal = FaceDirectionGoal(safe_facing_direction);
+            return Ok(goal.into());
         }
 
         if game_state.dialogue_menu.is_none() {

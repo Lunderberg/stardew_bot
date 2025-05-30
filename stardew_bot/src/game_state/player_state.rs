@@ -281,6 +281,25 @@ impl FacingDirection {
             _ => None,
         }
     }
+
+    pub fn offset(self) -> Vector<isize> {
+        match self {
+            FacingDirection::North => Vector::new(0, -1),
+            FacingDirection::East => Vector::new(1, 0),
+            FacingDirection::South => Vector::new(0, 1),
+            FacingDirection::West => Vector::new(-1, 0),
+        }
+    }
+
+    pub fn iter() -> impl Iterator<Item = Self> {
+        [
+            FacingDirection::South,
+            FacingDirection::North,
+            FacingDirection::East,
+            FacingDirection::West,
+        ]
+        .into_iter()
+    }
 }
 
 impl std::fmt::Display for FacingDirection {

@@ -75,6 +75,7 @@ pub trait GraphSearch<T: Eq + Hash> {
         &'a self,
         initial: T,
         target: T,
+        completion: impl Fn(&T) -> bool,
     ) -> Option<impl Iterator<Item = T> + 'a>
     where
         T: Clone,
@@ -82,10 +83,41 @@ pub trait GraphSearch<T: Eq + Hash> {
     {
         let mut search_nodes: Vec<_> = self
             .a_star_search(initial, target.clone())
-            .take_while_inclusive(|(tile, _)| tile != &target)
+            .take_while_inclusive(|(tile, _)| !completion(tile))
             .collect();
 
-        let last = search_nodes.pop().filter(|(tile, _)| tile == &target)?;
+        let last = search_nodes.pop().filter(|(tile, _)| completion(tile))?;
+
+        let iter_backrefs =
+            std::iter::successors(Some(last), move |(_, metadata)| {
+                let next_index =
+                    metadata.backref.as_ref().map(|b| b.initial_node)?;
+
+                Some(search_nodes.swap_remove(next_index))
+            })
+            .map(|(tile, _)| tile);
+
+        Some(iter_backrefs)
+    }
+
+    #[allow(dead_code)]
+    fn iter_backrefs<'a, H>(
+        &'a self,
+        initial: T,
+        heuristic: H,
+        completion: impl Fn(&T) -> bool,
+    ) -> Option<impl Iterator<Item = T> + 'a>
+    where
+        T: Clone,
+        T: 'a,
+        H: Heuristic<T>,
+    {
+        let mut search_nodes: Vec<_> = self
+            .search_with_explicit_heuristic(initial, heuristic)
+            .take_while_inclusive(|(tile, _)| !completion(tile))
+            .collect();
+
+        let last = search_nodes.pop().filter(|(tile, _)| completion(tile))?;
 
         let iter_backrefs =
             std::iter::successors(Some(last), move |(_, metadata)| {
