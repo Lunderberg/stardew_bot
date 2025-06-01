@@ -1,3 +1,4 @@
+use itertools::Itertools as _;
 use thiserror::Error;
 
 use crate::game_state::{Item, Vector};
@@ -12,6 +13,16 @@ pub enum BotError {
         room: String,
         start: Vector<isize>,
         goal: Vector<isize>,
+    },
+
+    #[error(
+        "Within {room}, no route from {start} to any of [{goal_fmt}]",
+        goal_fmt = .goals.iter().format(", "),
+    )]
+    NoRouteToTargets {
+        room: String,
+        start: Vector<isize>,
+        goals: Vec<Vector<isize>>,
     },
 
     #[error("Could not find room named '{0}'")]

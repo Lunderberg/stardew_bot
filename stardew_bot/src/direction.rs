@@ -2,7 +2,7 @@ use dotnet_debugger::RustNativeObject;
 
 use crate::game_state::Vector;
 
-#[derive(RustNativeObject, Debug, Clone, Copy)]
+#[derive(RustNativeObject, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {
     North,
     NorthEast,

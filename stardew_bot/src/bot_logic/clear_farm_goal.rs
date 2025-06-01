@@ -117,16 +117,12 @@ impl BotGoal for ClearFarmGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let clear_tiles = {
-            let mut map = farm.collect_clear_tiles();
-            for (&tile, _) in &clutter {
-                map[tile] = true;
-            }
-            map
-        };
-
-        let opt_closest_clutter = clear_tiles
-            .dijkstra_search(player_tile)
+        let opt_closest_clutter = farm
+            .pathfinding()
+            .stone_clearing_cost(0)
+            .wood_clearing_cost(0)
+            .fiber_clearing_cost(0)
+            .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
             .find(|tile| clutter.contains_key(&tile));
 

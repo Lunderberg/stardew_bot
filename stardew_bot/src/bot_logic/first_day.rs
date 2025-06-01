@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use dotnet_debugger::env_var_flag;
+use itertools::Itertools as _;
 
 use crate::{
     game_state::{Item, ObjectKind, Vector},
@@ -33,37 +34,33 @@ fn scythe_path_to_water(
         })
         .unwrap();
 
-    let mut clear_tiles = farm.collect_clear_tiles();
-    let mut can_scythe = HashSet::new();
-    for obj in &farm.objects {
-        match &obj.kind {
-            ObjectKind::Grass => {
-                can_scythe.insert(obj.tile);
-            }
-            ObjectKind::Fiber => {
-                clear_tiles[obj.tile] = true;
-                can_scythe.insert(obj.tile);
-            }
-            _ => {}
-        }
-    }
-
-    let closest_water = clear_tiles
-        .dijkstra_search(farm_door)
-        .map(|(tile, _)| tile)
-        .find(|tile| tile.iter_adjacent().any(|adj| farm.is_water(adj)))
-        .expect("Handle case where no water on farm is reachable");
-
-    let tile_to_scythe = clear_tiles
-        .iter_a_star_backrefs(farm_door, closest_water, |tile| {
-            tile.manhattan_dist(closest_water) <= 1
+    let water_border: Vec<Vector<isize>> = (0..farm.shape.right)
+        .cartesian_product(0..farm.shape.down)
+        .map(|(i, j)| Vector::new(i as isize, j as isize))
+        .filter(|&tile| !farm.is_water(tile))
+        .filter(|&tile| {
+            Direction::iter()
+                .filter(|dir| dir.is_cardinal())
+                .any(|dir| farm.is_water(tile + dir.offset()))
         })
+        .collect();
+
+    let pathfinding = farm
+        .pathfinding()
+        .allow_diagonal(false)
+        .fiber_clearing_cost(0);
+
+    let can_scythe: HashSet<_> = farm
+        .objects
+        .iter()
+        .filter(|obj| matches!(obj.kind, ObjectKind::Grass | ObjectKind::Fiber))
+        .map(|obj| obj.tile)
+        .collect();
+
+    let tile_to_scythe = pathfinding
+        .path_between(farm_door, water_border.as_slice())?
         .into_iter()
-        .flatten()
-        .filter_map(|tile| {
-            tile.iter_nearby().find(|adj| can_scythe.contains(adj))
-        })
-        .last();
+        .find(|tile| can_scythe.contains(tile));
 
     let opt_action = tile_to_scythe
         .map(|tile| UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile));

@@ -207,9 +207,9 @@ impl BotGoal for PlantCropsGoal {
                 .unwrap_or(0);
 
             if current_water == 0 {
-                let clear_tiles = farm.collect_clear_tiles();
-                let closest_water = clear_tiles
-                    .dijkstra_search(player_tile)
+                let closest_water = farm
+                    .pathfinding()
+                    .iter_dijkstra(player_tile)
                     .find_map(|(tile, _)| {
                         tile.iter_adjacent().find(|&adj| farm.is_water(adj))
                     })

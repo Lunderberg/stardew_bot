@@ -201,9 +201,7 @@ impl BotGoal for ClayFarmingGoal {
             const TILES_TO_AVOID_PICKAXE: u64 = 10;
 
             let mut clay_with_pickaxe: Option<(u64, Vector<isize>)> = None;
-            for (tile, metadata) in clear_tiles.dijkstra_search(player_tile) {
-                let dist = metadata.initial_to_node;
-
+            for (tile, dist) in beach.pathfinding().iter_dijkstra(player_tile) {
                 if clay_tiles.contains(&tile) {
                     if has_hoe_dirt(tile) {
                         // This tile will produce clay, but would
@@ -217,7 +215,7 @@ impl BotGoal for ClayFarmingGoal {
                 }
 
                 if let Some((prev_dist, prev_tile)) = clay_with_pickaxe {
-                    if dist > prev_dist + 2 * TILES_TO_AVOID_PICKAXE {
+                    if dist > prev_dist + TILES_TO_AVOID_PICKAXE {
                         // We've searched all tiles that may produce
                         // clay without requiring a pickaxe, and are
                         // within the configured range.  Therefore,

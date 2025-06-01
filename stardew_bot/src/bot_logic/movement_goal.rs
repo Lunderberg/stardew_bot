@@ -226,11 +226,22 @@ impl MovementGoal {
                     .iter()
                     .find(|warp| warp.location == tile)
                     .map(|warp| warp.kind.clone());
-                LocalMovementGoal::new(
+                let opt_tolerance = match warp_kind {
+                    None | Some(WarpKind::Automatic) => None,
+                    Some(WarpKind::Door | WarpKind::LockedDoor { .. }) => {
+                        Some(1.4)
+                    }
+                };
+                let goal = LocalMovementGoal::new(
                     loc.name.clone(),
                     tile.map(|x| x as f32),
                     warp_kind,
-                )
+                );
+                if let Some(tolerance) = opt_tolerance {
+                    goal.with_tolerance(tolerance)
+                } else {
+                    goal
+                }
             })
             .collect();
 
@@ -258,31 +269,6 @@ impl MovementGoal {
                 self.target_position.manhattan_dist(player.center_pos());
             goal_dist >= self.tolerance
         })
-    }
-}
-
-struct TileGraph {
-    clear_tiles: TileMap<bool>,
-    target_tile: Vector<isize>,
-}
-impl GraphSearch<Vector<isize>> for TileGraph {
-    fn connections_from<'a>(
-        &'a self,
-        tile: &'a Vector<isize>,
-    ) -> impl IntoIterator<Item = (Vector<isize>, u64)> + 'a {
-        let is_next_to_target = (self.target_tile - *tile).mag2() == 1;
-        is_next_to_target
-            .then(|| (self.target_tile, 2))
-            .into_iter()
-            .chain(self.clear_tiles.connections_from(tile))
-    }
-
-    fn heuristic_between(
-        &self,
-        node_from: &Vector<isize>,
-        node_to: &Vector<isize>,
-    ) -> Option<u64> {
-        self.clear_tiles.heuristic_between(node_from, node_to)
     }
 }
 
@@ -386,42 +372,44 @@ impl LocalMovementGoal {
             .iter()
             .find(|loc| loc.name == player.room_name)
             .expect("Player must be in a room");
-        let clear_tiles = location.collect_clear_tiles();
 
         let player_tile = player.tile();
+
+        let player_in_bounds = (0..location.shape.right)
+            .contains(&player_tile.right)
+            && (0..location.shape.down).contains(&player_tile.down);
+        if !player_in_bounds {
+            // During screen transitions, the player's current room is
+            // updated before the player's X/Y position is updated.
+            // If the memory-read occurs between these two times, then
+            // the player may appear to be out-of-bounds, causing an
+            // error during pathfinding.
+            //
+            // TODO: Find a stronger check to determine if a screen
+            // transition is in progress, as the current check
+            // wouldn't catch cases where the player's pre-update
+            // location places them in an inaccessible part of the
+            // post-update room.
+            return Ok(Vec::new());
+        }
+
         let target_tile: Vector<isize> =
             self.position.map(|x| x.round() as isize);
 
-        let local_graph = TileGraph {
-            clear_tiles,
-            target_tile,
+        let target_tiles: Vec<_> = if self.tolerance >= 1.0 {
+            target_tile.iter_nearby().collect()
+        } else {
+            vec![target_tile]
         };
 
-        let waypoints = local_graph
-            .iter_a_star_backrefs(player_tile, target_tile, |tile| {
-                (tile.manhattan_dist(target_tile) as f32) < self.tolerance
-            })
-            .ok_or_else(|| BotError::NoRouteToTarget {
-                room: self.room_name.clone(),
-                start: player_tile,
-                goal: target_tile,
-            })?
-            .map(|vec_isize| vec_isize.map(|i| i as f32))
+        let waypoints = location
+            .pathfinding()
+            .path_between(player_tile, &target_tiles)?
+            .into_iter()
+            .map(|tile| tile.map(|x| x as f32))
+            .rev()
             .with_position()
-            .filter(|(pos, _)| {
-                // Omit the first and last waypoints.  These are the
-                // tiles that include the player's current position
-                // and the goal position.  Rather than going to these
-                // waypoints, it's better to go directly to the next
-                // position, which avoids accidental backtracking.
-                match pos {
-                    itertools::Position::Last | itertools::Position::Only => {
-                        false
-                    }
-                    itertools::Position::Middle => true,
-                    itertools::Position::First => self.tolerance >= 1.0,
-                }
-            })
+            .filter(|(pos, _)| matches!(pos, itertools::Position::Middle))
             .map(|(_, tile)| tile)
             .collect();
 
@@ -495,7 +483,7 @@ impl BotGoal for LocalMovementGoal {
         let next_waypoint =
             self.waypoints.last().cloned().unwrap_or(self.position);
 
-        let player_position = player.position / 64.0;
+        let player_position = player.center_pos();
         let direction = next_waypoint - player_position;
         let dir = Direction::iter()
             .max_by(|dir_a, dir_b| {

@@ -1491,7 +1491,7 @@ impl Location {
         let iter_objects = self
             .objects
             .iter()
-            .filter(|obj| !obj.is_walkable())
+            .filter(|obj| !obj.kind.is_walkable())
             .map(|obj| obj.tile);
 
         let iter_furniture = self
@@ -1582,9 +1582,9 @@ impl Location {
     }
 }
 
-impl Object {
+impl ObjectKind {
     pub fn is_walkable(&self) -> bool {
-        match &self.kind {
+        match self {
             ObjectKind::Stone
             | ObjectKind::Wood
             | ObjectKind::Fiber
@@ -1626,6 +1626,15 @@ impl Bush {
                 right: self.width() as isize,
                 down: 1,
             },
+        }
+    }
+}
+
+impl Furniture {
+    pub fn is_walkable(&self) -> bool {
+        match &self.kind {
+            FurnitureKind::Rug => true,
+            _ => false,
         }
     }
 }

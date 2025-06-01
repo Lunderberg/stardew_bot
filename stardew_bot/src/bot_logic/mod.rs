@@ -21,6 +21,9 @@ pub use go_to_action_tile::*;
 mod wait_until_time_of_day;
 pub use wait_until_time_of_day::*;
 
+mod pathfinding;
+pub use pathfinding::Pathfinding;
+
 mod graph_search;
 
 mod inventory_goal;

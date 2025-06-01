@@ -266,9 +266,15 @@ where
     }
 }
 
-impl Into<Vector<f32>> for Vector<isize> {
-    fn into(self) -> Vector<f32> {
-        self.map(|x| x as f32)
+impl From<Vector<isize>> for Vector<f32> {
+    fn from(value: Vector<isize>) -> Self {
+        value.map(|x| x as f32)
+    }
+}
+
+impl From<&Vector<isize>> for Vector<isize> {
+    fn from(value: &Vector<isize>) -> Self {
+        *value
     }
 }
 

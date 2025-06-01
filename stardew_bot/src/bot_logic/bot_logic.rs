@@ -50,9 +50,11 @@ impl BotLogic {
     pub fn new(verbose: bool) -> Self {
         Self {
             stack: vec![
-                // Box::new(super::ClearFarmGoal),
-                // Box::new(super::ClayFarmingGoal::new()),
-                // Box::new(super::GoToActionTile::new("Carpenter")),
+                // LogicStackItem::Goal(Box::new(super::ClearFarmGoal)),
+                // LogicStackItem::Goal(Box::new(super::ClayFarmingGoal::new())),
+                // LogicStackItem::Goal(Box::new(super::GoToActionTile::new(
+                //     "Carpenter",
+                // ))),
                 LogicStackItem::Goal(Box::new(super::FishingGoal)),
                 LogicStackItem::Goal(Box::new(super::FirstDay)),
             ],
