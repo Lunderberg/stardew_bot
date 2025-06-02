@@ -1,6 +1,11 @@
 use itertools::Either;
 
 pub trait ResultIteratorExt: Iterator + Sized {
+    /// Apply a fallible map function to an iterator of results.
+    ///
+    /// * Before: Iterator of `Result<T,E>`
+    /// * Func: Map from `T` to `Result<U,E>`
+    /// * After: Iterator of `Result<U,E>`
     fn and_map_ok<Func, T, U, E>(
         self,
         mut func: Func,
@@ -13,6 +18,11 @@ pub trait ResultIteratorExt: Iterator + Sized {
         self.map(move |res| res.and_then(|item| func(item)))
     }
 
+    /// Apply a fallible filter function to an iterator of results.
+    ///
+    /// * Before: Iterator of `Result<T,E>`
+    /// * Func: Map from `&T` to `Result<bool,E>`
+    /// * After: Iterator of `Result<T,E>`
     fn and_filter_ok<Func, T, E>(
         self,
         mut func: Func,
@@ -32,6 +42,42 @@ pub trait ResultIteratorExt: Iterator + Sized {
         })
     }
 
+    /// Given an iterator of items, expand to iterate over a nested
+    /// structrue, where accessing the nested structure may produce an
+    /// error.
+    ///
+    /// * Before: Iterator of `T`
+    ///
+    /// * Func: Map from `T` to a `Result` containing an iterator of
+    ///         objects.
+    ///
+    /// * After: Iterator of `Result<U,E>`
+    fn try_flat_map<Func, OutIter, T, U, E>(
+        self,
+        mut func: Func,
+    ) -> impl Iterator<Item = Result<U, E>>
+    where
+        Self: Sized,
+        Self: Iterator<Item = T>,
+        Func: FnMut(T) -> Result<OutIter, E>,
+        OutIter: IntoIterator<Item = U>,
+    {
+        self.flat_map(move |item: T| match func(item) {
+            Ok(iter) => Either::Left(iter.into_iter().map(Ok)),
+            Err(err) => Either::Right(std::iter::once(Err(err))),
+        })
+    }
+
+    /// Given an iterator of results, expand to iterate over a nested
+    /// structure, where accessing the nested structure may produce an
+    /// error.
+    ///
+    /// * Before: Iterator of `Result<T,E>`
+    ///
+    /// * Func: Map from `T` to a `Result` containing an iterator of
+    ///         objects.
+    ///
+    /// * After: Iterator of `Result<U,E>`
     fn flat_map_ok<Func, OutIter, T, U, E>(
         self,
         mut func: Func,
@@ -52,6 +98,16 @@ pub trait ResultIteratorExt: Iterator + Sized {
         })
     }
 
+    /// Iterate over a nested structure, where accessing the nested
+    /// structure may produce an error, and where accessing each
+    /// element of the nested structure may produce an error.
+    ///
+    /// * Before: Iterator of `Result<T,E>
+    ///
+    /// * Func: Map from `T` to a `Result` containing an iterator of
+    ///         results.
+    ///
+    /// * After: Iterator of `Result<U,E>`
     fn and_flat_map_ok<Func, OutIter, T, U, E>(
         self,
         func: Func,
@@ -65,6 +121,13 @@ pub trait ResultIteratorExt: Iterator + Sized {
         self.flat_map_ok(func).map(|res| res?)
     }
 
+    /// Find an element using a fallible search function
+    ///
+    /// * Before: Iterator of `T`
+    ///
+    /// * Func: Map from `&T` to `Result<bool,E>`
+    ///
+    /// * After: Element of `Result<Option<T>,E>`
     fn and_find<Func, E>(
         &mut self,
         mut func: Func,
@@ -80,6 +143,71 @@ pub trait ResultIteratorExt: Iterator + Sized {
         .transpose()
     }
 
+    /// Find an element using a fallible search function, returning
+    /// the first non-None result, or the first error.
+    ///
+    /// * Before: Iterator of `Result<T,Error>`
+    ///
+    /// * Func: Map from `T` to `Result<Option<U>,E>`
+    ///
+    /// * After: Element of `Result<Option<U>,E>`
+    fn and_find_map<Func, T, U, E>(
+        &mut self,
+        mut func: Func,
+    ) -> Result<Option<U>, E>
+    where
+        Self: Sized,
+        Self: Iterator<Item = Result<T, E>>,
+        Func: FnMut(T) -> Result<Option<U>, E>,
+    {
+        self.find_map(|res_item| -> Option<Result<_, E>> {
+            match res_item {
+                Ok(item) => match func(item) {
+                    Ok(Some(mapped)) => Some(Ok(mapped)),
+                    Ok(None) => None,
+                    Err(err) => Some(Err(err)),
+                },
+                Err(err) => Some(Err(err)),
+            }
+        })
+        .transpose()
+    }
+
+    /// Find an element from an iterator of results, returning either
+    /// the first non-None output of search function, or the first
+    /// error from the iterator.
+    ///
+    /// * Before: Iterator of `Result<T,Error>`
+    ///
+    /// * Func: Map from `T` to `Option<U>`
+    ///
+    /// * After: Element of `Result<Option<U>,E>`
+    fn find_map_ok<Func, T, U, E>(
+        &mut self,
+        mut func: Func,
+    ) -> Result<Option<U>, E>
+    where
+        Self: Sized,
+        Self: Iterator<Item = Result<T, E>>,
+        Func: FnMut(T) -> Option<U>,
+    {
+        self.find_map(|res_item| -> Option<Result<_, E>> {
+            match res_item {
+                Ok(item) => func(item).map(Ok),
+                Err(err) => Some(Err(err)),
+            }
+        })
+        .transpose()
+    }
+
+    /// Find an element from an iterator of results, using a fallible
+    /// search function.
+    ///
+    /// * Before: Iterator of `Result<T,E>`
+    ///
+    /// * Func: Map from `&T` to `Result<bool,E>`
+    ///
+    /// * After: Element of `Result<Option<T>,E>`
     fn and_find_ok<Pred, T, E>(self, predicate: Pred) -> Result<Option<T>, E>
     where
         // I have no idea why this indirection is necessary for type
@@ -106,6 +234,14 @@ pub trait ResultIteratorExt: Iterator + Sized {
         <Self as AndFindOkImpl>::and_find_ok_impl(self, predicate)
     }
 
+    /// Check a fallible predicate against all elements in an iterator
+    /// of results.
+    ///
+    /// * Before: Iterator of `T`
+    ///
+    /// * Func: Map from `&T` to `Result<bool,E>`
+    ///
+    /// * After: Single value of type `Result<bool,E>`
     fn and_all<Pred, E>(&mut self, mut predicate: Pred) -> Result<bool, E>
     where
         Self: Sized,
