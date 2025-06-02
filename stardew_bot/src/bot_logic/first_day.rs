@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::env_var_flag;
 use itertools::Itertools as _;
@@ -64,6 +64,84 @@ fn scythe_path_to_water(
 
     let opt_action = tile_to_scythe
         .map(|tile| UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile));
+
+    Ok(opt_action.map(Into::into))
+}
+
+fn clear_common_travel_paths(
+    game_state: &GameState,
+) -> Result<Option<BotGoalResult>, Error> {
+    let farm = game_state.get_room("Farm")?;
+    let farm_door = farm
+        .buildings
+        .iter()
+        .find_map(|building| {
+            building
+                .door
+                .as_ref()
+                .filter(|door| door.inside_name == "FarmHouse")
+                .map(|door| building.shape.top_left + door.relative_location)
+        })
+        .unwrap();
+
+    let pathfinding = farm
+        .pathfinding()
+        .allow_diagonal(false)
+        .fiber_clearing_cost(10)
+        .stone_clearing_cost(10)
+        .wood_clearing_cost(10)
+        .tree_clearing_cost(10);
+
+    let tool_to_clear: HashMap<_, _> = farm
+        .objects
+        .iter()
+        .filter_map(|obj| {
+            let opt_tool = match &obj.kind {
+                ObjectKind::Stone => Some(Item::PICKAXE),
+                ObjectKind::Tree(_) | ObjectKind::Wood => Some(Item::AXE),
+                ObjectKind::Fiber | ObjectKind::Grass => Some(Item::SCYTHE),
+
+                ObjectKind::FruitTree(_)
+                | ObjectKind::HoeDirt(_)
+                | ObjectKind::Chest(_)
+                | ObjectKind::Other(_)
+                | ObjectKind::Unknown => None,
+            };
+            opt_tool.map(|tool| (obj.tile, tool))
+        })
+        .collect();
+
+    let reachable = pathfinding.reachable(farm_door);
+
+    let tiles_to_clear: HashSet<_> = farm
+        .warps
+        .iter()
+        .sorted_by_key(|warp| &warp.target_room)
+        .flat_map(|warp| {
+            // Technically, warps for screen transitions are just off
+            // the edge of the map, and aren't actually reachable.
+            // Instead, make sure that the path can reach any tiles
+            // that is adjacent to a warp.
+            warp.location.iter_cardinal()
+        })
+        .filter(|warp_tile| reachable.get(*warp_tile).cloned().unwrap_or(false))
+        .flat_map(|warp_tile| {
+            pathfinding
+                .path_between(farm_door, warp_tile)
+                .expect("Guarded by check on reachable tiles")
+        })
+        .collect();
+
+    let player_tile = game_state.player.tile();
+    let opt_action = pathfinding
+        .iter_dijkstra(player_tile)
+        .map(|(tile, _)| tile)
+        .filter(|tile| tiles_to_clear.contains(tile))
+        .find_map(|path_tile| {
+            tool_to_clear
+                .get(&path_tile)
+                .map(|tool| UseItemOnTile::new(tool.clone(), "Farm", path_tile))
+        });
 
     Ok(opt_action.map(Into::into))
 }
@@ -188,6 +266,10 @@ impl BotGoal for FirstDay {
                 "Buy General",
                 Item::PARSNIP_SEEDS.with_count(60),
             );
+            return Ok(goal.into());
+        }
+
+        if let Some(goal) = clear_common_travel_paths(game_state)? {
             return Ok(goal.into());
         }
 
