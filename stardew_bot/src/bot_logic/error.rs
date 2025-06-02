@@ -33,6 +33,9 @@ pub enum BotError {
 
     #[error("Cannot buy {item} from {merchant}")]
     ItemNotSold { merchant: String, item: Item },
+
+    #[error("Could not locate the farmhouse door")]
+    FarmhouseDoorNotFound,
 }
 
 impl std::fmt::Debug for BotError {

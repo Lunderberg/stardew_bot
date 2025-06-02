@@ -3,6 +3,9 @@
 mod error;
 pub use error::BotError;
 
+mod game_state_ext;
+pub use game_state_ext::*;
+
 mod bot_logic;
 pub use bot_logic::BotLogic;
 

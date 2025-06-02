@@ -11,9 +11,9 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
     graph_search::GraphSearch as _,
-    BuyFromMerchantGoal, ClayFarmingGoal, ForagingGoal, GoToActionTile,
-    MaintainStaminaGoal, MovementGoal, PlantCropsGoal, SellToMerchantGoal,
-    UseItemOnTile,
+    BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, ForagingGoal,
+    GameStateExt as _, GoToActionTile, MaintainStaminaGoal, MovementGoal,
+    PlantCropsGoal, SellToMerchantGoal, UseItemOnTile,
 };
 
 pub struct FirstDay;
@@ -22,17 +22,7 @@ fn scythe_path_to_water(
     game_state: &GameState,
 ) -> Result<Option<BotGoalResult>, Error> {
     let farm = game_state.get_room("Farm")?;
-    let farm_door = farm
-        .buildings
-        .iter()
-        .find_map(|building| {
-            building
-                .door
-                .as_ref()
-                .filter(|door| door.inside_name == "FarmHouse")
-                .map(|door| building.shape.top_left + door.relative_location)
-        })
-        .unwrap();
+    let farm_door = game_state.get_farm_door()?;
 
     let water_border: Vec<Vector<isize>> = (0..farm.shape.right)
         .cartesian_product(0..farm.shape.down)
@@ -72,17 +62,7 @@ fn clear_common_travel_paths(
     game_state: &GameState,
 ) -> Result<Option<BotGoalResult>, Error> {
     let farm = game_state.get_room("Farm")?;
-    let farm_door = farm
-        .buildings
-        .iter()
-        .find_map(|building| {
-            building
-                .door
-                .as_ref()
-                .filter(|door| door.inside_name == "FarmHouse")
-                .map(|door| building.shape.top_left + door.relative_location)
-        })
-        .unwrap();
+    let farm_door = game_state.get_farm_door()?;
 
     let pathfinding = farm
         .pathfinding()
@@ -159,6 +139,11 @@ impl BotGoal for FirstDay {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day != 1 {
             return Ok(BotGoalResult::Completed);
+        }
+
+        let goal = ClearFarmGoal;
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.into());
         }
 
         if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {

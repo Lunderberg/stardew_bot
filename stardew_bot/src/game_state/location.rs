@@ -141,6 +141,7 @@ pub struct Tree {
     pub has_seed: bool,
     #[allow(dead_code)]
     pub is_stump: bool,
+    pub health: f32,
 }
 
 #[derive(Debug, Clone)]
@@ -419,12 +420,17 @@ impl Location {
 
         graph.named_native_function(
             "new_tree_kind",
-            |kind: &str, growth_stage: i32, has_seed: bool, is_stump: bool| {
+            |kind: &str,
+             growth_stage: i32,
+             has_seed: bool,
+             is_stump: bool,
+             health: f32| {
                 ObjectKind::Tree(Tree {
                     kind: kind.parse().unwrap(),
                     growth_stage,
                     has_seed,
                     is_stump,
+                    health,
                 })
             },
         )?;
@@ -831,11 +837,13 @@ impl Location {
                             let growth_stage = tree.growthStage.value;
                             let has_seed = tree.hasSeed.value;
                             let is_stump = tree.stump.value;
+                            let health = tree.health.value;
                             new_tree_kind(
                                 tree_type,
                                 growth_stage,
                                 has_seed,
-                                is_stump
+                                is_stump,
+                                health,
                             )
                         } else if fruit_tree.is_some() {
                             let tree_type = fruit_tree

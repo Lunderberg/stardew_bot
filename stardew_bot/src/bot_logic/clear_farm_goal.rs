@@ -5,13 +5,40 @@ use crate::{
         bot_logic::SubGoals, graph_search::GraphSearch as _, BotError,
         MovementGoal, SelectItemGoal,
     },
-    game_state::{Inventory, Item, Key, ObjectKind, Quality, Vector},
+    game_state::{Inventory, Item, Key, Location, ObjectKind, Quality, Vector},
     Direction, Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{BotGoal, BotGoalResult},
+    GameStateExt as _, ObjectKindExt as _, Pathfinding, UseItemOnTile,
+};
 
 pub struct ClearFarmGoal;
+
+impl ClearFarmGoal {
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
+
+        let reachable = Self::pathfinding(farm).reachable(farm_door);
+
+        let reachable_clutter = farm
+            .objects
+            .iter()
+            .any(|obj| reachable[obj.tile] && obj.kind.get_tool().is_some());
+
+        Ok(!reachable_clutter)
+    }
+
+    fn pathfinding(farm: &Location) -> Pathfinding {
+        farm.pathfinding()
+            .stone_clearing_cost(10)
+            .wood_clearing_cost(10)
+            .fiber_clearing_cost(10)
+            .tree_clearing_cost(10)
+    }
+}
 
 impl BotGoal for ClearFarmGoal {
     fn description(&self) -> std::borrow::Cow<str> {
@@ -21,36 +48,18 @@ impl BotGoal for ClearFarmGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        _do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         let farm = game_state.get_room("Farm")?;
         let player = &game_state.player;
 
-        if player.using_tool
-            && player.last_click == Vector::zero()
-            && player
-                .selected_item()
-                .map(|item| item.item_id.starts_with("(T)"))
-                .unwrap_or(false)
-        {
-            do_action(GameAction::AnimationCancel);
-        }
-
-        let clutter: HashMap<Vector<isize>, &'static str> = farm
+        let tool_to_use: HashMap<Vector<isize>, Item> = farm
             .objects
             .iter()
-            .filter_map(|obj| {
-                let opt_tool = match &obj.kind {
-                    ObjectKind::Stone => Some("(T)Pickaxe"),
-                    ObjectKind::Wood => Some("(T)Axe"),
-                    ObjectKind::Fiber => Some("(W)47"),
-                    _ => None,
-                };
-                opt_tool.map(|tool| (obj.tile, tool))
-            })
+            .filter_map(|obj| obj.kind.get_tool().map(|tool| (obj.tile, tool)))
             .collect();
 
-        if clutter.is_empty() {
+        if tool_to_use.is_empty() {
             return Ok(BotGoalResult::Completed);
         }
 
@@ -59,11 +68,7 @@ impl BotGoal for ClearFarmGoal {
         // TODO: Let InventoryGoal accept a list of items.  The
         // current implementation opens/closes a chest once for each
         // tool, even if they are all stored in the same chest.
-        let items = [
-            Item::new("(T)Pickaxe"),
-            Item::new("(T)Axe"),
-            Item::new("(W)47"),
-        ];
+        let items = [Item::PICKAXE, Item::AXE, Item::SCYTHE];
         for item in items {
             let goal = super::InventoryGoal::new(item);
             if !goal.contains_target_item(&player.inventory) {
@@ -91,44 +96,21 @@ impl BotGoal for ClearFarmGoal {
 
         let player_tile = player.tile();
 
-        let opt_adjacent_clutter = Direction::iter()
-            .map(|dir| player_tile + dir.offset())
-            .find_map(|tile| clutter.get(&tile).map(|tool| (tile, *tool)));
-        if let Some((tile, tool)) = opt_adjacent_clutter {
-            do_action(GameAction::MouseOverTile(tile));
-
-            let goal = SelectItemGoal::new(Item::new(tool));
-            if !goal.is_completed(game_state) {
-                return Ok(goal.into());
-            }
-
-            // Swinging a tool by clicking the mouse uses the previous
-            // frame's mouse position, not the current mouse position.
-            // While both the MovementGoal and the `MouseOverTile`
-            // prior to `SelectItemGoal` try to preemptively move the
-            // cursor, if neither substep was necessary then the
-            // cursor may not have been updated yet.
-            if !player.using_tool
-                && tile == game_state.inputs.mouse_tile_location
-            {
-                do_action(GameAction::LeftClick);
-            }
-
-            return Ok(BotGoalResult::InProgress);
-        }
-
-        let opt_closest_clutter = farm
+        let opt_goal = farm
             .pathfinding()
-            .stone_clearing_cost(0)
-            .wood_clearing_cost(0)
-            .fiber_clearing_cost(0)
+            .stone_clearing_cost(10)
+            .wood_clearing_cost(10)
+            .fiber_clearing_cost(10)
+            .tree_clearing_cost(10)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
-            .find(|tile| clutter.contains_key(&tile));
+            .find_map(|tile| {
+                tool_to_use
+                    .get(&tile)
+                    .map(|tool| UseItemOnTile::new(tool.clone(), "Farm", tile))
+            });
 
-        if let Some(closest_clutter) = opt_closest_clutter {
-            let goal = MovementGoal::new("Farm", closest_clutter.into())
-                .with_tolerance(1.1);
+        if let Some(goal) = opt_goal {
             Ok(goal.into())
         } else {
             // There's still clutter on the farm, but we can't reach it.
