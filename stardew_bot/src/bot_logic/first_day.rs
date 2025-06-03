@@ -58,74 +58,6 @@ fn scythe_path_to_water(
     Ok(opt_action.map(Into::into))
 }
 
-fn clear_common_travel_paths(
-    game_state: &GameState,
-) -> Result<Option<BotGoalResult>, Error> {
-    let farm = game_state.get_room("Farm")?;
-    let farm_door = game_state.get_farm_door()?;
-
-    let pathfinding = farm
-        .pathfinding()
-        .allow_diagonal(false)
-        .fiber_clearing_cost(10)
-        .stone_clearing_cost(10)
-        .wood_clearing_cost(10)
-        .tree_clearing_cost(10);
-
-    let tool_to_clear: HashMap<_, _> = farm
-        .objects
-        .iter()
-        .filter_map(|obj| {
-            let opt_tool = match &obj.kind {
-                ObjectKind::Stone => Some(Item::PICKAXE),
-                ObjectKind::Tree(_) | ObjectKind::Wood => Some(Item::AXE),
-                ObjectKind::Fiber | ObjectKind::Grass => Some(Item::SCYTHE),
-
-                ObjectKind::FruitTree(_)
-                | ObjectKind::HoeDirt(_)
-                | ObjectKind::Chest(_)
-                | ObjectKind::Other(_)
-                | ObjectKind::Unknown => None,
-            };
-            opt_tool.map(|tool| (obj.tile, tool))
-        })
-        .collect();
-
-    let reachable = pathfinding.reachable(farm_door);
-
-    let tiles_to_clear: HashSet<_> = farm
-        .warps
-        .iter()
-        .sorted_by_key(|warp| &warp.target_room)
-        .flat_map(|warp| {
-            // Technically, warps for screen transitions are just off
-            // the edge of the map, and aren't actually reachable.
-            // Instead, make sure that the path can reach any tiles
-            // that is adjacent to a warp.
-            warp.location.iter_cardinal()
-        })
-        .filter(|warp_tile| reachable.get(*warp_tile).cloned().unwrap_or(false))
-        .flat_map(|warp_tile| {
-            pathfinding
-                .path_between(farm_door, warp_tile)
-                .expect("Guarded by check on reachable tiles")
-        })
-        .collect();
-
-    let player_tile = game_state.player.tile();
-    let opt_action = pathfinding
-        .iter_dijkstra(player_tile)
-        .map(|(tile, _)| tile)
-        .filter(|tile| tiles_to_clear.contains(tile))
-        .find_map(|path_tile| {
-            tool_to_clear
-                .get(&path_tile)
-                .map(|tool| UseItemOnTile::new(tool.clone(), "Farm", path_tile))
-        });
-
-    Ok(opt_action.map(Into::into))
-}
-
 impl BotGoal for FirstDay {
     fn description(&self) -> std::borrow::Cow<str> {
         "First Day".into()
@@ -139,11 +71,6 @@ impl BotGoal for FirstDay {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day != 1 {
             return Ok(BotGoalResult::Completed);
-        }
-
-        let goal = ClearFarmGoal;
-        if !goal.is_completed(game_state)? {
-            return Ok(goal.into());
         }
 
         if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {
@@ -254,13 +181,14 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        if let Some(goal) = clear_common_travel_paths(game_state)? {
-            return Ok(goal.into());
-        }
-
         let plant_crops = PlantCropsGoal::new();
         if !plant_crops.is_completed(game_state) {
             return Ok(plant_crops.into());
+        }
+
+        let goal = ClearFarmGoal::new();
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.into());
         }
 
         Ok(BotGoalResult::InProgress)
