@@ -356,7 +356,7 @@ impl WidgetWindow<Error> for LocationDisplay {
             .expect("Generated/updated in top-level GUI update");
 
         let current_location: &str = &game_state.player.room_name;
-        let position = game_state.player.position / 64.0;
+        let position = game_state.player.center_pos();
 
         let (left_column, draw_area) = area.split_from_left(15);
 

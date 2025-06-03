@@ -1,6 +1,8 @@
+use itertools::Itertools as _;
+
 use crate::{
     game_state::{Item, Vector},
-    Error, GameAction, GameState,
+    Direction, Error, GameAction, GameState,
 };
 
 use super::{
@@ -71,13 +73,38 @@ impl BotGoal for UseItemOnTile {
             return Ok(select_item.into());
         }
 
-        // let requires_adjacent_tile = match self.item.item_id {
+        let requires_adjacent_tile = match self.item.item_id.as_ref() {
+            "(T)Pickaxe" | "(T)Axe" | "(T)Hoe" => true,
+            _ => false,
+        };
+        let player_tile = game_state.player.tile();
+        if requires_adjacent_tile && player_tile == self.tile {
+            // This tool requires the player to be standing adjacent
+            // to the targeted tile, and cannot be used when standing
+            // on the tile itself.  Move to an adjacent clear tile.
 
-        // };
-        // let player_tile = game_state.player.tile();
-        // if requires_adjacent_tile && player_tile==self.tile {
-        //     // TODO: Move to an adjacent tile instead of standing on it.
-        // }
+            let clear_tiles = game_state.current_room()?.collect_clear_tiles();
+            let dir = Direction::iter()
+                .filter(|dir| dir.is_cardinal())
+                .filter(|dir| clear_tiles[player_tile + dir.offset()])
+                .sorted_by(|&dir_a, &dir_b| {
+                    let dot_product = |dir: Direction| {
+                        let player_offset = game_state.player.center_pos()
+                            - player_tile.map(|x| x as f32);
+                        let dir_offset = dir.offset().map(|x| x as f32);
+
+                        player_offset.dot(dir_offset)
+                    };
+                    dot_product(dir_a).total_cmp(&dot_product(dir_b))
+                })
+                .next()
+                .expect("At least one direction should be accessible");
+            let goal = MovementGoal::new(
+                game_state.player.room_name.clone(),
+                (player_tile + dir.offset()).into(),
+            );
+            return Ok(goal.into());
+        }
 
         do_action(GameAction::MouseOverTile(self.tile));
         if game_state.inputs.mouse_tile_location == self.tile

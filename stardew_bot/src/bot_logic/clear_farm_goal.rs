@@ -118,7 +118,12 @@ impl BotGoal for ClearFarmGoal {
 
         let farm = game_state.get_room("Farm")?;
         let player = &game_state.player;
+        let pathfinding = Self::pathfinding(farm);
 
+        // First, prioritize clearing out clutter that is along the
+        // fastest route from the FarmHouse to any of the warps
+        // present on the farm.  Clearing these tiles will allow
+        // faster movement around the map in the future.
         let has_priority_clutter = farm
             .objects
             .iter()
@@ -171,12 +176,7 @@ impl BotGoal for ClearFarmGoal {
 
         let player_tile = player.tile();
 
-        let opt_goal = farm
-            .pathfinding()
-            .stone_clearing_cost(10)
-            .wood_clearing_cost(10)
-            .fiber_clearing_cost(10)
-            .tree_clearing_cost(10)
+        let opt_goal = pathfinding
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
             .find_map(|tile| {

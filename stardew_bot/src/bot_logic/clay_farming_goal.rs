@@ -15,7 +15,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    MaintainStaminaGoal,
+    MaintainStaminaGoal, UseItemOnTile,
 };
 
 pub struct ClayFarmingGoal {
@@ -111,7 +111,7 @@ impl BotGoal for ClayFarmingGoal {
             let finalizing =
                 if let Some(clay_item_pos) = self.clay_to_pick_up(game_state) {
                     let goal = MovementGoal::new("Beach", clay_item_pos / 64.0)
-                        .with_tolerance(0.5);
+                        .with_tolerance(1.0);
                     if goal.is_completed(game_state) {
                         BotGoalResult::InProgress
                     } else {
@@ -126,20 +126,8 @@ impl BotGoal for ClayFarmingGoal {
         let beach = game_state.get_room("Beach")?;
         let player = &game_state.player;
 
-        if player.using_tool
-            && player.last_click == Vector::zero()
-            && player
-                .selected_item()
-                .map(|item| item.item_id.starts_with("(T)"))
-                .unwrap_or(false)
-        {
-            do_action(GameAction::AnimationCancel);
-        }
-
         // Pick up the hoe for use in the rest of the goal.
-        let hoe = Item::new("(T)Hoe");
-        let pickaxe = Item::new("(T)Pickaxe");
-        for item in [&hoe, &pickaxe] {
+        for item in [Item::HOE, Item::PICKAXE] {
             let goal = super::InventoryGoal::new(item.clone());
             if !goal.contains_target_item(&player.inventory) {
                 return Ok(goal.into());
@@ -155,6 +143,11 @@ impl BotGoal for ClayFarmingGoal {
             return Ok(MovementGoal::new("Beach", Vector::new(38.0, 1.0))
                 .with_tolerance(100.0)
                 .into());
+        }
+
+        let goal = MaintainStaminaGoal::new();
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
         }
 
         let player_tile = player.tile();
@@ -188,8 +181,6 @@ impl BotGoal for ClayFarmingGoal {
                 .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
                 .any(|obj| obj.tile == tile)
         };
-
-        let clear_tiles = beach.collect_clear_tiles();
 
         let opt_closest_clay: Option<Vector<isize>> = 'clay_tile: {
             /// If the closest tile would require using the pickaxe to
@@ -234,77 +225,14 @@ impl BotGoal for ClayFarmingGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        let opt_movement = match player_tile.manhattan_dist(closest_clay) {
-            0 => {
-                // Currently standing on the clay tile.  Move to an
-                // adjacent tile
-                let dir = Direction::iter()
-                    .filter(|dir| dir.is_cardinal())
-                    .filter(|dir| clear_tiles[player_tile + dir.offset()])
-                    .sorted_by(|&dir_a, &dir_b| {
-                        let dot_product = |dir: Direction| {
-                            let tile_center = closest_clay.map(|x| x as f32);
-                            let dir_offset = dir.offset().map(|x| x as f32);
-
-                            (tile_center - player.center_pos()).dot(dir_offset)
-                        };
-                        dot_product(dir_a).total_cmp(&dot_product(dir_b))
-                    })
-                    .next()
-                    .expect("At least one direction should be accessible");
-                Some(MovementGoal::new(
-                    "Beach",
-                    (closest_clay + dir.offset()).into(),
-                ))
-            }
-            1 => None,
-            _ => {
-                // Move to within range of the clay tile
-                Some(
-                    MovementGoal::new("Beach", closest_clay.into())
-                        .with_tolerance(1.1),
-                )
-            }
-        };
-        if let Some(movement) = opt_movement {
-            let movement =
-                SubGoals::new().then(movement).with_interrupt(move |state| {
-                    let updated_hoe_count =
-                        state.globals.get_stat("dirtHoed").unwrap_or(0);
-                    updated_hoe_count != total_dirt_hoed
-                });
-            return Ok(movement.into());
-        }
-
-        let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
-            return Ok(goal.into());
-        }
-
         do_action(GameAction::MouseOverTile(closest_clay));
         let tool = if has_hoe_dirt(closest_clay) {
-            pickaxe
+            Item::PICKAXE
         } else {
-            hoe
+            Item::HOE
         };
 
-        let select_tool = SelectItemGoal::new(tool);
-        if !select_tool.is_completed(game_state) {
-            return Ok(select_tool.into());
-        }
-
-        // Swinging a tool by clicking the mouse uses the previous
-        // frame's mouse position, not the current mouse position.
-        // While both the MovementGoal and the `MouseOverTile`
-        // prior to `SelectItemGoal` try to preemptively move the
-        // cursor, if neither substep was necessary then the
-        // cursor may not have been updated yet.
-        if !player.using_tool
-            && closest_clay == game_state.inputs.mouse_tile_location
-        {
-            do_action(GameAction::LeftClick);
-        }
-
-        Ok(BotGoalResult::InProgress)
+        let goal = UseItemOnTile::new(tool, "Beach", closest_clay);
+        Ok(goal.into())
     }
 }

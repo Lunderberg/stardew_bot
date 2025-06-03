@@ -1,6 +1,6 @@
 use crate::{
     bot_logic::SelectItemGoal,
-    game_state::{FacingDirection, Item},
+    game_state::{FacingDirection, Item, Vector},
     Error, GameAction, GameState,
 };
 
@@ -88,6 +88,12 @@ impl BotGoal for MaintainStaminaGoal {
         let facing_tile = player_tile + game_state.player.facing.offset();
 
         let loc = game_state.current_room()?;
+
+        // If the mouse is hovering over the player, or over a tile
+        // adjacent to the player, then the 'x' keystroke may activate
+        // that tile rather than using the selected item.  Therefore,
+        // move the mouse to hover over a different tile.
+        do_action(GameAction::MouseOverTile(player_tile + Vector::new(0, 2)));
 
         let is_facing_action_tile = loc
             .action_tiles
