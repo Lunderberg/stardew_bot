@@ -373,6 +373,7 @@ impl LocalMovementGoal {
             .find(|loc| loc.name == player.room_name)
             .expect("Player must be in a room");
 
+        let player_pos = player.center_pos();
         let player_tile = player.tile();
 
         let player_in_bounds = (0..location.shape.right)
@@ -408,9 +409,7 @@ impl LocalMovementGoal {
             .into_iter()
             .map(|tile| tile.map(|x| x as f32))
             .rev()
-            .with_position()
-            .filter(|(pos, _)| matches!(pos, itertools::Position::Middle))
-            .map(|(_, tile)| tile)
+            .filter(|pos| pos.manhattan_dist(player_pos) > WAYPOINT_TOLERANCE)
             .collect();
 
         Ok(waypoints)
@@ -498,6 +497,7 @@ impl BotGoal for LocalMovementGoal {
             })
             .expect("Direction::iter is non-empty");
         let target_tile = self.position.as_tile();
+
         do_action(GameAction::Move(dir));
         do_action(GameAction::MouseOverTile(target_tile));
 

@@ -85,39 +85,49 @@ impl BotGoal for MaintainStaminaGoal {
         }
 
         let player_tile = game_state.player.tile();
-        let facing_tile = player_tile + game_state.player.facing.offset();
 
         let loc = game_state.current_room()?;
+
+        if game_state.dialogue_menu.is_some() {
+            // The eat-food confirmation menu is open, so send the 'y'
+            // keystroke to confirm.
+            do_action(GameAction::ConfirmMenu);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        let can_apply = game_state
+            .inputs
+            .mouse_tile_location
+            .manhattan_dist(player_tile)
+            == 1
+            && loc.iter_activatable_tiles().all(|activatable_tile| {
+                game_state.inputs.mouse_tile_location != activatable_tile
+            });
+        if can_apply {
+            // The mouse is not currently over a tile that would be
+            // activated.  Therefore, send the 'x' keystroke to use
+            // the item.
+            do_action(GameAction::ActivateTile);
+            return Ok(BotGoalResult::InProgress);
+        }
 
         // If the mouse is hovering over the player, or over a tile
         // adjacent to the player, then the 'x' keystroke may activate
         // that tile rather than using the selected item.  Therefore,
-        // move the mouse to hover over a different tile.
-        do_action(GameAction::MouseOverTile(player_tile + Vector::new(0, 2)));
+        // must find a tile that is adjacent to the player, and which
+        // can have the mouse hovering over it without clicking on
+        // anything.
+        let safe_tile = player_tile
+            .iter_adjacent()
+            .find(|&hover_tile| {
+                loc.iter_activatable_tiles()
+                    .all(|activatable_tile| activatable_tile != hover_tile)
+            })
+            .expect(
+                "TODO: Handle case where no nearby tile can be hovered over",
+            );
 
-        let is_facing_action_tile = loc
-            .action_tiles
-            .iter()
-            .any(|(action_tile, _)| (action_tile == &facing_tile));
-        if is_facing_action_tile {
-            let safe_facing_direction = FacingDirection::iter()
-                .find(|dir| {
-                    let facing_tile = player_tile + dir.offset();
-                    loc.action_tiles
-                        .iter()
-                        .all(|(action_tile, _)| (action_tile != &facing_tile))
-                })
-                .expect("TODO: Handle case where all directions have action");
-            let goal = FaceDirectionGoal(safe_facing_direction);
-            return Ok(goal.into());
-        }
-
-        if game_state.dialogue_menu.is_none() {
-            do_action(GameAction::ActivateTile);
-            return Ok(BotGoalResult::InProgress);
-        };
-
-        do_action(GameAction::ConfirmMenu);
+        do_action(GameAction::MouseOverTile(safe_tile));
 
         Ok(BotGoalResult::InProgress)
     }

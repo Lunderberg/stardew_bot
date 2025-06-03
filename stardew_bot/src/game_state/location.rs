@@ -1549,6 +1549,54 @@ impl Location {
         reachable
     }
 
+    /// Iterator that yields tiles that have a right-click action
+    ///
+    /// Used when the mouse should be positioned to avoid being
+    /// overtop any of these tiles.  Even if using the 'x' key,
+    /// activating a tile will take precedence over consuming an item.
+    pub fn iter_activatable_tiles(
+        &self,
+    ) -> impl Iterator<Item = Vector<isize>> + '_ {
+        let iter_doors = self
+            .warps
+            .iter()
+            .filter(|warp| {
+                matches!(
+                    warp.kind,
+                    WarpKind::Door | WarpKind::LockedDoor { .. }
+                )
+            })
+            .map(|warp| warp.location);
+
+        let iter_bushes = self.iter_bush_tiles();
+
+        let iter_tree = self
+            .objects
+            .iter()
+            .filter(|obj| {
+                matches!(
+                    obj.kind,
+                    ObjectKind::Tree(_) | ObjectKind::FruitTree(_)
+                )
+            })
+            .map(|obj| obj.tile);
+
+        let iter_furniture = self
+            .furniture
+            .iter()
+            .filter(|piece| !matches!(piece.kind, FurnitureKind::Rug))
+            .flat_map(|piece| piece.shape.iter_points());
+
+        let iter_actions = self.action_tiles.iter().map(|(tile, _)| *tile);
+
+        std::iter::empty()
+            .chain(iter_doors)
+            .chain(iter_bushes)
+            .chain(iter_tree)
+            .chain(iter_actions)
+            .chain(iter_furniture)
+    }
+
     pub fn apply_delta(
         &mut self,
         delta: LocationDelta,
