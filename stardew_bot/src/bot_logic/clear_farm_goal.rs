@@ -119,6 +119,7 @@ impl BotGoal for ClearFarmGoal {
         }
 
         let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
         let player = &game_state.player;
 
         // First, prioritize clearing out clutter that is along the
@@ -143,6 +144,37 @@ impl BotGoal for ClearFarmGoal {
         if tool_to_use.is_empty() {
             return Ok(BotGoalResult::Completed);
         }
+
+        // Second, if all prioritized clutter has been cleared out,
+        // preferentially clear out clutter that is close to the farm
+        // house.
+        let tool_to_use = if has_priority_clutter {
+            tool_to_use
+        } else {
+            let pathfinding_without_clearing = farm
+                .pathfinding()
+                .allow_diagonal(false)
+                .include_border(true);
+
+            let Some(min_dist) = pathfinding_without_clearing
+                .iter_dijkstra(farm_door)
+                .filter(|(tile, _)| tool_to_use.contains_key(tile))
+                .map(|(_, dist)| dist)
+                .next()
+            else {
+                // There is still clutter remaining, but it is not
+                // accessible.
+                return Ok(BotGoalResult::Completed);
+            };
+
+            pathfinding_without_clearing
+                .iter_dijkstra(farm_door)
+                .take_while(|(_, dist)| *dist < min_dist + 5)
+                .filter_map(|(tile, _)| {
+                    tool_to_use.get(&tile).map(|tool| (tile, tool.clone()))
+                })
+                .collect()
+        };
 
         // Pick up the items that we'll need for the rest of the goal.
         //
