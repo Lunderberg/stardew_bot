@@ -1535,10 +1535,8 @@ impl Location {
         while let Some(visiting) = to_visit.pop() {
             for dir in Direction::iter_cardinal() {
                 let new_pos = visiting + dir.offset();
-                let is_clear =
-                    clear_tiles.get(new_pos).cloned().unwrap_or(false);
-                let was_previously_reachable =
-                    reachable.get(new_pos).cloned().unwrap_or(false);
+                let is_clear = clear_tiles.is_set(new_pos);
+                let was_previously_reachable = reachable.is_set(new_pos);
                 if is_clear && !was_previously_reachable {
                     reachable[new_pos] = true;
                     to_visit.push(new_pos);

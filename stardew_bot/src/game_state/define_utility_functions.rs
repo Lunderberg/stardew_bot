@@ -52,5 +52,20 @@ pub fn define_utility_functions(
         }
     })?;
 
+    graph.parse(stringify! {
+        fn get_item_locations(inventory_menu) {
+            let num_slots = inventory_menu
+                .capacity
+                .prim_cast::<usize>();
+
+            let item_locations = (0..num_slots)
+                .map(|i| inventory_menu.inventory._items[i])
+                .map(|tile| center_of_gui_rect(tile))
+                .collect();
+
+            item_locations
+        }
+    })?;
+
     Ok(())
 }

@@ -119,7 +119,8 @@ impl BotGoal for ForagingGoal {
             .objects
             .iter()
             .filter(|obj| {
-                Direction::iter().any(|dir| reachable[obj.tile + dir.offset()])
+                Direction::iter()
+                    .any(|dir| reachable.is_set(obj.tile + dir.offset()))
             })
             .filter(|obj| match &obj.kind {
                 ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,

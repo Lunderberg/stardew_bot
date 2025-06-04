@@ -40,6 +40,9 @@ pub use item::*;
 mod chest_menu;
 pub use chest_menu::ChestMenu;
 
+mod pause_menu;
+pub use pause_menu::PauseMenu;
+
 mod dialogue_menu;
 pub use dialogue_menu::DialogueMenu;
 

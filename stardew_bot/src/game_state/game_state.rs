@@ -7,7 +7,8 @@ use crate::{bot_logic::BotError, Error};
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
     DialogueMenu, DisplayState, FishingState, GlobalGameState, InputState,
-    Inventory, Location, LocationDelta, PlayerState, SeededRng, ShopMenu,
+    Inventory, Location, LocationDelta, PauseMenu, PlayerState, SeededRng,
+    ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -22,6 +23,7 @@ pub struct GameState {
     pub chest_menu: Option<ChestMenu>,
     pub dialogue_menu: Option<DialogueMenu>,
     pub shop_menu: Option<ShopMenu>,
+    pub pause_menu: Option<PauseMenu>,
     pub rng_state: RngState,
 }
 
@@ -42,6 +44,7 @@ pub struct GameStateDelta {
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
     shop_menu: Option<ShopMenu>,
+    pause_menu: Option<PauseMenu>,
     current_rng_state: SeededRng,
 }
 
@@ -63,6 +66,7 @@ impl GameState {
         ChestMenu::def_read_chest_menu(&mut graph)?;
         DialogueMenu::def_read_dialogue_menu(&mut graph)?;
         ShopMenu::def_read_shop_menu(&mut graph)?;
+        PauseMenu::def_read_pause_menu(&mut graph)?;
         SeededRng::def_read_rng_state(&mut graph)?;
 
         graph.parse(
@@ -93,6 +97,7 @@ impl GameState {
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
+             pause_menu: Option<&PauseMenu>,
              current_rng: &SeededRng| GameState {
                 globals: global_game_state.clone(),
                 locations: locations.clone(),
@@ -104,6 +109,7 @@ impl GameState {
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
                 shop_menu: shop_menu.cloned(),
+                pause_menu: pause_menu.cloned(),
                 rng_state: RngState::new(current_rng.clone()),
             },
         )?;
@@ -120,6 +126,7 @@ impl GameState {
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
+             pause_menu: Option<&PauseMenu>,
              rng_state: &SeededRng| GameStateDelta {
                 global_game_state: global_game_state.clone(),
                 location_delta: location_delta.clone(),
@@ -131,6 +138,7 @@ impl GameState {
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
                 shop_menu: shop_menu.cloned(),
+                pause_menu: pause_menu.cloned(),
                 current_rng_state: rng_state.clone(),
             },
         )?;
@@ -154,6 +162,7 @@ impl GameState {
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
                 let shop_menu = read_shop_menu();
+                let pause_menu = read_pause_menu();
                 let rng_state = read_rng_state();
 
                 new_game_state(
@@ -167,6 +176,7 @@ impl GameState {
                     chest_menu,
                     dialogue_menu,
                     shop_menu,
+                    pause_menu,
                     rng_state,
                 )
             }
@@ -182,6 +192,7 @@ impl GameState {
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
                 let shop_menu = read_shop_menu();
+                let pause_menu = read_pause_menu();
                 let rng_state = read_rng_state();
 
                 new_game_state_delta(
@@ -195,6 +206,7 @@ impl GameState {
                     chest_menu,
                     dialogue_menu,
                     shop_menu,
+                    pause_menu,
                     rng_state,
                 )
             }
@@ -221,6 +233,7 @@ impl GameState {
         self.chest_menu = delta.chest_menu;
         self.dialogue_menu = delta.dialogue_menu;
         self.shop_menu = delta.shop_menu;
+        self.pause_menu = delta.pause_menu;
 
         if let Some(loc) = self
             .locations

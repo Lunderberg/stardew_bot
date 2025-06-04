@@ -38,19 +38,6 @@ impl ChestMenu {
                     ._activeClickableMenu
                     .as::<StardewValley.Menus.ItemGrabMenu>();
 
-                fn get_item_locations(inventory_menu) {
-                    let num_slots = inventory_menu
-                        .capacity
-                        .prim_cast::<usize>();
-
-                    let item_locations = (0..num_slots)
-                        .map(|i| inventory_menu.inventory._items[i])
-                        .map(|tile| center_of_gui_rect(tile))
-                        .collect();
-
-                    item_locations
-                }
-
                 let player_item_locations = get_item_locations(menu.inventory);
                 let chest_item_locations = get_item_locations(menu.ItemsToGrabMenu);
                 let held_item = read_item(menu._heldItem);

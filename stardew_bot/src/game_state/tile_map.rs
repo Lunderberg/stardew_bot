@@ -109,6 +109,12 @@ impl<T> TileMap<T> {
     }
 }
 
+impl TileMap<bool> {
+    pub fn is_set(&self, index: impl AsGridPos) -> bool {
+        self.get(index).cloned().unwrap_or(false)
+    }
+}
+
 pub trait AsGridPos {
     fn get_flat_index(&self, width: usize, height: usize) -> Option<usize>;
 

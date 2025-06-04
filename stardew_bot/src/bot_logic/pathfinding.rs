@@ -444,7 +444,7 @@ impl Pathfinding<'_> {
 
             for dir in iter_dir {
                 let is_walkable = |check_tile: Vector<isize>| -> bool {
-                    walkable.get(check_tile).cloned().unwrap_or(false)
+                    walkable.is_set(check_tile)
                 };
 
                 let offset = dir.offset();

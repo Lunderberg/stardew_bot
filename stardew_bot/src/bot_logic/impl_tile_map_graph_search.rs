@@ -29,9 +29,7 @@ impl GraphSearch<Vector<isize>> for TileMap<bool> {
     ) -> impl IntoIterator<Item = (Vector<isize>, u64)> + 'a {
         Direction::iter()
             .filter(move |dir| {
-                let is_clear_tile = |tile: Vector<isize>| {
-                    self.get(tile).cloned().unwrap_or(false)
-                };
+                let is_clear_tile = |tile: Vector<isize>| self.is_set(tile);
 
                 let offset = dir.offset();
                 if dir.is_cardinal() {

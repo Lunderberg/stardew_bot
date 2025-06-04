@@ -104,12 +104,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                             .map(|dir| dir.offset())
                             .chain(Some(Vector::new(0, 0)))
                             .map(|offset| warp.location + offset)
-                            .any(|adj_tile| {
-                                reachable
-                                    .get(adj_tile)
-                                    .cloned()
-                                    .unwrap_or(false)
-                            })
+                            .any(|adj_tile| reachable.is_set(adj_tile))
                     })
                     .filter_map(|warp| {
                         if warp.location == node.current_pos {

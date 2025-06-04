@@ -83,9 +83,7 @@ impl ClearFarmGoal {
                 // that is adjacent to a warp.
                 warp.location.iter_cardinal()
             })
-            .filter(|warp_tile| {
-                reachable.get(*warp_tile).cloned().unwrap_or(false)
-            })
+            .filter(|warp_tile| reachable.is_set(*warp_tile))
             .flat_map(|warp_tile| {
                 pathfinding
                     .path_between(farm_door, warp_tile)

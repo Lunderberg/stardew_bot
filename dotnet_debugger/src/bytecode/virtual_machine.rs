@@ -1351,9 +1351,14 @@ macro_rules! define_comparison_op {
             ( NativeUInt(a), NativeUInt(b) ) => a.$cmp(&b),
             ( I32(a), I32(b) ) => a.$cmp(&b),
             ( F32(a), F32(b) ) => a.$cmp(&b),
+            ( F64(a), F64(b) ) => a.$cmp(&b),
+
+            ( NativeUInt(a), U32(b) ) => a.$cmp(&(b as usize)),
+            ( U32(a), NativeUInt(b) ) => (a as usize).$cmp(&b),
+
             ( NativeUInt(a), F32(b) ) => (a as f32).$cmp(&b),
             ( F32(a), NativeUInt(b) ) => a.$cmp(&(b as f32)),
-            ( F64(a), F64(b) ) => a.$cmp(&b),
+
             ( NativeUInt(a), F64(b) ) => (a as f64).$cmp(&b),
             ( F64(a), NativeUInt(b) ) => a.$cmp(&(b as f64)),
         }
