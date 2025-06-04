@@ -32,7 +32,9 @@ impl ClearFarmGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let reachable = Self::pathfinding(farm).reachable(farm_door);
+        let reachable = Self::pathfinding(farm)
+            .include_border(true)
+            .reachable(farm_door);
 
         let reachable_clutter = farm
             .objects
@@ -118,7 +120,6 @@ impl BotGoal for ClearFarmGoal {
 
         let farm = game_state.get_room("Farm")?;
         let player = &game_state.player;
-        let pathfinding = Self::pathfinding(farm);
 
         // First, prioritize clearing out clutter that is along the
         // fastest route from the FarmHouse to any of the warps
@@ -176,7 +177,8 @@ impl BotGoal for ClearFarmGoal {
 
         let player_tile = player.tile();
 
-        let opt_goal = pathfinding
+        let opt_goal = Self::pathfinding(farm)
+            .include_border(true)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
             .find_map(|tile| {

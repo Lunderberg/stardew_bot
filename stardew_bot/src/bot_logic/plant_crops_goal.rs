@@ -209,10 +209,10 @@ impl BotGoal for PlantCropsGoal {
             if current_water == 0 {
                 let closest_water = farm
                     .pathfinding()
+                    .include_border(true)
                     .iter_dijkstra(player_tile)
-                    .find_map(|(tile, _)| {
-                        tile.iter_adjacent().find(|&adj| farm.is_water(adj))
-                    })
+                    .map(|(tile, _)| tile)
+                    .find(|tile| farm.is_water(*tile))
                     .expect("Handle case where no water on farm is reachable");
                 let action =
                     UseItemOnTile::new(item.clone(), "Farm", closest_water);

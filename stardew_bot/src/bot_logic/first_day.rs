@@ -27,16 +27,17 @@ fn scythe_path_to_water(
     let water_border: Vec<Vector<isize>> = (0..farm.shape.right)
         .cartesian_product(0..farm.shape.down)
         .map(|(i, j)| Vector::new(i as isize, j as isize))
-        .filter(|&tile| !farm.is_water(tile))
+        .filter(|&tile| farm.is_water(tile))
         .filter(|&tile| {
             Direction::iter()
                 .filter(|dir| dir.is_cardinal())
-                .any(|dir| farm.is_water(tile + dir.offset()))
+                .any(|dir| !farm.is_water(tile + dir.offset()))
         })
         .collect();
 
     let pathfinding = farm
         .pathfinding()
+        .include_border(true)
         .allow_diagonal(false)
         .fiber_clearing_cost(0);
 

@@ -159,6 +159,19 @@ impl<T> Rectangle<T> {
         let two = T::one() + T::one();
         self.top_left + self.shape / two
     }
+
+    pub fn contains(&self, pos: Vector<T>) -> bool
+    where
+        T: Copy,
+        T: std::ops::Add<Output = T>,
+        T: PartialOrd,
+    {
+        let bottom_right = self.top_left + self.shape;
+        let x_range = self.top_left.right..bottom_right.right;
+        let y_range = self.top_left.down..bottom_right.down;
+
+        x_range.contains(&pos.right) && y_range.contains(&pos.down)
+    }
 }
 
 impl Rectangle<isize> {

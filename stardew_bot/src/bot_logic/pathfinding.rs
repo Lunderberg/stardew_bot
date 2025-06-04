@@ -1,3 +1,5 @@
+use itertools::Itertools as _;
+
 use crate::{
     bot_logic::BotError,
     game_state::{Location, ObjectKind, TileMap, Vector},
@@ -38,6 +40,16 @@ pub struct Pathfinding<'a> {
     /// The additional cost associated with moving through a tile that
     /// contains grass.
     grass_penalty: u64,
+
+    /// If true, results will allow the final tile of a path to be on
+    /// an unreachable tile.  If false, the final tile of a path must
+    /// not be blocked.
+    ///
+    /// Including the border is useful when identifying tiles on which
+    /// a tool may be used, where the player only needs to stand next
+    /// to the final tile.  Excluding the border is useful when
+    /// identifying tiles on which the player may stand.
+    include_border: bool,
 }
 
 /// Tracking for points during A* search.
@@ -66,6 +78,7 @@ struct DijkstraEntry {
     /// The distance from the initial point to the current tile.
     dist: u64,
     tile: Vector<isize>,
+    should_propagate: bool,
 }
 
 /// Internal implementation, provide a lower bound on the distance
@@ -113,6 +126,7 @@ impl Location {
             clear_fiber: None,
             clear_trees: None,
             grass_penalty: 100,
+            include_border: false,
         }
     }
 }
@@ -145,6 +159,13 @@ impl Pathfinding<'_> {
     pub fn tree_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_trees: Some(cost),
+            ..self
+        }
+    }
+
+    pub fn include_border(self, include_border: bool) -> Self {
+        Self {
+            include_border,
             ..self
         }
     }
@@ -225,12 +246,16 @@ impl Pathfinding<'_> {
         while let Some(tile) = to_visit.pop() {
             for dir in Direction::iter_cardinal() {
                 let adj = tile + dir.offset();
-                if reachable.in_bounds(adj)
-                    && !reachable[adj]
-                    && cost[adj].is_some()
-                {
-                    reachable[adj] = true;
-                    to_visit.push(adj);
+                if reachable.in_bounds(adj) && !reachable[adj] {
+                    if cost[adj].is_some() {
+                        // The player may walk through this tile.
+                        reachable[adj] = true;
+                        to_visit.push(adj);
+                    } else if self.include_border {
+                        // The player may interact with this tile, but
+                        // may not walk through it.
+                        reachable[adj] = true;
+                    }
                 }
             }
         }
@@ -286,62 +311,69 @@ impl Pathfinding<'_> {
             best[tile + best_tile_offset] =
                 Some((visiting.dist_plus_heuristic, visiting.dir));
 
-            Direction::iter()
-                .filter(|dir| self.allow_diagonal || dir.is_cardinal())
-                .filter(|dir| {
-                    let is_walkable = |check_tile: Vector<isize>| -> bool {
-                        if cost_map.in_bounds(check_tile) {
-                            cost_map[check_tile].is_some()
-                        } else {
-                            goal.iter().any(|goal_tile| goal_tile == check_tile)
-                        }
-                    };
+            let iter_dir = Direction::iter()
+                .filter(|dir| self.allow_diagonal || dir.is_cardinal());
 
-                    let offset = dir.offset();
-                    if dir.is_cardinal() {
-                        is_walkable(tile + offset)
-                    } else {
-                        [
-                            Vector::new(offset.right, offset.down),
-                            Vector::new(0, offset.down),
-                            Vector::new(offset.right, 0),
-                        ]
-                        .into_iter()
-                        .all(|offset| is_walkable(tile + offset))
-                    }
-                })
-                .map(|dir| {
-                    let new_tile = tile + dir.offset();
-                    let tile_dist = if dir.is_cardinal() { 1000 } else { 1414 };
-                    let additional_cost = if cost_map.in_bounds(new_tile) {
-                        cost_map[new_tile].expect(
-                            "Should only have walkable tiles at this point",
-                        )
-                    } else {
-                        0
-                    };
+            for dir in iter_dir {
+                let check_tile = |check_tile: Vector<isize>| -> bool {
+                    cost_map.in_bounds(check_tile)
+                        && cost_map[check_tile].is_some()
+                };
 
-                    let new_dist = visiting.dist + tile_dist + additional_cost;
-                    AStarEntry {
-                        dist_plus_heuristic: new_dist + get_heuristic(new_tile),
-                        tile: new_tile,
-                        dist: new_dist,
-                        dir: Some(dir),
-                    }
-                })
-                .for_each(|new_entry| {
-                    let is_best = best[new_entry.tile + best_tile_offset]
-                        .map(|(prev, _)| new_entry.dist_plus_heuristic < prev)
-                        .unwrap_or(true);
+                let offset = dir.offset();
+                let new_tile = tile + offset;
 
-                    if is_best {
-                        best[new_entry.tile + best_tile_offset] = Some((
-                            new_entry.dist_plus_heuristic,
-                            new_entry.dir,
-                        ));
+                let is_walkable = check_tile(new_tile);
+                let is_valid_path = if dir.is_cardinal() {
+                    is_walkable
+                } else {
+                    is_walkable
+                        && check_tile(tile + Vector::new(0, offset.down))
+                        && check_tile(tile + Vector::new(offset.right, 0))
+                };
+
+                if !(is_valid_path || (self.include_border && !is_walkable)) {
+                    // The player may not move to this tile, and we
+                    // are looking for locations where the player may
+                    // stand, not places where the player can reach
+                    // with a tool.  Therefore, no further processing
+                    // required for this Direction.
+                    continue;
+                }
+
+                let tile_dist = if dir.is_cardinal() { 1000 } else { 1414 };
+                let additional_cost = cost_map
+                    .get(new_tile)
+                    .map(Clone::clone)
+                    .flatten()
+                    .unwrap_or(0);
+
+                let new_dist = visiting.dist + tile_dist + additional_cost;
+                let new_dist_plus_heuristic =
+                    new_dist + get_heuristic(new_tile);
+
+                let is_best = best[new_tile + best_tile_offset]
+                    .map(|(prev, _)| new_dist_plus_heuristic < prev)
+                    .unwrap_or(true);
+
+                if is_best {
+                    // This is the best known route to access the new tile.
+                    best[new_tile + best_tile_offset] =
+                        Some((new_dist_plus_heuristic, Some(dir)));
+
+                    if is_valid_path {
+                        // Not only is this the best route, but the
+                        // player can also move through this tile.
+                        let new_entry = AStarEntry {
+                            dist_plus_heuristic: new_dist_plus_heuristic,
+                            tile: new_tile,
+                            dist: new_dist,
+                            dir: Some(dir),
+                        };
                         to_visit.insert(new_entry);
                     }
-                });
+                }
+            }
 
             let is_finished = goal.iter().any(|goal_tile| {
                 best.in_bounds(goal_tile + best_tile_offset)
@@ -389,11 +421,16 @@ impl Pathfinding<'_> {
             to_visit.insert(DijkstraEntry {
                 dist: 0,
                 tile: initial,
+                should_propagate: true,
             });
         }
 
         std::iter::from_fn(move || -> Option<(Vector<isize>, u64)> {
-            let DijkstraEntry { dist, tile } = loop {
+            let DijkstraEntry {
+                dist,
+                tile,
+                should_propagate,
+            } = loop {
                 let entry = to_visit.pop_first()?;
 
                 if !finished[entry.tile] {
@@ -401,38 +438,42 @@ impl Pathfinding<'_> {
                 }
             };
 
-            finished[tile] = true;
-
-            Direction::iter()
+            let iter_dir = Direction::iter()
                 .filter(|dir| self.allow_diagonal || dir.is_cardinal())
-                .filter(|dir| {
-                    let is_walkable = |check_tile: Vector<isize>| -> bool {
-                        walkable.get(check_tile).cloned().unwrap_or(false)
-                    };
+                .filter(|_| should_propagate);
 
-                    let offset = dir.offset();
-                    if dir.is_cardinal() {
-                        is_walkable(tile + offset)
-                    } else {
-                        [
-                            Vector::new(offset.right, offset.down),
-                            Vector::new(0, offset.down),
-                            Vector::new(offset.right, 0),
-                        ]
-                        .into_iter()
-                        .all(|offset| is_walkable(tile + offset))
-                    }
-                })
-                .for_each(|dir| {
-                    let new_tile = tile + dir.offset();
+            for dir in iter_dir {
+                let is_walkable = |check_tile: Vector<isize>| -> bool {
+                    walkable.get(check_tile).cloned().unwrap_or(false)
+                };
 
-                    if !finished[new_tile] {
-                        to_visit.insert(DijkstraEntry {
-                            dist: dist + 1,
-                            tile: new_tile,
-                        });
-                    }
-                });
+                let offset = dir.offset();
+                let is_accessible = if dir.is_cardinal() {
+                    is_walkable(tile + offset)
+                } else {
+                    [
+                        Vector::new(offset.right, offset.down),
+                        Vector::new(0, offset.down),
+                        Vector::new(offset.right, 0),
+                    ]
+                    .into_iter()
+                    .all(|offset| is_walkable(tile + offset))
+                };
+
+                let new_tile = tile + dir.offset();
+
+                if finished.in_bounds(new_tile)
+                    && !finished[new_tile]
+                    && (self.include_border || is_accessible)
+                {
+                    finished[tile] = true;
+                    to_visit.insert(DijkstraEntry {
+                        dist: dist + 1,
+                        tile: new_tile,
+                        should_propagate: is_accessible,
+                    });
+                }
+            }
 
             Some((tile, dist))
         })

@@ -4,7 +4,9 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
-    game_state::{FacingDirection, Location, TileMap, Vector, WarpKind},
+    game_state::{
+        FacingDirection, Location, Rectangle, TileMap, Vector, WarpKind,
+    },
     Direction, Error, GameAction, GameState,
 };
 
@@ -376,10 +378,12 @@ impl LocalMovementGoal {
         let player_pos = player.center_pos();
         let player_tile = player.tile();
 
-        let player_in_bounds = (0..location.shape.right)
-            .contains(&player_tile.right)
-            && (0..location.shape.down).contains(&player_tile.down);
-        if !player_in_bounds {
+        let bounds = Rectangle {
+            top_left: Vector::zero(),
+            shape: location.shape,
+        };
+
+        if !bounds.contains(player_tile) {
             // During screen transitions, the player's current room is
             // updated before the player's X/Y position is updated.
             // If the memory-read occurs between these two times, then
@@ -397,15 +401,12 @@ impl LocalMovementGoal {
         let target_tile: Vector<isize> =
             self.position.map(|x| x.round() as isize);
 
-        let target_tiles: Vec<_> = if self.tolerance >= 1.0 {
-            target_tile.iter_nearby().collect()
-        } else {
-            vec![target_tile]
-        };
-
         let waypoints = location
             .pathfinding()
-            .path_between(player_tile, &target_tiles)?
+            .include_border(
+                self.tolerance >= 1.0 || !bounds.contains(target_tile),
+            )
+            .path_between(player_tile, target_tile)?
             .into_iter()
             .map(|tile| tile.map(|x| x as f32))
             .rev()
