@@ -31,6 +31,10 @@ impl<T> TypedPointer<T> {
         T::read_typed_ptr(self.ptr, reader)
     }
 
+    pub fn as_untyped_ptr(&self) -> Pointer {
+        self.ptr
+    }
+
     #[inline]
     pub fn as_non_null(self) -> Option<Self> {
         if self.is_null() {

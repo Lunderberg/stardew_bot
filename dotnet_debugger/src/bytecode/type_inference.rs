@@ -368,10 +368,14 @@ impl<'a> TypeInference<'a> {
                         ) => {
                             let reader = self.reader()?;
                             let method_table = reader.method_table(*ptr)?;
-                            method_table
+                            let opt_element_type = method_table
                                 .array_element_type()
-                                .ok_or(Error::ArrayMissingElementType)
-                                .and_then(|ptr| reader.runtime_type(ptr))
+                                .ok_or(Error::ArrayMissingElementType)?
+                                .as_method_table()
+                                .map(|ptr| reader.runtime_type(ptr))
+                                .transpose()?;
+
+                            Ok(opt_element_type.unwrap_or(RuntimeType::Unknown))
                         }
 
                         other => {

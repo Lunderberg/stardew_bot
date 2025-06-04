@@ -5,7 +5,7 @@ use memory_reader::{MemoryReader, OwnedBytes, Pointer};
 use crate::{
     runtime_type::{DotNetType, FunctionType, IteratorType, TupleType},
     unpack_fields, CachedReader, CorElementType, Error, MethodTable,
-    ReadTypedPointer, RuntimeType, TypedPointer,
+    ReadTypedPointer, RuntimePrimType, RuntimeType, TypedPointer,
 };
 
 pub struct TypeDescription {
@@ -68,6 +68,16 @@ impl TypeDescription {
         }
     }
 
+    pub fn runtime_prim_type(
+        &self,
+        _reader: &MemoryReader,
+    ) -> Result<Option<RuntimePrimType>, Error> {
+        match self.element_type() {
+            CorElementType::Prim(prim) => Ok(Some(prim)),
+            _ => Ok(None),
+        }
+    }
+
     pub fn index(&self) -> Option<usize> {
         match self.element_type() {
             CorElementType::Var => Some(self.raw_index() as usize),
@@ -103,6 +113,36 @@ impl TypeHandle {
             }
             TypeHandle::TypeDescription(type_desc) => {
                 type_desc.runtime_type(reader)
+            }
+        }
+    }
+
+    pub fn runtime_prim_type(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<Option<RuntimePrimType>, Error> {
+        match self {
+            TypeHandle::MethodTable(method_table) => {
+                method_table.runtime_prim_type(reader)
+            }
+            TypeHandle::TypeDescription(type_desc) => {
+                type_desc.runtime_prim_type(reader)
+            }
+        }
+    }
+
+    pub fn as_method_table(&self) -> Option<&MethodTable> {
+        match self {
+            TypeHandle::MethodTable(method_table) => Some(method_table),
+            TypeHandle::TypeDescription(_) => None,
+        }
+    }
+
+    pub fn is_string(&self) -> bool {
+        match self {
+            TypeHandle::MethodTable(method_table) => method_table.is_string(),
+            TypeHandle::TypeDescription(type_desc) => {
+                matches!(type_desc.element_type(), CorElementType::String)
             }
         }
     }
@@ -282,8 +322,8 @@ impl<'a> TypeHandleRef<'a> {
                     let element_type = method_table
                         .array_element_type()
                         .ok_or(Error::ArrayMissingElementType)?;
-                    let runtime_type = reader.runtime_type(element_type)?;
-                    Self::print_runtime_type(&runtime_type, fmt, reader)?;
+                    let element_type_desc = reader.type_handle(element_type)?;
+                    write!(fmt, "{}", element_type_desc.printable(reader))?;
                 }
                 write!(fmt, ">")?;
             }
@@ -298,8 +338,8 @@ impl<'a> TypeHandleRef<'a> {
                     let element_type = method_table
                         .array_element_type()
                         .ok_or(Error::ArrayMissingElementType)?;
-                    let runtime_type = reader.runtime_type(element_type)?;
-                    Self::print_runtime_type(&runtime_type, fmt, reader)?;
+                    let element_type_desc = reader.type_handle(element_type)?;
+                    write!(fmt, "{}", element_type_desc.printable(reader))?;
                 }
                 write!(fmt, ">")?;
             }

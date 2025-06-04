@@ -288,7 +288,7 @@ impl MethodTable {
         }
     }
 
-    pub fn array_element_type(&self) -> Option<TypedPointer<MethodTable>> {
+    pub fn array_element_type(&self) -> Option<TypedPointer<TypeHandle>> {
         (self.is_array() || self.is_multi_dim_array()).then(|| {
             let ptr = self.element_type_handle_or_per_instance_info();
             ptr.into()
@@ -366,19 +366,28 @@ impl MethodTable {
     ) -> Result<Vec<TypedPointer<TypeHandle>>, Error> {
         let reader = reader.borrow();
 
-        let element_type =
-            std::iter::successors(Some(Ok(self.clone())), |res_prev| {
+        let element_type = std::iter::successors(
+            Some(Ok(TypeHandle::MethodTable(self.clone()))),
+            |res_prev| {
                 let prev = res_prev.as_ref().ok()?;
-                let element_type = prev.array_element_type()?;
-                Some(element_type.read(reader))
-            })
-            .last()
-            .expect("Iterator will at least produce self")?;
+                prev.as_method_table()
+                    .and_then(|method_table| method_table.array_element_type())
+                    .map(|element_ptr| element_ptr.read(reader))
+            },
+        )
+        .last()
+        .expect("Iterator will at least produce self")?;
 
-        let from_self =
-            element_type.generic_types_excluding_base_class(reader)?;
+        let from_self = element_type
+            .as_method_table()
+            .map(|element| element.generic_types_excluding_base_class(reader))
+            .transpose()?
+            .into_iter()
+            .flatten();
         let from_parents = element_type
-            .iter_parents(reader)
+            .as_method_table()
+            .into_iter()
+            .flat_map(|element| element.iter_parents(reader))
             .map(|res_parent| {
                 res_parent.and_then(|parent| {
                     parent.generic_types_excluding_base_class(reader)

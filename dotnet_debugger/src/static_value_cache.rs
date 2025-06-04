@@ -933,6 +933,8 @@ impl<'a> CachedReader<'a> {
                 ));
             }
         };
+        let is_string =
+            matches!(element_type, RuntimeType::DotNet(DotNetType::String));
 
         let module_ptr = if let Some(element_method_table_ptr) =
             opt_element_method_table_ptr
@@ -940,7 +942,7 @@ impl<'a> CachedReader<'a> {
             let element_method_table =
                 self.method_table(element_method_table_ptr)?;
             element_method_table.module()
-        } else if opt_prim_element.is_some() {
+        } else if opt_prim_element.is_some() || is_string {
             self.runtime_module_by_name("System.Private.CoreLib")?
         } else {
             return Ok(None);
@@ -960,16 +962,21 @@ impl<'a> CachedReader<'a> {
                 let is_correct_element = loaded_type
                     .array_element_type()
                     .map(|loaded_element_type_ptr| -> Result<bool, Error> {
-                        let is_match = if let Some(element_method_table_ptr) =
+                        let is_match = if is_string {
+                            let loaded_element_type =
+                                self.type_handle(loaded_element_type_ptr)?;
+                            loaded_element_type.is_string()
+                        } else if let Some(element_method_table_ptr) =
                             opt_element_method_table_ptr
                         {
-                            loaded_element_type_ptr == element_method_table_ptr
+                            loaded_element_type_ptr.as_untyped_ptr()
+                                == element_method_table_ptr.as_untyped_ptr()
                         } else if let Some(prim_element) = opt_prim_element {
                             let loaded_element_type =
-                                self.method_table(loaded_element_type_ptr)?;
-                            let loaded_prim_element_type =
+                                self.type_handle(loaded_element_type_ptr)?;
+                            let runtime_element_type =
                                 loaded_element_type.runtime_prim_type(self)?;
-                            loaded_prim_element_type == Some(prim_element)
+                            runtime_element_type == Some(prim_element)
                         } else {
                             false
                         };

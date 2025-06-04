@@ -194,10 +194,16 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                         let component_size = method_table
                             .component_size()
                             .ok_or(Error::ArrayMissingComponentSize)?;
-                        let element_type = method_table
+                        let opt_element_type = method_table
                             .array_element_type()
-                            .ok_or(Error::ArrayMissingElementType)
-                            .and_then(|ptr| reader.runtime_type(ptr))?;
+                            .ok_or(Error::ArrayMissingElementType)?
+                            .as_method_table()
+                            .map(|ptr| reader.runtime_type(ptr))
+                            .transpose()?;
+
+                        let Some(element_type) = opt_element_type else {
+                            return Ok(None);
+                        };
 
                         (element_type, component_size)
                     }
