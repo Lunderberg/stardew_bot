@@ -770,7 +770,7 @@ impl<'a> SymbolicParser<'a> {
         )?;
         let expr = self.expect_expr()?;
         self.expect_punct(
-            || "';' after variable assignment",
+            || format!("';' after variable assignment of '{var_name}'"),
             Punctuation::Semicolon,
         )?;
 
