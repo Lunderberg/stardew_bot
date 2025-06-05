@@ -6,6 +6,7 @@ use super::{Item, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PauseMenu {
+    pub tab_buttons: Vec<Vector<isize>>,
     pub active_page: MenuPage,
     pub exit_button: Vector<isize>,
 }
@@ -90,7 +91,10 @@ impl PauseMenu {
 
         graph.named_native_function(
             "new_pause_menu",
-            |active_page: &MenuPage, exit_button: &Vector<isize>| PauseMenu {
+            |tab_buttons: &Vec<Vector<isize>>,
+             active_page: &MenuPage,
+             exit_button: &Vector<isize>| PauseMenu {
+                tab_buttons: tab_buttons.clone(),
                 active_page: active_page.clone(),
                 exit_button: exit_button.clone(),
             },
@@ -173,12 +177,7 @@ impl PauseMenu {
                     page.trashCan
                 );
 
-                let held_item = read_item(
-                    StardewValley.Game1
-                        ._player
-                        .cursorSlotItem
-                        .value
-                );
+                let held_item = read_item(page.heldItem);
 
                 let current_crafting_page = page
                     .currentCraftingPage;
@@ -281,6 +280,7 @@ impl PauseMenu {
 
                 if menu.is_some(){
                     new_pause_menu(
+                        tabs,
                         active_page,
                         exit_button,
                     )

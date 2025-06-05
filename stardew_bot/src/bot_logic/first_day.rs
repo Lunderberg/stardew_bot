@@ -9,11 +9,11 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{BotGoal, BotGoalResult, SubGoals},
     graph_search::GraphSearch as _,
-    BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, ForagingGoal,
-    GameStateExt as _, GoToActionTile, MaintainStaminaGoal, MovementGoal,
-    PlantCropsGoal, SellToMerchantGoal, UseItemOnTile,
+    BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CraftItemGoal,
+    ForagingGoal, GameStateExt as _, GoToActionTile, MaintainStaminaGoal,
+    MovementGoal, PlantCropsGoal, SellToMerchantGoal, UseItemOnTile,
 };
 
 pub struct FirstDay;
@@ -57,6 +57,36 @@ fn scythe_path_to_water(
         .map(|tile| UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile));
 
     Ok(opt_action.map(Into::into))
+}
+
+fn desired_chests(
+    game_state: &GameState,
+) -> Result<impl Iterator<Item = Vector<isize>>, Error> {
+    let farm = game_state.get_room("Farm")?;
+    let farm_door = game_state.get_farm_door()?;
+
+    let offsets = [
+        Vector::new(-2, 3),
+        Vector::new(-3, 3),
+        Vector::new(-4, 3),
+        Vector::new(-5, 3),
+    ];
+
+    let chest_locations: Vec<_> = farm
+        .objects
+        .iter()
+        .filter(|obj| matches!(obj.kind, ObjectKind::Chest(_)))
+        .map(|obj| obj.tile)
+        .collect();
+
+    let iter = offsets
+        .into_iter()
+        .map(move |offset| farm_door + offset)
+        .filter(move |tile| {
+            chest_locations.iter().all(|chest_tile| tile != chest_tile)
+        });
+
+    Ok(iter)
 }
 
 impl BotGoal for FirstDay {
@@ -146,7 +176,7 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let clay_farming = ClayFarmingGoal::new().stop_at_time(1500);
+        let clay_farming = ClayFarmingGoal::new().stop_at_time(1450);
         if !clay_farming.is_completed(game_state) {
             return Ok(clay_farming.into());
         }
@@ -187,9 +217,35 @@ impl BotGoal for FirstDay {
             return Ok(plant_crops.into());
         }
 
-        let goal = ClearFarmGoal::new();
+        let num_remaining_chests = desired_chests(game_state)?.count();
+        let chests_in_inventory =
+            game_state.player.inventory.count_item(&Item::CHEST);
+        let target_wood = (num_remaining_chests - chests_in_inventory) * 50;
+        let current_wood = game_state.player.inventory.count_item(&Item::WOOD);
+        if num_remaining_chests > 0 && current_wood >= target_wood {
+            if chests_in_inventory < num_remaining_chests {
+                let goal = CraftItemGoal::new(
+                    Item::CHEST.with_count(num_remaining_chests),
+                );
+                return Ok(goal.into());
+            } else {
+                let tile = desired_chests(game_state)?.next().expect(
+                    "At least one chest remaining to reach this branch",
+                );
+                let goal = UseItemOnTile::new(Item::CHEST, "Farm", tile);
+                return Ok(goal.into());
+            }
+        }
+
+        let goal = ClearFarmGoal::new().clear_trees(num_remaining_chests > 0);
         if !goal.is_completed(game_state)? {
-            return Ok(goal.into());
+            return Ok(goal
+                .with_interrupt(move |game_state| {
+                    let current_wood =
+                        game_state.player.inventory.count_item(&Item::WOOD);
+                    num_remaining_chests > 0 && current_wood >= target_wood
+                })
+                .into());
         }
 
         Ok(BotGoalResult::InProgress)

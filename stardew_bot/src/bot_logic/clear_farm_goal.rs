@@ -18,6 +18,7 @@ use super::{
 };
 
 pub struct ClearFarmGoal {
+    clear_trees: bool,
     priority_tiles: HashSet<Vector<isize>>,
 }
 
@@ -25,6 +26,14 @@ impl ClearFarmGoal {
     pub fn new() -> Self {
         Self {
             priority_tiles: HashSet::new(),
+            clear_trees: false,
+        }
+    }
+
+    pub fn clear_trees(self, clear_trees: bool) -> Self {
+        Self {
+            clear_trees,
+            ..self
         }
     }
 
@@ -32,20 +41,29 @@ impl ClearFarmGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let reachable = Self::pathfinding(farm)
+        let pathfinding = farm
+            .pathfinding()
+            .allow_diagonal(false)
             .include_border(true)
-            .reachable(farm_door);
+            .fiber_clearing_cost(1);
+
+        let pathfinding = if game_state.player.current_stamina > 2.0 {
+            pathfinding
+                .stone_clearing_cost(10)
+                .wood_clearing_cost(10)
+                .tree_clearing_cost(50)
+        } else {
+            pathfinding
+        };
+
+        let reachable = pathfinding.reachable(farm_door);
 
         let reachable_clutter = farm
             .objects
             .iter()
             .any(|obj| reachable[obj.tile] && obj.kind.get_tool().is_some());
 
-        let has_stamina = game_state.player.current_stamina > 2.0;
-
-        let is_ongoing = reachable_clutter && has_stamina;
-
-        Ok(!is_ongoing)
+        Ok(!reachable_clutter)
     }
 
     fn pathfinding(farm: &Location) -> Pathfinding {
@@ -134,9 +152,22 @@ impl BotGoal for ClearFarmGoal {
             .objects
             .iter()
             .filter(|obj| {
-                !has_priority_clutter || self.priority_tiles.contains(&obj.tile)
+                if has_priority_clutter {
+                    self.priority_tiles.contains(&obj.tile)
+                } else {
+                    match &obj.kind {
+                        ObjectKind::Tree(tree) => {
+                            self.clear_trees && tree.growth_stage > 0
+                        }
+                        _ => true,
+                    }
+                }
             })
             .filter_map(|obj| obj.kind.get_tool().map(|tool| (obj.tile, tool)))
+            .filter(|(_, tool)| {
+                game_state.player.current_stamina > 2.0
+                    || tool.is_same_item(&Item::SCYTHE)
+            })
             .collect();
 
         if tool_to_use.is_empty() {

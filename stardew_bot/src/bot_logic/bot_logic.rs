@@ -25,6 +25,16 @@ pub trait BotGoal: Any {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error>;
+
+    fn with_interrupt(
+        self,
+        condition: impl Fn(&GameState) -> bool + 'static,
+    ) -> SubGoals
+    where
+        Self: Sized,
+    {
+        SubGoals::new().then(self).with_interrupt(condition)
+    }
 }
 
 pub enum BotGoalResult {

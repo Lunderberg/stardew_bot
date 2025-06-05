@@ -32,6 +32,9 @@ mod graph_search;
 mod inventory_goal;
 pub use inventory_goal::*;
 
+mod craft_item_goal;
+pub use craft_item_goal::*;
+
 mod select_item_goal;
 pub use select_item_goal::*;
 
