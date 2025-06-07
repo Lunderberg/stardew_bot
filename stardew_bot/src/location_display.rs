@@ -267,6 +267,7 @@ impl<'a> DrawableGameLocation<'a> {
                     ObjectKind::Stone => Some(Color::DarkGray),
                     ObjectKind::Wood => Some(Color::Rgb(97, 25, 0)),
                     ObjectKind::Fiber => Some(Color::LightGreen),
+                    ObjectKind::PotOfGold => Some(Color::Yellow),
                     ObjectKind::Tree(_) | ObjectKind::FruitTree(_) => {
                         Some(Color::Rgb(133, 74, 5))
                     }

@@ -72,6 +72,7 @@ impl CropPlantingPlan {
                         | ObjectKind::Wood
                         | ObjectKind::Fiber
                         | ObjectKind::Grass
+                        | ObjectKind::PotOfGold
                         | ObjectKind::Tree(_) => false,
                         ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop,
                         ObjectKind::FruitTree(_)
@@ -166,6 +167,7 @@ impl BotGoal for PlantCropsGoal {
                         Some(Item::PARSNIP_SEEDS)
                     }
                     Some(ObjectKind::HoeDirt(_)) => None,
+                    Some(ObjectKind::PotOfGold) => None,
                     None => Some(Item::HOE),
 
                     Some(

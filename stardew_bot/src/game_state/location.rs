@@ -208,6 +208,9 @@ pub enum ObjectKind {
     /// does it specify the health of the grass.
     Grass,
 
+    /// Appears on Spring 17
+    PotOfGold,
+
     /// A non-fruit tree (e.g. Oak/Maple)
     Tree(Tree),
 
@@ -466,6 +469,8 @@ impl Location {
                     ObjectKind::Stone
                 } else if name.to_lowercase().contains("weeds") {
                     ObjectKind::Fiber
+                } else if name == "PotOfGold" {
+                    ObjectKind::PotOfGold
                 } else {
                     todo!(
                         "Handle item '{name}', \
@@ -1642,6 +1647,7 @@ impl ObjectKind {
             ObjectKind::Stone
             | ObjectKind::Wood
             | ObjectKind::Fiber
+            | ObjectKind::PotOfGold
             | ObjectKind::Chest(_) => false,
             ObjectKind::Grass => true,
             ObjectKind::FruitTree(_) => false,
@@ -1925,6 +1931,7 @@ impl std::fmt::Display for ObjectKind {
             Self::Stone => write!(f, "Stone"),
             Self::Wood => write!(f, "Wood"),
             Self::Fiber => write!(f, "Fiber"),
+            Self::PotOfGold => write!(f, "PotOfGold"),
             Self::Chest(inventory) => {
                 write!(
                     f,
