@@ -45,3 +45,6 @@ pub use bot_goal_display::BotGoalDisplay;
 
 mod rng_display;
 pub use rng_display::RngDisplay;
+
+mod predicted_luck_display;
+pub use predicted_luck_display::PredictedLuckDisplay;

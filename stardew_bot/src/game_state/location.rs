@@ -144,7 +144,7 @@ pub struct Tree {
     pub health: f32,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum TreeKind {
     Oak,
     Maple,

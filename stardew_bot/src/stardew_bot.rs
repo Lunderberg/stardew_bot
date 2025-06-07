@@ -1,7 +1,7 @@
 use crate::{
     game_state::GameStateReader, BotGoalDisplay, BotLogic, Error, FishingUI,
     GameAction, GameState, InputDisplay, LocationDisplay, PlayerStats,
-    RngDisplay, RunningLog, TuiDrawRate, X11Handler,
+    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
@@ -56,6 +56,7 @@ struct TuiBuffers {
     keyboard: InputDisplay,
     bot_goals: BotGoalDisplay,
     rng_display: RngDisplay,
+    predicted_luck_display: PredictedLuckDisplay,
 }
 
 #[allow(unused)]
@@ -120,6 +121,7 @@ impl TuiBuffers {
             keyboard: InputDisplay,
             bot_goals: BotGoalDisplay,
             rng_display: RngDisplay,
+            predicted_luck_display: PredictedLuckDisplay,
         }
     }
 
@@ -133,6 +135,7 @@ impl TuiBuffers {
             Box::new(&mut self.keyboard),
             Box::new(&mut self.bot_goals),
             Box::new(&mut self.rng_display),
+            Box::new(&mut self.predicted_luck_display),
         ]
     }
 }

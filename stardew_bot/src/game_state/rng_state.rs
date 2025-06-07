@@ -251,6 +251,14 @@ impl SeededRng {
         (self.rand_i32() as f32) / (i32::MAX as f32)
     }
 
+    pub fn rand_in_range(&mut self, range: Range<i32>) -> i32 {
+        let float = self.rand_float();
+        let delta = range.end - range.start;
+
+        let offset = (float * (delta as f32)) as i32;
+        range.start + offset
+    }
+
     pub fn from_stardew_seed<const N: usize>(values: [f64; N]) -> Self {
         let seed = Self::stardew_seed(values);
         Self::from_seed(seed)
