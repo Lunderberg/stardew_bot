@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, SubGoals},
+    bot_logic::{BotGoal, BotGoalResult, LogicStack},
     movement_goal::{FaceDirectionGoal, MovementGoal},
 };
 
@@ -20,7 +20,7 @@ impl BotGoal for FishingGoal {
         _: &GameState,
         _: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        let goals = SubGoals::new()
+        let goals = LogicStack::new()
             // .then(super::InventoryGoal::new(Item::new("(T)BambooPole")))
             .then(MovementGoal::new("Forest", Vector::new(70.0, 50.4)))
             .then(FaceDirectionGoal(FacingDirection::South))

@@ -1,5 +1,5 @@
 use crate::{
-    bot_logic::{bot_logic::SubGoals, MovementGoal},
+    bot_logic::{bot_logic::LogicStack, MovementGoal},
     game_state::{Inventory, Item, Key, ObjectKind, Quality},
     Error, GameAction, GameState,
 };

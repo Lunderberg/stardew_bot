@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, SubGoals},
+    bot_logic::{BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch,
     impl_tile_map_graph_search::point_to_point_lower_bound,
     WaitUntilTimeOfDay,
@@ -170,7 +170,7 @@ impl MovementGoal {
     fn room_to_room_movement(
         &self,
         game_state: &GameState,
-    ) -> Result<Option<SubGoals>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         if self.target_room == game_state.player.room_name {
             return Ok(None);
         }
@@ -247,11 +247,14 @@ impl MovementGoal {
         Ok(Some(goals))
     }
 
-    fn within_room_movement(&self, game_state: &GameState) -> Option<SubGoals> {
+    fn within_room_movement(
+        &self,
+        game_state: &GameState,
+    ) -> Option<LogicStack> {
         let player = &game_state.player;
 
         Some(
-            SubGoals::new().then(
+            LogicStack::new().then(
                 LocalMovementGoal::new(
                     self.target_room.clone(),
                     self.target_position,

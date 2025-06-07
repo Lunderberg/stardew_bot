@@ -1,5 +1,5 @@
 use crate::{
-    bot_logic::{bot_logic::SubGoals, MovementGoal},
+    bot_logic::{bot_logic::LogicStack, MovementGoal},
     game_state::{Inventory, Item, Key, ObjectKind, Quality},
     Error, GameAction, GameState,
 };
@@ -100,7 +100,7 @@ impl BotGoal for InventoryGoal {
         if chest_room != &game_state.player.room_name
             || game_state.player.tile().manhattan_dist(chest_tile) > 1
         {
-            let goals = SubGoals::new().then(
+            let goals = LogicStack::new().then(
                 MovementGoal::new(
                     chest_room.clone(),
                     chest_tile.map(|x| x as f32),

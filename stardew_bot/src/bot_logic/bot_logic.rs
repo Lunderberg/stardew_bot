@@ -1,5 +1,5 @@
 use derive_more::From;
-use std::{any::Any, borrow::Cow};
+use std::{any::Any, borrow::Cow, collections::VecDeque};
 
 use crate::{
     game_state::{Item, Key},
@@ -11,10 +11,21 @@ pub struct BotLogic {
     verbose: bool,
 }
 
+pub struct LogicStack(VecDeque<LogicStackItem>);
+
 #[derive(From)]
 enum LogicStackItem {
+    /// A goal for the bot to achieve.  Only the top-most goal is ever
+    /// active.
     Goal(Box<dyn BotGoal>),
-    Interrupt(Box<dyn Fn(&GameState) -> bool>),
+
+    /// A condition required to continue running subgoals
+    ///
+    /// This condition is checked for each update, regardless of
+    /// position on the stack.  While the condition returns true, it
+    /// has no effect.  If the condition returns false, all items
+    /// above it on the stack are immediately canceled.
+    WhileTrue(Box<dyn Fn(&GameState) -> bool>),
 }
 
 pub trait BotGoal: Any {
@@ -26,14 +37,15 @@ pub trait BotGoal: Any {
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error>;
 
-    fn with_interrupt(
+    fn while_condition_holds(
         self,
         condition: impl Fn(&GameState) -> bool + 'static,
-    ) -> SubGoals
+    ) -> LogicStack
     where
         Self: Sized,
     {
-        SubGoals::new().then(self).with_interrupt(condition)
+        let interrupt = LogicStackItem::WhileTrue(Box::new(condition));
+        [interrupt, self.into()].into_iter().collect()
     }
 }
 
@@ -44,16 +56,11 @@ pub enum BotGoalResult {
 
     /// To accomplish this goal, the subgoal should first be
     /// completed.
-    SubGoals(SubGoals),
+    SubGoals(LogicStack),
 
     /// This goal is in-progress, and should remain at the top of the
     /// stack of goals.
     InProgress,
-}
-
-pub struct SubGoals {
-    goals: Vec<Box<dyn BotGoal>>,
-    interrupt: Option<Box<dyn Fn(&GameState) -> bool>>,
 }
 
 impl BotLogic {
@@ -125,7 +132,7 @@ impl BotLogic {
                 .iter()
                 .enumerate()
                 .find(|(_, item)| match item {
-                    LogicStackItem::Interrupt(cond) => cond(game_state),
+                    LogicStackItem::WhileTrue(cond) => cond(game_state),
                     LogicStackItem::Goal(_) => false,
                 })
                 .map(|(i, _)| i);
@@ -144,7 +151,7 @@ impl BotLogic {
             while self
                 .stack
                 .last()
-                .map(|item| matches!(item, LogicStackItem::Interrupt(_)))
+                .map(|item| matches!(item, LogicStackItem::WhileTrue(_)))
                 .unwrap_or(false)
             {
                 self.stack.pop();
@@ -155,7 +162,7 @@ impl BotLogic {
                 .iter_mut()
                 .filter_map(|item| match item {
                     LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_mut()),
-                    LogicStackItem::Interrupt(_) => None,
+                    LogicStackItem::WhileTrue(_) => None,
                 })
                 .last()
                 .ok_or(Error::NoRemainingGoals)?;
@@ -195,20 +202,25 @@ impl BotLogic {
                 BotGoalResult::SubGoals(sub_goals) => {
                     previously_produced_subgoals = Some(self.stack.len() - 1);
 
-                    if let Some(interrupt) = sub_goals.interrupt {
-                        self.stack.push(interrupt.into());
-                    }
-
-                    sub_goals.goals.into_iter().rev().for_each(|sub_goal| {
-                        if self.verbose {
+                    sub_goals
+                        .0
+                        .into_iter()
+                        .inspect(|item| {
+                            if !self.verbose {
+                                return;
+                            }
                             println!(
                                 "\tGoal requires sub-goal '{}', \
-                                 pushing sub-goal to top of stack.",
-                                sub_goal.description(),
+                                     pushing to top of stack.",
+                                match item {
+                                    LogicStackItem::Goal(sub_goal) =>
+                                        sub_goal.description(),
+                                    LogicStackItem::WhileTrue(_) =>
+                                        "while condition".into(),
+                                }
                             );
-                        }
-                        self.stack.push(sub_goal.into());
-                    });
+                        })
+                        .for_each(|item| self.stack.push(item));
                 }
                 BotGoalResult::InProgress => {
                     if self.verbose {
@@ -266,7 +278,7 @@ impl BotLogic {
     ) -> impl DoubleEndedIterator<Item = &dyn BotGoal> + '_ {
         self.stack.iter().filter_map(|item| match item {
             LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_ref()),
-            LogicStackItem::Interrupt(_) => None,
+            LogicStackItem::WhileTrue(_) => None,
         })
     }
 
@@ -275,53 +287,59 @@ impl BotLogic {
     }
 }
 
-impl SubGoals {
+impl LogicStack {
     pub fn new() -> Self {
-        Self {
-            goals: Vec::new(),
-            interrupt: None,
-        }
+        Self(Default::default())
     }
 
     pub fn then(mut self, goal: impl BotGoal + 'static) -> Self {
-        self.goals.push(Box::new(goal));
+        // Push onto the beginning of the stack, such that the new
+        // goal will be the last item executed.
+        self.0.push_front(goal.into());
         self
     }
 
-    pub fn with_interrupt(
+    pub fn while_condition_holds(
         mut self,
         condition: impl Fn(&GameState) -> bool + 'static,
     ) -> Self {
-        self.interrupt = Some(Box::new(condition));
+        self.0
+            .push_front(LogicStackItem::WhileTrue(Box::new(condition)));
         self
     }
 }
 
-impl<Goal> FromIterator<Goal> for SubGoals
+impl<Item> FromIterator<Item> for LogicStack
 where
-    Goal: BotGoal + 'static,
+    Item: Into<LogicStackItem>,
 {
-    fn from_iter<T: IntoIterator<Item = Goal>>(iter: T) -> Self {
-        let mut goals = SubGoals::new();
-        for goal in iter {
-            goals = goals.then(goal);
-        }
-        goals
+    fn from_iter<Iter: IntoIterator<Item = Item>>(iter: Iter) -> Self {
+        let stack = iter.into_iter().map(Into::into).collect();
+        Self(stack)
     }
 }
 
-impl From<SubGoals> for BotGoalResult {
-    fn from(subgoals: SubGoals) -> Self {
+impl From<LogicStack> for BotGoalResult {
+    fn from(subgoals: LogicStack) -> Self {
         Self::SubGoals(subgoals)
     }
 }
 
-impl<T> From<T> for SubGoals
+impl<T> From<T> for LogicStack
 where
     T: BotGoal,
 {
     fn from(value: T) -> Self {
-        SubGoals::new().then(value)
+        LogicStack::new().then(value)
+    }
+}
+
+impl<T> From<T> for LogicStackItem
+where
+    T: BotGoal,
+{
+    fn from(goal: T) -> Self {
+        LogicStackItem::Goal(Box::new(goal))
     }
 }
 

@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, SubGoals},
+    bot_logic::{BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch as _,
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CraftItemGoal,
     ForagingGoal, GameStateExt as _, GoToActionTile, MaintainStaminaGoal,
@@ -240,7 +240,7 @@ impl BotGoal for FirstDay {
         let goal = ClearFarmGoal::new().clear_trees(num_remaining_chests > 0);
         if !goal.is_completed(game_state)? {
             return Ok(goal
-                .with_interrupt(move |game_state| {
+                .while_condition_holds(move |game_state| {
                     let current_wood =
                         game_state.player.inventory.count_item(&Item::WOOD);
                     num_remaining_chests > 0 && current_wood >= target_wood
