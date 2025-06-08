@@ -11,7 +11,10 @@ use crate::{
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{BotGoal, BotGoalResult},
+    GameStateExt as _,
+};
 
 pub struct PlantCropsGoal {
     plan: Option<CropPlantingPlan>,
@@ -47,20 +50,7 @@ fn num_seeds(game_state: &GameState) -> usize {
 impl CropPlantingPlan {
     pub fn new(game_state: &GameState) -> Self {
         let farm = game_state.get_room("Farm").unwrap();
-
-        let farm_door = farm
-            .buildings
-            .iter()
-            .find_map(|building| {
-                building
-                    .door
-                    .as_ref()
-                    .filter(|door| door.inside_name == "FarmHouse")
-                    .map(|door| {
-                        building.shape.top_left + door.relative_location
-                    })
-            })
-            .unwrap();
+        let farm_door = game_state.get_farm_door()?;
 
         let blocked: HashSet<Vector<isize>> = std::iter::empty()
             .chain(farm.iter_water_tiles())

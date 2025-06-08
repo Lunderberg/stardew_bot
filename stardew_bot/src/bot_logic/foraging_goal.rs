@@ -11,6 +11,7 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
     graph_search::GraphSearch,
+    GameStateExt as _,
 };
 
 pub struct ForagingGoal {
@@ -80,22 +81,8 @@ impl BotGoal for ForagingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let farm_door = game_state
-            .locations
-            .iter()
-            .find(|loc| loc.name == "FarmHouse")
-            .unwrap()
-            .warps
-            .iter()
-            .filter(|warp| warp.target_room == "Farm")
-            .map(|warp| warp.target)
-            .next()
-            .unwrap();
-        let farm = game_state
-            .locations
-            .iter()
-            .find(|loc| loc.name == "Farm")
-            .unwrap();
+        let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
 
         let reachable = farm.find_reachable_tiles(farm_door);
 
