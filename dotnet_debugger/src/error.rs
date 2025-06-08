@@ -446,6 +446,9 @@ pub enum Error {
          is not currently supported."
     )]
     CollectionIntoNestedVectorNotSupported,
+
+    #[error("Pointer arithmetic of ({0} + {1})")]
+    InvalidPointerAddition(Pointer, usize),
 }
 
 impl std::fmt::Debug for Error {

@@ -1160,7 +1160,10 @@ where
         loc: Pointer,
         output: &mut [u8],
     ) -> Result<(), Error> {
-        let remote_range = loc..loc + output.len();
+        let range_end = loc
+            .checked_add(output.len())
+            .ok_or_else(|| Error::InvalidPointerAddition(loc, output.len()))?;
+        let remote_range = loc..range_end;
         let cache_range = Self::choose_cache_range(remote_range.clone());
         let num_pages = (cache_range.end - cache_range.start) / PAGE_SIZE;
 
