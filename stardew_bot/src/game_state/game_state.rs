@@ -7,8 +7,8 @@ use crate::{bot_logic::BotError, Error};
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
     DialogueMenu, DisplayState, FishingState, GlobalGameState, InputState,
-    Inventory, Location, LocationDelta, PauseMenu, PlayerState, SeededRng,
-    ShopMenu,
+    Inventory, Location, LocationDelta, MailMenu, PauseMenu, PlayerState,
+    SeededRng, ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -20,11 +20,14 @@ pub struct GameState {
     pub daily: DailyState,
     pub inputs: InputState,
     pub display: DisplayState,
+    pub rng_state: RngState,
+
+    // Different menus that may be open
     pub chest_menu: Option<ChestMenu>,
     pub dialogue_menu: Option<DialogueMenu>,
     pub shop_menu: Option<ShopMenu>,
     pub pause_menu: Option<PauseMenu>,
-    pub rng_state: RngState,
+    pub mail_menu: Option<MailMenu>,
 }
 
 #[derive(Debug)]
@@ -41,11 +44,13 @@ pub struct GameStateDelta {
     daily: DailyState,
     inputs: InputState,
     display: DisplayState,
+    current_rng_state: SeededRng,
+
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
     shop_menu: Option<ShopMenu>,
     pause_menu: Option<PauseMenu>,
-    current_rng_state: SeededRng,
+    mail_menu: Option<MailMenu>,
 }
 
 impl GameState {
@@ -63,11 +68,13 @@ impl GameState {
         DailyState::def_read_daily(&mut graph)?;
         InputState::def_read_input_state(&mut graph)?;
         DisplayState::def_read_display_state(&mut graph)?;
+        SeededRng::def_read_rng_state(&mut graph)?;
+
         ChestMenu::def_read_chest_menu(&mut graph)?;
         DialogueMenu::def_read_dialogue_menu(&mut graph)?;
         ShopMenu::def_read_shop_menu(&mut graph)?;
         PauseMenu::def_read_pause_menu(&mut graph)?;
-        SeededRng::def_read_rng_state(&mut graph)?;
+        MailMenu::def_read_mail_menu(&mut graph)?;
 
         graph.parse(
             "let location_list = StardewValley
@@ -94,11 +101,12 @@ impl GameState {
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
+             current_rng: &SeededRng,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
-             current_rng: &SeededRng| GameState {
+             mail_menu: Option<&MailMenu>| GameState {
                 globals: global_game_state.clone(),
                 locations: locations.clone(),
                 player: player.clone(),
@@ -106,11 +114,13 @@ impl GameState {
                 daily: daily.clone(),
                 inputs: inputs.clone(),
                 display: display.clone(),
+                rng_state: RngState::new(current_rng.clone()),
+
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
                 shop_menu: shop_menu.cloned(),
                 pause_menu: pause_menu.cloned(),
-                rng_state: RngState::new(current_rng.clone()),
+                mail_menu: mail_menu.cloned(),
             },
         )?;
 
@@ -123,11 +133,12 @@ impl GameState {
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
+             rng_state: &SeededRng,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
-             rng_state: &SeededRng| GameStateDelta {
+             mail_menu: Option<&MailMenu>| GameStateDelta {
                 global_game_state: global_game_state.clone(),
                 location_delta: location_delta.clone(),
                 player: player.clone(),
@@ -135,11 +146,13 @@ impl GameState {
                 daily: daily.clone(),
                 inputs: inputs.clone(),
                 display: display.clone(),
+                current_rng_state: rng_state.clone(),
+
                 chest_menu: chest_menu.cloned(),
                 dialogue_menu: dialogue_menu.cloned(),
                 shop_menu: shop_menu.cloned(),
                 pause_menu: pause_menu.cloned(),
-                current_rng_state: rng_state.clone(),
+                mail_menu: mail_menu.cloned(),
             },
         )?;
 
@@ -159,11 +172,13 @@ impl GameState {
                 let daily = read_daily();
                 let inputs = read_input_state();
                 let display = read_display_state();
+                let rng_state = read_rng_state();
+
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
                 let shop_menu = read_shop_menu();
                 let pause_menu = read_pause_menu();
-                let rng_state = read_rng_state();
+                let mail_menu = read_mail_menu();
 
                 new_game_state(
                     global_game_state,
@@ -173,11 +188,13 @@ impl GameState {
                     daily,
                     inputs,
                     display,
+                    rng_state,
+
                     chest_menu,
                     dialogue_menu,
                     shop_menu,
                     pause_menu,
-                    rng_state,
+                    mail_menu,
                 )
             }
 
@@ -189,11 +206,16 @@ impl GameState {
                 let daily = read_daily();
                 let inputs = read_input_state();
                 let display = read_display_state();
+                let rng_state = read_rng_state();
+
+                let has_open_menu = StardewValley.Game1
+                    ._activeClickableMenu
+                    .is_some();
                 let chest_menu = read_chest_menu();
                 let dialogue_menu = read_dialogue_menu();
                 let shop_menu = read_shop_menu();
                 let pause_menu = read_pause_menu();
-                let rng_state = read_rng_state();
+                let mail_menu = read_mail_menu();
 
                 new_game_state_delta(
                     global_game_state,
@@ -203,11 +225,13 @@ impl GameState {
                     daily,
                     inputs,
                     display,
+                    rng_state,
+
                     chest_menu,
                     dialogue_menu,
                     shop_menu,
                     pause_menu,
-                    rng_state,
+                    mail_menu,
                 )
             }
         })?;
@@ -230,10 +254,12 @@ impl GameState {
         self.daily = delta.daily;
         self.inputs = delta.inputs;
         self.display = delta.display;
+
         self.chest_menu = delta.chest_menu;
         self.dialogue_menu = delta.dialogue_menu;
         self.shop_menu = delta.shop_menu;
         self.pause_menu = delta.pause_menu;
+        self.mail_menu = delta.mail_menu;
 
         if let Some(loc) = self
             .locations

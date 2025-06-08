@@ -46,6 +46,9 @@ pub use pause_menu::PauseMenu;
 mod dialogue_menu;
 pub use dialogue_menu::DialogueMenu;
 
+mod mail_menu;
+pub use mail_menu::MailMenu;
+
 mod shop_menu;
 pub use shop_menu::ShopMenu;
 

@@ -78,3 +78,6 @@ pub use use_item_on_tile::*;
 
 mod step_count_for_luck;
 pub use step_count_for_luck::*;
+
+mod check_all_mail;
+pub use check_all_mail::*;

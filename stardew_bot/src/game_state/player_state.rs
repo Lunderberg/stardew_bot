@@ -26,6 +26,9 @@ pub struct PlayerState {
     // Info related to the current action being performed
     pub using_tool: bool,
     pub last_click: Vector<isize>,
+
+    // Per-player game state
+    pub num_unread_mail: usize,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -131,7 +134,8 @@ impl PlayerState {
              last_click: &Vector<isize>,
              current_stamina: f32,
              max_stamina: i32,
-             is_eating: bool| {
+             is_eating: bool,
+             num_unread_mail: usize| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -146,6 +150,7 @@ impl PlayerState {
                     current_stamina,
                     max_stamina,
                     is_eating,
+                    num_unread_mail,
                 }
             },
         )?;
@@ -216,6 +221,12 @@ impl PlayerState {
 
                 let current_money = player.teamRoot.value.money.value;
 
+                let num_unread_mail = player
+                    .mailbox
+                    .count
+                    .value
+                    .prim_cast::<usize>();
+
                 new_player(
                     position,
                     facing,
@@ -230,6 +241,7 @@ impl PlayerState {
                     current_stamina,
                     max_stamina,
                     is_eating,
+                    num_unread_mail,
                 )
             }
         })?;
