@@ -464,7 +464,9 @@ impl Pathfinding<'_> {
 
                 if finished.in_bounds(new_tile)
                     && !finished[new_tile]
-                    && (self.include_border || is_accessible)
+                    && (is_accessible
+                        || (self.include_border
+                            && (dir.is_cardinal() || !walkable[new_tile])))
                 {
                     finished[tile] = true;
                     to_visit.insert(DijkstraEntry {
