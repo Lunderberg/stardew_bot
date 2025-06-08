@@ -84,7 +84,7 @@ impl BotGoal for UseItemOnTile {
 
         let requires_adjacent_tile = match self.item.item_id.as_ref() {
             "(T)Pickaxe" | "(T)Axe" | "(T)Hoe" => true,
-            _ => false,
+            other => other.starts_with("(BC)"),
         };
         let player_tile = game_state.player.tile();
         if requires_adjacent_tile && player_tile == self.tile {
