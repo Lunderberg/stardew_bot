@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    ops::Deref,
+};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use itertools::{Either, Itertools as _};
@@ -128,6 +131,16 @@ pub struct HoeDirt {
     pub has_crop: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Chest {
+    /// The contents of the chest.
+    pub inventory: Inventory,
+
+    /// The chest is currently in the process of being opened.  Do not
+    /// need to re-click on the chest.
+    pub is_opening: bool,
+}
+
 /// Non-fruit trees.  This includes the small 1x1 stumps left behind
 /// after chopping down a tree, but not the larger 2x2 stumps made
 /// during worldgen.
@@ -223,7 +236,7 @@ pub enum ObjectKind {
 
     /// A tile that contains a chest, which may contain items inside
     /// it.
-    Chest(Inventory),
+    Chest(Chest),
 
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
@@ -493,7 +506,41 @@ impl Location {
 
         graph.named_native_function(
             "new_chest_kind",
-            |inventory: &Inventory| ObjectKind::Chest(inventory.clone()),
+            |inventory: &Inventory, special_kind: usize, is_opening: bool| {
+                let capacity: usize = match special_kind {
+                    0 => 36, // Normal
+                    1 => 9,  // Mini Shipping Bin
+                    2 => 9,  // Jumino Chest
+                    3 => 36, // AutoLoader
+                    4 => 1,  // Enricher
+                    5 => 70, // Big chest (either wood or stone)
+                    other => panic!("Invalid chest kind: {other}"),
+                };
+                let iter_explicit_items = inventory.items.iter().cloned();
+                let num_trailing_slots = capacity
+                    .checked_sub(inventory.items.len())
+                    .unwrap_or_else(|| {
+                        panic!(
+                            "Inventory had {} items, \
+                             but chest type {special_kind} \
+                             only has capacity of {capacity}.",
+                            inventory.items.len()
+                        )
+                    });
+                let iter_trailing_empty_slots =
+                    (0..num_trailing_slots).map(|_| None);
+
+                let inventory = Inventory {
+                    items: iter_explicit_items
+                        .chain(iter_trailing_empty_slots)
+                        .collect(),
+                };
+
+                ObjectKind::Chest(Chest {
+                    inventory,
+                    is_opening,
+                })
+            },
         )?;
 
         graph.named_native_function(
@@ -912,7 +959,17 @@ impl Location {
 
                         let kind = if chest.is_some() {
                             let inventory = read_inventory(chest.netItems.value);
-                            new_chest_kind(inventory)
+                            let special_kind = chest.specialChestType.value;
+
+                            let is_closed = chest.currentLidFrame == chest.startingLidFrame.value &&
+                                chest.frameCounter.value == -1i32;
+                            let is_opening = !is_closed;
+
+                            new_chest_kind(
+                                inventory,
+                                special_kind,
+                                is_opening,
+                            )
                         } else if obj.category.value == -999i32 {
                             let name = obj.netName.value.read_string();
                             new_litter_kind(name)
@@ -1932,12 +1989,13 @@ impl std::fmt::Display for ObjectKind {
             Self::Wood => write!(f, "Wood"),
             Self::Fiber => write!(f, "Fiber"),
             Self::PotOfGold => write!(f, "PotOfGold"),
-            Self::Chest(inventory) => {
+            Self::Chest(chest) => {
                 write!(
                     f,
                     "Chest with {} slots, {} full",
-                    inventory.items.len(),
-                    inventory
+                    chest.inventory.items.len(),
+                    chest
+                        .inventory
                         .items
                         .iter()
                         .filter(|item| item.is_some())
@@ -1999,5 +2057,13 @@ impl FloatingItem {
     /// The location of the item, in tile coordinates
     pub fn tile_pos(&self) -> Vector<f32> {
         self.position / 64.0
+    }
+}
+
+impl Deref for Chest {
+    type Target = Inventory;
+
+    fn deref(&self) -> &Self::Target {
+        &self.inventory
     }
 }

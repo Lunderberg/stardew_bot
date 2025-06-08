@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    FillWateringCan, GameStateExt as _,
+    FillWateringCan, GameStateExt as _, InventoryGoal,
 };
 
 pub struct WaterCropsGoal {}
@@ -99,6 +99,11 @@ impl BotGoal for WaterCropsGoal {
         let Some(tile) = opt_next_tile else {
             return Ok(BotGoalResult::Completed);
         };
+
+        let goal = InventoryGoal::new(Item::WATERING_CAN);
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
+        }
 
         let goal = FillWateringCan::if_empty();
         if !goal.is_completed(game_state) {

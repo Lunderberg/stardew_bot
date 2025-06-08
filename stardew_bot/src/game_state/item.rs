@@ -26,7 +26,7 @@ pub struct WateringCan {
     pub max_water: i32,
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum Quality {
     /// Normal quality (value = 0)
     Normal,
@@ -121,6 +121,13 @@ impl Item {
         self.kind.as_ref().and_then(|kind| match kind {
             ItemKind::WateringCan(can) => Some(can),
         })
+    }
+
+    /// Returns true if this item-stack is full, false otherwise.
+    ///
+    /// TODO: Handle item types that are not allowed to stack.
+    pub fn is_full_stack(&self) -> bool {
+        self.count == 999
     }
 }
 

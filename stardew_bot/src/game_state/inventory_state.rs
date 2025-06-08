@@ -156,4 +156,20 @@ impl Inventory {
             .map(|inv_item| inv_item.count)
             .sum::<usize>()
     }
+
+    pub fn has_empty_slot(&self) -> bool {
+        self.iter_slots().any(|opt_item| opt_item.is_none())
+    }
+
+    /// Returns true if the item can be added to this inventory.
+    ///
+    /// If the inventory has an empty slot, or if the inventory has a
+    /// non-full slot containing the item type, this method will
+    /// return true.  Otherwise, will return false.
+    pub fn can_add(&self, new_item: &Item) -> bool {
+        self.iter_slots().any(|opt_item| match opt_item {
+            None => true,
+            Some(item) => item.is_same_item(new_item) && !item.is_full_stack(),
+        })
+    }
 }
