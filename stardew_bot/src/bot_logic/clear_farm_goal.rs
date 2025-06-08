@@ -213,7 +213,7 @@ impl BotGoal for ClearFarmGoal {
         let items = [Item::PICKAXE, Item::AXE, Item::SCYTHE];
         for item in items {
             let goal = super::InventoryGoal::new(item);
-            if !goal.contains_target_item(&player.inventory) {
+            if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
         }

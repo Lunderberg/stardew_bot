@@ -18,6 +18,10 @@ impl InventoryGoal {
 }
 
 impl InventoryGoal {
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        self.contains_target_item(&game_state.player.inventory)
+    }
+
     pub fn contains_target_item(&self, inventory: &Inventory) -> bool {
         let num_found = inventory
             .items
