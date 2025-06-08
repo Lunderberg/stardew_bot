@@ -12,6 +12,9 @@ pub use bot_logic::BotLogic;
 mod first_day;
 pub use first_day::*;
 
+mod generic_day;
+pub use generic_day::*;
+
 mod fishing_goal;
 pub use fishing_goal::*;
 
@@ -44,8 +47,14 @@ pub use maintain_stamina_goal::*;
 mod clear_farm_goal;
 pub use clear_farm_goal::*;
 
+mod fill_watering_can;
+pub use fill_watering_can::*;
+
 mod plant_crops_goal;
 pub use plant_crops_goal::*;
+
+mod water_crops_goal;
+pub use water_crops_goal::*;
 
 mod clay_farming_goal;
 pub use clay_farming_goal::*;

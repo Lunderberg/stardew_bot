@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    GameStateExt as _,
+    FillWateringCan, GameStateExt as _,
 };
 
 pub struct PlantCropsGoal {
@@ -48,7 +48,7 @@ fn num_seeds(game_state: &GameState) -> usize {
 }
 
 impl CropPlantingPlan {
-    pub fn new(game_state: &GameState) -> Self {
+    pub fn new(game_state: &GameState) -> Result<Self, Error> {
         let farm = game_state.get_room("Farm").unwrap();
         let farm_door = game_state.get_farm_door()?;
 
@@ -90,10 +90,10 @@ impl CropPlantingPlan {
             .take(num_seeds)
             .collect();
 
-        CropPlantingPlan {
+        Ok(CropPlantingPlan {
             to_plant,
             farm_door,
-        }
+        })
     }
 }
 
@@ -108,7 +108,7 @@ impl BotGoal for PlantCropsGoal {
         _do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
         if self.plan.is_none() {
-            self.plan = Some(CropPlantingPlan::new(game_state));
+            self.plan = Some(CropPlantingPlan::new(game_state)?);
         }
         let plan = self.plan.as_ref().unwrap();
 
@@ -192,25 +192,9 @@ impl BotGoal for PlantCropsGoal {
         };
 
         if item.is_same_item(&Item::WATERING_CAN) {
-            let current_water = game_state
-                .player
-                .inventory
-                .iter_items()
-                .find_map(|item| item.as_watering_can())
-                .map(|can| can.remaining_water)
-                .unwrap_or(0);
-
-            if current_water == 0 {
-                let closest_water = farm
-                    .pathfinding()
-                    .include_border(true)
-                    .iter_dijkstra(player_tile)
-                    .map(|(tile, _)| tile)
-                    .find(|tile| farm.is_water(*tile))
-                    .expect("Handle case where no water on farm is reachable");
-                let action =
-                    UseItemOnTile::new(item.clone(), "Farm", closest_water);
-                return Ok(action.into());
+            let goal = FillWateringCan::if_empty();
+            if !goal.is_completed(game_state) {
+                return Ok(goal.into());
             }
         }
 

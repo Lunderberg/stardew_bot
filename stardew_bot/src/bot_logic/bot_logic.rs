@@ -96,7 +96,7 @@ impl BotLogic {
                     interrupt: Box::new(super::StepCountForLuck::new()),
                     active_goal: None,
                 },
-                LogicStackItem::Goal(Box::new(super::FirstDay)),
+                LogicStackItem::Goal(Box::new(super::GenericDay)),
             ],
             verbose,
         }
