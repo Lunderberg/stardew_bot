@@ -1,5 +1,112 @@
-use crate::{game_state::SeededRng, GameState};
+use crate::{
+    bot_logic::StopMovingGoal, game_state::SeededRng, Error, GameState,
+};
 
+use super::bot_logic::BotInterrupt;
+
+pub struct StepCountForLuck {
+    /// The time in the day when the steps should start being checked.
+    /// Defaults to 2500 (1:00 AM).
+    start_time: i32,
+
+    /// The maximum number of steps that may be taken to manipulate
+    /// the step counter.
+    ///
+    /// While in principle, we could always take enough steps that the
+    /// day will be guaranteed to have the best possible luck (+100 on
+    /// an RNG roll from -100 to +100), taking that many steps may
+    /// require taking more steps than there is time to do.
+    /// Therefore, select the best possible luck that can be achieved
+    /// within the next `max_lookahead` steps.
+    max_lookahead: usize,
+
+    /// The target number of steps when the day ends.
+    ///
+    /// When the time reaches `start_time`, this value is decided
+    /// based on the current number of steps taken.
+    target_steps: Option<u32>,
+}
+
+impl StepCountForLuck {
+    pub fn new() -> Self {
+        Self {
+            start_time: 2500,
+            max_lookahead: 30,
+            target_steps: None,
+        }
+    }
+
+    fn plan_steps(&self, game_state: &GameState) -> Result<u32, Error> {
+        let additional_steps = (0..(self.max_lookahead as u32))
+            .max_by_key(|additional_steps| {
+                predict_daily_luck(game_state, *additional_steps)
+            })
+            .unwrap();
+
+        let steps_taken: u32 =
+            game_state.globals.get_stat("stepsTaken").unwrap_or(0);
+
+        Ok(steps_taken + additional_steps)
+    }
+}
+
+impl BotInterrupt for StepCountForLuck {
+    fn description(&self) -> std::borrow::Cow<str> {
+        if let Some(steps) = self.target_steps {
+            format!("Stop at {steps} steps").into()
+        } else {
+            format!("Wait until {}, then step-count", self.start_time).into()
+        }
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<Box<dyn super::bot_logic::BotGoal>>, Error> {
+        if game_state.globals.in_game_time < self.start_time {
+            return Ok(None);
+        }
+
+        if self.target_steps.is_none() {
+            self.target_steps = Some(self.plan_steps(game_state)?);
+        }
+
+        let target_steps =
+            self.target_steps.expect("Just populated self.target_steps");
+
+        let steps_taken: u32 =
+            game_state.globals.get_stat("stepsTaken").unwrap_or(0);
+
+        assert!(
+            steps_taken <= target_steps,
+            "TODO: Re-plan target steps after overshooting.  \
+             Better yet, avoid taking too many steps \
+             in the first place."
+        );
+
+        if steps_taken < target_steps {
+            // Still have more steps to take before reaching target
+            // step count.
+            return Ok(None);
+        }
+
+        if game_state.player.movement.is_none() {
+            // Not currently moving, no need to change anything.
+            return Ok(None);
+        }
+
+        // The player is currently moving, and has alreaady reached
+        // the step count.
+        Ok(Some(Box::new(StopMovingGoal)))
+    }
+}
+
+/// Check if a value is allowed to be the dish of the day
+///
+/// The dish-of-the-day roll is repeated until a valid dish is
+/// selected.  Since the daily luck roll occurs after the
+/// dish-of-the-day roll, predicting the daily luck requires knowing
+/// how many PRNG rolls are consumed by the dish-of-the-day updates.
 fn is_allowed_dish_of_the_day(value: i32) -> bool {
     assert!(
         194 <= value && value < 240,
@@ -26,6 +133,17 @@ fn is_allowed_dish_of_the_day(value: i32) -> bool {
     }
 }
 
+/// Generate a seeded RNG for the following day
+///
+/// Valid for Stardew Valley 1.6.15, with legacy RNG disabled.
+///
+/// In 1.5 and earlier, or with legacy RNG enabled, the components are
+/// added together instead of being hashed together.  It's also
+/// possible that some versions of 1.6 only perform a single round of
+/// hashing rather than two rounds of hashing, as I've seen that
+/// described in some posts, but 1.6.15 does perform two rounds of
+/// hashing, one before distributing the seed to all clients, and one
+/// after.
 fn new_day_rng(game_state: &GameState, additional_steps: u32) -> SeededRng {
     let unique_id: u32 = game_state.globals.unique_id as u32;
 

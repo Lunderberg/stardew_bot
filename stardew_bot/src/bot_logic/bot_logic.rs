@@ -14,7 +14,7 @@ pub struct BotLogic {
 pub struct LogicStack(VecDeque<LogicStackItem>);
 
 #[derive(From)]
-enum LogicStackItem {
+pub enum LogicStackItem {
     /// A goal for the bot to achieve.  Only the top-most goal is ever
     /// active.
     Goal(Box<dyn BotGoal>),
@@ -22,10 +22,20 @@ enum LogicStackItem {
     /// A condition required to continue running subgoals
     ///
     /// This condition is checked for each update, regardless of
-    /// position on the stack.  While the condition returns true, it
-    /// has no effect.  If the condition returns false, all items
-    /// above it on the stack are immediately canceled.
-    WhileTrue(Box<dyn Fn(&GameState) -> bool>),
+    /// position on the stack.  If the condition returns true, all
+    /// items above it on the stack are immediately canceled.
+    CancelIf(Box<dyn Fn(&GameState) -> bool>),
+
+    /// An interrupt that may push a new goal to the top of the stack,
+    /// pre-empting an in-progress goal.
+    ///
+    /// An interrupt may only have a single goal on the stack at a
+    /// time.  Until the interrupt's goal has been completed, the
+    /// interrupt may not fire again.
+    Interrupt {
+        interrupt: Box<dyn BotInterrupt>,
+        active_goal: Option<usize>,
+    },
 }
 
 pub trait BotGoal: Any {
@@ -37,15 +47,15 @@ pub trait BotGoal: Any {
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error>;
 
-    fn while_condition_holds(
+    fn cancel_if(
         self,
         condition: impl Fn(&GameState) -> bool + 'static,
     ) -> LogicStack
     where
         Self: Sized,
     {
-        let interrupt = LogicStackItem::WhileTrue(Box::new(condition));
-        [interrupt, self.into()].into_iter().collect()
+        let cancellation = LogicStackItem::CancelIf(Box::new(condition));
+        [cancellation, self.into()].into_iter().collect()
     }
 }
 
@@ -63,6 +73,15 @@ pub enum BotGoalResult {
     InProgress,
 }
 
+pub trait BotInterrupt: Any {
+    fn description(&self) -> Cow<str>;
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<Box<dyn BotGoal>>, Error>;
+}
+
 impl BotLogic {
     pub fn new(verbose: bool) -> Self {
         Self {
@@ -73,6 +92,10 @@ impl BotLogic {
                 //     "Carpenter",
                 // ))),
                 LogicStackItem::Goal(Box::new(super::FishingGoal)),
+                LogicStackItem::Interrupt {
+                    interrupt: Box::new(super::StepCountForLuck::new()),
+                    active_goal: None,
+                },
                 LogicStackItem::Goal(Box::new(super::FirstDay)),
             ],
             verbose,
@@ -124,37 +147,70 @@ impl BotLogic {
         let mut previously_produced_subgoals: Option<usize> = None;
 
         loop {
-            // Check if any interrupts should be triggered.  If so,
-            // everything above that position in the stack gets
+            // Check if any CancelIf conditions should be triggered.
+            // If so, everything above that position in the stack gets
             // removed.
-            let opt_interrupt = self
+            let opt_cancellation = self
                 .stack
                 .iter()
                 .enumerate()
                 .find(|(_, item)| match item {
-                    LogicStackItem::WhileTrue(cond) => cond(game_state),
-                    LogicStackItem::Goal(_) => false,
+                    LogicStackItem::CancelIf(cond) => cond(game_state),
+                    LogicStackItem::Goal(_)
+                    | LogicStackItem::Interrupt { .. } => false,
                 })
                 .map(|(i, _)| i);
-            if let Some(interrupt) = opt_interrupt {
+            if let Some(interrupt) = opt_cancellation {
                 if self.verbose {
                     println!(
                         "Interrupt {interrupt} triggered, \
                          removing all goals above it."
                     )
                 }
-                self.stack.shrink_to(interrupt);
+                self.stack.truncate(interrupt);
             }
 
-            // Any interrupts on the top of the stack no longer have
-            // anything remaining that they can interrupt.
+            // Any cancellations or interrupts on the top of the stack no longer
+            // have anything remaining that they can cancel/interrupt.
             while self
                 .stack
                 .last()
-                .map(|item| matches!(item, LogicStackItem::WhileTrue(_)))
+                .map(|item| {
+                    matches!(
+                        item,
+                        LogicStackItem::CancelIf(_)
+                            | LogicStackItem::Interrupt { .. }
+                    )
+                })
                 .unwrap_or(false)
             {
                 self.stack.pop();
+            }
+
+            // If anything was removed, mark interrupts that may be
+            // triggered again.
+            self.reset_completed_interrupts();
+
+            // Check if any interrupts should push a new goal onto the
+            // top of the stack.
+            for i_item in (0..self.stack.len()).rev() {
+                let current_stack_size = self.stack.len();
+                let LogicStackItem::Interrupt {
+                    interrupt,
+                    active_goal,
+                } = &mut self.stack[i_item]
+                else {
+                    continue;
+                };
+                if active_goal.is_some() {
+                    continue;
+                }
+                let Some(new_goal) = interrupt.check(game_state)? else {
+                    continue;
+                };
+
+                *active_goal = Some(current_stack_size);
+                self.stack.push(new_goal.into());
             }
 
             let current_goal: &mut dyn BotGoal = self
@@ -162,7 +218,8 @@ impl BotLogic {
                 .iter_mut()
                 .filter_map(|item| match item {
                     LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_mut()),
-                    LogicStackItem::WhileTrue(_) => None,
+                    LogicStackItem::CancelIf(_)
+                    | LogicStackItem::Interrupt { .. } => None,
                 })
                 .last()
                 .ok_or(Error::NoRemainingGoals)?;
@@ -198,6 +255,7 @@ impl BotLogic {
                     }
 
                     self.stack.pop();
+                    self.reset_completed_interrupts();
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
                     previously_produced_subgoals = Some(self.stack.len() - 1);
@@ -206,19 +264,13 @@ impl BotLogic {
                         .0
                         .into_iter()
                         .inspect(|item| {
-                            if !self.verbose {
-                                return;
-                            }
-                            println!(
-                                "\tGoal requires sub-goal '{}', \
+                            if self.verbose {
+                                println!(
+                                    "\tGoal requires sub-goal '{}', \
                                      pushing to top of stack.",
-                                match item {
-                                    LogicStackItem::Goal(sub_goal) =>
-                                        sub_goal.description(),
-                                    LogicStackItem::WhileTrue(_) =>
-                                        "while condition".into(),
-                                }
-                            );
+                                    item.description()
+                                );
+                            }
                         })
                         .for_each(|item| self.stack.push(item));
                 }
@@ -273,17 +325,31 @@ impl BotLogic {
         Ok(actions)
     }
 
-    pub fn iter_goals(
+    fn reset_completed_interrupts(&mut self) {
+        let stack_size = self.stack.len();
+        for item in &mut self.stack {
+            if let LogicStackItem::Interrupt { active_goal, .. } = item {
+                let should_reset = active_goal
+                    .map(|index| index >= stack_size)
+                    .unwrap_or(false);
+                if should_reset {
+                    *active_goal = None;
+                }
+            }
+        }
+    }
+
+    pub fn iter(
         &self,
-    ) -> impl DoubleEndedIterator<Item = &dyn BotGoal> + '_ {
-        self.stack.iter().filter_map(|item| match item {
-            LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_ref()),
-            LogicStackItem::WhileTrue(_) => None,
-        })
+    ) -> impl DoubleEndedIterator<Item = &LogicStackItem> + '_ {
+        self.stack.iter()
     }
 
     pub fn current_goal(&self) -> Option<&dyn BotGoal> {
-        self.iter_goals().last()
+        self.stack.iter().rev().find_map(|item| match item {
+            LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_ref()),
+            _ => None,
+        })
     }
 }
 
@@ -299,13 +365,25 @@ impl LogicStack {
         self
     }
 
-    pub fn while_condition_holds(
+    pub fn cancel_if(
         mut self,
         condition: impl Fn(&GameState) -> bool + 'static,
     ) -> Self {
         self.0
-            .push_front(LogicStackItem::WhileTrue(Box::new(condition)));
+            .push_front(LogicStackItem::CancelIf(Box::new(condition)));
         self
+    }
+}
+
+impl LogicStackItem {
+    pub fn description(&self) -> Cow<str> {
+        match self {
+            LogicStackItem::Goal(goal) => goal.description(),
+            LogicStackItem::CancelIf(_) => "CancelIf".into(),
+            LogicStackItem::Interrupt { interrupt, .. } => {
+                interrupt.description()
+            }
+        }
     }
 }
 

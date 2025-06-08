@@ -55,6 +55,8 @@ pub struct LocalMovementGoal {
 
 pub struct FaceDirectionGoal(pub FacingDirection);
 
+pub struct StopMovingGoal;
+
 struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
     in_game_time: i32,
@@ -556,5 +558,30 @@ impl BotGoal for FaceDirectionGoal {
 
     fn description(&self) -> Cow<str> {
         format!("Turn to face {}", self.0).into()
+    }
+}
+
+impl BotGoal for StopMovingGoal {
+    fn description(&self) -> Cow<str> {
+        "Stop moving".into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        _: &mut dyn FnMut(GameAction),
+    ) -> Result<BotGoalResult, Error> {
+        Ok(if game_state.player.movement.is_some() {
+            // The player is currently moving.  The return-to-default
+            // logic will stop the player's movement, so long as no
+            // goal triggers additional movement.  Mark this goal as
+            // InProgress to prevent any other goals from continuing
+            // the ongoing motion.
+            BotGoalResult::InProgress
+        } else {
+            // The player is not moving.  Therefore, the goal of
+            // becoming stationary has been achieved.
+            BotGoalResult::Completed
+        })
     }
 }

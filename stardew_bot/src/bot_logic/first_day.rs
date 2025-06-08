@@ -222,28 +222,28 @@ impl BotGoal for FirstDay {
             game_state.player.inventory.count_item(&Item::CHEST);
         let target_wood = (num_remaining_chests - chests_in_inventory) * 50;
         let current_wood = game_state.player.inventory.count_item(&Item::WOOD);
-        if num_remaining_chests > 0 && current_wood >= target_wood {
-            if chests_in_inventory < num_remaining_chests {
-                let goal = CraftItemGoal::new(
-                    Item::CHEST.with_count(num_remaining_chests),
-                );
-                return Ok(goal.into());
-            } else {
-                let tile = desired_chests(game_state)?.next().expect(
-                    "At least one chest remaining to reach this branch",
-                );
+        if chests_in_inventory > 0 {
+            if let Some(tile) = desired_chests(game_state)?.next() {
                 let goal = UseItemOnTile::new(Item::CHEST, "Farm", tile);
                 return Ok(goal.into());
             }
+        }
+        if num_remaining_chests > 0 && current_wood >= target_wood {
+            let goal = CraftItemGoal::new(
+                Item::CHEST.with_count(num_remaining_chests),
+            );
+            return Ok(goal.into());
         }
 
         let goal = ClearFarmGoal::new().clear_trees(num_remaining_chests > 0);
         if !goal.is_completed(game_state)? {
             return Ok(goal
-                .while_condition_holds(move |game_state| {
+                .cancel_if(move |game_state| {
                     let current_wood =
                         game_state.player.inventory.count_item(&Item::WOOD);
-                    num_remaining_chests > 0 && current_wood >= target_wood
+                    let should_cancel =
+                        num_remaining_chests > 0 && current_wood >= target_wood;
+                    should_cancel
                 })
                 .into());
         }

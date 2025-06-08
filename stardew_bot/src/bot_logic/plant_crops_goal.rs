@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools as _;
+
 use crate::{
     bot_logic::{
         graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
