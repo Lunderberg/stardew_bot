@@ -61,9 +61,18 @@ impl BotGoal for UseItemOnTile {
             return Ok(BotGoalResult::Completed);
         }
 
+        let tolerance = match self.item.item_id.as_ref() {
+            "(T)WateringCan"
+                if game_state.get_room(&self.room)?.is_water(self.tile) =>
+            {
+                1.0
+            }
+            _ => 1.4,
+        };
+
         let movement =
             MovementGoal::new(self.room.clone(), self.tile.map(|x| x as f32))
-                .with_tolerance(1.4);
+                .with_tolerance(tolerance);
         if !movement.is_completed(game_state) {
             return Ok(movement.into());
         }
