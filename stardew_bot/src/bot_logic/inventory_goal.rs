@@ -223,30 +223,31 @@ impl BotGoal for InventoryGoal {
             for (item, player_count) in &player_contents {
                 let player_count = *player_count;
 
-                let player_to_chest = {
-                    let player_has_too_many = if let Some(bound) =
-                        self.bounds.get(item)
-                    {
-                        bound.max.map(|max| player_count > max).unwrap_or(false)
-                    } else {
-                        self.stash_unspecified_items
-                    };
-                    let can_add_to_chest = chest_menu.chest_items.can_add(
-                        &Item::new(item.item_id.clone())
-                            .with_quality(item.quality),
-                    );
-                    let should_add_to_chest = preferred_chest
-                        .get(item)
-                        .cloned()
-                        .map(|preferred_chest_tile| {
-                            preferred_chest_tile == chest_tile
-                        })
-                        .unwrap_or(true);
+                let opt_upper_bound = self
+                    .bounds
+                    .get(item)
+                    .map(|bound| bound.max)
+                    .unwrap_or(self.stash_unspecified_items.then(|| 0));
 
-                    player_has_too_many
-                        && can_add_to_chest
-                        && should_add_to_chest
-                };
+                let player_has_too_many = opt_upper_bound
+                    .map(|upper_bound| player_count > upper_bound)
+                    .unwrap_or(false);
+
+                let can_add_to_chest = chest_menu.chest_items.can_add(
+                    &Item::new(item.item_id.clone()).with_quality(item.quality),
+                );
+                let should_add_to_chest = preferred_chest
+                    .get(item)
+                    .cloned()
+                    .map(|preferred_chest_tile| {
+                        preferred_chest_tile == chest_tile
+                    })
+                    .unwrap_or(true);
+
+                let player_to_chest = player_has_too_many
+                    && can_add_to_chest
+                    && should_add_to_chest;
+
                 if player_to_chest {
                     // The player has more than the maximum amount of
                     // an item, and the chest already contains some of
@@ -255,7 +256,11 @@ impl BotGoal for InventoryGoal {
                     let slot = player_inventory.item_slot(item).unwrap();
                     let pixel = chest_menu.player_item_locations[slot];
                     do_action(GameAction::MouseOverPixel(pixel));
-                    do_action(GameAction::RightClick);
+                    if opt_upper_bound == Some(0) {
+                        do_action(GameAction::LeftClick);
+                    } else {
+                        do_action(GameAction::RightClick);
+                    }
                     return Ok(BotGoalResult::InProgress);
                 }
             }
