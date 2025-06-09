@@ -99,27 +99,23 @@ impl BotGoal for ExpandTreeFarm {
             })
             .collect();
 
-        if !seed_loc.is_empty() {
+        let initial_tile = if game_state.player.room_name == "Farm" {
+            game_state.player.tile()
+        } else {
+            farm_door
+        };
+
+        let opt_closest_seed = pathfinding
+            .iter_dijkstra(initial_tile)
+            .find_map(|(tile, _)| {
+                seed_loc.get(&tile).map(|opt_tool| (tile, opt_tool))
+            });
+        if let Some((tile, opt_tool)) = opt_closest_seed {
             let goal = InventoryGoal::new(Item::AXE);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
-        }
 
-        if game_state.player.room_name != "Farm" {
-            let goal = MovementGoal::new("Farm", farm_door.map(|x| x as f32))
-                .with_tolerance(1000.0);
-            return Ok(goal.into());
-        }
-
-        let player_tile = game_state.player.tile();
-        let opt_closest_seed =
-            pathfinding
-                .iter_dijkstra(player_tile)
-                .find_map(|(tile, _)| {
-                    seed_loc.get(&tile).map(|opt_tool| (tile, opt_tool))
-                });
-        if let Some((tile, opt_tool)) = opt_closest_seed {
             if let Some(tool) = opt_tool {
                 let goal = UseItemOnTile::new(tool.clone(), "Farm", tile);
                 return Ok(goal.into());
