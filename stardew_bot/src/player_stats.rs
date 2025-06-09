@@ -4,7 +4,7 @@ use ratatui::{
 };
 use tui_utils::WidgetWindow;
 
-use crate::{Error, GameState};
+use crate::{game_state::ItemCategory, Error, GameState};
 
 pub struct PlayerStats {
     table_state: TableState,
@@ -35,6 +35,16 @@ impl WidgetWindow<Error> for PlayerStats {
         let player_state = &game_state.player;
         let daily_state = &game_state.daily;
 
+        let gold_plus_fish = player_state.current_money
+            + player_state
+                .inventory
+                .iter_items()
+                .filter(|item| {
+                    matches!(item.category, Some(ItemCategory::Fish))
+                })
+                .map(|item| item.price * (item.count as i32))
+                .sum::<i32>();
+
         let table = Table::new(
             [
                 Row::new([
@@ -44,6 +54,8 @@ impl WidgetWindow<Error> for PlayerStats {
                         .map(|dir| format!("{dir}"))
                         .unwrap_or("".into()),
                 ]),
+                Row::default(),
+                Row::new(["Gold+Fish".into(), format!("{gold_plus_fish}")]),
                 Row::default(),
                 Row::new([
                     "Farming XP".into(),

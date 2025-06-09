@@ -2,8 +2,8 @@ use crate::{Error, GameAction, GameState};
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult, LogicStack},
-    CheckAllMail, ExpandTreeFarm, FirstDay, InventoryGoal, PlantCropsGoal,
-    WaterCropsGoal,
+    CheckAllMail, ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation,
+    InventoryGoal, PlantCropsGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -25,6 +25,7 @@ impl BotGoal for GenericDay {
 
         Ok(LogicStack::new()
             .then(CheckAllMail)
+            .then(FishingGoal::new(FishingLocation::OceanByWilly))
             .then(WaterCropsGoal::new())
             .then(ExpandTreeFarm::new())
             .into())

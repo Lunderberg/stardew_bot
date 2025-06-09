@@ -11,7 +11,14 @@ pub struct Item {
     pub count: usize,
     pub price: i32,
     pub edibility: i32,
+
+    /// Extra information about a specific item (e.g. watering cans
+    /// tracking the amount of water).
     pub kind: Option<ItemKind>,
+
+    /// The numeric category of the item. (e.g. watering cans being
+    /// within the Tool category).
+    pub category: Option<ItemCategory>,
 }
 
 /// Contains extra fields for specific item types.
@@ -41,12 +48,22 @@ pub enum Quality {
     Iridium,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ItemCategory {
+    Fish,
+    Other(i32),
+}
+
 impl Item {
     pub const PICKAXE: Item = Item::new_const("(T)Pickaxe");
     pub const AXE: Item = Item::new_const("(T)Axe");
     pub const SCYTHE: Item = Item::new_const("(W)47");
     pub const HOE: Item = Item::new_const("(T)Hoe");
     pub const WATERING_CAN: Item = Item::new_const("(T)WateringCan");
+
+    pub const BAMBOO_POLE: Item = Item::new_const("(T)BambooPole");
+    pub const FIBERGLASS_ROD: Item = Item::new_const("(T)FiberglassRod");
+    pub const IRIDIUM_ROD: Item = Item::new_const("(T)IridiumRod");
 
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const SALAD: Item = Item::new_const("(O)196");
@@ -67,6 +84,7 @@ impl Item {
             price: 0,
             edibility: -300,
             kind: None,
+            category: None,
         }
     }
 
@@ -78,6 +96,7 @@ impl Item {
             price: 0,
             edibility: -300,
             kind: None,
+            category: None,
         }
     }
 
@@ -87,6 +106,10 @@ impl Item {
 
     pub fn with_count(self, count: usize) -> Self {
         Self { count, ..self }
+    }
+
+    pub fn with_category(self, category: Option<ItemCategory>) -> Self {
+        Self { category, ..self }
     }
 
     pub fn with_price(self, price: i32) -> Self {
@@ -149,8 +172,17 @@ impl TryFrom<i32> for Quality {
             0 => Ok(Self::Normal),
             1 => Ok(Self::Silver),
             2 => Ok(Self::Gold),
-            3 => Ok(Self::Iridium),
+            4 => Ok(Self::Iridium),
             other => Err(Error::InvalidQualityValue(other)),
+        }
+    }
+}
+
+impl From<i32> for ItemCategory {
+    fn from(value: i32) -> Self {
+        match value {
+            -4 => ItemCategory::Fish,
+            other => ItemCategory::Other(other),
         }
     }
 }

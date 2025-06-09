@@ -27,7 +27,7 @@ impl<T> Vector<T> {
         }
     }
 
-    pub fn new(right: T, down: T) -> Self {
+    pub const fn new(right: T, down: T) -> Self {
         Self { right, down }
     }
 

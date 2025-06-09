@@ -30,7 +30,7 @@ impl BotGoal for CheckAllMail {
         let farm_door = game_state.get_farm_door()?;
         let mailbox = farm_door + Vector::new(4, 2);
 
-        if game_state.mail_menu.is_some() {
+        if game_state.mail_menu.is_some() || game_state.pause_menu.is_some() {
             do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         }

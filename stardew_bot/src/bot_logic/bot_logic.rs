@@ -91,7 +91,6 @@ impl BotLogic {
                 // LogicStackItem::Goal(Box::new(super::GoToActionTile::new(
                 //     "Carpenter",
                 // ))),
-                LogicStackItem::Goal(Box::new(super::FishingGoal)),
                 LogicStackItem::Interrupt {
                     interrupt: Box::new(super::StepCountForLuck::new()),
                     active_goal: None,

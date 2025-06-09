@@ -61,6 +61,18 @@ impl InventoryGoal {
             stash_unspecified_items: true,
         }
     }
+
+    pub fn with(mut self, item: Item) -> Self {
+        let count = item.count;
+        self.bounds.insert(
+            item.into(),
+            Bounds {
+                min: Some(count),
+                max: None,
+            },
+        );
+        self
+    }
 }
 
 trait InventoryExt: Sized {
@@ -143,6 +155,53 @@ impl InventoryGoal {
             });
 
         within_all_maximums && within_all_minimums
+    }
+
+    pub fn is_possible(&self, game_state: &GameState) -> bool {
+        if self.is_completed(game_state) {
+            return true;
+        }
+
+        let Ok(farm) = game_state.get_room("Farm") else {
+            return false;
+        };
+
+        let iter_inventory = game_state.player.inventory.iter_items();
+        let iter_chests = farm
+            .objects
+            .iter()
+            .filter_map(|obj| match &obj.kind {
+                ObjectKind::Chest(chest) => Some(chest),
+                _ => None,
+            })
+            .flat_map(|chest| chest.iter_items());
+
+        let total_counts = iter_inventory
+            .chain(iter_chests)
+            .map(|item| {
+                (
+                    ItemType {
+                        item_id: item.item_id.clone(),
+                        quality: item.quality,
+                    },
+                    item.count,
+                )
+            })
+            .into_grouping_map()
+            .sum();
+
+        let have_enough = self
+            .bounds
+            .iter()
+            .filter_map(|(item, bound)| bound.min.map(|min| (item, min)))
+            .all(|(item, min)| {
+                let count = total_counts.get(item).cloned().unwrap_or(0);
+                count >= min
+            });
+
+        // TODO: Also check if there is enough available storage to
+        // drop off the player's inventory.
+        have_enough
     }
 }
 
@@ -385,6 +444,14 @@ impl BotGoal for InventoryGoal {
         }
 
         todo!("Handle case where desired item doesn't exist anywhere")
+    }
+}
 
+impl From<Item> for ItemType {
+    fn from(item: Item) -> Self {
+        Self {
+            item_id: item.item_id,
+            quality: item.quality,
+        }
     }
 }

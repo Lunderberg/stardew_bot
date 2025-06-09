@@ -38,13 +38,15 @@ impl Inventory {
              count: usize,
              price: i32,
              edibility: i32,
-             kind: Option<&ItemKind>| {
+             kind: Option<&ItemKind>,
+             category: Option<i32>| {
                 Item::new(item_id.to_string())
                     .with_quality(quality.try_into().unwrap())
                     .with_count(count)
                     .with_price(price)
                     .with_edibility(edibility)
                     .with_item_kind(kind.cloned())
+                    .with_category(category.map(Into::into))
             },
         )?;
 
@@ -86,6 +88,12 @@ impl Inventory {
                     -300i32
                 };
 
+                let category = if object.is_some() {
+                    object.category.value
+                } else {
+                    None
+                };
+
                 let kind = if watering_can.is_some() {
                     let remaining_water = watering_can
                         .waterLeft
@@ -107,6 +115,7 @@ impl Inventory {
                     price,
                     edibility,
                     kind,
+                    category
                 )
             }
 
