@@ -24,10 +24,8 @@ impl BotGoal for GenericDay {
         }
 
         Ok(LogicStack::new()
-            .then(InventoryGoal::empty())
             .then(CheckAllMail)
             .then(WaterCropsGoal::new())
-            .then(InventoryGoal::empty())
             .then(ExpandTreeFarm::new())
             .into())
     }

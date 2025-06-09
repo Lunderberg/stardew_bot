@@ -4,7 +4,10 @@ use crate::{
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{BotGoal, BotGoalResult},
+    InventoryGoal,
+};
 
 pub struct CheckAllMail;
 
@@ -34,6 +37,11 @@ impl BotGoal for CheckAllMail {
 
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);
+        }
+
+        if !game_state.player.inventory.has_empty_slot() {
+            let goal = InventoryGoal::empty();
+            return Ok(goal.into());
         }
 
         let goal = ActivateTile::new("Farm", mailbox);
