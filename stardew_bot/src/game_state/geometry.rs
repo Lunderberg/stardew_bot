@@ -170,6 +170,20 @@ impl<T> Rectangle<T> {
             .map(move |p| p + self.top_left)
     }
 
+    pub fn width(&self) -> T
+    where
+        T: Copy,
+    {
+        self.shape.right
+    }
+
+    pub fn height(&self) -> T
+    where
+        T: Copy,
+    {
+        self.shape.down
+    }
+
     pub fn center(self) -> Vector<T>
     where
         T: Copy,

@@ -84,3 +84,6 @@ pub use check_all_mail::*;
 
 mod expand_tree_farm;
 pub use expand_tree_farm::*;
+
+mod skip_cutscenes;
+pub use skip_cutscenes::*;

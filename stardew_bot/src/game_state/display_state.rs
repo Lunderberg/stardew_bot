@@ -81,4 +81,24 @@ impl DisplayState {
         let tile_rect = self.tile_to_pixels(tile);
         tile_rect.center()
     }
+
+    /// The location of the "Skip" button for cutscenes
+    ///
+    /// It doesn't look like there is an explicit skippable button
+    /// with pixel locations used for cutscenes.  Instead, the bounds
+    /// of the button are dynamically generated as needed, based on
+    /// the size of the view window.
+    pub fn event_skip_button(&self) -> Rectangle<isize> {
+        let scale = 4;
+        let width = 22 * scale;
+        let height = 15 * scale;
+
+        let top_left = Vector::new(
+            self.viewport.width() - width - 8,
+            self.viewport.height() - 64,
+        );
+        let shape = Vector::new(width, height);
+
+        Rectangle { top_left, shape }
+    }
 }

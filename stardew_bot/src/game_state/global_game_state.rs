@@ -35,6 +35,9 @@ pub struct GlobalGameState {
     /// If the screen is currently fading to black.
     pub currently_fading_to_black: bool,
 
+    /// If an event is currently playing.
+    pub event_up: bool,
+
     pub stats: HashMap<String, u32>,
 }
 
@@ -52,13 +55,15 @@ impl GlobalGameState {
              game_mode_tick: i32,
              in_game_time: i32,
              stats: &Stats,
-             currently_fading_to_black: bool| GlobalGameState {
+             currently_fading_to_black: bool,
+             event_up: bool| GlobalGameState {
                 game_tick,
                 unique_id,
                 game_mode_tick,
                 in_game_time,
                 stats: stats.0.clone(),
                 currently_fading_to_black,
+                event_up,
             },
         )?;
 
@@ -99,6 +104,8 @@ impl GlobalGameState {
                             define_game_stat(stat_dict, stat_name, stat_value)
                         });
 
+                let event_up = StardewValley.Game1.eventUp;
+
                 new_global_game_state(
                     unique_id,
                     game_tick,
@@ -106,6 +113,7 @@ impl GlobalGameState {
                     in_game_time,
                     stat_dict,
                     currently_fading_to_black,
+                    event_up,
                 )
             }
         })?;
