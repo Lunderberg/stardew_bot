@@ -80,13 +80,61 @@ impl BotGoal for SelectItemGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
+        let opt_held_item = game_state
+            .pause_menu
+            .as_ref()
+            .and_then(|pause| pause.inventory_page())
+            .and_then(|inventory_page| {
+                inventory_page
+                    .held_item
+                    .as_ref()
+                    .map(|held_item| (inventory_page, held_item))
+            });
+
+        if let Some((inventory_page, held_item)) = opt_held_item {
+            let dest_slots = if held_item.is_same_item(&self.item) {
+                0..12
+            } else {
+                let inventory_size = game_state.player.inventory.items.len();
+                12..inventory_size
+            };
+            let dest_slot = game_state
+                .player
+                .inventory
+                .iter_slots()
+                .enumerate()
+                .skip(dest_slots.start)
+                .take(dest_slots.end - dest_slots.start)
+                .find(|(_, opt_item)| opt_item.is_none())
+                .map(|(i, _)| i)
+                .unwrap_or_else(|| {
+                    // Fallback, game tick is good enough for a random
+                    // selection.
+                    let num_slots = dest_slots.end - dest_slots.start;
+                    let offset =
+                        (game_state.globals.game_tick as usize) % num_slots;
+                    dest_slots.start + offset
+                });
+
+            let pixel = inventory_page.player_item_locations[dest_slot];
+            do_action(GameAction::MouseOverPixel(pixel));
+            do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
         let opt_current_slot = self.current_inventory_slot(game_state);
 
         let is_completed_or_impossible = opt_current_slot
             .map(|slot| slot == game_state.player.active_hotbar_index)
             .unwrap_or(true);
         if is_completed_or_impossible {
-            return Ok(BotGoalResult::Completed);
+            if let Some(pause) = &game_state.pause_menu {
+                do_action(GameAction::MouseOverPixel(pause.exit_button));
+                do_action(GameAction::LeftClick);
+                return Ok(BotGoalResult::InProgress);
+            } else {
+                return Ok(BotGoalResult::Completed);
+            }
         }
 
         let current_slot =
@@ -99,6 +147,20 @@ impl BotGoal for SelectItemGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        todo!("Handle case where item must be moved to the hotbar")
+        let Some(pause) = &game_state.pause_menu else {
+            do_action(GameAction::ExitMenu);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        let Some(inventory_page) = pause.inventory_page() else {
+            do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        let pixel = inventory_page.player_item_locations[current_slot];
+        do_action(GameAction::MouseOverPixel(pixel));
+        do_action(GameAction::LeftClick);
+        Ok(BotGoalResult::InProgress)
     }
 }

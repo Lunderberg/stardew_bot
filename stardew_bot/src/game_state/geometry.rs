@@ -111,6 +111,21 @@ impl Vector<f32> {
     pub fn as_tile(self) -> Vector<isize> {
         self.map(|x| x.round() as isize)
     }
+
+    pub fn closest_direction(self) -> Direction {
+        Direction::iter()
+            .max_by(|dir_a, dir_b| {
+                let do_dot_product = |dir: Direction| {
+                    let offset = dir.offset().map(|i| i as f32);
+                    let offset = offset / offset.mag();
+                    offset.dot(self)
+                };
+                let dot_a = do_dot_product(*dir_a);
+                let dot_b = do_dot_product(*dir_b);
+                num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
+            })
+            .expect("Direction::iter is non-empty")
+    }
 }
 
 impl Vector<isize> {
@@ -132,6 +147,12 @@ impl Vector<isize> {
         Direction::iter()
             .filter(|dir| dir.is_cardinal())
             .map(move |dir| self + dir.offset())
+    }
+
+    pub fn closest_direction(self) -> Direction {
+        Direction::iter()
+            .max_by_key(|dir| self.dot(dir.offset()))
+            .expect("Direction::iter is non-empty")
     }
 }
 

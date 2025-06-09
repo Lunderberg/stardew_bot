@@ -53,6 +53,10 @@ impl Item {
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
     pub const WOOD: Item = Item::new_const("(O)388");
 
+    pub const OAK_SEED: Item = Item::new_const("(O)309");
+    pub const MAPLE_SEED: Item = Item::new_const("(O)310");
+    pub const PINE_SEED: Item = Item::new_const("(O)311");
+
     pub const CHEST: Item = Item::new_const("(BC)130");
 
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
