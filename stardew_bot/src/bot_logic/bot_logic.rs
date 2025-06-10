@@ -376,6 +376,14 @@ impl LogicStack {
             .push_front(LogicStackItem::CancelIf(Box::new(condition)));
         self
     }
+
+    pub fn with_interrupt(mut self, interrupt: impl BotInterrupt) -> Self {
+        self.0.push_front(LogicStackItem::Interrupt {
+            interrupt: Box::new(interrupt),
+            active_goal: None,
+        });
+        self
+    }
 }
 
 impl LogicStackItem {

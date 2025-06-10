@@ -11,9 +11,10 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch as _,
-    BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CraftItemGoal,
-    ForagingGoal, GameStateExt as _, GoToActionTile, MaintainStaminaGoal,
-    MovementGoal, PlantCropsGoal, SellToMerchantGoal, UseItemOnTile,
+    BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
+    CraftItemGoal, ForagingGoal, GameStateExt as _, GoToActionTile,
+    MaintainStaminaGoal, MovementGoal, PlantCropsGoal, SellToMerchantGoal,
+    UseItemOnTile,
 };
 
 pub struct FirstDay;
@@ -48,13 +49,16 @@ fn scythe_path_to_water(
         .map(|obj| obj.tile)
         .collect();
 
-    let tile_to_scythe = pathfinding
+    let opt_tile_to_scythe = pathfinding
         .path_between(farm_door, water_border.as_slice())?
         .into_iter()
         .find(|tile| can_scythe.contains(tile));
 
-    let opt_action = tile_to_scythe
-        .map(|tile| UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile));
+    let opt_action = opt_tile_to_scythe.map(|tile| {
+        LogicStack::new()
+            .then(UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile))
+            .with_interrupt(CollectNearbyItems::new())
+    });
 
     Ok(opt_action.map(Into::into))
 }

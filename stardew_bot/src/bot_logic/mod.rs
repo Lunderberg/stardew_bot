@@ -87,3 +87,6 @@ pub use expand_tree_farm::*;
 
 mod skip_cutscenes;
 pub use skip_cutscenes::*;
+
+mod collect_nearby_items;
+pub use collect_nearby_items::CollectNearbyItems;
