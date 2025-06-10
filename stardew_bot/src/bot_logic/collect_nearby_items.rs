@@ -13,7 +13,9 @@ struct WalkTowardDebris {
 
 impl CollectNearbyItems {
     pub fn new() -> Self {
-        Self { search_radius: 2.5 }
+        Self {
+            search_radius: 2.25,
+        }
     }
 
     #[allow(dead_code)]
@@ -34,7 +36,7 @@ impl BotInterrupt for CollectNearbyItems {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<Box<dyn BotGoal>>, Error> {
-        let goal_dist = 1.8;
+        let goal_dist = 1.7;
         let goal = WalkTowardDebris {
             search_radius_squared: self.search_radius * self.search_radius,
             goal_dist_squared: goal_dist * goal_dist,
