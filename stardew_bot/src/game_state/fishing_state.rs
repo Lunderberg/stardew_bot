@@ -77,6 +77,12 @@ pub struct FishingState {
     ///
     pub fish_target_position: f32,
 
+    /// The position of the treasure chest.
+    ///
+    /// Is only Some(_) when relevant for catching.  Prior to showing
+    /// up, and after being caught, displays None.
+    pub treasure_position: Option<f32>,
+
     /// The location of the fish within the fishing minigame.
     pub bar_position: f32,
 
@@ -130,6 +136,7 @@ impl FishingState {
              fish_position: f32,
              fish_velocity: f32,
              fish_target_position: f32,
+             treasure_position: Option<f32>,
              bar_position: f32,
              bar_velocity: f32,
              bar_height: i32,
@@ -154,6 +161,7 @@ impl FishingState {
                 fish_position,
                 fish_velocity,
                 fish_target_position,
+                treasure_position,
                 bar_position,
                 bar_velocity,
                 bar_height,
@@ -248,6 +256,17 @@ impl FishingState {
                 } else {
                     nan
                 };
+
+                let treasure_position = if minigame.is_some() &&
+                    minigame.treasure &&
+                    !minigame.treasureCaught &&
+                    minigame.treasureAppearTimer < 0
+                {
+                    minigame.treasurePosition
+                } else {
+                    None
+                };
+
                 let bar_position = if minigame.is_some() {
                     minigame.bobberBarPos
                 } else {
@@ -295,6 +314,7 @@ impl FishingState {
                     fish_position,
                     fish_velocity,
                     fish_target_position,
+                    treasure_position,
                     bar_position,
                     bar_velocity,
                     bar_height,
@@ -427,11 +447,9 @@ impl FishingState {
         }
     }
 
-    pub fn should_move_upward(&self) -> bool {
-        const LOOKAHEAD_TIME: f32 = 30.0;
+    const LOOKAHEAD_TIME: f32 = 30.0;
 
-        let fish_position = self.predicted_positions()(LOOKAHEAD_TIME);
-
+    fn should_move_upward_for_target(&self, target_pos: f32) -> bool {
         let bar_position =
             self.bar_position..self.bar_position + (self.bar_height as f32);
 
@@ -444,14 +462,26 @@ impl FishingState {
         let bar_velocity_if_release = bar_velocity + 0.25;
 
         let bar_position_if_click =
-            bar_velocity_if_click * LOOKAHEAD_TIME + bar_position;
+            bar_velocity_if_click * Self::LOOKAHEAD_TIME + bar_position;
         let bar_position_if_release =
-            bar_velocity_if_release * LOOKAHEAD_TIME + bar_position;
+            bar_velocity_if_release * Self::LOOKAHEAD_TIME + bar_position;
 
-        let distance_if_click = (fish_position - bar_position_if_click).abs();
-        let distance_if_release =
-            (fish_position - bar_position_if_release).abs();
+        let distance_if_click = (target_pos - bar_position_if_click).abs();
+        let distance_if_release = (target_pos - bar_position_if_release).abs();
 
         distance_if_click < distance_if_release
+    }
+
+    pub fn should_move_upward_for_fish(&self) -> bool {
+        let fish_position = self.predicted_positions()(Self::LOOKAHEAD_TIME);
+        self.should_move_upward_for_target(fish_position)
+    }
+
+    pub fn should_move_upward_for_treasure(&self) -> bool {
+        if let Some(treasure_position) = self.treasure_position {
+            self.should_move_upward_for_target(treasure_position)
+        } else {
+            self.should_move_upward_for_fish()
+        }
     }
 }

@@ -541,6 +541,9 @@ impl BotGoal for FaceDirectionGoal {
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
+        let facing_tile = game_state.player.tile() + self.0.offset();
+        do_action(GameAction::MouseOverTile(facing_tile));
+
         if game_state.player.facing != self.0 {
             let dir = match self.0 {
                 FacingDirection::North => Direction::North,

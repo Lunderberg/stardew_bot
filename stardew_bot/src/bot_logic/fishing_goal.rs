@@ -17,6 +17,7 @@ pub struct FishingGoal {
 
 pub struct FishOnceGoal {
     started_fishing: bool,
+    swapped_to_treasure: bool,
 }
 
 #[allow(dead_code)]
@@ -139,6 +140,7 @@ impl FishOnceGoal {
     pub fn new() -> Self {
         Self {
             started_fishing: false,
+            swapped_to_treasure: false,
         }
     }
 }
@@ -166,11 +168,22 @@ impl BotGoal for FishOnceGoal {
                 do_action(GameAction::HoldTool)
             }
         } else if fishing.minigame_in_progress {
-            if fishing.should_move_upward() {
-                do_action(GameAction::HoldTool)
-            } else {
-                do_action(GameAction::ReleaseTool)
+            if fishing.catch_progress > 0.8 {
+                self.swapped_to_treasure = true;
             }
+            let should_move_upward = if fishing.treasure_position.is_some()
+                && self.swapped_to_treasure
+            {
+                fishing.should_move_upward_for_treasure()
+            } else {
+                fishing.should_move_upward_for_fish()
+            };
+            let action = if should_move_upward {
+                GameAction::HoldTool
+            } else {
+                GameAction::ReleaseTool
+            };
+            do_action(action);
         } else if fishing.showing_fish {
             self.started_fishing = true;
             do_action(GameAction::LeftClick);
