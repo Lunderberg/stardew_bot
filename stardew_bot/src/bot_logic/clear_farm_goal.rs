@@ -72,6 +72,7 @@ impl ClearFarmGoal {
             .stone_clearing_cost(10)
             .wood_clearing_cost(10)
             .fiber_clearing_cost(1)
+            .grass_movement_cost(1)
             .tree_clearing_cost(50)
     }
 

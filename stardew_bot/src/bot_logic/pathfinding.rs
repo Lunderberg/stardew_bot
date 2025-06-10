@@ -162,6 +162,12 @@ impl Pathfinding<'_> {
             ..self
         }
     }
+    pub fn grass_movement_cost(self, grass_penalty: u64) -> Self {
+        Self {
+            grass_penalty,
+            ..self
+        }
+    }
 
     pub fn include_border(self, include_border: bool) -> Self {
         Self {
