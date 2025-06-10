@@ -9,7 +9,7 @@ pub struct ChestMenu {
     pub player_item_locations: Vec<Vector<isize>>,
     pub chest_item_locations: Vec<Vector<isize>>,
     pub chest_items: Inventory,
-    pub chest_tile: Vector<isize>,
+    pub chest_tile: Option<Vector<isize>>,
     pub held_item: Option<Item>,
     pub ok_button: Vector<isize>,
 }
@@ -23,7 +23,7 @@ impl ChestMenu {
             |player_item_locations: &Vec<Vector<isize>>,
              chest_item_locations: &Vec<Vector<isize>>,
              chest_items: &Inventory,
-             chest_tile: &Vector<isize>,
+             chest_tile: Option<&Vector<isize>>,
              held_item: Option<&Item>,
              ok_button: &Vector<isize>| {
                 let num_chest_slots = chest_item_locations.len();
@@ -40,8 +40,8 @@ impl ChestMenu {
                 ChestMenu {
                     player_item_locations: player_item_locations.clone(),
                     chest_item_locations: chest_item_locations.clone(),
-                    chest_items: chest_items.clone(),
-                    chest_tile: chest_tile.clone(),
+                    chest_items,
+                    chest_tile: chest_tile.cloned(),
                     held_item: held_item.cloned(),
                     ok_button: ok_button.clone(),
                 }
@@ -59,11 +59,35 @@ impl ChestMenu {
                 let held_item = read_item(menu._heldItem);
 
                 let chest_items = {
-                    let items = menu
+                    let inventory = menu
                         .ItemsToGrabMenu
-                        .actualInventory
+                        .actualInventory;
+
+                    let as_inventory = inventory
                         .as::<StardewValley.Inventories.Inventory>();
-                    read_inventory(items)
+
+                    let as_list = inventory
+                        .as::<
+                            "System.Collections.Generic.List`1"
+                            <StardewValley.Item>
+                        >();
+
+                    if as_inventory.is_some() {
+                        read_inventory(as_inventory)
+                    } else if as_list.is_some() {
+                        let num_items = as_list
+                            ._size
+                            .prim_cast::<usize>();
+                        (0..num_items)
+                            .map(|i| as_list._items[i])
+                            .map(read_item)
+                            .reduce(
+                                new_inventory(as_list),
+                                add_item_to_inventory,
+                            )
+                    } else {
+                        None
+                    }
                 };
 
                 let chest_tile = {

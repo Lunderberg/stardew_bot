@@ -299,7 +299,7 @@ impl BotGoal for InventoryGoal {
                     .get(item)
                     .cloned()
                     .map(|preferred_chest_tile| {
-                        preferred_chest_tile == chest_tile
+                        Some(preferred_chest_tile) == chest_tile
                     })
                     .unwrap_or(true);
 

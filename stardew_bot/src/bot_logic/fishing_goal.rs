@@ -157,6 +157,22 @@ impl BotGoal for FishOnceGoal {
     ) -> Result<BotGoalResult, Error> {
         let fishing = &game_state.fishing;
 
+        if let Some(menu) = &game_state.chest_menu {
+            let opt_item_pixel = menu
+                .chest_items
+                .iter_slots()
+                .zip(menu.chest_item_locations.iter())
+                .find(|(opt_item, _)| opt_item.is_some())
+                .map(|(_, pixel)| pixel)
+                .cloned();
+
+            let pixel = opt_item_pixel.unwrap_or(menu.ok_button);
+
+            do_action(GameAction::MouseOverPixel(pixel));
+            do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
         if self.started_fishing && !fishing.showing_fish {
             return Ok(BotGoalResult::Completed);
         }
