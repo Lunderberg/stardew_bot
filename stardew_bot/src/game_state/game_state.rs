@@ -76,22 +76,6 @@ impl GameState {
         PauseMenu::def_read_pause_menu(&mut graph)?;
         MailMenu::def_read_mail_menu(&mut graph)?;
 
-        graph.parse(
-            "let location_list = StardewValley
-                 .Game1
-                 .game1
-                 ._locations
-                 .as::<
-                     System.Collections.ObjectModel
-                     .Collection`1<StardewValley.GameLocation>
-                 >()
-                 .items
-                 .as::<
-                   System.Collections.Generic
-                   .List`1<StardewValley.GameLocation>
-                 >();",
-        )?;
-
         graph.named_native_function(
             "new_game_state",
             |global_game_state: &GlobalGameState,
@@ -159,6 +143,20 @@ impl GameState {
         graph.parse(stringify! {
             pub fn read_full_state() {
                 let global_game_state = read_global_game_state();
+
+                let location_list = StardewValley
+                    .Game1
+                    .game1
+                    ._locations
+                    .as::<
+                      "System.Collections.ObjectModel.Collection`1"
+                      <StardewValley.GameLocation>
+                    >()
+                    .items
+                    .as::<
+                      "System.Collections.Generic.List`1"
+                      <StardewValley.GameLocation>
+                    >();
 
                 let num_locations = location_list._size.prim_cast::<usize>();
 
