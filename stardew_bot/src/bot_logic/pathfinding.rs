@@ -162,6 +162,13 @@ impl Pathfinding<'_> {
             ..self
         }
     }
+    pub fn do_not_clear_trees(self) -> Self {
+        Self {
+            clear_trees: None,
+            ..self
+        }
+    }
+
     pub fn grass_movement_cost(self, grass_penalty: u64) -> Self {
         Self {
             grass_penalty,

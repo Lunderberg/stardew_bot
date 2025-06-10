@@ -7,7 +7,9 @@ use crate::{
         bot_logic::LogicStack, graph_search::GraphSearch as _, BotError,
         MovementGoal, SelectItemGoal,
     },
-    game_state::{Inventory, Item, Key, Location, ObjectKind, Quality, Vector},
+    game_state::{
+        Inventory, Item, Key, Location, Object, ObjectKind, Quality, Vector,
+    },
     Direction, Error, GameAction, GameState,
 };
 
@@ -87,7 +89,7 @@ impl ClearFarmGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let pathfinding = Self::pathfinding(farm);
+        let pathfinding = Self::pathfinding(farm).do_not_clear_trees();
         let reachable = pathfinding.reachable(farm_door);
 
         self.priority_tiles = farm
@@ -149,7 +151,7 @@ impl BotGoal for ClearFarmGoal {
             .filter(|obj| obj.kind.get_tool().is_some())
             .any(|obj| self.priority_tiles.contains(&obj.tile));
 
-        let tool_to_use: HashMap<Vector<isize>, Item> = farm
+        let clearable_tile: HashMap<Vector<isize>, &Object> = farm
             .objects
             .iter()
             .filter(|obj| {
@@ -164,31 +166,59 @@ impl BotGoal for ClearFarmGoal {
                     }
                 }
             })
-            .filter_map(|obj| obj.kind.get_tool().map(|tool| (obj.tile, tool)))
-            .filter(|(_, tool)| {
+            .filter(|obj| obj.kind.get_tool().is_some())
+            .map(|obj| (obj.tile, obj))
+            .filter(|(_, obj)| {
                 game_state.player.current_stamina > 2.0
-                    || tool.is_same_item(&Item::SCYTHE)
+                    || obj.kind.get_tool().unwrap().is_same_item(&Item::SCYTHE)
             })
             .collect();
 
-        if tool_to_use.is_empty() {
+        if clearable_tile.is_empty() {
             return Ok(BotGoalResult::Completed);
         }
 
-        // Second, if all prioritized clutter has been cleared out,
-        // preferentially clear out clutter that is close to the farm
-        // house.
-        let tool_to_use = if has_priority_clutter {
-            tool_to_use
+        let is_grown_tree = |obj: &Object| -> bool {
+            match &obj.kind {
+                ObjectKind::Tree(tree) => {
+                    tree.growth_stage >= 5 && !tree.is_stump
+                }
+                _ => false,
+            }
+        };
+
+        let pathfinding_without_clearing = farm
+            .pathfinding()
+            .allow_diagonal(false)
+            .include_border(true);
+
+        let reachable_without_clearing =
+            pathfinding_without_clearing.reachable(farm_door);
+
+        let clearable_tile = if has_priority_clutter {
+            clearable_tile
+        } else if game_state.player.skills.foraging_xp < 100
+            && clearable_tile.iter().any(|(tile, obj)| {
+                reachable_without_clearing[*tile] && is_grown_tree(obj)
+            })
+        {
+            // Second, if foraging level 1 has not yet been reached,
+            // prioritize cutting down trees.
+
+            clearable_tile
+                .into_iter()
+                .filter(|(tile, obj)| {
+                    reachable_without_clearing[*tile] && is_grown_tree(obj)
+                })
+                .collect()
         } else {
-            let pathfinding_without_clearing = farm
-                .pathfinding()
-                .allow_diagonal(false)
-                .include_border(true);
+            // Third, if all prioritized clutter has been cleared out,
+            // preferentially clear out clutter that is close to the farm
+            // house.
 
             let Some(min_dist) = pathfinding_without_clearing
                 .iter_dijkstra(farm_door)
-                .filter(|(tile, _)| tool_to_use.contains_key(tile))
+                .filter(|(tile, _)| clearable_tile.contains_key(tile))
                 .map(|(_, dist)| dist)
                 .next()
             else {
@@ -201,7 +231,7 @@ impl BotGoal for ClearFarmGoal {
                 .iter_dijkstra(farm_door)
                 .take_while(|(_, dist)| *dist < min_dist + 5)
                 .filter_map(|(tile, _)| {
-                    tool_to_use.get(&tile).map(|tool| (tile, tool.clone()))
+                    clearable_tile.get(&tile).map(|obj| (tile, *obj))
                 })
                 .collect()
         };
@@ -244,9 +274,13 @@ impl BotGoal for ClearFarmGoal {
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
             .find_map(|tile| {
-                tool_to_use
-                    .get(&tile)
-                    .map(|tool| UseItemOnTile::new(tool.clone(), "Farm", tile))
+                clearable_tile.get(&tile).map(|obj| {
+                    let tool = obj.kind.get_tool().expect(
+                        "Lookup should only contain tiles \
+                         that can be cleared by using a tool.",
+                    );
+                    UseItemOnTile::new(tool, "Farm", tile)
+                })
             });
 
         if let Some(goal) = opt_goal {
