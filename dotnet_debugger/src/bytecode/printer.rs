@@ -1375,7 +1375,11 @@ impl<'a> Display for TypePrinter<'a> {
         let sep =
             MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
 
-        write!(f, "{full_name}")?;
+        if full_name.contains('`') {
+            write!(f, "\"{full_name}\"")?;
+        } else {
+            write!(f, "{full_name}")?;
+        }
 
         if !generics.is_empty() {
             write!(f, "<{sep}")?;

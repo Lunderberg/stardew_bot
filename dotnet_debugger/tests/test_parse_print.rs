@@ -175,6 +175,17 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    downcast_with_backtick,
+    indoc!{"
+        class_name.field_name.as::<\"namespace.class_name2`1\">()
+    "},
+    |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        graph.downcast(obj, "namespace.class_name2`1")
+    },
+}
+
+test_print_and_parse! {
     downcast_with_type_args,
     "class_name.field_name.as::<other_class<arg1, arg2>>()",
     |graph| {

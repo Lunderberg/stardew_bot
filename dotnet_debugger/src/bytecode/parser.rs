@@ -156,6 +156,7 @@ pub enum Punctuation {
     DoubleAmpersand,
     Slash,
     Percent,
+    DoubleQuote,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1278,6 +1279,10 @@ impl<'a> SymbolicParser<'a> {
     }
 
     fn expect_type(&mut self) -> Result<SymbolicType, Error> {
+        let opening_double_quote = self
+            .tokens
+            .next_if(|token| token.kind.is_punct(Punctuation::DoubleQuote))?;
+
         let mut namespace = Vec::new();
         let mut name =
             self.expect_ident(|| "namespace and name of class")?.text;
@@ -1290,10 +1295,17 @@ impl<'a> SymbolicParser<'a> {
             name = self.expect_ident(|| "namespace and name of class")?.text;
         }
 
-        let generics = self.try_generic_type_list()?;
-
         let full_name =
             namespace.into_iter().chain(std::iter::once(name)).join(".");
+
+        if opening_double_quote.is_some() {
+            self.expect_punct(
+                || format!("Closing \" after class name 'full_name'"),
+                Punctuation::DoubleQuote,
+            )?;
+        }
+
+        let generics = self.try_generic_type_list()?;
 
         Ok(SymbolicType {
             full_name,
@@ -1467,6 +1479,7 @@ impl<'a> SymbolicTokenizer<'a> {
             '&' => TokenKind::Punct(Punctuation::Ampersand),
             '/' => TokenKind::Punct(Punctuation::Slash),
             '%' => TokenKind::Punct(Punctuation::Percent),
+            '"' => TokenKind::Punct(Punctuation::DoubleQuote),
             '0'..='9' => {
                 let mut value: usize = 0;
                 let mut index = None;
