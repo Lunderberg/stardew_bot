@@ -217,7 +217,7 @@ impl BotGoal for FirstDay {
         }
 
         let plant_crops = PlantCropsGoal::new();
-        if !plant_crops.is_completed(game_state) {
+        if in_game_time < 2000 && !plant_crops.is_completed(game_state) {
             return Ok(plant_crops.into());
         }
 
