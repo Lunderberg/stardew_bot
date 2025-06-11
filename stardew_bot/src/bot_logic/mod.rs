@@ -59,6 +59,9 @@ pub use water_crops_goal::*;
 mod clay_farming_goal;
 pub use clay_farming_goal::*;
 
+mod ship_item_goal;
+pub use ship_item_goal::*;
+
 mod sell_to_merchant_goal;
 pub use sell_to_merchant_goal::*;
 

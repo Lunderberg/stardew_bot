@@ -78,6 +78,8 @@ impl Item {
 
     pub const CHEST: Item = Item::new_const("(BC)130");
 
+    pub const DAFFODIL: Item = Item::new_const("(O)18");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),

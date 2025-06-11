@@ -296,6 +296,9 @@ pub enum FurnitureKind {
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Building {
+    /// What type of building this is
+    pub kind: String,
+
     /// The size of the building
     pub shape: Rectangle<isize>,
 
@@ -655,6 +658,7 @@ impl Location {
                 let collision_map =
                     data_lookup.collision_maps.get(building_type).cloned();
                 Building {
+                    kind: building_type.to_string(),
                     shape,
                     door,
                     collision_map,

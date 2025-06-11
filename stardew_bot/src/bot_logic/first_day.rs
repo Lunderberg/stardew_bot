@@ -14,7 +14,7 @@ use super::{
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
     CraftItemGoal, ForagingGoal, GameStateExt as _, GoToActionTile,
     MaintainStaminaGoal, MovementGoal, PlantCropsGoal, SellToMerchantGoal,
-    UseItemOnTile,
+    ShipItemGoal, UseItemOnTile,
 };
 
 pub struct FirstDay;
@@ -225,17 +225,33 @@ impl BotGoal for FirstDay {
         let chests_in_inventory =
             game_state.player.inventory.count_item(&Item::CHEST);
         let target_wood = (num_remaining_chests - chests_in_inventory) * 50;
-        let current_wood = game_state.player.inventory.count_item(&Item::WOOD);
         if chests_in_inventory > 0 {
             if let Some(tile) = desired_chests(game_state)?.next() {
                 let goal = UseItemOnTile::new(Item::CHEST, "Farm", tile);
                 return Ok(goal.into());
             }
         }
-        if num_remaining_chests > 0 && current_wood >= target_wood {
+        let should_make_chests = move |game_state: &GameState| -> bool {
+            let current_wood =
+                game_state.player.inventory.count_item(&Item::WOOD);
+            num_remaining_chests > 0 && current_wood >= target_wood
+        };
+
+        if should_make_chests(game_state) {
             let goal = CraftItemGoal::new(
                 Item::CHEST.with_count(num_remaining_chests),
             );
+            return Ok(goal.into());
+        }
+
+        let should_ship_clay = |game_state: &GameState| -> bool {
+            let current_clay =
+                game_state.player.inventory.count_item(&Item::CLAY);
+            current_clay > 20 && game_state.globals.in_game_time > 2400
+        };
+
+        if should_ship_clay(game_state) {
+            let goal = ShipItemGoal::new([Item::CLAY, Item::DAFFODIL]);
             return Ok(goal.into());
         }
 
@@ -243,11 +259,8 @@ impl BotGoal for FirstDay {
         if !goal.is_completed(game_state)? {
             return Ok(goal
                 .cancel_if(move |game_state| {
-                    let current_wood =
-                        game_state.player.inventory.count_item(&Item::WOOD);
-                    let should_cancel =
-                        num_remaining_chests > 0 && current_wood >= target_wood;
-                    should_cancel
+                    should_make_chests(game_state)
+                        || should_ship_clay(game_state)
                 })
                 .with_interrupt(CollectNearbyItems::new())
                 .into());
