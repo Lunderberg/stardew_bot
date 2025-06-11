@@ -232,7 +232,12 @@ impl BotGoal for ClayFarmingGoal {
             Item::HOE
         };
 
-        let goal = UseItemOnTile::new(tool, "Beach", closest_clay);
+        let goal = UseItemOnTile::new(tool, "Beach", closest_clay).cancel_if(
+            move |game_state| {
+                game_state.globals.get_stat("dirtHoed").unwrap_or(0)
+                    != total_dirt_hoed
+            },
+        );
         Ok(goal.into())
     }
 }
