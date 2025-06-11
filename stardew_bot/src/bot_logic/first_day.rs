@@ -71,9 +71,9 @@ fn desired_chests(
 
     let offsets = [
         Vector::new(-2, 3),
-        Vector::new(-3, 3),
-        Vector::new(-4, 3),
-        Vector::new(-5, 3),
+        // Vector::new(-3, 3),
+        // Vector::new(-4, 3),
+        // Vector::new(-5, 3),
     ];
 
     let chest_locations: Vec<_> = farm
@@ -175,7 +175,7 @@ impl BotGoal for FirstDay {
         }
 
         let goal =
-            BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(10));
+            BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(6));
         if goal.item_count(game_state) == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
