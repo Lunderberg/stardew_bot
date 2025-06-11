@@ -76,7 +76,11 @@ impl BotGoal for ExpandTreeFarm {
                     ObjectKind::Tree(tree) if tree.growth_stage == 0 => {
                         Some(Item::AXE)
                     }
-                    ObjectKind::Tree(tree) if tree.has_seed => None,
+                    ObjectKind::Tree(tree)
+                        if tree.has_seed && !tree.is_stump =>
+                    {
+                        None
+                    }
 
                     _ => {
                         return None;
