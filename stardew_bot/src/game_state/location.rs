@@ -238,6 +238,12 @@ pub enum ObjectKind {
     /// it.
     Chest(Chest),
 
+    /// Gives artifacts when dug
+    ArtifactSpot,
+
+    /// Gives seasonal seeds when dug
+    SeedSpot,
+
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
     /// implemented.
@@ -496,7 +502,13 @@ impl Location {
 
         graph.named_native_function(
             "new_other_object_kind",
-            |name: &str| -> ObjectKind { ObjectKind::Other(name.to_string()) },
+            |name: &str| -> ObjectKind {
+                match name {
+                    "Artifact Spot" => ObjectKind::ArtifactSpot,
+                    "Seed Spot" => ObjectKind::SeedSpot,
+                    other => ObjectKind::Other(other.to_string()),
+                }
+            },
         )?;
 
         graph.named_native_function(
@@ -1718,6 +1730,8 @@ impl ObjectKind {
                 // cannot be walked over.
                 true
             }
+            ObjectKind::ArtifactSpot => true,
+            ObjectKind::SeedSpot => true,
             ObjectKind::Other(_) => false,
             ObjectKind::Unknown => false,
         }
@@ -2006,6 +2020,8 @@ impl std::fmt::Display for ObjectKind {
             Self::Tree(tree) => write!(f, "{}", tree.kind),
             Self::FruitTree(tree) => write!(f, "{}", tree.kind),
             Self::HoeDirt(_) => write!(f, "HoeDirt"),
+            Self::ArtifactSpot => write!(f, "ArtifactSpot"),
+            Self::SeedSpot => write!(f, "SeedSpot"),
             Self::Other(other) => write!(f, "Other({other})"),
             Self::Unknown => write!(f, "Unknown"),
         }

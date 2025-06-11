@@ -3,7 +3,7 @@ use crate::{Error, GameAction, GameState};
 use super::{
     bot_logic::{BotGoal, BotGoalResult, LogicStack},
     CheckAllMail, ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation,
-    InventoryGoal, PlantCropsGoal, WaterCropsGoal,
+    InventoryGoal, OpportunisticForaging, PlantCropsGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -20,7 +20,13 @@ impl BotGoal for GenericDay {
     ) -> Result<BotGoalResult, Error> {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day == 1 {
-            return Ok(FirstDay.into());
+            let goal = LogicStack::new()
+                .then(FirstDay)
+                .with_interrupt(OpportunisticForaging::new(10.0))
+                .cancel_if(|game_state| {
+                    game_state.globals.get_stat("daysPlayed").unwrap_or(0) != 1
+                });
+            return Ok(goal.into());
         }
 
         Ok(LogicStack::new()

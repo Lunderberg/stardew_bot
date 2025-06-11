@@ -39,9 +39,18 @@ impl ObjectKindExt for ObjectKind {
         match self {
             ObjectKind::Stone => Some(Item::PICKAXE),
             ObjectKind::Wood => Some(Item::AXE),
-            ObjectKind::Tree(tree) if tree.health > 0.0 => Some(Item::AXE),
+            ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| Item::AXE),
+
             ObjectKind::Fiber | ObjectKind::Grass => Some(Item::SCYTHE),
-            _ => None,
+
+            ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => Some(Item::HOE),
+
+            ObjectKind::PotOfGold
+            | ObjectKind::FruitTree(_)
+            | ObjectKind::HoeDirt(_)
+            | ObjectKind::Chest(_)
+            | ObjectKind::Other(_)
+            | ObjectKind::Unknown => None,
         }
     }
 }

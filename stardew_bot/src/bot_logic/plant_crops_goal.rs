@@ -65,6 +65,8 @@ impl CropPlantingPlan {
                         | ObjectKind::Fiber
                         | ObjectKind::Grass
                         | ObjectKind::PotOfGold
+                        | ObjectKind::ArtifactSpot
+                        | ObjectKind::SeedSpot
                         | ObjectKind::Tree(_) => false,
                         ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop,
                         ObjectKind::FruitTree(_)
@@ -147,6 +149,9 @@ impl BotGoal for PlantCropsGoal {
                     }
                     Some(ObjectKind::Wood | ObjectKind::Tree(_)) => {
                         Some(Item::AXE)
+                    }
+                    Some(ObjectKind::ArtifactSpot | ObjectKind::SeedSpot) => {
+                        Some(Item::HOE)
                     }
                     Some(ObjectKind::HoeDirt(hoe_dirt))
                         if !hoe_dirt.is_watered =>

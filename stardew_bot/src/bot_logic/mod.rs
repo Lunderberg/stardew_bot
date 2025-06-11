@@ -70,6 +70,9 @@ mod impl_tile_map_graph_search;
 mod foraging_goal;
 pub use foraging_goal::*;
 
+mod opportunistic_foraging;
+pub use opportunistic_foraging::*;
+
 mod activate_tile;
 pub use activate_tile::*;
 
