@@ -51,6 +51,7 @@ pub enum Quality {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ItemCategory {
     Fish,
+    Seed,
     Other(i32),
 }
 
@@ -68,6 +69,7 @@ impl Item {
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const SALAD: Item = Item::new_const("(O)196");
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
+    pub const CARROT_SEEDS: Item = Item::new_const("(O)CarrotSeeds");
     pub const WOOD: Item = Item::new_const("(O)388");
 
     pub const OAK_SEED: Item = Item::new_const("(O)309");
@@ -182,6 +184,7 @@ impl From<i32> for ItemCategory {
     fn from(value: i32) -> Self {
         match value {
             -4 => ItemCategory::Fish,
+            -74 => ItemCategory::Seed,
             other => ItemCategory::Other(other),
         }
     }

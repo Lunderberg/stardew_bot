@@ -7,7 +7,7 @@ use crate::{
         graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
         UseItemOnTile,
     },
-    game_state::{Item, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
@@ -37,14 +37,16 @@ impl PlantCropsGoal {
     }
 }
 
-fn num_seeds(game_state: &GameState) -> usize {
+fn iter_seeds(game_state: &GameState) -> impl Iterator<Item = &Item> + '_ {
     game_state
         .player
         .inventory
         .iter_items()
-        .filter(|item| item.is_same_item(&Item::PARSNIP_SEEDS))
-        .map(|item| item.count)
-        .sum::<usize>()
+        .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
+}
+
+fn num_seeds(game_state: &GameState) -> usize {
+    iter_seeds(game_state).map(|item| item.count).sum::<usize>()
 }
 
 impl CropPlantingPlan {
@@ -161,7 +163,7 @@ impl BotGoal for PlantCropsGoal {
                     Some(ObjectKind::HoeDirt(hoe_dirt))
                         if !hoe_dirt.has_crop =>
                     {
-                        Some(Item::PARSNIP_SEEDS)
+                        iter_seeds(game_state).next().cloned()
                     }
                     Some(ObjectKind::HoeDirt(_)) => None,
                     Some(ObjectKind::PotOfGold) => None,
