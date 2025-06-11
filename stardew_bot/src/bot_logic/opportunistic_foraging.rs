@@ -38,7 +38,7 @@ impl BotInterrupt for OpportunisticForaging {
 
         let radius2 = self.radius * self.radius;
 
-        let mut reachable: Option<TileMap<bool>> = None;
+        let mut distances: Option<TileMap<Option<u64>>> = None;
 
         let opt_forageable = loc
             .objects
@@ -57,14 +57,20 @@ impl BotInterrupt for OpportunisticForaging {
                 _ => false,
             })
             .filter(|obj| {
-                if reachable.is_none() {
-                    reachable = Some(
+                if distances.is_none() {
+                    distances = Some(
                         loc.pathfinding()
                             .include_border(true)
-                            .reachable(game_state.player.tile()),
+                            .distances(game_state.player.tile()),
                     );
                 }
-                reachable.as_ref().unwrap()[obj.tile]
+                let map = distances.as_ref().unwrap();
+
+                if let Some(dist) = map[obj.tile] {
+                    (dist as f32) < self.radius
+                } else {
+                    false
+                }
             })
             .next();
 

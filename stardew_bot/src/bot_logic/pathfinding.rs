@@ -276,6 +276,16 @@ impl Pathfinding<'_> {
         reachable
     }
 
+    pub fn distances(&self, initial: Vector<isize>) -> TileMap<Option<u64>> {
+        let mut distances = self.location.blocked.map(|_| None);
+
+        self.iter_dijkstra(initial).for_each(|(tile, dist)| {
+            distances[tile] = Some(dist);
+        });
+
+        distances
+    }
+
     pub fn path_between(
         &self,
         initial: Vector<isize>,
