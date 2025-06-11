@@ -249,6 +249,7 @@ impl BotGoal for FirstDay {
                         num_remaining_chests > 0 && current_wood >= target_wood;
                     should_cancel
                 })
+                .with_interrupt(CollectNearbyItems::new())
                 .into());
         }
 
