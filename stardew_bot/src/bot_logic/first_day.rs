@@ -108,6 +108,12 @@ impl BotGoal for FirstDay {
             return Ok(BotGoalResult::Completed);
         }
 
+        let foraging =
+            ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
+        if !foraging.is_completed(game_state) {
+            return Ok(foraging.into());
+        }
+
         if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {
             return Ok(tile_to_scythe.into());
         }
@@ -148,12 +154,6 @@ impl BotGoal for FirstDay {
             }
 
             return Ok(BotGoalResult::InProgress);
-        }
-
-        let foraging =
-            ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
-        if !foraging.is_completed(game_state) {
-            return Ok(foraging.into());
         }
 
         let goal = MaintainStaminaGoal::new();
