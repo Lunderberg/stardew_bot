@@ -292,6 +292,22 @@ impl BotLogic {
             }
         }
 
+        if self.verbose {
+            println!(
+                "From the goals, \
+                 sending the following {} {} to game",
+                actions.len(),
+                if actions.len() == 1 {
+                    "action"
+                } else {
+                    "actions"
+                },
+            );
+            actions
+                .iter()
+                .for_each(|action| println!("\tAction: {action}"));
+        }
+
         // Reset mouse/keyboard state back to their unpressed state.
         //
         // For buttons/keys that have an instant effect, such as

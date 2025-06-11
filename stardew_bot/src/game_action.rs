@@ -1,3 +1,5 @@
+use std::fmt::Display;
+
 use x11rb::protocol::xproto::{ButtonIndex, Keycode as X11KeyCode};
 
 use crate::{game_state::Vector, Direction, Error, GameState, X11Handler};
@@ -186,5 +188,44 @@ impl GameAction {
         }
 
         Ok(())
+    }
+}
+
+impl Display for GameAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            GameAction::HoldTool => write!(f, "HoldTool ('c')"),
+            GameAction::ReleaseTool => write!(f, "ReleaseTool ('c')"),
+            GameAction::Move(direction) => write!(f, "Move({direction})"),
+            GameAction::StopMoving => write!(f, "StopMoving"),
+            GameAction::ExitMenu => write!(f, "ExitMenu ('esc')"),
+            GameAction::StopExitingMenu => write!(f, "StopExitingMenu ('esc')"),
+            GameAction::ActivateTile => write!(f, "ActivateTile ('x')"),
+            GameAction::StopActivatingTile => {
+                write!(f, "StopActivatingTile ('x')")
+            }
+            GameAction::ConfirmMenu => write!(f, "ConfirmMenu ('y')"),
+            GameAction::StopConfirmingMenu => {
+                write!(f, "StopConfirmingMenu ('y')")
+            }
+            GameAction::MouseOverTile(tile) => {
+                write!(f, "MouseOverTile({tile})")
+            }
+            GameAction::MouseOverPixel(pixel) => {
+                write!(f, "MouseOverPixel({pixel})")
+            }
+            GameAction::LeftClick => write!(f, "LeftClick"),
+            GameAction::ReleaseLeftClick => write!(f, "ReleaseLeftClick"),
+            GameAction::RightClick => write!(f, "RightClick"),
+            GameAction::ReleaseRightClick => write!(f, "ReleaseRightClick"),
+            GameAction::SelectHotbar(i) => write!(f, "SelectHotbar({i})"),
+            GameAction::StopSelectingHotbar(i) => {
+                write!(f, "StopSelectingHotbar({i})")
+            }
+            GameAction::AnimationCancel => write!(f, "AnimationCancel"),
+            GameAction::StopAnimationCanceling => {
+                write!(f, "StopAnimationCanceling")
+            }
+        }
     }
 }
