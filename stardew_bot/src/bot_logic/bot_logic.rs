@@ -79,7 +79,7 @@ pub trait BotInterrupt: Any {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<Box<dyn BotGoal>>, Error>;
+    ) -> Result<Option<LogicStack>, Error>;
 }
 
 impl BotLogic {
@@ -208,12 +208,15 @@ impl BotLogic {
                 if active_goal.is_some() {
                     continue;
                 }
-                let Some(new_goal) = interrupt.check(game_state)? else {
+                let Some(interrupt_stack) = interrupt.check(game_state)? else {
                     continue;
                 };
 
                 *active_goal = Some(current_stack_size);
-                self.stack.push(new_goal.into());
+                interrupt_stack
+                    .0
+                    .into_iter()
+                    .for_each(|item| self.stack.push(item));
             }
 
             let current_goal: &mut dyn BotGoal = self

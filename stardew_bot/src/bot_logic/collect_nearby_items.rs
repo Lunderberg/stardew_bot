@@ -1,6 +1,6 @@
 use crate::{game_state::Vector, Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt};
+use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
 
 pub struct CollectNearbyItems {
     search_radius: f32,
@@ -35,7 +35,7 @@ impl BotInterrupt for CollectNearbyItems {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<Box<dyn BotGoal>>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         let goal_dist = 1.7;
         let goal = WalkTowardDebris {
             search_radius_squared: self.search_radius * self.search_radius,
@@ -43,7 +43,7 @@ impl BotInterrupt for CollectNearbyItems {
         };
 
         if !goal.is_completed(game_state)? {
-            return Ok(Some(Box::new(goal)));
+            return Ok(Some(goal.into()));
         }
 
         Ok(None)

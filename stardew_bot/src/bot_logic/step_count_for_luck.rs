@@ -2,7 +2,7 @@ use crate::{
     bot_logic::StopMovingGoal, game_state::SeededRng, Error, GameState,
 };
 
-use super::bot_logic::BotInterrupt;
+use super::bot_logic::{BotInterrupt, LogicStack};
 
 pub struct StepCountForLuck {
     /// The time in the day when the steps should start being checked.
@@ -62,7 +62,7 @@ impl BotInterrupt for StepCountForLuck {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<Box<dyn super::bot_logic::BotGoal>>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         if game_state.globals.in_game_time < self.start_time {
             return Ok(None);
         }
@@ -97,7 +97,7 @@ impl BotInterrupt for StepCountForLuck {
 
         // The player is currently moving, and has alreaady reached
         // the step count.
-        Ok(Some(Box::new(StopMovingGoal)))
+        Ok(Some(StopMovingGoal.into()))
     }
 }
 

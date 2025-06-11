@@ -1,6 +1,6 @@
 use crate::{Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt};
+use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
 
 pub struct SkipCutscenes;
 
@@ -20,9 +20,9 @@ impl BotInterrupt for SkipCutscenes {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<Box<dyn BotGoal>>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         if game_state.globals.event_up {
-            Ok(Some(Box::new(SkipCurrentCutscene)))
+            Ok(Some(SkipCurrentCutscene.into()))
         } else {
             Ok(None)
         }

@@ -4,7 +4,7 @@ use crate::{
     Error, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotInterrupt};
+use super::bot_logic::{BotGoal, BotInterrupt, LogicStack};
 
 pub struct OpportunisticForaging {
     radius: f32,
@@ -24,7 +24,7 @@ impl BotInterrupt for OpportunisticForaging {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<Box<dyn BotGoal>>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         let loc = game_state.current_room()?;
         let pos = game_state.player.center_pos();
 
@@ -72,15 +72,27 @@ impl BotInterrupt for OpportunisticForaging {
             return Ok(None);
         };
 
-        let interrupt: Box<dyn BotGoal> =
+        let interrupt: LogicStack =
             if let Some(tool) = forageable.kind.get_tool() {
                 let goal =
                     UseItemOnTile::new(tool, loc.name.clone(), forageable.tile);
-                Box::new(goal)
+                goal.into()
             } else {
                 let goal = ActivateTile::new(loc.name.clone(), forageable.tile);
-                Box::new(goal)
+                goal.into()
             };
+
+        // During screen transitions, the X/Y position is updated
+        // before the current room.  If a memory read occurs between
+        // those two updates, then the interrupt may trigger
+        // erroneously, thinking that the player is at the new X/Y
+        // position within the old room.  This check ensures that when
+        // the screen transition completes, the erroneously triggered
+        // interrupt will be cancelled.
+        let current_room = loc.name.clone();
+        let interrupt = interrupt.cancel_if(move |game_state| {
+            game_state.player.room_name != current_room
+        });
 
         Ok(Some(interrupt))
     }
