@@ -535,12 +535,31 @@ impl BotGoal for LocalMovementGoal {
     }
 }
 
+impl FaceDirectionGoal {
+    pub fn new(dir: FacingDirection) -> Self {
+        Self(dir)
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        let facing_correct_direction = game_state.player.facing == self.0;
+        let mouse_over_correct_tile = game_state.player.tile()
+            + self.0.offset()
+            == game_state.inputs.mouse_tile_location;
+
+        facing_correct_direction && mouse_over_correct_tile
+    }
+}
+
 impl BotGoal for FaceDirectionGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
         do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
+        if self.is_completed(game_state) {
+            return Ok(BotGoalResult::Completed);
+        }
+
         let facing_tile = game_state.player.tile() + self.0.offset();
         do_action(GameAction::MouseOverTile(facing_tile));
 
@@ -552,8 +571,6 @@ impl BotGoal for FaceDirectionGoal {
                 FacingDirection::West => Direction::West,
             };
             do_action(GameAction::Move(dir));
-        } else {
-            return Ok(BotGoalResult::Completed);
         }
 
         Ok(BotGoalResult::InProgress)
