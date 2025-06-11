@@ -29,6 +29,37 @@ pub struct ClayFarmingGoal {
     hard_stop: bool,
 }
 
+pub struct ClayPredictor {
+    unique_id: u64,
+    days_played: u32,
+    dirt_hoed: u32,
+}
+
+impl ClayPredictor {
+    pub fn new(game_state: &GameState) -> Self {
+        let dirt_hoed = game_state.globals.get_stat("dirtHoed").unwrap_or(0);
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
+        let unique_id = game_state.globals.unique_id;
+        Self {
+            unique_id,
+            days_played,
+            dirt_hoed,
+        }
+    }
+
+    pub fn will_produce_clay(&self, tile: Vector<isize>) -> bool {
+        let mut rng = SeededRng::from_stardew_seed([
+            self.days_played as f64,
+            (self.unique_id / 2) as f64,
+            (tile.right * 2000) as f64,
+            (tile.down * 77) as f64,
+            self.dirt_hoed as f64,
+        ]);
+        rng.rand_float() < 0.03
+    }
+}
+
 impl ClayFarmingGoal {
     pub fn new() -> Self {
         Self {
@@ -155,23 +186,13 @@ impl BotGoal for ClayFarmingGoal {
         let total_dirt_hoed =
             game_state.globals.get_stat("dirtHoed").unwrap_or(0);
 
-        let days_played = game_state.globals.get_stat("daysPlayed")?;
-
+        let clay_predictor = ClayPredictor::new(game_state);
         let clay_tiles: HashSet<Vector<isize>> = beach
             .diggable
             .iter()
             .filter(|(_, is_diggable)| **is_diggable)
             .map(|(tile, _)| tile)
-            .filter(|tile| {
-                let mut rng = SeededRng::from_stardew_seed([
-                    days_played as f64,
-                    (game_state.globals.unique_id / 2) as f64,
-                    (tile.right * 2000) as f64,
-                    (tile.down * 77) as f64,
-                    total_dirt_hoed as f64,
-                ]);
-                rng.rand_float() < 0.03
-            })
+            .filter(|tile| clay_predictor.will_produce_clay(*tile))
             .collect();
 
         let has_hoe_dirt = |tile: Vector<isize>| -> bool {

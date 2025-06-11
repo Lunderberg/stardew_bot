@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    FillWateringCan, GameStateExt as _,
+    ClayPredictor, FillWateringCan, GameStateExt as _,
 };
 
 pub struct PlantCropsGoal {
@@ -140,6 +140,20 @@ impl BotGoal for PlantCropsGoal {
             .map(|obj| (obj.tile, &obj.kind))
             .collect();
 
+        let clay_predictor = ClayPredictor::new(game_state);
+        let clay_tiles: HashSet<Vector<isize>> = plan
+            .to_plant
+            .iter()
+            .cloned()
+            .filter(|tile| {
+                !matches!(
+                    current_contents.get(tile),
+                    Some(ObjectKind::HoeDirt(_))
+                )
+            })
+            .filter(|tile| clay_predictor.will_produce_clay(*tile))
+            .collect();
+
         let next_steps: HashMap<Vector<isize>, Item> = plan
             .to_plant
             .iter()
@@ -167,7 +181,17 @@ impl BotGoal for PlantCropsGoal {
                     }
                     Some(ObjectKind::HoeDirt(_)) => None,
                     Some(ObjectKind::PotOfGold) => None,
-                    None => Some(Item::HOE),
+                    None => {
+                        // If any of the tiles that still need to be
+                        // hoed will produce clay, then only allow the
+                        // hoe to be used on those tiles.  If there
+                        // are no tiles remaining that would produce
+                        // clay, then hoe in any order.
+                        let preferred_clay =
+                            clay_tiles.is_empty() || clay_tiles.contains(tile);
+
+                        preferred_clay.then(|| Item::HOE)
+                    }
 
                     Some(
                         ObjectKind::Other(_)
