@@ -110,6 +110,9 @@ pub enum Error {
         field_type: String,
     },
 
+    #[error("Pointer overflow, {0} + {1}")]
+    PointerOverflow(Pointer, usize),
+
     #[error(
         "Length of System.String should be non-negative, \
          but found length of {0} UTF-16 code units."
