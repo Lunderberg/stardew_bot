@@ -1,8 +1,11 @@
 use std::{borrow::Cow, fmt::Display};
 
 use crate::{
-    bot_logic::{InventoryGoal, MaintainStaminaGoal, SelectItemGoal},
-    game_state::{FacingDirection, Item, Vector},
+    bot_logic::{
+        BuyFromMerchantGoal, DiscardItemGoal, InventoryGoal,
+        MaintainStaminaGoal, SelectItemGoal, SellToMerchantGoal,
+    },
+    game_state::{FacingDirection, Item, ItemCategory, Vector},
     Error, GameAction, GameState,
 };
 
@@ -93,10 +96,19 @@ impl BotGoal for FishingGoal {
         const FISHING_POLES: [Item; 3] =
             [Item::IRIDIUM_ROD, Item::FIBERGLASS_ROD, Item::BAMBOO_POLE];
 
-        let opt_current_pole =
-            game_state.player.inventory.iter_items().find(|item| {
-                FISHING_POLES.iter().any(|pole| item.is_same_item(pole))
-            });
+        let opt_current_pole = game_state
+            .player
+            .inventory
+            .iter_items()
+            .filter_map(|item| {
+                FISHING_POLES
+                    .iter()
+                    .enumerate()
+                    .find(|(_, pole)| item.is_same_item(pole))
+                    .map(|(i, _)| (i, item))
+            })
+            .min_by_key(|(i, _)| *i)
+            .map(|(_, pole)| pole);
         let Some(current_pole) = opt_current_pole else {
             let opt_get_pole_goal = FISHING_POLES
                 .iter()
@@ -116,6 +128,43 @@ impl BotGoal for FishingGoal {
                 .with_tolerance(1000.0);
             return Ok(trigger_willy_cutscene.into());
         };
+
+        if current_pole.is_same_item(&Item::FIBERGLASS_ROD) {
+            let goal = DiscardItemGoal::new(Item::BAMBOO_POLE);
+            if !goal.is_completed(game_state) {
+                return Ok(goal.into());
+            }
+        }
+
+        if game_state.player.skills.fishing_xp >= 380
+            && game_state.globals.in_game_time < 1700
+            && current_pole.is_same_item(&Item::BAMBOO_POLE)
+        {
+            let iter_fish = || {
+                game_state.player.inventory.iter_items().filter(|item| {
+                    matches!(item.category, Some(ItemCategory::Fish))
+                })
+            };
+            let fish_money = iter_fish()
+                .map(|item| item.price * (item.count as i32))
+                .sum::<i32>();
+            let can_upgrade =
+                fish_money + game_state.player.current_money >= 1800;
+            if can_upgrade {
+                let goal = iter_fish()
+                    .fold(LogicStack::new(), |stack, item| {
+                        stack.then(SellToMerchantGoal::new(
+                            "Buy Fish",
+                            item.clone(),
+                        ))
+                    })
+                    .then(BuyFromMerchantGoal::new(
+                        "Buy Fish",
+                        Item::FIBERGLASS_ROD,
+                    ));
+                return Ok(goal.into());
+            }
+        }
 
         if !self.loc.is_completed(game_state) {
             return Ok(self.loc.move_to_location().into());

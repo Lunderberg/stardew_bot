@@ -31,9 +31,9 @@ impl BotGoal for GenericDay {
 
         Ok(LogicStack::new()
             .then(CheckAllMail)
-            .then(FishingGoal::new(FishingLocation::OceanByWilly))
             .then(WaterCropsGoal::new())
             .then(ExpandTreeFarm::new())
+            .then(FishingGoal::new(FishingLocation::OceanByWilly))
             .into())
     }
 }

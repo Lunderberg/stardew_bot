@@ -23,19 +23,7 @@ impl SelectItemGoal {
         &self,
         game_state: &GameState,
     ) -> Option<usize> {
-        game_state
-            .player
-            .inventory
-            .items
-            .iter()
-            .enumerate()
-            .find(|(_, opt_item)| {
-                opt_item
-                    .as_ref()
-                    .map(|item| self.item.is_same_item(item))
-                    .unwrap_or(false)
-            })
-            .map(|(i, _)| i)
+        game_state.player.inventory.current_slot(&self.item)
     }
 
     fn key_to_hotbar(key: Key) -> Option<usize> {

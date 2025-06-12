@@ -81,10 +81,7 @@ trait InventoryExt: Sized {
         ty: &'a ItemType,
     ) -> impl Iterator<Item = usize> + 'a;
 
-    // fn count(&self, ty: &ItemType) -> usize {
-    //     self.iter_stacks(ty).sum()
-    // }
-    fn contains(&self, ty: &ItemType) -> bool {
+    fn contains_ty(&self, ty: &ItemType) -> bool {
         self.iter_stacks(ty).next().is_some()
     }
 
@@ -431,7 +428,7 @@ impl BotGoal for InventoryGoal {
             .map(|(item, _)| item)
             .flat_map(|item| {
                 farm.objects.iter().filter(|obj| match &obj.kind {
-                    ObjectKind::Chest(chest) => chest.contains(item),
+                    ObjectKind::Chest(chest) => chest.contains_ty(item),
                     _ => false,
                 })
             })

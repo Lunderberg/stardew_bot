@@ -159,11 +159,36 @@ impl Inventory {
         self.iter_slots().flatten()
     }
 
+    pub fn contains(&self, item: &Item) -> bool {
+        self.iter_items()
+            .any(|inv_item| inv_item.is_same_item(item))
+    }
+
+    pub fn current_slot(&self, item: &Item) -> Option<usize> {
+        self.items
+            .iter()
+            .enumerate()
+            .find(|(_, opt_inv_item)| {
+                opt_inv_item
+                    .as_ref()
+                    .map(|inv_item| item.is_same_item(inv_item))
+                    .unwrap_or(false)
+            })
+            .map(|(i, _)| i)
+    }
+
     pub fn count_item(&self, item: &Item) -> usize {
         self.iter_items()
             .filter(|inv_item| inv_item.is_same_item(item))
             .map(|inv_item| inv_item.count)
             .sum::<usize>()
+    }
+
+    pub fn empty_slot(&self) -> Option<usize> {
+        self.iter_slots()
+            .enumerate()
+            .find(|(_, opt_item)| opt_item.is_none())
+            .map(|(i, _)| i)
     }
 
     pub fn has_empty_slot(&self) -> bool {
