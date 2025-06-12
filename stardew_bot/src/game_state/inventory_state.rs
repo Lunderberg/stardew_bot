@@ -5,7 +5,7 @@ use crate::Error;
 
 use super::{
     item::{ItemKind, WateringCan},
-    Item,
+    FishingRod, Item,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -32,21 +32,35 @@ impl Inventory {
         )?;
 
         graph.named_native_function(
+            "new_fishing_rod_kind",
+            |bait: Option<&Item>, tackle: Option<&Item>| {
+                let bait = bait.cloned().map(Box::new);
+                let tackle = tackle.cloned().map(Box::new);
+                ItemKind::FishingRod(FishingRod { bait, tackle })
+            },
+        )?;
+
+        graph.named_native_function(
             "new_item",
             |item_id: &str,
              quality: i32,
              count: usize,
              price: i32,
              edibility: i32,
-             kind: Option<&ItemKind>,
              category: Option<i32>| {
                 Item::new(item_id.to_string())
                     .with_quality(quality.try_into().unwrap())
                     .with_count(count)
                     .with_price(price)
                     .with_edibility(edibility)
-                    .with_item_kind(kind.cloned())
                     .with_category(category.map(Into::into))
+            },
+        )?;
+
+        graph.named_native_function(
+            "item_with_kind",
+            |item: &Item, kind: Option<&ItemKind>| -> Item {
+                item.clone().with_item_kind(kind.cloned())
             },
         )?;
 
@@ -58,7 +72,7 @@ impl Inventory {
         )?;
 
         let func = graph.parse(stringify! {
-            fn read_item(item) {
+            fn read_base_item(item) {
                 let item_id = item
                     ._qualifiedItemId
                     .read_string();
@@ -73,8 +87,6 @@ impl Inventory {
 
                 let object = item
                     .as::<StardewValley.Object>();
-                let watering_can = item
-                    .as::<StardewValley.Tools.WateringCan>();
 
                 let price = if object.is_some() {
                     object.price.value
@@ -94,6 +106,25 @@ impl Inventory {
                     None
                 };
 
+                new_item(
+                    item_id,
+                    quality,
+                    count,
+                    price,
+                    edibility,
+                    category
+                )
+            }
+
+            fn read_item(item) {
+                let base_item = read_base_item(item);
+
+
+                let watering_can = item
+                    .as::<StardewValley.Tools.WateringCan>();
+                let fishing_rod = item
+                    .as::<StardewValley.Tools.FishingRod>();
+
                 let kind = if watering_can.is_some() {
                     let remaining_water = watering_can
                         .waterLeft
@@ -104,19 +135,45 @@ impl Inventory {
                         remaining_water,
                         max_water,
                     )
+
+                } else if fishing_rod.is_some() {
+                    let num_attachments = fishing_rod
+                        .attachments
+                        .elements
+                        ._size
+                        .prim_cast::<usize>();
+
+                    let arr = fishing_rod
+                        .attachments
+                        .elements
+                        ._items;
+
+                    let bait = if num_attachments > 0 {
+                        read_base_item(arr[0].value)
+                    } else {
+                        None
+                    };
+
+                    let tackle = if num_attachments > 1 {
+                        read_base_item(arr[1].value)
+                    } else {
+                        None
+                    };
+
+                    new_fishing_rod_kind(
+                        bait,
+                        tackle,
+                    )
+
                 } else {
                     None
                 };
 
-                new_item(
-                    item_id,
-                    quality,
-                    count,
-                    price,
-                    edibility,
-                    kind,
-                    category
-                )
+                if kind.is_some() {
+                    item_with_kind(base_item, kind)
+                } else {
+                    base_item
+                }
             }
 
             fn read_inventory(container) {

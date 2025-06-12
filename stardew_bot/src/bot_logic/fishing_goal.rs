@@ -5,7 +5,7 @@ use crate::{
         BuyFromMerchantGoal, DiscardItemGoal, InventoryGoal,
         MaintainStaminaGoal, SelectItemGoal, SellToMerchantGoal,
     },
-    game_state::{FacingDirection, Item, ItemCategory, Vector},
+    game_state::{FacingDirection, Inventory, Item, ItemCategory, Vector},
     Error, GameAction, GameState,
 };
 
@@ -24,12 +24,19 @@ pub struct FishOnceGoal {
 }
 
 #[allow(dead_code)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum FishingLocation {
     River,
     Ocean,
     OceanByWilly,
     Lake,
 }
+
+struct LoadBaitOntoFishingRod {
+    bait: Item,
+}
+
+struct FishSelling<'a>(&'a Inventory);
 
 impl FishingGoal {
     pub fn new(loc: FishingLocation) -> Self {
@@ -83,6 +90,26 @@ impl FishingLocation {
     }
 }
 
+impl FishSelling<'_> {
+    fn iter_fish(&self) -> impl Iterator<Item = &Item> + '_ {
+        self.0
+            .iter_items()
+            .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
+    }
+
+    fn fish_money(&self) -> i32 {
+        self.iter_fish()
+            .map(|item| item.price * (item.count as i32))
+            .sum::<i32>()
+    }
+
+    fn sell_all_fish(&self) -> LogicStack {
+        self.iter_fish().fold(LogicStack::new(), |stack, item| {
+            stack.then(SellToMerchantGoal::new("Buy Fish", item.clone()))
+        })
+    }
+}
+
 impl BotGoal for FishingGoal {
     fn description(&self) -> Cow<str> {
         format!("Fish at {}", self.loc).into()
@@ -96,72 +123,103 @@ impl BotGoal for FishingGoal {
         const FISHING_POLES: [Item; 3] =
             [Item::IRIDIUM_ROD, Item::FIBERGLASS_ROD, Item::BAMBOO_POLE];
 
-        let opt_current_pole = game_state
-            .player
-            .inventory
-            .iter_items()
-            .filter_map(|item| {
-                FISHING_POLES
-                    .iter()
-                    .enumerate()
-                    .find(|(_, pole)| item.is_same_item(pole))
-                    .map(|(i, _)| (i, item))
-            })
-            .min_by_key(|(i, _)| *i)
-            .map(|(_, pole)| pole);
-        let Some(current_pole) = opt_current_pole else {
-            let opt_get_pole_goal = FISHING_POLES
-                .iter()
-                .map(|pole| InventoryGoal::empty().with(pole.clone()))
-                .find(|goal| goal.is_possible(game_state));
-            if let Some(goal) = opt_get_pole_goal {
-                return Ok(goal.into());
-            }
+        let inventory = &game_state.player.inventory;
 
-            let goal = InventoryGoal::empty();
-            if !goal.is_completed(game_state) {
-                return Ok(goal.into());
-            }
-
-            let trigger_willy_cutscene = FishingLocation::Ocean
-                .movement_goal()
-                .with_tolerance(1000.0);
-            return Ok(trigger_willy_cutscene.into());
-        };
-
-        if current_pole.is_same_item(&Item::FIBERGLASS_ROD) {
+        if inventory.contains(&Item::FIBERGLASS_ROD) {
+            // Discard the Bamboo Pole as soon as we have the
+            // Fiberglass Rod.
             let goal = DiscardItemGoal::new(Item::BAMBOO_POLE);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
         }
 
-        if game_state.player.skills.fishing_xp >= 380
-            && game_state.globals.in_game_time < 1700
-            && current_pole.is_same_item(&Item::BAMBOO_POLE)
+        let opt_current_pole = inventory
+            .iter_items()
+            .find(|item| item.as_fishing_rod().is_some());
+        let Some(current_pole) = opt_current_pole else {
+            let opt_get_pole_goal = FISHING_POLES
+                .iter()
+                .map(|pole| InventoryGoal::empty().with(pole.clone()))
+                .find(|goal| goal.is_possible(game_state));
+            if let Some(goal) = opt_get_pole_goal {
+                // Grab a fishing pole from whichever chest has it.
+                return Ok(goal.into());
+            } else {
+                // Empty out the inventory before heading to the Beach
+                let trigger_willy_cutscene = FishingLocation::Ocean
+                    .movement_goal()
+                    .with_tolerance(1000.0);
+
+                let goal = LogicStack::new()
+                    .then(InventoryGoal::empty())
+                    .then(trigger_willy_cutscene);
+                return Ok(goal.into());
+            }
+        };
+
+        let using_bamboo_pole = current_pole.is_same_item(&Item::BAMBOO_POLE);
+        let in_game_time = game_state.globals.in_game_time;
+
+        if using_bamboo_pole
+            && game_state.player.skills.fishing_xp >= 380
+            && in_game_time < 1700
         {
-            let iter_fish = || {
-                game_state.player.inventory.iter_items().filter(|item| {
-                    matches!(item.category, Some(ItemCategory::Fish))
-                })
-            };
-            let fish_money = iter_fish()
-                .map(|item| item.price * (item.count as i32))
-                .sum::<i32>();
-            let can_upgrade =
-                fish_money + game_state.player.current_money >= 1800;
+            // The shop is open, and we have enough XP to unlock the
+            // Fiberglass Rod.  Check how much cash we can get by
+            // selling all current fish, and whether that's enough to
+            // buy the Fiberglass Rod.
+            let fish_selling = FishSelling(inventory);
+            let can_upgrade = game_state.player.current_money
+                + fish_selling.fish_money()
+                >= 1800;
             if can_upgrade {
-                let goal = iter_fish()
-                    .fold(LogicStack::new(), |stack, item| {
-                        stack.then(SellToMerchantGoal::new(
-                            "Buy Fish",
-                            item.clone(),
-                        ))
+                let goal = fish_selling.sell_all_fish().then(
+                    BuyFromMerchantGoal::new("Buy Fish", Item::FIBERGLASS_ROD),
+                );
+                return Ok(goal.into());
+            }
+        }
+
+        if !using_bamboo_pole {
+            let opt_bait = current_pole
+                .as_fishing_rod()
+                .expect("Guarded by earlier as_fishing_rod.is_some() check")
+                .bait
+                .as_ref();
+            if opt_bait
+                .map(|bait| bait.is_same_item(&Item::BAIT))
+                .unwrap_or(true)
+                && inventory.contains(&Item::BAIT)
+            {
+                // Load bait into fishing pole
+                let goal = LoadBaitOntoFishingRod::new(Item::BAIT.clone());
+                return Ok(goal.into());
+            }
+
+            if in_game_time < 1700
+                && opt_bait
+                    .map(|bait| {
+                        bait.is_same_item(&Item::BAIT)
+                            && bait.count < 150
+                            && self.loc == FishingLocation::OceanByWilly
+                            && in_game_time > 1630
                     })
-                    .then(BuyFromMerchantGoal::new(
+                    .unwrap_or(true)
+            {
+                // The fish shop is open, and we're either out of bait
+                // or low on bait and nearby.  Sell all fish and buy
+                // as much bait as available.
+                let fish_selling = FishSelling(inventory);
+                let total_cash = (game_state.player.current_money
+                    + fish_selling.fish_money())
+                    as usize;
+                let goal = fish_selling.sell_all_fish().then(
+                    BuyFromMerchantGoal::new(
                         "Buy Fish",
-                        Item::FIBERGLASS_ROD,
-                    ));
+                        Item::BAIT.with_count(total_cash / 5),
+                    ),
+                );
                 return Ok(goal.into());
             }
         }
@@ -178,6 +236,9 @@ impl BotGoal for FishingGoal {
         let goal = MaintainStaminaGoal::new();
         if !goal.is_completed(game_state) {
             return Ok(goal.into());
+        }
+        if game_state.player.current_stamina < 10.0 {
+            return Ok(BotGoalResult::Completed);
         }
 
         let fish_once = FishOnceGoal::new();
@@ -206,6 +267,15 @@ impl BotGoal for FishOnceGoal {
     ) -> Result<BotGoalResult, Error> {
         let fishing = &game_state.fishing;
 
+        // In case the first-geode popup appears from a treasure
+        // chest.
+        if let Some(menu) = &game_state.dialogue_menu {
+            if menu.responses.is_empty() {
+                do_action(GameAction::LeftClick);
+                return Ok(BotGoalResult::InProgress);
+            }
+        }
+
         if let Some(menu) = &game_state.chest_menu {
             let opt_item_pixel = menu
                 .chest_items
@@ -220,10 +290,6 @@ impl BotGoal for FishOnceGoal {
             do_action(GameAction::MouseOverPixel(pixel));
             do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
-        }
-
-        if self.started_fishing && !fishing.showing_fish {
-            return Ok(BotGoalResult::Completed);
         }
 
         if fishing.is_timing_cast {
@@ -250,16 +316,138 @@ impl BotGoal for FishOnceGoal {
             };
             do_action(action);
         } else if fishing.showing_fish {
-            self.started_fishing = true;
             do_action(GameAction::LeftClick);
         } else if fishing.is_nibbling {
+            self.started_fishing = true;
             do_action(GameAction::ReleaseTool)
+        } else if fishing.is_fishing
+            && (fishing.time_until_fishing_bite
+                - fishing.fishing_bite_accumulator
+                > 20000.0)
+        {
+            // Optimization for the BambooRod.  Even though I haven't
+            // found a good way to manipulate `Game1.random` calls, I
+            // can still view the results.  For the BambooRod, the
+            // time to wait for a fish will be between 0.5 and 30
+            // seconds.  If the waiting time is longer than 20
+            // seconds, we may as well re-roll instead of waiting.
+            //
+            // This only impacts the fishing with the BambooRod,
+            // because use of any bait will decrease the maximum wait
+            // time from 30 seconds to 15 seconds.
+            do_action(GameAction::ReleaseTool)
+        } else if self.started_fishing {
+            // This is the second time around, so stop here rather
+            // than starting another attempt at fishing.
+            do_action(GameAction::ReleaseTool);
+            return Ok(BotGoalResult::Completed);
         } else if fishing.is_fishing {
             do_action(GameAction::HoldTool)
         } else if fishing.is_holding_rod {
             do_action(GameAction::HoldTool)
         }
 
+        Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl LoadBaitOntoFishingRod {
+    fn new(bait: Item) -> Self {
+        Self { bait }
+    }
+
+    fn fishing_rod_slot(&self, game_state: &GameState) -> Option<usize> {
+        game_state
+            .player
+            .inventory
+            .iter_slots()
+            .enumerate()
+            .filter_map(|(i, opt_item)| opt_item.map(|item| (i, item)))
+            .filter(|(_, item)| !item.is_same_item(&Item::BAMBOO_POLE))
+            .filter(|(_, item)| item.as_fishing_rod().is_some())
+            .map(|(i, _)| i)
+            .next()
+    }
+
+    fn bait_slot(&self, game_state: &GameState) -> Option<usize> {
+        game_state.player.inventory.current_slot(&self.bait)
+    }
+
+    fn is_completed(&self, game_state: &GameState) -> bool {
+        self.fishing_rod_slot(game_state).is_none()
+            || self.bait_slot(game_state).is_none()
+    }
+}
+
+impl BotGoal for LoadBaitOntoFishingRod {
+    fn description(&self) -> Cow<str> {
+        format!("Load {} onto fishing rod", self.bait).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
+    ) -> Result<BotGoalResult, Error> {
+        if let Some(page) = game_state
+            .pause_menu
+            .as_ref()
+            .and_then(|pause| pause.inventory_page())
+        {
+            if let Some(held_item) = &page.held_item {
+                if let Some(rod_slot) = self
+                    .fishing_rod_slot(game_state)
+                    .filter(|_| held_item.is_same_item(&self.bait))
+                {
+                    let pixel = page.player_item_locations[rod_slot];
+                    do_action(GameAction::MouseOverPixel(pixel));
+                    do_action(GameAction::RightClick);
+                } else {
+                    let slot = game_state.player.inventory.empty_slot().expect(
+                        "TODO: Handle case where held item has nowhere to go",
+                    );
+                    let pixel = page.player_item_locations[slot];
+                    do_action(GameAction::MouseOverPixel(pixel));
+                    do_action(GameAction::LeftClick);
+                }
+
+                return Ok(BotGoalResult::InProgress);
+            }
+        }
+
+        if self.is_completed(game_state) {
+            if let Some(menu) = &game_state.pause_menu {
+                do_action(GameAction::MouseOverPixel(menu.exit_button));
+                do_action(GameAction::LeftClick);
+                return Ok(BotGoalResult::InProgress);
+            } else {
+                return Ok(BotGoalResult::Completed);
+            }
+        }
+
+        let bait_slot = self
+            .bait_slot(game_state)
+            .expect("Guarded by is_completed() check");
+
+        let Some(pause) = &game_state.pause_menu else {
+            do_action(GameAction::ExitMenu);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        let Some(inventory_page) = pause.inventory_page() else {
+            do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        assert!(
+            inventory_page.held_item.is_none(),
+            "Should be handled prior to the is_completed step"
+        );
+
+        let pixel = inventory_page.player_item_locations[bait_slot];
+        do_action(GameAction::MouseOverPixel(pixel));
+        do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)
     }
 }

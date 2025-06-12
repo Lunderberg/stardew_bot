@@ -25,12 +25,19 @@ pub struct Item {
 #[derive(RustNativeObject, Debug, Clone)]
 pub enum ItemKind {
     WateringCan(WateringCan),
+    FishingRod(FishingRod),
 }
 
 #[derive(Debug, Clone)]
 pub struct WateringCan {
     pub remaining_water: i32,
     pub max_water: i32,
+}
+
+#[derive(Debug, Clone)]
+pub struct FishingRod {
+    pub bait: Option<Box<Item>>,
+    pub tackle: Option<Box<Item>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -65,6 +72,7 @@ impl Item {
     pub const BAMBOO_POLE: Item = Item::new_const("(T)BambooPole");
     pub const FIBERGLASS_ROD: Item = Item::new_const("(T)FiberglassRod");
     pub const IRIDIUM_ROD: Item = Item::new_const("(T)IridiumRod");
+    pub const BAIT: Item = Item::new_const("(O)685");
 
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const SALAD: Item = Item::new_const("(O)196");
@@ -151,6 +159,14 @@ impl Item {
     pub fn as_watering_can(&self) -> Option<&WateringCan> {
         self.kind.as_ref().and_then(|kind| match kind {
             ItemKind::WateringCan(can) => Some(can),
+            _ => None,
+        })
+    }
+
+    pub fn as_fishing_rod(&self) -> Option<&FishingRod> {
+        self.kind.as_ref().and_then(|kind| match kind {
+            ItemKind::FishingRod(rod) => Some(rod),
+            _ => None,
         })
     }
 
