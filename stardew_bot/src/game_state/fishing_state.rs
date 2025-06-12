@@ -49,6 +49,9 @@ pub struct FishingState {
     /// The difficulty of the fish.  Typically on a scale from 0-100
     pub fish_difficulty: f32,
 
+    /// The type of movement used by the fish
+    pub fish_movement_kind: FishMovementKind,
+
     /// The location of the fish within the fishing minigame.
     ///
     /// Initially set to 508 (out of 568)
@@ -65,6 +68,9 @@ pub struct FishingState {
     ///    accel = (target_pos - pos) / ( 20*rand() + 10 + max(0,100-difficulty))
     ///    vel = 0.8*vel + 0.2*accel
     pub fish_velocity: f32,
+
+    /// Extra velocity applied to Floater/Sink fish.
+    pub fish_floater_sinker: f32,
 
     /// The location that the fish is trying to reach within the
     /// fishing minigame.
@@ -114,6 +120,15 @@ pub struct FishingState {
     pub showing_treasure: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum FishMovementKind {
+    Mixed,
+    Dart,
+    Smooth,
+    Sink,
+    Floater,
+}
+
 impl FishingState {
     pub(crate) fn def_read_fishing(
         graph: &mut SymbolicGraph,
@@ -133,8 +148,10 @@ impl FishingState {
              fishing_nibble_accumulator: f32,
              minigame_in_progress: bool,
              fish_difficulty: f32,
+             fish_movement_kind: i32,
              fish_position: f32,
              fish_velocity: f32,
+             fish_floater_sinker: f32,
              fish_target_position: f32,
              treasure_position: Option<f32>,
              bar_position: f32,
@@ -144,32 +161,44 @@ impl FishingState {
              catch_progress: f32,
              pulling_out_of_water: bool,
              showing_fish: bool,
-             showing_treasure: bool| FishingState {
-                is_holding_rod,
-                is_timing_cast,
-                casting_power,
-                is_casting,
-                bobber_in_air,
-                is_fishing,
-                time_until_fishing_bite,
-                fishing_bite_accumulator,
-                is_nibbling,
-                time_until_fishing_nibble_done,
-                fishing_nibble_accumulator,
-                minigame_in_progress,
-                fish_difficulty,
-                fish_position,
-                fish_velocity,
-                fish_target_position,
-                treasure_position,
-                bar_position,
-                bar_velocity,
-                bar_height,
-                bobber_in_bar,
-                catch_progress,
-                pulling_out_of_water,
-                showing_fish,
-                showing_treasure,
+             showing_treasure: bool| {
+                let fish_movement_kind = match fish_movement_kind {
+                    0 => FishMovementKind::Mixed,
+                    1 => FishMovementKind::Dart,
+                    2 => FishMovementKind::Smooth,
+                    3 => FishMovementKind::Sink,
+                    4 => FishMovementKind::Floater,
+                    _ => FishMovementKind::Mixed,
+                };
+                FishingState {
+                    is_holding_rod,
+                    is_timing_cast,
+                    casting_power,
+                    is_casting,
+                    bobber_in_air,
+                    is_fishing,
+                    time_until_fishing_bite,
+                    fishing_bite_accumulator,
+                    is_nibbling,
+                    time_until_fishing_nibble_done,
+                    fishing_nibble_accumulator,
+                    minigame_in_progress,
+                    fish_difficulty,
+                    fish_movement_kind,
+                    fish_position,
+                    fish_velocity,
+                    fish_floater_sinker,
+                    fish_target_position,
+                    treasure_position,
+                    bar_position,
+                    bar_velocity,
+                    bar_height,
+                    bobber_in_bar,
+                    catch_progress,
+                    pulling_out_of_water,
+                    showing_fish,
+                    showing_treasure,
+                }
             },
         )?;
 
@@ -241,6 +270,11 @@ impl FishingState {
                 } else {
                     nan
                 };
+                let fish_movement_kind = if minigame.is_some() {
+                    minigame.motionType
+                } else {
+                    0i32
+                };
                 let fish_position = if minigame.is_some() {
                     minigame.bobberPosition
                 } else {
@@ -251,6 +285,12 @@ impl FishingState {
                 } else {
                     nan
                 };
+                let fish_floater_sinker = if minigame.is_some() {
+                    minigame.floaterSinkerAcceleration
+                } else {
+                    nan
+                };
+
                 let fish_target_position = if minigame.is_some() {
                     minigame.bobberTargetPosition
                 } else {
@@ -311,8 +351,10 @@ impl FishingState {
                     fishing_nibble_accumulator,
                     minigame_in_progress,
                     fish_difficulty,
+                    fish_movement_kind,
                     fish_position,
                     fish_velocity,
+                    fish_floater_sinker,
                     fish_target_position,
                     treasure_position,
                     bar_position,
@@ -404,6 +446,8 @@ impl FishingState {
         };
 
         let fish_target_position = self.fish_target_position;
+        let fish_movement_kind = self.fish_movement_kind;
+        let bar_height = self.bar_height as f32;
 
         move |t: f32| -> f32 {
             let offset = match solution {
@@ -443,6 +487,17 @@ impl FishingState {
             };
             let predicted = fish_target_position + offset;
 
+            // Hack to handle floater/sinker fish types.  Really
+            // should re-derive the equation of motion to include the
+            // additional velocity for the floater/sinker type, but
+            // this should be good enough for now.
+            let predicted = predicted
+                + match fish_movement_kind {
+                    FishMovementKind::Sink => bar_height / 3.0,
+                    FishMovementKind::Floater => -bar_height / 3.0,
+                    _ => 0.0,
+                };
+
             predicted
         }
     }
@@ -450,9 +505,12 @@ impl FishingState {
     const LOOKAHEAD_TIME: f32 = 30.0;
 
     fn should_move_upward_for_target(&self, target_pos: f32) -> bool {
+        // The actual location of the bobber bar.
         let bar_position =
             self.bar_position..self.bar_position + (self.bar_height as f32);
 
+        // Adjust the effective bar position based on how it is used
+        // in the bobber_in_bar computation.
         let bar_position =
             (bar_position.start + bar_position.end - 28.0) / 2.0 - 16.0;
 
