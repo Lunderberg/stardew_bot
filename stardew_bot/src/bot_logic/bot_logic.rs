@@ -2,7 +2,7 @@ use derive_more::From;
 use std::{any::Any, borrow::Cow, collections::VecDeque};
 
 use crate::{
-    game_state::{Item, Key},
+    game_state::{Item, Key, ScrollWheel},
     Error, GameAction, GameState,
 };
 
@@ -323,6 +323,12 @@ impl BotLogic {
         }
         if game_state.inputs.right_mouse_down() {
             actions.push(GameAction::ReleaseRightClick.into());
+        }
+        if game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingDown) {
+            actions.push(GameAction::StopScrollingDown);
+        }
+        if game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingUp) {
+            actions.push(GameAction::StopScrollingUp);
         }
         if is_animation_cancelling {
             actions.push(GameAction::StopAnimationCanceling);

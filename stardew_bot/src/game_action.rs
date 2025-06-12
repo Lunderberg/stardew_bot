@@ -31,6 +31,10 @@ pub enum GameAction {
     ReleaseLeftClick,
     RightClick,
     ReleaseRightClick,
+    ScrollDown,
+    StopScrollingDown,
+    ScrollUp,
+    StopScrollingUp,
 
     SelectHotbar(usize),
     StopSelectingHotbar(usize),
@@ -90,6 +94,8 @@ impl GameAction {
 
     const MOUSE_LEFT: ButtonIndex = ButtonIndex::M1;
     const MOUSE_RIGHT: ButtonIndex = ButtonIndex::M3;
+    const MOUSE_SCROLL_UP: ButtonIndex = ButtonIndex::M4;
+    const MOUSE_SCROLL_DOWN: ButtonIndex = ButtonIndex::M5;
 
     pub fn apply(
         &self,
@@ -160,6 +166,18 @@ impl GameAction {
             GameAction::ReleaseRightClick => {
                 handler.send_click(false, Self::MOUSE_RIGHT)?
             }
+            GameAction::ScrollDown => {
+                handler.send_click(true, Self::MOUSE_SCROLL_DOWN)?
+            }
+            GameAction::StopScrollingDown => {
+                handler.send_click(false, Self::MOUSE_SCROLL_DOWN)?
+            }
+            GameAction::ScrollUp => {
+                handler.send_click(true, Self::MOUSE_SCROLL_UP)?
+            }
+            GameAction::StopScrollingUp => {
+                handler.send_click(false, Self::MOUSE_SCROLL_UP)?
+            }
 
             GameAction::ExitMenu => {
                 handler.send_keystroke(true, Self::KEY_ESCAPE)?
@@ -218,6 +236,12 @@ impl Display for GameAction {
             GameAction::ReleaseLeftClick => write!(f, "ReleaseLeftClick"),
             GameAction::RightClick => write!(f, "RightClick"),
             GameAction::ReleaseRightClick => write!(f, "ReleaseRightClick"),
+
+            GameAction::ScrollDown => write!(f, "ScrollDown"),
+            GameAction::StopScrollingDown => write!(f, "StopScrollingDown"),
+            GameAction::ScrollUp => write!(f, "ScrollUp"),
+            GameAction::StopScrollingUp => write!(f, "StopScrollingUp"),
+
             GameAction::SelectHotbar(i) => write!(f, "SelectHotbar({i})"),
             GameAction::StopSelectingHotbar(i) => {
                 write!(f, "StopSelectingHotbar({i})")

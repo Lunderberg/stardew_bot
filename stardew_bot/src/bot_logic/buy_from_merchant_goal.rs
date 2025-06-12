@@ -86,7 +86,12 @@ impl BotGoal for BuyFromMerchantGoal {
                     item: self.item.clone(),
                 })?;
             if !menu.visible_items().contains(&to_buy_index) {
-                todo!("Implement scrolling through shop menu.")
+                if to_buy_index > menu.for_sale_scroll_index {
+                    do_action(GameAction::ScrollDown);
+                } else {
+                    do_action(GameAction::ScrollUp);
+                }
+                return Ok(BotGoalResult::InProgress);
             }
 
             let button_index = to_buy_index

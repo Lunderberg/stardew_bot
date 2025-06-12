@@ -26,7 +26,7 @@ mod tile_map;
 pub use tile_map::TileMap;
 
 mod input_state;
-pub use input_state::{InputState, Key};
+pub use input_state::{InputState, Key, ScrollWheel};
 
 mod display_state;
 pub use display_state::DisplayState;

@@ -10,6 +10,13 @@ pub struct InputState {
     pub mouse_pixel_location: Vector<isize>,
     pub mouse_tile_location: Vector<isize>,
     pub mouse_buttons: u8,
+    pub scroll_wheel: Option<ScrollWheel>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub enum ScrollWheel {
+    ScrollingUp,
+    ScrollingDown,
 }
 
 impl InputState {
@@ -23,11 +30,18 @@ impl InputState {
              mouse_pixel_y: isize,
              mouse_tile_x: isize,
              mouse_tile_y: isize,
-             mouse_buttons: u8| {
+             mouse_buttons: u8,
+             scroll_wheel: i32| {
                 let mouse_pixel_location =
                     Vector::new(mouse_pixel_x, mouse_pixel_y);
                 let mouse_tile_location =
                     Vector::new(mouse_tile_x, mouse_tile_y);
+                let scroll_wheel = match scroll_wheel {
+                    -1 => Some(ScrollWheel::ScrollingDown),
+                    1 => Some(ScrollWheel::ScrollingUp),
+                    0 => None,
+                    _ => unreachable!("Only generates -1/0/+1"),
+                };
                 InputState {
                     keys_pressed: keys_pressed
                         .iter()
@@ -37,6 +51,7 @@ impl InputState {
                     mouse_pixel_location,
                     mouse_tile_location,
                     mouse_buttons,
+                    scroll_wheel,
                 }
             },
         )?;
@@ -58,11 +73,25 @@ impl InputState {
 
                 let mouse_tile = StardewValley.Game1.currentCursorTile;
 
+                let prev_scroll = mouse._scrollWheelValue;
+                let current_scroll = StardewValley.Game1
+                    .input
+                    ._currentMouseState
+                    ._scrollWheelValue;
+                let scroll_wheel = if current_scroll < prev_scroll {
+                    -1i32
+                } else if current_scroll > prev_scroll {
+                    1i32
+                } else {
+                    0i32
+                };
+
                 new_input_state(
                     keys_pressed,
                     mouse._x, mouse._y,
                     mouse_tile.X, mouse_tile.Y,
                     mouse._buttons,
+                    scroll_wheel,
                 )
             }
         })?;
