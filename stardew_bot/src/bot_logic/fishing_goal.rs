@@ -17,6 +17,7 @@ use super::{
 
 pub struct FishingGoal {
     loc: FishingLocation,
+    stop_time: i32,
 }
 
 pub struct FishOnceGoal {
@@ -41,7 +42,14 @@ struct FishSelling<'a>(&'a Inventory);
 
 impl FishingGoal {
     pub fn new(loc: FishingLocation) -> Self {
-        Self { loc }
+        Self {
+            loc,
+            stop_time: 2700,
+        }
+    }
+
+    pub fn stop_time(self, stop_time: i32) -> Self {
+        Self { stop_time, ..self }
     }
 }
 
@@ -121,6 +129,9 @@ impl BotGoal for FishingGoal {
     ) -> Result<BotGoalResult, Error> {
         const FISHING_POLES: [Item; 3] =
             [Item::IRIDIUM_ROD, Item::FIBERGLASS_ROD, Item::BAMBOO_POLE];
+        if game_state.globals.in_game_time >= self.stop_time {
+            return Ok(BotGoalResult::Completed);
+        }
 
         let inventory = &game_state.player.inventory;
 
