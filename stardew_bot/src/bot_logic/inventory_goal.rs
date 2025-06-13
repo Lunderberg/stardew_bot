@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult},
-    ActivateTile,
+    ActivateTile, GameStateExt as _,
 };
 
 pub struct InventoryGoal {
@@ -154,27 +154,16 @@ impl InventoryGoal {
         within_all_maximums && within_all_minimums
     }
 
+    #[allow(dead_code)]
     pub fn is_possible(&self, game_state: &GameState) -> bool {
         if self.is_completed(game_state) {
             return true;
         }
 
-        let Ok(farm) = game_state.get_room("Farm") else {
+        let Ok(iter_items) = game_state.iter_accessible_items() else {
             return false;
         };
-
-        let iter_inventory = game_state.player.inventory.iter_items();
-        let iter_chests = farm
-            .objects
-            .iter()
-            .filter_map(|obj| match &obj.kind {
-                ObjectKind::Chest(chest) => Some(chest),
-                _ => None,
-            })
-            .flat_map(|chest| chest.iter_items());
-
-        let total_counts = iter_inventory
-            .chain(iter_chests)
+        let total_counts = iter_items
             .map(|item| {
                 (
                     ItemType {

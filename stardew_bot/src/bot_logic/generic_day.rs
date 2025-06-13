@@ -1,9 +1,10 @@
-use crate::{Error, GameAction, GameState};
+use crate::{game_state::ObjectKind, Error, GameAction, GameState};
 
 use super::{
     bot_logic::{BotGoal, BotGoalResult, LogicStack},
-    CheckAllMail, ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation,
-    InventoryGoal, OpportunisticForaging, PlantCropsGoal, WaterCropsGoal,
+    CheckAllMail, ClearFarmGoal, ExpandTreeFarm, FirstDay, FishingGoal,
+    FishingLocation, GameStateExt as _, InventoryGoal, OpportunisticForaging,
+    PlantCropsGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -29,11 +30,24 @@ impl BotGoal for GenericDay {
             return Ok(goal.into());
         }
 
+        let has_fishing_rod = game_state
+            .iter_accessible_items()?
+            .any(|item| item.as_fishing_rod().is_some());
+
+        let fishing_goal = if !has_fishing_rod {
+            FishingGoal::new(FishingLocation::OceanByWilly)
+        } else if game_state.daily.is_raining {
+            FishingGoal::new(FishingLocation::River).stop_time(2400)
+        } else {
+            FishingGoal::new(FishingLocation::Lake)
+        };
+
         Ok(LogicStack::new()
             .then(CheckAllMail)
             .then(WaterCropsGoal::new())
             .then(ExpandTreeFarm::new())
-            .then(FishingGoal::new(FishingLocation::OceanByWilly))
+            .then(fishing_goal)
+            .then(ClearFarmGoal::new())
             .into())
     }
 }

@@ -2,7 +2,7 @@ use std::{borrow::Cow, fmt::Display};
 
 use crate::{
     bot_logic::{
-        BuyFromMerchantGoal, DiscardItemGoal, InventoryGoal,
+        BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, InventoryGoal,
         MaintainStaminaGoal, SelectItemGoal, SellToMerchantGoal,
         StepCountForLuck,
     },
@@ -127,8 +127,6 @@ impl BotGoal for FishingGoal {
         game_state: &GameState,
         _do_action: &mut dyn FnMut(GameAction),
     ) -> Result<BotGoalResult, Error> {
-        const FISHING_POLES: [Item; 3] =
-            [Item::IRIDIUM_ROD, Item::FIBERGLASS_ROD, Item::BAMBOO_POLE];
         if game_state.globals.in_game_time >= self.stop_time {
             return Ok(BotGoalResult::Completed);
         }
@@ -144,29 +142,35 @@ impl BotGoal for FishingGoal {
             }
         }
 
-        let opt_current_pole = inventory
-            .iter_items()
+        let opt_current_pole = game_state
+            .iter_accessible_items()?
             .find(|item| item.as_fishing_rod().is_some());
         let Some(current_pole) = opt_current_pole else {
-            let opt_get_pole_goal = FISHING_POLES
-                .iter()
-                .map(|pole| InventoryGoal::empty().with(pole.clone()))
-                .find(|goal| goal.is_possible(game_state));
-            if let Some(goal) = opt_get_pole_goal {
-                // Grab a fishing pole from whichever chest has it.
-                return Ok(goal.into());
-            } else {
-                // Empty out the inventory before heading to the Beach
-                let trigger_willy_cutscene = FishingLocation::Ocean
-                    .movement_goal()
-                    .with_tolerance(1000.0);
+            // Empty out the inventory before heading to the Beach to
+            // trigger the Day2 cutscene with Willy.
+            let trigger_willy_cutscene = FishingLocation::Ocean
+                .movement_goal()
+                .with_tolerance(1000.0);
 
-                let goal = LogicStack::new()
-                    .then(InventoryGoal::empty())
-                    .then(trigger_willy_cutscene);
-                return Ok(goal.into());
-            }
+            let goal = LogicStack::new()
+                .then(InventoryGoal::empty())
+                .then(trigger_willy_cutscene);
+            return Ok(goal.into());
         };
+
+        let preparation = if game_state.player.room_name == "Farm" {
+            // Before leaving the farm, empty out the current
+            // inventory except for the fishing pole.
+            InventoryGoal::empty().with(current_pole.clone())
+        } else {
+            // If not currently on the farm, can resume fishing
+            // without emptying out the inventory, so long as we have
+            // the fishing rod.
+            InventoryGoal::new(current_pole.clone())
+        };
+        if !preparation.is_completed(game_state) {
+            return Ok(preparation.into());
+        }
 
         let using_bamboo_pole = current_pole.is_same_item(&Item::BAMBOO_POLE);
         let in_game_time = game_state.globals.in_game_time;

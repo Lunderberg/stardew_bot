@@ -7,6 +7,10 @@ use super::BotError;
 
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
+
+    fn iter_accessible_items(
+        &self,
+    ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
 }
 
 impl GameStateExt for GameState {
@@ -27,6 +31,21 @@ impl GameStateExt for GameState {
             .ok_or_else(|| BotError::FarmhouseDoorNotFound)?;
 
         Ok(farm_door)
+    }
+
+    fn iter_accessible_items(
+        &self,
+    ) -> Result<impl Iterator<Item = &Item> + '_, Error> {
+        let iter = std::iter::once(&self.player.inventory)
+            .chain(self.get_room("Farm")?.objects.iter().filter_map(|obj| {
+                match &obj.kind {
+                    ObjectKind::Chest(chest) => Some(&chest.inventory),
+                    _ => None,
+                }
+            }))
+            .flat_map(|inventory| inventory.iter_items());
+
+        Ok(iter)
     }
 }
 
