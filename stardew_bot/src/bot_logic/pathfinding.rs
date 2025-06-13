@@ -249,6 +249,10 @@ impl Pathfinding<'_> {
         map
     }
 
+    pub fn walkable(&self) -> TileMap<bool> {
+        self.movement_cost().map(|opt_cost| opt_cost.is_some())
+    }
+
     pub fn reachable(&self, initial: Vector<isize>) -> TileMap<bool> {
         let cost = self.movement_cost();
 
@@ -435,7 +439,7 @@ impl Pathfinding<'_> {
         &self,
         initial: impl detail::Goal,
     ) -> impl Iterator<Item = (Vector<isize>, u64)> + '_ {
-        let walkable = self.movement_cost().map(|opt_cost| opt_cost.is_some());
+        let walkable = self.walkable();
 
         let mut finished: TileMap<bool> = walkable.map(|_| false);
 

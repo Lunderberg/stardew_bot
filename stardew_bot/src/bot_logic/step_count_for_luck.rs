@@ -1,8 +1,9 @@
 use crate::{
-    bot_logic::StopMovingGoal, game_state::SeededRng, Error, GameState,
+    bot_logic::StopMovingGoal, game_state::SeededRng, Direction, Error,
+    GameAction, GameState,
 };
 
-use super::bot_logic::{BotInterrupt, LogicStack};
+use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
 
 pub struct StepCountForLuck {
     /// The time in the day when the steps should start being checked.
@@ -36,6 +37,15 @@ impl StepCountForLuck {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn start_time(self, start_time: i32) -> Self {
+        Self { start_time, ..self }
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        predict_daily_luck(game_state, 0) > 90
+    }
+
     fn plan_steps(&self, game_state: &GameState) -> Result<u32, Error> {
         let additional_steps = (0..(self.max_lookahead as u32))
             .max_by_key(|additional_steps| {
@@ -47,6 +57,30 @@ impl StepCountForLuck {
             game_state.globals.get_stat("stepsTaken").unwrap_or(0);
 
         Ok(steps_taken + additional_steps)
+    }
+
+    fn reached_lucky_step_count(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<bool, Error> {
+        if self.target_steps.is_none() {
+            self.target_steps = Some(self.plan_steps(game_state)?);
+        }
+
+        let target_steps =
+            self.target_steps.expect("Just populated self.target_steps");
+
+        let steps_taken: u32 =
+            game_state.globals.get_stat("stepsTaken").unwrap_or(0);
+
+        assert!(
+            steps_taken <= target_steps,
+            "TODO: Re-plan target steps after overshooting.  \
+             Better yet, avoid taking too many steps \
+             in the first place."
+        );
+
+        Ok(steps_taken == target_steps)
     }
 }
 
@@ -67,24 +101,7 @@ impl BotInterrupt for StepCountForLuck {
             return Ok(None);
         }
 
-        if self.target_steps.is_none() {
-            self.target_steps = Some(self.plan_steps(game_state)?);
-        }
-
-        let target_steps =
-            self.target_steps.expect("Just populated self.target_steps");
-
-        let steps_taken: u32 =
-            game_state.globals.get_stat("stepsTaken").unwrap_or(0);
-
-        assert!(
-            steps_taken <= target_steps,
-            "TODO: Re-plan target steps after overshooting.  \
-             Better yet, avoid taking too many steps \
-             in the first place."
-        );
-
-        if steps_taken < target_steps {
+        if !self.reached_lucky_step_count(game_state)? {
             // Still have more steps to take before reaching target
             // step count.
             return Ok(None);
@@ -98,6 +115,32 @@ impl BotInterrupt for StepCountForLuck {
         // The player is currently moving, and has alreaady reached
         // the step count.
         Ok(Some(StopMovingGoal.into()))
+    }
+}
+
+impl BotGoal for StepCountForLuck {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Actively walk for luck".into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        do_action: &mut dyn FnMut(GameAction),
+    ) -> Result<BotGoalResult, Error> {
+        if self.reached_lucky_step_count(game_state)? {
+            return Ok(BotGoalResult::Completed);
+        }
+
+        let walkable = game_state.current_room()?.pathfinding().walkable();
+
+        let player_tile = game_state.player.tile();
+        let blocked_dir = Direction::iter_cardinal()
+            .find(|dir| !walkable[player_tile + dir.offset()])
+            .expect("TODO: Find nearest wall to walk into");
+
+        do_action(GameAction::Move(blocked_dir.into()));
+        Ok(BotGoalResult::InProgress)
     }
 }
 

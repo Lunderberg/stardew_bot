@@ -4,6 +4,7 @@ use crate::{
     bot_logic::{
         BuyFromMerchantGoal, DiscardItemGoal, InventoryGoal,
         MaintainStaminaGoal, SelectItemGoal, SellToMerchantGoal,
+        StepCountForLuck,
     },
     game_state::{FacingDirection, Inventory, Item, ItemCategory, Vector},
     Error, GameAction, GameState,
@@ -239,6 +240,13 @@ impl BotGoal for FishingGoal {
         }
         if game_state.player.current_stamina < 10.0 {
             return Ok(BotGoalResult::Completed);
+        }
+
+        if in_game_time > 2000 {
+            let goal = StepCountForLuck::new();
+            if !goal.is_completed(game_state) {
+                return Ok(goal.into());
+            }
         }
 
         let fish_once = FishOnceGoal::new();
