@@ -176,11 +176,30 @@ impl Item {
     pub fn is_full_stack(&self) -> bool {
         self.count == 999
     }
+
+    /// The price of each item, including the multiplier from quality
+    pub fn per_item_price(&self) -> i32 {
+        ((self.price as f32) * self.quality.price_multiplier()) as i32
+    }
+
+    /// The total price of all items in the stack
+    pub fn stack_price(&self) -> i32 {
+        (self.count as i32) * self.per_item_price()
+    }
 }
 
 impl Quality {
     pub fn is_normal(&self) -> bool {
         matches!(self, Self::Normal)
+    }
+
+    pub fn price_multiplier(&self) -> f32 {
+        match self {
+            Quality::Normal => 1.0,
+            Quality::Silver => 1.25,
+            Quality::Gold => 1.5,
+            Quality::Iridium => 2.0,
+        }
     }
 }
 

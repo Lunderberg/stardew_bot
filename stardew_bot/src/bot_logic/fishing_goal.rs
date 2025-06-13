@@ -99,9 +99,7 @@ impl FishSelling<'_> {
     }
 
     fn fish_money(&self) -> i32 {
-        self.iter_fish()
-            .map(|item| item.price * (item.count as i32))
-            .sum::<i32>()
+        self.iter_fish().map(|item| item.stack_price()).sum::<i32>()
     }
 
     fn sell_all_fish(&self) -> LogicStack {

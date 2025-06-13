@@ -46,7 +46,7 @@ impl WidgetWindow<Error> for PlayerStats {
                     matches!(item.category, Some(ItemCategory::Fish))
                         || Item::CLAY.is_same_item(item)
                 })
-                .map(|item| item.price * (item.count as i32))
+                .map(|item| item.stack_price())
                 .sum::<i32>();
 
         let table = Table::new(
