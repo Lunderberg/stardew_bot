@@ -5,6 +5,7 @@ use crate::Error;
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct DailyState {
     pub daily_luck: f64,
+    pub is_raining: bool,
     pub tomorrow_weather: String,
 }
 
@@ -14,9 +15,12 @@ impl DailyState {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_daily_state",
-            |daily_luck: f64, tomorrow_weather: &str| DailyState {
-                daily_luck,
-                tomorrow_weather: tomorrow_weather.into(),
+            |daily_luck: f64, is_raining: bool, tomorrow_weather: &str| {
+                DailyState {
+                    daily_luck,
+                    is_raining,
+                    tomorrow_weather: tomorrow_weather.into(),
+                }
             },
         )?;
 
@@ -30,12 +34,20 @@ impl DailyState {
                     .sharedDailyLuck
                     .value;
 
+                let is_raining = StardewValley
+                    .Game1
+                    .isRaining;
+
                 let tomorrow_weather = StardewValley
                     .Game1
                     .weatherForTomorrow
                     .read_string();
 
-                new_daily_state(daily_luck, tomorrow_weather)
+                new_daily_state(
+                    daily_luck,
+                    is_raining,
+                    tomorrow_weather,
+                )
             }
         })?;
 
