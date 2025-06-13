@@ -20,11 +20,19 @@ impl WidgetWindow<Error> for BotGoalDisplay {
             .get::<BotLogic>()
             .expect("Generated/updated in top-level GUI update");
 
+        let iter_current = bot_logic
+            .iter()
+            .rev()
+            .map(|logic_item| logic_item.description());
+
+        let iter_completed = bot_logic
+            .iter_recent()
+            .map(|logic_item| logic_item.description());
+
         let goal_list = List::new(
-            bot_logic
-                .iter()
-                .rev()
-                .map(|logic_item| logic_item.description()),
+            iter_current
+                .chain(["----------------------".into()])
+                .chain(iter_completed),
         );
 
         Widget::render(goal_list, area, buf);

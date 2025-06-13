@@ -6,8 +6,11 @@ use crate::{
     Error, GameAction, GameState,
 };
 
+const KEEP_RECENT: usize = 30;
+
 pub struct BotLogic {
     stack: Vec<LogicStackItem>,
+    recently_finished: VecDeque<LogicStackItem>,
     verbose: bool,
 }
 
@@ -101,6 +104,7 @@ impl BotLogic {
                 },
                 LogicStackItem::Goal(Box::new(super::GenericDay)),
             ],
+            recently_finished: Default::default(),
             verbose,
         }
     }
@@ -163,14 +167,18 @@ impl BotLogic {
                     | LogicStackItem::Interrupt { .. } => false,
                 })
                 .map(|(i, _)| i);
-            if let Some(interrupt) = opt_cancellation {
+            if let Some(cancellation) = opt_cancellation {
                 if self.verbose {
                     println!(
-                        "Interrupt {interrupt} triggered, \
+                        "Interrupt {cancellation} triggered, \
                          removing all goals above it."
                     )
                 }
-                self.stack.truncate(interrupt);
+                // Truncate to just above the cancellation, without
+                // recording those goals as completed.  Then, pop the
+                // cancellation, recording it as completed.
+                self.stack.truncate(cancellation + 1);
+                self.pop_from_logic_stack();
             }
 
             // Any cancellations or interrupts on the top of the stack no longer
@@ -187,7 +195,7 @@ impl BotLogic {
                 })
                 .unwrap_or(false)
             {
-                self.stack.pop();
+                self.pop_from_logic_stack();
             }
 
             // If anything was removed, mark interrupts that may be
@@ -260,7 +268,7 @@ impl BotLogic {
                         );
                     }
 
-                    self.stack.pop();
+                    self.pop_from_logic_stack();
                     self.reset_completed_interrupts();
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
@@ -371,6 +379,21 @@ impl BotLogic {
         &self,
     ) -> impl DoubleEndedIterator<Item = &LogicStackItem> + '_ {
         self.stack.iter()
+    }
+
+    fn pop_from_logic_stack(&mut self) {
+        let item = self.stack.pop().expect("Bot has run out of goals");
+        self.recently_finished.push_back(item);
+
+        while self.recently_finished.len() > KEEP_RECENT {
+            self.recently_finished.pop_front();
+        }
+    }
+
+    pub fn iter_recent(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &LogicStackItem> + '_ {
+        self.recently_finished.iter().rev()
     }
 
     pub fn current_goal(&self) -> Option<&dyn BotGoal> {
