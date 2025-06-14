@@ -59,6 +59,8 @@ pub enum Quality {
 pub enum ItemCategory {
     Fish,
     Seed,
+    Junk,
+    Ore,
     Other(i32),
 }
 
@@ -222,6 +224,8 @@ impl From<i32> for ItemCategory {
         match value {
             -4 => ItemCategory::Fish,
             -74 => ItemCategory::Seed,
+            -20 => ItemCategory::Junk,
+            -15 => ItemCategory::Ore,
             other => ItemCategory::Other(other),
         }
     }

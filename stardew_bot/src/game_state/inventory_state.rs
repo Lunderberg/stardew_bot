@@ -208,7 +208,10 @@ impl Inventory {
         Ok(func)
     }
 
-    pub fn iter_slots(&self) -> impl Iterator<Item = Option<&Item>> + '_ {
+    pub fn iter_slots(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = Option<&Item>> + ExactSizeIterator + '_
+    {
         self.items.iter().map(|item| item.as_ref())
     }
 

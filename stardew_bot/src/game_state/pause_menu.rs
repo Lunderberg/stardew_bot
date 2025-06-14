@@ -293,6 +293,22 @@ impl PauseMenu {
         Ok(func)
     }
 
+    pub fn held_item(&self) -> Option<&Item> {
+        match &self.active_page {
+            MenuPage::Inventory(page) => page.held_item.as_ref(),
+            MenuPage::Crafting(page) => page.held_item.as_ref(),
+            MenuPage::Other(_) => None,
+        }
+    }
+
+    pub fn player_inventory_tiles(&self) -> Option<&[Vector<isize>]> {
+        match &self.active_page {
+            MenuPage::Inventory(page) => Some(&page.player_item_locations),
+            MenuPage::Crafting(page) => Some(&page.player_item_locations),
+            MenuPage::Other(_) => None,
+        }
+    }
+
     pub fn inventory_page(&self) -> Option<&InventoryPage> {
         match &self.active_page {
             MenuPage::Inventory(page) => Some(page),

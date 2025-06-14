@@ -13,6 +13,7 @@ use crate::{
 use super::{
     bot_logic::{BotGoal, BotGoalResult, LogicStack},
     movement_goal::{FaceDirectionGoal, MovementGoal},
+    OrganizeInventoryGoal,
 };
 
 pub struct FishingGoal {
@@ -129,6 +130,25 @@ impl BotGoal for FishingGoal {
     ) -> Result<BotGoalResult, Error> {
         if game_state.globals.in_game_time >= self.stop_time {
             return Ok(BotGoalResult::Completed);
+        }
+
+        let organization = OrganizeInventoryGoal::new(|item| {
+            use super::SortedInventoryLocation as Loc;
+            if item.as_fishing_rod().is_some() {
+                Loc::HotBarLeft
+            } else if matches!(
+                item.category,
+                Some(ItemCategory::Fish | ItemCategory::Junk)
+            ) {
+                Loc::Hidden
+            } else if item.edibility > 0 {
+                Loc::HotBarRight
+            } else {
+                Loc::HotBar
+            }
+        });
+        if !organization.is_completed(game_state) {
+            return Ok(organization.into());
         }
 
         let inventory = &game_state.player.inventory;

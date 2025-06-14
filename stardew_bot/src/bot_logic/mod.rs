@@ -35,6 +35,9 @@ mod graph_search;
 mod inventory_goal;
 pub use inventory_goal::*;
 
+mod organize_inventory_goal;
+pub use organize_inventory_goal::*;
+
 mod discard_item_goal;
 pub use discard_item_goal::*;
 
