@@ -24,6 +24,9 @@ pub enum GameAction {
     ConfirmMenu,
     StopConfirmingMenu,
 
+    HoldLeftShift,
+    StopHoldingLeftShift,
+
     MouseOverTile(Vector<isize>),
     MouseOverPixel(Vector<isize>),
 
@@ -86,6 +89,7 @@ impl GameAction {
         Self::KEY_EQUAL,
     ];
 
+    const KEY_LEFT_SHIFT: X11KeyCode = 50;
     const KEY_RIGHT_SHIFT: X11KeyCode = 62;
     const KEY_R: X11KeyCode = 27;
     const KEY_DELETE: X11KeyCode = 119;
@@ -203,6 +207,13 @@ impl GameAction {
                     handler.send_keystroke(false, key)?
                 }
             }
+
+            GameAction::HoldLeftShift => {
+                handler.send_keystroke(true, Self::KEY_LEFT_SHIFT)?
+            }
+            GameAction::StopHoldingLeftShift => {
+                handler.send_keystroke(false, Self::KEY_LEFT_SHIFT)?
+            }
         }
 
         Ok(())
@@ -236,12 +247,10 @@ impl Display for GameAction {
             GameAction::ReleaseLeftClick => write!(f, "ReleaseLeftClick"),
             GameAction::RightClick => write!(f, "RightClick"),
             GameAction::ReleaseRightClick => write!(f, "ReleaseRightClick"),
-
             GameAction::ScrollDown => write!(f, "ScrollDown"),
             GameAction::StopScrollingDown => write!(f, "StopScrollingDown"),
             GameAction::ScrollUp => write!(f, "ScrollUp"),
             GameAction::StopScrollingUp => write!(f, "StopScrollingUp"),
-
             GameAction::SelectHotbar(i) => write!(f, "SelectHotbar({i})"),
             GameAction::StopSelectingHotbar(i) => {
                 write!(f, "StopSelectingHotbar({i})")
@@ -249,6 +258,10 @@ impl Display for GameAction {
             GameAction::AnimationCancel => write!(f, "AnimationCancel"),
             GameAction::StopAnimationCanceling => {
                 write!(f, "StopAnimationCanceling")
+            }
+            GameAction::HoldLeftShift => write!(f, "HoldLeftShift"),
+            GameAction::StopHoldingLeftShift => {
+                write!(f, "StopHoldingLeftShift")
             }
         }
     }

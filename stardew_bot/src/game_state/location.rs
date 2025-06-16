@@ -9,7 +9,7 @@ use memory_reader::Pointer;
 
 use crate::{Direction, Error};
 
-use super::{Inventory, Quality, Rectangle, TileMap, Vector};
+use super::{Inventory, ItemId, Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -261,8 +261,7 @@ pub enum ObjectKind {
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct FloatingItem {
     pub position: Vector<f32>,
-    pub item_id: String,
-    pub quality: Quality,
+    pub id: ItemId,
     pub count: usize,
 }
 
@@ -574,8 +573,8 @@ impl Location {
              quality: i32,
              count: usize| FloatingItem {
                 position: Vector::new(right, down),
-                quality: quality.try_into().unwrap(),
-                item_id: item_id.to_string(),
+                id: ItemId::new(item_id.to_string())
+                    .with_quality(quality.try_into().unwrap()),
                 count,
             },
         )?;

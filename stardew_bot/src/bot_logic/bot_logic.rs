@@ -61,6 +61,7 @@ pub struct ActionCollector {
     is_scrolling_down: bool,
     is_left_clicking: bool,
     is_right_clicking: bool,
+    is_holding_left_shift: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -301,6 +302,8 @@ impl ActionCollector {
             .into_iter()
             .any(|key| game_state.inputs.keys_pressed.contains(&key));
 
+        let is_holding_left_shift = game_state.inputs.holding_left_shift();
+
         let is_scrolling_up =
             game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingUp);
         let is_scrolling_down =
@@ -323,6 +326,7 @@ impl ActionCollector {
             is_scrolling_down,
             is_left_clicking,
             is_right_clicking,
+            is_holding_left_shift,
         }
     }
 
@@ -454,6 +458,14 @@ impl ActionCollector {
                 .all(|action| !matches!(action.action, GameAction::Move(_)))
         {
             self.do_action(GameAction::StopMoving);
+        }
+
+        if self.is_holding_left_shift
+            && self.actions.iter().all(|action| {
+                !matches!(action.action, GameAction::HoldLeftShift)
+            })
+        {
+            self.do_action(GameAction::StopHoldingLeftShift);
         }
     }
 }

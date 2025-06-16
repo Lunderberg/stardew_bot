@@ -106,6 +106,10 @@ impl InputState {
     pub fn right_mouse_down(&self) -> bool {
         (self.mouse_buttons & 2) > 0
     }
+
+    pub fn holding_left_shift(&self) -> bool {
+        self.keys_pressed.contains(&Key::LeftShift)
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

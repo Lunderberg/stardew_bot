@@ -13,6 +13,17 @@ pub struct ShipItemGoal {
     items: Vec<Item>,
 }
 
+enum TransferSize {
+    /// Ship the entire stack by left-clicking
+    All,
+
+    /// Ship half of the stack by shift + right-click
+    Half,
+
+    /// Ship one item by right-clicking
+    One,
+}
+
 impl ShipItemGoal {
     pub fn new<Iter>(items: Iter) -> Self
     where
@@ -21,6 +32,39 @@ impl ShipItemGoal {
     {
         let items = items.into_iter().map(Into::into).collect();
         Self { items }
+    }
+
+    fn next_transfer(
+        &self,
+        game_state: &GameState,
+    ) -> Option<(usize, TransferSize)> {
+        let inventory = &game_state.player.inventory;
+        let counts = inventory.to_hash_map();
+
+        for item in &self.items {
+            let current = counts.get(item.as_ref()).cloned().unwrap_or(0);
+            let goal = item.count;
+            if goal < current {
+                let Some(slot) = inventory.current_slot(item) else {
+                    continue;
+                };
+
+                let transfer_size = if goal == 0 {
+                    TransferSize::All
+                } else if goal <= current / 2 {
+                    TransferSize::Half
+                } else {
+                    TransferSize::One
+                };
+
+                return Some((slot, transfer_size));
+            }
+        }
+        None
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        self.next_transfer(game_state).is_none()
     }
 }
 
@@ -38,23 +82,9 @@ impl BotGoal for ShipItemGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        let opt_index_to_ship = game_state
-            .player
-            .inventory
-            .iter_slots()
-            .enumerate()
-            .find(|(_, opt_item)| {
-                opt_item
-                    .map(|item| {
-                        self.items
-                            .iter()
-                            .any(|to_sell| item.is_same_item(to_sell))
-                    })
-                    .unwrap_or(false)
-            })
-            .map(|(i, _)| i);
-
-        let Some(index_to_ship) = opt_index_to_ship else {
+        let Some((index_to_ship, transfer_size)) =
+            self.next_transfer(game_state)
+        else {
             let cleanup = MenuCloser::new();
             if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
@@ -84,7 +114,24 @@ impl BotGoal for ShipItemGoal {
         // Time to click the item.
         let pixel = menu.player_item_locations[index_to_ship];
         actions.do_action(GameAction::MouseOverPixel(pixel));
-        actions.do_action(GameAction::LeftClick);
+
+        match transfer_size {
+            TransferSize::All => {
+                actions.do_action(GameAction::LeftClick);
+            }
+            TransferSize::Half => {
+                actions.do_action(GameAction::HoldLeftShift);
+                if game_state.inputs.holding_left_shift() {
+                    actions.do_action(GameAction::RightClick);
+                }
+            }
+            TransferSize::One => {
+                if !game_state.inputs.holding_left_shift() {
+                    actions.do_action(GameAction::RightClick);
+                }
+            }
+        }
+
         Ok(BotGoalResult::InProgress)
     }
 }

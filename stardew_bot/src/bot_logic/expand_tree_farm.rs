@@ -45,9 +45,7 @@ impl BotGoal for ExpandTreeFarm {
                 .items
                 .iter()
                 .filter(|item| {
-                    seed_types
-                        .iter()
-                        .any(|seed_type| item.item_id == seed_type.item_id)
+                    seed_types.iter().any(|seed_type| item.id == seed_type.id)
                 })
                 .map(|item| item.position / 64.0 - pos)
                 .filter(|offset| offset.mag2() < 3.0 * 3.0)

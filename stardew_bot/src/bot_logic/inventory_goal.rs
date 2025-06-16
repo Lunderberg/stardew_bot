@@ -4,7 +4,9 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
-    game_state::{Chest, Inventory, Item, Key, ObjectKind, Quality, Vector},
+    game_state::{
+        Chest, Inventory, Item, ItemId, Key, ObjectKind, Quality, Vector,
+    },
     Error, GameAction, GameState,
 };
 
@@ -14,7 +16,7 @@ use super::{
 };
 
 pub struct InventoryGoal {
-    bounds: HashMap<ItemType, Bounds>,
+    bounds: HashMap<ItemId, Bounds>,
 
     /// If true, any item not mentioned in `bounds` will be treated as
     /// if it has a maximum of zero items, and will be stored in a
@@ -22,12 +24,6 @@ pub struct InventoryGoal {
     /// treated as if it has `Bounds{min: None, max: None}`, and will
     /// not be transferred into or out of the player's inventory.
     stash_unspecified_items: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct ItemType {
-    item_id: Cow<'static, str>,
-    quality: Quality,
 }
 
 struct Bounds {
@@ -38,10 +34,7 @@ struct Bounds {
 impl InventoryGoal {
     pub fn new(item: Item) -> Self {
         let bounds = [(
-            ItemType {
-                item_id: item.item_id,
-                quality: item.quality,
-            },
+            item.id,
             Bounds {
                 min: Some(item.count),
                 max: Some(item.count),
@@ -65,7 +58,7 @@ impl InventoryGoal {
     pub fn with(mut self, item: Item) -> Self {
         let count = item.count;
         self.bounds.insert(
-            item.into(),
+            item.id,
             Bounds {
                 min: Some(count),
                 max: None,
@@ -78,53 +71,33 @@ impl InventoryGoal {
 trait InventoryExt: Sized {
     fn iter_stacks<'a>(
         &'a self,
-        ty: &'a ItemType,
+        ty: &'a ItemId,
     ) -> impl Iterator<Item = usize> + 'a;
 
-    fn contains_ty(&self, ty: &ItemType) -> bool {
+    fn contains_ty(&self, ty: &ItemId) -> bool {
         self.iter_stacks(ty).next().is_some()
     }
 
-    fn to_hash_map(&self) -> HashMap<ItemType, usize>;
-
-    fn item_slot(&self, ty: &ItemType) -> Option<usize>;
+    fn item_slot(&self, ty: &ItemId) -> Option<usize>;
 }
 impl InventoryExt for Inventory {
     fn iter_stacks<'a>(
         &'a self,
-        ty: &'a ItemType,
+        id: &'a ItemId,
     ) -> impl Iterator<Item = usize> + 'a {
         self.items
             .iter()
             .filter_map(|opt_item| opt_item.as_ref())
-            .filter(|item| {
-                item.item_id == ty.item_id && item.quality == ty.quality
-            })
+            .filter(move |item| *item == id)
             .map(|item| item.count)
     }
 
-    fn to_hash_map(&self) -> HashMap<ItemType, usize> {
-        let mut contents = HashMap::new();
-        for item in self.iter_items() {
-            let count = contents
-                .entry(ItemType {
-                    item_id: item.item_id.clone(),
-                    quality: item.quality,
-                })
-                .or_default();
-            *count += item.count;
-        }
-        contents
-    }
-
-    fn item_slot(&self, ty: &ItemType) -> Option<usize> {
+    fn item_slot(&self, ty: &ItemId) -> Option<usize> {
         self.items
             .iter()
             .enumerate()
             .filter_map(|(i, opt_item)| opt_item.as_ref().map(|item| (i, item)))
-            .find(|(_, item)| {
-                ty.item_id == item.item_id && ty.quality == item.quality
-            })
+            .find(|(_, item)| item == &ty)
             .map(|(i, _)| i)
     }
 }
@@ -164,15 +137,7 @@ impl InventoryGoal {
             return false;
         };
         let total_counts = iter_items
-            .map(|item| {
-                (
-                    ItemType {
-                        item_id: item.item_id.clone(),
-                        quality: item.quality,
-                    },
-                    item.count,
-                )
-            })
+            .map(|item| (item.id.clone(), item.count))
             .into_grouping_map()
             .sum();
 
@@ -233,11 +198,11 @@ impl BotGoal for InventoryGoal {
         }
 
         let player_inventory = &game_state.player.inventory;
-        let player_contents: HashMap<ItemType, usize> =
+        let player_contents: HashMap<ItemId, usize> =
             player_inventory.to_hash_map();
 
         let farm = game_state.get_room("Farm")?;
-        let preferred_chest: HashMap<ItemType, Vector<isize>> = farm
+        let preferred_chest: HashMap<ItemId, Vector<isize>> = farm
             .objects
             .iter()
             .filter_map(|obj| match &obj.kind {
@@ -249,15 +214,7 @@ impl BotGoal for InventoryGoal {
                 chest
                     .iter_items()
                     .filter(move |item| !item.is_full_stack() || has_empty_slot)
-                    .map(move |item| {
-                        (
-                            ItemType {
-                                item_id: item.item_id.clone(),
-                                quality: item.quality,
-                            },
-                            tile,
-                        )
-                    })
+                    .map(move |item| (item.id.clone(), tile))
             })
             .collect();
 
@@ -427,14 +384,5 @@ impl BotGoal for InventoryGoal {
         }
 
         todo!("Handle case where desired item doesn't exist anywhere")
-    }
-}
-
-impl From<Item> for ItemType {
-    fn from(item: Item) -> Self {
-        Self {
-            item_id: item.item_id,
-            quality: item.quality,
-        }
     }
 }

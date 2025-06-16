@@ -109,13 +109,12 @@ impl ClayFarmingGoal {
             return None;
         }
 
-        let clay_id = "(O)330";
         let player_loc = game_state.player.center_pos();
         game_state
             .get_room("Beach")
             .into_iter()
             .flat_map(|loc| loc.items.iter())
-            .filter(|floating_item| floating_item.item_id == clay_id)
+            .filter(|floating_item| floating_item.id == Item::CLAY)
             .min_by_key(|item| {
                 (item.position / 64.0).dist2(player_loc) as isize
             })

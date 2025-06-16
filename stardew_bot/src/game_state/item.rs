@@ -6,8 +6,8 @@ use crate::Error;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
-    pub item_id: Cow<'static, str>,
-    pub quality: Quality,
+    pub id: ItemId,
+
     pub count: usize,
     pub price: i32,
     pub edibility: i32,
@@ -19,6 +19,21 @@ pub struct Item {
     /// The numeric category of the item. (e.g. watering cans being
     /// within the Tool category).
     pub category: Option<ItemCategory>,
+}
+
+/// A identfier for a type of item
+///
+/// Can be used as a dictionary lookup.  Only identifies the item
+/// type, without any extra fields that may be present for the item.
+/// Often, these will be available in contexts that generate items,
+/// even before the item itself has been materialized.
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub struct ItemId {
+    /// The qualified item id (e.g. "(O)CarrotSeeds").
+    pub item_id: Cow<'static, str>,
+
+    /// The quality of the item.
+    pub quality: Quality,
 }
 
 /// Contains extra fields for specific item types.
@@ -57,11 +72,32 @@ pub enum Quality {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ItemCategory {
+    Tool,
     Fish,
     Seed,
     Junk,
     Ore,
     Other(i32),
+}
+
+impl ItemId {
+    pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            item_id: item_id.into(),
+            quality: Quality::Normal,
+        }
+    }
+
+    pub const fn new_const(item_id: &'static str) -> Self {
+        Self {
+            item_id: Cow::Borrowed(item_id),
+            quality: Quality::Normal,
+        }
+    }
+
+    pub fn with_quality(self, quality: Quality) -> Self {
+        Self { quality, ..self }
+    }
 }
 
 impl Item {
@@ -92,8 +128,7 @@ impl Item {
 
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
-            item_id: item_id.into(),
-            quality: Quality::Normal,
+            id: ItemId::new(item_id),
             count: 1,
             price: 0,
             edibility: -300,
@@ -104,8 +139,7 @@ impl Item {
 
     pub const fn new_const(item_id: &'static str) -> Self {
         Self {
-            item_id: Cow::Borrowed(item_id),
-            quality: Quality::Normal,
+            id: ItemId::new_const(item_id),
             count: 1,
             price: 0,
             edibility: -300,
@@ -114,8 +148,15 @@ impl Item {
         }
     }
 
+    pub fn quality(&self) -> Quality {
+        self.id.quality
+    }
+
     pub fn with_quality(self, quality: Quality) -> Self {
-        Self { quality, ..self }
+        Self {
+            id: self.id.with_quality(quality),
+            ..self
+        }
     }
 
     pub fn with_count(self, count: usize) -> Self {
@@ -140,10 +181,16 @@ impl Item {
 
     pub fn stamina_recovery(&self) -> Option<f32> {
         if self.edibility == -300 {
-            None
-        } else {
-            Some((self.edibility as f32) * 2.5)
+            return None;
         }
+        let base_recovery = (self.edibility as f32) * 2.5;
+        let quality_multiplier = match self.quality() {
+            Quality::Normal => 1.0,
+            Quality::Silver => 1.4,
+            Quality::Gold => 1.8,
+            Quality::Iridium => 2.6,
+        };
+        Some(base_recovery * quality_multiplier)
     }
 
     pub fn health_recovery(&self) -> Option<f32> {
@@ -155,7 +202,7 @@ impl Item {
     }
 
     pub fn is_same_item(&self, other: &Item) -> bool {
-        self.item_id == other.item_id && self.quality == other.quality
+        self.id == other.id
     }
 
     pub fn as_watering_can(&self) -> Option<&WateringCan> {
@@ -181,7 +228,9 @@ impl Item {
 
     /// The price of each item, including the multiplier from quality
     pub fn per_item_price(&self) -> i32 {
-        ((self.price as f32) * self.quality.price_multiplier()) as i32
+        let base_price = self.price as f32;
+        let price = base_price * self.quality().price_multiplier();
+        price as i32
     }
 
     /// The total price of all items in the stack
@@ -222,6 +271,7 @@ impl TryFrom<i32> for Quality {
 impl From<i32> for ItemCategory {
     fn from(value: i32) -> Self {
         match value {
+            -99 => ItemCategory::Tool,
             -4 => ItemCategory::Fish,
             -74 => ItemCategory::Seed,
             -20 => ItemCategory::Junk,
@@ -242,22 +292,42 @@ impl std::fmt::Display for Quality {
     }
 }
 
+impl std::fmt::Display for ItemId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let Self { item_id, quality } = &self;
+        if quality.is_normal() {
+            write!(f, "{item_id}")
+        } else {
+            write!(f, "{quality} {item_id}")
+        }
+    }
+}
+
 impl std::fmt::Display for Item {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self {
-            item_id,
-            quality,
-            count,
-            ..
-        } = &self;
-        if quality.is_normal() && *count == 1 {
-            write!(f, "{item_id}")
-        } else if quality.is_normal() {
-            write!(f, "{count} {item_id}")
-        } else if *count == 1 {
-            write!(f, "{quality} {item_id}")
+        let Self { id, count, .. } = &self;
+        if *count == 1 {
+            write!(f, "{id}")
         } else {
-            write!(f, "{count} {quality} {item_id}")
+            write!(f, "{count} {id}")
         }
+    }
+}
+
+impl std::cmp::PartialEq<Item> for ItemId {
+    fn eq(&self, other: &Item) -> bool {
+        self == &other.id
+    }
+}
+
+impl std::cmp::PartialEq<ItemId> for Item {
+    fn eq(&self, other: &ItemId) -> bool {
+        &self.id == other
+    }
+}
+
+impl AsRef<ItemId> for Item {
+    fn as_ref(&self) -> &ItemId {
+        &self.id
     }
 }

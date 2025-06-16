@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use memory_reader::Pointer;
 
@@ -5,7 +7,7 @@ use crate::Error;
 
 use super::{
     item::{ItemKind, WateringCan},
-    FishingRod, Item,
+    FishingRod, Item, ItemId,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -219,19 +221,22 @@ impl Inventory {
         self.iter_slots().flatten()
     }
 
-    pub fn contains(&self, item: &Item) -> bool {
-        self.iter_items()
-            .any(|inv_item| inv_item.is_same_item(item))
+    pub fn contains(&self, item: impl AsRef<ItemId>) -> bool {
+        let item = item.as_ref();
+
+        self.iter_items().any(|inv_item| inv_item == item)
     }
 
-    pub fn current_slot(&self, item: &Item) -> Option<usize> {
+    pub fn current_slot(&self, item: impl AsRef<ItemId>) -> Option<usize> {
+        let item = item.as_ref();
+
         self.items
             .iter()
             .enumerate()
             .find(|(_, opt_inv_item)| {
                 opt_inv_item
                     .as_ref()
-                    .map(|inv_item| item.is_same_item(inv_item))
+                    .map(|inv_item| inv_item == item)
                     .unwrap_or(false)
             })
             .map(|(i, _)| i)
@@ -265,5 +270,18 @@ impl Inventory {
             None => true,
             Some(item) => item.is_same_item(new_item) && !item.is_full_stack(),
         })
+    }
+
+    /// Returns a lookup with the contents of this inventory
+    ///
+    /// If the same item occurs in multiple stack, the lookup contains
+    /// the sum of all stacks.
+    pub fn to_hash_map(&self) -> HashMap<ItemId, usize> {
+        let mut contents = HashMap::new();
+        for item in self.iter_items() {
+            let count = contents.entry(item.id.clone()).or_default();
+            *count += item.count;
+        }
+        contents
     }
 }

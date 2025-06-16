@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, Vector},
+    game_state::{Item, ItemCategory, Vector},
     Direction, Error, GameAction, GameState,
 };
 
@@ -48,7 +48,7 @@ impl BotGoal for UseItemOnTile {
         if player.using_tool
             && player
                 .selected_item()
-                .map(|item| item.item_id.starts_with("(T)"))
+                .map(|item| matches!(item.category, Some(ItemCategory::Tool)))
                 .unwrap_or(false)
         {
             if player.last_click == Vector::zero() {
@@ -61,10 +61,8 @@ impl BotGoal for UseItemOnTile {
             return Ok(BotGoalResult::Completed);
         }
 
-        let tolerance = match self.item.item_id.as_ref() {
-            "(T)WateringCan"
-                if game_state.get_room(&self.room)?.is_water(self.tile) =>
-            {
+        let tolerance = match self.item.as_watering_can() {
+            Some(_) if game_state.get_room(&self.room)?.is_water(self.tile) => {
                 1.0
             }
             _ => 1.4,
@@ -82,7 +80,7 @@ impl BotGoal for UseItemOnTile {
             return Ok(select_item.into());
         }
 
-        let requires_adjacent_tile = match self.item.item_id.as_ref() {
+        let requires_adjacent_tile = match self.item.id.item_id.as_ref() {
             "(T)Pickaxe" | "(T)Axe" | "(T)Hoe" => true,
             other => other.starts_with("(BC)"),
         };

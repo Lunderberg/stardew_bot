@@ -251,8 +251,13 @@ impl BotGoal for FirstDay {
         };
 
         if should_ship_clay(game_state) {
-            let goal = ShipItemGoal::new([Item::CLAY, Item::DAFFODIL]);
-            return Ok(goal.into());
+            let goal = ShipItemGoal::new([
+                Item::CLAY.with_count(0),
+                Item::DAFFODIL.with_count(0),
+            ]);
+            if !goal.is_completed(game_state) {
+                return Ok(goal.into());
+            }
         }
 
         let goal = ClearFarmGoal::new().clear_trees(num_remaining_chests > 0);

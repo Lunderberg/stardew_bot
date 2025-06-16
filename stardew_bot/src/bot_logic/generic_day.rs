@@ -4,7 +4,7 @@ use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     CheckAllMail, ClearFarmGoal, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, GameStateExt as _, InventoryGoal, OpportunisticForaging,
-    PlantCropsGoal, WaterCropsGoal,
+    PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -47,6 +47,7 @@ impl BotGoal for GenericDay {
             .then(WaterCropsGoal::new())
             .then(ExpandTreeFarm::new())
             .then(fishing_goal)
+            .then(ShipMostFishGoal::new())
             .then(ClearFarmGoal::new())
             .into())
     }

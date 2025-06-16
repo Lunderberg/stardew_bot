@@ -18,6 +18,9 @@ pub use generic_day::*;
 mod fishing_goal;
 pub use fishing_goal::*;
 
+mod ship_most_fish;
+pub use ship_most_fish::*;
+
 mod movement_goal;
 pub use movement_goal::*;
 
