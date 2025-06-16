@@ -275,7 +275,10 @@ impl BotGoal for FishingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        if in_game_time > 2000 {
+        if self.stop_time > 2530 && in_game_time > 2000 {
+            // If there isn't enough time to passively manipulate luck
+            // at the end of the day, actively walk into a wall to
+            // manipulate luck.
             let goal = StepCountForLuck::new();
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
