@@ -26,7 +26,7 @@ impl WidgetWindow<Error> for BotGoalDisplay {
             .map(|logic_item| logic_item.description());
 
         let iter_completed = bot_logic
-            .iter_recent()
+            .iter_recently_completed()
             .map(|logic_item| logic_item.description());
 
         let goal_list = List::new(

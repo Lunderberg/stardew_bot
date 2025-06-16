@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     FillWateringCan, GameStateExt as _, InventoryGoal,
 };
 
@@ -53,14 +53,14 @@ impl WaterCropsGoal {
 }
 
 impl BotGoal for WaterCropsGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Water crops".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state)? {
             return Ok(BotGoalResult::Completed);

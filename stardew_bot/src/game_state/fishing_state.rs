@@ -111,6 +111,11 @@ pub struct FishingState {
     /// currently being pulled from the water.
     pub pulling_out_of_water: bool,
 
+    /// True if the minigame has completed, and text showing a new
+    /// fish or a new record catch is showing above the player's
+    /// head.
+    pub has_sparkling_text: bool,
+
     /// True if the minigame has completed, and the fish is currently
     /// being displayed above the player's head.
     pub showing_fish: bool,
@@ -118,6 +123,9 @@ pub struct FishingState {
     /// True if the minigame has completed, and the player is
     /// currently being shown the treasure that has been caught.
     pub showing_treasure: bool,
+
+    /// Animation finished after pulling the catch back in.
+    pub done_with_animation: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -160,8 +168,10 @@ impl FishingState {
              bobber_in_bar: bool,
              catch_progress: f32,
              pulling_out_of_water: bool,
+             has_sparkling_text: bool,
              showing_fish: bool,
-             showing_treasure: bool| {
+             showing_treasure: bool,
+             done_with_animation: bool| {
                 let fish_movement_kind = match fish_movement_kind {
                     0 => FishMovementKind::Mixed,
                     1 => FishMovementKind::Dart,
@@ -196,8 +206,10 @@ impl FishingState {
                     bobber_in_bar,
                     catch_progress,
                     pulling_out_of_water,
+                    has_sparkling_text,
                     showing_fish,
                     showing_treasure,
+                    done_with_animation,
                 }
             },
         )?;
@@ -332,10 +344,15 @@ impl FishingState {
                 let pulling_out_of_water =
                     fishing_rod.is_some() && fishing_rod.pullingOutOfWater;
 
+                let has_sparkling_text = fishing_rod.sparklingText.is_some();
+
                 let showing_fish = fishing_rod.is_some() && fishing_rod.fishCaught;
 
                 let showing_treasure =
                     fishing_rod.is_some() && fishing_rod.showingTreasure;
+
+                let done_with_animation =
+                    fishing_rod.is_some() && fishing_rod.doneWithAnimation;
 
                 new_fishing_state(
                     fishing_rod.is_some(),
@@ -363,8 +380,10 @@ impl FishingState {
                     bobber_in_bar,
                     catch_progress,
                     pulling_out_of_water,
+                    has_sparkling_text,
                     showing_fish,
                     showing_treasure,
+                    done_with_animation,
                 )
             }
         })?;

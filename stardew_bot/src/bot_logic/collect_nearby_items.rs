@@ -1,6 +1,8 @@
 use crate::{game_state::Vector, Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
+use super::bot_logic::{
+    ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+};
 
 pub struct CollectNearbyItems {
     search_radius: f32,
@@ -77,7 +79,7 @@ impl WalkTowardDebris {
 }
 
 impl BotGoal for WalkTowardDebris {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!(
             "Walk toward debris within {} tiles",
             self.search_radius_squared
@@ -88,14 +90,14 @@ impl BotGoal for WalkTowardDebris {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let opt_nearby_item = self.iter_offsets(game_state)?.min_by(|a, b| {
             num::traits::float::TotalOrder::total_cmp(&a.mag2(), &b.mag2())
         });
 
         if let Some(offset) = opt_nearby_item {
-            do_action(GameAction::Move(offset.closest_direction()));
+            actions.do_action(GameAction::Move(offset.closest_direction()));
             return Ok(BotGoalResult::InProgress);
         }
 

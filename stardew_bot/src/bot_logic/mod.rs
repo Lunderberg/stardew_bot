@@ -102,3 +102,6 @@ pub use skip_cutscenes::*;
 
 mod collect_nearby_items;
 pub use collect_nearby_items::CollectNearbyItems;
+
+mod menu_closer;
+pub use menu_closer::*;

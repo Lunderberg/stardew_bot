@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ClayPredictor, FillWateringCan, GameStateExt as _,
 };
 
@@ -102,14 +102,14 @@ impl CropPlantingPlan {
 }
 
 impl BotGoal for PlantCropsGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Plant crops".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.plan.is_none() {
             self.plan = Some(CropPlantingPlan::new(game_state)?);

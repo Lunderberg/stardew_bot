@@ -3,7 +3,9 @@ use crate::{
     GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
+use super::bot_logic::{
+    ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+};
 
 pub struct StepCountForLuck {
     /// The time in the day when the steps should start being checked.
@@ -119,14 +121,14 @@ impl BotInterrupt for StepCountForLuck {
 }
 
 impl BotGoal for StepCountForLuck {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Actively walk for luck".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.reached_lucky_step_count(game_state)? {
             return Ok(BotGoalResult::Completed);
@@ -139,7 +141,7 @@ impl BotGoal for StepCountForLuck {
             .find(|dir| !walkable[player_tile + dir.offset()])
             .expect("TODO: Find nearest wall to walk into");
 
-        do_action(GameAction::Move(blocked_dir.into()));
+        actions.do_action(GameAction::Move(blocked_dir.into()));
         Ok(BotGoalResult::InProgress)
     }
 }

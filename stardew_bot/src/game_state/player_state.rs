@@ -25,6 +25,8 @@ pub struct PlayerState {
 
     // Info related to the current action being performed
     pub using_tool: bool,
+    pub can_move: bool,
+    pub can_release_tool: bool,
     pub last_click: Vector<isize>,
 
     // Per-player game state
@@ -131,6 +133,8 @@ impl PlayerState {
              active_hotbar_index: usize,
              current_money: i32,
              using_tool: bool,
+             can_move: bool,
+             can_release_tool: bool,
              last_click: &Vector<isize>,
              current_stamina: f32,
              max_stamina: i32,
@@ -145,6 +149,8 @@ impl PlayerState {
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
+                    can_move,
+                    can_release_tool,
                     current_money,
                     last_click: *last_click,
                     current_stamina,
@@ -210,6 +216,8 @@ impl PlayerState {
                     .prim_cast::<usize>();
 
                 let using_tool = player.usingTool.value;
+                let can_move = player.canMove;
+                let can_release_tool = player.netCanReleaseTool.value;
                 let last_click = {
                     let pos = StardewValley.Game1._player.lastClick;
                     new_isize_vector(pos.X, pos.Y)
@@ -237,6 +245,8 @@ impl PlayerState {
                     active_hotbar_index,
                     current_money,
                     using_tool,
+                    can_move,
+                    can_release_tool,
                     last_click,
                     current_stamina,
                     max_stamina,

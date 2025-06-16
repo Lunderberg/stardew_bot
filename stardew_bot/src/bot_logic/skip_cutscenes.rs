@@ -1,6 +1,8 @@
 use crate::{Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult, BotInterrupt, LogicStack};
+use super::bot_logic::{
+    ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+};
 
 pub struct SkipCutscenes;
 
@@ -30,22 +32,22 @@ impl BotInterrupt for SkipCutscenes {
 }
 
 impl BotGoal for SkipCurrentCutscene {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Skip current cutscene".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if !game_state.globals.event_up {
             return Ok(BotGoalResult::Completed);
         }
 
         let pixel = game_state.display.event_skip_button().center();
-        do_action(GameAction::MouseOverPixel(pixel));
-        do_action(GameAction::LeftClick);
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)
     }
 }

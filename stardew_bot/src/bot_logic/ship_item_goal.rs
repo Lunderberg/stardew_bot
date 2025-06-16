@@ -4,7 +4,10 @@ use crate::{
     bot_logic::ActivateTile, game_state::Item, Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    MenuCloser,
+};
 
 pub struct ShipItemGoal {
     items: Vec<Item>,
@@ -22,7 +25,7 @@ impl ShipItemGoal {
 }
 
 impl BotGoal for ShipItemGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         if self.items.len() <= 2 {
             format!("Ship {}", self.items.iter().format(", ")).into()
         } else {
@@ -33,7 +36,7 @@ impl BotGoal for ShipItemGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let opt_index_to_ship = game_state
             .player
@@ -52,15 +55,11 @@ impl BotGoal for ShipItemGoal {
             .map(|(i, _)| i);
 
         let Some(index_to_ship) = opt_index_to_ship else {
-            if let Some(menu) = &game_state.chest_menu {
-                // No items to ship, but the menu needs to be closed
-                do_action(GameAction::MouseOverPixel(menu.ok_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
-                // No items to ship, and the menu is closed.
-                // Therefore, done.
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         };
 
@@ -84,8 +83,8 @@ impl BotGoal for ShipItemGoal {
         // We have something to ship, and have the menu open to do so.
         // Time to click the item.
         let pixel = menu.player_item_locations[index_to_ship];
-        do_action(GameAction::MouseOverPixel(pixel));
-        do_action(GameAction::LeftClick);
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)
     }
 }

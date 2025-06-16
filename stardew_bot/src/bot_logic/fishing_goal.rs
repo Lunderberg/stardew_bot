@@ -3,15 +3,15 @@ use std::{borrow::Cow, fmt::Display};
 use crate::{
     bot_logic::{
         BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, InventoryGoal,
-        MaintainStaminaGoal, SelectItemGoal, SellToMerchantGoal,
+        MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
         StepCountForLuck,
     },
-    game_state::{FacingDirection, Inventory, Item, ItemCategory, Vector},
+    game_state::{FacingDirection, Inventory, Item, ItemCategory, Key, Vector},
     Error, GameAction, GameState,
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     movement_goal::{FaceDirectionGoal, MovementGoal},
     OrganizeInventoryGoal,
 };
@@ -24,6 +24,8 @@ pub struct FishingGoal {
 pub struct FishOnceGoal {
     started_fishing: bool,
     swapped_to_treasure: bool,
+    exit_tick: Option<i32>,
+    wait_for_treasure_chest: bool,
 }
 
 #[allow(dead_code)]
@@ -86,7 +88,7 @@ impl FishingLocation {
         let player = &game_state.player;
         player.room_name == self.room_name()
             && player.tile() == self.tile()
-            && player.facing == self.facing()
+            && FaceDirectionGoal::new(self.facing()).is_completed(game_state)
     }
 
     fn movement_goal(&self) -> MovementGoal {
@@ -119,14 +121,14 @@ impl FishSelling<'_> {
 }
 
 impl BotGoal for FishingGoal {
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         format!("Fish at {}", self.loc).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if game_state.globals.in_game_time >= self.stop_time {
             return Ok(BotGoalResult::Completed);
@@ -215,21 +217,19 @@ impl BotGoal for FishingGoal {
             }
         }
 
+        // Load bait into fishing pole, if bait is available and the
+        // fishing pole can use bait.
+        let goal = LoadBaitOntoFishingRod::new(Item::BAIT.clone());
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
+        }
+
         if !using_bamboo_pole {
             let opt_bait = current_pole
                 .as_fishing_rod()
                 .expect("Guarded by earlier as_fishing_rod.is_some() check")
                 .bait
                 .as_ref();
-            if opt_bait
-                .map(|bait| bait.is_same_item(&Item::BAIT))
-                .unwrap_or(true)
-                && inventory.contains(&Item::BAIT)
-            {
-                // Load bait into fishing pole
-                let goal = LoadBaitOntoFishingRod::new(Item::BAIT.clone());
-                return Ok(goal.into());
-            }
 
             if in_game_time < 1700
                 && opt_bait
@@ -292,32 +292,38 @@ impl FishOnceGoal {
         Self {
             started_fishing: false,
             swapped_to_treasure: false,
+            exit_tick: None,
+            wait_for_treasure_chest: false,
         }
     }
 }
 
 impl BotGoal for FishOnceGoal {
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         "Fish once".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        let _ = actions;
         let fishing = &game_state.fishing;
 
         // In case the first-geode popup appears from a treasure
         // chest.
         if let Some(menu) = &game_state.dialogue_menu {
             if menu.responses.is_empty() {
-                do_action(GameAction::LeftClick);
+                actions
+                    .do_action(GameAction::LeftClick)
+                    .annotate("Clear out dialogue menu");
                 return Ok(BotGoalResult::InProgress);
             }
         }
 
         if let Some(menu) = &game_state.chest_menu {
+            self.wait_for_treasure_chest = false;
             let opt_item_pixel = menu
                 .chest_items
                 .iter_slots()
@@ -326,18 +332,84 @@ impl BotGoal for FishOnceGoal {
                 .map(|(_, pixel)| pixel)
                 .cloned();
 
-            let pixel = opt_item_pixel.unwrap_or(menu.ok_button);
-
-            do_action(GameAction::MouseOverPixel(pixel));
-            do_action(GameAction::LeftClick);
-            return Ok(BotGoalResult::InProgress);
+            if let Some(pixel) = opt_item_pixel {
+                actions
+                    .do_action(GameAction::MouseOverPixel(pixel))
+                    .annotate("Mouse over treasure");
+                actions
+                    .do_action(GameAction::LeftClick)
+                    .annotate("Click on treasure");
+                return Ok(BotGoalResult::InProgress);
+            } else {
+                return Ok(MenuCloser::new().into());
+            }
         }
 
-        if fishing.is_timing_cast {
+        if fishing.showing_treasure {
+            // The FishingRod variables get reset slightly earlier
+            // than the display of the treasure chest.  If the readout
+            // occurs after the FishingRod is reset but before the
+            // treasure chest appears, the `FishOnceGoal` may exit
+            // prematurely.
+            //
+            // If we know to expect a treasure chest, then we can wait
+            // until the treasure chest appears.
+            self.wait_for_treasure_chest = true;
+        }
+
+        if fishing.is_casting {
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Wait during casting animation");
+        } else if fishing.bobber_in_air {
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Wait during bobber traveling");
+        } else if fishing.pulling_out_of_water {
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Wait during pulling bobber back");
+        } else if fishing.showing_treasure {
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Wait while showing treasure");
+        // } else if fishing.has_sparkling_text {
+        //     actions
+        //         .do_action(GameAction::ReleaseTool)
+        //         .annotate("Wait while showing sparkling text");
+        } else
+        //
+        if fishing.is_casting
+            || fishing.bobber_in_air
+            || fishing.pulling_out_of_water
+            || fishing.showing_treasure
+        // || fishing.has_sparkling_text
+        {
+            // Do nothing
+        } else if fishing.showing_fish {
+            if !game_state.inputs.left_mouse_down()
+                && !game_state.inputs.keys_pressed.contains(&Key::C)
+                && self
+                    .exit_tick
+                    .map(|prev_tick| {
+                        prev_tick + 5 < game_state.globals.game_tick
+                    })
+                    .unwrap_or(true)
+            {
+                self.exit_tick = Some(game_state.globals.game_tick);
+                actions
+                    .do_action(GameAction::LeftClick)
+                    .annotate("Click through the new fish menu");
+            }
+        } else if fishing.is_timing_cast {
             if fishing.casting_power > 0.95 {
-                do_action(GameAction::ReleaseTool)
+                actions
+                    .do_action(GameAction::ReleaseTool)
+                    .annotate("Cast bobber");
             } else {
-                do_action(GameAction::HoldTool)
+                actions
+                    .do_action(GameAction::HoldTool)
+                    .annotate("Wait for max cast distance");
             }
         } else if fishing.minigame_in_progress {
             if fishing.catch_progress > 0.8 {
@@ -355,12 +427,16 @@ impl BotGoal for FishOnceGoal {
             } else {
                 GameAction::ReleaseTool
             };
-            do_action(action);
+            actions.do_action(action).annotate("Playing minigame");
         } else if fishing.showing_fish {
-            do_action(GameAction::LeftClick);
+            actions
+                .do_action(GameAction::LeftClick)
+                .annotate("Stop showing fish");
         } else if fishing.is_nibbling {
             self.started_fishing = true;
-            do_action(GameAction::ReleaseTool)
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Start minigame");
         } else if fishing.is_fishing
             && (fishing.time_until_fishing_bite
                 - fishing.fishing_bite_accumulator
@@ -376,16 +452,36 @@ impl BotGoal for FishOnceGoal {
             // This only impacts the fishing with the BambooRod,
             // because use of any bait will decrease the maximum wait
             // time from 30 seconds to 15 seconds.
-            do_action(GameAction::ReleaseTool)
+            actions
+                .do_action(GameAction::ReleaseTool)
+                .annotate("Skip fish with long wait");
+        } else if fishing.is_fishing {
+            actions
+                .do_action(GameAction::HoldTool)
+                .annotate("Wait for nibble");
+        // } else if self.started_fishing && !fishing.done_with_animation {
+        //     actions
+        //         .do_action(GameAction::ReleaseTool)
+        //         .annotate("Wait for animation to finish");
+        // } else if game_state.player.using_tool
+        //     && !game_state.player.can_release_tool
+        // {
+        //     actions
+        //         .do_action(GameAction::ExitMenu)
+        //         .annotate("Hit Esc to finish up");
         } else if self.started_fishing {
             // This is the second time around, so stop here rather
             // than starting another attempt at fishing.
-            do_action(GameAction::ReleaseTool);
-            return Ok(BotGoalResult::Completed);
-        } else if fishing.is_fishing {
-            do_action(GameAction::HoldTool)
+            // actions
+            //     .do_action(GameAction::ReleaseTool)
+            //     .annotate("Cleanup");
+            if !self.wait_for_treasure_chest {
+                return Ok(BotGoalResult::Completed);
+            }
         } else if fishing.is_holding_rod {
-            do_action(GameAction::HoldTool)
+            actions
+                .do_action(GameAction::HoldTool)
+                .annotate("Start fishing");
         }
 
         Ok(BotGoalResult::InProgress)
@@ -421,74 +517,78 @@ impl LoadBaitOntoFishingRod {
 }
 
 impl BotGoal for LoadBaitOntoFishingRod {
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         format!("Load {} onto fishing rod", self.bait).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if let Some(page) = game_state
-            .pause_menu
-            .as_ref()
-            .and_then(|pause| pause.inventory_page())
-        {
-            if let Some(held_item) = &page.held_item {
-                if let Some(rod_slot) = self
-                    .fishing_rod_slot(game_state)
-                    .filter(|_| held_item.is_same_item(&self.bait))
-                {
-                    let pixel = page.player_item_locations[rod_slot];
-                    do_action(GameAction::MouseOverPixel(pixel));
-                    do_action(GameAction::RightClick);
-                } else {
-                    let slot = game_state.player.inventory.empty_slot().expect(
-                        "TODO: Handle case where held item has nowhere to go",
-                    );
-                    let pixel = page.player_item_locations[slot];
-                    do_action(GameAction::MouseOverPixel(pixel));
-                    do_action(GameAction::LeftClick);
+        let Some(rod_slot) = self.fishing_rod_slot(game_state) else {
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        if let Some(pause) = &game_state.pause_menu {
+            if let Some(page) = pause.inventory_page() {
+                if let Some(held_item) = &page.held_item {
+                    if held_item.is_same_item(&self.bait) {
+                        // The cursor is holding the bait, so load it
+                        // onto the fishing rod.
+                        let pixel = page.player_item_locations[rod_slot];
+                        actions.do_action(GameAction::MouseOverPixel(pixel));
+                        actions.do_action(GameAction::RightClick);
+                        return Ok(BotGoalResult::InProgress);
+                    } else {
+                        // The inventory currently holds something other
+                        // than the bait to be loaded (e.g. different bait
+                        // that has just been removed from the fishing
+                        // rod).  Place it in an empty slot of the
+                        // inventory.
+                        let slot = game_state.player.inventory.empty_slot().expect(
+                            "TODO: Handle case where held item has nowhere to go",
+                        );
+                        let pixel = page.player_item_locations[slot];
+                        actions.do_action(GameAction::MouseOverPixel(pixel));
+                        actions.do_action(GameAction::LeftClick);
+                        return Ok(BotGoalResult::InProgress);
+                    }
                 }
-
-                return Ok(BotGoalResult::InProgress);
             }
         }
 
-        if self.is_completed(game_state) {
-            if let Some(menu) = &game_state.pause_menu {
-                do_action(GameAction::MouseOverPixel(menu.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+        let Some(bait_slot) = self.bait_slot(game_state) else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
-        }
-
-        let bait_slot = self
-            .bait_slot(game_state)
-            .expect("Guarded by is_completed() check");
+        };
 
         let Some(pause) = &game_state.pause_menu else {
-            do_action(GameAction::ExitMenu);
+            actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };
 
-        let Some(inventory_page) = pause.inventory_page() else {
-            do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
-            do_action(GameAction::LeftClick);
+        let Some(page) = pause.inventory_page() else {
+            actions.do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         };
 
-        assert!(
-            inventory_page.held_item.is_none(),
-            "Should be handled prior to the is_completed step"
-        );
+        if page.held_item.is_none() {
+            let pixel = page.player_item_locations[bait_slot];
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
 
-        let pixel = inventory_page.player_item_locations[bait_slot];
-        do_action(GameAction::MouseOverPixel(pixel));
-        do_action(GameAction::LeftClick);
+        let pixel = page.player_item_locations[rod_slot];
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::RightClick);
+
         Ok(BotGoalResult::InProgress)
     }
 }

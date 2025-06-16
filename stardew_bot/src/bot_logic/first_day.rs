@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch as _,
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
     CraftItemGoal, ForagingGoal, GameStateExt as _, GoToActionTile,
@@ -94,14 +94,14 @@ fn desired_chests(
 }
 
 impl BotGoal for FirstDay {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "First Day".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day != 1 {
@@ -148,9 +148,9 @@ impl BotGoal for FirstDay {
                 return Ok(movement.into());
             }
 
-            do_action(GameAction::MouseOverTile(tile));
+            actions.do_action(GameAction::MouseOverTile(tile));
             if tile == game_state.inputs.mouse_tile_location {
-                do_action(GameAction::RightClick);
+                actions.do_action(GameAction::RightClick);
             }
 
             return Ok(BotGoalResult::InProgress);
@@ -189,8 +189,8 @@ impl BotGoal for FirstDay {
         {
             if let Some(menu) = &game_state.dialogue_menu {
                 if let Some(pixel) = menu.responses.get(0) {
-                    do_action(GameAction::MouseOverPixel(*pixel));
-                    do_action(GameAction::LeftClick);
+                    actions.do_action(GameAction::MouseOverPixel(*pixel));
+                    actions.do_action(GameAction::LeftClick);
                 }
                 return Ok(BotGoalResult::InProgress);
             } else {
@@ -200,7 +200,7 @@ impl BotGoal for FirstDay {
         }
         if let Some(menu) = &game_state.dialogue_menu {
             if menu.responses.is_empty() {
-                do_action(GameAction::ExitMenu);
+                actions.do_action(GameAction::ExitMenu);
                 return Ok(BotGoalResult::InProgress);
             }
         }

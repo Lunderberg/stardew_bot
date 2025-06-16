@@ -4,7 +4,7 @@ use x11rb::protocol::xproto::{ButtonIndex, Keycode as X11KeyCode};
 
 use crate::{game_state::Vector, Direction, Error, GameState, X11Handler};
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub enum GameAction {
     HoldTool,
     ReleaseTool,

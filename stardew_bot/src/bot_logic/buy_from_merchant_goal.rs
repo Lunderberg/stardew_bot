@@ -4,7 +4,10 @@ use crate::{
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    MenuCloser,
+};
 
 pub struct BuyFromMerchantGoal {
     merchant: String,
@@ -33,22 +36,21 @@ impl BuyFromMerchantGoal {
 }
 
 impl BotGoal for BuyFromMerchantGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Buy {} from {}", self.item, self.merchant).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
-            if let Some(menu) = &game_state.shop_menu {
-                do_action(GameAction::MouseOverPixel(menu.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         }
 
@@ -68,8 +70,10 @@ impl BotGoal for BuyFromMerchantGoal {
                         .map(|(_, pixel)| *pixel)
                         .next()
                         .expect("TODO: Handle full inventory");
-                    do_action(GameAction::MouseOverPixel(open_inventory_slot));
-                    do_action(GameAction::LeftClick);
+                    actions.do_action(GameAction::MouseOverPixel(
+                        open_inventory_slot,
+                    ));
+                    actions.do_action(GameAction::LeftClick);
 
                     return Ok(BotGoalResult::InProgress);
                 }
@@ -87,9 +91,9 @@ impl BotGoal for BuyFromMerchantGoal {
                 })?;
             if !menu.visible_items().contains(&to_buy_index) {
                 if to_buy_index > menu.for_sale_scroll_index {
-                    do_action(GameAction::ScrollDown);
+                    actions.do_action(GameAction::ScrollDown);
                 } else {
-                    do_action(GameAction::ScrollUp);
+                    actions.do_action(GameAction::ScrollUp);
                 }
                 return Ok(BotGoalResult::InProgress);
             }
@@ -99,14 +103,14 @@ impl BotGoal for BuyFromMerchantGoal {
                 .expect("Guarded by menu.visible_items().contains");
             let pixel = menu.for_sale_buttons[button_index];
 
-            do_action(GameAction::MouseOverPixel(pixel));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         } else if let Some(menu) = &game_state.dialogue_menu {
             if let Some(pixel) = menu.responses.get(0) {
-                do_action(GameAction::MouseOverPixel(*pixel));
+                actions.do_action(GameAction::MouseOverPixel(*pixel));
             }
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::LeftClick);
             Ok(BotGoalResult::InProgress)
         } else {
             Ok(self.movement_goal.clone().into())

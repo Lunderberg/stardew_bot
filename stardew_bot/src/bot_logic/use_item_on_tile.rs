@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MovementGoal, SelectItemGoal,
 };
 
@@ -34,14 +34,14 @@ impl UseItemOnTile {
 }
 
 impl BotGoal for UseItemOnTile {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Use {} on {} in {}", self.item, self.tile, self.room).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
@@ -52,7 +52,7 @@ impl BotGoal for UseItemOnTile {
                 .unwrap_or(false)
         {
             if player.last_click == Vector::zero() {
-                do_action(GameAction::AnimationCancel);
+                actions.do_action(GameAction::AnimationCancel);
             }
             return Ok(BotGoalResult::InProgress);
         }
@@ -115,11 +115,11 @@ impl BotGoal for UseItemOnTile {
             return Ok(goal.into());
         }
 
-        do_action(GameAction::MouseOverTile(self.tile));
+        actions.do_action(GameAction::MouseOverTile(self.tile));
         if game_state.inputs.mouse_tile_location == self.tile
             && !game_state.inputs.left_mouse_down()
         {
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::LeftClick);
             self.item_has_been_used = true;
         }
         Ok(BotGoalResult::InProgress)

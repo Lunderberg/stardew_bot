@@ -1,6 +1,8 @@
-use crate::{game_state::Item, Error, GameAction, GameState};
+use crate::{
+    bot_logic::MenuCloser, game_state::Item, Error, GameAction, GameState,
+};
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
 pub struct DiscardItemGoal {
     item: Item,
@@ -17,14 +19,14 @@ impl DiscardItemGoal {
 }
 
 impl BotGoal for DiscardItemGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Discard {}", self.item).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if let Some(page) = game_state
             .pause_menu
@@ -40,31 +42,30 @@ impl BotGoal for DiscardItemGoal {
                     );
                     page.player_item_locations[slot]
                 };
-                do_action(GameAction::MouseOverPixel(pixel));
-                do_action(GameAction::LeftClick);
+                actions.do_action(GameAction::MouseOverPixel(pixel));
+                actions.do_action(GameAction::LeftClick);
                 return Ok(BotGoalResult::InProgress);
             }
         }
 
         let Some(slot) = game_state.player.inventory.current_slot(&self.item)
         else {
-            if let Some(menu) = &game_state.pause_menu {
-                do_action(GameAction::MouseOverPixel(menu.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         };
 
         let Some(pause) = &game_state.pause_menu else {
-            do_action(GameAction::ExitMenu);
+            actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };
 
         let Some(inventory_page) = pause.inventory_page() else {
-            do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         };
 
@@ -74,8 +75,8 @@ impl BotGoal for DiscardItemGoal {
         );
 
         let pixel = inventory_page.player_item_locations[slot];
-        do_action(GameAction::MouseOverPixel(pixel));
-        do_action(GameAction::LeftClick);
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)
     }
 }

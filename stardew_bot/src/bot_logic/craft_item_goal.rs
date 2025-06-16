@@ -4,7 +4,10 @@ use crate::{
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    MenuCloser,
+};
 
 pub struct CraftItemGoal {
     item: Item,
@@ -26,33 +29,32 @@ impl CraftItemGoal {
 }
 
 impl BotGoal for CraftItemGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Craft {}", self.item).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
-            if let Some(pause) = &game_state.pause_menu {
-                do_action(GameAction::MouseOverPixel(pause.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         }
 
         let Some(pause) = &game_state.pause_menu else {
-            do_action(GameAction::ExitMenu);
+            actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };
 
         let Some(crafting_page) = pause.crafting_page() else {
-            do_action(GameAction::MouseOverPixel(pause.tab_buttons[4]));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(pause.tab_buttons[4]));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         };
 
@@ -66,15 +68,15 @@ impl BotGoal for CraftItemGoal {
             let down_button = crafting_page.down_button.expect(
                 "Down button should be shown for multiple recipe pages",
             );
-            do_action(GameAction::MouseOverPixel(down_button));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(down_button));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         } else if crafting_page.current_recipe_page > recipe.recipe_page {
             let up_button = crafting_page
                 .up_button
                 .expect("Up button should be shown for multiple recipe pages");
-            do_action(GameAction::MouseOverPixel(up_button));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(up_button));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -91,15 +93,16 @@ impl BotGoal for CraftItemGoal {
                     .map(|(_, pixel)| *pixel)
                     .next()
                     .expect("TODO: Handle full inventory");
-                do_action(GameAction::MouseOverPixel(open_inventory_slot));
-                do_action(GameAction::LeftClick);
+                actions
+                    .do_action(GameAction::MouseOverPixel(open_inventory_slot));
+                actions.do_action(GameAction::LeftClick);
 
                 return Ok(BotGoalResult::InProgress);
             }
         }
 
-        do_action(GameAction::MouseOverPixel(recipe.pixel_location));
-        do_action(GameAction::LeftClick);
+        actions.do_action(GameAction::MouseOverPixel(recipe.pixel_location));
+        actions.do_action(GameAction::LeftClick);
 
         Ok(BotGoalResult::InProgress)
     }

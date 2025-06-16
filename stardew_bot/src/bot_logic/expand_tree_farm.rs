@@ -9,7 +9,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     GameStateExt as _,
 };
 
@@ -22,14 +22,14 @@ impl ExpandTreeFarm {
 }
 
 impl BotGoal for ExpandTreeFarm {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Expand Tree Farm".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
@@ -59,7 +59,7 @@ impl BotGoal for ExpandTreeFarm {
                 })
         };
         if let Some(offset) = opt_nearby_seed {
-            do_action(GameAction::Move(offset.closest_direction()));
+            actions.do_action(GameAction::Move(offset.closest_direction()));
             return Ok(BotGoalResult::InProgress);
         }
 

@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     GameStateExt as _, MaintainStaminaGoal, ObjectKindExt as _, Pathfinding,
     UseItemOnTile,
 };
@@ -117,14 +117,14 @@ impl ClearFarmGoal {
 }
 
 impl BotGoal for ClearFarmGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Clear farm".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         self.fill_priority_tiles(game_state)?;
 

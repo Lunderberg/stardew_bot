@@ -1,6 +1,9 @@
 use crate::{game_state::Item, Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    MenuCloser,
+};
 
 pub struct OrganizeInventoryGoal<Func> {
     func: Func,
@@ -195,45 +198,56 @@ where
     Func: 'static,
     Func: Fn(&Item) -> SortedInventoryLocation,
 {
-    fn description(&self) -> std::borrow::Cow<str> {
-        "Sort inventory".into()
+    fn description(&self) -> std::borrow::Cow<'static, str> {
+        "Organize inventory".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let Some(next_slot) = self.plan_next_move(game_state) else {
             // No further next step is required.  Therefore, Close the
             // pause menu and resume.
-            if let Some(menu) = &game_state.pause_menu {
-                do_action(GameAction::MouseOverPixel(menu.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         };
 
         // Open the pause menu if needed
         let Some(menu) = &game_state.pause_menu else {
-            do_action(GameAction::ExitMenu);
+            if game_state.player.can_move {
+                actions
+                    .do_action(GameAction::ExitMenu)
+                    .annotate("Open inventory");
+            }
             return Ok(BotGoalResult::InProgress);
         };
 
         // Navigate to the inventory page if needed
         let Some(page) = menu.inventory_page() else {
-            do_action(GameAction::MouseOverPixel(menu.tab_buttons[0]));
-            do_action(GameAction::LeftClick);
+            actions
+                .do_action(GameAction::MouseOverPixel(menu.tab_buttons[0]))
+                .annotate("Mouse over inventory tab");
+            actions
+                .do_action(GameAction::LeftClick)
+                .annotate("Left-click inventory tab");
             return Ok(BotGoalResult::InProgress);
         };
 
         // Left-click on the correct tile for the next organizational step.
-        do_action(GameAction::MouseOverPixel(
-            page.player_item_locations[next_slot],
-        ));
-        do_action(GameAction::LeftClick);
+        actions
+            .do_action(GameAction::MouseOverPixel(
+                page.player_item_locations[next_slot],
+            ))
+            .annotate("Mouse over inventory tile");
+        actions
+            .do_action(GameAction::LeftClick)
+            .annotate("Click inventory tile");
         Ok(BotGoalResult::InProgress)
     }
 }

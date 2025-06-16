@@ -14,7 +14,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MaintainStaminaGoal, UseItemOnTile,
 };
 
@@ -129,14 +129,14 @@ impl ClayFarmingGoal {
 }
 
 impl BotGoal for ClayFarmingGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Clay farming".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.done_digging(game_state) {
             let finalizing =
@@ -246,7 +246,7 @@ impl BotGoal for ClayFarmingGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        do_action(GameAction::MouseOverTile(closest_clay));
+        actions.do_action(GameAction::MouseOverTile(closest_clay));
         let tool = if has_hoe_dirt(closest_clay) {
             Item::PICKAXE
         } else {

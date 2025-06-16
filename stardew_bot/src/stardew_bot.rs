@@ -1,7 +1,8 @@
 use crate::{
-    game_state::GameStateReader, BotGoalDisplay, BotLogic, Error, FishingUI,
-    GameAction, GameState, InputDisplay, LocationDisplay, PlayerStats,
-    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
+    game_state::GameStateReader, BotActionDisplay, BotGoalDisplay, BotLogic,
+    Error, FishingUI, GameAction, GameState, InputDisplay, LocationDisplay,
+    PlayerStats, PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate,
+    X11Handler,
 };
 
 use crossterm::event::Event;
@@ -57,6 +58,7 @@ struct TuiBuffers {
     bot_goals: BotGoalDisplay,
     rng_display: RngDisplay,
     predicted_luck_display: PredictedLuckDisplay,
+    bot_actions: BotActionDisplay,
 }
 
 #[allow(unused)]
@@ -122,6 +124,7 @@ impl TuiBuffers {
             bot_goals: BotGoalDisplay,
             rng_display: RngDisplay,
             predicted_luck_display: PredictedLuckDisplay,
+            bot_actions: BotActionDisplay::new(),
         }
     }
 
@@ -136,6 +139,7 @@ impl TuiBuffers {
             Box::new(&mut self.bot_goals),
             Box::new(&mut self.rng_display),
             Box::new(&mut self.predicted_luck_display),
+            Box::new(&mut self.bot_actions),
         ]
     }
 }
@@ -404,6 +408,10 @@ impl StardewBot {
     }
 
     pub fn update_bot_logic(&mut self) {
+        if !self.x11_handler.main_window_is_active().unwrap_or(true) {
+            return;
+        }
+
         // TODO: Either extend anymap to allow mutable access to
         // multiple keys, or add a generic parameter to WidgetWindow
         // indicating what type of global values are expected.

@@ -11,7 +11,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch,
     impl_tile_map_graph_search::point_to_point_lower_bound,
     WaitUntilTimeOfDay,
@@ -427,7 +427,7 @@ impl BotGoal for MovementGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        _: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let goal: BotGoalResult = if self.is_completed(game_state) {
             BotGoalResult::Completed
@@ -452,7 +452,7 @@ impl BotGoal for MovementGoal {
 
         Ok(goal)
     }
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         format!(
             "X-room move to {} in {}",
             self.target_position, self.target_room
@@ -465,7 +465,7 @@ impl BotGoal for LocalMovementGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
@@ -474,7 +474,7 @@ impl BotGoal for LocalMovementGoal {
         }
 
         if game_state.dialogue_menu.is_some() {
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -499,8 +499,8 @@ impl BotGoal for LocalMovementGoal {
             .expect("Direction::iter is non-empty");
         let target_tile = self.position.as_tile();
 
-        do_action(GameAction::Move(dir));
-        do_action(GameAction::MouseOverTile(target_tile));
+        actions.do_action(GameAction::Move(dir));
+        actions.do_action(GameAction::MouseOverTile(target_tile));
 
         let must_open_door = self.activate_endpoint()
             && player_position.manhattan_dist(self.position) < 1.5;
@@ -516,7 +516,7 @@ impl BotGoal for LocalMovementGoal {
                     return Ok(goal.into());
                 }
                 _ => {
-                    do_action(GameAction::RightClick);
+                    actions.do_action(GameAction::RightClick);
                 }
             }
         }
@@ -524,7 +524,7 @@ impl BotGoal for LocalMovementGoal {
         Ok(BotGoalResult::InProgress)
     }
 
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         format!(
             "Move {} tiles to {} in {}",
             self.waypoints.len(),
@@ -554,14 +554,14 @@ impl BotGoal for FaceDirectionGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);
         }
 
         let facing_tile = game_state.player.tile() + self.0.offset();
-        do_action(GameAction::MouseOverTile(facing_tile));
+        actions.do_action(GameAction::MouseOverTile(facing_tile));
 
         if game_state.player.facing != self.0 {
             let dir = match self.0 {
@@ -570,26 +570,26 @@ impl BotGoal for FaceDirectionGoal {
                 FacingDirection::South => Direction::South,
                 FacingDirection::West => Direction::West,
             };
-            do_action(GameAction::Move(dir));
+            actions.do_action(GameAction::Move(dir));
         }
 
         Ok(BotGoalResult::InProgress)
     }
 
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         format!("Turn to face {}", self.0).into()
     }
 }
 
 impl BotGoal for StopMovingGoal {
-    fn description(&self) -> Cow<str> {
+    fn description(&self) -> Cow<'static, str> {
         "Stop moving".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         Ok(if game_state.player.movement.is_some() {
             // The player is currently moving.  The return-to-default

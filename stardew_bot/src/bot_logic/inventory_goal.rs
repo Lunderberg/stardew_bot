@@ -3,13 +3,13 @@ use std::{borrow::Cow, collections::HashMap};
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::{bot_logic::LogicStack, MovementGoal},
+    bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
     game_state::{Chest, Inventory, Item, Key, ObjectKind, Quality, Vector},
     Error, GameAction, GameState,
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, GameStateExt as _,
 };
 
@@ -192,7 +192,7 @@ impl InventoryGoal {
 }
 
 impl BotGoal for InventoryGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         if self.bounds.len() == 1 {
             let (item_ty, bounds) = self.bounds.iter().next().unwrap();
 
@@ -218,18 +218,17 @@ impl BotGoal for InventoryGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
             // The inventory transfer is complete.  Close out the
             // chest menu if it is still open, and return control to
             // the parent goal.
-            if let Some(chest_menu) = &game_state.chest_menu {
-                do_action(GameAction::MouseOverPixel(chest_menu.ok_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         }
 
@@ -300,11 +299,11 @@ impl BotGoal for InventoryGoal {
                     // into the chest.
                     let slot = player_inventory.item_slot(item).unwrap();
                     let pixel = chest_menu.player_item_locations[slot];
-                    do_action(GameAction::MouseOverPixel(pixel));
+                    actions.do_action(GameAction::MouseOverPixel(pixel));
                     if opt_upper_bound == Some(0) {
-                        do_action(GameAction::LeftClick);
+                        actions.do_action(GameAction::LeftClick);
                     } else {
-                        do_action(GameAction::RightClick);
+                        actions.do_action(GameAction::RightClick);
                     }
                     return Ok(BotGoalResult::InProgress);
                 }
@@ -336,17 +335,15 @@ impl BotGoal for InventoryGoal {
                     // it from the chest.
                     let slot = chest_menu.chest_items.item_slot(item).unwrap();
                     let pixel = chest_menu.chest_item_locations[slot];
-                    do_action(GameAction::MouseOverPixel(pixel));
-                    do_action(GameAction::RightClick);
+                    actions.do_action(GameAction::MouseOverPixel(pixel));
+                    actions.do_action(GameAction::RightClick);
                     return Ok(BotGoalResult::InProgress);
                 }
             }
 
             // No need to transfer items to/from this chest, so it can
             // be closed.
-            do_action(GameAction::MouseOverPixel(chest_menu.ok_button));
-            do_action(GameAction::LeftClick);
-            return Ok(BotGoalResult::InProgress);
+            return Ok(MenuCloser::new().into());
         }
 
         // There's a chest in the process of opening.  Should wait

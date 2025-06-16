@@ -1,7 +1,7 @@
 use crate::{game_state::ObjectKind, Error, GameAction, GameState};
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     CheckAllMail, ClearFarmGoal, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, GameStateExt as _, InventoryGoal, OpportunisticForaging,
     PlantCropsGoal, WaterCropsGoal,
@@ -10,14 +10,14 @@ use super::{
 pub struct GenericDay;
 
 impl BotGoal for GenericDay {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Generic Day".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         if current_day == 1 {

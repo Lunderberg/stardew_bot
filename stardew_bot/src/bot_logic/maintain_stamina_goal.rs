@@ -5,7 +5,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     FaceDirectionGoal,
 };
 
@@ -56,14 +56,14 @@ impl MaintainStaminaGoal {
 }
 
 impl BotGoal for MaintainStaminaGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Recover stamina".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);
@@ -89,7 +89,7 @@ impl BotGoal for MaintainStaminaGoal {
         if game_state.dialogue_menu.is_some() {
             // The eat-food confirmation menu is open, so send the 'y'
             // keystroke to confirm.
-            do_action(GameAction::ConfirmMenu);
+            actions.do_action(GameAction::ConfirmMenu);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -114,7 +114,7 @@ impl BotGoal for MaintainStaminaGoal {
             return Ok(goal.into());
         }
 
-        do_action(GameAction::ActivateTile);
+        actions.do_action(GameAction::ActivateTile);
         Ok(BotGoalResult::InProgress)
     }
 }

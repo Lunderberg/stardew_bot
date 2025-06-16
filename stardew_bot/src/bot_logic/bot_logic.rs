@@ -1,16 +1,19 @@
 use derive_more::From;
-use std::{any::Any, borrow::Cow, collections::VecDeque};
+use std::{any::Any, borrow::Cow, collections::VecDeque, fmt::Display};
 
 use crate::{
-    game_state::{Item, Key, ScrollWheel},
+    game_state::{InputState, Item, Key, ScrollWheel},
     Error, GameAction, GameState,
 };
 
-const KEEP_RECENT: usize = 30;
+const MAX_RECENT_GOALS: usize = 30;
+const MAX_RECENT_ACTIONS: usize = 1000;
 
 pub struct BotLogic {
     stack: Vec<LogicStackItem>,
+    action_dead_time: ActionForbiddenUntil,
     recently_finished: VecDeque<LogicStackItem>,
+    recent_actions: VecDeque<VerboseAction>,
     verbose: bool,
 }
 
@@ -41,13 +44,60 @@ pub enum LogicStackItem {
     },
 }
 
+pub struct ActionCollector {
+    actions: Vec<VerboseAction>,
+
+    forbidden: ActionForbiddenUntil,
+
+    game_tick: i32,
+
+    is_activating_tile: bool,
+    is_confirming_menu: bool,
+    is_animation_cancelling: bool,
+    is_exiting_menu: bool,
+    is_holding_tool: bool,
+    is_moving: bool,
+    is_scrolling_up: bool,
+    is_scrolling_down: bool,
+    is_left_clicking: bool,
+    is_right_clicking: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ActionForbiddenUntil {
+    activate_tile: Option<i32>,
+    confirm_menu: Option<i32>,
+    animation_cancel: Option<i32>,
+    exit_menu: Option<i32>,
+    scroll_up: Option<i32>,
+    scroll_down: Option<i32>,
+    left_click: Option<i32>,
+    right_click: Option<i32>,
+}
+
+pub struct VerboseAction {
+    action: GameAction,
+    game_tick: i32,
+    goal: Option<Cow<'static, str>>,
+    detail: Option<Cow<'static, str>>,
+
+    /// If true, this action will be sent to the remote process.  If
+    /// false, this action occurred too recently after the same input,
+    /// and should be suppressed.
+    allowed: bool,
+}
+
+pub struct GameActionAnnotator<'a> {
+    detail: Option<&'a mut Option<Cow<'static, str>>>,
+}
+
 pub trait BotGoal: Any {
-    fn description(&self) -> Cow<str>;
+    fn description(&self) -> Cow<'static, str>;
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error>;
 
     fn cancel_if(
@@ -85,6 +135,337 @@ pub trait BotInterrupt: Any {
     ) -> Result<Option<LogicStack>, Error>;
 }
 
+impl ActionForbiddenUntil {
+    fn initial() -> Self {
+        Self {
+            activate_tile: None,
+            confirm_menu: None,
+            animation_cancel: None,
+            exit_menu: None,
+            scroll_up: None,
+            scroll_down: None,
+            left_click: None,
+            right_click: None,
+        }
+    }
+
+    fn from_game_state(game_state: &GameState) -> Self {
+        // If an action is currently taking place, then any attempts
+        // to repeat it may not occur until at least the next game
+        // tick.
+        let tick = game_state.globals.game_tick + 1;
+
+        let activate_tile = game_state
+            .inputs
+            .keys_pressed
+            .contains(&Key::X)
+            .then(|| tick);
+        let confirm_menu = game_state
+            .inputs
+            .keys_pressed
+            .contains(&Key::Y)
+            .then(|| tick);
+        let animation_cancel = game_state
+            .inputs
+            .keys_pressed
+            .iter()
+            .any(|key| matches!(key, Key::Delete | Key::RightShift | Key::R))
+            .then(|| tick);
+        let exit_menu = game_state
+            .inputs
+            .keys_pressed
+            .contains(&Key::Escape)
+            .then(|| tick);
+
+        let scroll_up = (game_state.inputs.scroll_wheel
+            == Some(ScrollWheel::ScrollingUp))
+        .then(|| tick);
+        let scroll_down = (game_state.inputs.scroll_wheel
+            == Some(ScrollWheel::ScrollingDown))
+        .then(|| tick);
+
+        let left_click = game_state.inputs.left_mouse_down().then(|| tick);
+        let right_click = game_state.inputs.right_mouse_down().then(|| tick);
+
+        Self {
+            activate_tile,
+            confirm_menu,
+            animation_cancel,
+            exit_menu,
+            scroll_up,
+            scroll_down,
+            left_click,
+            right_click,
+        }
+    }
+
+    fn from_actions(
+        current_tick: i32,
+        actions: impl IntoIterator<Item = GameAction>,
+    ) -> Self {
+        let mut out = Self::initial();
+
+        // An input may not be sent again until two game ticks have
+        // passed.  One game tick to allow the mouse/keyboard to be
+        // recognized as pressed down, and another to be recognized as
+        // pressed up.
+
+        actions.into_iter().for_each(|action| match action {
+            GameAction::ExitMenu => {
+                out.exit_menu = Some(current_tick + 4);
+                out.left_click = Some(current_tick + 4);
+                out.right_click = Some(current_tick + 4);
+            }
+            GameAction::ActivateTile => {
+                out.activate_tile = Some(current_tick + 2);
+            }
+            GameAction::ConfirmMenu => {
+                out.confirm_menu = Some(current_tick + 2);
+            }
+            GameAction::LeftClick => {
+                out.left_click = Some(current_tick + 2);
+            }
+            GameAction::RightClick => {
+                out.right_click = Some(current_tick + 2);
+            }
+            GameAction::ScrollUp => {
+                out.scroll_up = Some(current_tick + 2);
+            }
+            GameAction::ScrollDown => {
+                out.scroll_down = Some(current_tick + 2);
+            }
+            GameAction::AnimationCancel => {
+                out.animation_cancel = Some(current_tick + 2);
+            }
+
+            // TODO: GameAction::SelectHotbar(_) => todo!(),
+            _ => {}
+        });
+
+        out
+    }
+
+    fn merge(self, other: Self) -> Self {
+        let merge = |a: Option<i32>, b: Option<i32>| -> Option<i32> {
+            match (a, b) {
+                (Some(a), Some(b)) => Some(a.max(b)),
+                (None, other) | (other, None) => other,
+            }
+        };
+
+        Self {
+            activate_tile: merge(self.activate_tile, other.activate_tile),
+            confirm_menu: merge(self.confirm_menu, other.confirm_menu),
+            animation_cancel: merge(
+                self.animation_cancel,
+                other.animation_cancel,
+            ),
+            exit_menu: merge(self.exit_menu, other.exit_menu),
+            scroll_up: merge(self.scroll_up, other.scroll_up),
+            scroll_down: merge(self.scroll_down, other.scroll_down),
+            left_click: merge(self.left_click, other.left_click),
+            right_click: merge(self.right_click, other.right_click),
+        }
+    }
+
+    fn at_game_tick(self, game_tick: i32) -> Self {
+        let filter = |expires_at: &i32| -> bool { game_tick < *expires_at };
+
+        Self {
+            activate_tile: self.activate_tile.filter(filter),
+            confirm_menu: self.confirm_menu.filter(filter),
+            animation_cancel: self.animation_cancel.filter(filter),
+            exit_menu: self.exit_menu.filter(filter),
+            scroll_up: self.scroll_up.filter(filter),
+            scroll_down: self.scroll_down.filter(filter),
+            left_click: self.left_click.filter(filter),
+            right_click: self.right_click.filter(filter),
+        }
+    }
+}
+
+impl ActionCollector {
+    fn new(game_state: &GameState, forbidden: ActionForbiddenUntil) -> Self {
+        let is_activating_tile =
+            game_state.inputs.keys_pressed.contains(&Key::X);
+        let is_confirming_menu =
+            game_state.inputs.keys_pressed.contains(&Key::Y);
+        let is_animation_cancelling =
+            game_state.inputs.keys_pressed.iter().any(|key| {
+                matches!(key, Key::Delete | Key::RightShift | Key::R)
+            });
+        let is_exiting_menu =
+            game_state.inputs.keys_pressed.contains(&Key::Escape);
+        let is_holding_tool = game_state.inputs.keys_pressed.contains(&Key::C);
+        let is_moving = [Key::W, Key::S, Key::A, Key::D]
+            .into_iter()
+            .any(|key| game_state.inputs.keys_pressed.contains(&key));
+
+        let is_scrolling_up =
+            game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingUp);
+        let is_scrolling_down =
+            game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingDown);
+
+        let is_left_clicking = game_state.inputs.left_mouse_down();
+        let is_right_clicking = game_state.inputs.right_mouse_down();
+
+        Self {
+            actions: Vec::new(),
+            forbidden,
+            game_tick: game_state.globals.game_tick,
+            is_activating_tile,
+            is_confirming_menu,
+            is_animation_cancelling,
+            is_exiting_menu,
+            is_holding_tool,
+            is_moving,
+            is_scrolling_up,
+            is_scrolling_down,
+            is_left_clicking,
+            is_right_clicking,
+        }
+    }
+
+    pub fn do_action(&mut self, action: GameAction) -> GameActionAnnotator<'_> {
+        // Some actions, such as moving the character around, are
+        // continuous, while others are instantaneous.  For an
+        // instantaneous action, Stardew checks whether the
+        // button/key are in a different state than they were on
+        // the previous frame.  Therefore, even if we were to send
+        // the input, it wouldn't cause the game action to be
+        // repeated.
+        //
+        // TL;DR: Don't press the mouse down unless the game will
+        // recognize it as pressing the mouse down.
+
+        // let should_perform = match action {
+        //     GameAction::LeftClick => !self.is_left_clicking,
+        //     GameAction::RightClick => !self.is_right_clicking,
+        //     GameAction::AnimationCancel => !self.is_animation_cancelling,
+        //     GameAction::ActivateTile => !self.is_activating_tile,
+        //     GameAction::ConfirmMenu => !self.is_confirming_menu,
+        //     GameAction::ExitMenu => !self.is_exiting_menu,
+        //     _ => true,
+        // };
+
+        let waited_dead_time = |wait_until: Option<i32>| -> bool {
+            wait_until
+                .map(|tick| self.game_tick >= tick)
+                .unwrap_or(true)
+        };
+
+        let allowed = match action {
+            GameAction::LeftClick => {
+                waited_dead_time(self.forbidden.left_click)
+            }
+            GameAction::RightClick => {
+                waited_dead_time(self.forbidden.right_click)
+            }
+            GameAction::AnimationCancel => {
+                waited_dead_time(self.forbidden.animation_cancel)
+            }
+            GameAction::ActivateTile => {
+                waited_dead_time(self.forbidden.activate_tile)
+            }
+            GameAction::ConfirmMenu => {
+                waited_dead_time(self.forbidden.confirm_menu)
+            }
+            GameAction::ExitMenu => waited_dead_time(self.forbidden.exit_menu),
+            GameAction::ScrollDown => {
+                waited_dead_time(self.forbidden.scroll_down)
+            }
+            GameAction::ScrollUp => waited_dead_time(self.forbidden.scroll_up),
+            _ => true,
+        };
+
+        self.actions.push(VerboseAction {
+            action,
+            game_tick: self.game_tick,
+            goal: None,
+            detail: None,
+            allowed,
+        });
+        GameActionAnnotator {
+            detail: self
+                .actions
+                .last_mut()
+                .map(|verbose_action| &mut verbose_action.detail),
+        }
+    }
+
+    fn annotate_new(&mut self, goal: &dyn BotGoal, num_actions_before: usize) {
+        let goal = goal.description();
+        self.actions[num_actions_before..].iter_mut().for_each(
+            |verbose_action| {
+                verbose_action.goal = Some(goal.clone());
+            },
+        );
+    }
+
+    fn finalize(&mut self) {
+        // Reset mouse/keyboard state back to their unpressed state.
+        //
+        // For buttons/keys that have an instant effect, such as
+        // left-clicking, the button/key is released as soon as it is
+        // recognized as being pressed down, so that it can be ready
+        // to be pressed down again.
+        //
+        // For buttons/keys that have a continuous effect, such as
+        // moving, the button/key remains pressed down as long as the
+        // `BotGoal` keeps producing `GameAction::Move` commands.
+        if self.is_left_clicking {
+            self.do_action(GameAction::ReleaseLeftClick);
+        }
+        if self.is_right_clicking {
+            self.do_action(GameAction::ReleaseRightClick);
+        }
+        if self.is_scrolling_down {
+            self.do_action(GameAction::StopScrollingDown);
+        }
+        if self.is_scrolling_up {
+            self.do_action(GameAction::StopScrollingUp);
+        }
+        if self.is_animation_cancelling {
+            self.do_action(GameAction::StopAnimationCanceling);
+        }
+        if self.is_activating_tile {
+            self.do_action(GameAction::StopActivatingTile);
+        }
+        if self.is_confirming_menu {
+            self.do_action(GameAction::StopConfirmingMenu);
+        }
+        if self.is_exiting_menu {
+            self.do_action(GameAction::StopExitingMenu);
+        }
+
+        if self.is_holding_tool
+            && self
+                .actions
+                .iter()
+                .all(|action| !matches!(action.action, GameAction::HoldTool))
+        {
+            self.do_action(GameAction::ReleaseTool);
+        }
+
+        if self.is_moving
+            && self
+                .actions
+                .iter()
+                .all(|action| !matches!(action.action, GameAction::Move(_)))
+        {
+            self.do_action(GameAction::StopMoving);
+        }
+    }
+}
+
+impl GameActionAnnotator<'_> {
+    pub fn annotate(&mut self, annotation: impl Into<Cow<'static, str>>) {
+        if let Some(detail) = &mut self.detail {
+            let _ = detail.insert(annotation.into());
+        }
+    }
+}
+
 impl BotLogic {
     pub fn new(verbose: bool) -> Self {
         Self {
@@ -104,7 +485,10 @@ impl BotLogic {
                 },
                 LogicStackItem::Goal(Box::new(super::GenericDay)),
             ],
+            action_dead_time: ActionForbiddenUntil::initial(),
+
             recently_finished: Default::default(),
+            recent_actions: Default::default(),
             verbose,
         }
     }
@@ -113,43 +497,24 @@ impl BotLogic {
         &mut self,
         game_state: &GameState,
     ) -> Result<Vec<GameAction>, Error> {
-        let mut actions = Vec::new();
+        // Mark actions which may be repeated, now that enough time
+        // has passed.
+        self.action_dead_time = self
+            .action_dead_time
+            .clone()
+            .at_game_tick(game_state.globals.game_tick);
 
-        let is_activating_tile =
-            game_state.inputs.keys_pressed.contains(&Key::X);
-        let is_confirming_menu =
-            game_state.inputs.keys_pressed.contains(&Key::Y);
-        let is_animation_cancelling =
-            game_state.inputs.keys_pressed.iter().any(|key| {
-                matches!(key, Key::Delete | Key::RightShift | Key::R)
-            });
-        let is_exiting_menu =
-            game_state.inputs.keys_pressed.contains(&Key::Escape);
+        // If any actions are in-progress, based on the current game
+        // state, mark inputs that may not be taken again until the
+        // next game tick.  (e.g. If the mouse is currently down, do
+        // not send another MouseDown event.)
+        self.action_dead_time = self
+            .action_dead_time
+            .clone()
+            .merge(ActionForbiddenUntil::from_game_state(game_state));
 
-        let mut on_goal_action = |action| {
-            // Some actions, such as moving the character around, are
-            // continuous, while others are instantaneous.  For an
-            // instantaneous action, Stardew checks whether the
-            // button/key are in a different state than they were on
-            // the previous frame.  Therefore, even if we were to send
-            // the input, it wouldn't cause the game action to be
-            // repeated.
-            //
-            // TL;DR: Don't press the mouse down unless the game will
-            // recognize it as pressing the mouse down.
-            let should_perform = match action {
-                GameAction::LeftClick => !game_state.inputs.left_mouse_down(),
-                GameAction::RightClick => !game_state.inputs.right_mouse_down(),
-                GameAction::AnimationCancel => !is_animation_cancelling,
-                GameAction::ActivateTile => !is_activating_tile,
-                GameAction::ConfirmMenu => !is_confirming_menu,
-                GameAction::ExitMenu => !is_exiting_menu,
-                _ => true,
-            };
-            if should_perform {
-                actions.push(action);
-            }
-        };
+        let mut actions =
+            ActionCollector::new(game_state, self.action_dead_time.clone());
 
         let mut previously_produced_subgoals: Option<usize> = None;
 
@@ -242,13 +607,14 @@ impl BotLogic {
                 println!("Running top goal '{}'", current_goal.description());
             }
 
-            let goal_result =
-                current_goal.apply(game_state, &mut on_goal_action)?;
+            let num_actions_before = actions.actions.len();
+            let goal_result = current_goal.apply(game_state, &mut actions)?;
+            actions.annotate_new(current_goal, num_actions_before);
 
             match goal_result {
                 BotGoalResult::Completed => {
                     if self.verbose {
-                        println!("\tGoal completed, removing from stack",);
+                        println!("\tGoal completed, removing from stack");
                     }
 
                     if let Some(prev) = previously_produced_subgoals {
@@ -303,62 +669,44 @@ impl BotLogic {
         if self.verbose {
             println!(
                 "From the goals, \
-                 sending the following {} {} to game",
-                actions.len(),
-                if actions.len() == 1 {
-                    "action"
-                } else {
-                    "actions"
-                },
+                 sending the following {} actions to game",
+                actions.actions.len(),
             );
             actions
+                .actions
                 .iter()
                 .for_each(|action| println!("\tAction: {action}"));
         }
 
-        // Reset mouse/keyboard state back to their unpressed state.
-        //
-        // For buttons/keys that have an instant effect, such as
-        // left-clicking, the button/key is released as soon as it is
-        // recognized as being pressed down, so that it can be ready
-        // to be pressed down again.
-        //
-        // For buttons/keys that have a continuous effect, such as
-        // moving, the button/key remains pressed down as long as the
-        // `BotGoal` keeps producing `GameAction::Move` commands.
-        if game_state.inputs.left_mouse_down() {
-            actions.push(GameAction::ReleaseLeftClick.into());
-        }
-        if game_state.inputs.right_mouse_down() {
-            actions.push(GameAction::ReleaseRightClick.into());
-        }
-        if game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingDown) {
-            actions.push(GameAction::StopScrollingDown);
-        }
-        if game_state.inputs.scroll_wheel == Some(ScrollWheel::ScrollingUp) {
-            actions.push(GameAction::StopScrollingUp);
-        }
-        if is_animation_cancelling {
-            actions.push(GameAction::StopAnimationCanceling);
-        }
-        if is_activating_tile {
-            actions.push(GameAction::StopActivatingTile);
-        }
-        if is_confirming_menu {
-            actions.push(GameAction::StopConfirmingMenu);
-        }
-        if is_exiting_menu {
-            actions.push(GameAction::StopExitingMenu);
-        }
-        if game_state.player.movement.is_some()
-            && actions
-                .iter()
-                .all(|action| !matches!(action, GameAction::Move(_)))
-        {
-            actions.push(GameAction::StopMoving);
+        actions.finalize();
+
+        // For any action taken, mark which ones may not be repeated
+        // until at least two game ticks have occurred.  (e.g. If
+        // sending a MouseDown event, do not send another MouseDown
+        // event until two frames have passed..)
+        self.action_dead_time = self.action_dead_time.clone().merge(
+            ActionForbiddenUntil::from_actions(
+                game_state.globals.game_tick,
+                actions
+                    .actions
+                    .iter()
+                    .filter(|verbose_action| verbose_action.allowed)
+                    .map(|verbose_action| verbose_action.action),
+            ),
+        );
+
+        let mut output_actions = Vec::new();
+        for verbose_action in actions.actions {
+            if verbose_action.allowed {
+                output_actions.push(verbose_action.action);
+            }
+            self.recent_actions.push_back(verbose_action);
+            while self.recent_actions.len() > MAX_RECENT_ACTIONS {
+                self.recent_actions.pop_front();
+            }
         }
 
-        Ok(actions)
+        Ok(output_actions)
     }
 
     fn reset_completed_interrupts(&mut self) {
@@ -375,22 +723,29 @@ impl BotLogic {
         }
     }
 
+    fn pop_from_logic_stack(&mut self) {
+        let item = self.stack.pop().expect("Bot has run out of goals");
+        self.recently_finished.push_back(item);
+
+        while self.recently_finished.len() > MAX_RECENT_GOALS {
+            self.recently_finished.pop_front();
+        }
+    }
+
     pub fn iter(
         &self,
     ) -> impl DoubleEndedIterator<Item = &LogicStackItem> + '_ {
         self.stack.iter()
     }
 
-    fn pop_from_logic_stack(&mut self) {
-        let item = self.stack.pop().expect("Bot has run out of goals");
-        self.recently_finished.push_back(item);
-
-        while self.recently_finished.len() > KEEP_RECENT {
-            self.recently_finished.pop_front();
-        }
+    pub fn iter_recent_actions(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &VerboseAction> + ExactSizeIterator + '_
+    {
+        self.recent_actions.iter()
     }
 
-    pub fn iter_recent(
+    pub fn iter_recently_completed(
         &self,
     ) -> impl DoubleEndedIterator<Item = &LogicStackItem> + '_ {
         self.recently_finished.iter().rev()
@@ -486,5 +841,27 @@ where
 {
     fn from(goal: T) -> Self {
         BotGoalResult::SubGoals(goal.into())
+    }
+}
+
+impl Display for VerboseAction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: ", self.game_tick)?;
+
+        if !self.allowed {
+            write!(f, "(suppressed) ")?;
+        }
+
+        write!(f, "{}", self.action)?;
+
+        if let Some(goal) = &self.goal {
+            write!(f, " from '{goal}'")?;
+        }
+
+        if let Some(detail) = &self.detail {
+            write!(f, " because '{detail}'")?;
+        }
+
+        Ok(())
     }
 }

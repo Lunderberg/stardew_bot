@@ -5,8 +5,8 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
-    InventoryGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    InventoryGoal, MenuCloser,
 };
 
 pub struct CheckAllMail;
@@ -18,24 +18,28 @@ impl CheckAllMail {
 }
 
 impl BotGoal for CheckAllMail {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         "Check all mail".into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let farm_door = game_state.get_farm_door()?;
         let mailbox = farm_door + Vector::new(4, 2);
 
-        if game_state.mail_menu.is_some()
-            || (game_state.pause_menu.is_some()
-                && game_state.player.room_name == "Farm")
-        {
-            do_action(GameAction::ExitMenu);
-            return Ok(BotGoalResult::InProgress);
+        let is_near_mailbox = game_state.player.room_name == "Farm"
+            && game_state
+                .player
+                .tile()
+                .iter_adjacent()
+                .any(|adj| adj == mailbox);
+
+        let cleanup = MenuCloser::new();
+        if is_near_mailbox && !cleanup.is_completed(game_state) {
+            return Ok(cleanup.into());
         }
 
         if self.is_completed(game_state) {

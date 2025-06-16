@@ -3,7 +3,10 @@ use crate::{
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    MenuCloser,
+};
 
 pub struct SelectItemGoal {
     item: Item,
@@ -46,14 +49,14 @@ impl SelectItemGoal {
 }
 
 impl BotGoal for SelectItemGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Select {}", self.item).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let opt_cleanup = game_state
             .inputs
@@ -64,7 +67,7 @@ impl BotGoal for SelectItemGoal {
             .map(|index| GameAction::StopSelectingHotbar(index));
 
         if let Some(cleanup) = opt_cleanup {
-            do_action(cleanup);
+            actions.do_action(cleanup);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -105,8 +108,8 @@ impl BotGoal for SelectItemGoal {
                 });
 
             let pixel = inventory_page.player_item_locations[dest_slot];
-            do_action(GameAction::MouseOverPixel(pixel));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -116,12 +119,11 @@ impl BotGoal for SelectItemGoal {
             .map(|slot| slot == game_state.player.active_hotbar_index)
             .unwrap_or(true);
         if is_completed_or_impossible {
-            if let Some(pause) = &game_state.pause_menu {
-                do_action(GameAction::MouseOverPixel(pause.exit_button));
-                do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            } else {
+            let cleanup = MenuCloser::new();
+            if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
+            } else {
+                return Ok(cleanup.into());
             }
         }
 
@@ -131,24 +133,24 @@ impl BotGoal for SelectItemGoal {
         if current_slot < 12 {
             // The item is currently in the hotbar, so we just need to
             // select it.
-            do_action(GameAction::SelectHotbar(current_slot));
+            actions.do_action(GameAction::SelectHotbar(current_slot));
             return Ok(BotGoalResult::InProgress);
         }
 
         let Some(pause) = &game_state.pause_menu else {
-            do_action(GameAction::ExitMenu);
+            actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };
 
         let Some(inventory_page) = pause.inventory_page() else {
-            do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
-            do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         };
 
         let pixel = inventory_page.player_item_locations[current_slot];
-        do_action(GameAction::MouseOverPixel(pixel));
-        do_action(GameAction::LeftClick);
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)
     }
 }

@@ -1,7 +1,7 @@
 use crate::{game_state::Vector, Error, GameAction, GameState};
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, BotError, MovementGoal,
 };
 
@@ -24,14 +24,14 @@ impl GoToActionTile {
 }
 
 impl BotGoal for GoToActionTile {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Go to {}", self.action).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        _: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);

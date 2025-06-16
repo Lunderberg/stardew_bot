@@ -1,7 +1,7 @@
 use crate::{game_state::Vector, Error, GameAction, GameState};
 
 use super::{
-    bot_logic::{BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MovementGoal,
 };
 
@@ -23,14 +23,14 @@ impl ActivateTile {
 }
 
 impl BotGoal for ActivateTile {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!("Activate {} in {}", self.tile, self.room).into()
     }
 
     fn apply(
         &mut self,
         game_state: &GameState,
-        do_action: &mut dyn FnMut(GameAction),
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_activated {
             return Ok(BotGoalResult::Completed);
@@ -39,9 +39,9 @@ impl BotGoal for ActivateTile {
         let is_within_range =
             game_state.player.tile().manhattan_dist(self.tile) <= 1;
         if is_within_range {
-            do_action(GameAction::MouseOverTile(self.tile));
+            actions.do_action(GameAction::MouseOverTile(self.tile));
             if !game_state.inputs.right_mouse_down() {
-                do_action(GameAction::RightClick);
+                actions.do_action(GameAction::RightClick);
                 self.is_activated = true;
             }
             return Ok(BotGoalResult::InProgress);

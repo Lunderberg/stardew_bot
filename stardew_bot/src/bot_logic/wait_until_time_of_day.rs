@@ -1,6 +1,6 @@
 use crate::{Error, GameAction, GameState};
 
-use super::bot_logic::{BotGoal, BotGoalResult};
+use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
 pub struct WaitUntilTimeOfDay {
     /// Uses the same interpretation as
@@ -15,7 +15,7 @@ impl WaitUntilTimeOfDay {
 }
 
 impl BotGoal for WaitUntilTimeOfDay {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
         format!(
             "Wait until {:02}:{:02}",
             self.time_of_day / 100,
@@ -27,7 +27,7 @@ impl BotGoal for WaitUntilTimeOfDay {
     fn apply(
         &mut self,
         game_state: &GameState,
-        _: &mut dyn FnMut(GameAction),
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         Ok(if game_state.globals.in_game_time < self.time_of_day {
             BotGoalResult::InProgress
