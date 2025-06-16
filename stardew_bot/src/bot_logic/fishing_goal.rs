@@ -357,33 +357,10 @@ impl BotGoal for FishOnceGoal {
             self.wait_for_treasure_chest = true;
         }
 
-        if fishing.is_casting {
-            actions
-                .do_action(GameAction::ReleaseTool)
-                .annotate("Wait during casting animation");
-        } else if fishing.bobber_in_air {
-            actions
-                .do_action(GameAction::ReleaseTool)
-                .annotate("Wait during bobber traveling");
-        } else if fishing.pulling_out_of_water {
-            actions
-                .do_action(GameAction::ReleaseTool)
-                .annotate("Wait during pulling bobber back");
-        } else if fishing.showing_treasure {
-            actions
-                .do_action(GameAction::ReleaseTool)
-                .annotate("Wait while showing treasure");
-        // } else if fishing.has_sparkling_text {
-        //     actions
-        //         .do_action(GameAction::ReleaseTool)
-        //         .annotate("Wait while showing sparkling text");
-        } else
-        //
         if fishing.is_casting
             || fishing.bobber_in_air
             || fishing.pulling_out_of_water
             || fishing.showing_treasure
-        // || fishing.has_sparkling_text
         {
             // Do nothing
         } else if fishing.showing_fish {
@@ -459,22 +436,9 @@ impl BotGoal for FishOnceGoal {
             actions
                 .do_action(GameAction::HoldTool)
                 .annotate("Wait for nibble");
-        // } else if self.started_fishing && !fishing.done_with_animation {
-        //     actions
-        //         .do_action(GameAction::ReleaseTool)
-        //         .annotate("Wait for animation to finish");
-        // } else if game_state.player.using_tool
-        //     && !game_state.player.can_release_tool
-        // {
-        //     actions
-        //         .do_action(GameAction::ExitMenu)
-        //         .annotate("Hit Esc to finish up");
         } else if self.started_fishing {
             // This is the second time around, so stop here rather
             // than starting another attempt at fishing.
-            // actions
-            //     .do_action(GameAction::ReleaseTool)
-            //     .annotate("Cleanup");
             if !self.wait_for_treasure_chest {
                 return Ok(BotGoalResult::Completed);
             }
