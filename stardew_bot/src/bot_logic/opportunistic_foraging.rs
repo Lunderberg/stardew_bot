@@ -46,7 +46,7 @@ impl BotInterrupt for OpportunisticForaging {
             .filter(|obj| pos.dist2(obj.tile.into()) < radius2)
             .filter(|obj| match &obj.kind {
                 ObjectKind::HoeDirt(hoe_dirt) => {
-                    hoe_dirt.has_crop && should_hoe
+                    hoe_dirt.has_crop() && should_hoe
                 }
                 ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
                 ObjectKind::Other(name) => match name.as_ref() {

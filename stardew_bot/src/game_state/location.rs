@@ -128,7 +128,15 @@ pub struct Bush {
 #[derive(Debug, Clone)]
 pub struct HoeDirt {
     pub is_watered: bool,
-    pub has_crop: bool,
+    pub crop_phase: Option<CropPhase>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CropPhase {
+    Seed,
+    Growing,
+    Harvestable,
+    Regrowing,
 }
 
 #[derive(Debug, Clone)]
@@ -434,10 +442,19 @@ impl Location {
 
         graph.named_native_function(
             "new_hoe_dirt",
-            |is_watered: bool, has_crop: bool| {
+            |is_watered: bool, crop_phase: Option<usize>| {
+                let crop_phase = crop_phase.map(|value| match value {
+                    0 => CropPhase::Seed,
+                    1 => CropPhase::Growing,
+                    2 => CropPhase::Harvestable,
+                    3 => CropPhase::Regrowing,
+                    other => {
+                        unreachable!("Value {other} should not be produced")
+                    }
+                });
                 ObjectKind::HoeDirt(HoeDirt {
                     is_watered,
-                    has_crop,
+                    crop_phase,
                 })
             },
         )?;
@@ -935,8 +952,30 @@ impl Location {
                             let is_watered = state == 1i32;
 
                             let crop = hoe_dirt.netCrop.value;
+                            let crop_phase = if crop.is_none() {
+                                None
+                            } else {
+                                let phase = crop.currentPhase.value.prim_cast::<usize>();
+                                let num_phases = crop.phaseDays.count.value.prim_cast::<usize>();
+                                let is_fully_grown = crop.fullyGrown.value;
+                                let day_of_current_phase = crop.dayOfCurrentPhase.value;
 
-                            new_hoe_dirt(is_watered, crop.is_some())
+                                let is_growing = phase < num_phases - 1;
+                                let is_regrowing = is_fully_grown && day_of_current_phase > 0i32;
+                                let can_harvest = !is_growing && !is_regrowing;
+
+                                if phase==0 {
+                                    0
+                                } else if can_harvest {
+                                    2
+                                } else if is_regrowing {
+                                    3
+                                } else {
+                                    1
+                                }
+                            };
+
+                            new_hoe_dirt(is_watered, crop_phase)
                         } else {
                             new_unknown_object_kind(feature_value)
                         };
@@ -1738,6 +1777,38 @@ impl ObjectKind {
             ObjectKind::Other(_) => false,
             ObjectKind::Unknown => false,
         }
+    }
+
+    pub fn as_hoe_dirt(&self) -> Option<&HoeDirt> {
+        match self {
+            ObjectKind::HoeDirt(hoe_dirt) => Some(hoe_dirt),
+            _ => None,
+        }
+    }
+}
+
+impl HoeDirt {
+    pub fn can_harvest(&self) -> bool {
+        matches!(self.crop_phase, Some(CropPhase::Harvestable))
+    }
+
+    pub fn requires_watering(&self) -> bool {
+        !self.is_watered
+            && match self.crop_phase {
+                None => false,
+                Some(CropPhase::Seed) => true,
+                Some(CropPhase::Growing) => true,
+                Some(CropPhase::Harvestable) => false,
+                Some(CropPhase::Regrowing) => true,
+            }
+    }
+
+    pub fn has_crop(&self) -> bool {
+        self.crop_phase.is_some()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.crop_phase.is_none()
     }
 }
 

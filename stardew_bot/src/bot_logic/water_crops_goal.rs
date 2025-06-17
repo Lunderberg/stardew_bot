@@ -31,13 +31,10 @@ impl WaterCropsGoal {
             .objects
             .iter()
             .filter(|obj| {
-                matches!(
-                    obj.kind,
-                    ObjectKind::HoeDirt(HoeDirt {
-                        is_watered: false,
-                        has_crop: true
-                    })
-                )
+                obj.kind
+                    .as_hoe_dirt()
+                    .map(|hoe_dirt| hoe_dirt.requires_watering())
+                    .unwrap_or(false)
             })
             .map(|obj| obj.tile);
 

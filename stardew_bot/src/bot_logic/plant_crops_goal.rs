@@ -70,7 +70,7 @@ impl CropPlantingPlan {
                         | ObjectKind::ArtifactSpot
                         | ObjectKind::SeedSpot
                         | ObjectKind::Tree(_) => false,
-                        ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop,
+                        ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop(),
                         ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_)
                         | ObjectKind::Other(_)
@@ -175,7 +175,7 @@ impl BotGoal for PlantCropsGoal {
                         Some(Item::WATERING_CAN)
                     }
                     Some(ObjectKind::HoeDirt(hoe_dirt))
-                        if !hoe_dirt.has_crop =>
+                        if hoe_dirt.is_empty() =>
                     {
                         iter_seeds(game_state).next().cloned()
                     }
