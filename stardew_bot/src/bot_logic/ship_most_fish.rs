@@ -1,4 +1,7 @@
-use crate::{game_state::ItemCategory, Error, GameState};
+use crate::{
+    game_state::{ItemCategory, Quality},
+    Error, GameState,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
@@ -29,12 +32,22 @@ impl BotGoal for ShipMostFishGoal {
             .iter_items()
             .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
             .filter(|item| {
-                let Some(stamina) = item.stamina_recovery() else {
-                    return true;
-                };
-                (item.price as f32) > 1.9 * stamina
+                let low_stamina_per_gp = item
+                    .stamina_recovery()
+                    .map(|stamina| {
+                        (item.per_item_price() as f32) > 1.75 * stamina
+                    })
+                    .unwrap_or(true);
+
+                low_stamina_per_gp
             })
-            .map(|item| item.clone().with_count(1));
+            .map(|item| {
+                let num_to_keep = match item.quality() {
+                    Quality::Normal | Quality::Silver => 0,
+                    Quality::Gold | Quality::Iridium => 1,
+                };
+                item.clone().with_count(num_to_keep)
+            });
 
         let goal = ShipItemGoal::new(iter_items);
         if !goal.is_completed(game_state) {
