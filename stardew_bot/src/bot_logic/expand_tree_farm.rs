@@ -130,7 +130,7 @@ impl BotGoal for ExpandTreeFarm {
                 .iter()
                 .fold(InventoryGoal::empty(), |goal, seed| goal.ignoring(seed))
                 .with(Item::AXE);
-            if !goal.is_completed(game_state) {
+            if !goal.is_completed(game_state)? {
                 return Ok(goal.into());
             }
 

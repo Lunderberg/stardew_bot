@@ -98,7 +98,7 @@ impl BotGoal for WaterCropsGoal {
         };
 
         let goal = InventoryGoal::new(Item::WATERING_CAN);
-        if !goal.is_completed(game_state) {
+        if !goal.is_completed(game_state)? {
             return Ok(goal.into());
         }
 

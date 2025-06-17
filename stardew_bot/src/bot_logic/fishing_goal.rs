@@ -190,7 +190,7 @@ impl BotGoal for FishingGoal {
             // the fishing rod.
             InventoryGoal::new(current_pole.clone())
         };
-        if !preparation.is_completed(game_state) {
+        if !preparation.is_completed(game_state)? {
             return Ok(preparation.into());
         }
 

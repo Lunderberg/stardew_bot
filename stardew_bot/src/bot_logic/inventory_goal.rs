@@ -1,4 +1,7 @@
-use std::{borrow::Cow, collections::HashMap};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use itertools::Itertools as _;
 
@@ -114,11 +117,50 @@ impl InventoryExt for Inventory {
 }
 
 impl InventoryGoal {
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let iter_chests = || {
+            game_state.get_room("Farm").map(|location| {
+                location
+                    .objects
+                    .iter()
+                    .filter_map(|object| object.kind.as_chest())
+            })
+        };
+
+        // Collect the set of partial stacks in storage chests.  If
+        // all storage chests are full, then only items that fit into
+        // a partial stack may be stored.
+        let can_only_store: Option<HashSet<&ItemId>> = 'can_only_store: {
+            let mut partial_stacks: HashSet<&ItemId> = HashSet::new();
+
+            for opt_item in iter_chests()?.flat_map(|chest| chest.iter_slots())
+            {
+                if let Some(item) = opt_item {
+                    if !item.is_full_stack() {
+                        partial_stacks.insert(&item.id);
+                    }
+                } else {
+                    break 'can_only_store None;
+                }
+            }
+
+            Some(partial_stacks)
+        };
+
         let player_contents = game_state.player.inventory.to_hash_map();
 
-        let within_all_maximums =
-            player_contents.iter().all(|(item, count)| {
+        let within_all_maximums = player_contents
+            .iter()
+            .filter(|(item, _)| {
+                // If the chests do not have enough space to store the
+                // item, `InventoryGoal` may be completed even if the
+                // player is still above the requested maximum.
+                can_only_store
+                    .as_ref()
+                    .map(|lookup| lookup.contains(item))
+                    .unwrap_or(true)
+            })
+            .all(|(item, count)| {
                 if let Some(bound) = self.bounds.get(item) {
                     bound.max.map(|max| *count <= max).unwrap_or(true)
                 } else {
@@ -126,44 +168,28 @@ impl InventoryGoal {
                 }
             });
 
+        let exists_in_chests: HashSet<&ItemId> = iter_chests()?
+            .flat_map(|chest| chest.iter_items())
+            .map(|item| &item.id)
+            .collect();
+
         let within_all_minimums = self
             .bounds
             .iter()
+            .filter(|(item, _)| {
+                // If the item doesn't exist in any chest, then the
+                // `InventoryGoal` is allowed to complete even if the
+                // player does not yet have the requested amount
+                // within the inventory.
+                exists_in_chests.contains(item)
+            })
             .filter_map(|(item, bound)| bound.min.map(|min| (item, min)))
             .all(|(item, min)| {
                 let count = player_contents.get(item).cloned().unwrap_or(0);
                 count >= min
             });
 
-        within_all_maximums && within_all_minimums
-    }
-
-    #[allow(dead_code)]
-    pub fn is_possible(&self, game_state: &GameState) -> bool {
-        if self.is_completed(game_state) {
-            return true;
-        }
-
-        let Ok(iter_items) = game_state.iter_accessible_items() else {
-            return false;
-        };
-        let total_counts = iter_items
-            .map(|item| (item.id.clone(), item.count))
-            .into_grouping_map()
-            .sum();
-
-        let have_enough = self
-            .bounds
-            .iter()
-            .filter_map(|(item, bound)| bound.min.map(|min| (item, min)))
-            .all(|(item, min)| {
-                let count = total_counts.get(item).cloned().unwrap_or(0);
-                count >= min
-            });
-
-        // TODO: Also check if there is enough available storage to
-        // drop off the player's inventory.
-        have_enough
+        Ok(within_all_maximums && within_all_minimums)
     }
 }
 
@@ -196,7 +222,7 @@ impl BotGoal for InventoryGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state) {
+        if self.is_completed(game_state)? {
             // The inventory transfer is complete.  Close out the
             // chest menu if it is still open, and return control to
             // the parent goal.

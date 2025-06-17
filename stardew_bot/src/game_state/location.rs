@@ -1785,6 +1785,13 @@ impl ObjectKind {
             _ => None,
         }
     }
+
+    pub fn as_chest(&self) -> Option<&Chest> {
+        match self {
+            ObjectKind::Chest(chest) => Some(chest),
+            _ => None,
+        }
+    }
 }
 
 impl HoeDirt {

@@ -159,7 +159,7 @@ impl BotGoal for ClayFarmingGoal {
         // Pick up the hoe for use in the rest of the goal.
         for item in [Item::HOE, Item::PICKAXE] {
             let goal = super::InventoryGoal::new(item.clone());
-            if !goal.is_completed(game_state) {
+            if !goal.is_completed(game_state)? {
                 return Ok(goal.into());
             }
         }
