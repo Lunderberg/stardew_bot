@@ -29,7 +29,7 @@ impl BotGoal for ExpandTreeFarm {
     fn apply(
         &mut self,
         game_state: &GameState,
-        actions: &mut ActionCollector,
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
@@ -39,29 +39,6 @@ impl BotGoal for ExpandTreeFarm {
         let num_tree_columns = 10;
 
         let seed_types = [Item::OAK_SEED, Item::MAPLE_SEED, Item::PINE_SEED];
-
-        let opt_nearby_seed = {
-            let pos = game_state.player.center_pos();
-            game_state
-                .current_room()?
-                .items
-                .iter()
-                .filter(|item| {
-                    seed_types.iter().any(|seed_type| item.id == seed_type.id)
-                })
-                .map(|item| item.position / 64.0 - pos)
-                .filter(|offset| offset.mag2() < 3.0 * 3.0)
-                .min_by(|a, b| {
-                    num::traits::float::TotalOrder::total_cmp(
-                        &a.mag2(),
-                        &b.mag2(),
-                    )
-                })
-        };
-        if let Some(offset) = opt_nearby_seed {
-            actions.do_action(GameAction::Move(offset.closest_direction()));
-            return Ok(BotGoalResult::InProgress);
-        }
 
         let pathfinding = farm.pathfinding().include_border(true);
 
