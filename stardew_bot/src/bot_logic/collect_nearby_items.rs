@@ -61,12 +61,15 @@ impl WalkTowardDebris {
         &'a self,
         game_state: &'a GameState,
     ) -> Result<impl Iterator<Item = Vector<f32>> + 'a, Error> {
+        let inventory = &game_state.player.inventory;
+
         let player_pos = game_state.player.center_pos();
 
         let iter = game_state
             .current_room()?
             .items
             .iter()
+            .filter(|item| inventory.can_add(item))
             .map(move |item| item.position / 64.0 - player_pos)
             .filter(|offset| {
                 let dist2 = offset.mag2();

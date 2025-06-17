@@ -2157,3 +2157,9 @@ impl Deref for Chest {
         &self.inventory
     }
 }
+
+impl AsRef<ItemId> for FloatingItem {
+    fn as_ref(&self) -> &ItemId {
+        &self.id
+    }
+}
