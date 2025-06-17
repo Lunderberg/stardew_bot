@@ -2,9 +2,9 @@ use crate::{game_state::ObjectKind, Error, GameAction, GameState};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
-    CheckAllMail, ClearFarmGoal, ExpandTreeFarm, FirstDay, FishingGoal,
-    FishingLocation, GameStateExt as _, InventoryGoal, OpportunisticForaging,
-    PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
+    CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandTreeFarm, FirstDay,
+    FishingGoal, FishingLocation, GameStateExt as _, InventoryGoal,
+    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -49,6 +49,7 @@ impl BotGoal for GenericDay {
             .then(fishing_goal)
             .then(ShipMostFishGoal::new())
             .then(ClearFarmGoal::new())
+            .with_interrupt(CollectNearbyItems::new())
             .into())
     }
 }
