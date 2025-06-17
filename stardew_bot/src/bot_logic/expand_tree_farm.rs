@@ -35,6 +35,8 @@ impl BotGoal for ExpandTreeFarm {
         let farm_door = game_state.get_farm_door()?;
         let crops_top_right = farm_door + Vector::new(3, 5);
         let tree_top_right = crops_top_right + Vector::new(0, 12);
+        let num_tree_rows = 10;
+        let num_tree_columns = 10;
 
         let seed_types = [Item::OAK_SEED, Item::MAPLE_SEED, Item::PINE_SEED];
 
@@ -107,48 +109,59 @@ impl BotGoal for ExpandTreeFarm {
             farm_door
         };
 
-        let opt_closest_seed = pathfinding
-            .iter_dijkstra(initial_tile)
-            .find_map(|(tile, _)| {
-                seed_loc.get(&tile).map(|opt_tool| (tile, opt_tool))
-            });
-        if let Some((tile, opt_tool)) = opt_closest_seed {
-            let goal = InventoryGoal::new(Item::AXE);
+        let opt_seed_to_grab = || {
+            pathfinding
+                .iter_dijkstra(initial_tile)
+                .find_map(|(tile, _)| {
+                    seed_loc
+                        .get(&tile)
+                        .map(|opt_tool| (tile, opt_tool.as_ref()))
+                })
+        };
+
+        let opt_seed_to_plant = || {
+            game_state
+                .player
+                .inventory
+                .iter_items()
+                .find(|item| {
+                    seed_types
+                        .iter()
+                        .any(|seed_type| seed_type.is_same_item(item))
+                })
+                .and_then(|seed_to_plant| {
+                    let reachable = farm.pathfinding().reachable(farm_door);
+                    let opt_tile_to_plant = (0..=tree_top_right.right)
+                        .rev()
+                        .step_by(2)
+                        .take(num_tree_columns)
+                        .cartesian_product(
+                            (tree_top_right.down..farm.shape.down)
+                                .step_by(2)
+                                .take(num_tree_rows),
+                        )
+                        .map(|(right, down)| Vector::new(right, down))
+                        .find(|tile| reachable[*tile]);
+                    opt_tile_to_plant.map(|tile| (tile, Some(seed_to_plant)))
+                })
+        };
+
+        if let Some((tile, opt_item)) =
+            opt_seed_to_grab().or_else(opt_seed_to_plant)
+        {
+            let goal = seed_types
+                .iter()
+                .fold(InventoryGoal::empty(), |goal, seed| goal.ignoring(seed))
+                .with(Item::AXE);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
 
-            if let Some(tool) = opt_tool {
-                let goal = UseItemOnTile::new(tool.clone(), "Farm", tile);
+            if let Some(item) = opt_item {
+                let goal = UseItemOnTile::new(item.clone(), "Farm", tile);
                 return Ok(goal.into());
             } else {
                 let goal = ActivateTile::new("Farm", tile);
-                return Ok(goal.into());
-            }
-        }
-
-        let opt_seed_to_plant =
-            game_state.player.inventory.iter_items().find(|item| {
-                seed_types
-                    .iter()
-                    .any(|seed_type| seed_type.is_same_item(item))
-            });
-        if let Some(seed_to_plant) = opt_seed_to_plant {
-            let reachable = farm.pathfinding().reachable(farm_door);
-            let opt_tile_to_plant = (0..=tree_top_right.right)
-                .rev()
-                .step_by(2)
-                .cartesian_product(
-                    (tree_top_right.down..farm.shape.down).step_by(2),
-                )
-                .map(|(right, down)| Vector::new(right, down))
-                .find(|tile| reachable[*tile]);
-            if let Some(tile_to_plant) = opt_tile_to_plant {
-                let goal = UseItemOnTile::new(
-                    seed_to_plant.clone(),
-                    "Farm",
-                    tile_to_plant,
-                );
                 return Ok(goal.into());
             }
         }

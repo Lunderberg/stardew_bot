@@ -55,6 +55,17 @@ impl InventoryGoal {
         }
     }
 
+    pub fn ignoring(mut self, item: impl AsRef<ItemId>) -> Self {
+        self.bounds.insert(
+            item.as_ref().clone(),
+            Bounds {
+                min: None,
+                max: None,
+            },
+        );
+        self
+    }
+
     pub fn with(mut self, item: Item) -> Self {
         let count = item.count;
         self.bounds.insert(
