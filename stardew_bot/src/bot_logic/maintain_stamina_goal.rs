@@ -44,7 +44,7 @@ impl MaintainStaminaGoal {
                 let stamina = item
                     .stamina_recovery()
                     .expect("Guarded by edibility check");
-                let price = item.price as f32;
+                let price = item.per_item_price() as f32;
                 (price / stamina, item)
             })
             .filter(|(gold_per_energy, _)| {
