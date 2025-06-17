@@ -45,12 +45,12 @@ impl BotGoal for UseItemOnTile {
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
 
-        if player.using_tool
-            && player
-                .selected_item()
-                .map(|item| matches!(item.category, Some(ItemCategory::Tool)))
-                .unwrap_or(false)
-        {
+        let is_tool = player
+            .selected_item()
+            .map(|item| item.id.item_id.starts_with("(T)"))
+            .unwrap_or(false);
+
+        if is_tool && player.using_tool {
             if player.last_click == Vector::zero() {
                 actions.do_action(GameAction::AnimationCancel);
             }
