@@ -160,7 +160,8 @@ impl BotGoal for ClearFarmGoal {
                 } else {
                     match &obj.kind {
                         ObjectKind::Tree(tree) => {
-                            self.clear_trees && tree.growth_stage > 0
+                            tree.is_stump
+                                || (self.clear_trees && tree.growth_stage > 0)
                         }
                         _ => true,
                     }
