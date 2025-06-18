@@ -1,10 +1,13 @@
 use crate::{game_state::ObjectKind, Error, GameAction, GameState};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
-    CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandTreeFarm, FirstDay,
-    FishingGoal, FishingLocation, GameStateExt as _, InventoryGoal,
-    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, BotInterrupt as _, LogicStack,
+    },
+    CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandStorageInterrupt,
+    ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation, GameStateExt as _,
+    InventoryGoal, OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal,
+    WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -34,10 +37,19 @@ impl BotGoal for GenericDay {
             .iter_accessible_items()?
             .any(|item| item.as_fishing_rod().is_some());
 
+        let current_day = game_state
+            .globals
+            .stats
+            .get("daysPlayed")
+            .cloned()
+            .unwrap_or(0);
+
         let fishing_goal = if !has_fishing_rod {
             FishingGoal::new(FishingLocation::OceanByWilly)
         } else if game_state.daily.is_raining {
             FishingGoal::new(FishingLocation::River).stop_time(2400)
+        } else if current_day == 4 {
+            FishingGoal::new(FishingLocation::River).stop_time(600)
         } else {
             FishingGoal::new(FishingLocation::Lake)
         };
@@ -50,6 +62,7 @@ impl BotGoal for GenericDay {
             .then(ShipMostFishGoal::new())
             .then(ClearFarmGoal::new())
             .with_interrupt(CollectNearbyItems::new())
+            .with_interrupt(ExpandStorageInterrupt::new())
             .into())
     }
 }

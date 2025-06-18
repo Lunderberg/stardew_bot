@@ -40,7 +40,9 @@ impl BotGoal for ActivateTile {
             game_state.player.tile().manhattan_dist(self.tile) <= 1;
         if is_within_range {
             actions.do_action(GameAction::MouseOverTile(self.tile));
-            if !game_state.inputs.right_mouse_down() {
+            if game_state.inputs.mouse_tile_location == self.tile
+                && !game_state.inputs.right_mouse_down()
+            {
                 actions.do_action(GameAction::RightClick);
                 self.is_activated = true;
             }

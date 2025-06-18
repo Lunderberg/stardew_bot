@@ -38,6 +38,9 @@ mod graph_search;
 mod inventory_goal;
 pub use inventory_goal::*;
 
+mod expand_storage_interrupt;
+pub use expand_storage_interrupt::*;
+
 mod organize_inventory_goal;
 pub use organize_inventory_goal::*;
 

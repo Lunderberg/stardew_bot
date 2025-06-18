@@ -6,22 +6,11 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    MenuCloser,
+    MenuCloser, TransferSize,
 };
 
 pub struct ShipItemGoal {
     items: Vec<Item>,
-}
-
-enum TransferSize {
-    /// Ship the entire stack by left-clicking
-    All,
-
-    /// Ship half of the stack by shift + right-click
-    Half,
-
-    /// Ship one item by right-clicking
-    One,
 }
 
 impl ShipItemGoal {
@@ -49,13 +38,7 @@ impl ShipItemGoal {
                     continue;
                 };
 
-                let transfer_size = if goal == 0 {
-                    TransferSize::All
-                } else if goal <= current / 2 {
-                    TransferSize::Half
-                } else {
-                    TransferSize::One
-                };
+                let transfer_size = TransferSize::select(current, goal);
 
                 return Some((slot, transfer_size));
             }
@@ -115,22 +98,7 @@ impl BotGoal for ShipItemGoal {
         let pixel = menu.player_item_locations[index_to_ship];
         actions.do_action(GameAction::MouseOverPixel(pixel));
 
-        match transfer_size {
-            TransferSize::All => {
-                actions.do_action(GameAction::LeftClick);
-            }
-            TransferSize::Half => {
-                actions.do_action(GameAction::HoldLeftShift);
-                if game_state.inputs.holding_left_shift() {
-                    actions.do_action(GameAction::RightClick);
-                }
-            }
-            TransferSize::One => {
-                if !game_state.inputs.holding_left_shift() {
-                    actions.do_action(GameAction::RightClick);
-                }
-            }
-        }
+        transfer_size.send_inputs(game_state, actions);
 
         Ok(BotGoalResult::InProgress)
     }

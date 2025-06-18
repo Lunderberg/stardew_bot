@@ -128,7 +128,8 @@ impl BotGoal for ExpandTreeFarm {
         {
             let goal = seed_types
                 .iter()
-                .fold(InventoryGoal::empty(), |goal, seed| goal.ignoring(seed))
+                .map(|seed| seed.clone().with_count(100))
+                .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
                 .with(Item::AXE);
             if !goal.is_completed(game_state)? {
                 return Ok(goal.into());

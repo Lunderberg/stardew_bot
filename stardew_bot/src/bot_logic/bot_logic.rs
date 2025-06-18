@@ -225,8 +225,10 @@ impl ActionForbiddenUntil {
             }
             GameAction::LeftClick => {
                 out.left_click = Some(current_tick + 2);
+                out.right_click = Some(current_tick + 2);
             }
             GameAction::RightClick => {
+                out.left_click = Some(current_tick + 2);
                 out.right_click = Some(current_tick + 2);
             }
             GameAction::ScrollUp => {

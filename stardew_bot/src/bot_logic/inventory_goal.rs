@@ -34,6 +34,29 @@ struct Bounds {
     max: Option<usize>,
 }
 
+struct Transfer {
+    chest: Vector<isize>,
+    direction: TransferDirection,
+    slot: usize,
+    size: TransferSize,
+}
+
+enum TransferDirection {
+    PlayerToChest,
+    ChestToPlayer,
+}
+
+pub(super) enum TransferSize {
+    /// Ship the entire stack by left-clicking
+    All,
+
+    /// Ship half of the stack by shift + right-click
+    Half,
+
+    /// Ship one item by right-clicking
+    One,
+}
+
 impl InventoryGoal {
     pub fn new(item: Item) -> Self {
         let bounds = [(
@@ -51,6 +74,13 @@ impl InventoryGoal {
         }
     }
 
+    pub fn current() -> Self {
+        Self {
+            bounds: Default::default(),
+            stash_unspecified_items: false,
+        }
+    }
+
     pub fn empty() -> Self {
         Self {
             bounds: Default::default(),
@@ -58,6 +88,7 @@ impl InventoryGoal {
         }
     }
 
+    #[allow(dead_code)]
     pub fn ignoring(mut self, item: impl AsRef<ItemId>) -> Self {
         self.bounds.insert(
             item.as_ref().clone(),
@@ -82,114 +113,225 @@ impl InventoryGoal {
     }
 }
 
-trait InventoryExt: Sized {
-    fn iter_stacks<'a>(
-        &'a self,
-        ty: &'a ItemId,
-    ) -> impl Iterator<Item = usize> + 'a;
-
-    fn contains_ty(&self, ty: &ItemId) -> bool {
-        self.iter_stacks(ty).next().is_some()
-    }
-
-    fn item_slot(&self, ty: &ItemId) -> Option<usize>;
-}
-impl InventoryExt for Inventory {
-    fn iter_stacks<'a>(
-        &'a self,
-        id: &'a ItemId,
-    ) -> impl Iterator<Item = usize> + 'a {
-        self.items
-            .iter()
-            .filter_map(|opt_item| opt_item.as_ref())
-            .filter(move |item| *item == id)
-            .map(|item| item.count)
-    }
-
-    fn item_slot(&self, ty: &ItemId) -> Option<usize> {
-        self.items
-            .iter()
-            .enumerate()
-            .filter_map(|(i, opt_item)| opt_item.as_ref().map(|item| (i, item)))
-            .find(|(_, item)| item == &ty)
-            .map(|(i, _)| i)
-    }
-}
-
 impl InventoryGoal {
-    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+    fn next_transfer(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<Transfer>, Error> {
         let iter_chests = || {
             game_state.get_room("Farm").map(|location| {
-                location
-                    .objects
-                    .iter()
-                    .filter_map(|object| object.kind.as_chest())
+                location.objects.iter().filter_map(|obj| {
+                    obj.kind.as_chest().map(|chest| (obj.tile, chest))
+                })
             })
         };
 
-        // Collect the set of partial stacks in storage chests.  If
-        // all storage chests are full, then only items that fit into
-        // a partial stack may be stored.
-        let can_only_store: Option<HashSet<&ItemId>> = 'can_only_store: {
-            let mut partial_stacks: HashSet<&ItemId> = HashSet::new();
+        let inventory = &game_state.player.inventory;
+        // Current contents of the player inventory
+        let player_contents: HashMap<ItemId, usize> = inventory.to_hash_map();
+        let player_has_empty_slot = inventory.empty_slot().is_some();
 
-            for opt_item in iter_chests()?.flat_map(|chest| chest.iter_slots())
-            {
-                if let Some(item) = opt_item {
-                    if !item.is_full_stack() {
-                        partial_stacks.insert(&item.id);
-                    }
-                } else {
-                    break 'can_only_store None;
-                }
-            }
-
-            Some(partial_stacks)
-        };
-
-        let player_contents = game_state.player.inventory.to_hash_map();
-
-        let within_all_maximums = player_contents
-            .iter()
-            .filter(|(item, _)| {
-                // If the chests do not have enough space to store the
-                // item, `InventoryGoal` may be completed even if the
-                // player is still above the requested maximum.
-                can_only_store
-                    .as_ref()
-                    .map(|lookup| lookup.contains(item))
-                    .unwrap_or(true)
+        let preferred_chest: HashMap<ItemId, Vector<isize>> = iter_chests()?
+            .flat_map(|(tile, chest)| {
+                let has_empty_slot = chest.empty_slot().is_some();
+                chest
+                    .iter_items()
+                    .filter(move |item| has_empty_slot || !item.is_full_stack())
+                    .map(move |item| (item.id.clone(), tile))
             })
-            .all(|(item, count)| {
-                if let Some(bound) = self.bounds.get(item) {
-                    bound.max.map(|max| *count <= max).unwrap_or(true)
-                } else {
-                    !self.stash_unspecified_items
-                }
-            });
-
-        let exists_in_chests: HashSet<&ItemId> = iter_chests()?
-            .flat_map(|chest| chest.iter_items())
-            .map(|item| &item.id)
             .collect();
 
-        let within_all_minimums = self
+        // Items that should be transferred from the player to a
+        // chest.  Values are the desired number of items in the
+        // player's inventory after the tranfer.
+        let player_to_chest: HashMap<ItemId, usize> = player_contents
+            .iter()
+            .filter_map(|(item, count)| {
+                let opt_new_count = if let Some(bound) = self.bounds.get(item) {
+                    bound.max.filter(|max| max < count)
+                } else if self.stash_unspecified_items {
+                    Some(0)
+                } else {
+                    None
+                };
+
+                opt_new_count.map(|new_count| (item.clone(), new_count))
+            })
+            .collect();
+
+        // Items that should be transferred from a chest to the
+        // player.  Values are the desired number of items in the
+        // player's inventory after the tranfer.
+        let chest_to_player: HashMap<ItemId, usize> = self
             .bounds
             .iter()
-            .filter(|(item, _)| {
-                // If the item doesn't exist in any chest, then the
-                // `InventoryGoal` is allowed to complete even if the
-                // player does not yet have the requested amount
-                // within the inventory.
-                exists_in_chests.contains(item)
+            .filter_map(|(item, bound)| {
+                let current = player_contents.get(item).cloned().unwrap_or(0);
+                bound
+                    .min
+                    .filter(|&min| current < min)
+                    .map(|new_count| (item.clone(), new_count))
             })
-            .filter_map(|(item, bound)| bound.min.map(|min| (item, min)))
-            .all(|(item, min)| {
-                let count = player_contents.get(item).cloned().unwrap_or(0);
-                count >= min
-            });
+            .collect();
 
-        Ok(within_all_maximums && within_all_minimums)
+        if let Some(chest) = &game_state.chest_menu {
+            let Some(tile) = chest.chest_tile else {
+                // This chest doesn't exist at any location, such as
+                // the "chest" displaying fishing rewards.  Not part
+                // of the responsibility of `InventoryGoal`.
+                return Ok(None);
+            };
+
+            let chest_has_empty_slot = chest.chest_items.empty_slot().is_some();
+
+            let opt_transfer_to_chest = inventory
+                .iter_slots()
+                .enumerate()
+                .filter_map(|(slot, opt_item)| {
+                    opt_item.map(|item| (slot, item))
+                })
+                .filter(|(_, item)| {
+                    if let Some(preferred) = preferred_chest.get(&item.id) {
+                        *preferred == tile
+                    } else {
+                        chest_has_empty_slot
+                    }
+                })
+                .find_map(|(slot, item)| {
+                    let goal = player_to_chest.get(&item.id).cloned()?;
+                    let transfer_size = TransferSize::select(item.count, goal);
+                    Some(Transfer {
+                        chest: tile,
+                        direction: TransferDirection::PlayerToChest,
+                        slot,
+                        size: transfer_size,
+                    })
+                });
+            if opt_transfer_to_chest.is_some() {
+                // There is a chest currently open, and it is either
+                // the preferred chest to receive an item from the
+                // player, or there is no preferred chest but this one
+                // has spare slots.  Therefore, transfer those items
+                // to the chest.
+                return Ok(opt_transfer_to_chest);
+            }
+
+            let opt_transfer_to_player = chest
+                .chest_items
+                .iter_slots()
+                .enumerate()
+                .filter_map(|(slot, opt_item)| {
+                    opt_item.map(|item| (slot, item))
+                })
+                .find_map(|(slot, item)| {
+                    let goal = chest_to_player.get(&item.id)?;
+                    let current = player_contents
+                        .get(&item.id)
+                        .cloned()
+                        .or_else(|| player_has_empty_slot.then(|| 0))?;
+                    let transfer_size = TransferSize::select(
+                        item.count,
+                        item.count + current - goal,
+                    );
+                    Some(Transfer {
+                        chest: tile,
+                        direction: TransferDirection::ChestToPlayer,
+                        slot,
+                        size: transfer_size,
+                    })
+                });
+            if opt_transfer_to_player.is_some() {
+                // There is a chest open, and it contains items that
+                // the player wants.  The player either has a partial
+                // stack of that item type, or has an empty slot
+                // available.  Therefore, transfer those items into
+                // the player's inventory.
+                return Ok(opt_transfer_to_player);
+            }
+        }
+
+        // If there is a preferred chest to load up, open it.
+        let opt_open_preferred_chest = preferred_chest
+            .iter()
+            .min_by_key(|(_, tile)| (tile.down, -tile.right))
+            .map(|(item, tile)| {
+                let current = player_contents.get(item).cloned()?;
+                let goal = player_to_chest.get(item).cloned()?;
+                let transfer_size = TransferSize::select(current, goal);
+                let slot = inventory.current_slot(&item)?;
+                Some(Transfer {
+                    chest: *tile,
+                    direction: TransferDirection::PlayerToChest,
+                    slot,
+                    size: transfer_size,
+                })
+            })
+            .flatten();
+        if opt_open_preferred_chest.is_some() {
+            return Ok(opt_open_preferred_chest);
+        }
+
+        // If there are items to retrieve from a chest, open that
+        // chest.
+        let opt_retrieve_from_chest = iter_chests()?
+            .flat_map(|(tile, chest)| {
+                chest.iter_slots().enumerate().filter_map(
+                    move |(slot, opt_item)| {
+                        opt_item.map(|item| (tile, slot, item))
+                    },
+                )
+            })
+            .find_map(|(tile, slot, item)| {
+                let current =
+                    player_contents.get(&item.id).cloned().unwrap_or(0);
+                let goal = chest_to_player.get(&item.id).cloned()?;
+                let transfer_size = TransferSize::select(
+                    item.count,
+                    item.count + current - goal,
+                );
+                Some(Transfer {
+                    chest: tile,
+                    direction: TransferDirection::ChestToPlayer,
+                    slot,
+                    size: transfer_size,
+                })
+            });
+        if opt_retrieve_from_chest.is_some() {
+            return Ok(opt_retrieve_from_chest);
+        }
+
+        // If there are items to stash in an arbitrary chest, open
+        // whichever chest has space.
+        let opt_store_in_empty_slot = iter_chests()?
+            .filter(|(_, chest)| chest.inventory.empty_slot().is_some())
+            .min_by_key(|(tile, _)| (tile.down, -tile.right))
+            .and_then(|(tile, _)| {
+                player_to_chest
+                    .iter()
+                    .next()
+                    .map(|(item, goal)| {
+                        let slot = inventory.current_slot(item)?;
+                        let current = player_contents.get(item).cloned()?;
+                        let transfer_size =
+                            TransferSize::select(current, *goal);
+                        Some(Transfer {
+                            chest: tile,
+                            direction: TransferDirection::PlayerToChest,
+                            slot,
+                            size: transfer_size,
+                        })
+                    })
+                    .flatten()
+            });
+        if opt_store_in_empty_slot.is_some() {
+            return Ok(opt_store_in_empty_slot);
+        }
+
+        Ok(None)
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        Ok(self.next_transfer(game_state)?.is_none())
     }
 }
 
@@ -222,7 +364,7 @@ impl BotGoal for InventoryGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state)? {
+        let Some(transfer) = self.next_transfer(game_state)? else {
             // The inventory transfer is complete.  Close out the
             // chest menu if it is still open, and return control to
             // the parent goal.
@@ -232,194 +374,75 @@ impl BotGoal for InventoryGoal {
             } else {
                 return Ok(cleanup.into());
             }
-        }
+        };
 
-        let player_inventory = &game_state.player.inventory;
-        let player_contents: HashMap<ItemId, usize> =
-            player_inventory.to_hash_map();
+        let Some(chest_menu) = &game_state.chest_menu else {
+            // There is no chest open.  Open the chest for the next
+            // transfer.
+            let goal = ActivateTile::new("Farm", transfer.chest);
+            return Ok(goal.into());
+        };
 
-        let farm = game_state.get_room("Farm")?;
-        let preferred_chest: HashMap<ItemId, Vector<isize>> = farm
-            .objects
-            .iter()
-            .filter_map(|obj| match &obj.kind {
-                ObjectKind::Chest(chest) => Some((chest, obj.tile)),
-                _ => None,
-            })
-            .flat_map(|(chest, tile)| {
-                let has_empty_slot = chest.has_empty_slot();
-                chest
-                    .iter_items()
-                    .filter(move |item| !item.is_full_stack() || has_empty_slot)
-                    .map(move |item| (item.id.clone(), tile))
-            })
-            .collect();
-
-        if let Some(chest_menu) = &game_state.chest_menu {
-            let chest_tile = chest_menu.chest_tile;
-
-            for (item, player_count) in &player_contents {
-                let player_count = *player_count;
-
-                let opt_upper_bound = self
-                    .bounds
-                    .get(item)
-                    .map(|bound| bound.max)
-                    .unwrap_or(self.stash_unspecified_items.then(|| 0));
-
-                let player_has_too_many = opt_upper_bound
-                    .map(|upper_bound| player_count > upper_bound)
-                    .unwrap_or(false);
-
-                let can_add_to_chest = chest_menu.chest_items.can_add(
-                    &Item::new(item.item_id.clone()).with_quality(item.quality),
-                );
-                let should_add_to_chest = preferred_chest
-                    .get(item)
-                    .cloned()
-                    .map(|preferred_chest_tile| {
-                        Some(preferred_chest_tile) == chest_tile
-                    })
-                    .unwrap_or(true);
-
-                let player_to_chest = player_has_too_many
-                    && can_add_to_chest
-                    && should_add_to_chest;
-
-                if player_to_chest {
-                    // The player has more than the maximum amount of
-                    // an item, and the chest already contains some of
-                    // that item.  Therefore, put more of the item
-                    // into the chest.
-                    let slot = player_inventory.item_slot(item).unwrap();
-                    let pixel = chest_menu.player_item_locations[slot];
-                    actions.do_action(GameAction::MouseOverPixel(pixel));
-                    if opt_upper_bound == Some(0) {
-                        actions.do_action(GameAction::LeftClick);
-                    } else {
-                        actions.do_action(GameAction::RightClick);
-                    }
-                    return Ok(BotGoalResult::InProgress);
-                }
-            }
-
-            let chest_contents = chest_menu.chest_items.to_hash_map();
-            for (item, _) in &chest_contents {
-                let player_count =
-                    player_contents.get(item).cloned().unwrap_or(0);
-
-                let chest_to_player = {
-                    let player_has_too_few = self
-                        .bounds
-                        .get(item)
-                        .and_then(|bound| bound.min)
-                        .map(|min| player_count < min)
-                        .unwrap_or(false);
-
-                    let can_add_to_player = player_inventory.can_add(
-                        &Item::new(item.item_id.clone())
-                            .with_quality(item.quality),
-                    );
-                    player_has_too_few && can_add_to_player
-                };
-
-                if chest_to_player {
-                    // The player doesn't have enough of this item
-                    // type, and has room to hold it.  Therefore, grab
-                    // it from the chest.
-                    let slot = chest_menu.chest_items.item_slot(item).unwrap();
-                    let pixel = chest_menu.chest_item_locations[slot];
-                    actions.do_action(GameAction::MouseOverPixel(pixel));
-                    actions.do_action(GameAction::RightClick);
-                    return Ok(BotGoalResult::InProgress);
-                }
-            }
-
-            // No need to transfer items to/from this chest, so it can
-            // be closed.
+        if chest_menu.chest_tile != Some(transfer.chest) {
+            // There's a chest open, but it isn't the one we want to
+            // be open.  Close it.
             return Ok(MenuCloser::new().into());
         }
 
-        // There's a chest in the process of opening.  Should wait
-        // until it finishes opening.
-        let currently_opening_chest =
-            game_state.current_room()?.objects.iter().any(|obj| {
-                matches!(
-                    obj.kind,
-                    ObjectKind::Chest(Chest {
-                        is_opening: true,
-                        ..
-                    })
-                )
-            });
-        if currently_opening_chest {
-            return Ok(BotGoalResult::InProgress);
+        let pixel = match transfer.direction {
+            TransferDirection::PlayerToChest => {
+                chest_menu.player_item_locations[transfer.slot]
+            }
+            TransferDirection::ChestToPlayer => {
+                chest_menu.chest_item_locations[transfer.slot]
+            }
+        };
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        transfer.size.send_inputs(game_state, actions);
+
+        Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl TransferSize {
+    /// Determine the best transfer size in order to go from a stack
+    /// of `current` items down to a a stack of `goal` items.
+    pub fn select(current: usize, goal: usize) -> Self {
+        assert!(current >= goal);
+        if goal == 0 {
+            Self::All
+        } else if goal <= current / 2 {
+            Self::Half
+        } else {
+            Self::One
         }
+    }
 
-        // We still have inventory management to do, and there is no
-        // chest currently open.  Therefore, find a chest to open.
-
-        if let Some(chest_tile) =
-            preferred_chest.iter().next().map(|(_, tile)| *tile)
-        {
-            // There's a chest that already contains an item that we
-            // want to get rid of, and has space to hold more of that
-            // item.
-            let goal = ActivateTile::new("Farm", chest_tile);
-            return Ok(goal.into());
-        }
-
-        let player_has_new_item =
-            player_contents.iter().any(|(item, player_count)| {
-                let player_count = *player_count;
-                if let Some(bound) = self.bounds.get(item) {
-                    bound.max.map(|max| player_count > max).unwrap_or(false)
-                } else {
-                    self.stash_unspecified_items
+    /// Send the inputs required to transfer items between the player
+    /// and a chest.
+    ///
+    /// Before calling this method, the mouse should be positioned
+    /// above the item to be transferred.
+    pub fn send_inputs(
+        &self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) {
+        match self {
+            TransferSize::All => {
+                actions.do_action(GameAction::LeftClick);
+            }
+            TransferSize::Half => {
+                actions.do_action(GameAction::HoldLeftShift);
+                if game_state.inputs.holding_left_shift() {
+                    actions.do_action(GameAction::RightClick);
                 }
-            });
-        if player_has_new_item {
-            // There's an item that we want to store, and there is no
-            // chest with free space that already has some of that
-            // item.  Therefore, pick any chest that has some free
-            // space.
-            let chest_tile = farm
-                .objects
-                .iter()
-                .find(|obj| match &obj.kind {
-                    ObjectKind::Chest(chest) => chest.has_empty_slot(),
-                    _ => false,
-                })
-                .map(|obj| obj.tile)
-                .expect("TODO: Handle case where all chests are full");
-            let goal = ActivateTile::new("Farm", chest_tile);
-            return Ok(goal.into());
+            }
+            TransferSize::One => {
+                if !game_state.inputs.holding_left_shift() {
+                    actions.do_action(GameAction::RightClick);
+                }
+            }
         }
-
-        let opt_chest_with_desired_item = self
-            .bounds
-            .iter()
-            .filter_map(|(item, bound)| bound.min.map(|min| (item, min)))
-            .filter(|(item, min)| {
-                let player_count =
-                    player_contents.get(item).cloned().unwrap_or(0);
-                player_count < *min
-            })
-            .map(|(item, _)| item)
-            .flat_map(|item| {
-                farm.objects.iter().filter(|obj| match &obj.kind {
-                    ObjectKind::Chest(chest) => chest.contains_ty(item),
-                    _ => false,
-                })
-            })
-            .map(|obj| obj.tile)
-            .next();
-
-        if let Some(chest_tile) = opt_chest_with_desired_item {
-            let goal = ActivateTile::new("Farm", chest_tile);
-            return Ok(goal.into());
-        }
-
-        todo!("Handle case where desired item doesn't exist anywhere")
     }
 }

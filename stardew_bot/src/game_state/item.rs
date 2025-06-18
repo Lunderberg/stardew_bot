@@ -331,3 +331,9 @@ impl AsRef<ItemId> for Item {
         &self.id
     }
 }
+
+impl AsRef<ItemId> for ItemId {
+    fn as_ref(&self) -> &ItemId {
+        self
+    }
+}
