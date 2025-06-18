@@ -51,6 +51,11 @@ pub struct LocalMovementGoal {
     /// any.  Used to determine if the final tile should be clicked
     /// on, and if the player needs to wait until a given time.
     warp_kind: Option<WarpKind>,
+
+    /// The previous position, and the game tick on which it had
+    /// updated.  Used to detect if the pathfinding is stuck and
+    /// should re-plan.
+    previous_position: Option<(Vector<f32>, i32)>,
 }
 
 pub struct FaceDirectionGoal(pub FacingDirection);
@@ -286,6 +291,7 @@ impl LocalMovementGoal {
             waypoints: Vec::new(),
             tolerance: WAYPOINT_TOLERANCE,
             warp_kind,
+            previous_position: None,
         }
     }
 
@@ -476,6 +482,25 @@ impl BotGoal for LocalMovementGoal {
         if game_state.dialogue_menu.is_some() {
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
+        }
+
+        if self
+            .previous_position
+            .map(|(prev_pos, _)| player.center_pos().dist(prev_pos) > 0.001)
+            .unwrap_or(true)
+        {
+            self.previous_position =
+                Some((player.center_pos(), game_state.globals.game_tick));
+        }
+        if self
+            .previous_position
+            .map(|(_, prev_tick)| game_state.globals.game_tick - prev_tick > 30)
+            .unwrap_or(false)
+        {
+            // Something has gone wrong, as the pathfinding isn't able
+            // to make progress for over half a second.  Clear the
+            // waypoints and re-plan.
+            self.waypoints.clear();
         }
 
         self.update_plan(game_state)?;
