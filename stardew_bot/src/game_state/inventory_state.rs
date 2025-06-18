@@ -7,7 +7,7 @@ use crate::Error;
 
 use super::{
     item::{ItemKind, WateringCan},
-    FishingRod, Item, ItemId,
+    FishingRod, Item, ItemId, Quality,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -51,7 +51,7 @@ impl Inventory {
              edibility: i32,
              category: Option<i32>| {
                 Item::new(item_id.to_string())
-                    .with_quality(quality.try_into().unwrap())
+                    .with_quality(quality.try_into().unwrap_or(Quality::Normal))
                     .with_count(count)
                     .with_price(price)
                     .with_edibility(edibility)
