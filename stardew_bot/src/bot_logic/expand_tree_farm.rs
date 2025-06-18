@@ -126,12 +126,12 @@ impl BotGoal for ExpandTreeFarm {
         if let Some((tile, opt_item)) =
             opt_seed_to_grab().or_else(opt_seed_to_plant)
         {
-            let goal = seed_types
-                .iter()
-                .map(|seed| seed.clone().with_count(100))
-                .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
-                .with(Item::AXE);
-            if !goal.is_completed(game_state)? {
+            if !game_state.player.inventory.contains(Item::AXE) {
+                let goal = seed_types
+                    .iter()
+                    .map(|seed| seed.clone().with_count(100))
+                    .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
+                    .with(Item::AXE);
                 return Ok(goal.into());
             }
 
