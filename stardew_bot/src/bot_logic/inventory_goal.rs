@@ -253,6 +253,7 @@ impl InventoryGoal {
         // If there is a preferred chest to load up, open it.
         let opt_open_preferred_chest = preferred_chest
             .iter()
+            .filter(|(item, _)| player_to_chest.contains_key(item))
             .min_by_key(|(_, tile)| (tile.down, -tile.right))
             .map(|(item, tile)| {
                 let current = player_contents.get(item).cloned()?;
