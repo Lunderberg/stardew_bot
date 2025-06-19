@@ -1695,6 +1695,11 @@ impl Location {
             })
             .map(|obj| obj.tile);
 
+        let iter_resource_clump = self
+            .resource_clumps
+            .iter()
+            .flat_map(|clump| clump.shape.iter_points());
+
         let iter_furniture = self
             .furniture
             .iter()
@@ -1708,6 +1713,7 @@ impl Location {
             .chain(iter_bushes)
             .chain(iter_tree)
             .chain(iter_actions)
+            .chain(iter_resource_clump)
             .chain(iter_furniture)
     }
 
