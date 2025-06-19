@@ -65,6 +65,7 @@ struct AStarEntry {
     tile: Vector<isize>,
     dist: u64,
     dir: Option<Direction>,
+    should_propagate: bool,
 }
 
 /// Tracking for points during Dijkstra search.
@@ -314,6 +315,7 @@ impl Pathfinding<'_> {
             tile: initial,
             dist: 0,
             dir: None,
+            should_propagate: true,
         });
         // Offset between the actual tile position and the tile
         // position in the `best` map, because often the goal tile map
@@ -340,24 +342,20 @@ impl Pathfinding<'_> {
                 Some((visiting.dist_plus_heuristic, visiting.dir));
 
             let iter_dir = Direction::iter()
+                .filter(|_| visiting.should_propagate)
                 .filter(|dir| self.allow_diagonal || dir.is_cardinal());
 
             for dir in iter_dir {
-                let check_tile = |check_tile: Vector<isize>| -> bool {
-                    cost_map.in_bounds(check_tile)
-                        && cost_map[check_tile].is_some()
-                };
-
                 let offset = dir.offset();
                 let new_tile = tile + offset;
 
-                let is_walkable = check_tile(new_tile);
+                let is_walkable = cost_map.is_some(new_tile);
                 let is_valid_path = if dir.is_cardinal() {
                     is_walkable
                 } else {
                     is_walkable
-                        && check_tile(tile + Vector::new(0, offset.down))
-                        && check_tile(tile + Vector::new(offset.right, 0))
+                        && cost_map.is_some(tile + Vector::new(0, offset.down))
+                        && cost_map.is_some(tile + Vector::new(offset.right, 0))
                 };
 
                 if !(is_valid_path || (self.include_border && !is_walkable)) {
@@ -389,17 +387,13 @@ impl Pathfinding<'_> {
                     best[new_tile + best_tile_offset] =
                         Some((new_dist_plus_heuristic, Some(dir)));
 
-                    if is_valid_path {
-                        // Not only is this the best route, but the
-                        // player can also move through this tile.
-                        let new_entry = AStarEntry {
-                            dist_plus_heuristic: new_dist_plus_heuristic,
-                            tile: new_tile,
-                            dist: new_dist,
-                            dir: Some(dir),
-                        };
-                        to_visit.insert(new_entry);
-                    }
+                    to_visit.insert(AStarEntry {
+                        dist_plus_heuristic: new_dist_plus_heuristic,
+                        tile: new_tile,
+                        dist: new_dist,
+                        dir: Some(dir),
+                        should_propagate: is_valid_path,
+                    });
                 }
             }
 
@@ -472,20 +466,16 @@ impl Pathfinding<'_> {
                 .filter(|_| should_propagate);
 
             for dir in iter_dir {
-                let check_tile = |check_tile: Vector<isize>| -> bool {
-                    walkable.is_set(check_tile)
-                };
-
                 let offset = dir.offset();
                 let new_tile = tile + offset;
 
-                let is_walkable = check_tile(new_tile);
+                let is_walkable = walkable.is_set(new_tile);
                 let is_accessible = if dir.is_cardinal() {
                     is_walkable
                 } else {
                     is_walkable
-                        && check_tile(tile + Vector::new(0, offset.down))
-                        && check_tile(tile + Vector::new(offset.right, 0))
+                        && walkable.is_set(tile + Vector::new(0, offset.down))
+                        && walkable.is_set(tile + Vector::new(offset.right, 0))
                 };
 
                 if finished.in_bounds(new_tile)
