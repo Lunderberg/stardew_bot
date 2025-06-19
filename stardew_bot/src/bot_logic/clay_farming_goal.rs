@@ -48,15 +48,40 @@ impl ClayPredictor {
         }
     }
 
-    pub fn will_produce_clay(&self, tile: Vector<isize>) -> bool {
+    fn will_produce_clay_with_offset(
+        &self,
+        tile: Vector<isize>,
+        offset_dirt_hoed: u32,
+    ) -> bool {
         let mut rng = SeededRng::from_stardew_seed([
             self.days_played as f64,
             (self.unique_id / 2) as f64,
             (tile.right * 2000) as f64,
             (tile.down * 77) as f64,
-            self.dirt_hoed as f64,
+            (self.dirt_hoed + offset_dirt_hoed) as f64,
         ]);
         rng.rand_float() < 0.03
+    }
+
+    /// Returns true if the tile will produce clay if hoed.
+    pub fn will_produce_clay(&self, tile: Vector<isize>) -> bool {
+        self.will_produce_clay_with_offset(tile, 0)
+    }
+
+    /// Returns an iterator that returns whether the tile will produce
+    /// clay at some point in the future.
+    ///
+    /// The first element of the iterator will be the same as
+    /// `self.will_produce_clay(tile)`.  Element i of the iterator
+    /// indicates if the tile will produce clay if the hoe is used
+    /// (i-1) times elsewhere, with the i-th usage then being on the
+    /// tile itself.
+    pub fn iter_will_produce_clay(
+        &self,
+        tile: Vector<isize>,
+    ) -> impl Iterator<Item = bool> + '_ {
+        (0..)
+            .map(move |offset| self.will_produce_clay_with_offset(tile, offset))
     }
 }
 

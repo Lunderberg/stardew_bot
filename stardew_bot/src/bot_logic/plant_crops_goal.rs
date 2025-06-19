@@ -140,19 +140,45 @@ impl BotGoal for PlantCropsGoal {
             .map(|obj| (obj.tile, &obj.kind))
             .collect();
 
-        let clay_predictor = ClayPredictor::new(game_state);
-        let clay_tiles: HashSet<Vector<isize>> = plan
-            .to_plant
-            .iter()
-            .cloned()
-            .filter(|tile| {
+        let iter_tiles_to_hoe = || {
+            plan.to_plant.iter().cloned().filter(|tile| {
                 !matches!(
                     current_contents.get(tile),
                     Some(ObjectKind::HoeDirt(_))
                 )
             })
+        };
+        let clay_predictor = ClayPredictor::new(game_state);
+        let clay_tiles: HashSet<Vector<isize>> = iter_tiles_to_hoe()
             .filter(|tile| clay_predictor.will_produce_clay(*tile))
             .collect();
+
+        let clay_tiles = if clay_tiles.is_empty() {
+            // There are no tiles that will produce clay in the next
+            // use of the hoe.  The hoe should be used on whichever
+            // tile would take the longest before producing clay.
+            // This maximizes the clay production for the last few
+            // tiles, since it preserves tiles that are soon to
+            // produce clay, even if they are adjacent to the player.
+            let num_remaining = iter_tiles_to_hoe().count();
+            let uses_until_clay = |tile: Vector<isize>| {
+                clay_predictor
+                    .iter_will_produce_clay(tile)
+                    .take(num_remaining + 1)
+                    .take_while(|will_be_clay| !will_be_clay)
+                    .count()
+            };
+            let longest_until_clay =
+                iter_tiles_to_hoe().map(|tile| uses_until_clay(tile)).max();
+
+            iter_tiles_to_hoe()
+                .filter(|tile| {
+                    Some(uses_until_clay(*tile)) == longest_until_clay
+                })
+                .collect()
+        } else {
+            clay_tiles
+        };
 
         let next_steps: HashMap<Vector<isize>, Item> = plan
             .to_plant
@@ -186,11 +212,9 @@ impl BotGoal for PlantCropsGoal {
                         // hoed will produce clay, then only allow the
                         // hoe to be used on those tiles.  If there
                         // are no tiles remaining that would produce
-                        // clay, then hoe in any order.
-                        let preferred_clay =
-                            clay_tiles.is_empty() || clay_tiles.contains(tile);
-
-                        preferred_clay.then(|| Item::HOE)
+                        // clay, then hoe whichever tile would take
+                        // the longest before producing clay.
+                        clay_tiles.contains(tile).then(|| Item::HOE)
                     }
 
                     Some(
