@@ -329,7 +329,7 @@ impl Pathfinding<'_> {
                 self.location.name,
             );
             let is_best = best[visiting.tile + best_tile_offset]
-                .map(|(prev, _)| prev <= visiting.dist_plus_heuristic)
+                .map(|(prev, _)| visiting.dist_plus_heuristic <= prev)
                 .unwrap_or(true);
             if !is_best {
                 continue;
