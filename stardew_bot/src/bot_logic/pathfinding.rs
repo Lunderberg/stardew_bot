@@ -254,9 +254,9 @@ impl Pathfinding<'_> {
     }
 
     pub fn reachable(&self, initial: Vector<isize>) -> TileMap<bool> {
-        let cost = self.movement_cost();
+        let walkable = self.walkable();
 
-        let mut reachable = cost.map(|_| false);
+        let mut reachable = walkable.map(|_| false);
         reachable[initial] = true;
 
         let mut to_visit = vec![initial];
@@ -264,7 +264,7 @@ impl Pathfinding<'_> {
             for dir in Direction::iter_cardinal() {
                 let adj = tile + dir.offset();
                 if reachable.in_bounds(adj) && !reachable[adj] {
-                    if cost[adj].is_some() {
+                    if walkable[adj] {
                         // The player may walk through this tile.
                         reachable[adj] = true;
                         to_visit.push(adj);
@@ -472,30 +472,25 @@ impl Pathfinding<'_> {
                 .filter(|_| should_propagate);
 
             for dir in iter_dir {
-                let is_walkable = |check_tile: Vector<isize>| -> bool {
+                let check_tile = |check_tile: Vector<isize>| -> bool {
                     walkable.is_set(check_tile)
                 };
 
                 let offset = dir.offset();
-                let is_accessible = if dir.is_cardinal() {
-                    is_walkable(tile + offset)
-                } else {
-                    [
-                        Vector::new(offset.right, offset.down),
-                        Vector::new(0, offset.down),
-                        Vector::new(offset.right, 0),
-                    ]
-                    .into_iter()
-                    .all(|offset| is_walkable(tile + offset))
-                };
+                let new_tile = tile + offset;
 
-                let new_tile = tile + dir.offset();
+                let is_walkable = check_tile(new_tile);
+                let is_accessible = if dir.is_cardinal() {
+                    is_walkable
+                } else {
+                    is_walkable
+                        && check_tile(tile + Vector::new(0, offset.down))
+                        && check_tile(tile + Vector::new(offset.right, 0))
+                };
 
                 if finished.in_bounds(new_tile)
                     && !finished[new_tile]
-                    && (is_accessible
-                        || (self.include_border
-                            && (dir.is_cardinal() || !walkable[new_tile])))
+                    && (is_accessible || (self.include_border && !is_walkable))
                 {
                     to_visit.insert(DijkstraEntry {
                         dist: dist + 1,
