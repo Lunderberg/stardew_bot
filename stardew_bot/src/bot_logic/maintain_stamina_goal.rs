@@ -35,20 +35,30 @@ impl MaintainStaminaGoal {
         &self,
         game_state: &'a GameState,
     ) -> Option<&'a Item> {
-        game_state
-            .player
-            .inventory
-            .iter_items()
-            .filter(|item| item.edibility > 0)
-            .map(|item| {
-                let stamina = item
-                    .stamina_recovery()
-                    .expect("Guarded by edibility check");
-                let price = item.per_item_price() as f32;
-                (price / stamina, item)
-            })
-            .filter(|(gold_per_energy, _)| {
-                *gold_per_energy < self.max_gold_per_energy
+        let iter_items = || {
+            game_state
+                .player
+                .inventory
+                .iter_items()
+                .filter_map(|item| {
+                    let stamina = item.stamina_recovery()?;
+                    let price = item.per_item_price() as f32;
+                    Some((price / stamina, item))
+                })
+                .filter(|(gold_per_energy, _)| {
+                    *gold_per_energy < self.max_gold_per_energy
+                })
+        };
+
+        // If one of the eligible items has only a single instance
+        // remaining, prioritize eating it in order to free up the
+        // slot.
+        let has_single_item_stack_of_food =
+            iter_items().any(|(_, item)| item.count == 1);
+
+        iter_items()
+            .filter(|(_, item)| {
+                item.count == 1 || !has_single_item_stack_of_food
             })
             .min_by(|(a, _), (b, _)| a.total_cmp(b))
             .map(|(_, item)| item)

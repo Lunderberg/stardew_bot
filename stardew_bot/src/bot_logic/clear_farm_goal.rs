@@ -21,6 +21,7 @@ use super::{
 
 pub struct ClearFarmGoal {
     clear_trees: bool,
+    clear_stone: bool,
     priority_tiles: HashSet<Vector<isize>>,
 }
 
@@ -29,12 +30,22 @@ impl ClearFarmGoal {
         Self {
             priority_tiles: HashSet::new(),
             clear_trees: false,
+            clear_stone: true,
         }
     }
 
+    #[allow(dead_code)]
     pub fn clear_trees(self, clear_trees: bool) -> Self {
         Self {
             clear_trees,
+            ..self
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_stone(self, clear_stone: bool) -> Self {
+        Self {
+            clear_stone,
             ..self
         }
     }
@@ -163,6 +174,7 @@ impl BotGoal for ClearFarmGoal {
                             tree.is_stump
                                 || (self.clear_trees && tree.growth_stage > 0)
                         }
+                        ObjectKind::Stone => self.clear_stone,
                         _ => true,
                     }
                 }

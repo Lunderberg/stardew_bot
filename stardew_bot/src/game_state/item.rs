@@ -126,6 +126,12 @@ impl Item {
 
     pub const DAFFODIL: Item = Item::new_const("(O)18");
 
+    pub const COPPER_ORE: Item = Item::new_const("(O)378");
+    pub const IRON_ORE: Item = Item::new_const("(O)380");
+    pub const GOLD_ORE: Item = Item::new_const("(O)384");
+    pub const IRIDIUM_ORE: Item = Item::new_const("(O)386");
+    pub const COAL: Item = Item::new_const("(O)382");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             id: ItemId::new(item_id),
