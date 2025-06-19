@@ -457,13 +457,7 @@ impl Pathfinding<'_> {
                 dist,
                 tile,
                 should_propagate,
-            } = loop {
-                let entry = to_visit.pop_first()?;
-
-                if !finished[entry.tile] {
-                    break entry;
-                }
-            };
+            } = to_visit.pop_first()?;
 
             let iter_dir = Direction::iter()
                 .filter(|dir| self.allow_diagonal || dir.is_cardinal())
@@ -495,7 +489,7 @@ impl Pathfinding<'_> {
                         || (self.include_border
                             && (dir.is_cardinal() || !walkable[new_tile])))
                 {
-                    finished[tile] = true;
+                    finished[new_tile] = true;
                     to_visit.insert(DijkstraEntry {
                         dist: dist + 1,
                         tile: new_tile,
