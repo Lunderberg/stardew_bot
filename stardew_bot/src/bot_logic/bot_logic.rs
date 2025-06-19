@@ -583,28 +583,7 @@ impl BotLogic {
 
             // Check if any interrupts should push a new goal onto the
             // top of the stack.
-            for i_item in (0..self.stack.len()).rev() {
-                let current_stack_size = self.stack.len();
-                let LogicStackItem::Interrupt {
-                    interrupt,
-                    active_goal,
-                } = &mut self.stack[i_item]
-                else {
-                    continue;
-                };
-                if active_goal.is_some() {
-                    continue;
-                }
-                let Some(interrupt_stack) = interrupt.check(game_state)? else {
-                    continue;
-                };
-
-                *active_goal = Some(current_stack_size);
-                interrupt_stack
-                    .0
-                    .into_iter()
-                    .for_each(|item| self.stack.push(item));
-            }
+            self.check_interrupts(game_state, 0)?;
 
             let current_goal: &mut dyn BotGoal = self
                 .stack
@@ -652,7 +631,8 @@ impl BotLogic {
                     self.reset_completed_interrupts();
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
-                    previously_produced_subgoals = Some(self.stack.len() - 1);
+                    let stack_size = self.stack.len();
+                    previously_produced_subgoals = Some(stack_size - 1);
 
                     sub_goals
                         .0
@@ -667,6 +647,8 @@ impl BotLogic {
                             }
                         })
                         .for_each(|item| self.stack.push(item));
+
+                    self.check_interrupts(game_state, stack_size)?;
                 }
                 BotGoalResult::InProgress => {
                     if self.verbose {
@@ -735,6 +717,37 @@ impl BotLogic {
                 }
             }
         }
+    }
+
+    fn check_interrupts(
+        &mut self,
+        game_state: &GameState,
+        min_index: usize,
+    ) -> Result<(), Error> {
+        for i_item in (min_index..self.stack.len()).rev() {
+            let current_stack_size = self.stack.len();
+            let LogicStackItem::Interrupt {
+                interrupt,
+                active_goal,
+            } = &mut self.stack[i_item]
+            else {
+                continue;
+            };
+            if active_goal.is_some() {
+                continue;
+            }
+            let Some(interrupt_stack) = interrupt.check(game_state)? else {
+                continue;
+            };
+
+            *active_goal = Some(current_stack_size);
+            interrupt_stack
+                .0
+                .into_iter()
+                .for_each(|item| self.stack.push(item));
+        }
+
+        Ok(())
     }
 
     fn pop_from_logic_stack(&mut self) {
