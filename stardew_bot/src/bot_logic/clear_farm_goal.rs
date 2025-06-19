@@ -242,7 +242,7 @@ impl BotGoal for ClearFarmGoal {
 
             pathfinding_without_clearing
                 .iter_dijkstra(farm_door)
-                .take_while(|(_, dist)| *dist < min_dist + 5)
+                .take_while(|(_, dist)| *dist < min_dist + 10)
                 .filter_map(|(tile, _)| {
                     clearable_tile.get(&tile).map(|obj| (tile, *obj))
                 })
