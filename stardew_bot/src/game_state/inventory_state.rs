@@ -256,6 +256,12 @@ impl Inventory {
             .map(|(i, _)| i)
     }
 
+    pub fn num_empty_slots(&self) -> usize {
+        self.iter_slots()
+            .filter(|opt_item| opt_item.is_none())
+            .count()
+    }
+
     pub fn has_empty_slot(&self) -> bool {
         self.iter_slots().any(|opt_item| opt_item.is_none())
     }

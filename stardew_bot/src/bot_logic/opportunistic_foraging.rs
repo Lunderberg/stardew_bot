@@ -28,6 +28,11 @@ impl BotInterrupt for OpportunisticForaging {
         let loc = game_state.current_room()?;
         let pos = game_state.player.center_pos();
 
+        let num_empty_slots = game_state.player.inventory.num_empty_slots();
+        if num_empty_slots < 2 {
+            return Ok(None);
+        }
+
         let has_hoe = game_state
             .player
             .inventory
@@ -48,6 +53,7 @@ impl BotInterrupt for OpportunisticForaging {
                 ObjectKind::HoeDirt(hoe_dirt) => {
                     hoe_dirt.has_crop() && should_hoe
                 }
+                ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
                 ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
                 ObjectKind::Other(name) => match name.as_ref() {
                     "Leek" | "Dandelion" => true,
