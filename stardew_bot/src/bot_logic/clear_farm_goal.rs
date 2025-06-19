@@ -15,8 +15,8 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    GameStateExt as _, MaintainStaminaGoal, ObjectKindExt as _, Pathfinding,
-    UseItemOnTile,
+    GameStateExt as _, InventoryGoal, MaintainStaminaGoal, ObjectKindExt as _,
+    Pathfinding, UseItemOnTile,
 };
 
 pub struct ClearFarmGoal {
@@ -250,16 +250,14 @@ impl BotGoal for ClearFarmGoal {
         };
 
         // Pick up the items that we'll need for the rest of the goal.
-        //
-        // TODO: Let InventoryGoal accept a list of items.  The
-        // current implementation opens/closes a chest once for each
-        // tool, even if they are all stored in the same chest.
-        let items = [Item::PICKAXE, Item::AXE, Item::SCYTHE];
-        for item in items {
-            let goal = super::InventoryGoal::new(item);
-            if !goal.is_completed(game_state)? {
-                return Ok(goal.into());
-            }
+        // Anything else gets stashed away.
+        let goal = InventoryGoal::current()
+            .with(Item::PICKAXE)
+            .with(Item::AXE)
+            .with(Item::SCYTHE)
+            .with_stamina_recovery();
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.otherwise_empty().into());
         }
 
         // Go to the Farm
