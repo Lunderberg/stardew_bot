@@ -41,9 +41,7 @@ impl MaintainStaminaGoal {
                 .inventory
                 .iter_items()
                 .filter_map(|item| {
-                    let stamina = item.stamina_recovery()?;
-                    let price = item.per_item_price() as f32;
-                    Some((price / stamina, item))
+                    item.gp_per_stamina().map(|ratio| (ratio, item))
                 })
                 .filter(|(gold_per_energy, _)| {
                     *gold_per_energy < self.max_gold_per_energy

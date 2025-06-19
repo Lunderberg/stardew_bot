@@ -217,6 +217,14 @@ impl Inventory {
         self.items.iter().map(|item| item.as_ref())
     }
 
+    pub fn iter_filled_slots(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (usize, &Item)> + '_ {
+        self.iter_slots()
+            .enumerate()
+            .filter_map(|(slot, opt_item)| opt_item.map(|item| (slot, item)))
+    }
+
     pub fn iter_items(&self) -> impl Iterator<Item = &Item> + '_ {
         self.iter_slots().flatten()
     }

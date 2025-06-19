@@ -32,14 +32,7 @@ impl BotGoal for ShipMostFishGoal {
             .iter_items()
             .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
             .filter(|item| {
-                let low_stamina_per_gp = item
-                    .stamina_recovery()
-                    .map(|stamina| {
-                        (item.per_item_price() as f32) > 1.75 * stamina
-                    })
-                    .unwrap_or(true);
-
-                low_stamina_per_gp
+                item.gp_per_stamina().map(|gp| gp > 1.75).unwrap_or(false)
             })
             .map(|item| {
                 let num_to_keep = match item.quality() {

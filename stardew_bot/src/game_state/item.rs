@@ -199,6 +199,12 @@ impl Item {
         Some(base_recovery * quality_multiplier)
     }
 
+    pub fn gp_per_stamina(&self) -> Option<f32> {
+        let stamina = self.stamina_recovery()?;
+        let price = self.per_item_price() as f32;
+        Some(price / stamina)
+    }
+
     pub fn health_recovery(&self) -> Option<f32> {
         if self.edibility == -300 {
             None
@@ -207,8 +213,8 @@ impl Item {
         }
     }
 
-    pub fn is_same_item(&self, other: &Item) -> bool {
-        self.id == other.id
+    pub fn is_same_item(&self, other: impl AsRef<ItemId>) -> bool {
+        &self.id == other.as_ref()
     }
 
     pub fn as_watering_can(&self) -> Option<&WateringCan> {
