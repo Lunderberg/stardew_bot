@@ -30,9 +30,9 @@ pub struct InventoryGoal {
     /// not be transferred into or out of the player's inventory.
     stash_unspecified_items: bool,
 
-    /// If true, try to have one slot of items to eat for stamina
-    /// recovery.
-    with_stamina_recovery: bool,
+    /// If true, try to use this many slots to hold items to eat for
+    /// stamina recovery.
+    stamina_recovery_slots: usize,
 }
 
 struct Bounds {
@@ -77,7 +77,7 @@ impl InventoryGoal {
         Self {
             bounds,
             stash_unspecified_items: false,
-            with_stamina_recovery: false,
+            stamina_recovery_slots: 0,
         }
     }
 
@@ -85,7 +85,7 @@ impl InventoryGoal {
         Self {
             bounds: Default::default(),
             stash_unspecified_items: false,
-            with_stamina_recovery: false,
+            stamina_recovery_slots: 0,
         }
     }
 
@@ -93,7 +93,7 @@ impl InventoryGoal {
         Self {
             bounds: Default::default(),
             stash_unspecified_items: true,
-            with_stamina_recovery: false,
+            stamina_recovery_slots: 0,
         }
     }
 
@@ -121,9 +121,9 @@ impl InventoryGoal {
         self
     }
 
-    pub fn with_stamina_recovery(self) -> Self {
+    pub fn stamina_recovery_slots(self, stamina_recovery_slots: usize) -> Self {
         Self {
-            with_stamina_recovery: true,
+            stamina_recovery_slots,
             ..self
         }
     }
@@ -176,32 +176,25 @@ impl InventoryGoal {
             })
             .collect();
 
-        let opt_stamina_item = self
-            .with_stamina_recovery
-            .then(|| {
-                game_state
-                    .player
-                    .inventory
-                    .iter_items()
-                    .filter(|item| {
-                        // If an item is explicitly set to be stored
-                        // away, it may not be used as the stamina
-                        // recovery item.
-                        self.bounds
-                            .get(&item.id)
-                            .map(|bounds| !matches!(bounds.max, Some(0)))
-                            .unwrap_or(true)
-                    })
-                    .filter_map(|item| {
-                        item.gp_per_stamina().map(|gp| (gp, item))
-                    })
-                    .filter(|(gp, _)| *gp <= MAX_GP_PER_STAMINA)
-                    .min_by(|(lhs_gp, _), (rhs_gp, _)| {
-                        lhs_gp.total_cmp(&rhs_gp)
-                    })
-                    .map(|(_, item)| item)
+        let current_stamina_items: HashSet<&ItemId> = game_state
+            .player
+            .inventory
+            .iter_items()
+            .filter(|item| {
+                // If an item is explicitly set to be stored
+                // away, it may not be used as the stamina
+                // recovery item.
+                self.bounds
+                    .get(&item.id)
+                    .map(|bounds| !matches!(bounds.max, Some(0)))
+                    .unwrap_or(true)
             })
-            .flatten();
+            .filter_map(|item| item.gp_per_stamina().map(|gp| (gp, item)))
+            .filter(|(gp, _)| *gp <= MAX_GP_PER_STAMINA)
+            .sorted_by(|(lhs_gp, _), (rhs_gp, _)| lhs_gp.total_cmp(&rhs_gp))
+            .map(|(_, item)| &item.id)
+            .take(self.stamina_recovery_slots)
+            .collect();
 
         // Items that should be transferred from the player to a
         // chest.  Values are the desired number of items in the
@@ -220,9 +213,7 @@ impl InventoryGoal {
                 let opt_new_count = if let Some(bound) = self.bounds.get(item) {
                     bound.max.filter(|max| max < count)
                 } else if self.stash_unspecified_items
-                    && opt_stamina_item
-                        .map(|stamina| !stamina.is_same_item(&item))
-                        .unwrap_or(true)
+                    && !current_stamina_items.contains(&item)
                 {
                     Some(0)
                 } else {
@@ -315,8 +306,8 @@ impl InventoryGoal {
                 return Ok(opt_transfer_to_player);
             }
 
-            let opt_take_stamina_item = (opt_stamina_item.is_none()
-                && self.with_stamina_recovery
+            let opt_take_stamina_item = (current_stamina_items.len()
+                < self.stamina_recovery_slots
                 && player_has_empty_slot)
                 .then(|| {
                     chest
@@ -397,8 +388,8 @@ impl InventoryGoal {
             return Ok(opt_retrieve_from_chest);
         }
 
-        let opt_retrieve_stamina_item = (opt_stamina_item.is_none()
-            && self.with_stamina_recovery
+        let opt_retrieve_stamina_item = (current_stamina_items.len()
+            < self.stamina_recovery_slots
             && player_has_empty_slot)
             .then(|| {
                 iter_chest_items().map(|iter| {
