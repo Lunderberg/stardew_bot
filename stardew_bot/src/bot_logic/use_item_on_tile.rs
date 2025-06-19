@@ -6,7 +6,7 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     MovementGoal, SelectItemGoal,
 };
 
@@ -61,23 +61,27 @@ impl BotGoal for UseItemOnTile {
             return Ok(BotGoalResult::Completed);
         }
 
-        let tolerance = match self.item.as_watering_can() {
-            Some(_) if game_state.get_room(&self.room)?.is_water(self.tile) => {
-                1.0
-            }
-            _ => 1.4,
-        };
-
-        let movement =
-            MovementGoal::new(self.room.clone(), self.tile.map(|x| x as f32))
-                .with_tolerance(tolerance);
-        if !movement.is_completed(game_state) {
-            return Ok(movement.into());
-        }
-
         let select_item = SelectItemGoal::new(self.item.clone());
         if !select_item.is_completed(game_state) {
             return Ok(select_item.into());
+        }
+
+        let refilling_watering_can = self.item.as_watering_can().is_some()
+            && game_state.get_room(&self.room)?.is_water(self.tile);
+
+        let target_tile = self.tile;
+        let is_within_range = move |game_state: &GameState| -> bool {
+            !refilling_watering_can
+                && game_state.player.tile().manhattan_dist(target_tile) <= 1
+        };
+
+        let movement = MovementGoal::new(self.room.clone(), self.tile.into())
+            .with_tolerance(if refilling_watering_can { 1.0 } else { 1.4 });
+
+        if !movement.is_completed(game_state) && !is_within_range(game_state) {
+            let goal =
+                LogicStack::new().then(movement).cancel_if(is_within_range);
+            return Ok(goal.into());
         }
 
         let requires_adjacent_tile = match self.item.id.item_id.as_ref() {

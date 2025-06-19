@@ -115,6 +115,12 @@ impl TileMap<bool> {
     }
 }
 
+impl<T> TileMap<Option<T>> {
+    pub fn is_some(&self, index: impl AsGridPos) -> bool {
+        self.get(index).map(|opt| opt.is_some()).unwrap_or(false)
+    }
+}
+
 pub trait AsGridPos {
     fn get_flat_index(&self, width: usize, height: usize) -> Option<usize>;
 
