@@ -1474,7 +1474,7 @@ impl Location {
                     let diff_y = player_y - y;
                     let dist2 = diff_x*diff_x + diff_y*diff_y;
 
-                    dist2.is_some() && dist2 < 36
+                    dist2.is_some() && dist2 < 49
                 }
 
                 let resource_clumps = read_location_resource_clumps(
