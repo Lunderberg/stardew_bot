@@ -162,7 +162,7 @@ impl BotGoal for ClearFarmGoal {
             .filter(|obj| obj.kind.get_tool().is_some())
             .any(|obj| self.priority_tiles.contains(&obj.tile));
 
-        let clearable_tile: HashMap<Vector<isize>, &Object> = farm
+        let clearable_tiles: HashMap<Vector<isize>, &Object> = farm
             .objects
             .iter()
             .filter(|obj| {
@@ -187,7 +187,7 @@ impl BotGoal for ClearFarmGoal {
             })
             .collect();
 
-        if clearable_tile.is_empty() {
+        if clearable_tiles.is_empty() {
             return Ok(BotGoalResult::Completed);
         }
 
@@ -205,48 +205,27 @@ impl BotGoal for ClearFarmGoal {
             .allow_diagonal(false)
             .include_border(true);
 
-        let reachable_without_clearing =
-            pathfinding_without_clearing.reachable(farm_door);
+        let steps_from_farm_door =
+            pathfinding_without_clearing.distances(farm_door);
 
-        let clearable_tile = if has_priority_clutter {
-            clearable_tile
+        let clearable_tiles = if has_priority_clutter {
+            clearable_tiles
         } else if game_state.player.skills.foraging_xp < 100
-            && clearable_tile.iter().any(|(tile, obj)| {
-                reachable_without_clearing[*tile] && is_grown_tree(obj)
+            && clearable_tiles.iter().any(|(tile, obj)| {
+                steps_from_farm_door.is_some(*tile) && is_grown_tree(obj)
             })
         {
             // Second, if foraging level 1 has not yet been reached,
             // prioritize cutting down trees.
 
-            clearable_tile
+            clearable_tiles
                 .into_iter()
                 .filter(|(tile, obj)| {
-                    reachable_without_clearing[*tile] && is_grown_tree(obj)
+                    steps_from_farm_door.is_some(*tile) && is_grown_tree(obj)
                 })
                 .collect()
         } else {
-            // Third, if all prioritized clutter has been cleared out,
-            // preferentially clear out clutter that is close to the farm
-            // house.
-
-            let Some(min_dist) = pathfinding_without_clearing
-                .iter_dijkstra(farm_door)
-                .filter(|(tile, _)| clearable_tile.contains_key(tile))
-                .map(|(_, dist)| dist)
-                .next()
-            else {
-                // There is still clutter remaining, but it is not
-                // accessible.
-                return Ok(BotGoalResult::Completed);
-            };
-
-            pathfinding_without_clearing
-                .iter_dijkstra(farm_door)
-                .take_while(|(_, dist)| *dist < min_dist + 10)
-                .filter_map(|(tile, _)| {
-                    clearable_tile.get(&tile).map(|obj| (tile, *obj))
-                })
-                .collect()
+            clearable_tiles
         };
 
         // Pick up the items that we'll need for the rest of the goal.
@@ -281,12 +260,37 @@ impl BotGoal for ClearFarmGoal {
 
         let player_tile = player.tile();
 
+        let steps_from_player =
+            pathfinding_without_clearing.distances(player_tile);
+
+        let next_clear_heuristic = |tile: Vector<isize>| {
+            let from_door = steps_from_farm_door
+                .get(tile)
+                .map(|opt| opt.as_ref())
+                .flatten()
+                .cloned()
+                .unwrap_or(10000);
+            let from_player = steps_from_player
+                .get(tile)
+                .map(|opt| opt.as_ref())
+                .flatten()
+                .cloned()
+                .unwrap_or(10000);
+            from_door + from_player
+        };
+        let min_total_steps = clearable_tiles
+            .iter()
+            .map(|(tile, _)| next_clear_heuristic(*tile))
+            .min()
+            .expect("Guarded by earlier clearable_tiles.is_empty() check");
+
         let opt_goal = Self::pathfinding(farm)
             .include_border(true)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
+            .filter(|tile| next_clear_heuristic(*tile) <= min_total_steps)
             .find_map(|tile| {
-                clearable_tile.get(&tile).map(|obj| {
+                clearable_tiles.get(&tile).map(|obj| {
                     let tool = obj.kind.get_tool().expect(
                         "Lookup should only contain tiles \
                          that can be cleared by using a tool.",
