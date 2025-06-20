@@ -99,7 +99,7 @@ impl BotGoal for WaterCropsGoal {
 
         let goal = InventoryGoal::new(Item::WATERING_CAN);
         if !goal.is_completed(game_state)? {
-            return Ok(goal.into());
+            return Ok(goal.otherwise_empty().stamina_recovery_slots(2).into());
         }
 
         let goal = FillWateringCan::if_empty();

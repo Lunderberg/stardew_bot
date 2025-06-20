@@ -68,6 +68,9 @@ pub use plant_crops_goal::*;
 mod water_crops_goal;
 pub use water_crops_goal::*;
 
+mod harvest_crops_goal;
+pub use harvest_crops_goal::*;
+
 mod clay_farming_goal;
 pub use clay_farming_goal::*;
 
