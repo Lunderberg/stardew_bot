@@ -20,6 +20,7 @@ use super::{
 };
 
 pub struct ClearFarmGoal {
+    stop_time: i32,
     clear_trees: bool,
     clear_stone: bool,
     priority_tiles: HashSet<Vector<isize>>,
@@ -28,10 +29,15 @@ pub struct ClearFarmGoal {
 impl ClearFarmGoal {
     pub fn new() -> Self {
         Self {
+            stop_time: 2600,
             priority_tiles: HashSet::new(),
             clear_trees: false,
             clear_stone: true,
         }
+    }
+
+    pub fn stop_time(self, stop_time: i32) -> Self {
+        Self { stop_time, ..self }
     }
 
     #[allow(dead_code)]
@@ -51,6 +57,10 @@ impl ClearFarmGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        if game_state.globals.in_game_time >= self.stop_time {
+            return Ok(true);
+        }
+
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 

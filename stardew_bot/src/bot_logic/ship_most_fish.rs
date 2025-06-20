@@ -11,6 +11,7 @@ use super::{
 pub struct ShipMostFishGoal;
 
 impl ShipMostFishGoal {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Self
     }

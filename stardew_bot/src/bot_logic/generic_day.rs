@@ -44,23 +44,30 @@ impl BotGoal for GenericDay {
             .cloned()
             .unwrap_or(0);
 
-        let fishing_goal = if !has_fishing_rod {
-            FishingGoal::new(FishingLocation::OceanByWilly)
-        } else if game_state.daily.is_raining {
-            FishingGoal::new(FishingLocation::River).stop_time(2400)
-        } else if current_day == 4 {
-            FishingGoal::new(FishingLocation::River).stop_time(600)
-        } else {
-            FishingGoal::new(FishingLocation::Lake)
-        };
-
-        Ok(LogicStack::new()
+        let stack = LogicStack::new()
             .then(CheckAllMail)
             .then(HarvestCropsGoal::new())
-            .then(WaterCropsGoal::new())
-            .then(ExpandTreeFarm::new())
-            .then(fishing_goal)
-            .then(ShipMostFishGoal::new())
+            .then(WaterCropsGoal::new());
+
+        let stack = if !has_fishing_rod {
+            stack
+                .then(ExpandTreeFarm::new())
+                .then(FishingGoal::new(FishingLocation::OceanByWilly))
+        } else if game_state.daily.is_raining {
+            stack
+                .then(ExpandTreeFarm::new())
+                .then(FishingGoal::new(FishingLocation::River).stop_time(2400))
+        } else if current_day == 4 {
+            stack
+                .then(ClearFarmGoal::new().stop_time(2000))
+                .then(ExpandTreeFarm::new())
+        } else {
+            stack
+                .then(ExpandTreeFarm::new())
+                .then(FishingGoal::new(FishingLocation::Lake))
+        };
+
+        Ok(stack
             .then(ClearFarmGoal::new())
             .with_interrupt(OpportunisticForaging::new(5.0))
             .with_interrupt(CollectNearbyItems::new())
