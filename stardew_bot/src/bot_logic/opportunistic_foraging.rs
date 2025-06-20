@@ -54,7 +54,7 @@ impl BotInterrupt for OpportunisticForaging {
                     hoe_dirt.has_crop() && should_hoe
                 }
                 ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
-                ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
+                ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => can_hoe,
                 ObjectKind::Other(name) => match name.as_ref() {
                     "Leek" | "Dandelion" => true,
                     "Daffodil" => true,

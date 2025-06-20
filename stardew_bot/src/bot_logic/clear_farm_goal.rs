@@ -234,6 +234,7 @@ impl BotGoal for ClearFarmGoal {
             .with(Item::PICKAXE)
             .with(Item::AXE)
             .with(Item::SCYTHE)
+            .with(Item::HOE)
             .stamina_recovery_slots(1);
         if !goal.is_completed(game_state)? {
             let goal = goal.otherwise_empty().stamina_recovery_slots(4);
