@@ -281,14 +281,14 @@ impl InventoryGoal {
                 .chest_items
                 .iter_filled_slots()
                 .find_map(|(slot, item)| {
-                    let goal = chest_to_player.get(&item.id)?;
+                    let goal = *chest_to_player.get(&item.id)?;
                     let current = player_contents
                         .get(&item.id)
                         .cloned()
                         .or_else(|| player_has_empty_slot.then(|| 0))?;
                     let transfer_size = TransferSize::select(
                         item.count,
-                        item.count + current - goal,
+                        (item.count + current).saturating_sub(goal),
                     );
                     Some(Transfer {
                         chest: tile,
@@ -372,7 +372,7 @@ impl InventoryGoal {
                 let goal = chest_to_player.get(&item.id).cloned()?;
                 let transfer_size = TransferSize::select(
                     item.count,
-                    item.count + current - goal,
+                    (item.count + current).saturating_sub(goal),
                 );
                 Some(Transfer {
                     chest: tile,
@@ -530,7 +530,11 @@ impl TransferSize {
     /// Determine the best transfer size in order to go from a stack
     /// of `current` items down to a a stack of `goal` items.
     pub fn select(current: usize, goal: usize) -> Self {
-        assert!(current >= goal);
+        assert!(
+            current >= goal,
+            "Cannot transfer items to decrease stack size \
+             from {current} to {goal}"
+        );
         if goal == 0 {
             Self::All
         } else if goal <= current / 2 {
