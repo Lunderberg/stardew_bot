@@ -25,6 +25,7 @@ pub struct PlayerState {
 
     // Info related to the current action being performed
     pub using_tool: bool,
+    pub melee_animation_frame: Option<i32>,
     pub can_move: bool,
     pub can_release_tool: bool,
     pub last_click: Vector<isize>,
@@ -133,6 +134,7 @@ impl PlayerState {
              active_hotbar_index: usize,
              current_money: i32,
              using_tool: bool,
+             melee_animation_frame: Option<i32>,
              can_move: bool,
              can_release_tool: bool,
              last_click: &Vector<isize>,
@@ -149,6 +151,7 @@ impl PlayerState {
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
+                    melee_animation_frame,
                     can_move,
                     can_release_tool,
                     current_money,
@@ -235,6 +238,19 @@ impl PlayerState {
                     .value
                     .prim_cast::<usize>();
 
+                let sprite = player.sprite.value.as::<StardewValley.FarmerSprite>();
+                let is_swinging_melee_weapon = (
+                    sprite.currentSingleAnimation == 232i32 ||
+                        sprite.currentSingleAnimation == 240i32 ||
+                        sprite.currentSingleAnimation == 248i32 ||
+                        sprite.currentSingleAnimation == 256i32
+                );
+                let melee_animation_frame = if is_swinging_melee_weapon {
+                    sprite.currentAnimationIndex
+                } else {
+                    None
+                };
+
                 new_player(
                     position,
                     facing,
@@ -245,6 +261,7 @@ impl PlayerState {
                     active_hotbar_index,
                     current_money,
                     using_tool,
+                    melee_animation_frame,
                     can_move,
                     can_release_tool,
                     last_click,
