@@ -184,7 +184,7 @@ impl BotGoal for ClearFarmGoal {
                             tree.is_stump
                                 || (self.clear_trees && tree.growth_stage > 0)
                         }
-                        ObjectKind::Stone => self.clear_stone,
+                        ObjectKind::Stone(_) => self.clear_stone,
                         _ => true,
                     }
                 }

@@ -118,7 +118,7 @@ impl BotGoal for MineDelvingGoal {
             current_room
                 .objects
                 .iter()
-                .filter(|obj| matches!(obj.kind, ObjectKind::Stone))
+                .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
                 .map(|obj| obj.tile)
         };
 

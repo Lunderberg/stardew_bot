@@ -223,7 +223,7 @@ impl Pathfinding<'_> {
         // movement cost.
         for obj in &loc.objects {
             let opt_cost = match &obj.kind {
-                ObjectKind::Stone => self.clear_stone,
+                ObjectKind::Stone(_) => self.clear_stone,
                 ObjectKind::Wood => self.clear_wood,
                 ObjectKind::Fiber => self.clear_fiber,
                 ObjectKind::Tree(_) => self.clear_trees,

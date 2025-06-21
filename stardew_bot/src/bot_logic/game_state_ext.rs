@@ -70,7 +70,8 @@ pub trait ObjectKindExt {
 impl ObjectKindExt for ObjectKind {
     fn get_tool(&self) -> Option<Item> {
         match self {
-            ObjectKind::Stone => Some(Item::PICKAXE),
+            ObjectKind::Stone(_) => Some(Item::PICKAXE),
+            ObjectKind::Mineral(_) => None,
             ObjectKind::Wood => Some(Item::AXE),
             ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| Item::AXE),
 
@@ -87,7 +88,7 @@ impl ObjectKindExt for ObjectKind {
             | ObjectKind::FruitTree(_)
             | ObjectKind::HoeDirt(_)
             | ObjectKind::Chest(_)
-            | ObjectKind::Other(_)
+            | ObjectKind::Other { .. }
             | ObjectKind::Unknown => None,
         }
     }

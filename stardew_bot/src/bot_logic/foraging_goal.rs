@@ -128,7 +128,7 @@ impl BotGoal for ForagingGoal {
             .flat_map(|(i, loc)| loc.objects.iter().map(move |obj| (i, obj)))
             .filter(|(_, obj)| match &obj.kind {
                 // TODO: Customize based on which forage is desired.
-                ObjectKind::Other(name) => match name.as_str() {
+                ObjectKind::Other { name, .. } => match name.as_str() {
                     "Leek" => true,
                     "Dandelion" => true,
                     _ => false,

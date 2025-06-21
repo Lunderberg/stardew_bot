@@ -55,7 +55,7 @@ impl BotInterrupt for OpportunisticForaging {
                 }
                 ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
                 ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => can_hoe,
-                ObjectKind::Other(name) => match name.as_ref() {
+                ObjectKind::Other { name, .. } => match name.as_ref() {
                     "Leek" | "Dandelion" => true,
                     "Daffodil" => true,
                     _ => false,

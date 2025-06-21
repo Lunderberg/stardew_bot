@@ -214,8 +214,11 @@ pub struct Object {
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub enum ObjectKind {
-    /// The small 1x1 stones on the farm.
-    Stone,
+    /// The small 1x1 stones on the farm or in the underground mines
+    Stone(StoneKind),
+
+    /// A mineral that may be collected from the ground (e.g. Quartz)
+    Mineral(MineralKind),
 
     /// The small 1x1 logs on the farm.  Larger 2x2 stumps are under
     /// LargeTerrainFeatures.
@@ -270,11 +273,38 @@ pub enum ObjectKind {
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
     /// implemented.
-    Other(String),
+    Other {
+        category: i32,
+        name: String,
+        id: String,
+    },
 
     /// A tile that contains an unknown object or terrain feature,
     /// where not even the name is known.
     Unknown,
+}
+
+#[derive(Debug, Clone)]
+pub enum StoneKind {
+    /// A normal stone
+    Normal,
+
+    /// The light-gray stone that produces extra stone when mined.
+    DoubleStone,
+
+    /// Drops copper ore
+    Copper,
+
+    Other {
+        name: String,
+        id: String,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub enum MineralKind {
+    Quartz,
+    Other { name: String, id: String },
 }
 
 /// An item on the ground that may be picked up
@@ -514,22 +544,46 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_mineral_kind",
+            |name: &str, id: &str| -> ObjectKind {
+                match id {
+                    "(O)80" => ObjectKind::Mineral(MineralKind::Quartz),
+                    _ => ObjectKind::Mineral(MineralKind::Other {
+                        name: name.to_string(),
+                        id: id.to_string(),
+                    }),
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_litter_kind",
-            |name: &str| -> ObjectKind {
-                if name == "Twig" {
-                    ObjectKind::Wood
-                } else if name == "Stone" {
-                    ObjectKind::Stone
-                } else if name.to_lowercase().contains("weeds") {
-                    ObjectKind::Fiber
-                } else if name == "PotOfGold" {
-                    ObjectKind::PotOfGold
-                } else {
-                    todo!(
-                        "Handle item '{name}', \
+            |name: &str, id: &str| -> ObjectKind {
+                match name {
+                    "Twig" => ObjectKind::Wood,
+                    "Stone" => {
+                        let stone_kind = match id {
+                            "(O)32" | "(O)38" | "(O)40" | "(O)42" => {
+                                StoneKind::Normal
+                            }
+                            "(O)668" | "(O)670" => StoneKind::DoubleStone,
+                            "(O)751" => StoneKind::Copper,
+                            _ => StoneKind::Other {
+                                name: name.to_string(),
+                                id: id.to_string(),
+                            },
+                        };
+                        ObjectKind::Stone(stone_kind)
+                    }
+                    "PotOfGold" => ObjectKind::PotOfGold,
+                    name if name.to_lowercase().contains("weeds") => {
+                        ObjectKind::Fiber
+                    }
+                    other => todo!(
+                        "Handle item '{other}' with id '{id}', \
                          when it occurs as a type of litter \
                          (category == -999)"
-                    )
+                    ),
                 }
             },
         )?;
@@ -550,11 +604,15 @@ impl Location {
 
         graph.named_native_function(
             "new_other_object_kind",
-            |name: &str| -> ObjectKind {
+            |category: i32, name: &str, id: &str| -> ObjectKind {
                 match name {
                     "Artifact Spot" => ObjectKind::ArtifactSpot,
                     "Seed Spot" => ObjectKind::SeedSpot,
-                    other => ObjectKind::Other(other.to_string()),
+                    _ => ObjectKind::Other {
+                        category,
+                        name: name.to_string(),
+                        id: id.to_string(),
+                    },
                 }
             },
         )?;
@@ -1039,6 +1097,9 @@ impl Location {
 
                         let chest = obj.as::<StardewValley.Objects.Chest>();
 
+                        let category = obj.category.value;
+                        let name = obj.netName.value.read_string();
+                        let id = obj._qualifiedItemId.read_string();
 
                         let kind = if chest.is_some() {
                             let inventory = read_inventory(chest.netItems.value);
@@ -1053,12 +1114,12 @@ impl Location {
                                 special_kind,
                                 is_opening,
                             )
-                        } else if obj.category.value == -999i32 {
-                            let name = obj.netName.value.read_string();
-                            new_litter_kind(name)
+                        } else if category == -999i32 {
+                            new_litter_kind(name, id)
+                        } else if category == -2i32 {
+                            new_mineral_kind(name, id)
                         } else {
-                            let name = obj.netName.value.read_string();
-                            new_other_object_kind(name)
+                            new_other_object_kind(category, name, id)
                         };
 
                         new_object(tile,kind)
@@ -1841,7 +1902,8 @@ impl Location {
 impl ObjectKind {
     pub fn is_walkable(&self) -> bool {
         match self {
-            ObjectKind::Stone
+            ObjectKind::Stone(_)
+            | ObjectKind::Mineral(_)
             | ObjectKind::Wood
             | ObjectKind::Fiber
             | ObjectKind::PotOfGold
@@ -1867,7 +1929,7 @@ impl ObjectKind {
             | ObjectKind::MineElevator
             | ObjectKind::MineCartCoal => false,
 
-            ObjectKind::Other(_) => false,
+            ObjectKind::Other { .. } => false,
             ObjectKind::Unknown => false,
         }
     }
@@ -2173,7 +2235,8 @@ impl std::fmt::Display for FruitTreeKind {
 impl std::fmt::Display for ObjectKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Stone => write!(f, "Stone"),
+            Self::Stone(stone) => write!(f, "{stone}"),
+            Self::Mineral(mineral) => write!(f, "{mineral}"),
             Self::Wood => write!(f, "Wood"),
             Self::Fiber => write!(f, "Fiber"),
             Self::PotOfGold => write!(f, "PotOfGold"),
@@ -2202,8 +2265,34 @@ impl std::fmt::Display for ObjectKind {
             Self::MineElevator => write!(f, "MineElevator"),
             Self::MineCartCoal => write!(f, "MineCartCoal"),
 
-            Self::Other(other) => write!(f, "Other({other})"),
+            Self::Other { category, name, id } => {
+                write!(f, "Other({category}, '{name}', '{id}')")
+            }
             Self::Unknown => write!(f, "Unknown"),
+        }
+    }
+}
+
+impl std::fmt::Display for StoneKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            StoneKind::Normal => write!(f, "Stone"),
+            StoneKind::DoubleStone => write!(f, "DoubleStone"),
+            StoneKind::Copper => write!(f, "CopperOre"),
+            StoneKind::Other { name, id } => {
+                write!(f, "StoneKind::Other('{name}', '{id}')")
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for MineralKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            MineralKind::Quartz => write!(f, "Quartz"),
+            MineralKind::Other { name, id } => {
+                write!(f, "MineralKind::Other('{name}', '{id}')")
+            }
         }
     }
 }

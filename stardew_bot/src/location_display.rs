@@ -20,7 +20,7 @@ use crate::{
     bot_logic::LocalMovementGoal,
     game_state::{
         FurnitureKind, Location, ObjectKind, Rectangle, ResourceClumpKind,
-        TileMap, Vector,
+        StoneKind, TileMap, Vector,
     },
     BotLogic, Error, GameState,
 };
@@ -264,7 +264,11 @@ impl<'a> DrawableGameLocation<'a> {
             .iter()
             .filter_map(|obj| {
                 let color = match &obj.kind {
-                    ObjectKind::Stone => Some(Color::DarkGray),
+                    ObjectKind::Stone(StoneKind::Copper) => {
+                        Some(Color::DarkGray)
+                    }
+                    ObjectKind::Stone(_) => Some(Color::DarkGray),
+                    ObjectKind::Mineral(_) => Some(Color::DarkGray),
                     ObjectKind::Wood => Some(Color::Rgb(97, 25, 0)),
                     ObjectKind::Fiber => Some(Color::LightGreen),
                     ObjectKind::PotOfGold => Some(Color::Yellow),
@@ -280,7 +284,7 @@ impl<'a> DrawableGameLocation<'a> {
                     ObjectKind::MineHoleDown => None,
                     ObjectKind::MineElevator => None,
                     ObjectKind::MineCartCoal => None,
-                    ObjectKind::Other(_) => None,
+                    ObjectKind::Other { .. } => None,
                     ObjectKind::HoeDirt(_) => Some(Color::Rgb(40, 40, 40)),
                     ObjectKind::Unknown => None,
                 }?;

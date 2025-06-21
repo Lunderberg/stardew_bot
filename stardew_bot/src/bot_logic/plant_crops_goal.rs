@@ -62,7 +62,8 @@ impl CropPlantingPlan {
                 farm.objects
                     .iter()
                     .filter(|obj| match &obj.kind {
-                        ObjectKind::Stone
+                        ObjectKind::Stone(_)
+                        | ObjectKind::Mineral(_)
                         | ObjectKind::Wood
                         | ObjectKind::Fiber
                         | ObjectKind::Grass
@@ -80,7 +81,7 @@ impl CropPlantingPlan {
                         | ObjectKind::MineCartCoal
                         | ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_)
-                        | ObjectKind::Other(_)
+                        | ObjectKind::Other { .. }
                         | ObjectKind::Unknown => true,
                     })
                     .map(|obj| obj.tile),
@@ -192,7 +193,8 @@ impl BotGoal for PlantCropsGoal {
             .iter()
             .filter_map(|tile| {
                 let opt_action = match current_contents.get(tile) {
-                    Some(ObjectKind::Stone) => Some(Item::PICKAXE),
+                    Some(ObjectKind::Stone(_)) => Some(Item::PICKAXE),
+                    Some(ObjectKind::Mineral(_)) => None,
                     Some(ObjectKind::Fiber | ObjectKind::Grass) => {
                         Some(Item::SCYTHE)
                     }
@@ -230,7 +232,7 @@ impl BotGoal for PlantCropsGoal {
                         | ObjectKind::MineHoleDown
                         | ObjectKind::MineElevator
                         | ObjectKind::MineCartCoal
-                        | ObjectKind::Other(_)
+                        | ObjectKind::Other { .. }
                         | ObjectKind::Unknown
                         | ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_),
