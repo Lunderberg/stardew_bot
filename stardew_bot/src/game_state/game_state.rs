@@ -159,10 +159,21 @@ impl GameState {
                     >();
 
                 let num_locations = location_list._size.prim_cast::<usize>();
-
-                let locations = (0..num_locations)
+                let iter_locations = (0..num_locations)
                     .map(|i| location_list._items[i])
-                    .map(read_location)
+                    .map(read_location);
+
+                let mineshaft_list = StardewValley
+                    .Locations
+                    .MineShaft
+                    .activeMines;
+                let num_mine_levels = mineshaft_list._size.prim_cast::<usize>();
+                let iter_mine_levels = (0..num_mine_levels)
+                    .map(|i| mineshaft_list._items[i])
+                    .map(read_location);
+
+                let locations = iter_locations
+                    .chain(iter_mine_levels)
                     .collect();
 
                 let player = read_player();
@@ -232,11 +243,26 @@ impl GameState {
                     mail_menu,
                 )
             }
+
+            pub fn read_full_current_location() {
+                let location = StardewValley.Game1
+                    ._player
+                    .currentLocationRef
+                    ._gameLocation;
+
+                read_location(location)
+            }
         })?;
 
         let vm = graph.compile(reader)?;
 
         Ok(GameStateReader { vm })
+    }
+
+    pub fn requires_new_location_read(&self, delta: &GameStateDelta) -> bool {
+        self.locations
+            .iter()
+            .all(|loc| &loc.name != &delta.location_delta.name)
     }
 
     pub fn apply_delta(&mut self, delta: GameStateDelta) {
@@ -266,6 +292,17 @@ impl GameState {
         {
             loc.apply_delta(delta.location_delta, player_pos);
         }
+    }
+
+    pub fn update_location(&mut self, new_loc: Location) {
+        for old_loc in &mut self.locations {
+            if old_loc.name == new_loc.name {
+                *old_loc = new_loc;
+                return;
+            }
+        }
+
+        self.locations.push(new_loc);
     }
 
     pub fn get_room<'a>(&'a self, name: &str) -> Result<&'a Location, Error> {
@@ -306,6 +343,19 @@ impl GameStateReader {
         Ok(self
             .vm
             .get_function("read_delta_state")?
+            .with_reader(cache)
+            .evaluate()?
+            .take_obj(0)?
+            .ok_or(Error::ExpectedNonEmptyValue)?)
+    }
+
+    pub fn read_full_current_location(
+        &self,
+        cache: CachedReader,
+    ) -> Result<Location, Error> {
+        Ok(self
+            .vm
+            .get_function("read_full_current_location")?
             .with_reader(cache)
             .evaluate()?
             .take_obj(0)?

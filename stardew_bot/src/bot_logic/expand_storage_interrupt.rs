@@ -15,7 +15,7 @@ impl ExpandStorageInterrupt {
         Self
     }
 
-    const RELATIVE_POS: [Vector<isize>; 7] = [
+    const FROM_FARM_DOOR: [Vector<isize>; 7] = [
         // Along the front of the farmhouse
         Vector::new(-2, 3),
         Vector::new(-3, 3),
@@ -25,6 +25,12 @@ impl ExpandStorageInterrupt {
         Vector::new(4, 1),
         Vector::new(4, 0),
         Vector::new(4, -1),
+    ];
+
+    const FROM_MINE_ELEVATOR: [Vector<isize>; 2] = [
+        // To the left of the mine elevator
+        Vector::new(-1, 1),
+        Vector::new(-2, 2),
     ];
 }
 
@@ -50,19 +56,28 @@ impl BotInterrupt for ExpandStorageInterrupt {
             return Ok(None);
         }
 
-        let farm_door = game_state.get_farm_door()?;
-        if game_state.player.room_name != "Farm"
-            || game_state.player.center_pos().dist(farm_door.into()) > 20.0
-        {
-            // The player is far from the FarmHouse, so now isn't a
-            // good time to expand the storage.
+        let (room, origin, offsets) = if game_state.player.room_name == "Farm" {
+            let room = game_state.get_room("Farm")?;
+            let origin = game_state.get_farm_door()?;
+            (room, origin, &Self::FROM_FARM_DOOR[..])
+        } else if game_state.player.room_name == "Mine" {
+            let room = game_state.get_room("Mine")?;
+            let origin = game_state.get_mine_elevator()?;
+            (room, origin, &Self::FROM_MINE_ELEVATOR[..])
+        } else {
+            // The player isn't in any room with storage, so now isn't
+            // a good time to expand the storage.
+            return Ok(None);
+        };
+
+        if game_state.player.center_pos().dist(origin.into()) > 20.0 {
+            // The player may be in a room that has storage space, but
+            // isn't anywhere near it.  Wait until later.
             return Ok(None);
         }
 
-        // Now, starting the actual checkes
-        let farm = game_state.get_room("Farm")?;
         let iter_chests =
-            || farm.objects.iter().filter_map(|obj| obj.kind.as_chest());
+            || room.objects.iter().filter_map(|obj| obj.kind.as_chest());
 
         let num_free_slots = iter_chests()
             .flat_map(|chest| chest.iter_slots())
@@ -87,10 +102,10 @@ impl BotInterrupt for ExpandStorageInterrupt {
             return Ok(None);
         }
 
-        let walkable = farm.pathfinding().walkable();
-        let Some(tile) = Self::RELATIVE_POS
+        let walkable = room.pathfinding().walkable();
+        let Some(tile) = offsets
             .iter()
-            .map(|offset| farm_door + *offset)
+            .map(|offset| origin + *offset)
             .find(|tile| walkable[*tile])
         else {
             // All the chests are already made
@@ -100,7 +115,7 @@ impl BotInterrupt for ExpandStorageInterrupt {
         let prepare =
             InventoryGoal::current().with(Item::WOOD.clone().with_count(50));
         let craft = CraftItemGoal::new(Item::CHEST);
-        let place = UseItemOnTile::new(Item::CHEST, "Farm", tile);
+        let place = UseItemOnTile::new(Item::CHEST, room.name.clone(), tile);
 
         let interrupt = LogicStack::new().then(prepare).then(craft).then(place);
 

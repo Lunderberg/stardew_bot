@@ -114,3 +114,6 @@ pub use collect_nearby_items::CollectNearbyItems;
 
 mod menu_closer;
 pub use menu_closer::*;
+
+mod mine_delving_goal;
+pub use mine_delving_goal::*;

@@ -36,6 +36,12 @@ pub enum BotError {
 
     #[error("Could not locate the farmhouse door")]
     FarmhouseDoorNotFound,
+
+    #[error("Could not locate the mine's elevator")]
+    MineElevatorNotFound,
+
+    #[error("Could not locate the mine ladder")]
+    MineLadderNotFound,
 }
 
 impl std::fmt::Debug for BotError {
