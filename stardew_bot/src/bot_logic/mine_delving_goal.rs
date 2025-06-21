@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use crate::{
     bot_logic::{
-        ActivateTile, BotError, GameStateExt as _, InventoryGoal, MovementGoal,
-        UseItemOnTile,
+        ActivateTile, BotError, GameStateExt as _, InventoryGoal,
+        MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{Item, ObjectKind, Vector},
     Error, GameState,
@@ -100,17 +100,8 @@ impl BotGoal for MineDelvingGoal {
             return Ok(descend.into());
         }
 
-        let opt_ladder = current_room
-            .objects
-            .iter()
-            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
-            .map(|obj| obj.tile);
-        if let Some(ladder) = opt_ladder {
-            let room_name = current_room.name.clone();
-            let goal = ActivateTile::new(current_room.name.clone(), ladder)
-                .cancel_if(move |game_state| {
-                    game_state.player.room_name != room_name
-                });
+        let goal = MaintainStaminaGoal::new();
+        if !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
 
@@ -123,8 +114,38 @@ impl BotGoal for MineDelvingGoal {
         };
 
         let stones_to_mine: HashSet<Vector<isize>> = iter_stones().collect();
-
         let player_tile = game_state.player.tile();
+
+        let opt_ladder = current_room
+            .objects
+            .iter()
+            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
+            .map(|obj| obj.tile);
+        if let Some(ladder) = opt_ladder {
+            let path = current_room
+                .pathfinding()
+                .stone_clearing_cost(2000)
+                .include_border(true)
+                .allow_diagonal(false)
+                .path_between(player_tile, ladder)?;
+
+            let room_name = current_room.name.clone();
+
+            let opt_stone_in_path =
+                path.into_iter().find(|tile| stones_to_mine.contains(tile));
+
+            if let Some(stone_in_path) = opt_stone_in_path {
+                let goal =
+                    UseItemOnTile::new(Item::PICKAXE, room_name, stone_in_path);
+                return Ok(goal.into());
+            } else {
+                let goal = ActivateTile::new(room_name.clone(), ladder)
+                    .cancel_if(move |game_state| {
+                        game_state.player.room_name != room_name
+                    });
+                return Ok(goal.into());
+            }
+        }
 
         let opt_next_stone = current_room
             .pathfinding()
