@@ -7,7 +7,7 @@ use crate::Error;
 
 use super::{
     item::{ItemKind, WateringCan},
-    FishingRod, Item, ItemId, Quality,
+    FishingRod, Item, ItemId, Quality, Weapon, WeaponKind,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -39,6 +39,28 @@ impl Inventory {
                 let bait = bait.cloned().map(Box::new);
                 let tackle = tackle.cloned().map(Box::new);
                 ItemKind::FishingRod(FishingRod { bait, tackle })
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_weapon_kind",
+            |kind: i32, min_damage: i32, max_damage: i32| {
+                let kind = if kind == 1 {
+                    WeaponKind::Dagger
+                } else if kind == 2 {
+                    WeaponKind::Club
+                } else if kind == 3 {
+                    WeaponKind::Sword
+                } else {
+                    // Not actually a dagger, but fallback in case
+                    // there's a misread.
+                    WeaponKind::Dagger
+                };
+                ItemKind::Weapon(Weapon {
+                    kind,
+                    min_damage,
+                    max_damage,
+                })
             },
         )?;
 
@@ -126,6 +148,8 @@ impl Inventory {
                     .as::<StardewValley.Tools.WateringCan>();
                 let fishing_rod = item
                     .as::<StardewValley.Tools.FishingRod>();
+                let weapon = item
+                    .as::<StardewValley.Tools.MeleeWeapon>();
 
                 let kind = if watering_can.is_some() {
                     let remaining_water = watering_can
@@ -165,6 +189,17 @@ impl Inventory {
                     new_fishing_rod_kind(
                         bait,
                         tackle,
+                    )
+
+                } else if weapon.is_some() {
+                    let kind = weapon.type.value;
+                    let min_damage = weapon.minDamage.value;
+                    let max_damage = weapon.maxDamage.value;
+
+                    new_weapon_kind(
+                        kind,
+                        min_damage,
+                        max_damage,
                     )
 
                 } else {

@@ -39,6 +39,11 @@ pub struct GlobalGameState {
     pub event_up: bool,
 
     pub stats: HashMap<String, u32>,
+
+    /// The lowest level that has been reached in the mines.  Values
+    /// above 120 indicate reaching level (value-120) within
+    /// SkullCavern.
+    pub lowest_mine_level_reached: i32,
 }
 
 #[derive(RustNativeObject, Default)]
@@ -56,7 +61,8 @@ impl GlobalGameState {
              in_game_time: i32,
              stats: &Stats,
              currently_fading_to_black: bool,
-             event_up: bool| GlobalGameState {
+             event_up: bool,
+             lowest_mine_level_reached: i32| GlobalGameState {
                 game_tick,
                 unique_id,
                 game_mode_tick,
@@ -64,6 +70,7 @@ impl GlobalGameState {
                 stats: stats.0.clone(),
                 currently_fading_to_black,
                 event_up,
+                lowest_mine_level_reached,
             },
         )?;
 
@@ -106,6 +113,12 @@ impl GlobalGameState {
 
                 let event_up = StardewValley.Game1.eventUp;
 
+                let lowest_mine_level_reached = StardewValley.Game1
+                    .netWorldState
+                    .value
+                    .lowestMineLevel
+                    .value;
+
                 new_global_game_state(
                     unique_id,
                     game_tick,
@@ -114,6 +127,7 @@ impl GlobalGameState {
                     stat_dict,
                     currently_fading_to_black,
                     event_up,
+                    lowest_mine_level_reached,
                 )
             }
         })?;

@@ -196,7 +196,10 @@ impl MovementGoal {
         };
         let target_room_index = graph
             .get_room_index(&self.target_room)
-            .ok_or_else(|| BotError::UnknownRoom(self.target_room.clone()))?;
+            .ok_or_else(|| BotError::UnknownRoom(self.target_room.clone()))
+            .unwrap()
+            // ?
+            ;
 
         let search_nodes: Vec<_> = graph
             .dijkstra_search(initial)

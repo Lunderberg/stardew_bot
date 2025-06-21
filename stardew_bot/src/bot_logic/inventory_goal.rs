@@ -8,7 +8,8 @@ use itertools::Itertools as _;
 use crate::{
     bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
     game_state::{
-        Chest, Inventory, Item, ItemId, Key, ObjectKind, Quality, Vector,
+        Chest, Inventory, Item, ItemId, Key, Location, ObjectKind, Quality,
+        Vector, WeaponKind,
     },
     Error, GameAction, GameState,
 };
@@ -21,6 +22,11 @@ use super::{
 const MAX_GP_PER_STAMINA: f32 = 2.5;
 
 pub struct InventoryGoal {
+    /// Which room contains the storage chests to be interacted with.
+    room: Cow<'static, str>,
+
+    /// Specifies which items should be added/removed to the
+    /// inventory.
     bounds: HashMap<ItemId, Bounds>,
 
     /// If true, any item not mentioned in `bounds` will be treated as
@@ -33,6 +39,9 @@ pub struct InventoryGoal {
     /// If true, try to use this many slots to hold items to eat for
     /// stamina recovery.
     stamina_recovery_slots: usize,
+
+    /// If true, keep the best weapon in the inventory.
+    with_weapon: bool,
 }
 
 struct Bounds {
@@ -64,6 +73,11 @@ pub(super) enum TransferSize {
 }
 
 impl InventoryGoal {
+    pub fn room(self, room: impl Into<Cow<'static, str>>) -> Self {
+        let room = room.into();
+        Self { room, ..self }
+    }
+
     pub fn new(item: Item) -> Self {
         let bounds = [(
             item.id,
@@ -75,25 +89,31 @@ impl InventoryGoal {
         .into_iter()
         .collect();
         Self {
+            room: "Farm".into(),
             bounds,
             stash_unspecified_items: false,
             stamina_recovery_slots: 0,
+            with_weapon: false,
         }
     }
 
     pub fn current() -> Self {
         Self {
+            room: "Farm".into(),
             bounds: Default::default(),
             stash_unspecified_items: false,
             stamina_recovery_slots: 0,
+            with_weapon: false,
         }
     }
 
     pub fn empty() -> Self {
         Self {
+            room: "Farm".into(),
             bounds: Default::default(),
             stash_unspecified_items: true,
             stamina_recovery_slots: 0,
+            with_weapon: false,
         }
     }
 
@@ -104,6 +124,18 @@ impl InventoryGoal {
             Bounds {
                 min: None,
                 max: None,
+            },
+        );
+        self
+    }
+
+    pub fn with_exactly(mut self, item: Item) -> Self {
+        let count = item.count;
+        self.bounds.insert(
+            item.id,
+            Bounds {
+                min: Some(count),
+                max: Some(count),
             },
         );
         self
@@ -121,6 +153,13 @@ impl InventoryGoal {
         self
     }
 
+    pub fn with_weapon(self) -> Self {
+        Self {
+            with_weapon: true,
+            ..self
+        }
+    }
+
     pub fn stamina_recovery_slots(self, stamina_recovery_slots: usize) -> Self {
         Self {
             stamina_recovery_slots,
@@ -134,6 +173,26 @@ impl InventoryGoal {
             ..self
         }
     }
+
+    fn get_room<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Result<&'a Location, Error> {
+        game_state.get_room(&self.room)
+    }
+}
+
+fn best_weapon<'a>(
+    iter: impl IntoIterator<Item = &'a Item>,
+) -> Option<&'a ItemId> {
+    iter.into_iter()
+        .filter(|item| item.as_weapon().is_some())
+        .max_by_key(|item| {
+            let as_weapon = item.as_weapon().unwrap();
+            let is_club = matches!(as_weapon.kind, WeaponKind::Club);
+            (is_club, as_weapon.min_damage)
+        })
+        .map(|item| &item.id)
 }
 
 impl InventoryGoal {
@@ -143,7 +202,7 @@ impl InventoryGoal {
     ) -> Result<Option<Transfer>, Error> {
         // Iterator of (tile, &Chest)
         let iter_chests = || {
-            game_state.get_room("Farm").map(|location| {
+            self.get_room(game_state).map(|location| {
                 location.objects.iter().filter_map(|obj| {
                     obj.kind.as_chest().map(|chest| (obj.tile, chest))
                 })
@@ -176,9 +235,7 @@ impl InventoryGoal {
             })
             .collect();
 
-        let current_stamina_items: HashSet<&ItemId> = game_state
-            .player
-            .inventory
+        let current_stamina_items: HashSet<&ItemId> = inventory
             .iter_items()
             .filter(|item| {
                 // If an item is explicitly set to be stored
@@ -195,6 +252,9 @@ impl InventoryGoal {
             .map(|(_, item)| &item.id)
             .take(self.stamina_recovery_slots)
             .collect();
+
+        let opt_current_weapon =
+            best_weapon(inventory.iter_items().filter(|_| self.with_weapon));
 
         // Items that should be transferred from the player to a
         // chest.  Values are the desired number of items in the
@@ -214,6 +274,9 @@ impl InventoryGoal {
                     bound.max.filter(|max| max < count)
                 } else if self.stash_unspecified_items
                     && !current_stamina_items.contains(&item)
+                    && !opt_current_weapon
+                        .map(|weapon| item == weapon)
+                        .unwrap_or(false)
                 {
                     Some(0)
                 } else {
@@ -227,7 +290,7 @@ impl InventoryGoal {
         // Items that should be transferred from a chest to the
         // player.  Values are the desired number of items in the
         // player's inventory after the tranfer.
-        let chest_to_player: HashMap<ItemId, usize> = self
+        let mut chest_to_player: HashMap<ItemId, usize> = self
             .bounds
             .iter()
             .filter_map(|(item, bound)| {
@@ -238,6 +301,17 @@ impl InventoryGoal {
                     .map(|new_count| (item.clone(), new_count))
             })
             .collect();
+
+        // If the player has no weapon, wants one, and there's one
+        // available to pick up, add it to the list of items to pick
+        // up.
+        if self.with_weapon && opt_current_weapon.is_none() {
+            let opt_stored_weapon =
+                best_weapon(iter_chest_items()?.map(|(_, _, item)| item));
+            if let Some(stored_weapon) = opt_stored_weapon {
+                chest_to_player.insert(stored_weapon.clone(), 1);
+            }
+        }
 
         if let Some(chest) = &game_state.chest_menu {
             let Some(tile) = chest.chest_tile else {
@@ -501,7 +575,7 @@ impl BotGoal for InventoryGoal {
         let Some(chest_menu) = &game_state.chest_menu else {
             // There is no chest open.  Open the chest for the next
             // transfer.
-            let goal = ActivateTile::new("Farm", transfer.chest);
+            let goal = ActivateTile::new(self.room.clone(), transfer.chest);
             return Ok(goal.into());
         };
 

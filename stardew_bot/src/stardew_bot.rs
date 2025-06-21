@@ -390,21 +390,41 @@ impl StardewBot {
     }
 
     pub fn update_game_state(&mut self) {
-        let res_delta = self
-            .game_state_reader
-            .read_delta_state(self.tui_globals.cached_reader());
-
-        match res_delta {
-            Ok(delta) => {
-                self.tui_globals
-                    .get_mut::<GameState>()
-                    .expect("Globals should always contain a GameState")
-                    .apply_delta(delta);
-            }
-            Err(err) => {
-                self.buffers.running_log.add_log(format!("Error: {err}"));
-            }
+        if let Err(err) = self.try_update_game_state() {
+            self.buffers.running_log.add_log(format!("Error: {err}"));
         }
+    }
+
+    fn try_update_game_state(&mut self) -> Result<(), Error> {
+        let requires_new_location_read = {
+            let delta = self
+                .game_state_reader
+                .read_delta_state(self.tui_globals.cached_reader())?;
+
+            let game_state = self
+                .tui_globals
+                .get_mut::<GameState>()
+                .expect("Globals should always contain a GameState");
+
+            let requires_new_location_read =
+                game_state.requires_new_location_read(&delta);
+
+            game_state.apply_delta(delta);
+            requires_new_location_read
+        };
+
+        if requires_new_location_read {
+            let loc = self
+                .game_state_reader
+                .read_full_current_location(self.tui_globals.cached_reader())?;
+
+            self.tui_globals
+                .get_mut::<GameState>()
+                .expect("Globals should always contain a GameState")
+                .update_location(loc);
+        }
+
+        Ok(())
     }
 
     pub fn update_bot_logic(&mut self) {

@@ -41,6 +41,7 @@ pub struct ItemId {
 pub enum ItemKind {
     WateringCan(WateringCan),
     FishingRod(FishingRod),
+    Weapon(Weapon),
 }
 
 #[derive(Debug, Clone)]
@@ -53,6 +54,20 @@ pub struct WateringCan {
 pub struct FishingRod {
     pub bait: Option<Box<Item>>,
     pub tackle: Option<Box<Item>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Weapon {
+    pub kind: WeaponKind,
+    pub min_damage: i32,
+    pub max_damage: i32,
+}
+
+#[derive(Debug, Clone)]
+pub enum WeaponKind {
+    Dagger,
+    Club,
+    Sword,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -112,11 +127,13 @@ impl Item {
     pub const IRIDIUM_ROD: Item = Item::new_const("(T)IridiumRod");
     pub const BAIT: Item = Item::new_const("(O)685");
 
-    pub const CLAY: Item = Item::new_const("(O)330");
     pub const SALAD: Item = Item::new_const("(O)196");
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
     pub const CARROT_SEEDS: Item = Item::new_const("(O)CarrotSeeds");
+
+    pub const CLAY: Item = Item::new_const("(O)330");
     pub const WOOD: Item = Item::new_const("(O)388");
+    pub const STONE: Item = Item::new_const("(O)390");
 
     pub const OAK_SEED: Item = Item::new_const("(O)309");
     pub const MAPLE_SEED: Item = Item::new_const("(O)310");
@@ -245,6 +262,13 @@ impl Item {
     pub fn as_fishing_rod(&self) -> Option<&FishingRod> {
         self.kind.as_ref().and_then(|kind| match kind {
             ItemKind::FishingRod(rod) => Some(rod),
+            _ => None,
+        })
+    }
+
+    pub fn as_weapon(&self) -> Option<&Weapon> {
+        self.kind.as_ref().and_then(|kind| match kind {
+            ItemKind::Weapon(weapon) => Some(weapon),
             _ => None,
         })
     }

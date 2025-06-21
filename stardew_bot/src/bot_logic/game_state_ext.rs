@@ -8,6 +8,8 @@ use super::BotError;
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
 
+    fn get_mine_elevator(&self) -> Result<Vector<isize>, Error>;
+
     fn iter_accessible_items(
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
@@ -31,6 +33,18 @@ impl GameStateExt for GameState {
             .ok_or_else(|| BotError::FarmhouseDoorNotFound)?;
 
         Ok(farm_door)
+    }
+
+    fn get_mine_elevator(&self) -> Result<Vector<isize>, Error> {
+        let mine = self.get_room("Mine")?;
+        let elevator = mine
+            .action_tiles
+            .iter()
+            .find(|(_, action)| action == "MineElevator")
+            .map(|(tile, _)| *tile)
+            .ok_or_else(|| BotError::MineElevatorNotFound)?;
+
+        Ok(elevator)
     }
 
     fn iter_accessible_items(
