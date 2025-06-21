@@ -100,6 +100,20 @@ impl BotGoal for MineDelvingGoal {
             return Ok(descend.into());
         }
 
+        let opt_ladder = current_room
+            .objects
+            .iter()
+            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
+            .map(|obj| obj.tile);
+        if let Some(ladder) = opt_ladder {
+            let room_name = current_room.name.clone();
+            let goal = ActivateTile::new(current_room.name.clone(), ladder)
+                .cancel_if(move |game_state| {
+                    game_state.player.room_name != room_name
+                });
+            return Ok(goal.into());
+        }
+
         let iter_stones = || {
             current_room
                 .objects

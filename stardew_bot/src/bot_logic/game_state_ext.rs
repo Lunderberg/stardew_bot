@@ -78,7 +78,12 @@ impl ObjectKindExt for ObjectKind {
 
             ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => Some(Item::HOE),
 
-            ObjectKind::PotOfGold
+            ObjectKind::MineLadderUp
+            | ObjectKind::MineLadderDown
+            | ObjectKind::MineHoleDown
+            | ObjectKind::MineElevator
+            | ObjectKind::MineCartCoal
+            | ObjectKind::PotOfGold
             | ObjectKind::FruitTree(_)
             | ObjectKind::HoeDirt(_)
             | ObjectKind::Chest(_)

@@ -252,6 +252,21 @@ pub enum ObjectKind {
     /// Gives seasonal seeds when dug
     SeedSpot,
 
+    /// The ladder to return from the mines to the surface
+    MineLadderUp,
+
+    /// A ladder to descend deeper into the mines
+    MineLadderDown,
+
+    /// A hole that may be jumped down in skull cavern
+    MineHoleDown,
+
+    /// The elevator in the underground mines.
+    MineElevator,
+
+    /// A cart in the mines that contains coal.
+    MineCartCoal,
+
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
     /// implemented.
@@ -515,6 +530,20 @@ impl Location {
                          when it occurs as a type of litter \
                          (category == -999)"
                     )
+                }
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_mineshaft_tile",
+            |index: i32| -> Option<ObjectKind> {
+                match index {
+                    115 => Some(ObjectKind::MineLadderUp),
+                    173 => Some(ObjectKind::MineLadderDown),
+                    174 => Some(ObjectKind::MineHoleDown),
+                    112 => Some(ObjectKind::MineElevator),
+                    194 => Some(ObjectKind::MineCartCoal),
+                    _ => None,
                 }
             },
         )?;
@@ -1037,6 +1066,46 @@ impl Location {
                     .filter(|obj| obj.is_some())
             }
 
+            fn iter_location_mineshaft_tiles(location) {
+                let mineshaft = location
+                    .as::<StardewValley.Locations.MineShaft>();
+
+                let building_layer = mineshaft
+                    .buildingLayers
+                    ._items[0]
+                    .key;
+
+                let size = building_layer
+                        .m_layerSize;
+
+                let width =  if mineshaft.is_some() {
+                    size.Width.prim_cast::<usize>()
+                } else {
+                    0
+                };
+                let height = if mineshaft.is_some() {
+                    size.Height.prim_cast::<usize>()
+                } else {
+                    0
+                };
+
+                (0..(height*width))
+                    .map(|i_flat| {
+                        let i = i_flat/height;
+                        let j = i_flat%height;
+
+                        let index = building_layer
+                            .m_tiles[i,j]
+                            .as::<xTile.Tiles.StaticTile>()
+                            .m_tileIndex;
+
+                        let tile = new_vector_isize(i,j);
+                        let kind = new_mineshaft_tile(index);
+                        new_object(tile, kind)
+                    })
+                    .filter(|obj| obj.is_some())
+            }
+
             fn read_location_items(location, filter) {
                 let debris_list = location
                     .debris
@@ -1435,9 +1504,14 @@ impl Location {
                 let furniture = read_location_furniture(location, None);
 
                 let iter_objects = iter_location_objects(location,None);
-                let iter_features = iter_location_terrain_features(location,None);
+                let iter_features = iter_location_terrain_features(
+                    location,None
+                );
+                let iter_mineshaft_tiles = iter_location_mineshaft_tiles(location);
+
                 let objects = iter_objects
                     .chain(iter_features)
+                    .chain(iter_mineshaft_tiles)
                     .collect();
 
                 let items = read_location_items(location, None);
@@ -1470,6 +1544,8 @@ impl Location {
                 let player_y = player_pos.Y / 64;
 
                 fn is_close_to_player(x,y) {
+                    let x = x.prim_cast::<f32>();
+                    let y = y.prim_cast::<f32>();
                     let diff_x = player_x - x;
                     let diff_y = player_y - y;
                     let dist2 = diff_x*diff_x + diff_y*diff_y;
@@ -1498,8 +1574,12 @@ impl Location {
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
+                let iter_mineshaft_tiles = iter_location_mineshaft_tiles(
+                    location
+                );
                 let objects = iter_objects
                     .chain(iter_features)
+                    .chain(iter_mineshaft_tiles)
                     .collect();
 
                 let items = read_location_items(location, None);
@@ -1780,6 +1860,13 @@ impl ObjectKind {
             }
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,
+
+            ObjectKind::MineLadderUp
+            | ObjectKind::MineLadderDown
+            | ObjectKind::MineHoleDown
+            | ObjectKind::MineElevator
+            | ObjectKind::MineCartCoal => false,
+
             ObjectKind::Other(_) => false,
             ObjectKind::Unknown => false,
         }
@@ -2109,6 +2196,12 @@ impl std::fmt::Display for ObjectKind {
             Self::HoeDirt(_) => write!(f, "HoeDirt"),
             Self::ArtifactSpot => write!(f, "ArtifactSpot"),
             Self::SeedSpot => write!(f, "SeedSpot"),
+            Self::MineLadderUp => write!(f, "MineLadderUp"),
+            Self::MineLadderDown => write!(f, "MineLadderDown"),
+            Self::MineHoleDown => write!(f, "MineHoleDown"),
+            Self::MineElevator => write!(f, "MineElevator"),
+            Self::MineCartCoal => write!(f, "MineCartCoal"),
+
             Self::Other(other) => write!(f, "Other({other})"),
             Self::Unknown => write!(f, "Unknown"),
         }

@@ -70,8 +70,15 @@ impl CropPlantingPlan {
                         | ObjectKind::ArtifactSpot
                         | ObjectKind::SeedSpot
                         | ObjectKind::Tree(_) => false,
+
                         ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop(),
-                        ObjectKind::FruitTree(_)
+
+                        ObjectKind::MineLadderUp
+                        | ObjectKind::MineLadderDown
+                        | ObjectKind::MineHoleDown
+                        | ObjectKind::MineElevator
+                        | ObjectKind::MineCartCoal
+                        | ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_)
                         | ObjectKind::Other(_)
                         | ObjectKind::Unknown => true,
@@ -218,7 +225,12 @@ impl BotGoal for PlantCropsGoal {
                     }
 
                     Some(
-                        ObjectKind::Other(_)
+                        ObjectKind::MineLadderUp
+                        | ObjectKind::MineLadderDown
+                        | ObjectKind::MineHoleDown
+                        | ObjectKind::MineElevator
+                        | ObjectKind::MineCartCoal
+                        | ObjectKind::Other(_)
                         | ObjectKind::Unknown
                         | ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_),
