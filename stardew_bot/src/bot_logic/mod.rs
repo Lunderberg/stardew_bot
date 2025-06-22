@@ -117,3 +117,6 @@ pub use menu_closer::*;
 
 mod mine_delving_goal;
 pub use mine_delving_goal::*;
+
+mod attack_nearby_enemy;
+pub use attack_nearby_enemy::*;

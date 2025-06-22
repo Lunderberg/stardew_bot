@@ -60,6 +60,9 @@ pub struct Location {
 
     /// Tiles that can have some action performed on them.
     pub action_tiles: Vec<(Vector<isize>, String)>,
+
+    /// Any Villagers or Monsters in the area
+    pub characters: Vec<Character>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -68,6 +71,7 @@ pub struct LocationDelta {
     resource_clumps: Vec<ResourceClump>,
     objects: Vec<Object>,
     items: Vec<FloatingItem>,
+    characters: Vec<Character>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -370,6 +374,21 @@ pub struct BuildingDoor {
 
     /// The name of the GameLocation that is inside the building.
     pub inside_name: String,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Character {
+    /// The name of the NPC/Monster
+    pub name: String,
+
+    /// The pixel position of the character.  Must be divided by 64 to
+    /// get the tile position.
+    pub position: Vector<f32>,
+
+    /// The health of the character.  Only present for monsters.
+    pub health: Option<i32>,
+
+    pub sprite_width: i32,
 }
 
 #[derive(RustNativeObject, Default, Clone, Debug)]
@@ -819,6 +838,23 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_character",
+            |name: &str,
+             x: f32,
+             y: f32,
+             sprite_width: i32,
+             health: Option<i32>|
+             -> Character {
+                Character {
+                    name: name.to_string(),
+                    position: Vector::new(x, y),
+                    sprite_width,
+                    health,
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_location",
             |name: &str,
              shape: &Vector<isize>,
@@ -830,7 +866,8 @@ impl Location {
              furniture: &Vec<Furniture>,
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
-             buildings: &Vec<Building>| {
+             buildings: &Vec<Building>,
+             characters: &Vec<Character>| {
                 Location {
                     name: name.into(),
                     shape: shape.clone(),
@@ -846,6 +883,7 @@ impl Location {
                     blocked: tiles.collect_blocked_tiles(*shape),
                     diggable: tiles.collect_diggable_tiles(*shape),
                     action_tiles: tiles.collect_action_tiles(),
+                    characters: characters.clone(),
                 }
             },
         )?;
@@ -855,12 +893,14 @@ impl Location {
             |name: &str,
              resource_clumps: &Vec<ResourceClump>,
              objects: &Vec<Object>,
-             items: &Vec<FloatingItem>| {
+             items: &Vec<FloatingItem>,
+             characters: &Vec<Character>| {
                 LocationDelta {
                     name: name.into(),
                     resource_clumps: resource_clumps.clone(),
                     objects: objects.clone(),
                     items: items.clone(),
+                    characters: characters.clone(),
                 }
             },
         )?;
@@ -1257,6 +1297,50 @@ impl Location {
                 furniture
             }
 
+            fn read_location_characters(location) {
+                let character_list = location
+                    .characters
+                    .list;
+
+                let num_characters = character_list
+                    ._size
+                    .prim_cast::<usize>();
+
+                let characters = (0..num_characters)
+                    .map(|i_character| character_list._items[i_character])
+                    .map(|character| {
+                        let name = character
+                            ._displayName
+                            .read_string();
+
+                        let pos = character
+                            .position
+                            .Field
+                            .value;
+
+                        let sprite_width = character
+                            .sprite
+                            .value
+                            .spriteWidth
+                            .value;
+
+                        let health = character
+                            .as::<StardewValley.Monsters.Monster>()
+                            .health
+                            .value;
+
+                        new_character(
+                            name,
+                            pos.X, pos.Y,
+                            sprite_width,
+                            health,
+                        )
+                    })
+                    .collect();
+
+                characters
+            }
+
             fn read_location(location) {
                 let name = get_location_name_ptr(location).read_string();
                 let size = location
@@ -1577,6 +1661,8 @@ impl Location {
 
                 let items = read_location_items(location, None);
 
+                let characters = read_location_characters(location);
+
                 new_location(
                     name,
                     shape,
@@ -1589,6 +1675,7 @@ impl Location {
                     flattened_water_tiles,
                     tile_sheets,
                     buildings,
+                    characters,
                 )
             }
 
@@ -1645,11 +1732,14 @@ impl Location {
 
                 let items = read_location_items(location, None);
 
+                let characters = read_location_characters(location);
+
                 new_location_delta(
                     name,
                     resource_clumps,
                     objects,
                     items,
+                    characters,
                 )
             }
         })?;
@@ -1896,6 +1986,8 @@ impl Location {
         // more than one item may be on a given tile.  So for now,
         // just reading all of them.
         self.items = delta.items;
+
+        self.characters = delta.characters;
     }
 }
 
@@ -2356,5 +2448,35 @@ impl Deref for Chest {
 impl AsRef<ItemId> for FloatingItem {
     fn as_ref(&self) -> &ItemId {
         &self.id
+    }
+}
+
+impl Character {
+    fn center_pixel(&self) -> Vector<isize> {
+        let offset = Vector::<isize>::new(8, 16);
+
+        let width = self.sprite_width as isize;
+        let width = width * 4 * 3 / 4;
+        let bounding_box = Vector::<isize>::new(width, 32);
+
+        let position = self.position.map(|x| x as isize);
+        position + offset + bounding_box / 2
+    }
+
+    /// The tile that contains the center of the player's bounding
+    /// box.  This is the tile used to determine tool reach (may only
+    /// target tiles at or adjacent to the player's tile).
+    pub fn tile(&self) -> Vector<isize> {
+        self.center_pixel().map(|x| x / 64)
+    }
+
+    /// The center of the player's bounding box, adjusted to be
+    /// directly comparable to tile coordinates.
+    pub fn center_pos(&self) -> Vector<f32> {
+        self.center_pixel().map(|x| {
+            let x = x - 32;
+            let x = x as f32;
+            x / 64.0
+        })
     }
 }
