@@ -16,6 +16,8 @@ pub struct PlayerState {
     pub skills: PlayerSkills,
     pub current_stamina: f32,
     pub max_stamina: i32,
+    pub current_health: i32,
+    pub max_health: i32,
     pub is_eating: bool,
 
     // Inventory-related info
@@ -140,6 +142,8 @@ impl PlayerState {
              last_click: &Vector<isize>,
              current_stamina: f32,
              max_stamina: i32,
+             current_health: i32,
+             max_health: i32,
              is_eating: bool,
              num_unread_mail: usize| {
                 PlayerState {
@@ -158,6 +162,8 @@ impl PlayerState {
                     last_click: *last_click,
                     current_stamina,
                     max_stamina,
+                    current_health,
+                    max_health,
                     is_eating,
                     num_unread_mail,
                 }
@@ -228,6 +234,8 @@ impl PlayerState {
 
                 let current_stamina = player.netStamina.value;
                 let max_stamina = player.maxStamina.value;
+                let current_health = player.health;
+                let max_health = player.maxHealth;
                 let is_eating = player.isEating;
 
                 let current_money = player.teamRoot.value.money.value;
@@ -267,6 +275,8 @@ impl PlayerState {
                     last_click,
                     current_stamina,
                     max_stamina,
+                    current_health,
+                    max_health,
                     is_eating,
                     num_unread_mail,
                 )

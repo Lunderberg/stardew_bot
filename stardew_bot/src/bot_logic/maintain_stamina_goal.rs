@@ -13,6 +13,9 @@ pub struct MaintainStaminaGoal {
     /// The target stamina to stay above.
     min_stamina: f32,
 
+    /// The target health to stay above.
+    min_health: i32,
+
     /// The maximum gold that should be spent in per energy restored.
     /// Any item that is outside of this threshold will not be eaten.
     max_gold_per_energy: f32,
@@ -22,12 +25,14 @@ impl MaintainStaminaGoal {
     pub fn new() -> Self {
         Self {
             min_stamina: 10.0,
+            min_health: 50,
             max_gold_per_energy: 2.5,
         }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        game_state.player.current_stamina > self.min_stamina
+        (game_state.player.current_stamina > self.min_stamina
+            && game_state.player.current_health > self.min_health)
             || self.item_to_eat(game_state).is_none()
     }
 
@@ -65,7 +70,7 @@ impl MaintainStaminaGoal {
 
 impl BotGoal for MaintainStaminaGoal {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        "Recover stamina".into()
+        "Recover health/stamina".into()
     }
 
     fn apply(
