@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use crate::{
     bot_logic::{
@@ -186,71 +186,86 @@ impl BotGoal for MineDelvingGoal {
             return Ok(goal.into());
         }
 
-        let iter_stones = || {
+        let opt_weapon = game_state
+            .player
+            .inventory
+            .iter_items()
+            .find(|item| item.as_weapon().is_some());
+
+        let clearable_tiles: HashMap<Vector<isize>, Option<Item>> =
             current_room
                 .objects
                 .iter()
-                .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
-                .map(|obj| obj.tile)
-        };
-
-        let stones_to_mine: HashSet<Vector<isize>> = iter_stones().collect();
+                .filter_map(|obj| {
+                    let opt_tool = match &obj.kind {
+                        ObjectKind::Stone(_) => Some(Item::PICKAXE),
+                        ObjectKind::Fiber if opt_weapon.is_some() => {
+                            opt_weapon.cloned()
+                        }
+                        ObjectKind::Mineral(_) => None,
+                        _ => {
+                            return None;
+                        }
+                    };
+                    Some((obj.tile, opt_tool))
+                })
+                .collect();
         let player_tile = game_state.player.tile();
 
-        let opt_ladder = current_room
+        let ladder_up = current_room
             .objects
             .iter()
-            .find(|obj| {
-                let has_stamina = game_state.player.current_stamina > 5.0;
-                match obj.kind {
-                    ObjectKind::MineLadderDown => has_stamina,
-                    ObjectKind::MineLadderUp => !has_stamina,
-                    _ => false,
-                }
-            })
+            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderUp))
+            .map(|obj| obj.tile)
+            .ok_or(BotError::MineLadderNotFound)?;
+
+        let opt_ladder_down = current_room
+            .objects
+            .iter()
+            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
             .map(|obj| obj.tile);
-        if let Some(ladder) = opt_ladder {
-            let path = current_room
+
+        let target_tile = if game_state.player.current_stamina <= 5.0 {
+            ladder_up
+        } else if let Some(ladder_down) = opt_ladder_down {
+            ladder_down
+        } else {
+            current_room
                 .pathfinding()
-                .stone_clearing_cost(2000)
                 .include_border(true)
-                .allow_diagonal(false)
-                .path_between(player_tile, ladder)?;
+                .iter_dijkstra(player_tile)
+                .map(|(tile, _)| tile)
+                .find(|tile| clearable_tiles.contains_key(&tile))
+                .expect("Handle case where everything has been cleared")
+        };
 
-            let room_name = current_room.name.clone();
-
-            let opt_stone_in_path =
-                path.into_iter().find(|tile| stones_to_mine.contains(tile));
-
-            if let Some(stone_in_path) = opt_stone_in_path {
-                let goal =
-                    UseItemOnTile::new(Item::PICKAXE, room_name, stone_in_path)
-                        .allow_room_change(false);
-                return Ok(goal.into());
-            } else {
-                let goal = ActivateTile::new(room_name.clone(), ladder)
-                    .allow_room_change(false);
-                return Ok(goal.into());
-            }
-        }
-
-        let opt_next_stone = current_room
+        let path = current_room
             .pathfinding()
+            .stone_clearing_cost(2000)
+            .fiber_clearing_cost(500)
             .include_border(true)
-            .iter_dijkstra(player_tile)
-            .map(|(tile, _)| tile)
-            .find(|tile| stones_to_mine.contains(&tile));
+            .allow_diagonal(false)
+            .path_between(player_tile, target_tile)?;
 
-        if let Some(next_stone) = opt_next_stone {
-            let goal = UseItemOnTile::new(
-                Item::PICKAXE,
-                current_room.name.clone(),
-                next_stone,
-            )
-            .allow_room_change(false);
-            return Ok(goal.into());
+        let opt_blocked_tile_in_path = path
+            .into_iter()
+            .find(|tile| clearable_tiles.contains_key(&tile));
+        let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
+
+        let opt_tool = clearable_tiles
+            .get(&target_tile)
+            .map(|opt| opt.as_ref())
+            .flatten();
+
+        let room_name = current_room.name.clone();
+        if let Some(tool) = opt_tool {
+            let goal = UseItemOnTile::new(tool.clone(), room_name, target_tile)
+                .allow_room_change(false);
+            Ok(goal.into())
+        } else {
+            let goal = ActivateTile::new(room_name, target_tile)
+                .allow_room_change(false);
+            Ok(goal.into())
         }
-
-        todo!("Handle case where no stones are remaining")
     }
 }
