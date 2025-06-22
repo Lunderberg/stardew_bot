@@ -132,8 +132,13 @@ impl BotGoal for UseItemOnTile {
             .with_tolerance(threshold);
 
         if !movement.is_completed(game_state) && !is_within_range(game_state) {
-            let goal =
-                LogicStack::new().then(movement).cancel_if(is_within_range);
+            let room_name = game_state.player.room_name.clone();
+            let goal = LogicStack::new()
+                .then(movement)
+                .cancel_if(is_within_range)
+                .cancel_if(move |game_state| {
+                    game_state.player.room_name != room_name
+                });
             return Ok(goal.into());
         }
 

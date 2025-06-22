@@ -63,6 +63,20 @@ pub struct Location {
 
     /// Any Villagers or Monsters in the area
     pub characters: Vec<Character>,
+
+    /// Additional values that are only present for the mines.
+    pub mineshaft_details: Option<MineshaftDetails>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct MineshaftDetails {
+    /// Which level of the mines this location is located at.
+    pub mineshaft_level: i32,
+
+    /// If true, this level was initially generated with a ladder.
+    /// For these levels, rocks will never produce a ladder when
+    /// broken.
+    pub generated_ladder: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -855,6 +869,14 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_mineshaft_details",
+            |mineshaft_level: i32, generated_ladder: bool| MineshaftDetails {
+                mineshaft_level,
+                generated_ladder,
+            },
+        )?;
+
+        graph.named_native_function(
             "new_location",
             |name: &str,
              shape: &Vector<isize>,
@@ -867,7 +889,8 @@ impl Location {
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
              buildings: &Vec<Building>,
-             characters: &Vec<Character>| {
+             characters: &Vec<Character>,
+             mineshaft_details: Option<&MineshaftDetails>| {
                 Location {
                     name: name.into(),
                     shape: shape.clone(),
@@ -884,6 +907,7 @@ impl Location {
                     diggable: tiles.collect_diggable_tiles(*shape),
                     action_tiles: tiles.collect_action_tiles(),
                     characters: characters.clone(),
+                    mineshaft_details: mineshaft_details.cloned(),
                 }
             },
         )?;
@@ -1663,6 +1687,25 @@ impl Location {
 
                 let characters = read_location_characters(location);
 
+                let mineshaft = location
+                    .as::<StardewValley.Locations.MineShaft>();
+                let mineshaft_details = if mineshaft.is_some() {
+                    let mineshaft_level = mineshaft
+                        .netMineLevel
+                        .value;
+                    let generated_ladder = mineshaft
+                        .ladderHasSpawned;
+
+                    new_mineshaft_details(
+                        mineshaft_level,
+                        generated_ladder,
+                    )
+                } else {
+                    None
+                };
+
+
+
                 new_location(
                     name,
                     shape,
@@ -1676,6 +1719,7 @@ impl Location {
                     tile_sheets,
                     buildings,
                     characters,
+                    mineshaft_details,
                 )
             }
 

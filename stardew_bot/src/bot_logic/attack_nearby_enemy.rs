@@ -1,6 +1,6 @@
 use crate::{bot_logic::UseItemOnTile, Error, GameState};
 
-use super::bot_logic::{BotInterrupt, LogicStack};
+use super::bot_logic::{BotGoal, BotInterrupt, LogicStack};
 
 pub struct AttackNearbyEnemy {}
 
@@ -40,12 +40,13 @@ impl BotInterrupt for AttackNearbyEnemy {
             return Ok(None);
         };
 
+        let room_name = game_state.player.room_name.clone();
         let goal = UseItemOnTile::new(
             weapon.clone(),
             game_state.player.room_name.clone(),
             nearby_monster.tile(),
         )
-        .allow_room_change(false);
+        .cancel_if(move |game_state| game_state.player.room_name != room_name);
 
         Ok(Some(goal.into()))
     }

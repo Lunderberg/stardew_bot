@@ -5,13 +5,23 @@ use crate::{
         ActivateTile, BotError, GameStateExt as _, InventoryGoal,
         MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
-    game_state::{Item, ObjectKind, Vector},
+    game_state::{Item, ObjectKind, SeededRng, Vector},
     Error, GameAction, GameState,
 };
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
 pub struct MineDelvingGoal;
+
+struct StonePredictor {
+    game_id: u64,
+    days_played: u32,
+    daily_luck: f64,
+    mineshaft_level: i32,
+    num_enemies: usize,
+    num_stones: usize,
+    generated_ladder: bool,
+}
 
 impl MineDelvingGoal {
     pub fn new() -> Self {
@@ -82,7 +92,12 @@ impl MineDelvingGoal {
             ActivateTile::new("Mine", tile)
         };
 
-        Ok(activate_elevator.allow_room_change(false).into())
+        let room_name = game_state.player.room_name.clone();
+        Ok(activate_elevator
+            .cancel_if(move |game_state| {
+                game_state.player.room_name != room_name
+            })
+            .into())
     }
 
     fn at_mine_entrance(
@@ -122,8 +137,8 @@ impl MineDelvingGoal {
             .cloned()
             .ok_or(BotError::MineLadderNotFound)?;
 
-        let descend =
-            ActivateTile::new("Mine", mine_ladder).allow_room_change(false);
+        let descend = ActivateTile::new("Mine", mine_ladder)
+            .cancel_if(|game_state| game_state.player.room_name != "Mine");
         return Ok(descend.into());
     }
 }
@@ -230,13 +245,37 @@ impl BotGoal for MineDelvingGoal {
         } else if let Some(ladder_down) = opt_ladder_down {
             ladder_down
         } else {
-            current_room
-                .pathfinding()
-                .include_border(true)
-                .iter_dijkstra(player_tile)
-                .map(|(tile, _)| tile)
-                .find(|tile| clearable_tiles.contains_key(&tile))
-                .expect("Handle case where everything has been cleared")
+            let predictor = StonePredictor::new(game_state)?;
+            let ladder_stones: HashSet<Vector<isize>> = current_room
+                .objects
+                .iter()
+                .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
+                .map(|obj| obj.tile)
+                .filter(|tile| predictor.will_produce_ladder(*tile))
+                .collect();
+
+            if ladder_stones.is_empty() {
+                current_room
+                    .pathfinding()
+                    .include_border(true)
+                    .iter_dijkstra(player_tile)
+                    .map(|(tile, _)| tile)
+                    .find(|tile| clearable_tiles.contains_key(&tile))
+                    .expect("Handle case where everything has been cleared")
+            } else {
+                current_room
+                    .pathfinding()
+                    .include_border(true)
+                    .stone_clearing_cost(500)
+                    .fiber_clearing_cost(500)
+                    .iter_dijkstra(player_tile)
+                    .map(|(tile, _)| tile)
+                    .find(|tile| ladder_stones.contains(tile))
+                    .expect(
+                        "Handle case where ladder stone exists, \
+                         but is inaccessible",
+                    )
+            }
         };
 
         let path = current_room
@@ -257,15 +296,101 @@ impl BotGoal for MineDelvingGoal {
             .map(|opt| opt.as_ref())
             .flatten();
 
-        let room_name = current_room.name.clone();
         if let Some(tool) = opt_tool {
-            let goal = UseItemOnTile::new(tool.clone(), room_name, target_tile)
-                .allow_room_change(false);
+            let room_name = game_state.player.room_name.clone();
+            let goal = UseItemOnTile::new(
+                tool.clone(),
+                room_name.clone(),
+                target_tile,
+            )
+            .cancel_if(move |game_state| {
+                game_state.player.room_name != room_name
+            });
             Ok(goal.into())
         } else {
-            let goal = ActivateTile::new(room_name, target_tile)
-                .allow_room_change(false);
+            let room_name = game_state.player.room_name.clone();
+            let goal = ActivateTile::new(room_name.clone(), target_tile)
+                .cancel_if(move |game_state| {
+                    game_state.player.room_name != room_name
+                });
             Ok(goal.into())
         }
+    }
+}
+
+impl StonePredictor {
+    pub fn new(game_state: &GameState) -> Result<Self, Error> {
+        let room = game_state.current_room()?;
+
+        let game_id = game_state.globals.unique_id;
+        let daily_luck = game_state.daily.daily_luck;
+        let (mineshaft_level, generated_ladder) =
+            if let Some(details) = &room.mineshaft_details {
+                (details.mineshaft_level, details.generated_ladder)
+            } else {
+                (0, false)
+            };
+
+        let num_enemies = room
+            .characters
+            .iter()
+            .filter(|character| character.health.is_some())
+            .count();
+
+        let num_stones = room
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
+            .count();
+
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
+
+        Ok(Self {
+            game_id,
+            days_played,
+            daily_luck,
+            mineshaft_level,
+            generated_ladder,
+            num_enemies,
+            num_stones,
+        })
+    }
+
+    pub fn ladder_chance(&self) -> f32 {
+        if self.generated_ladder {
+            return 0.0;
+        }
+
+        let base_chance = 0.02;
+        let from_remaining_stones = 1.0 / (self.num_stones.max(1) as f64);
+        let from_daily_luck = self.daily_luck / 5.0;
+        let from_enemies = if self.num_enemies == 0 { 0.04 } else { 0.0 };
+
+        let chance = base_chance
+            + from_remaining_stones
+            + from_daily_luck
+            + from_enemies;
+        chance as f32
+    }
+
+    fn generate_rng(&self, tile: Vector<isize>) -> SeededRng {
+        let mut rng = SeededRng::from_stardew_seed([
+            self.days_played as f64,
+            (self.game_id / 2) as f64,
+            (tile.right * 1000) as f64,
+            tile.down as f64,
+            self.mineshaft_level as f64,
+        ]);
+
+        // Skip unused value;
+        rng.rand_i32();
+
+        rng
+    }
+
+    pub fn will_produce_ladder(&self, tile: Vector<isize>) -> bool {
+        let mut rng = self.generate_rng(tile);
+        rng.rand_float() < self.ladder_chance()
     }
 }

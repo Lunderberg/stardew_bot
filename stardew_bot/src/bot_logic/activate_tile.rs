@@ -65,6 +65,15 @@ impl BotGoal for ActivateTile {
         let movement =
             MovementGoal::new(self.room.clone(), self.tile.map(|x| x as f32))
                 .with_tolerance(1.4);
-        Ok(movement.into())
+        if self.allow_room_change {
+            let room_name = game_state.player.room_name.clone();
+            Ok(movement
+                .cancel_if(move |game_state| {
+                    game_state.player.room_name != room_name
+                })
+                .into())
+        } else {
+            Ok(movement.into())
+        }
     }
 }
