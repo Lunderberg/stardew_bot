@@ -15,6 +15,7 @@ pub struct UseItemOnTile {
     room: String,
     tile: Vector<isize>,
     item_has_been_used: bool,
+    allow_room_change: bool,
 }
 
 impl UseItemOnTile {
@@ -29,6 +30,14 @@ impl UseItemOnTile {
             room,
             tile,
             item_has_been_used: false,
+            allow_room_change: true,
+        }
+    }
+
+    pub fn allow_room_change(self, allow_room_change: bool) -> Self {
+        Self {
+            allow_room_change,
+            ..self
         }
     }
 }
@@ -44,6 +53,10 @@ impl BotGoal for UseItemOnTile {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
+
+        if !self.allow_room_change && game_state.player.room_name != self.room {
+            return Ok(BotGoalResult::Completed);
+        }
 
         if player.using_tool {
             let is_tool = player

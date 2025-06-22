@@ -52,5 +52,8 @@ pub use mail_menu::MailMenu;
 mod shop_menu;
 pub use shop_menu::ShopMenu;
 
+mod mine_elevator_menu;
+pub use mine_elevator_menu::MineElevatorMenu;
+
 mod rng_state;
 pub use rng_state::SeededRng;

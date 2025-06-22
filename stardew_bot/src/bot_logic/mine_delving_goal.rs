@@ -6,7 +6,7 @@ use crate::{
         MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{Item, ObjectKind, Vector},
-    Error, GameState,
+    Error, GameAction, GameState,
 };
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
@@ -31,6 +31,101 @@ impl MineDelvingGoal {
 
         Ok(current_day < 5 || reached_bottom)
     }
+
+    fn elevator_to_floor(
+        &self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+        depth: usize,
+    ) -> Result<BotGoalResult, Error> {
+        let room_name = &game_state.player.room_name;
+        let is_in_mines = room_name.starts_with("UndergroundMine");
+
+        if is_in_mines && room_name == &format!("UndergroundMine{depth}") {
+            return Ok(BotGoalResult::Completed);
+        }
+
+        if let Some(menu) = &game_state.mine_elevator_menu {
+            let i_button = depth / 5;
+            let pixel =
+                menu.buttons.get(i_button).cloned().unwrap_or_else(|| {
+                    panic!(
+                        "TODO: Requested depth {depth}, \
+                         which requires button {i_button}, \
+                         but elevator only has {} buttons",
+                        menu.buttons.len(),
+                    )
+                });
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        let activate_elevator = if is_in_mines {
+            let tile = game_state
+                .current_room()?
+                .objects
+                .iter()
+                .find(|obj| matches!(obj.kind, ObjectKind::MineElevator))
+                .ok_or(BotError::MineElevatorNotFound)?
+                .tile;
+            ActivateTile::new(game_state.player.room_name.clone(), tile)
+        } else {
+            let tile = game_state
+                .get_room("Mine")?
+                .action_tiles
+                .iter()
+                .find(|(_, action)| action == "MineElevator")
+                .map(|(tile, _)| tile)
+                .cloned()
+                .ok_or(BotError::MineElevatorNotFound)?;
+            ActivateTile::new("Mine", tile)
+        };
+
+        Ok(activate_elevator.allow_room_change(false).into())
+    }
+
+    fn at_mine_entrance(
+        &self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        let prepare = InventoryGoal::empty()
+            .room("Mine")
+            .with_exactly(Item::STONE.clone().with_count(100))
+            .with(Item::PICKAXE)
+            .stamina_recovery_slots(2)
+            .with_weapon();
+        if !prepare.is_completed(game_state)? {
+            return Ok(prepare.into());
+        }
+
+        let elevator_depth =
+            game_state.globals.lowest_mine_level_reached.clamp(0, 120) as usize;
+
+        if elevator_depth >= 5 {
+            return self.elevator_to_floor(game_state, actions, elevator_depth);
+        }
+
+        let mine_ladder = game_state
+            .current_room()?
+            .action_tiles
+            .iter()
+            .find(|(_, action)| {
+                if elevator_depth == 0 {
+                    action == "Mine"
+                } else {
+                    action == "MineElevator"
+                }
+            })
+            .map(|(tile, _)| tile)
+            .cloned()
+            .ok_or(BotError::MineLadderNotFound)?;
+
+        let descend =
+            ActivateTile::new("Mine", mine_ladder).allow_room_change(false);
+        return Ok(descend.into());
+    }
 }
 
 impl BotGoal for MineDelvingGoal {
@@ -41,7 +136,7 @@ impl BotGoal for MineDelvingGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        _actions: &mut ActionCollector,
+        actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state)? {
             return Ok(BotGoalResult::Completed);
@@ -76,28 +171,14 @@ impl BotGoal for MineDelvingGoal {
 
         if current_room.name == "Mine" {
             // Currently at the top level of the mines
+            return self.at_mine_entrance(game_state, actions);
+        }
 
-            let prepare = InventoryGoal::empty()
-                .room("Mine")
-                .with_exactly(Item::STONE.clone().with_count(100))
-                .with(Item::PICKAXE)
-                .stamina_recovery_slots(2)
-                .with_weapon();
-            if !prepare.is_completed(game_state)? {
-                return Ok(prepare.into());
-            }
-
-            let mine_ladder = current_room
-                .action_tiles
-                .iter()
-                .find(|(_, action)| action == "Mine")
-                .map(|(tile, _)| tile)
-                .cloned()
-                .ok_or(BotError::MineLadderNotFound)?;
-
-            let descend = ActivateTile::new("Mine", mine_ladder)
-                .cancel_if(|game_state| game_state.player.room_name != "Mine");
-            return Ok(descend.into());
+        if game_state.dialogue_menu.is_some() {
+            // The return-to-surface menu is open, so send a
+            // confirmation.
+            actions.do_action(GameAction::ConfirmMenu);
+            return Ok(BotGoalResult::InProgress);
         }
 
         let goal = MaintainStaminaGoal::new();
@@ -119,7 +200,14 @@ impl BotGoal for MineDelvingGoal {
         let opt_ladder = current_room
             .objects
             .iter()
-            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
+            .find(|obj| {
+                let has_stamina = game_state.player.current_stamina > 5.0;
+                match obj.kind {
+                    ObjectKind::MineLadderDown => has_stamina,
+                    ObjectKind::MineLadderUp => !has_stamina,
+                    _ => false,
+                }
+            })
             .map(|obj| obj.tile);
         if let Some(ladder) = opt_ladder {
             let path = current_room
@@ -136,13 +224,12 @@ impl BotGoal for MineDelvingGoal {
 
             if let Some(stone_in_path) = opt_stone_in_path {
                 let goal =
-                    UseItemOnTile::new(Item::PICKAXE, room_name, stone_in_path);
+                    UseItemOnTile::new(Item::PICKAXE, room_name, stone_in_path)
+                        .allow_room_change(false);
                 return Ok(goal.into());
             } else {
                 let goal = ActivateTile::new(room_name.clone(), ladder)
-                    .cancel_if(move |game_state| {
-                        game_state.player.room_name != room_name
-                    });
+                    .allow_room_change(false);
                 return Ok(goal.into());
             }
         }
@@ -159,7 +246,8 @@ impl BotGoal for MineDelvingGoal {
                 Item::PICKAXE,
                 current_room.name.clone(),
                 next_stone,
-            );
+            )
+            .allow_room_change(false);
             return Ok(goal.into());
         }
 

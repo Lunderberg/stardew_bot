@@ -7,8 +7,8 @@ use crate::{bot_logic::BotError, Error};
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
     DialogueMenu, DisplayState, FishingState, GlobalGameState, InputState,
-    Inventory, Location, LocationDelta, MailMenu, PauseMenu, PlayerState,
-    SeededRng, ShopMenu,
+    Inventory, Location, LocationDelta, MailMenu, MineElevatorMenu, PauseMenu,
+    PlayerState, SeededRng, ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -28,6 +28,7 @@ pub struct GameState {
     pub shop_menu: Option<ShopMenu>,
     pub pause_menu: Option<PauseMenu>,
     pub mail_menu: Option<MailMenu>,
+    pub mine_elevator_menu: Option<MineElevatorMenu>,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,7 @@ pub struct GameStateDelta {
     shop_menu: Option<ShopMenu>,
     pause_menu: Option<PauseMenu>,
     mail_menu: Option<MailMenu>,
+    mine_elevator_menu: Option<MineElevatorMenu>,
 }
 
 impl GameState {
@@ -75,6 +77,7 @@ impl GameState {
         ShopMenu::def_read_shop_menu(&mut graph)?;
         PauseMenu::def_read_pause_menu(&mut graph)?;
         MailMenu::def_read_mail_menu(&mut graph)?;
+        MineElevatorMenu::def_read_mine_elevator_menu(&mut graph)?;
 
         graph.named_native_function(
             "new_game_state",
@@ -90,21 +93,25 @@ impl GameState {
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
-             mail_menu: Option<&MailMenu>| GameState {
-                globals: global_game_state.clone(),
-                locations: locations.clone(),
-                player: player.clone(),
-                fishing: fishing.clone(),
-                daily: daily.clone(),
-                inputs: inputs.clone(),
-                display: display.clone(),
-                rng_state: RngState::new(current_rng.clone()),
+             mail_menu: Option<&MailMenu>,
+             mine_elevator_menu: Option<&MineElevatorMenu>| {
+                GameState {
+                    globals: global_game_state.clone(),
+                    locations: locations.clone(),
+                    player: player.clone(),
+                    fishing: fishing.clone(),
+                    daily: daily.clone(),
+                    inputs: inputs.clone(),
+                    display: display.clone(),
+                    rng_state: RngState::new(current_rng.clone()),
 
-                chest_menu: chest_menu.cloned(),
-                dialogue_menu: dialogue_menu.cloned(),
-                shop_menu: shop_menu.cloned(),
-                pause_menu: pause_menu.cloned(),
-                mail_menu: mail_menu.cloned(),
+                    chest_menu: chest_menu.cloned(),
+                    dialogue_menu: dialogue_menu.cloned(),
+                    shop_menu: shop_menu.cloned(),
+                    pause_menu: pause_menu.cloned(),
+                    mail_menu: mail_menu.cloned(),
+                    mine_elevator_menu: mine_elevator_menu.cloned(),
+                }
             },
         )?;
 
@@ -122,21 +129,25 @@ impl GameState {
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
-             mail_menu: Option<&MailMenu>| GameStateDelta {
-                global_game_state: global_game_state.clone(),
-                location_delta: location_delta.clone(),
-                player: player.clone(),
-                fishing: fishing.clone(),
-                daily: daily.clone(),
-                inputs: inputs.clone(),
-                display: display.clone(),
-                current_rng_state: rng_state.clone(),
+             mail_menu: Option<&MailMenu>,
+             mine_elevator_menu: Option<&MineElevatorMenu>| {
+                GameStateDelta {
+                    global_game_state: global_game_state.clone(),
+                    location_delta: location_delta.clone(),
+                    player: player.clone(),
+                    fishing: fishing.clone(),
+                    daily: daily.clone(),
+                    inputs: inputs.clone(),
+                    display: display.clone(),
+                    current_rng_state: rng_state.clone(),
 
-                chest_menu: chest_menu.cloned(),
-                dialogue_menu: dialogue_menu.cloned(),
-                shop_menu: shop_menu.cloned(),
-                pause_menu: pause_menu.cloned(),
-                mail_menu: mail_menu.cloned(),
+                    chest_menu: chest_menu.cloned(),
+                    dialogue_menu: dialogue_menu.cloned(),
+                    shop_menu: shop_menu.cloned(),
+                    pause_menu: pause_menu.cloned(),
+                    mail_menu: mail_menu.cloned(),
+                    mine_elevator_menu: mine_elevator_menu.cloned(),
+                }
             },
         )?;
 
@@ -188,6 +199,7 @@ impl GameState {
                 let shop_menu = read_shop_menu();
                 let pause_menu = read_pause_menu();
                 let mail_menu = read_mail_menu();
+                let mine_elevator_menu = read_mine_elevator_menu();
 
                 new_game_state(
                     global_game_state,
@@ -204,6 +216,7 @@ impl GameState {
                     shop_menu,
                     pause_menu,
                     mail_menu,
+                    mine_elevator_menu,
                 )
             }
 
@@ -225,6 +238,7 @@ impl GameState {
                 let shop_menu = read_shop_menu();
                 let pause_menu = read_pause_menu();
                 let mail_menu = read_mail_menu();
+                let mine_elevator_menu = read_mine_elevator_menu();
 
                 new_game_state_delta(
                     global_game_state,
@@ -241,6 +255,7 @@ impl GameState {
                     shop_menu,
                     pause_menu,
                     mail_menu,
+                    mine_elevator_menu,
                 )
             }
 
@@ -284,6 +299,7 @@ impl GameState {
         self.shop_menu = delta.shop_menu;
         self.pause_menu = delta.pause_menu;
         self.mail_menu = delta.mail_menu;
+        self.mine_elevator_menu = delta.mine_elevator_menu;
 
         if let Some(loc) = self
             .locations
