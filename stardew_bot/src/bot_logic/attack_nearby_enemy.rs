@@ -1,6 +1,9 @@
 use crate::{bot_logic::UseItemOnTile, Error, GameState};
 
-use super::bot_logic::{BotGoal, BotInterrupt, LogicStack};
+use super::{
+    best_weapon,
+    bot_logic::{BotGoal, BotInterrupt, LogicStack},
+};
 
 pub struct AttackNearbyEnemy {}
 
@@ -19,11 +22,7 @@ impl BotInterrupt for AttackNearbyEnemy {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
-        let opt_weapon = game_state
-            .player
-            .inventory
-            .iter_items()
-            .find(|item| item.as_weapon().is_some());
+        let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
         let Some(weapon) = opt_weapon else {
             return Ok(None);
         };

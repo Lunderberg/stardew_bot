@@ -182,17 +182,20 @@ impl InventoryGoal {
     }
 }
 
-fn best_weapon<'a>(
+pub(super) fn best_weapon<'a>(
     iter: impl IntoIterator<Item = &'a Item>,
-) -> Option<&'a ItemId> {
+) -> Option<&'a Item> {
     iter.into_iter()
         .filter(|item| item.as_weapon().is_some())
         .max_by_key(|item| {
             let as_weapon = item.as_weapon().unwrap();
-            let is_club = matches!(as_weapon.kind, WeaponKind::Club);
-            (is_club, as_weapon.min_damage)
+            let kind = match &as_weapon.kind {
+                WeaponKind::Club => 2,
+                WeaponKind::Sword => 1,
+                WeaponKind::Dagger => 0,
+            };
+            (kind, as_weapon.min_damage)
         })
-        .map(|item| &item.id)
 }
 
 impl InventoryGoal {
@@ -254,7 +257,8 @@ impl InventoryGoal {
             .collect();
 
         let opt_current_weapon =
-            best_weapon(inventory.iter_items().filter(|_| self.with_weapon));
+            best_weapon(inventory.iter_items().filter(|_| self.with_weapon))
+                .map(|item| &item.id);
 
         // Items that should be transferred from the player to a
         // chest.  Values are the desired number of items in the
@@ -307,7 +311,8 @@ impl InventoryGoal {
         // up.
         if self.with_weapon && opt_current_weapon.is_none() {
             let opt_stored_weapon =
-                best_weapon(iter_chest_items()?.map(|(_, _, item)| item));
+                best_weapon(iter_chest_items()?.map(|(_, _, item)| item))
+                    .map(|item| &item.id);
             if let Some(stored_weapon) = opt_stored_weapon {
                 chest_to_player.insert(stored_weapon.clone(), 1);
             }

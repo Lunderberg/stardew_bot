@@ -10,6 +10,7 @@ use crate::{
 };
 
 use super::{
+    best_weapon,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, BotInterrupt},
     ObjectKindExt as _,
 };
@@ -243,11 +244,7 @@ impl BotGoal for MineSingleLevel {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let opt_weapon = game_state
-            .player
-            .inventory
-            .iter_items()
-            .find(|item| item.as_weapon().is_some());
+        let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
 
         let clearable_tiles: HashMap<Vector<isize>, Option<Item>> =
             current_room
