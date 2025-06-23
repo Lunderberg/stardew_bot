@@ -16,7 +16,7 @@ struct WalkTowardDebris {
 impl CollectNearbyItems {
     pub fn new() -> Self {
         Self {
-            search_radius: 2.25,
+            search_radius: 2.15,
         }
     }
 
