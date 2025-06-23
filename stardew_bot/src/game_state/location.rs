@@ -167,6 +167,16 @@ pub struct Chest {
     pub is_opening: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct Furnace {
+    /// True if the product is ready to harvest.  Otherwise, false.
+    pub ready_to_harvest: bool,
+
+    /// True if the machine has been loaded up with ingredients.
+    /// Otherwise, false.
+    pub has_held_item: bool,
+}
+
 /// Non-fruit trees.  This includes the small 1x1 stumps left behind
 /// after chopping down a tree, but not the larger 2x2 stumps made
 /// during worldgen.
@@ -287,6 +297,9 @@ pub enum ObjectKind {
 
     /// A cart in the mines that contains coal.
     MineCartCoal,
+
+    /// A furnace in which ore can be smelted.
+    Furnace(Furnace),
 
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
@@ -734,6 +747,16 @@ impl Location {
                 ObjectKind::Chest(Chest {
                     inventory,
                     is_opening,
+                })
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_furnace_kind",
+            |ready_to_harvest: bool, has_held_item: bool| {
+                ObjectKind::Furnace(Furnace {
+                    ready_to_harvest,
+                    has_held_item,
                 })
             },
         )?;
@@ -1213,6 +1236,9 @@ impl Location {
                         let name = obj.netName.value.read_string();
                         let id = obj._qualifiedItemId.read_string();
 
+
+
+
                         let kind = if chest.is_some() {
                             let inventory = read_inventory(chest.netItems.value);
                             let special_kind = chest.specialChestType.value;
@@ -1230,11 +1256,25 @@ impl Location {
                             new_litter_kind(name, id)
                         } else if category == -2i32 {
                             new_mineral_kind(name, id)
+                        } else if category == -9i32
+                            && obj.parentSheetIndex.value == 13i32 {
+                            let ready_to_harvest = obj.readyForHarvest.value;
+                            let has_held_item = obj
+                                .heldObject
+                                .value
+                                .is_some();
+                            new_furnace_kind(
+                                ready_to_harvest,
+                                has_held_item,
+                            )
                         } else {
                             new_other_object_kind(category, name, id)
                         };
 
-                        new_object(tile,kind)
+                        new_object(
+                            tile,
+                            kind,
+                        )
                     })
                     .filter(|obj| obj.is_some())
             }
@@ -2119,7 +2159,8 @@ impl ObjectKind {
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,
 
-            ObjectKind::MineLadderUp
+            ObjectKind::Furnace(_)
+            | ObjectKind::MineLadderUp
             | ObjectKind::MineLadderDown
             | ObjectKind::MineHoleDown
             | ObjectKind::MineElevator
@@ -2140,6 +2181,13 @@ impl ObjectKind {
     pub fn as_chest(&self) -> Option<&Chest> {
         match self {
             ObjectKind::Chest(chest) => Some(chest),
+            _ => None,
+        }
+    }
+
+    pub fn as_furnace(&self) -> Option<&Furnace> {
+        match self {
+            ObjectKind::Furnace(furnace) => Some(furnace),
             _ => None,
         }
     }
@@ -2460,6 +2508,7 @@ impl std::fmt::Display for ObjectKind {
             Self::MineHoleDown => write!(f, "MineHoleDown"),
             Self::MineElevator => write!(f, "MineElevator"),
             Self::MineCartCoal => write!(f, "MineCartCoal"),
+            Self::Furnace(furnace) => write!(f, "{furnace}"),
 
             Self::Other { category, name, id } => {
                 write!(f, "Other({category}, '{name}', '{id}')")
@@ -2506,6 +2555,18 @@ impl std::fmt::Display for MineralKind {
             MineralKind::Other { name, id } => {
                 write!(f, "MineralKind::Other('{name}', '{id}')")
             }
+        }
+    }
+}
+
+impl std::fmt::Display for Furnace {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.ready_to_harvest {
+            write!(f, "Furnace(harvestable)")
+        } else if self.has_held_item {
+            write!(f, "Furnace(running)")
+        } else {
+            write!(f, "Furnace(empty)")
         }
     }
 }

@@ -81,6 +81,7 @@ impl CropPlantingPlan {
                         | ObjectKind::MineCartCoal
                         | ObjectKind::FruitTree(_)
                         | ObjectKind::Chest(_)
+                        | ObjectKind::Furnace(_)
                         | ObjectKind::Other { .. }
                         | ObjectKind::Unknown => true,
                     })
@@ -235,7 +236,8 @@ impl BotGoal for PlantCropsGoal {
                         | ObjectKind::Other { .. }
                         | ObjectKind::Unknown
                         | ObjectKind::FruitTree(_)
-                        | ObjectKind::Chest(_),
+                        | ObjectKind::Chest(_)
+                        | ObjectKind::Furnace(_),
                     ) => unreachable!(
                         "These tiles were excluded from the planning step"
                     ),

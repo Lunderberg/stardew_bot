@@ -791,6 +791,11 @@ impl LogicStack {
         Self(Default::default())
     }
 
+    pub fn with_item(mut self, item: LogicStackItem) -> Self {
+        self.0.push_front(item);
+        self
+    }
+
     pub fn then(mut self, goal: impl BotGoal + 'static) -> Self {
         // Push onto the beginning of the stack, such that the new
         // goal will be the last item executed.

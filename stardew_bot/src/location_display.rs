@@ -279,6 +279,7 @@ impl<'a> DrawableGameLocation<'a> {
                     ObjectKind::ArtifactSpot => None,
                     ObjectKind::SeedSpot => None,
                     ObjectKind::Chest(_) => None,
+                    ObjectKind::Furnace(_) => None,
                     ObjectKind::MineLadderUp => None,
                     ObjectKind::MineLadderDown => Some(Color::Rgb(140, 20, 20)),
                     ObjectKind::MineHoleDown => None,

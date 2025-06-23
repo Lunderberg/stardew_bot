@@ -535,10 +535,10 @@ impl InventoryGoal {
         Ok(self.next_transfer(game_state)?.is_none())
     }
 
-    pub fn has_sufficient_stored(
+    pub fn total_stored_and_carried<'a>(
         &self,
-        game_state: &GameState,
-    ) -> Result<bool, Error> {
+        game_state: &'a GameState,
+    ) -> Result<HashMap<&'a ItemId, usize>, Error> {
         let iter_current = game_state.player.inventory.iter_items();
 
         let iter_stored = game_state
@@ -553,6 +553,15 @@ impl InventoryGoal {
             .map(|item| (&item.id, item.count))
             .into_grouping_map()
             .sum();
+
+        Ok(total)
+    }
+
+    pub fn has_sufficient_stored(
+        &self,
+        game_state: &GameState,
+    ) -> Result<bool, Error> {
+        let total = self.total_stored_and_carried(game_state)?;
 
         let can_reach_goal = self.bounds.iter().all(|(item, bound)| {
             bound

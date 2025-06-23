@@ -88,6 +88,7 @@ impl ObjectKindExt for ObjectKind {
             | ObjectKind::FruitTree(_)
             | ObjectKind::HoeDirt(_)
             | ObjectKind::Chest(_)
+            | ObjectKind::Furnace(_)
             | ObjectKind::Other { .. }
             | ObjectKind::Unknown => None,
         }

@@ -2,11 +2,12 @@ use std::collections::{HashMap, HashSet};
 
 use crate::{
     bot_logic::{
-        ActivateTile, BotError, GameStateExt as _, InventoryGoal,
-        MaintainStaminaGoal, MovementGoal, UseItemOnTile,
+        bot_logic::LogicStackItem, ActivateTile, BotError, GameStateExt as _,
+        InventoryGoal, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{
-        Item, ObjectKind, ResourceClumpKind, SeededRng, StoneKind, Vector,
+        Item, ItemId, ObjectKind, ResourceClumpKind, SeededRng, StoneKind,
+        Vector,
     },
     Error, GameAction, GameState,
 };
@@ -116,6 +117,102 @@ impl MineDelvingGoal {
             .into())
     }
 
+    fn start_smelting(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        if game_state.player.room_name != "Mine" {
+            return Ok(None);
+        }
+
+        let loc = game_state.current_room()?;
+        let num_free_furnaces = loc
+            .objects
+            .iter()
+            .filter(|obj| {
+                obj.kind
+                    .as_furnace()
+                    .map(|furnace| {
+                        !furnace.has_held_item || furnace.ready_to_harvest
+                    })
+                    .unwrap_or(false)
+            })
+            .count();
+
+        if num_free_furnaces == 0 {
+            return Ok(None);
+        }
+
+        let available = InventoryGoal::current()
+            .room("Mine")
+            .total_stored_and_carried(game_state)?;
+        let get_available = |item: &ItemId| -> usize {
+            available.get(item).cloned().unwrap_or(0)
+        };
+
+        let num_to_smelt = num_free_furnaces.min(get_available(&Item::COAL.id));
+
+        if num_to_smelt == 0 {
+            return Ok(None);
+        }
+
+        let num_iron_bars =
+            (get_available(&Item::IRON_ORE.id) / 5).min(num_to_smelt);
+        let num_to_smelt = num_to_smelt - num_iron_bars;
+
+        let num_copper_bars =
+            (get_available(&Item::COPPER_ORE.id) / 5).min(num_to_smelt);
+
+        if num_iron_bars == 0 && num_copper_bars == 0 {
+            return Ok(None);
+        }
+
+        let prepare = InventoryGoal::current()
+            .room("Mine")
+            .with_exactly(
+                Item::COAL
+                    .clone()
+                    .with_count(num_iron_bars + num_copper_bars),
+            )
+            .with_exactly(
+                Item::COPPER_ORE.clone().with_count(num_copper_bars * 5),
+            )
+            .with_exactly(Item::IRON_ORE.clone().with_count(num_iron_bars * 5));
+
+        let mut iter_smelt = std::iter::empty()
+            .chain(std::iter::repeat_n(Item::COPPER_ORE, num_copper_bars))
+            .chain(std::iter::repeat_n(Item::IRON_ORE, num_iron_bars));
+
+        let stack = loc
+            .objects
+            .iter()
+            .filter_map(|obj| {
+                obj.kind.as_furnace().map(|furnace| (obj.tile, furnace))
+            })
+            .flat_map(|(tile, furnace)| -> [Option<LogicStackItem>; 2] {
+                let take_complete = furnace
+                    .ready_to_harvest
+                    .then(|| ActivateTile::new("Mine", tile))
+                    .map(Into::into);
+                let start_new = (furnace.ready_to_harvest
+                    || !furnace.has_held_item)
+                    .then(|| {
+                        iter_smelt
+                            .next()
+                            .map(|ore| UseItemOnTile::new(ore, "Mine", tile))
+                    })
+                    .flatten()
+                    .map(Into::into);
+                [take_complete, start_new]
+            })
+            .flatten()
+            .fold(LogicStack::new().then(prepare), |stack, goal| {
+                stack.with_item(goal)
+            });
+
+        Ok(Some(stack))
+    }
+
     fn expand_furnace_array(
         &self,
         game_state: &GameState,
@@ -173,6 +270,10 @@ impl MineDelvingGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        if let Some(start_smelting) = self.start_smelting(game_state)? {
+            return Ok(start_smelting.into());
+        }
+
         if let Some(craft_furnace) = self.expand_furnace_array(game_state)? {
             return Ok(craft_furnace.into());
         }
@@ -371,7 +472,7 @@ impl BotGoal for MineSingleLevel {
             let get_count = |item: &Item| {
                 inventory.get(item.as_ref()).cloned().unwrap_or(0)
             };
-            get_count(&Item::COPPER_ORE) > 50 || get_count(&Item::IRON_ORE) > 50
+            get_count(&Item::COPPER_ORE) >= 5 || get_count(&Item::IRON_ORE) >= 5
         };
 
         let ladder_up = current_room
@@ -386,6 +487,13 @@ impl BotGoal for MineSingleLevel {
             .iter()
             .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
             .map(|obj| obj.tile);
+
+        let pathfinding = current_room
+            .pathfinding()
+            .include_border(true)
+            .mine_boulder_clearing_cost(10000)
+            .stone_clearing_cost(2000)
+            .fiber_clearing_cost(500);
 
         let target_tile = if should_go_up {
             ladder_up
@@ -402,19 +510,13 @@ impl BotGoal for MineSingleLevel {
                 .collect();
 
             if ladder_stones.is_empty() {
-                current_room
-                    .pathfinding()
-                    .include_border(true)
+                pathfinding
                     .iter_dijkstra(player_tile)
                     .map(|(tile, _)| tile)
                     .find(|tile| clearable_tiles.contains_key(&tile))
                     .expect("Handle case where everything has been cleared")
             } else {
-                current_room
-                    .pathfinding()
-                    .include_border(true)
-                    .stone_clearing_cost(500)
-                    .fiber_clearing_cost(500)
+                pathfinding
                     .iter_dijkstra(player_tile)
                     .map(|(tile, _)| tile)
                     .find(|tile| ladder_stones.contains(tile))
@@ -425,11 +527,7 @@ impl BotGoal for MineSingleLevel {
             }
         };
 
-        let path = current_room
-            .pathfinding()
-            .stone_clearing_cost(2000)
-            .fiber_clearing_cost(500)
-            .include_border(true)
+        let path = pathfinding
             .allow_diagonal(false)
             .path_between(player_tile, target_tile)?;
 

@@ -124,12 +124,11 @@ mod detail {
 
 impl Location {
     pub fn pathfinding(&self) -> Pathfinding {
-        let clear_boulders = self.mineshaft_details.as_ref().map(|_| 10000);
         Pathfinding {
             location: self,
             allow_diagonal: true,
             clear_stone: None,
-            clear_boulders,
+            clear_boulders: None,
             clear_wood: None,
             clear_fiber: None,
             clear_trees: None,
@@ -149,6 +148,12 @@ impl Pathfinding<'_> {
     pub fn stone_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_stone: Some(cost),
+            ..self
+        }
+    }
+    pub fn mine_boulder_clearing_cost(self, cost: u64) -> Self {
+        Self {
+            clear_boulders: Some(cost),
             ..self
         }
     }

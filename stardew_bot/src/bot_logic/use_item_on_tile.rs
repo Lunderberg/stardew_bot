@@ -83,6 +83,15 @@ impl BotGoal for UseItemOnTile {
             return Ok(BotGoalResult::Completed);
         }
 
+        if game_state
+            .player
+            .inventory
+            .current_slot(&self.item)
+            .is_none()
+        {
+            return Ok(BotGoalResult::Completed);
+        }
+
         let select_item = SelectItemGoal::new(self.item.clone());
         if !select_item.is_completed(game_state) {
             return Ok(select_item.into());
