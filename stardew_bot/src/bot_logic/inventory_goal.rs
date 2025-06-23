@@ -534,6 +534,38 @@ impl InventoryGoal {
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         Ok(self.next_transfer(game_state)?.is_none())
     }
+
+    pub fn has_sufficient_stored(
+        &self,
+        game_state: &GameState,
+    ) -> Result<bool, Error> {
+        let iter_current = game_state.player.inventory.iter_items();
+
+        let iter_stored = game_state
+            .get_room(self.room.as_ref())?
+            .objects
+            .iter()
+            .filter_map(|obj| obj.kind.as_chest())
+            .flat_map(|chest| chest.iter_items());
+
+        let total: HashMap<&ItemId, usize> = iter_current
+            .chain(iter_stored)
+            .map(|item| (&item.id, item.count))
+            .into_grouping_map()
+            .sum();
+
+        let can_reach_goal = self.bounds.iter().all(|(item, bound)| {
+            bound
+                .min
+                .map(|min| {
+                    let available = total.get(item).cloned().unwrap_or(0);
+                    available >= min
+                })
+                .unwrap_or(true)
+        });
+
+        Ok(can_reach_goal)
+    }
 }
 
 impl BotGoal for InventoryGoal {

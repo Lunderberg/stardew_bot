@@ -140,6 +140,7 @@ impl Item {
     pub const PINE_SEED: Item = Item::new_const("(O)311");
 
     pub const CHEST: Item = Item::new_const("(BC)130");
+    pub const FURNACE: Item = Item::new_const("(BC)13");
 
     pub const DAFFODIL: Item = Item::new_const("(O)18");
 

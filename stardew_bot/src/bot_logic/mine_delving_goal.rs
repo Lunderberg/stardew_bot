@@ -13,8 +13,10 @@ use crate::{
 
 use super::{
     best_weapon,
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, BotInterrupt},
-    ObjectKindExt as _,
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+    },
+    CraftItemGoal, ObjectKindExt as _,
 };
 
 pub struct MineDelvingGoal;
@@ -114,11 +116,67 @@ impl MineDelvingGoal {
             .into())
     }
 
+    fn expand_furnace_array(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        if game_state.player.room_name != "Mine" {
+            return Ok(None);
+        }
+
+        let offsets: [Vector<isize>; 12] = [
+            // Along back wall of mines
+            Vector::new(1, 1),
+            Vector::new(2, 1),
+            Vector::new(3, 1),
+            Vector::new(4, 1),
+            Vector::new(5, 1),
+            Vector::new(6, 1),
+            Vector::new(7, 1),
+            Vector::new(8, 1),
+            // Along right wall of mines
+            Vector::new(8, 2),
+            Vector::new(8, 3),
+            Vector::new(8, 4),
+            Vector::new(8, 5),
+        ];
+
+        let mine_elevator = game_state.get_mine_elevator()?;
+        let walkable = game_state.current_room()?.pathfinding().walkable();
+
+        let opt_build_next = offsets
+            .into_iter()
+            .map(|offset| mine_elevator + offset)
+            .find(|tile| walkable[*tile]);
+        let Some(tile) = opt_build_next else {
+            return Ok(None);
+        };
+
+        let prepare = InventoryGoal::current()
+            .room("Mine")
+            .with(Item::STONE.clone().with_count(25))
+            .with(Item::COPPER_ORE.clone().with_count(20));
+        let craft = CraftItemGoal::new(Item::FURNACE);
+        let place = UseItemOnTile::new(Item::FURNACE, "Mine", tile);
+
+        if !prepare.has_sufficient_stored(game_state)? {
+            return Ok(None);
+        }
+
+        let stack = LogicStack::new().then(prepare).then(craft).then(place);
+
+        Ok(Some(stack))
+    }
+
     fn at_mine_entrance(
         &self,
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        if let Some(craft_furnace) = self.expand_furnace_array(game_state)? {
+            return Ok(craft_furnace.into());
+        }
+
         let prepare = InventoryGoal::empty()
             .room("Mine")
             .with_exactly(Item::STONE.clone().with_count(100))
