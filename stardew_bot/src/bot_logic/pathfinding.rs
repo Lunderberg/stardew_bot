@@ -191,11 +191,23 @@ impl Pathfinding<'_> {
         }
     }
 
-    fn movement_cost(&self) -> TileMap<Option<u64>> {
+    /// An iterator of (tile,movement_cost)
+    ///
+    /// Each element specifies a tile, and an update to the movement
+    /// cost required for passing through a tile.  If any update is
+    /// `None`, then that tile is impassable.
+    fn movement_cost_component(
+        &self,
+    ) -> impl Iterator<Item = (Vector<isize>, Option<u64>)> + '_ {
         let loc = &self.location;
-        let mut map = loc
+
+        // Handle tiles that are not passable, even with an additional
+        // movement cost.
+        let iter_blocked = loc
             .blocked
-            .map(|&blocked| if blocked { None } else { Some(0) });
+            .iter()
+            .filter(|(_, b)| **b)
+            .map(|(tile, _)| tile);
 
         let iter_water = loc.iter_water_tiles();
 
@@ -209,17 +221,16 @@ impl Pathfinding<'_> {
 
         let iter_buildings = loc.iter_building_tiles();
 
-        // Handle tiles that are not passable, even with an additional
-        // movement cost.
-        std::iter::empty()
+        let iter_unwalkable = std::iter::empty()
+            .chain(iter_blocked)
             .chain(iter_water)
             .chain(iter_bush)
             .chain(iter_furniture)
             .chain(iter_buildings)
-            .for_each(|tile| {
-                map[tile] = None;
-            });
+            .map(|tile| (tile, None));
 
+        // Handle tiles that may be passable, but with an additional
+        // movement cost.
         let iter_clumps = loc.resource_clumps.iter().flat_map(|clump| {
             let opt_cost = match &clump.kind {
                 ResourceClumpKind::MineBoulder => self.clear_boulders,
@@ -246,24 +257,39 @@ impl Pathfinding<'_> {
             Some((obj.tile, opt_cost))
         });
 
-        // Handle tiles that may be passable, but with an additional
-        // movement cost.
         std::iter::empty()
+            .chain(iter_unwalkable)
             .chain(iter_clumps)
             .chain(iter_obj)
-            .for_each(|(tile, opt_cost)| {
-                map[tile] = match (map[tile], opt_cost) {
-                    (None, _) | (_, None) => None,
-                    (Some(a), Some(b)) => {
-                        // Add the two costs together, as some objects can
-                        // coexist on the same tile.  For example, a stone
-                        // that has grass underneath it.
-                        Some(a + b)
-                    }
-                };
-            });
+    }
+
+    fn movement_cost(&self) -> TileMap<Option<u64>> {
+        // Collect all the tile costs into a single TileMap
+        let mut map = self.location.blocked.map(|_| Some(0));
+
+        self.movement_cost_component().for_each(|(tile, opt_cost)| {
+            map[tile] = match (map[tile], opt_cost) {
+                (None, _) | (_, None) => None,
+                (Some(a), Some(b)) => {
+                    // Add the two costs together, as some objects can
+                    // coexist on the same tile.  For example, a stone
+                    // that has grass underneath it.
+                    Some(a + b)
+                }
+            };
+        });
 
         map
+    }
+
+    /// Check if a single tile is walkable.  If checking several
+    /// tiles, may be faster to use `Pathfinding.walkable` instead.
+    pub fn tile_is_walkable(&self, tile: Vector<isize>) -> bool {
+        self.location.blocked.in_bounds(tile)
+            && self
+                .movement_cost_component()
+                .filter(|(component_tile, _)| component_tile == &tile)
+                .all(|(_, opt_cost)| opt_cost.is_some())
     }
 
     pub fn walkable(&self) -> TileMap<bool> {
