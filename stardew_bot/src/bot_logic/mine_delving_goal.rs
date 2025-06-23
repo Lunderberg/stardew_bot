@@ -284,6 +284,38 @@ impl BotGoal for MineSingleLevel {
         };
         let player_tile = game_state.player.tile();
 
+        let should_go_up = 'go_up: {
+            if game_state.player.current_stamina <= 5.0 {
+                // Not enough food to restore stamina, go up.
+                break 'go_up true;
+            }
+            if self.mineshaft_level % 5 != 0 {
+                // Not a mineshaft level, so keep going.
+                break 'go_up false;
+            }
+
+            let num_empty_slots = game_state.player.inventory.num_empty_slots();
+            if num_empty_slots < 5 {
+                break 'go_up true;
+            }
+
+            let num_weapons = game_state
+                .player
+                .inventory
+                .iter_items()
+                .filter(|item| item.as_weapon().is_some())
+                .count();
+            if num_weapons > 1 {
+                break 'go_up true;
+            }
+
+            let inventory = game_state.player.inventory.to_hash_map();
+            let get_count = |item: &Item| {
+                inventory.get(item.as_ref()).cloned().unwrap_or(0)
+            };
+            get_count(&Item::COPPER_ORE) > 50 || get_count(&Item::IRON_ORE) > 50
+        };
+
         let ladder_up = current_room
             .objects
             .iter()
@@ -297,7 +329,7 @@ impl BotGoal for MineSingleLevel {
             .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
             .map(|obj| obj.tile);
 
-        let target_tile = if game_state.player.current_stamina <= 5.0 {
+        let target_tile = if should_go_up {
             ladder_up
         } else if let Some(ladder_down) = opt_ladder_down {
             ladder_down
