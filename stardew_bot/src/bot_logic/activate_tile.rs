@@ -9,7 +9,6 @@ pub struct ActivateTile {
     room: String,
     tile: Vector<isize>,
     is_activated: bool,
-    allow_room_change: bool,
 }
 
 impl ActivateTile {
@@ -19,14 +18,6 @@ impl ActivateTile {
             room,
             tile,
             is_activated: false,
-            allow_room_change: true,
-        }
-    }
-
-    pub fn allow_room_change(self, allow_room_change: bool) -> Self {
-        Self {
-            allow_room_change,
-            ..self
         }
     }
 }
@@ -42,10 +33,6 @@ impl BotGoal for ActivateTile {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_activated {
-            return Ok(BotGoalResult::Completed);
-        }
-
-        if !self.allow_room_change && game_state.player.room_name != self.room {
             return Ok(BotGoalResult::Completed);
         }
 
@@ -65,15 +52,6 @@ impl BotGoal for ActivateTile {
         let movement =
             MovementGoal::new(self.room.clone(), self.tile.map(|x| x as f32))
                 .with_tolerance(1.4);
-        if self.allow_room_change {
-            let room_name = game_state.player.room_name.clone();
-            Ok(movement
-                .cancel_if(move |game_state| {
-                    game_state.player.room_name != room_name
-                })
-                .into())
-        } else {
-            Ok(movement.into())
-        }
+        Ok(movement.into())
     }
 }
