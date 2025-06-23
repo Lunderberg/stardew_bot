@@ -5,7 +5,9 @@ use crate::{
         ActivateTile, BotError, GameStateExt as _, InventoryGoal,
         MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
-    game_state::{Item, ObjectKind, SeededRng, StoneKind, Vector},
+    game_state::{
+        Item, ObjectKind, ResourceClumpKind, SeededRng, StoneKind, Vector,
+    },
     Error, GameAction, GameState,
 };
 
@@ -246,11 +248,9 @@ impl BotGoal for MineSingleLevel {
 
         let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
 
-        let clearable_tiles: HashMap<Vector<isize>, Option<Item>> =
-            current_room
-                .objects
-                .iter()
-                .filter_map(|obj| {
+        let clearable_tiles: HashMap<Vector<isize>, Option<Item>> = {
+            let iter_clearable_obj =
+                current_room.objects.iter().filter_map(|obj| {
                     let opt_tool = match &obj.kind {
                         ObjectKind::Stone(_) => Some(Item::PICKAXE),
                         ObjectKind::Fiber if opt_weapon.is_some() => {
@@ -262,8 +262,26 @@ impl BotGoal for MineSingleLevel {
                         }
                     };
                     Some((obj.tile, opt_tool))
+                });
+            let iter_clearable_clump = current_room
+                .resource_clumps
+                .iter()
+                .filter_map(|clump| {
+                    let tool = match &clump.kind {
+                        ResourceClumpKind::MineBoulder => Some(Item::PICKAXE),
+                        _ => None,
+                    }?;
+                    Some(
+                        clump
+                            .shape
+                            .iter_points()
+                            .map(move |tile| (tile, Some(tool.clone()))),
+                    )
                 })
-                .collect();
+                .flatten();
+
+            iter_clearable_obj.chain(iter_clearable_clump).collect()
+        };
         let player_tile = game_state.player.tile();
 
         let ladder_up = current_room

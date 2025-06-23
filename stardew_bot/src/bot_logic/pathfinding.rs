@@ -2,7 +2,7 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
-    game_state::{Location, ObjectKind, TileMap, Vector},
+    game_state::{Location, ObjectKind, ResourceClumpKind, TileMap, Vector},
     Direction, Error,
 };
 
@@ -19,6 +19,11 @@ pub struct Pathfinding<'a> {
     /// If `None`, do not allow walking through tiles that contain
     /// small stones.
     clear_stone: Option<u64>,
+
+    /// If `Some(cost)`, allow walking through tiles that contain 2x2
+    /// boulders, with an additional penalty as specified.  If `None`,
+    /// do not allow walking through tiles that contain 2x2 boulders.
+    clear_boulders: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain wood
     /// debris/twigs, with an additional penalty as specified.  If
@@ -119,10 +124,12 @@ mod detail {
 
 impl Location {
     pub fn pathfinding(&self) -> Pathfinding {
+        let clear_boulders = self.mineshaft_details.as_ref().map(|_| 10000);
         Pathfinding {
             location: self,
             allow_diagonal: true,
             clear_stone: None,
+            clear_boulders,
             clear_wood: None,
             clear_fiber: None,
             clear_trees: None,
@@ -192,11 +199,6 @@ impl Pathfinding<'_> {
 
         let iter_water = loc.iter_water_tiles();
 
-        let iter_clumps = loc
-            .resource_clumps
-            .iter()
-            .flat_map(|clump| clump.shape.iter_points());
-
         let iter_bush = loc.iter_bush_tiles();
 
         let iter_furniture = loc
@@ -211,7 +213,6 @@ impl Pathfinding<'_> {
         // movement cost.
         std::iter::empty()
             .chain(iter_water)
-            .chain(iter_clumps)
             .chain(iter_bush)
             .chain(iter_furniture)
             .chain(iter_buildings)
@@ -219,9 +220,15 @@ impl Pathfinding<'_> {
                 map[tile] = None;
             });
 
-        // Handle tiles that may be passable, but with an additional
-        // movement cost.
-        for obj in &loc.objects {
+        let iter_clumps = loc.resource_clumps.iter().flat_map(|clump| {
+            let opt_cost = match &clump.kind {
+                ResourceClumpKind::MineBoulder => self.clear_boulders,
+                _ => None,
+            };
+            clump.shape.iter_points().map(move |tile| (tile, opt_cost))
+        });
+
+        let iter_obj = loc.objects.iter().filter_map(|obj| {
             let opt_cost = match &obj.kind {
                 ObjectKind::Stone(_) => self.clear_stone,
                 ObjectKind::Wood => self.clear_wood,
@@ -231,21 +238,30 @@ impl Pathfinding<'_> {
                 other if other.is_walkable() => {
                     // Can walk on this tile without penalty (e.g. a
                     // rug on the floor)
-                    continue;
+                    return None;
                 }
                 _ => None,
             };
 
-            map[obj.tile] = match (map[obj.tile], opt_cost) {
-                (None, _) | (_, None) => None,
-                (Some(a), Some(b)) => {
-                    // Add the two costs together, as some objects can
-                    // coexist on the same tile.  For example, a stone
-                    // that has grass underneath it.
-                    Some(a + b)
-                }
-            };
-        }
+            Some((obj.tile, opt_cost))
+        });
+
+        // Handle tiles that may be passable, but with an additional
+        // movement cost.
+        std::iter::empty()
+            .chain(iter_clumps)
+            .chain(iter_obj)
+            .for_each(|(tile, opt_cost)| {
+                map[tile] = match (map[tile], opt_cost) {
+                    (None, _) | (_, None) => None,
+                    (Some(a), Some(b)) => {
+                        // Add the two costs together, as some objects can
+                        // coexist on the same tile.  For example, a stone
+                        // that has grass underneath it.
+                        Some(a + b)
+                    }
+                };
+            });
 
         map
     }
