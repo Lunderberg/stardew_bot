@@ -233,7 +233,7 @@ impl BotGoal for MineDelvingGoal {
         if current_room.name == "Farm" || current_room.name == "FarmHouse" {
             let prepare = InventoryGoal::empty()
                 .with(Item::PICKAXE)
-                .with(Item::WOOD.clone().with_count(50))
+                .with_exactly(Item::WOOD.clone().with_count(100))
                 .with(Item::STONE.clone().with_count(1000))
                 .with(Item::COPPER_ORE.clone().with_count(1000))
                 .with(Item::IRON_ORE.clone().with_count(1000))
