@@ -5,10 +5,13 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+    },
     FaceDirectionGoal,
 };
 
+#[derive(Clone)]
 pub struct MaintainStaminaGoal {
     /// The target stamina to stay above.
     min_stamina: f32,
@@ -130,5 +133,22 @@ impl BotGoal for MaintainStaminaGoal {
 
         actions.do_action(GameAction::ActivateTile);
         Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl BotInterrupt for MaintainStaminaGoal {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Recover health/stamina".into()
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        if self.is_completed(game_state) || game_state.any_menu_open() {
+            Ok(None)
+        } else {
+            Ok(Some(LogicStack::new().then(self.clone())))
+        }
     }
 }

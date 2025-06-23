@@ -43,12 +43,7 @@ impl BotInterrupt for ExpandStorageInterrupt {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
-        if game_state.chest_menu.is_some()
-            || game_state.dialogue_menu.is_some()
-            || game_state.shop_menu.is_some()
-            || game_state.pause_menu.is_some()
-            || game_state.mail_menu.is_some()
-        {
+        if game_state.any_menu_open() {
             // Avoid interrupting any in-progress menus.  This is
             // especially important for this interrupt, because common
             // menu interactions such as storing items into a chest could

@@ -332,6 +332,15 @@ impl GameState {
     pub fn current_room(&self) -> Result<&Location, Error> {
         self.get_room(&self.player.room_name)
     }
+
+    pub fn any_menu_open(&self) -> bool {
+        self.chest_menu.is_some()
+            || self.dialogue_menu.is_some()
+            || self.shop_menu.is_some()
+            || self.pause_menu.is_some()
+            || self.mail_menu.is_some()
+            || self.mine_elevator_menu.is_some()
+    }
 }
 
 impl GameStateReader {

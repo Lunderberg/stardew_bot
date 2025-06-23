@@ -210,7 +210,8 @@ impl BotGoal for MineDelvingGoal {
             .cancel_if(move |game_state| {
                 game_state.player.room_name != room_name
             })
-            .with_interrupt(MineNearbyOre::new());
+            .with_interrupt(MineNearbyOre::new())
+            .with_interrupt(MaintainStaminaGoal::new());
         Ok(goal.into())
     }
 }
@@ -240,11 +241,6 @@ impl BotGoal for MineSingleLevel {
             // confirmation.
             actions.do_action(GameAction::ConfirmMenu);
             return Ok(BotGoalResult::InProgress);
-        }
-
-        let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
-            return Ok(goal.into());
         }
 
         let opt_weapon = game_state
