@@ -5,13 +5,24 @@ use crate::{
         ActivateTile, BotError, GameStateExt as _, InventoryGoal,
         MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
-    game_state::{Item, ObjectKind, SeededRng, Vector},
+    game_state::{Item, ObjectKind, SeededRng, StoneKind, Vector},
     Error, GameAction, GameState,
 };
 
-use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
+use super::{
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, BotInterrupt},
+    ObjectKindExt as _,
+};
 
 pub struct MineDelvingGoal;
+
+struct MineSingleLevel {
+    mineshaft_level: i32,
+}
+
+struct MineNearbyOre {
+    dist: f32,
+}
 
 struct StonePredictor {
     game_id: u64,
@@ -189,6 +200,41 @@ impl BotGoal for MineDelvingGoal {
             return self.at_mine_entrance(game_state, actions);
         }
 
+        let mineshaft_level = current_room
+            .mineshaft_details
+            .as_ref()
+            .map(|details| details.mineshaft_level)
+            .unwrap_or(0);
+        let room_name = current_room.name.clone();
+        let goal = MineSingleLevel { mineshaft_level }
+            .cancel_if(move |game_state| {
+                game_state.player.room_name != room_name
+            })
+            .with_interrupt(MineNearbyOre::new());
+        Ok(goal.into())
+    }
+}
+
+impl BotGoal for MineSingleLevel {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
+        format!("Mine through level {}", self.mineshaft_level).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        let current_room = game_state.current_room()?;
+        if current_room
+            .mineshaft_details
+            .as_ref()
+            .map(|details| details.mineshaft_level)
+            != Some(self.mineshaft_level)
+        {
+            return Ok(BotGoalResult::Completed);
+        }
+
         if game_state.dialogue_menu.is_some() {
             // The return-to-surface menu is open, so send a
             // confirmation.
@@ -302,17 +348,11 @@ impl BotGoal for MineDelvingGoal {
                 tool.clone(),
                 room_name.clone(),
                 target_tile,
-            )
-            .cancel_if(move |game_state| {
-                game_state.player.room_name != room_name
-            });
+            );
             Ok(goal.into())
         } else {
             let room_name = game_state.player.room_name.clone();
-            let goal = ActivateTile::new(room_name.clone(), target_tile)
-                .cancel_if(move |game_state| {
-                    game_state.player.room_name != room_name
-                });
+            let goal = ActivateTile::new(room_name.clone(), target_tile);
             Ok(goal.into())
         }
     }
@@ -392,5 +432,79 @@ impl StonePredictor {
     pub fn will_produce_ladder(&self, tile: Vector<isize>) -> bool {
         let mut rng = self.generate_rng(tile);
         rng.rand_float() < self.ladder_chance()
+    }
+}
+
+impl MineNearbyOre {
+    pub fn new() -> Self {
+        Self { dist: 4.0 }
+    }
+}
+impl BotInterrupt for MineNearbyOre {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Mine nearby ore".into()
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<super::bot_logic::LogicStack>, Error> {
+        let loc = game_state.current_room()?;
+        if loc.mineshaft_details.is_none() {
+            return Ok(None);
+        }
+
+        let player_tile = game_state.player.tile();
+        let reachable = loc
+            .pathfinding()
+            .include_border(true)
+            .distances(player_tile);
+
+        let opt_nearby_stone = loc.objects.iter().find(|obj| {
+            let max_dist = match &obj.kind {
+                ObjectKind::Stone(
+                    StoneKind::Copper
+                    | StoneKind::Iron
+                    | StoneKind::Gold
+                    | StoneKind::Iridium
+                    | StoneKind::Gem
+                    | StoneKind::Mystic
+                    | StoneKind::Diamond
+                    | StoneKind::Ruby
+                    | StoneKind::Jade
+                    | StoneKind::Amethyst
+                    | StoneKind::Topaz
+                    | StoneKind::Emerald
+                    | StoneKind::Aquamarine,
+                )
+                | ObjectKind::MineCartCoal
+                | ObjectKind::Chest(_)
+                | ObjectKind::Mineral(_) => self.dist,
+                _ => {
+                    return false;
+                }
+            };
+
+            reachable
+                .get(obj.tile)
+                .cloned()
+                .flatten()
+                .map(|dist| (dist as f32) <= max_dist)
+                .unwrap_or(false)
+        });
+
+        Ok(opt_nearby_stone.map(|obj| {
+            if let Some(tool) = obj.kind.get_tool() {
+                UseItemOnTile::new(
+                    tool,
+                    game_state.player.room_name.clone(),
+                    obj.tile,
+                )
+                .into()
+            } else {
+                ActivateTile::new(game_state.player.room_name.clone(), obj.tile)
+                    .into()
+            }
+        }))
     }
 }

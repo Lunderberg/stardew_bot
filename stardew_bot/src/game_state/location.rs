@@ -313,6 +313,24 @@ pub enum StoneKind {
     /// Drops copper ore
     Copper,
 
+    Iron,
+
+    Gold,
+
+    Iridium,
+
+    Gem,
+
+    Mystic,
+
+    Diamond,
+    Ruby,
+    Jade,
+    Amethyst,
+    Topaz,
+    Emerald,
+    Aquamarine,
+
     Other {
         name: String,
         id: String,
@@ -322,6 +340,9 @@ pub enum StoneKind {
 #[derive(Debug, Clone)]
 pub enum MineralKind {
     Quartz,
+    EarthCrystal,
+    FrozenTear,
+    FireQuartz,
     Other { name: String, id: String },
 }
 
@@ -399,10 +420,14 @@ pub struct Character {
     /// get the tile position.
     pub position: Vector<f32>,
 
+    pub sprite_width: i32,
+
     /// The health of the character.  Only present for monsters.
     pub health: Option<i32>,
 
-    pub sprite_width: i32,
+    pub is_invisible_duggy: bool,
+
+    pub is_waiting_rock_crab: bool,
 }
 
 #[derive(RustNativeObject, Default, Clone, Debug)]
@@ -581,6 +606,9 @@ impl Location {
             |name: &str, id: &str| -> ObjectKind {
                 match id {
                     "(O)80" => ObjectKind::Mineral(MineralKind::Quartz),
+                    "(O)86" => ObjectKind::Mineral(MineralKind::EarthCrystal),
+                    "(O)84" => ObjectKind::Mineral(MineralKind::FrozenTear),
+                    "(O)82" => ObjectKind::Mineral(MineralKind::FireQuartz),
                     _ => ObjectKind::Mineral(MineralKind::Other {
                         name: name.to_string(),
                         id: id.to_string(),
@@ -596,11 +624,27 @@ impl Location {
                     "Twig" => ObjectKind::Wood,
                     "Stone" => {
                         let stone_kind = match id {
-                            "(O)32" | "(O)38" | "(O)40" | "(O)42" => {
-                                StoneKind::Normal
-                            }
+                            "(O)32" | "(O)34" | "(O)36" | "(O)38" | "(O)40"
+                            | "(O)42" | "(O)48" | "(O)50" | "(O)52"
+                            | "(O)54" | "(O)56" | "(O)58" => StoneKind::Normal,
+
                             "(O)668" | "(O)670" => StoneKind::DoubleStone,
-                            "(O)751" => StoneKind::Copper,
+                            "(O)751" | "(O)859" => StoneKind::Copper,
+                            "(O)290" | "(O)860" => StoneKind::Iron,
+                            "(O)764" | "(O)VolcanoGoldNode" => StoneKind::Gold,
+                            "(O)765" => StoneKind::Iridium,
+
+                            "(O)44" => StoneKind::Gem,
+                            "(O)46" => StoneKind::Mystic,
+
+                            "(O)2" => StoneKind::Diamond,
+                            "(O)4" => StoneKind::Ruby,
+                            "(O)6" => StoneKind::Jade,
+                            "(O)8" => StoneKind::Amethyst,
+                            "(O)10" => StoneKind::Topaz,
+                            "(O)12" => StoneKind::Emerald,
+                            "(O)14" => StoneKind::Aquamarine,
+
                             _ => StoneKind::Other {
                                 name: name.to_string(),
                                 id: id.to_string(),
@@ -857,13 +901,17 @@ impl Location {
              x: f32,
              y: f32,
              sprite_width: i32,
-             health: Option<i32>|
+             health: Option<i32>,
+             is_invisible_duggy: bool,
+             is_waiting_rock_crab: bool|
              -> Character {
                 Character {
                     name: name.to_string(),
                     position: Vector::new(x, y),
                     sprite_width,
                     health,
+                    is_invisible_duggy,
+                    is_waiting_rock_crab,
                 }
             },
         )?;
@@ -1353,11 +1401,23 @@ impl Location {
                             .health
                             .value;
 
+                        let is_invisible_duggy = character.isInvisible.value;
+
+                        let as_rock_crab = character
+                            .as::<StardewValley.Monsters.RockCrab>();
+                        let is_waiting_rock_crab = if as_rock_crab.is_some() {
+                            as_rock_crab.waiter
+                        } else {
+                            false
+                        };
+
                         new_character(
                             name,
                             pos.X, pos.Y,
                             sprite_width,
                             health,
+                            is_invisible_duggy,
+                            is_waiting_rock_crab,
                         )
                     })
                     .collect();
@@ -2415,6 +2475,20 @@ impl std::fmt::Display for StoneKind {
             StoneKind::Normal => write!(f, "Stone"),
             StoneKind::DoubleStone => write!(f, "DoubleStone"),
             StoneKind::Copper => write!(f, "CopperOre"),
+            StoneKind::Iron => write!(f, "IronOre"),
+            StoneKind::Gold => write!(f, "GoldOre"),
+            StoneKind::Iridium => write!(f, "IridiumOre"),
+            StoneKind::Gem => write!(f, "Gem"),
+            StoneKind::Mystic => write!(f, "Mystic"),
+
+            StoneKind::Diamond => write!(f, "Diamond"),
+            StoneKind::Ruby => write!(f, "Ruby"),
+            StoneKind::Jade => write!(f, "Jade"),
+            StoneKind::Amethyst => write!(f, "Amethyst"),
+            StoneKind::Topaz => write!(f, "Topas"),
+            StoneKind::Emerald => write!(f, "Emerald"),
+            StoneKind::Aquamarine => write!(f, "Aquamarine"),
+
             StoneKind::Other { name, id } => {
                 write!(f, "StoneKind::Other('{name}', '{id}')")
             }
@@ -2426,6 +2500,9 @@ impl std::fmt::Display for MineralKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             MineralKind::Quartz => write!(f, "Quartz"),
+            MineralKind::EarthCrystal => write!(f, "EarthCrystal"),
+            MineralKind::FrozenTear => write!(f, "FrozenTear"),
+            MineralKind::FireQuartz => write!(f, "FireQuartz"),
             MineralKind::Other { name, id } => {
                 write!(f, "MineralKind::Other('{name}', '{id}')")
             }
