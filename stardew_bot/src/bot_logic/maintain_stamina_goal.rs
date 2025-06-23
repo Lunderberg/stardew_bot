@@ -45,6 +45,7 @@ impl MaintainStaminaGoal {
                 .player
                 .inventory
                 .iter_items()
+                .filter(|item| item.edibility > 0)
                 .filter_map(|item| {
                     item.gp_per_stamina().map(|ratio| (ratio, item))
                 })
