@@ -40,6 +40,23 @@ struct StonePredictor {
     generated_ladder: bool,
 }
 
+const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
+    // Along back wall of mines
+    Vector::new(1, 1),
+    Vector::new(2, 1),
+    Vector::new(3, 1),
+    Vector::new(4, 1),
+    Vector::new(5, 1),
+    Vector::new(6, 1),
+    Vector::new(7, 1),
+    Vector::new(8, 1),
+    // Along right wall of mines
+    Vector::new(8, 2),
+    Vector::new(8, 3),
+    Vector::new(8, 4),
+    Vector::new(8, 5),
+];
+
 impl MineDelvingGoal {
     pub fn new() -> Self {
         Self
@@ -221,28 +238,12 @@ impl MineDelvingGoal {
             return Ok(None);
         }
 
-        let offsets: [Vector<isize>; 12] = [
-            // Along back wall of mines
-            Vector::new(1, 1),
-            Vector::new(2, 1),
-            Vector::new(3, 1),
-            Vector::new(4, 1),
-            Vector::new(5, 1),
-            Vector::new(6, 1),
-            Vector::new(7, 1),
-            Vector::new(8, 1),
-            // Along right wall of mines
-            Vector::new(8, 2),
-            Vector::new(8, 3),
-            Vector::new(8, 4),
-            Vector::new(8, 5),
-        ];
-
         let mine_elevator = game_state.get_mine_elevator()?;
         let walkable = game_state.current_room()?.pathfinding().walkable();
 
-        let opt_build_next = offsets
-            .into_iter()
+        let opt_build_next = OFFSETS_ELEVATOR_TO_FURNACE
+            .iter()
+            .cloned()
             .map(|offset| mine_elevator + offset)
             .find(|tile| walkable[*tile]);
         let Some(tile) = opt_build_next else {
@@ -274,6 +275,47 @@ impl MineDelvingGoal {
         }
     }
 
+    fn prefer_mining_copper(
+        &self,
+        game_state: &GameState,
+    ) -> Result<bool, Error> {
+        let items = InventoryGoal::empty()
+            .room("Mine")
+            .total_stored_and_carried(game_state)?;
+        let get_count = |item: &Item| -> usize {
+            items.get(&item.id).cloned().unwrap_or(0)
+        };
+
+        let enough_ore_to_smelt = get_count(&Item::COAL) >= 1
+            && (get_count(&Item::COPPER_ORE) >= 5
+                && get_count(&Item::IRON_ORE) >= 5);
+        let num_furnaces = game_state
+            .get_room("Mine")?
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::Furnace(_)))
+            .count();
+        if enough_ore_to_smelt
+            && num_furnaces < OFFSETS_ELEVATOR_TO_FURNACE.len()
+        {
+            // We have enough ore/coal to smelt a bar, and aren't
+            // smelting it.  Therefore, it must be because we don't
+            // have enough smelters.  Mine more copper to make more
+            // smelters.
+            return Ok(true);
+        }
+
+        // If there are more iron bars than copper bars, mine more
+        // copper.
+
+        let copper_bars =
+            get_count(&Item::COPPER_BAR) + get_count(&Item::COPPER_ORE) / 5;
+        let iron_bars =
+            get_count(&Item::IRON_BAR) + get_count(&Item::IRON_ORE) / 5;
+
+        Ok(copper_bars <= iron_bars)
+    }
+
     fn at_mine_entrance(
         &self,
         game_state: &GameState,
@@ -301,7 +343,15 @@ impl MineDelvingGoal {
             game_state.globals.lowest_mine_level_reached.clamp(0, 120) as usize;
 
         if elevator_depth >= 5 {
-            return self.elevator_to_floor(game_state, actions, elevator_depth);
+            let go_to_depth = if self.prefer_mining_copper(game_state)? {
+                20
+            } else if elevator_depth < 80 {
+                elevator_depth
+            } else {
+                60
+            };
+            let go_to_depth = go_to_depth.min(elevator_depth);
+            return self.elevator_to_floor(game_state, actions, go_to_depth);
         }
 
         let mine_ladder = game_state
@@ -402,12 +452,23 @@ impl BotGoal for MineDelvingGoal {
             .as_ref()
             .map(|details| details.mineshaft_level)
             .unwrap_or(0);
+
+        // If we are returning to the copper levels after having
+        // reached iron, then we're here to get more copper ore.
+        let prefer_mining_ore = (mineshaft_level < 40
+            && game_state.globals.lowest_mine_level_reached >= 40)
+            || (mineshaft_level < 80
+                && game_state.globals.lowest_mine_level_reached >= 80);
+        let mining_dist = if prefer_mining_ore { 16.0 } else { 4.0 };
+
         let room_name = current_room.name.clone();
         let goal = MineSingleLevel { mineshaft_level }
             .cancel_if(move |game_state| {
                 game_state.player.room_name != room_name
             })
-            .with_interrupt(MineNearbyOre::new())
+            .with_interrupt(
+                MineNearbyOre::new().with_search_distance(mining_dist),
+            )
             .with_interrupt(MaintainStaminaGoal::new());
         Ok(goal.into())
     }
@@ -486,8 +547,19 @@ impl BotGoal for MineSingleLevel {
                 break 'go_up true;
             }
             if self.mineshaft_level % 5 != 0 {
-                // Not a mineshaft level, so keep going.
-                break 'go_up false;
+                if self.mineshaft_level / 5
+                    < game_state.globals.lowest_mine_level_reached / 5
+                {
+                    // We are revisiting this level for ore.
+                    // Therefore, go back up as soon as the
+                    // CollectNearbyOre interrupts are completed.
+                    break 'go_up true;
+                } else {
+                    // This is the deepest we've gone, and this level
+                    // doesn't have an elevator.  Therefore, keep
+                    // going to the next elevator level.
+                    break 'go_up false;
+                }
             }
 
             let num_empty_slots = game_state.player.inventory.num_empty_slots();
@@ -674,6 +746,10 @@ impl StonePredictor {
 impl MineNearbyOre {
     pub fn new() -> Self {
         Self { dist: 4.0 }
+    }
+
+    pub fn with_search_distance(self, dist: f32) -> Self {
+        Self { dist, ..self }
     }
 
     fn max_dist(&self, kind: &ObjectKind) -> Option<f32> {
