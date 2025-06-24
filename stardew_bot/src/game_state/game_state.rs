@@ -47,6 +47,8 @@ pub struct GameStateDelta {
     display: DisplayState,
     current_rng_state: SeededRng,
 
+    num_mine_levels: usize,
+
     chest_menu: Option<ChestMenu>,
     dialogue_menu: Option<DialogueMenu>,
     shop_menu: Option<ShopMenu>,
@@ -125,6 +127,7 @@ impl GameState {
              inputs: &InputState,
              display: &DisplayState,
              rng_state: &SeededRng,
+             num_mine_levels: usize,
              chest_menu: Option<&ChestMenu>,
              dialogue_menu: Option<&DialogueMenu>,
              shop_menu: Option<&ShopMenu>,
@@ -140,6 +143,8 @@ impl GameState {
                     inputs: inputs.clone(),
                     display: display.clone(),
                     current_rng_state: rng_state.clone(),
+
+                    num_mine_levels,
 
                     chest_menu: chest_menu.cloned(),
                     dialogue_menu: dialogue_menu.cloned(),
@@ -230,6 +235,13 @@ impl GameState {
                 let display = read_display_state();
                 let rng_state = read_rng_state();
 
+                let num_mine_levels = StardewValley
+                    .Locations
+                    .MineShaft
+                    .activeMines
+                    ._size
+                    .prim_cast::<usize>();
+
                 let has_open_menu = StardewValley.Game1
                     ._activeClickableMenu
                     .is_some();
@@ -249,6 +261,8 @@ impl GameState {
                     inputs,
                     display,
                     rng_state,
+
+                    num_mine_levels,
 
                     chest_menu,
                     dialogue_menu,
@@ -300,6 +314,14 @@ impl GameState {
         self.pause_menu = delta.pause_menu;
         self.mail_menu = delta.mail_menu;
         self.mine_elevator_menu = delta.mine_elevator_menu;
+
+        if delta.num_mine_levels == 0 {
+            self.locations = self
+                .locations
+                .drain(..)
+                .filter(|loc| loc.mineshaft_details.is_none())
+                .collect();
+        }
 
         if let Some(loc) = self
             .locations
