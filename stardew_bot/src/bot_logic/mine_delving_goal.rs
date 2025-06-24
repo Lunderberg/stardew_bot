@@ -6,8 +6,8 @@ use crate::{
         InventoryGoal, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{
-        Item, ItemId, ObjectKind, ResourceClumpKind, SeededRng, StoneKind,
-        Vector,
+        Item, ItemId, Object, ObjectKind, ResourceClumpKind, SeededRng,
+        StoneKind, Vector,
     },
     Error, GameAction, GameState,
 };
@@ -638,7 +638,32 @@ impl MineNearbyOre {
     pub fn new() -> Self {
         Self { dist: 4.0 }
     }
+
+    fn max_dist(&self, kind: &ObjectKind) -> Option<f32> {
+        match kind {
+            ObjectKind::Stone(
+                StoneKind::Copper
+                | StoneKind::Iron
+                | StoneKind::Gold
+                | StoneKind::Iridium
+                | StoneKind::Gem
+                | StoneKind::Mystic
+                | StoneKind::Diamond
+                | StoneKind::Ruby
+                | StoneKind::Jade
+                | StoneKind::Amethyst
+                | StoneKind::Topaz
+                | StoneKind::Emerald
+                | StoneKind::Aquamarine,
+            )
+            | ObjectKind::MineCartCoal
+            | ObjectKind::Chest(_)
+            | ObjectKind::Mineral(_) => Some(self.dist),
+            _ => None,
+        }
+    }
 }
+
 impl BotInterrupt for MineNearbyOre {
     fn description(&self) -> std::borrow::Cow<str> {
         "Mine nearby ore".into()
@@ -654,56 +679,69 @@ impl BotInterrupt for MineNearbyOre {
         }
 
         let player_tile = game_state.player.tile();
-        let reachable = loc
+        let distances = loc
             .pathfinding()
             .include_border(true)
             .distances(player_tile);
 
-        let opt_nearby_stone = loc.objects.iter().find(|obj| {
-            let max_dist = match &obj.kind {
-                ObjectKind::Stone(
-                    StoneKind::Copper
-                    | StoneKind::Iron
-                    | StoneKind::Gold
-                    | StoneKind::Iridium
-                    | StoneKind::Gem
-                    | StoneKind::Mystic
-                    | StoneKind::Diamond
-                    | StoneKind::Ruby
-                    | StoneKind::Jade
-                    | StoneKind::Amethyst
-                    | StoneKind::Topaz
-                    | StoneKind::Emerald
-                    | StoneKind::Aquamarine,
-                )
-                | ObjectKind::MineCartCoal
-                | ObjectKind::Chest(_)
-                | ObjectKind::Mineral(_) => self.dist,
-                _ => {
-                    return false;
+        let desirable_rocks: HashMap<Vector<isize>, &Object> = loc
+            .objects
+            .iter()
+            .filter(|obj| self.max_dist(&obj.kind).is_some())
+            .map(|obj| (obj.tile, obj))
+            .collect();
+
+        let opt_closest_stone = desirable_rocks
+            .iter()
+            .filter_map(|(tile, _)| {
+                let dist = distances.get(*tile)?.as_ref()?;
+                Some((*tile, *dist))
+            })
+            .min_by_key(|(_, dist)| *dist);
+
+        let Some((closest_stone, dist)) = opt_closest_stone else {
+            return Ok(None);
+        };
+
+        let num_in_group = {
+            let mut to_visit: Vec<Vector<isize>> = vec![closest_stone];
+            let mut nearby_stones = HashSet::new();
+            while let Some(visiting) = to_visit.pop() {
+                for adj in visiting
+                    .iter_nearby()
+                    .filter(|adj| desirable_rocks.contains_key(&adj))
+                {
+                    if !nearby_stones.contains(&adj) {
+                        nearby_stones.insert(adj);
+                        to_visit.push(adj);
+                    }
                 }
-            };
-
-            reachable
-                .get(obj.tile)
-                .cloned()
-                .flatten()
-                .map(|dist| (dist as f32) <= max_dist)
-                .unwrap_or(false)
-        });
-
-        Ok(opt_nearby_stone.map(|obj| {
-            if let Some(tool) = obj.kind.get_tool() {
-                UseItemOnTile::new(
-                    tool,
-                    game_state.player.room_name.clone(),
-                    obj.tile,
-                )
-                .into()
-            } else {
-                ActivateTile::new(game_state.player.room_name.clone(), obj.tile)
-                    .into()
             }
-        }))
+            nearby_stones.len()
+        };
+
+        if self.dist * (num_in_group as f32) < (dist as f32) {
+            return Ok(None);
+        }
+
+        let opt_tool =
+            desirable_rocks.get(&closest_stone).unwrap().kind.get_tool();
+
+        let goal = if let Some(tool) = opt_tool {
+            UseItemOnTile::new(
+                tool,
+                game_state.player.room_name.clone(),
+                closest_stone,
+            )
+            .into()
+        } else {
+            ActivateTile::new(
+                game_state.player.room_name.clone(),
+                closest_stone,
+            )
+            .into()
+        };
+
+        Ok(Some(goal))
     }
 }
