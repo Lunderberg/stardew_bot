@@ -129,6 +129,7 @@ impl Item {
 
     pub const SALAD: Item = Item::new_const("(O)196");
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
+    pub const PARSNIP: Item = Item::new_const("(O)24");
     pub const CARROT_SEEDS: Item = Item::new_const("(O)CarrotSeeds");
 
     pub const CLAY: Item = Item::new_const("(O)330");

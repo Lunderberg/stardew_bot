@@ -393,6 +393,15 @@ impl InventoryGoal {
                         .chest_items
                         .iter_filled_slots()
                         .filter(|(_, item)| {
+                            // If an item is explicitly set to be stored
+                            // away, it may not be used as the stamina
+                            // recovery item.
+                            self.bounds
+                                .get(&item.id)
+                                .map(|bounds| !matches!(bounds.max, Some(0)))
+                                .unwrap_or(true)
+                        })
+                        .filter(|(_, item)| {
                             item.gp_per_stamina()
                                 .map(|gp| gp < MAX_GP_PER_STAMINA)
                                 .unwrap_or(false)

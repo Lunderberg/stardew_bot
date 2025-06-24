@@ -6,8 +6,8 @@ use crate::{
         InventoryGoal, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{
-        Item, ItemId, Object, ObjectKind, ResourceClumpKind, SeededRng,
-        StoneKind, Vector,
+        Item, ItemId, Object, ObjectKind, Quality, ResourceClumpKind,
+        SeededRng, StoneKind, Vector,
     },
     Error, GameAction, GameState,
 };
@@ -359,6 +359,12 @@ impl BotGoal for MineDelvingGoal {
                 .with(Item::COPPER_ORE.clone().with_count(1000))
                 .with(Item::IRON_ORE.clone().with_count(1000))
                 .with(Item::GOLD_ORE.clone().with_count(1000))
+                .with_exactly(
+                    Item::PARSNIP
+                        .clone()
+                        .with_quality(Quality::Gold)
+                        .with_count(0),
+                )
                 .stamina_recovery_slots(5);
 
             if !prepare.is_completed(game_state)? {
