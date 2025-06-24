@@ -238,7 +238,7 @@ impl Item {
     pub fn gp_per_stamina(&self) -> Option<f32> {
         let stamina = self.stamina_recovery()?;
         let price = self.per_item_price() as f32;
-        Some(price / stamina)
+        Some(price / stamina).filter(|&ratio| ratio > 0.0)
     }
 
     pub fn health_recovery(&self) -> Option<f32> {
