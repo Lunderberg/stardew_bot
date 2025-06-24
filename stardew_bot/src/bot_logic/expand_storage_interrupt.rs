@@ -107,8 +107,9 @@ impl BotInterrupt for ExpandStorageInterrupt {
             return Ok(None);
         };
 
-        let prepare =
-            InventoryGoal::current().with(Item::WOOD.clone().with_count(50));
+        let prepare = InventoryGoal::current()
+            .room(room.name.clone())
+            .with(Item::WOOD.clone().with_count(50));
         let craft = CraftItemGoal::new(Item::CHEST);
         let place = UseItemOnTile::new(Item::CHEST, room.name.clone(), tile);
 
