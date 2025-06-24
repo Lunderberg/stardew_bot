@@ -276,6 +276,7 @@ impl<'a> DrawableGameLocation<'a> {
                         Some(Color::Rgb(133, 74, 5))
                     }
                     ObjectKind::Grass => Some(Color::Rgb(10, 80, 10)),
+                    ObjectKind::Torch => None,
                     ObjectKind::ArtifactSpot => None,
                     ObjectKind::SeedSpot => None,
                     ObjectKind::Chest(_) => None,

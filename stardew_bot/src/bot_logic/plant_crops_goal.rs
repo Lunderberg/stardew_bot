@@ -74,7 +74,8 @@ impl CropPlantingPlan {
 
                         ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt.has_crop(),
 
-                        ObjectKind::MineBarrel
+                        ObjectKind::Torch
+                        | ObjectKind::MineBarrel
                         | ObjectKind::MineLadderUp
                         | ObjectKind::MineLadderDown
                         | ObjectKind::MineHoleDown
@@ -229,7 +230,8 @@ impl BotGoal for PlantCropsGoal {
                     }
 
                     Some(
-                        ObjectKind::MineBarrel
+                        ObjectKind::Torch
+                        | ObjectKind::MineBarrel
                         | ObjectKind::MineLadderUp
                         | ObjectKind::MineLadderDown
                         | ObjectKind::MineHoleDown

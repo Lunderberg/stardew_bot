@@ -304,6 +304,9 @@ pub enum ObjectKind {
     /// A furnace in which ore can be smelted.
     Furnace(Furnace),
 
+    /// A placable torch
+    Torch,
+
     /// A tile that contains an unknown object or terrain feature
     /// whose name is known, but for which unpacking has not yet been
     /// implemented.
@@ -704,6 +707,7 @@ impl Location {
              -> ObjectKind {
                 match (category, sheet_index, name) {
                     (-9, 118, _) => ObjectKind::MineBarrel,
+                    (0, 93, _) => ObjectKind::Torch,
                     (_, _, "Artifact Spot") => ObjectKind::ArtifactSpot,
                     (_, _, "Seed Spot") => ObjectKind::SeedSpot,
                     _ => ObjectKind::Other {
@@ -2167,6 +2171,7 @@ impl ObjectKind {
                 // cannot be walked over.
                 true
             }
+            ObjectKind::Torch => true,
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,
 
@@ -2522,6 +2527,7 @@ impl std::fmt::Display for ObjectKind {
             Self::MineCartCoal => write!(f, "MineCartCoal"),
             Self::MineBarrel => write!(f, "MineBarrel"),
             Self::Furnace(furnace) => write!(f, "{furnace}"),
+            Self::Torch => write!(f, "Torch"),
 
             Self::Other { category, name, id } => {
                 write!(f, "Other({category}, '{name}', '{id}')")
