@@ -249,20 +249,29 @@ impl MineDelvingGoal {
             return Ok(None);
         };
 
+        let has_furnace = game_state
+            .player
+            .inventory
+            .iter_items()
+            .any(|item| item.is_same_item(&Item::FURNACE));
+        if has_furnace {
+            return Ok(Some(
+                UseItemOnTile::new(Item::FURNACE, "Mine", tile).into(),
+            ));
+        }
+
         let prepare = InventoryGoal::current()
             .room("Mine")
             .with(Item::STONE.clone().with_count(25))
             .with(Item::COPPER_ORE.clone().with_count(20));
-        let craft = CraftItemGoal::new(Item::FURNACE);
-        let place = UseItemOnTile::new(Item::FURNACE, "Mine", tile);
-
         if !prepare.has_sufficient_stored(game_state)? {
             return Ok(None);
         }
-
-        let stack = LogicStack::new().then(prepare).then(craft).then(place);
-
-        Ok(Some(stack))
+        if prepare.is_completed(game_state)? {
+            Ok(Some(CraftItemGoal::new(Item::FURNACE).into()))
+        } else {
+            Ok(Some(prepare.into()))
+        }
     }
 
     fn at_mine_entrance(
