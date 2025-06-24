@@ -140,10 +140,17 @@ impl BotGoal for UseItemOnTile {
 
         let requires_adjacent_tile = match self.item.id.item_id.as_ref() {
             "(T)Pickaxe" | "(T)Axe" | "(T)Hoe" => true,
-            other => other.starts_with("(BC)"),
+            _ => false,
         };
+        let requires_noncolliding_tile =
+            self.item.id.item_id.starts_with("(BC)");
+
+        let player_pos = game_state.player.center_pos();
         let player_tile = game_state.player.tile();
-        if requires_adjacent_tile && player_tile == self.tile {
+        if (requires_adjacent_tile && player_tile == self.tile)
+            || (requires_noncolliding_tile
+                && player_pos.manhattan_dist(self.tile.into()) < 1.0)
+        {
             // This tool requires the player to be standing adjacent
             // to the targeted tile, and cannot be used when standing
             // on the tile itself.  Move to an adjacent clear tile.
@@ -151,11 +158,11 @@ impl BotGoal for UseItemOnTile {
             let clear_tiles = game_state.current_room()?.collect_clear_tiles();
             let dir = Direction::iter()
                 .filter(|dir| dir.is_cardinal())
-                .filter(|dir| clear_tiles[player_tile + dir.offset()])
+                .filter(|dir| clear_tiles[self.tile + dir.offset()])
                 .sorted_by(|&dir_a, &dir_b| {
                     let dot_product = |dir: Direction| {
                         let player_offset = game_state.player.center_pos()
-                            - player_tile.map(|x| x as f32);
+                            - self.tile.map(|x| x as f32);
                         let dir_offset = dir.offset().map(|x| x as f32);
 
                         player_offset.dot(dir_offset)
@@ -164,9 +171,13 @@ impl BotGoal for UseItemOnTile {
                 })
                 .next()
                 .expect("At least one direction should be accessible");
+
+            let tile: Vector<f32> = self.tile.into();
+            let dir_offset: Vector<f32> = dir.offset().into();
+            let dir_scale = if requires_noncolliding_tile { 1.3 } else { 1.0 };
             let goal = MovementGoal::new(
                 game_state.player.room_name.clone(),
-                (player_tile + dir.offset()).into(),
+                tile + dir_offset * dir_scale,
             );
             return Ok(goal.into());
         }
