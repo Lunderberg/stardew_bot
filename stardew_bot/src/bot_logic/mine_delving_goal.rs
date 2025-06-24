@@ -332,9 +332,29 @@ impl BotGoal for MineDelvingGoal {
 
         let current_room = game_state.current_room()?;
         if current_room.name == "Farm" || current_room.name == "FarmHouse" {
+            // Bring enough wood to make two storage chests at the
+            // mines.  If the mines already have two storage chests,
+            // or if the first storage chest contains wood to craft
+            // the second, no need to bring wood along.
+            let wood_investment = game_state
+                .get_room("Mine")?
+                .objects
+                .iter()
+                .filter_map(|obj| obj.kind.as_chest())
+                .map(|chest| {
+                    let contents = chest
+                        .iter_items()
+                        .filter(|item| item.is_same_item(&Item::WOOD))
+                        .map(|item| item.count)
+                        .sum::<usize>();
+                    50 + contents
+                })
+                .sum::<usize>();
+            let required_wood = 100usize.saturating_sub(wood_investment);
+
             let prepare = InventoryGoal::empty()
                 .with(Item::PICKAXE)
-                .with_exactly(Item::WOOD.clone().with_count(100))
+                .with_exactly(Item::WOOD.clone().with_count(required_wood))
                 .with(Item::STONE.clone().with_count(1000))
                 .with(Item::COPPER_ORE.clone().with_count(1000))
                 .with(Item::IRON_ORE.clone().with_count(1000))
