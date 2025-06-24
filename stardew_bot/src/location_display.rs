@@ -280,11 +280,12 @@ impl<'a> DrawableGameLocation<'a> {
                     ObjectKind::SeedSpot => None,
                     ObjectKind::Chest(_) => None,
                     ObjectKind::Furnace(_) => None,
-                    ObjectKind::MineLadderUp => None,
                     ObjectKind::MineLadderDown => Some(Color::Rgb(140, 20, 20)),
-                    ObjectKind::MineHoleDown => None,
-                    ObjectKind::MineElevator => None,
-                    ObjectKind::MineCartCoal => None,
+                    ObjectKind::MineBarrel
+                    | ObjectKind::MineLadderUp
+                    | ObjectKind::MineHoleDown
+                    | ObjectKind::MineElevator
+                    | ObjectKind::MineCartCoal => None,
                     ObjectKind::Other { .. } => None,
                     ObjectKind::HoeDirt(_) => Some(Color::Rgb(40, 40, 40)),
                     ObjectKind::Unknown => None,

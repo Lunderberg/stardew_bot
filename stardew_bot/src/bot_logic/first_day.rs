@@ -40,7 +40,7 @@ fn scythe_path_to_water(
         .pathfinding()
         .include_border(true)
         .allow_diagonal(false)
-        .fiber_clearing_cost(0);
+        .breakable_clearing_cost(0);
 
     let can_scythe: HashSet<_> = farm
         .objects

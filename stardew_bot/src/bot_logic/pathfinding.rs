@@ -32,10 +32,11 @@ pub struct Pathfinding<'a> {
     clear_wood: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain
-    /// fiber/weeds, with an additional penalty as specified.  If
-    /// `None`, do not allow walking through tiles that contain
-    /// fiber/weeds.
-    clear_fiber: Option<u64>,
+    /// breakable objects (fiber/weeds on the farm, barrels in the
+    /// mines), with an additional penalty as specified.  If `None`,
+    /// do not allow walking through tiles that contain breakable
+    /// objects.
+    clear_breakables: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain
     /// trees, with an additional penalty as specified.  If `None`, do
@@ -130,7 +131,7 @@ impl Location {
             clear_stone: None,
             clear_boulders: None,
             clear_wood: None,
-            clear_fiber: None,
+            clear_breakables: None,
             clear_trees: None,
             grass_penalty: 100,
             include_border: false,
@@ -163,9 +164,9 @@ impl Pathfinding<'_> {
             ..self
         }
     }
-    pub fn fiber_clearing_cost(self, cost: u64) -> Self {
+    pub fn breakable_clearing_cost(self, cost: u64) -> Self {
         Self {
-            clear_fiber: Some(cost),
+            clear_breakables: Some(cost),
             ..self
         }
     }
@@ -248,7 +249,9 @@ impl Pathfinding<'_> {
             let opt_cost = match &obj.kind {
                 ObjectKind::Stone(_) => self.clear_stone,
                 ObjectKind::Wood => self.clear_wood,
-                ObjectKind::Fiber => self.clear_fiber,
+                ObjectKind::Fiber | ObjectKind::MineBarrel => {
+                    self.clear_breakables
+                }
                 ObjectKind::Tree(_) => self.clear_trees,
                 ObjectKind::Grass => Some(self.grass_penalty),
                 other if other.is_walkable() => {

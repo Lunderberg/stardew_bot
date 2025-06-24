@@ -412,7 +412,9 @@ impl BotGoal for MineSingleLevel {
                 current_room.objects.iter().filter_map(|obj| {
                     let opt_tool = match &obj.kind {
                         ObjectKind::Stone(_) => Some(Item::PICKAXE),
-                        ObjectKind::Fiber if opt_weapon.is_some() => {
+                        ObjectKind::Fiber | ObjectKind::MineBarrel
+                            if opt_weapon.is_some() =>
+                        {
                             opt_weapon.cloned()
                         }
                         ObjectKind::Mineral(_) => None,
@@ -493,7 +495,7 @@ impl BotGoal for MineSingleLevel {
             .include_border(true)
             .mine_boulder_clearing_cost(10000)
             .stone_clearing_cost(2000)
-            .fiber_clearing_cost(500);
+            .breakable_clearing_cost(500);
 
         let target_tile = if should_go_up {
             ladder_up

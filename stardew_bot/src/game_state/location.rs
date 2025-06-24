@@ -298,6 +298,9 @@ pub enum ObjectKind {
     /// A cart in the mines that contains coal.
     MineCartCoal,
 
+    /// A breakable barrel in the mines
+    MineBarrel,
+
     /// A furnace in which ore can be smelted.
     Furnace(Furnace),
 
@@ -694,10 +697,15 @@ impl Location {
 
         graph.named_native_function(
             "new_other_object_kind",
-            |category: i32, name: &str, id: &str| -> ObjectKind {
-                match name {
-                    "Artifact Spot" => ObjectKind::ArtifactSpot,
-                    "Seed Spot" => ObjectKind::SeedSpot,
+            |category: i32,
+             sheet_index: i32,
+             name: &str,
+             id: &str|
+             -> ObjectKind {
+                match (category, sheet_index, name) {
+                    (-9, 118, _) => ObjectKind::MineBarrel,
+                    (_, _, "Artifact Spot") => ObjectKind::ArtifactSpot,
+                    (_, _, "Seed Spot") => ObjectKind::SeedSpot,
                     _ => ObjectKind::Other {
                         category,
                         name: name.to_string(),
@@ -1233,10 +1241,9 @@ impl Location {
                         let chest = obj.as::<StardewValley.Objects.Chest>();
 
                         let category = obj.category.value;
+                        let sheet_index = obj.parentSheetIndex.value;
                         let name = obj.netName.value.read_string();
                         let id = obj._qualifiedItemId.read_string();
-
-
 
 
                         let kind = if chest.is_some() {
@@ -1256,8 +1263,7 @@ impl Location {
                             new_litter_kind(name, id)
                         } else if category == -2i32 {
                             new_mineral_kind(name, id)
-                        } else if category == -9i32
-                            && obj.parentSheetIndex.value == 13i32 {
+                        } else if category == -9i32 && sheet_index == 13i32 {
                             let ready_to_harvest = obj.readyForHarvest.value;
                             let has_held_item = obj
                                 .heldObject
@@ -1268,7 +1274,12 @@ impl Location {
                                 has_held_item,
                             )
                         } else {
-                            new_other_object_kind(category, name, id)
+                            new_other_object_kind(
+                                category,
+                                sheet_index,
+                                name,
+                                id,
+                            )
                         };
 
                         new_object(
@@ -2159,7 +2170,8 @@ impl ObjectKind {
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,
 
-            ObjectKind::Furnace(_)
+            ObjectKind::MineBarrel
+            | ObjectKind::Furnace(_)
             | ObjectKind::MineLadderUp
             | ObjectKind::MineLadderDown
             | ObjectKind::MineHoleDown
@@ -2508,6 +2520,7 @@ impl std::fmt::Display for ObjectKind {
             Self::MineHoleDown => write!(f, "MineHoleDown"),
             Self::MineElevator => write!(f, "MineElevator"),
             Self::MineCartCoal => write!(f, "MineCartCoal"),
+            Self::MineBarrel => write!(f, "MineBarrel"),
             Self::Furnace(furnace) => write!(f, "{furnace}"),
 
             Self::Other { category, name, id } => {

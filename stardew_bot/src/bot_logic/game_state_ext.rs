@@ -75,7 +75,9 @@ impl ObjectKindExt for ObjectKind {
             ObjectKind::Wood => Some(Item::AXE),
             ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| Item::AXE),
 
-            ObjectKind::Fiber | ObjectKind::Grass => Some(Item::SCYTHE),
+            ObjectKind::MineBarrel | ObjectKind::Fiber | ObjectKind::Grass => {
+                Some(Item::SCYTHE)
+            }
 
             ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => Some(Item::HOE),
 

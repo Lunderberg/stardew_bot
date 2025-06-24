@@ -68,7 +68,7 @@ impl ClearFarmGoal {
             .pathfinding()
             .allow_diagonal(false)
             .include_border(true)
-            .fiber_clearing_cost(1);
+            .breakable_clearing_cost(1);
 
         let pathfinding = if game_state.player.current_stamina > 2.0 {
             pathfinding
@@ -94,7 +94,7 @@ impl ClearFarmGoal {
             .allow_diagonal(false)
             .stone_clearing_cost(10)
             .wood_clearing_cost(10)
-            .fiber_clearing_cost(1)
+            .breakable_clearing_cost(1)
             .grass_movement_cost(1)
             .tree_clearing_cost(50)
     }
