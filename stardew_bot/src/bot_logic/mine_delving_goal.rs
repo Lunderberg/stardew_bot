@@ -17,7 +17,7 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    CraftItemGoal, ObjectKindExt as _,
+    CraftItemGoal, ObjectKindExt as _, OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal;
@@ -332,11 +332,31 @@ impl MineDelvingGoal {
         let prepare = InventoryGoal::empty()
             .room("Mine")
             .with_exactly(Item::STONE.clone().with_count(100))
+            .with(Item::COPPER_BAR.clone().with_count(1000))
+            .with(Item::IRON_BAR.clone().with_count(1000))
             .with(Item::PICKAXE)
             .stamina_recovery_slots(2)
             .with_weapon();
         if !prepare.is_completed(game_state)? {
             return Ok(prepare.into());
+        }
+
+        let organization = OrganizeInventoryGoal::new(|item| {
+            use super::SortedInventoryLocation as Loc;
+            if item.as_weapon().is_some() || Item::PICKAXE.is_same_item(&item) {
+                Loc::HotBarLeft
+            } else if item.edibility > 0 {
+                Loc::HotBarRight
+            } else if item.is_same_item(&Item::COPPER_BAR)
+                || item.is_same_item(&Item::IRON_BAR)
+            {
+                Loc::HotBar
+            } else {
+                Loc::Hidden
+            }
+        });
+        if !organization.is_completed(game_state) {
+            return Ok(organization.into());
         }
 
         let elevator_depth =
