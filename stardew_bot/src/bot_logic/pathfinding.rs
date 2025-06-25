@@ -505,7 +505,7 @@ impl Pathfinding<'_> {
             } = loop {
                 let entry = to_visit.pop_first()?;
 
-                if !finished.is_set(entry.tile) {
+                if finished.in_bounds(entry.tile) && !finished[entry.tile] {
                     break entry;
                 }
             };
