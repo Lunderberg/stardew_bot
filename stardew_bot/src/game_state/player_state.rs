@@ -320,6 +320,50 @@ impl PlayerState {
     }
 }
 
+impl PlayerSkills {
+    fn xp_to_level(xp: usize) -> u8 {
+        if xp > 15000 {
+            10
+        } else if xp > 10000 {
+            9
+        } else if xp > 6900 {
+            8
+        } else if xp > 4800 {
+            7
+        } else if xp > 3300 {
+            6
+        } else if xp > 2150 {
+            5
+        } else if xp > 1300 {
+            4
+        } else if xp > 770 {
+            3
+        } else if xp > 380 {
+            2
+        } else if xp > 100 {
+            1
+        } else {
+            0
+        }
+    }
+
+    pub fn farming_level(&self) -> u8 {
+        Self::xp_to_level(self.farming_xp)
+    }
+    pub fn fishing_level(&self) -> u8 {
+        Self::xp_to_level(self.fishing_xp)
+    }
+    pub fn foraging_level(&self) -> u8 {
+        Self::xp_to_level(self.foraging_xp)
+    }
+    pub fn mining_level(&self) -> u8 {
+        Self::xp_to_level(self.mining_xp)
+    }
+    pub fn combat_level(&self) -> u8 {
+        Self::xp_to_level(self.combat_xp)
+    }
+}
+
 impl FacingDirection {
     fn from_value(value: usize) -> Option<FacingDirection> {
         match value {

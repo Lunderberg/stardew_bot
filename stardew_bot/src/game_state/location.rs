@@ -2208,6 +2208,13 @@ impl ObjectKind {
             _ => None,
         }
     }
+
+    pub fn as_stone(&self) -> Option<&StoneKind> {
+        match self {
+            ObjectKind::Stone(stone) => Some(stone),
+            _ => None,
+        }
+    }
 }
 
 impl HoeDirt {

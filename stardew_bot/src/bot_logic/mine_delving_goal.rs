@@ -33,11 +33,22 @@ struct MineNearbyOre {
 struct StonePredictor {
     game_id: u64,
     days_played: u32,
-    daily_luck: f64,
+    mining_level: u8,
+    daily_luck: f32,
     mineshaft_level: i32,
     num_enemies: usize,
     num_stones: usize,
     generated_ladder: bool,
+}
+
+#[derive(Default)]
+struct StonePrediction {
+    ladder: bool,
+    coal: bool,
+    gem: bool,
+    ore: bool,
+    geode: bool,
+    omnigeode: bool,
 }
 
 const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
@@ -572,7 +583,7 @@ impl BotGoal for MineSingleLevel {
                 {
                     // We are revisiting this level for ore.
                     // Therefore, go back up as soon as the
-                    // CollectNearbyOre interrupts are completed.
+                    // MineNearbyOre interrupts are completed.
                     break 'go_up true;
                 } else {
                     // This is the deepest we've gone, and this level
@@ -691,7 +702,12 @@ impl StonePredictor {
         let room = game_state.current_room()?;
 
         let game_id = game_state.globals.unique_id;
-        let daily_luck = game_state.daily.daily_luck;
+        let daily_luck = game_state.daily.daily_luck as f32;
+        let mining_level = game_state.player.skills.mining_level();
+
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
+
         let (mineshaft_level, generated_ladder) =
             if let Some(details) = &room.mineshaft_details {
                 (details.mineshaft_level, details.generated_ladder)
@@ -711,13 +727,11 @@ impl StonePredictor {
             .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
             .count();
 
-        let days_played =
-            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
-
         Ok(Self {
             game_id,
             days_played,
             daily_luck,
+            mining_level,
             mineshaft_level,
             generated_ladder,
             num_enemies,
@@ -731,15 +745,11 @@ impl StonePredictor {
         }
 
         let base_chance = 0.02;
-        let from_remaining_stones = 1.0 / (self.num_stones.max(1) as f64);
+        let from_remaining_stones = 1.0 / (self.num_stones.max(1) as f32);
         let from_daily_luck = self.daily_luck / 5.0;
         let from_enemies = if self.num_enemies == 0 { 0.04 } else { 0.0 };
 
-        let chance = base_chance
-            + from_remaining_stones
-            + from_daily_luck
-            + from_enemies;
-        chance as f32
+        base_chance + from_remaining_stones + from_daily_luck + from_enemies
     }
 
     fn generate_rng(&self, tile: Vector<isize>) -> SeededRng {
@@ -761,6 +771,80 @@ impl StonePredictor {
         let mut rng = self.generate_rng(tile);
         rng.rand_float() < self.ladder_chance()
     }
+
+    pub fn drop_from_stone(
+        &self,
+        tile: Vector<isize>,
+        kind: &StoneKind,
+    ) -> StonePrediction {
+        let mut prediction = StonePrediction::default();
+
+        let mut rng = self.generate_rng(tile);
+
+        // Skip RNG roll to generate a ladder, only called if the
+        // level did not contain a ladder during generation.
+        if !self.generated_ladder {
+            prediction.ladder = rng.rand_float() < self.ladder_chance();
+        }
+
+        match kind {
+            StoneKind::Normal => {}
+            StoneKind::DoubleStone => {
+                // 3 rolls that determine the number of stone
+                for _ in 0..3 {
+                    rng.rand_i32();
+                }
+
+                prediction.coal = rng.rand_float() < 0.08;
+                return prediction;
+            }
+            StoneKind::Copper
+            | StoneKind::Iron
+            | StoneKind::Gold
+            | StoneKind::Iridium => {
+                prediction.ore = true;
+                return prediction;
+            }
+
+            StoneKind::Gem
+            | StoneKind::Mystic
+            | StoneKind::Diamond
+            | StoneKind::Ruby
+            | StoneKind::Jade
+            | StoneKind::Amethyst
+            | StoneKind::Topaz
+            | StoneKind::Emerald
+            | StoneKind::Aquamarine => {
+                prediction.gem = true;
+                return prediction;
+            }
+
+            StoneKind::Other { name, id } => todo!(
+                "Handle stone with name {name}, \
+                 id {id} in the StonePredictor"
+            ),
+        }
+
+        // TODO: If the player has Gemologist profession, skip a roll
+        // for the extra gem.  (Roll occurs regardless of whether the
+        // stone type can actually drop a gem.)
+
+        // TODO: If the player has unlocked Secret Note drops, skip a
+        // roll that determines whether a secret note will be dropped.
+
+        let chance_modifier =
+            self.daily_luck / 2.0 + (self.mining_level as f32) * 0.005;
+
+        let geode_chance = 0.022 * (1.0 + chance_modifier);
+        prediction.geode = rng.rand_float() < geode_chance;
+
+        if self.mineshaft_level > 20 {
+            let omnigeode_chance = 0.005 * (1.0 + chance_modifier);
+            prediction.omnigeode = rng.rand_float() < omnigeode_chance;
+        }
+
+        prediction
+    }
 }
 
 impl MineNearbyOre {
@@ -770,30 +854,6 @@ impl MineNearbyOre {
 
     pub fn with_search_distance(self, dist: f32) -> Self {
         Self { dist, ..self }
-    }
-
-    fn max_dist(&self, kind: &ObjectKind) -> Option<f32> {
-        match kind {
-            ObjectKind::Stone(
-                StoneKind::Copper
-                | StoneKind::Iron
-                | StoneKind::Gold
-                | StoneKind::Iridium
-                | StoneKind::Gem
-                | StoneKind::Mystic
-                | StoneKind::Diamond
-                | StoneKind::Ruby
-                | StoneKind::Jade
-                | StoneKind::Amethyst
-                | StoneKind::Topaz
-                | StoneKind::Emerald
-                | StoneKind::Aquamarine,
-            )
-            | ObjectKind::MineCartCoal
-            | ObjectKind::Chest(_)
-            | ObjectKind::Mineral(_) => Some(self.dist),
-            _ => None,
-        }
     }
 }
 
@@ -817,48 +877,89 @@ impl BotInterrupt for MineNearbyOre {
             .include_border(true)
             .distances(player_tile);
 
-        let desirable_rocks: HashMap<Vector<isize>, &Object> = loc
-            .objects
-            .iter()
-            .filter(|obj| self.max_dist(&obj.kind).is_some())
-            .map(|obj| (obj.tile, obj))
-            .collect();
+        let predictor = StonePredictor::new(game_state)?;
+        let mut desirable_rocks: HashMap<Vector<isize>, (f32, &ObjectKind)> =
+            loc.objects
+                .iter()
+                .filter_map(|obj| {
+                    let dist_multiplier = match &obj.kind {
+                        ObjectKind::Stone(stone) => {
+                            let prediction =
+                                predictor.drop_from_stone(obj.tile, stone);
+                            if prediction.omnigeode {
+                                2.0
+                            } else if prediction.gem {
+                                match stone {
+                                    StoneKind::Diamond => 4.0,
+                                    _ => 2.0,
+                                }
+                            } else if prediction.coal {
+                                1.5
+                            } else if prediction.ore {
+                                1.0
+                            } else {
+                                return None;
+                            }
+                        }
+                        ObjectKind::MineCartCoal
+                        | ObjectKind::Chest(_)
+                        | ObjectKind::Mineral(_) => 1.0,
+                        _ => {
+                            return None;
+                        }
+                    };
+                    Some((obj.tile, (dist_multiplier, &obj.kind)))
+                })
+                .collect();
+
+        {
+            let mut to_group: HashSet<Vector<isize>> =
+                desirable_rocks.iter().map(|(tile, _)| *tile).collect();
+            while !to_group.is_empty() {
+                let seed = to_group.iter().next().cloned().unwrap();
+                to_group.remove(&seed);
+
+                let mut current_group = vec![seed];
+                let mut to_visit = vec![seed];
+                while let Some(visiting) = to_visit.pop() {
+                    for adj in visiting.iter_nearby() {
+                        if to_group.contains(&adj) {
+                            to_group.remove(&adj);
+                            to_visit.push(adj);
+                            current_group.push(adj);
+                        }
+                    }
+                }
+
+                if current_group.len() > 1 {
+                    let total_multiplier = current_group
+                        .iter()
+                        .map(|tile| desirable_rocks[tile].0)
+                        .sum::<f32>();
+                    current_group.into_iter().for_each(|tile| {
+                        desirable_rocks.get_mut(&tile).unwrap().0 =
+                            total_multiplier;
+                    });
+                }
+            }
+        }
 
         let opt_closest_stone = desirable_rocks
             .iter()
-            .filter_map(|(tile, _)| {
+            .filter_map(|(tile, (multiplier, _))| {
                 let dist = distances.get(*tile)?.as_ref()?;
-                Some((*tile, *dist))
+                ((*dist as f32) < self.dist * multiplier)
+                    .then(|| (*tile, *dist))
             })
-            .min_by_key(|(_, dist)| *dist);
+            .min_by_key(|(_, dist)| *dist)
+            .map(|(tile, _)| tile);
 
-        let Some((closest_stone, dist)) = opt_closest_stone else {
+        let Some(closest_stone) = opt_closest_stone else {
             return Ok(None);
         };
-
-        let num_in_group = {
-            let mut to_visit: Vec<Vector<isize>> = vec![closest_stone];
-            let mut nearby_stones = HashSet::new();
-            while let Some(visiting) = to_visit.pop() {
-                for adj in visiting
-                    .iter_nearby()
-                    .filter(|adj| desirable_rocks.contains_key(&adj))
-                {
-                    if !nearby_stones.contains(&adj) {
-                        nearby_stones.insert(adj);
-                        to_visit.push(adj);
-                    }
-                }
-            }
-            nearby_stones.len()
-        };
-
-        if self.dist * (num_in_group as f32) < (dist as f32) {
-            return Ok(None);
-        }
 
         let opt_tool =
-            desirable_rocks.get(&closest_stone).unwrap().kind.get_tool();
+            desirable_rocks.get(&closest_stone).unwrap().1.get_tool();
 
         let goal = if let Some(tool) = opt_tool {
             UseItemOnTile::new(
