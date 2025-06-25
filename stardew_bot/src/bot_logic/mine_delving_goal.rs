@@ -88,7 +88,6 @@ impl MineDelvingGoal {
     }
 
     fn elevator_to_floor(
-        &self,
         game_state: &GameState,
         actions: &mut ActionCollector,
         depth: usize,
@@ -382,7 +381,7 @@ impl MineDelvingGoal {
                 60
             };
             let go_to_depth = go_to_depth.min(elevator_depth);
-            return self.elevator_to_floor(game_state, actions, go_to_depth);
+            return Self::elevator_to_floor(game_state, actions, go_to_depth);
         }
 
         let mine_ladder = game_state
@@ -577,20 +576,22 @@ impl BotGoal for MineSingleLevel {
                 // Not enough food to restore stamina, go up.
                 break 'go_up true;
             }
+
+            if self.mineshaft_level / 5
+                < game_state.globals.lowest_mine_level_reached / 5
+                && self.mineshaft_level % 10 != 0
+            {
+                // We are revisiting this level for ore.
+                // Therefore, go back up as soon as the
+                // MineNearbyOre interrupts are completed.
+                break 'go_up true;
+            }
+
             if self.mineshaft_level % 5 != 0 {
-                if self.mineshaft_level / 5
-                    < game_state.globals.lowest_mine_level_reached / 5
-                {
-                    // We are revisiting this level for ore.
-                    // Therefore, go back up as soon as the
-                    // MineNearbyOre interrupts are completed.
-                    break 'go_up true;
-                } else {
-                    // This is the deepest we've gone, and this level
-                    // doesn't have an elevator.  Therefore, keep
-                    // going to the next elevator level.
-                    break 'go_up false;
-                }
+                // This is the deepest we've gone, and this level
+                // doesn't have an elevator.  Therefore, keep
+                // going to the next elevator level.
+                break 'go_up false;
             }
 
             let num_empty_slots = game_state.player.inventory.num_empty_slots();
@@ -615,28 +616,43 @@ impl BotGoal for MineSingleLevel {
             get_count(&Item::COPPER_ORE) >= 5 || get_count(&Item::IRON_ORE) >= 5
         };
 
-        let ladder_up = current_room
-            .objects
-            .iter()
-            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderUp))
-            .map(|obj| obj.tile)
-            .ok_or(BotError::MineLadderNotFound)?;
-
-        let opt_ladder_down = current_room
-            .objects
-            .iter()
-            .find(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
-            .map(|obj| obj.tile);
+        if should_go_up && game_state.mine_elevator_menu.is_some() {
+            return MineDelvingGoal::elevator_to_floor(game_state, actions, 0);
+        }
 
         let pathfinding = current_room
             .pathfinding()
             .include_border(true)
             .mine_boulder_clearing_cost(10000)
-            .stone_clearing_cost(2000)
+            .stone_clearing_cost(3000)
             .breakable_clearing_cost(500);
 
+        let distances = pathfinding.distances(player_tile);
+
+        let opt_ladder_down = current_room
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::MineLadderDown))
+            .map(|obj| obj.tile)
+            .filter(|tile| distances.is_some(*tile))
+            .min_by_key(|tile| distances[*tile].unwrap());
+
         let target_tile = if should_go_up {
-            ladder_up
+            current_room
+                .objects
+                .iter()
+                .filter(|obj| {
+                    matches!(
+                        obj.kind,
+                        ObjectKind::MineLadderUp
+                            | ObjectKind::MineLadderDown
+                            | ObjectKind::MineElevator
+                    )
+                })
+                .map(|obj| obj.tile)
+                .filter(|tile| distances.is_some(*tile))
+                .min_by_key(|tile| distances[*tile].unwrap())
+                .ok_or(BotError::MineLadderNotFound)?
         } else if let Some(ladder_down) = opt_ladder_down {
             ladder_down
         } else {
