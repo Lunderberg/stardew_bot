@@ -38,7 +38,7 @@ impl BotInterrupt for CollectNearbyItems {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
-        let goal_dist = 1.65;
+        let goal_dist = 1.55;
         let goal = WalkTowardDebris {
             search_radius_squared: self.search_radius * self.search_radius,
             goal_dist_squared: goal_dist * goal_dist,
