@@ -283,6 +283,14 @@ impl InventoryGoal {
                         .unwrap_or(false)
                 {
                     Some(0)
+                } else if self.stash_unspecified_items
+                    && opt_current_weapon
+                        .map(|weapon| item == weapon && *count > 1)
+                        .unwrap_or(false)
+                {
+                    // The player has more than one copy of the same
+                    // weapon, so stash the copies.
+                    Some(1)
                 } else {
                     None
                 };
