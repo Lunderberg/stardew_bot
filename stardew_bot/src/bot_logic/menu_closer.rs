@@ -24,13 +24,20 @@ impl MenuCloser {
             menu.responses
                 .is_empty()
                 .then(|| menu.pixel_location.center())
+        } else if let Some(menu) = &game_state.mail_menu {
+            (menu.current_page + 1 < menu.num_pages)
+                .then(|| menu.pixel_location.center())
         } else {
             None
         }
     }
 
     fn must_press_escape(&self, game_state: &GameState) -> bool {
-        game_state.mail_menu.is_some()
+        game_state
+            .mail_menu
+            .as_ref()
+            .map(|menu| menu.current_page + 1 == menu.num_pages)
+            .unwrap_or(false)
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {

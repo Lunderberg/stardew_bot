@@ -7,6 +7,8 @@ use super::{Rectangle, Vector};
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct MailMenu {
     pub pixel_location: Rectangle<isize>,
+    pub current_page: usize,
+    pub num_pages: usize,
 }
 
 impl MailMenu {
@@ -15,11 +17,18 @@ impl MailMenu {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_mail_menu",
-            |x: isize, y: isize, width: isize, height: isize| MailMenu {
+            |x: isize,
+             y: isize,
+             width: isize,
+             height: isize,
+             current_page: usize,
+             num_pages: usize| MailMenu {
                 pixel_location: Rectangle {
                     top_left: Vector::new(x, y),
                     shape: Vector::new(width, height),
                 },
+                current_page,
+                num_pages,
             },
         )?;
 
@@ -34,10 +43,15 @@ impl MailMenu {
                 let width = menu.width;
                 let height = menu.height;
 
+                let current_page = menu.page;
+                let num_pages = menu.mailMessage._size.prim_cast::<usize>();
+
                 if menu.is_some(){
                     new_mail_menu(
                         x, y,
                         width, height,
+                        current_page,
+                        num_pages,
                     )
                 } else {
                     None
