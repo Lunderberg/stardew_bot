@@ -892,6 +892,8 @@ impl BotInterrupt for MineNearbyOre {
             .include_border(true)
             .distances(player_tile);
 
+        let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
+
         let predictor = StonePredictor::new(game_state)?;
         let mut desirable_rocks: HashMap<Vector<isize>, (f32, &ObjectKind)> =
             loc.objects
@@ -918,9 +920,11 @@ impl BotInterrupt for MineNearbyOre {
                                 return None;
                             }
                         }
-                        ObjectKind::MineCartCoal
-                        | ObjectKind::Chest(_)
-                        | ObjectKind::Mineral(_) => 1.0,
+                        ObjectKind::MineCartCoal => 3.0,
+
+                        ObjectKind::MineBarrel if opt_weapon.is_some() => 1.0,
+
+                        ObjectKind::Chest(_) | ObjectKind::Mineral(_) => 1.0,
                         _ => {
                             return None;
                         }
@@ -979,6 +983,15 @@ impl BotInterrupt for MineNearbyOre {
             desirable_rocks.get(&closest_stone).unwrap().1.get_tool();
 
         let goal = if let Some(tool) = opt_tool {
+            let tool = if tool.id.item_id.starts_with("(W)") {
+                if let Some(weapon) = opt_weapon {
+                    weapon.clone()
+                } else {
+                    return Ok(None);
+                }
+            } else {
+                tool
+            };
             UseItemOnTile::new(
                 tool,
                 game_state.player.room_name.clone(),
