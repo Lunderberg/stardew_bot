@@ -903,6 +903,8 @@ impl BotInterrupt for MineNearbyOre {
                                 predictor.drop_from_stone(obj.tile, stone);
                             if prediction.omnigeode {
                                 2.0
+                            } else if prediction.geode {
+                                1.5
                             } else if prediction.gem {
                                 match stone {
                                     StoneKind::Diamond => 4.0,
