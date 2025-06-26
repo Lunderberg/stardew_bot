@@ -706,7 +706,9 @@ impl Location {
              id: &str|
              -> ObjectKind {
                 match (category, sheet_index, name) {
-                    (-9, 118, _) => ObjectKind::MineBarrel,
+                    (-9, 118 | 119 | 120 | 121 | 122 | 123 | 124 | 125, _) => {
+                        ObjectKind::MineBarrel
+                    }
                     (0, 93, _) => ObjectKind::Torch,
                     (_, _, "Artifact Spot") => ObjectKind::ArtifactSpot,
                     (_, _, "Seed Spot") => ObjectKind::SeedSpot,
