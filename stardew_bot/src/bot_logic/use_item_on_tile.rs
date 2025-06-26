@@ -14,9 +14,8 @@ pub struct UseItemOnTile {
     item: Item,
     room: String,
     tile: Vector<isize>,
-    item_has_been_used: bool,
-    requires_animation_cancel: bool,
-    done_animation_cancel: bool,
+    item_usage_game_tick: Option<i32>,
+    wait_for_animation_cancel: bool,
 }
 
 impl UseItemOnTile {
@@ -26,7 +25,7 @@ impl UseItemOnTile {
         tile: Vector<isize>,
     ) -> Self {
         let id = &item.id.item_id;
-        let requires_animation_cancel =
+        let wait_for_animation_cancel =
             id.starts_with("(T)") || id.starts_with("(W)");
 
         let room = room.into();
@@ -34,9 +33,8 @@ impl UseItemOnTile {
             item,
             room,
             tile,
-            item_has_been_used: false,
-            requires_animation_cancel,
-            done_animation_cancel: false,
+            item_usage_game_tick: None,
+            wait_for_animation_cancel,
         }
     }
 }
@@ -82,15 +80,41 @@ impl BotGoal for UseItemOnTile {
                     .unwrap_or(false)
             };
             if can_animation_cancel {
-                self.done_animation_cancel = true;
+                // If this is the tool usage from the current
+                // `UseItemOnTile` goal, then mark the animation
+                // cancel as complete.  (Since it's possible that the
+                // in-use tool is left over from a previous
+                // `UseItemOnTile`, only mark the animation-cancel as
+                // complete if the item usage is also complete.)
+                if self.item_usage_game_tick.is_some() {
+                    self.wait_for_animation_cancel = false;
+                }
                 actions.do_action(GameAction::AnimationCancel);
             }
             return Ok(BotGoalResult::InProgress);
         }
 
-        if self.item_has_been_used
-            && (self.done_animation_cancel || !self.requires_animation_cancel)
+        let player_tile = game_state.player.tile();
+
+        if self
+            .item_usage_game_tick
+            .map(|usage_tick| {
+                !self.wait_for_animation_cancel
+                    || usage_tick + 30 < game_state.globals.game_tick
+            })
+            .unwrap_or(false)
         {
+            // The item has been used on the tile.  In addition, one
+            // of the following three conditions has been met.
+            //
+            // 1. The item did not require animation canceling.
+            //
+            // 2. The tool's animation has been canceled.
+            //
+            // 3. At least half a second has passed since the usage of
+            //    the tool.  (e.g. Resuming after an interrupt that
+            //    triggered between the tool usage and the animation
+            //    canceling.)
             return Ok(BotGoalResult::Completed);
         }
 
@@ -157,7 +181,6 @@ impl BotGoal for UseItemOnTile {
             self.item.id.item_id.starts_with("(BC)");
 
         let player_pos = game_state.player.center_pos();
-        let player_tile = game_state.player.tile();
         if (requires_adjacent_tile && player_tile == self.tile)
             || (requires_noncolliding_tile
                 && player_pos.manhattan_dist(self.tile.into()) < 1.0)
@@ -198,7 +221,7 @@ impl BotGoal for UseItemOnTile {
             && !game_state.inputs.left_mouse_down()
         {
             actions.do_action(GameAction::LeftClick);
-            self.item_has_been_used = true;
+            self.item_usage_game_tick = Some(game_state.globals.game_tick);
         }
         Ok(BotGoalResult::InProgress)
     }
