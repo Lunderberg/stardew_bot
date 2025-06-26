@@ -1723,8 +1723,8 @@ impl<'a> VMEvaluator<'a> {
     define_binary_op! {
         eval_add,
         (NativeUInt(a), NativeUInt(b)) => a + b,
-        (Ptr(a), NativeUInt(b)) => a + b,
-        (NativeUInt(a), Ptr(b)) => b + a,
+        (Ptr(a), NativeUInt(b)) => a.try_add(b)?,
+        (NativeUInt(a), Ptr(b)) => b.try_add(a)?,
         (I32(a), I32(b)) => a + b,
         (F32(a), F32(b)) => a + b,
         (F64(a), F64(b)) => a + b,

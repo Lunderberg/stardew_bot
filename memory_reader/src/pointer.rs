@@ -2,7 +2,7 @@ use std::fmt::{Debug, Display};
 
 use crate::extensions::IterConversion;
 use crate::numeric_traits::{CheckedAdd, CheckedSub};
-use crate::MemoryValue;
+use crate::{Error, MemoryValue};
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Pointer {
@@ -74,6 +74,15 @@ impl Pointer {
     #[inline]
     pub fn next_multiple_of(self, alignment: usize) -> Self {
         self.address.next_multiple_of(alignment).into()
+    }
+
+    #[inline]
+    pub fn try_add(
+        self,
+        offset: usize,
+    ) -> Result<<Self as CheckedAdd<usize>>::Output, Error> {
+        self.checked_add(offset)
+            .ok_or_else(|| Error::PointerOverflow(self, offset))
     }
 
     #[inline]

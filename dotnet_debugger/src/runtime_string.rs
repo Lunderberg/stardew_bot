@@ -10,11 +10,6 @@ pub struct RuntimeString(
     #[allow(dead_code)] String,
 );
 
-fn checked_add(ptr: Pointer, offset: usize) -> Result<Pointer, Error> {
-    ptr.checked_add(offset)
-        .ok_or_else(|| Error::PointerOverflow(ptr, offset))
-}
-
 impl RuntimeString {
     pub(crate) fn read_string<Reader>(
         ptr: Pointer,
@@ -26,9 +21,9 @@ impl RuntimeString {
         const SHORT_READ: usize = 32;
 
         // Advance past the System.String method table
-        let ptr = checked_add(ptr, Pointer::SIZE)?;
+        let ptr = ptr.try_add(Pointer::SIZE)?;
 
-        let bytes = read_bytes(ptr..checked_add(ptr, SHORT_READ)?)?;
+        let bytes = read_bytes(ptr..ptr.try_add(SHORT_READ)?)?;
         let num_u16_code_units =
             i32::from_ne_bytes(bytes[0..4].try_into().unwrap());
         if num_u16_code_units < 0 {
@@ -41,7 +36,7 @@ impl RuntimeString {
         let bytes = if num_total_bytes <= SHORT_READ {
             bytes
         } else {
-            read_bytes(ptr..checked_add(ptr, num_total_bytes)?)?
+            read_bytes(ptr..ptr.try_add(num_total_bytes)?)?
         };
 
         let iter_u16 = bytes

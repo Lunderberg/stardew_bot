@@ -73,6 +73,9 @@ pub enum Error {
         #[from]
         err: elf::ParseError,
     },
+
+    #[error("Pointer overflow, {0} + {1}")]
+    PointerOverflow(Pointer, usize),
 }
 
 impl std::fmt::Debug for Error {
