@@ -30,7 +30,7 @@ impl ExpandStorageInterrupt {
     const FROM_MINE_ELEVATOR: [Vector<isize>; 2] = [
         // To the left of the mine elevator
         Vector::new(-1, 1),
-        Vector::new(-2, 2),
+        Vector::new(-2, 1),
     ];
 }
 
