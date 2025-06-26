@@ -55,11 +55,15 @@ impl BotInterrupt for AttackNearbyEnemy {
             return Ok(None);
         }
 
+        let offset =
+            nearby_monster.center_pos() - game_state.player.center_pos();
+        let dir = offset.closest_direction();
+
         let room_name = game_state.player.room_name.clone();
         let goal = UseItemOnTile::new(
             weapon.clone(),
             game_state.player.room_name.clone(),
-            nearby_monster.tile(),
+            player_tile + dir.offset(),
         )
         .cancel_if(move |game_state| game_state.player.room_name != room_name);
 
