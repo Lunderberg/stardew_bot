@@ -15,6 +15,8 @@ pub struct UseItemOnTile {
     room: String,
     tile: Vector<isize>,
     item_has_been_used: bool,
+    requires_animation_cancel: bool,
+    done_animation_cancel: bool,
 }
 
 impl UseItemOnTile {
@@ -23,12 +25,18 @@ impl UseItemOnTile {
         room: impl Into<String>,
         tile: Vector<isize>,
     ) -> Self {
+        let id = &item.id.item_id;
+        let requires_animation_cancel =
+            id.starts_with("(T)") || id.starts_with("(W)");
+
         let room = room.into();
         Self {
             item,
             room,
             tile,
             item_has_been_used: false,
+            requires_animation_cancel,
+            done_animation_cancel: false,
         }
     }
 }
@@ -74,12 +82,15 @@ impl BotGoal for UseItemOnTile {
                     .unwrap_or(false)
             };
             if can_animation_cancel {
+                self.done_animation_cancel = true;
                 actions.do_action(GameAction::AnimationCancel);
             }
             return Ok(BotGoalResult::InProgress);
         }
 
-        if self.item_has_been_used {
+        if self.item_has_been_used
+            && (self.done_animation_cancel || !self.requires_animation_cancel)
+        {
             return Ok(BotGoalResult::Completed);
         }
 
