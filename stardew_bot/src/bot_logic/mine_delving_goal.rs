@@ -341,7 +341,6 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::empty()
             .room("Mine")
-            .with_exactly(Item::STONE.clone().with_count(100))
             .with(Item::COPPER_BAR.clone().with_count(1000))
             .with(Item::IRON_BAR.clone().with_count(1000))
             .with(Item::PICKAXE)
