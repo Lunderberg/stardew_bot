@@ -603,6 +603,21 @@ impl BotGoal for MineSingleLevel {
                 break 'go_up false;
             }
 
+            let dist_from_ladder = current_room
+                .objects
+                .iter()
+                .filter(|obj| matches!(obj.kind, ObjectKind::MineLadderUp))
+                .map(|obj| obj.tile.manhattan_dist(player_tile))
+                .min()
+                .unwrap_or(100);
+            if dist_from_ladder > 3 {
+                // We may have picked up additional items on a level
+                // that has an elevator.  In that case, should keep
+                // going on the floor, even if the inventory state has
+                // changed.
+                break 'go_up false;
+            }
+
             let num_empty_slots = game_state.player.inventory.num_empty_slots();
             if num_empty_slots < 5 {
                 break 'go_up true;
