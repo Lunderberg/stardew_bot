@@ -157,6 +157,10 @@ impl Vector<isize> {
 }
 
 impl<T> Rectangle<T> {
+    pub fn new(top_left: Vector<T>, shape: Vector<T>) -> Self {
+        Self { top_left, shape }
+    }
+
     pub fn iter_points(self) -> impl Iterator<Item = Vector<T>>
     where
         T: 'static,
@@ -168,6 +172,14 @@ impl<T> Rectangle<T> {
                     .map(move |j| Vector::new(i, j))
             })
             .map(move |p| p + self.top_left)
+    }
+
+    pub fn top_right(&self) -> Vector<T>
+    where
+        T: Copy,
+        T: num::Zero,
+    {
+        self.top_left + Vector::new(self.shape.right, T::zero())
     }
 
     pub fn width(&self) -> T

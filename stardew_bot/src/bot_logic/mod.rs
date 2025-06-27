@@ -9,6 +9,9 @@ pub use game_state_ext::*;
 mod bot_logic;
 pub use bot_logic::BotLogic;
 
+mod farm_plan;
+pub use farm_plan::*;
+
 mod first_day;
 pub use first_day::*;
 

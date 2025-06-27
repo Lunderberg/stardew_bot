@@ -13,7 +13,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    ClayPredictor, FillWateringCan, GameStateExt as _,
+    ClayPredictor, FarmPlan, FillWateringCan, GameStateExt as _,
 };
 
 pub struct PlantCropsGoal {
@@ -23,7 +23,6 @@ pub struct PlantCropsGoal {
 struct CropPlantingPlan {
     /// Which tiles should be prepared for planting
     to_plant: HashSet<Vector<isize>>,
-    farm_door: Vector<isize>,
 }
 
 impl PlantCropsGoal {
@@ -51,8 +50,8 @@ fn num_seeds(game_state: &GameState) -> usize {
 
 impl CropPlantingPlan {
     pub fn new(game_state: &GameState) -> Result<Self, Error> {
+        let plan = FarmPlan::plan(game_state)?;
         let farm = game_state.get_room("Farm").unwrap();
-        let farm_door = game_state.get_farm_door()?;
 
         let blocked: HashSet<Vector<isize>> = std::iter::empty()
             .chain(farm.iter_water_tiles())
@@ -91,24 +90,15 @@ impl CropPlantingPlan {
             )
             .collect();
 
-        let plot_top_right = farm_door + Vector::new(3, 5);
-
         let num_seeds = num_seeds(game_state);
 
-        let num_rows = 6;
-        let to_plant = (0..)
-            .flat_map(|di| {
-                (0..num_rows).map(move |dj| Vector::<isize>::new(-di, dj))
-            })
-            .map(|offset| plot_top_right + offset)
+        let to_plant = plan
+            .iter_initial_plot()
             .filter(|tile| !blocked.contains(tile))
             .take(num_seeds)
             .collect();
 
-        Ok(CropPlantingPlan {
-            to_plant,
-            farm_door,
-        })
+        Ok(CropPlantingPlan { to_plant })
     }
 }
 
@@ -135,8 +125,9 @@ impl BotGoal for PlantCropsGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let goal = MovementGoal::new("Farm", plan.farm_door.map(|x| x as f32))
-            .with_tolerance(1000.0);
+        let farm_door = game_state.get_farm_door()?;
+        let goal =
+            MovementGoal::new("Farm", farm_door.into()).with_tolerance(1000.0);
         if !goal.is_completed(game_state) {
             return Ok(goal.into());
         }

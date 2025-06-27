@@ -10,7 +10,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    GameStateExt as _,
+    FarmPlan, GameStateExt as _,
 };
 
 pub struct ExpandTreeFarm;
@@ -31,12 +31,9 @@ impl BotGoal for ExpandTreeFarm {
         game_state: &GameState,
         _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        let plan = FarmPlan::plan(game_state)?;
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
-        let crops_top_right = farm_door + Vector::new(3, 5);
-        let tree_top_right = crops_top_right + Vector::new(0, 12);
-        let num_tree_rows = 10;
-        let num_tree_columns = 10;
 
         let seed_types = [Item::OAK_SEED, Item::MAPLE_SEED, Item::PINE_SEED];
 
@@ -66,11 +63,7 @@ impl BotGoal for ExpandTreeFarm {
                 Some((obj.tile, opt_tool))
             })
             .filter(|(tile, opt_tool)| {
-                let offset = *tile - tree_top_right;
-                let is_tree_farm_tile = offset.right <= 0
-                    && offset.down >= 0
-                    && offset.right % 2 == 0
-                    && offset.down % 2 == 0;
+                let is_tree_farm_tile = plan.is_planned_tree(*tile);
 
                 // If a seed is already planted in a location that
                 // will become the tree farm, let it remain where it
@@ -108,17 +101,8 @@ impl BotGoal for ExpandTreeFarm {
                 })
                 .and_then(|seed_to_plant| {
                     let reachable = farm.pathfinding().reachable(farm_door);
-                    let opt_tile_to_plant = (0..=tree_top_right.right)
-                        .rev()
-                        .step_by(2)
-                        .take(num_tree_columns)
-                        .cartesian_product(
-                            (tree_top_right.down..farm.shape.down)
-                                .step_by(2)
-                                .take(num_tree_rows),
-                        )
-                        .map(|(right, down)| Vector::new(right, down))
-                        .find(|tile| reachable[*tile]);
+                    let opt_tile_to_plant =
+                        plan.iter_planned_trees().find(|tile| reachable[*tile]);
                     opt_tile_to_plant.map(|tile| (tile, Some(seed_to_plant)))
                 })
         };
