@@ -4,11 +4,10 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt as _, LogicStack,
     },
-    AttackNearbyEnemy, CheckAllMail, ClearFarmGoal, CollectNearbyItems,
-    ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
-    FishingLocation, ForagingGoal, GameStateExt as _, HarvestCropsGoal,
-    InventoryGoal, MineDelvingGoal, OpportunisticForaging, PlantCropsGoal,
-    ShipMostFishGoal, WaterCropsGoal,
+    CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandStorageInterrupt,
+    ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation, ForagingGoal,
+    GameStateExt as _, HarvestCropsGoal, InventoryGoal, MineDelvingGoal,
+    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -62,11 +61,12 @@ impl BotGoal for GenericDay {
             stack
                 .then(ClearFarmGoal::new().stop_time(2000))
                 .then(ExpandTreeFarm::new())
-        } else if current_day == 5 {
+        } else if current_day >= 5
+            && game_state.globals.lowest_mine_level_reached < 40
+        {
             stack
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
-                .with_interrupt(AttackNearbyEnemy::new())
         } else {
             stack
                 .then(ExpandTreeFarm::new())

@@ -17,7 +17,8 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    CraftItemGoal, ObjectKindExt as _, OrganizeInventoryGoal,
+    AttackNearbyEnemy, CraftItemGoal, ObjectKindExt as _,
+    OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal;
@@ -508,7 +509,8 @@ impl BotGoal for MineDelvingGoal {
             .with_interrupt(
                 MineNearbyOre::new().with_search_distance(mining_dist),
             )
-            .with_interrupt(MaintainStaminaGoal::new());
+            .with_interrupt(MaintainStaminaGoal::new())
+            .with_interrupt(AttackNearbyEnemy::new());
         Ok(goal.into())
     }
 }
