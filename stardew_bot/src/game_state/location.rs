@@ -1438,9 +1438,12 @@ impl Location {
                 let characters = (0..num_characters)
                     .map(|i_character| character_list._items[i_character])
                     .map(|character| {
-                        let name = character
-                            ._displayName
-                            .read_string();
+                        let name_ptr = if character._displayName.is_some() {
+                            character._displayName
+                        } else {
+                            character.name.value
+                        };
+                        let name = name_ptr.read_string();
 
                         let pos = character
                             .position
