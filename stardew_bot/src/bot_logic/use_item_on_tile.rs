@@ -15,7 +15,7 @@ pub struct UseItemOnTile {
     room: String,
     tile: Vector<isize>,
     item_usage_game_tick: Option<i32>,
-    wait_for_animation_cancel: bool,
+    animation_cancel_sent: bool,
 }
 
 impl UseItemOnTile {
@@ -24,17 +24,13 @@ impl UseItemOnTile {
         room: impl Into<String>,
         tile: Vector<isize>,
     ) -> Self {
-        let id = &item.id.item_id;
-        let wait_for_animation_cancel =
-            id.starts_with("(T)") || id.starts_with("(W)");
-
         let room = room.into();
         Self {
             item,
             room,
             tile,
             item_usage_game_tick: None,
-            wait_for_animation_cancel,
+            animation_cancel_sent: false,
         }
     }
 }
@@ -87,7 +83,7 @@ impl BotGoal for UseItemOnTile {
                 // `UseItemOnTile`, only mark the animation-cancel as
                 // complete if the item usage is also complete.)
                 if self.item_usage_game_tick.is_some() {
-                    self.wait_for_animation_cancel = false;
+                    self.animation_cancel_sent = true;
                 }
                 actions.do_action(GameAction::AnimationCancel);
             }
@@ -96,10 +92,16 @@ impl BotGoal for UseItemOnTile {
 
         let player_tile = game_state.player.tile();
 
+        let wait_for_animation_cancel = {
+            let id = &self.item.id.item_id;
+            id.starts_with("(T)") || id.starts_with("(W)")
+        };
+
         if self
             .item_usage_game_tick
             .map(|usage_tick| {
-                !self.wait_for_animation_cancel
+                !wait_for_animation_cancel
+                    || self.animation_cancel_sent
                     || usage_tick + 30 < game_state.globals.game_tick
             })
             .unwrap_or(false)
