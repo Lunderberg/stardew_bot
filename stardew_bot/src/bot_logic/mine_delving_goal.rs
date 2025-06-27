@@ -689,22 +689,17 @@ impl BotGoal for MineSingleLevel {
                 .filter(|tile| predictor.will_produce_ladder(*tile))
                 .collect();
 
-            if ladder_stones.is_empty() {
-                pathfinding
-                    .iter_dijkstra(player_tile)
-                    .map(|(tile, _)| tile)
-                    .find(|tile| clearable_tiles.contains_key(&tile))
-                    .expect("Handle case where everything has been cleared")
-            } else {
-                pathfinding
-                    .iter_dijkstra(player_tile)
-                    .map(|(tile, _)| tile)
-                    .find(|tile| ladder_stones.contains(tile))
-                    .expect(
-                        "Handle case where ladder stone exists, \
-                         but is inaccessible",
-                    )
-            }
+            pathfinding
+                .iter_dijkstra(player_tile)
+                .map(|(tile, _)| tile)
+                .find(|tile| {
+                    if ladder_stones.is_empty() {
+                        clearable_tiles.contains_key(&tile)
+                    } else {
+                        ladder_stones.contains(tile)
+                    }
+                })
+                .ok_or(BotError::MineLadderNotFound)?
         };
 
         let path = pathfinding
