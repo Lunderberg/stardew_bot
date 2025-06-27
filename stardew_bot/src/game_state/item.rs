@@ -113,6 +113,10 @@ impl ItemId {
     pub fn with_quality(self, quality: Quality) -> Self {
         Self { quality, ..self }
     }
+
+    pub fn as_item(self) -> Item {
+        self.into()
+    }
 }
 
 impl Item {
@@ -166,14 +170,8 @@ impl Item {
     pub const OMNI_GEODE: Item = Item::new_const("(O)749");
 
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
-        Self {
-            id: ItemId::new(item_id),
-            count: 1,
-            price: 0,
-            edibility: -300,
-            kind: None,
-            category: None,
-        }
+        let id = ItemId::new(item_id);
+        id.into()
     }
 
     pub const fn new_const(item_id: &'static str) -> Self {
@@ -401,5 +399,18 @@ impl AsRef<ItemId> for Item {
 impl AsRef<ItemId> for ItemId {
     fn as_ref(&self) -> &ItemId {
         self
+    }
+}
+
+impl From<ItemId> for Item {
+    fn from(id: ItemId) -> Self {
+        Self {
+            id,
+            count: 1,
+            price: 0,
+            edibility: -300,
+            kind: None,
+            category: None,
+        }
     }
 }

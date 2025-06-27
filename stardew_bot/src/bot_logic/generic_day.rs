@@ -64,6 +64,7 @@ impl BotGoal for GenericDay {
                 .then(ExpandTreeFarm::new())
         } else if current_day == 5 {
             stack
+                .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
                 .with_interrupt(AttackNearbyEnemy::new())
         } else {
