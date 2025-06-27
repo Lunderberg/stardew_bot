@@ -5,6 +5,7 @@ use crate::{
 
 use super::bot_logic::{
     ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+    LogicStackItem,
 };
 
 pub struct StepCountForLuck {
@@ -116,7 +117,11 @@ impl BotInterrupt for StepCountForLuck {
 
         // The player is currently moving, and has alreaady reached
         // the step count.
-        Ok(Some(StopMovingGoal.into()))
+        Ok(Some(
+            [LogicStackItem::PreventInterrupt, StopMovingGoal.into()]
+                .into_iter()
+                .collect(),
+        ))
     }
 }
 

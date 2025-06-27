@@ -42,6 +42,19 @@ pub enum LogicStackItem {
         interrupt: Box<dyn BotInterrupt>,
         active_goal: Option<usize>,
     },
+
+    /// Prevent any interrupts from lower on the stack from firing.
+    /// This should be used very sparingly, and only in cases where
+    /// the goals will be completed within a few frames.
+    ///
+    /// For example, the `StepCountForLuck` interrupt stops the
+    /// player's motion, preventing additional steps from being taken.
+    /// This interrupt should not itself be interrupted, as that could
+    /// cause additional steps to be taken, breaking the RNG
+    /// manipulation.  Therefore, the `StepCountForLuck` interrupt
+    /// pushes a `PreventInterrupt` item as well as a
+    /// `StopMovingGoal`.
+    PreventInterrupt,
 }
 
 pub struct ActionCollector {
@@ -540,9 +553,14 @@ impl BotLogic {
                 .stack
                 .iter()
                 .enumerate()
+                .rev()
+                .take_while(|(_, item)| {
+                    !matches!(item, LogicStackItem::PreventInterrupt)
+                })
                 .find(|(_, item)| match item {
                     LogicStackItem::CancelIf(cond) => cond(game_state),
-                    LogicStackItem::Goal(_)
+                    LogicStackItem::PreventInterrupt
+                    | LogicStackItem::Goal(_)
                     | LogicStackItem::Interrupt { .. } => false,
                 })
                 .map(|(i, _)| i);
@@ -568,7 +586,8 @@ impl BotLogic {
                 .map(|item| {
                     matches!(
                         item,
-                        LogicStackItem::CancelIf(_)
+                        LogicStackItem::PreventInterrupt
+                            | LogicStackItem::CancelIf(_)
                             | LogicStackItem::Interrupt { .. }
                     )
                 })
@@ -590,7 +609,8 @@ impl BotLogic {
                 .iter_mut()
                 .filter_map(|item| match item {
                     LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_mut()),
-                    LogicStackItem::CancelIf(_)
+                    LogicStackItem::PreventInterrupt
+                    | LogicStackItem::CancelIf(_)
                     | LogicStackItem::Interrupt { .. } => None,
                 })
                 .last()
@@ -726,10 +746,16 @@ impl BotLogic {
     ) -> Result<(), Error> {
         for i_item in (min_index..self.stack.len()).rev() {
             let current_stack_size = self.stack.len();
+            let item = &mut self.stack[i_item];
+
+            if matches!(item, LogicStackItem::PreventInterrupt) {
+                break;
+            }
+
             let LogicStackItem::Interrupt {
                 interrupt,
                 active_goal,
-            } = &mut self.stack[i_item]
+            } = item
             else {
                 continue;
             };
@@ -829,6 +855,7 @@ impl LogicStackItem {
             LogicStackItem::Interrupt { interrupt, .. } => {
                 interrupt.description()
             }
+            LogicStackItem::PreventInterrupt => "PreventInterrupt".into(),
         }
     }
 }
