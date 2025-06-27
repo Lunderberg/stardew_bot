@@ -38,6 +38,7 @@ impl MenuCloser {
             .as_ref()
             .map(|menu| menu.current_page + 1 == menu.num_pages)
             .unwrap_or(false)
+            || game_state.mine_elevator_menu.is_some()
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {
