@@ -160,6 +160,11 @@ impl Item {
     pub const GOLD_BAR: Item = Item::new_const("(O)336");
     pub const IRIDIUM_BAR: Item = Item::new_const("(O)337");
 
+    pub const GEODE: Item = Item::new_const("(O)535");
+    pub const FROZEN_GEODE: Item = Item::new_const("(O)536");
+    pub const MAGMA_GEODE: Item = Item::new_const("(O)537");
+    pub const OMNI_GEODE: Item = Item::new_const("(O)749");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             id: ItemId::new(item_id),

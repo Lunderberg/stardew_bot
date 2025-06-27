@@ -341,11 +341,16 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::empty()
             .room("Mine")
-            .with(Item::COPPER_BAR.clone().with_count(1000))
-            .with(Item::IRON_BAR.clone().with_count(1000))
             .with(Item::PICKAXE)
             .stamina_recovery_slots(2)
-            .with_weapon();
+            .with_weapon()
+            .with(Item::COAL.clone().with_count(1000))
+            .with(Item::COPPER_BAR.clone().with_count(1000))
+            .with(Item::IRON_BAR.clone().with_count(1000))
+            .with(Item::GEODE.clone().with_count(1000))
+            .with(Item::FROZEN_GEODE.clone().with_count(1000))
+            .with(Item::MAGMA_GEODE.clone().with_count(1000))
+            .with(Item::OMNI_GEODE.clone().with_count(1000));
         if !prepare.is_completed(game_state)? {
             return Ok(prepare.into());
         }
@@ -356,8 +361,13 @@ impl MineDelvingGoal {
                 Loc::HotBarLeft
             } else if item.edibility > 0 {
                 Loc::HotBarRight
-            } else if item.is_same_item(&Item::COPPER_BAR)
+            } else if item.is_same_item(&Item::COAL)
+                || item.is_same_item(&Item::COPPER_BAR)
                 || item.is_same_item(&Item::IRON_BAR)
+                || item.is_same_item(&Item::GEODE)
+                || item.is_same_item(&Item::FROZEN_GEODE)
+                || item.is_same_item(&Item::MAGMA_GEODE)
+                || item.is_same_item(&Item::OMNI_GEODE)
             {
                 Loc::HotBar
             } else {
