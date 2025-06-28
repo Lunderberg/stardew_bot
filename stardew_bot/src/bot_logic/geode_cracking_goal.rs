@@ -1,3 +1,5 @@
+use itertools::Either;
+
 use crate::{
     bot_logic::{BotError, GoToActionTile, InventoryGoal, MenuCloser},
     game_state::{Item, ItemCategory, ItemId, SeededRng, StaticState},
@@ -92,9 +94,21 @@ impl GeodeCrackingGoal {
             .into_iter()
             .filter(|(_, count)| *count > 0)
             .max_by_key(|(id, count)| {
-                // TODO: Heuristic based on the predicted output.
+                let mean: f32 = predictor
+                    .iter_chances(&game_state.statics, id)
+                    .map(|(item, prob)| (item.stack_price() as f32) * prob)
+                    .sum();
+
                 let predicted = predictor.predict(&game_state.statics, id);
-                *count
+                let predicted_price = if matches!(
+                    predicted.category,
+                    Some(ItemCategory::Mineral | ItemCategory::Gem)
+                ) {
+                    predicted.stack_price()
+                } else {
+                    0
+                };
+                (predicted_price - (mean as i32), *count)
             })
             .map(|(id, _)| id);
 
@@ -275,11 +289,30 @@ impl GeodePredictor {
 
         if !geode_data.drops_default_items || rng.rand_bool() {
             for drop in &geode_data.drops {
-                if rng.rand_weighted_bool(drop.chance as f32) {
-                    let num_options = drop.item_list.len() as i32;
-                    let index = rng.rand_in_range(0..num_options) as usize;
-                    return drop.item_list[index].clone().into();
+                if !rng.rand_weighted_bool(drop.chance as f32) {
+                    continue;
                 }
+                if let Some(cond) = &drop.condition {
+                    // Prismatic Shards may not appear before the
+                    // player's 16th geode being cracked.  This
+                    // condition is checked after the RNG call, so the
+                    // RNG state is still updated even if the
+                    // condition prevents a Prismatic Shard from being
+                    // produced.
+                    assert_eq!(
+                        cond, "PLAYER_STAT Current GeodesCracked 16",
+                        "TODO: Handle conditions other than \
+                         OmniGeode's condition for Prismatic Shards."
+                    );
+
+                    if self.geodes_cracked < 16 {
+                        continue;
+                    }
+                }
+                let num_options = drop.item_list.len() as i32;
+                let index = rng.rand_in_range(0..num_options) as usize;
+                return statics
+                    .enrich_item(drop.item_list[index].clone().into());
             }
         }
 
@@ -351,7 +384,189 @@ impl GeodePredictor {
             }
         };
 
-        let item: Item = ItemId::new(output_id).into();
-        item.with_count(amount as usize)
+        statics
+            .enrich_item(ItemId::new(output_id).into())
+            .with_count(amount as usize)
+    }
+
+    pub fn iter_chances<'a>(
+        &'a self,
+        statics: &'a StaticState,
+        geode: &ItemId,
+    ) -> impl Iterator<Item = (Item, f32)> + 'a {
+        #[derive(Clone, Copy)]
+        enum GeodeKind {
+            Regular,
+            Frozen,
+            Magma,
+            Omni,
+        }
+        let kind = if geode == &Item::GEODE {
+            GeodeKind::Regular
+        } else if geode == &Item::FROZEN_GEODE {
+            GeodeKind::Frozen
+        } else if geode == &Item::MAGMA_GEODE {
+            GeodeKind::Magma
+        } else if geode == &Item::OMNI_GEODE {
+            GeodeKind::Omni
+        } else {
+            panic!("Could not find geode data for {geode}")
+        };
+
+        let geode_data = match kind {
+            GeodeKind::Regular => &statics.geode,
+            GeodeKind::Frozen => &statics.frozen_geode,
+            GeodeKind::Magma => &statics.magma_geode,
+            GeodeKind::Omni => &statics.omni_geode,
+        };
+
+        // For ore/rock/coal, which may give more than one, the
+        // probability distribution of the amount.
+        #[derive(Clone, Copy)]
+        enum StackSize {
+            Default,
+            SingleItem,
+            IridiumOre,
+        }
+
+        // 50% chance of pulling from the geode-specific table of outputs
+        let iter_table = geode_data
+            .drops
+            .iter()
+            .filter(|drop| {
+                if let Some(cond) = &drop.condition {
+                    assert_eq!(
+                        cond, "PLAYER_STAT Current GeodesCracked 16",
+                        "TODO: Handle conditions other than \
+                         OmniGeode's condition for Prismatic Shards."
+                    );
+                    self.geodes_cracked >= 15
+                } else {
+                    true
+                }
+            })
+            .scan(0.5, |cumulative_prob, drop| {
+                let drop_chance = drop.chance as f32;
+                let chance_this_list = (*cumulative_prob) * drop_chance;
+                *cumulative_prob *= 1.0 - drop_chance;
+
+                let chance_per_item =
+                    chance_this_list / (drop.item_list.len() as f32);
+                let iter = drop.item_list.iter().map(move |id| {
+                    (id.clone(), chance_per_item, StackSize::SingleItem)
+                });
+                Some(iter)
+            })
+            .flatten();
+
+        let non_table_prob = 0.5
+            * (1.0
+                + geode_data
+                    .drops
+                    .iter()
+                    .map(|drop| 1.0 - drop.chance as f32)
+                    .product::<f32>());
+
+        // If the geode doesn't generate an output from the table,
+        // there's a 50% chance (25% chance total) of generating
+        // stone/clay/gems
+        let iter_stone_clay = [
+            ("(O)390", non_table_prob * 0.5 * 0.5, StackSize::Default),
+            ("(O)330", non_table_prob * 0.5 * 0.25, StackSize::SingleItem),
+        ]
+        .into_iter();
+        let iter_gems = {
+            let gem_prob = match kind {
+                GeodeKind::Regular => [1.0, 0.0, 0.0],
+                GeodeKind::Frozen => [0.0, 1.0, 0.0],
+                GeodeKind::Magma => [0.0, 0.0, 1.0],
+                GeodeKind::Omni => [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
+            };
+
+            ["(O)86", "(O)84", "(O)82"]
+                .into_iter()
+                .zip(gem_prob.into_iter())
+                .map(move |(id, prob)| {
+                    (
+                        id,
+                        non_table_prob * 0.5 * 0.25 * prob,
+                        StackSize::SingleItem,
+                    )
+                })
+        };
+
+        // If the geode is producing neither a result from the table
+        // nor a result from the stone/clay/gems (25% of the time), it
+        // will generate ore.
+        let iter_ore = {
+            // Probability of producing (coal, copper, iron, gold, iridium) ore
+            let ore_prob = match kind {
+                GeodeKind::Regular if self.lowest_mine_level_reached <= 25 => {
+                    [1.0 / 3.0, 2.0 / 3.0, 0.0, 0.0, 0.0]
+                }
+                GeodeKind::Regular => {
+                    [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0, 0.0]
+                }
+                GeodeKind::Frozen if self.lowest_mine_level_reached <= 75 => {
+                    [0.25, 0.25, 0.5, 0.0, 0.0]
+                }
+                GeodeKind::Frozen => [0.25, 0.25, 0.25, 0.25, 0.0],
+                GeodeKind::Magma | GeodeKind::Omni => [0.2, 0.2, 0.2, 0.2, 0.2],
+            };
+
+            [
+                ("(O)382", StackSize::Default),
+                ("(O)378", StackSize::Default),
+                ("(O)380", StackSize::Default),
+                ("(O)384", StackSize::Default),
+                ("(O)386", StackSize::IridiumOre),
+            ]
+            .into_iter()
+            .zip(ore_prob.into_iter())
+            .map(move |((id, stack_size), prob)| {
+                (id, non_table_prob * 0.5 * prob, stack_size)
+            })
+        };
+
+        iter_table
+            .chain(iter_stone_clay.chain(iter_gems).chain(iter_ore).map(
+                |(id, prob, stack_size)| (ItemId::new(id), prob, stack_size),
+            ))
+            .flat_map(move |(id, prob, stack_size)| {
+                let item: Item = id.into();
+
+                let amounts = match stack_size {
+                    StackSize::Default => Either::Left(
+                        [
+                            (20, 0.01),
+                            (10, 0.099),
+                            (5, 0.297),
+                            (3, 0.297),
+                            (1, 0.297),
+                        ]
+                        .into_iter(),
+                    ),
+                    StackSize::IridiumOre => Either::Left(
+                        [
+                            (11, 0.01),
+                            (6, 0.099),
+                            (3, 0.297),
+                            (2, 0.297),
+                            (1, 0.297),
+                        ]
+                        .into_iter(),
+                    ),
+                    StackSize::SingleItem => {
+                        Either::Right([(1, 1.0)].into_iter())
+                    }
+                };
+
+                amounts.map(move |(count, count_prob)| {
+                    let item: Item = item.clone().with_count(count as usize);
+                    let item = statics.enrich_item(item);
+                    let prob: f32 = prob * count_prob;
+                    (item, prob)
+                })
+            })
     }
 }

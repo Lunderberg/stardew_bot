@@ -94,6 +94,7 @@ pub enum ItemCategory {
     Ore,
     Gem,
     Mineral,
+    BigCraftable,
     Other(i32),
 }
 
@@ -374,6 +375,7 @@ impl From<i32> for ItemCategory {
             -15 => ItemCategory::Ore,
             -12 => ItemCategory::Mineral,
             -2 => ItemCategory::Gem,
+            -9 => ItemCategory::BigCraftable,
             other => ItemCategory::Other(other),
         }
     }
