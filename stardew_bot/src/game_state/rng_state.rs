@@ -259,6 +259,19 @@ impl SeededRng {
         range.start + offset
     }
 
+    pub fn rand_bool(&mut self) -> bool {
+        self.rand_float() < 0.5
+    }
+
+    /// Generate a boolean value which is true for probability `prob`,
+    /// and false otherwise.
+    ///
+    /// If the probability is 1.0, then this function returns true
+    /// without advancing the RNG state.
+    pub fn rand_weighted_bool(&mut self, prob: f32) -> bool {
+        prob >= 1.0 || (self.rand_float() < prob)
+    }
+
     pub fn from_stardew_seed<const N: usize>(values: [f64; N]) -> Self {
         let seed = Self::stardew_seed(values);
         Self::from_seed(seed)

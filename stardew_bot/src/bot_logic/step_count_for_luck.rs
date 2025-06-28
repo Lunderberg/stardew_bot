@@ -195,7 +195,7 @@ fn is_allowed_dish_of_the_day(value: i32) -> bool {
 /// hashing, one before distributing the seed to all clients, and one
 /// after.
 fn new_day_rng(game_state: &GameState, additional_steps: u32) -> SeededRng {
-    let unique_id: u32 = game_state.globals.unique_id as u32;
+    let game_id: u32 = game_state.globals.game_id as u32;
 
     let days_played: u32 =
         game_state.globals.get_stat("daysPlayed").unwrap_or(1);
@@ -207,7 +207,7 @@ fn new_day_rng(game_state: &GameState, additional_steps: u32) -> SeededRng {
     let steps_taken = steps_taken + additional_steps;
 
     let seed = SeededRng::stardew_seed([
-        (unique_id / 100) as f64,
+        (game_id / 100) as f64,
         (days_played * 10 + 1) as f64,
         steps_taken as f64,
     ]);

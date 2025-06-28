@@ -738,7 +738,7 @@ impl StonePredictor {
     pub fn new(game_state: &GameState) -> Result<Self, Error> {
         let room = game_state.current_room()?;
 
-        let game_id = game_state.globals.unique_id;
+        let game_id = game_state.globals.game_id;
         let daily_luck = game_state.daily.daily_luck as f32;
         let mining_level = game_state.player.skills.mining_level();
 

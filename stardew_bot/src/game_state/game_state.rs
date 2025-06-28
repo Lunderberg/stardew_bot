@@ -8,11 +8,12 @@ use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
     DialogueMenu, DisplayState, FishingState, GeodeMenu, GlobalGameState,
     InputState, Inventory, Location, LocationDelta, MailMenu, MineElevatorMenu,
-    PauseMenu, PlayerState, SeededRng, ShopMenu,
+    PauseMenu, PlayerState, SeededRng, ShopMenu, StaticState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameState {
+    pub statics: StaticState,
     pub globals: GlobalGameState,
     pub locations: Vec<Location>,
     pub player: PlayerState,
@@ -66,6 +67,7 @@ impl GameState {
         let mut graph = SymbolicGraph::new();
 
         define_utility_functions(&mut graph)?;
+        StaticState::def_read_static_state(&mut graph)?;
         GlobalGameState::def_read_global_game_state(&mut graph)?;
         Inventory::def_read_inventory(&mut graph)?;
         Location::def_read_location(&mut graph)?;
@@ -86,7 +88,8 @@ impl GameState {
 
         graph.named_native_function(
             "new_game_state",
-            |global_game_state: &GlobalGameState,
+            |static_state: &StaticState,
+             global_game_state: &GlobalGameState,
              locations: &Vec<Location>,
              player: &PlayerState,
              fishing: &FishingState,
@@ -102,6 +105,7 @@ impl GameState {
              mine_elevator_menu: Option<&MineElevatorMenu>,
              geode_menu: Option<&GeodeMenu>| {
                 GameState {
+                    statics: static_state.clone(),
                     globals: global_game_state.clone(),
                     locations: locations.clone(),
                     player: player.clone(),
@@ -165,6 +169,7 @@ impl GameState {
 
         graph.parse(stringify! {
             pub fn read_full_state() {
+                let static_state = read_static_state();
                 let global_game_state = read_global_game_state();
 
                 let location_list = StardewValley
@@ -215,6 +220,7 @@ impl GameState {
                 let geode_menu = read_geode_menu();
 
                 new_game_state(
+                    static_state,
                     global_game_state,
                     locations,
                     player,

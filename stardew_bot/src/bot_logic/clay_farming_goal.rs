@@ -30,7 +30,7 @@ pub struct ClayFarmingGoal {
 }
 
 pub struct ClayPredictor {
-    unique_id: u64,
+    game_id: u64,
     days_played: u32,
     dirt_hoed: u32,
 }
@@ -40,9 +40,9 @@ impl ClayPredictor {
         let dirt_hoed = game_state.globals.get_stat("dirtHoed").unwrap_or(0);
         let days_played =
             game_state.globals.get_stat("daysPlayed").unwrap_or(1);
-        let unique_id = game_state.globals.unique_id;
+        let game_id = game_state.globals.game_id;
         Self {
-            unique_id,
+            game_id,
             days_played,
             dirt_hoed,
         }
@@ -55,7 +55,7 @@ impl ClayPredictor {
     ) -> bool {
         let mut rng = SeededRng::from_stardew_seed([
             self.days_played as f64,
-            (self.unique_id / 2) as f64,
+            (self.game_id / 2) as f64,
             (tile.right * 2000) as f64,
             (tile.down * 77) as f64,
             (self.dirt_hoed + offset_dirt_hoed) as f64,

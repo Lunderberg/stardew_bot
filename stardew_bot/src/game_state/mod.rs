@@ -16,6 +16,9 @@ pub use fishing_state::FishingState;
 mod global_game_state;
 pub use global_game_state::GlobalGameState;
 
+mod static_state;
+pub use static_state::StaticState;
+
 mod daily_state;
 pub use daily_state::DailyState;
 

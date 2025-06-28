@@ -6,13 +6,20 @@ use crate::Error;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GlobalGameState {
-    /// The unique id of the game, used for seeding RNG
-    pub unique_id: u64,
+    /// The unique id of the game, used for seeding RNG.  Generated
+    /// when starting a new game, and never changes.
+    pub game_id: u64,
+
+    /// The unique multiplayer ID, used for communication and
+    /// sometimes for seeding RNG.  Generated each time the game is
+    /// loaded.
+    pub multiplayer_id: i64,
 
     /// The number of game ticks that have elapsed
     pub game_tick: i32,
 
-    /// The number of game ticks that have elapsed
+    /// The number of game ticks that have elapsed while in the
+    /// present game mode.
     pub game_mode_tick: i32,
 
     /// The current in-game time.
@@ -55,7 +62,8 @@ impl GlobalGameState {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_global_game_state",
-            |unique_id: u64,
+            |game_id: u64,
+             multiplayer_id: i64,
              game_tick: i32,
              game_mode_tick: i32,
              in_game_time: i32,
@@ -64,7 +72,8 @@ impl GlobalGameState {
              event_up: bool,
              lowest_mine_level_reached: i32| GlobalGameState {
                 game_tick,
-                unique_id,
+                multiplayer_id,
+                game_id,
                 game_mode_tick,
                 in_game_time,
                 stats: stats.0.clone(),
@@ -91,7 +100,11 @@ impl GlobalGameState {
         let func = graph.parse(stringify! {
             fn read_global_game_state() {
                 let game_tick = StardewValley.Game1.ticks;
-                let unique_id = StardewValley.Game1.uniqueIDForThisGame;
+                let game_id = StardewValley.Game1.uniqueIDForThisGame;
+                let multiplayer_id = StardewValley.Game1
+                    ._player
+                    .uniqueMultiplayerID
+                    .value;
 
                 let in_game_time = StardewValley.Game1.timeOfDay;
 
@@ -120,7 +133,8 @@ impl GlobalGameState {
                     .value;
 
                 new_global_game_state(
-                    unique_id,
+                    game_id,
+                    multiplayer_id,
                     game_tick,
                     game_mode_tick,
                     in_game_time,
