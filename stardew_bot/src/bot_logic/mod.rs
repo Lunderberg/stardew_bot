@@ -123,3 +123,6 @@ pub use mine_delving_goal::*;
 
 mod attack_nearby_enemy;
 pub use attack_nearby_enemy::*;
+
+mod geode_cracking_goal;
+pub use geode_cracking_goal::*;

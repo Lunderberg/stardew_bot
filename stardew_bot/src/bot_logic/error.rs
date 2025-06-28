@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::game_state::{Item, Vector};
+use crate::game_state::{Item, ItemId, Vector};
 
 #[derive(Error)]
 pub enum BotError {
@@ -42,6 +42,12 @@ pub enum BotError {
 
     #[error("Could not locate the mine ladder")]
     MineLadderNotFound,
+
+    #[error("Expected empty inventory slot to be available")]
+    ExpectedEmptySlot,
+
+    #[error("Expected item {0} to be in the inventory")]
+    ExpectedItemInInventory(ItemId),
 }
 
 impl std::fmt::Debug for BotError {

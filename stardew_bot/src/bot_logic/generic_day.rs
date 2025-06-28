@@ -6,8 +6,9 @@ use super::{
     },
     CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandStorageInterrupt,
     ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation, ForagingGoal,
-    GameStateExt as _, HarvestCropsGoal, InventoryGoal, MineDelvingGoal,
-    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
+    GameStateExt as _, GeodeCrackingGoal, HarvestCropsGoal, InventoryGoal,
+    MineDelvingGoal, OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal,
+    WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -74,6 +75,7 @@ impl BotGoal for GenericDay {
                         .with_expected_seeds(200)
                         .stop_time(1100),
                 )
+                .then(GeodeCrackingGoal::new())
                 .then(PlantCropsGoal::new().with_expected_seeds(200))
         } else {
             stack

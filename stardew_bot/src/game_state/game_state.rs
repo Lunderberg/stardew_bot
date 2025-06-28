@@ -6,9 +6,9 @@ use crate::{bot_logic::BotError, Error};
 
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
-    DialogueMenu, DisplayState, FishingState, GlobalGameState, InputState,
-    Inventory, Location, LocationDelta, MailMenu, MineElevatorMenu, PauseMenu,
-    PlayerState, SeededRng, ShopMenu,
+    DialogueMenu, DisplayState, FishingState, GeodeMenu, GlobalGameState,
+    InputState, Inventory, Location, LocationDelta, MailMenu, MineElevatorMenu,
+    PauseMenu, PlayerState, SeededRng, ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -29,6 +29,7 @@ pub struct GameState {
     pub pause_menu: Option<PauseMenu>,
     pub mail_menu: Option<MailMenu>,
     pub mine_elevator_menu: Option<MineElevatorMenu>,
+    pub geode_menu: Option<GeodeMenu>,
 }
 
 #[derive(Debug)]
@@ -55,6 +56,7 @@ pub struct GameStateDelta {
     pause_menu: Option<PauseMenu>,
     mail_menu: Option<MailMenu>,
     mine_elevator_menu: Option<MineElevatorMenu>,
+    geode_menu: Option<GeodeMenu>,
 }
 
 impl GameState {
@@ -80,6 +82,7 @@ impl GameState {
         PauseMenu::def_read_pause_menu(&mut graph)?;
         MailMenu::def_read_mail_menu(&mut graph)?;
         MineElevatorMenu::def_read_mine_elevator_menu(&mut graph)?;
+        GeodeMenu::def_read_geode_menu(&mut graph)?;
 
         graph.named_native_function(
             "new_game_state",
@@ -96,7 +99,8 @@ impl GameState {
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
              mail_menu: Option<&MailMenu>,
-             mine_elevator_menu: Option<&MineElevatorMenu>| {
+             mine_elevator_menu: Option<&MineElevatorMenu>,
+             geode_menu: Option<&GeodeMenu>| {
                 GameState {
                     globals: global_game_state.clone(),
                     locations: locations.clone(),
@@ -113,6 +117,7 @@ impl GameState {
                     pause_menu: pause_menu.cloned(),
                     mail_menu: mail_menu.cloned(),
                     mine_elevator_menu: mine_elevator_menu.cloned(),
+                    geode_menu: geode_menu.cloned(),
                 }
             },
         )?;
@@ -133,7 +138,8 @@ impl GameState {
              shop_menu: Option<&ShopMenu>,
              pause_menu: Option<&PauseMenu>,
              mail_menu: Option<&MailMenu>,
-             mine_elevator_menu: Option<&MineElevatorMenu>| {
+             mine_elevator_menu: Option<&MineElevatorMenu>,
+             geode_menu: Option<&GeodeMenu>| {
                 GameStateDelta {
                     global_game_state: global_game_state.clone(),
                     location_delta: location_delta.clone(),
@@ -152,6 +158,7 @@ impl GameState {
                     pause_menu: pause_menu.cloned(),
                     mail_menu: mail_menu.cloned(),
                     mine_elevator_menu: mine_elevator_menu.cloned(),
+                    geode_menu: geode_menu.cloned(),
                 }
             },
         )?;
@@ -205,6 +212,7 @@ impl GameState {
                 let pause_menu = read_pause_menu();
                 let mail_menu = read_mail_menu();
                 let mine_elevator_menu = read_mine_elevator_menu();
+                let geode_menu = read_geode_menu();
 
                 new_game_state(
                     global_game_state,
@@ -222,6 +230,7 @@ impl GameState {
                     pause_menu,
                     mail_menu,
                     mine_elevator_menu,
+                    geode_menu,
                 )
             }
 
@@ -251,6 +260,7 @@ impl GameState {
                 let pause_menu = read_pause_menu();
                 let mail_menu = read_mail_menu();
                 let mine_elevator_menu = read_mine_elevator_menu();
+                let geode_menu = read_geode_menu();
 
                 new_game_state_delta(
                     global_game_state,
@@ -270,6 +280,7 @@ impl GameState {
                     pause_menu,
                     mail_menu,
                     mine_elevator_menu,
+                    geode_menu,
                 )
             }
 
@@ -314,6 +325,7 @@ impl GameState {
         self.pause_menu = delta.pause_menu;
         self.mail_menu = delta.mail_menu;
         self.mine_elevator_menu = delta.mine_elevator_menu;
+        self.geode_menu = delta.geode_menu;
 
         if delta.num_mine_levels == 0 {
             self.locations = self

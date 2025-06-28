@@ -57,3 +57,6 @@ pub use mine_elevator_menu::MineElevatorMenu;
 
 mod rng_state;
 pub use rng_state::SeededRng;
+
+mod geode_menu;
+pub use geode_menu::GeodeMenu;
