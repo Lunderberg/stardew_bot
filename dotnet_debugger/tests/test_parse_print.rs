@@ -218,6 +218,16 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    field_access_wiith_special_char,
+    "class_name.static_field.a.field(\"<CustomProp>k__BackingField\")",
+    |graph| {
+        let obj = graph.static_field("class_name", "static_field");
+        let a = graph.access_field(obj, "a");
+        graph.access_field(a, "<CustomProp>k__BackingField")
+    },
+}
+
+test_print_and_parse! {
     static_index_access,
     "class_name.static_field[123]",
     |graph| {

@@ -1054,6 +1054,23 @@ impl<'a> SymbolicParser<'a> {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.read_string(obj))
                 }
+
+                "field" => {
+                    self.expect_punct(
+                        || "left paren after .field",
+                        Punctuation::LeftParen,
+                    )?;
+
+                    let field_name = self.expect_string_literal()?;
+
+                    self.expect_punct(
+                        || format!("right paren after .field {field_name}"),
+                        Punctuation::RightParen,
+                    )?;
+
+                    Ok(self.graph.access_field(obj, field_name))
+                }
+
                 _ => Err(ParseError::UnknownOperator {
                     name: field.text.to_string(),
                 }
@@ -1343,6 +1360,28 @@ impl<'a> SymbolicParser<'a> {
         )?;
 
         Ok(generic_types)
+    }
+
+    fn expect_string_literal(&mut self) -> Result<String, Error> {
+        let opening = self.expect_punct(
+            || "opening DoubleQuote (\") of string literal",
+            Punctuation::DoubleQuote,
+        )?;
+
+        while self
+            .tokens
+            .next_if(|token| !token.kind.is_punct(Punctuation::DoubleQuote))?
+            .is_some()
+        {}
+
+        let closing = self.expect_punct(
+            || "closing DoubleQuote (\") of string literal",
+            Punctuation::DoubleQuote,
+        )?;
+
+        let string_range = opening.span.end..closing.span.start;
+
+        Ok(self.tokens.text[string_range].to_string())
     }
 }
 

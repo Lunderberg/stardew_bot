@@ -128,6 +128,7 @@ enum PrintItem<'a> {
     BraceOpen,
     BraceClose,
     MemberAccess,
+    DoubleQuote,
 }
 
 trait IterPrintItemExt<'a>: Iterator<Item = PrintItem<'a>> + Sized {
@@ -384,6 +385,7 @@ impl<'a> GraphPrinter<'a> {
                 }
                 PrintItem::ParenOpen => write!(fmt, "(")?,
                 PrintItem::ParenClose => write!(fmt, ")")?,
+                PrintItem::DoubleQuote => write!(fmt, "\"")?,
                 PrintItem::SquareBracketOpen => write!(fmt, "[")?,
                 PrintItem::SquareBracketClose => write!(fmt, "]")?,
                 PrintItem::BraceOpen => {
@@ -609,6 +611,29 @@ impl<'a> GraphPrinter<'a> {
                                 .for_each(|print_item| {
                                     to_print.push(print_item)
                                 });
+                        }};
+                    }
+
+                    macro_rules! handle_field_access {
+                        ($field:expr) => {{
+                            let field = $field;
+
+                            if field.contains('<') || field.contains('>') {
+                                [
+                                    PrintItem::Str("field"),
+                                    PrintItem::ParenOpen,
+                                    PrintItem::DoubleQuote,
+                                    PrintItem::Str(field),
+                                    PrintItem::DoubleQuote,
+                                    PrintItem::ParenClose,
+                                ]
+                                .into_iter()
+                                .rev()
+                                .for_each(|item| to_print.push(item));
+                            } else {
+                                to_print.push(PrintItem::Str(field));
+                            }
+                            to_print.push(PrintItem::MemberAccess);
                         }};
                     }
 
@@ -841,27 +866,15 @@ impl<'a> GraphPrinter<'a> {
                             class,
                             field_name,
                         }) => {
-                            [
-                                PrintItem::SymbolicType(class),
-                                PrintItem::MemberAccess,
-                                PrintItem::Str(field_name),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                            handle_field_access!(field_name);
+                            to_print.push(PrintItem::SymbolicType(class));
                         }
                         ExprKind::FieldAccess { obj, field } => {
-                            [
-                                PrintItem::Expr(
-                                    *obj,
-                                    OpPrecedence::MaxPrecedence,
-                                ),
-                                PrintItem::MemberAccess,
-                                PrintItem::Str(field),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
+                            handle_field_access!(field);
+                            to_print.push(PrintItem::Expr(
+                                *obj,
+                                OpPrecedence::MaxPrecedence,
+                            ));
                         }
                         ExprKind::SymbolicDowncast { obj, ty } => {
                             [
