@@ -9,6 +9,7 @@ pub struct GeodeMenu {
     pub player_item_locations: Vec<Vector<isize>>,
     pub held_item: Option<Item>,
     pub crack_geode_button: Vector<isize>,
+    pub is_cracking_geode: bool,
     pub ok_button: Vector<isize>,
 }
 
@@ -21,10 +22,12 @@ impl GeodeMenu {
             |player_item_locations: &Vec<Vector<isize>>,
              held_item: Option<&Item>,
              crack_geode_button: &Vector<isize>,
+             is_cracking_geode: bool,
              ok_button: &Vector<isize>| GeodeMenu {
                 player_item_locations: player_item_locations.clone(),
                 held_item: held_item.cloned(),
                 crack_geode_button: crack_geode_button.clone(),
+                is_cracking_geode,
                 ok_button: ok_button.clone(),
             },
         )?;
@@ -50,6 +53,11 @@ impl GeodeMenu {
                     menu.geodeSpot
                 );
 
+                let is_cracking_geode = menu
+                    .geodeSpot
+                    .item
+                    .is_some();
+
                 let ok_button = center_of_gui_rect(
                     menu.okButton
                 );
@@ -59,6 +67,7 @@ impl GeodeMenu {
                         player_item_locations,
                         held_item,
                         crack_geode_button,
+                        is_cracking_geode,
                         ok_button,
                     )
                 } else {

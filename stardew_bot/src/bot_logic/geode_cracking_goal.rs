@@ -164,29 +164,39 @@ impl BotGoal for GeodeCrackingGoal {
             return Ok(GoToActionTile::new("Blacksmith").into());
         };
 
-        let pixel = if let Some(held_item) = &menu.held_item {
+        if menu.is_cracking_geode {
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        let (pixel, click) = if let Some(held_item) = &menu.held_item {
             if held_item.is_same_item(next_geode) {
                 // The cursor is holding the correct geode, so drop it onto
                 // Clint's anvil.
-                menu.crack_geode_button
+                (menu.crack_geode_button, GameAction::LeftClick)
             } else {
                 // The cursor is holding an item, but it's not the
                 // geode we want to open.
                 let empty_slot = inventory
                     .empty_slot()
                     .ok_or(BotError::ExpectedEmptySlot)?;
-                menu.player_item_locations[empty_slot]
+                (
+                    menu.player_item_locations[empty_slot],
+                    GameAction::LeftClick,
+                )
             }
         } else {
             // The cursor is not holding an item, so pick one up.
             let next_slot = inventory
                 .current_slot(&next_geode)
                 .ok_or_else(|| BotError::ExpectedItemInInventory(next_geode))?;
-            menu.player_item_locations[next_slot]
+            (
+                menu.player_item_locations[next_slot],
+                GameAction::RightClick,
+            )
         };
 
         actions.do_action(GameAction::MouseOverPixel(pixel));
-        actions.do_action(GameAction::LeftClick);
+        actions.do_action(click);
         Ok(BotGoalResult::InProgress)
     }
 }
