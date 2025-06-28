@@ -2166,11 +2166,7 @@ impl ObjectKind {
             | ObjectKind::Chest(_) => false,
             ObjectKind::Grass => true,
             ObjectKind::FruitTree(_) => false,
-            ObjectKind::Tree(_) => {
-                // TODO: Check for just-planted trees, which can be
-                // walked over.
-                false
-            }
+            ObjectKind::Tree(tree) => tree.growth_stage == 0,
             ObjectKind::HoeDirt(_) => {
                 // TODO: Check for crops that use a trellis, which
                 // cannot be walked over.

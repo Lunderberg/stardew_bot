@@ -141,4 +141,8 @@ impl GlobalGameState {
             .cloned()
             .ok_or_else(|| Error::MissingStat(stat_name.to_string()))
     }
+
+    pub(crate) fn days_played(&self) -> u32 {
+        self.get_stat("daysPlayed").unwrap_or(1)
+    }
 }

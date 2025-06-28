@@ -67,6 +67,14 @@ impl BotGoal for GenericDay {
             stack
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
+        } else if current_day >= 6 {
+            stack
+                .then(
+                    PlantCropsGoal::new()
+                        .with_expected_seeds(200)
+                        .stop_time(1100),
+                )
+                .then(PlantCropsGoal::new().with_expected_seeds(200))
         } else {
             stack
                 .then(ExpandTreeFarm::new())

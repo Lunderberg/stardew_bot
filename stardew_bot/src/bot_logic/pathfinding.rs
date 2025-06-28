@@ -252,7 +252,9 @@ impl Pathfinding<'_> {
                 ObjectKind::Fiber | ObjectKind::MineBarrel => {
                     self.clear_breakables
                 }
-                ObjectKind::Tree(_) => self.clear_trees,
+                ObjectKind::Tree(tree) if tree.growth_stage > 0 => {
+                    self.clear_trees
+                }
                 ObjectKind::Grass => Some(self.grass_penalty),
                 other if other.is_walkable() => {
                     // Can walk on this tile without penalty (e.g. a

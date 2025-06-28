@@ -191,8 +191,10 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let plant_crops = PlantCropsGoal::new();
-        if in_game_time < 2000 && !plant_crops.is_completed(game_state) {
+        let mut plant_crops = PlantCropsGoal::new()
+            .stop_time(2000)
+            .opportunistic_clay_farming(true);
+        if !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
         }
 

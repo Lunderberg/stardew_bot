@@ -1,3 +1,7 @@
+use std::collections::HashSet;
+
+use itertools::Itertools as _;
+
 use crate::{
     bot_logic::GameStateExt as _,
     game_state::{Rectangle, Vector},
@@ -7,11 +11,14 @@ use crate::{
 pub struct FarmPlan {
     initial_plot: Rectangle<isize>,
     tree_farm: Rectangle<isize>,
+    regular_sprinklers: Vec<Vector<isize>>,
 }
 
 impl FarmPlan {
     pub fn plan(game_state: &GameState) -> Result<FarmPlan, Error> {
+        let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
+
         let initial_plot = {
             let top_right = farm_door + Vector::new(3, 5);
             // 60 seeds for the first day, plus an extra row for any
@@ -39,9 +46,77 @@ impl FarmPlan {
             )
         };
 
+        let regular_sprinklers = {
+            const NUM_SPRINKLERS: usize = 50;
+
+            let walkable = farm
+                .pathfinding()
+                .stone_clearing_cost(0)
+                .wood_clearing_cost(0)
+                .breakable_clearing_cost(0)
+                .tree_clearing_cost(0)
+                .walkable();
+
+            // Off to the bottom/left, so that barns/coops can be
+            // closer to the farm house.
+            let starting_location = farm_door + Vector::new(-44, 31);
+
+            let mut sprinklers: Vec<Vector<isize>> = Default::default();
+
+            let mut seen: HashSet<Vector<isize>> = Default::default();
+            let mut to_visit: HashSet<Vector<isize>> = Default::default();
+
+            for di in -1..=1 {
+                for dj in -1..=1 {
+                    let loc = starting_location
+                        + Vector::<isize>::new(2, -1) * di
+                        + Vector::<isize>::new(1, 2) * dj;
+                    seen.insert(loc);
+                    to_visit.insert(loc);
+                }
+            }
+
+            while sprinklers.len() < NUM_SPRINKLERS && !to_visit.is_empty() {
+                let visiting = to_visit
+                    .iter()
+                    .cloned()
+                    .min_by_key(|tile| {
+                        let dist = tile.manhattan_dist(starting_location);
+                        (dist, tile.right, std::cmp::Reverse(tile.down))
+                    })
+                    .expect("Guarded by to_visit.is_some()");
+                to_visit.remove(&visiting);
+
+                let is_good_placement = std::iter::once(visiting)
+                    .chain(visiting.iter_cardinal())
+                    .all(|adj| walkable.is_set(adj));
+                if is_good_placement {
+                    sprinklers.push(visiting);
+
+                    [
+                        Vector::<isize>::new(2, -1),
+                        Vector::<isize>::new(1, 2),
+                        Vector::<isize>::new(-2, 1),
+                        Vector::<isize>::new(-1, -2),
+                    ]
+                    .into_iter()
+                    .map(|offset| visiting + offset)
+                    .for_each(|tile| {
+                        if !seen.contains(&tile) {
+                            seen.insert(tile);
+                            to_visit.insert(tile);
+                        }
+                    });
+                }
+            }
+
+            sprinklers
+        };
+
         Ok(Self {
             initial_plot,
             tree_farm,
+            regular_sprinklers,
         })
     }
 
@@ -68,5 +143,19 @@ impl FarmPlan {
         &self,
     ) -> impl Iterator<Item = Vector<isize>> + '_ {
         self.initial_plot.iter_points()
+    }
+
+    pub fn iter_regular_sprinklers(
+        &self,
+    ) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.regular_sprinklers.iter().cloned()
+    }
+
+    pub fn iter_sprinkler_plot(
+        &self,
+    ) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.regular_sprinklers
+            .iter()
+            .flat_map(|sprinkler| sprinkler.iter_cardinal())
     }
 }

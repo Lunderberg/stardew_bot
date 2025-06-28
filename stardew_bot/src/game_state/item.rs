@@ -117,6 +117,36 @@ impl ItemId {
     pub fn as_item(self) -> Item {
         self.into()
     }
+
+    pub fn is_tree_seed(&self) -> bool {
+        match self.item_id.as_ref() {
+            "(O)309"
+            | "(O)310"
+            | "(O)311"
+            | "(O)MossySeed"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Fir_Seed"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Birch_Seed" => true,
+            _ => false,
+        }
+    }
+
+    pub fn is_fruit_sapling(&self) -> bool {
+        match self.item_id.as_ref() {
+            "(O)69"
+            | "(O)628"
+            | "(O)629"
+            | "(O)630"
+            | "(O)631"
+            | "(O)632"
+            | "(O)633"
+            | "(O)835"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Pear_Sapling"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Nectarine_Sapling"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Persimmon_Sapling"
+            | "FlashShifter.StardewValleyExpandedCP_Tree_Coin" => true,
+            _ => false,
+        }
+    }
 }
 
 impl Item {
