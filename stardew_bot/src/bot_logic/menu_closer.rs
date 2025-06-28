@@ -27,6 +27,8 @@ impl MenuCloser {
         } else if let Some(menu) = &game_state.mail_menu {
             (menu.current_page + 1 < menu.num_pages)
                 .then(|| menu.pixel_location.center())
+        } else if let Some(menu) = &game_state.geode_menu {
+            Some(menu.ok_button)
         } else {
             None
         }
@@ -42,19 +44,33 @@ impl MenuCloser {
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {
-        game_state
-            .pause_menu
-            .as_ref()
-            .filter(|menu| menu.held_item().is_some())
-            .map(|menu| {
+        if let Some(menu) = &game_state.pause_menu {
+            if menu.held_item().is_some() {
                 let empty_slot = game_state
                     .player
                     .inventory
                     .empty_slot()
                     .expect("TODO: Handle case of fully inventory");
 
-                menu.player_inventory_tiles().unwrap()[empty_slot]
-            })
+                return Some(
+                    menu.player_inventory_tiles().unwrap()[empty_slot],
+                );
+            }
+        }
+
+        if let Some(menu) = &game_state.geode_menu {
+            if menu.held_item.is_some() {
+                let empty_slot = game_state
+                    .player
+                    .inventory
+                    .empty_slot()
+                    .expect("TODO: Handle case of fully inventory");
+
+                return Some(menu.player_item_locations[empty_slot]);
+            }
+        }
+
+        None
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {

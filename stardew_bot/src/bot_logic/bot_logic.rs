@@ -817,6 +817,10 @@ impl LogicStack {
         Self(Default::default())
     }
 
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
     pub fn with_item(mut self, item: LogicStackItem) -> Self {
         self.0.push_front(item);
         self

@@ -374,6 +374,7 @@ impl GameState {
             || self.pause_menu.is_some()
             || self.mail_menu.is_some()
             || self.mine_elevator_menu.is_some()
+            || self.geode_menu.is_some()
     }
 }
 

@@ -92,6 +92,8 @@ pub enum ItemCategory {
     Seed,
     Junk,
     Ore,
+    Gem,
+    Mineral,
     Other(i32),
 }
 
@@ -370,6 +372,8 @@ impl From<i32> for ItemCategory {
             -74 => ItemCategory::Seed,
             -20 => ItemCategory::Junk,
             -15 => ItemCategory::Ore,
+            -12 => ItemCategory::Mineral,
+            -2 => ItemCategory::Gem,
             other => ItemCategory::Other(other),
         }
     }
