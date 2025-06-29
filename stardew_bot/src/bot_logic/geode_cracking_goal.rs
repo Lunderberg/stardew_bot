@@ -1,4 +1,4 @@
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::{BotError, GoToActionTile, InventoryGoal, MenuCloser},
@@ -89,30 +89,54 @@ impl GeodeCrackingGoal {
             (kind, count)
         });
 
+        let total_geodes =
+            carried.iter().map(|(_, count)| *count).sum::<usize>();
+        if total_geodes == 0 {
+            return Ok(None);
+        }
+
         let predictor = GeodePredictor::new(game_state)?;
-        let opt_next = carried
-            .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .max_by_key(|(id, count)| {
-                let mean: f32 = predictor
-                    .iter_chances(&game_state.statics, id)
-                    .map(|(item, prob)| (item.stack_price() as f32) * prob)
-                    .sum();
 
-                let predicted = predictor.predict(&game_state.statics, id);
-                let predicted_price = if matches!(
-                    predicted.category,
-                    Some(ItemCategory::Mineral | ItemCategory::Gem)
-                ) {
-                    predicted.stack_price()
-                } else {
-                    0
-                };
-                (predicted_price - (mean as i32), *count)
-            })
-            .map(|(id, _)| id);
+        let mut used = vec![false; total_geodes];
 
-        Ok(opt_next)
+        for (geode_id, count) in
+            carried.into_iter().rev().filter(|(_, count)| *count > 0)
+        {
+            (0..total_geodes)
+                .filter(|i| !used[*i])
+                .map(|i| {
+                    let predicted = predictor.predict_ahead(
+                        &game_state.statics,
+                        &geode_id,
+                        i,
+                    );
+                    (i, predicted)
+                })
+                .sorted_by_key(|(_, item)| {
+                    let price = if matches!(
+                        item.category,
+                        Some(ItemCategory::Mineral | ItemCategory::Gem)
+                    ) {
+                        item.stack_price()
+                    } else {
+                        0
+                    };
+                    std::cmp::Reverse(price)
+                })
+                .take(count)
+                .for_each(|(i, _)| {
+                    used[i] = true;
+                });
+
+            if used[0] {
+                return Ok(Some(geode_id));
+            }
+        }
+
+        unreachable!(
+            "Of the N geodes, \
+             one geode must be first."
+        )
     }
 }
 
@@ -251,9 +275,10 @@ impl GeodePredictor {
         })
     }
 
-    fn generate_rng(&self) -> SeededRng {
+    fn generate_rng(&self, other_geodes: usize) -> SeededRng {
+        let geodes_cracked = self.geodes_cracked + (other_geodes as u32);
         let mut rng = SeededRng::from_stardew_seed([
-            self.geodes_cracked as f64,
+            geodes_cracked as f64,
             (self.game_id / 2) as f64,
             ((self.multiplayer_id as i32) / 2) as f64,
         ]);
@@ -268,7 +293,12 @@ impl GeodePredictor {
         rng
     }
 
-    pub fn predict(&self, statics: &StaticState, geode: &ItemId) -> Item {
+    pub fn predict_ahead(
+        &self,
+        statics: &StaticState,
+        geode: &ItemId,
+        other_geodes: usize,
+    ) -> Item {
         let geode_data = if geode == &Item::GEODE {
             &statics.geode
         } else if geode == &Item::FROZEN_GEODE {
@@ -281,7 +311,7 @@ impl GeodePredictor {
             panic!("Could not find geode data for {geode}")
         };
 
-        let mut rng = self.generate_rng();
+        let mut rng = self.generate_rng(other_geodes);
 
         // Skip one roll used to check for Qi Beans.  (Roll occurs
         // regardless of whether Qi Beans can currently drop.)
@@ -387,186 +417,5 @@ impl GeodePredictor {
         statics
             .enrich_item(ItemId::new(output_id).into())
             .with_count(amount as usize)
-    }
-
-    pub fn iter_chances<'a>(
-        &'a self,
-        statics: &'a StaticState,
-        geode: &ItemId,
-    ) -> impl Iterator<Item = (Item, f32)> + 'a {
-        #[derive(Clone, Copy)]
-        enum GeodeKind {
-            Regular,
-            Frozen,
-            Magma,
-            Omni,
-        }
-        let kind = if geode == &Item::GEODE {
-            GeodeKind::Regular
-        } else if geode == &Item::FROZEN_GEODE {
-            GeodeKind::Frozen
-        } else if geode == &Item::MAGMA_GEODE {
-            GeodeKind::Magma
-        } else if geode == &Item::OMNI_GEODE {
-            GeodeKind::Omni
-        } else {
-            panic!("Could not find geode data for {geode}")
-        };
-
-        let geode_data = match kind {
-            GeodeKind::Regular => &statics.geode,
-            GeodeKind::Frozen => &statics.frozen_geode,
-            GeodeKind::Magma => &statics.magma_geode,
-            GeodeKind::Omni => &statics.omni_geode,
-        };
-
-        // For ore/rock/coal, which may give more than one, the
-        // probability distribution of the amount.
-        #[derive(Clone, Copy)]
-        enum StackSize {
-            Default,
-            SingleItem,
-            IridiumOre,
-        }
-
-        // 50% chance of pulling from the geode-specific table of outputs
-        let iter_table = geode_data
-            .drops
-            .iter()
-            .filter(|drop| {
-                if let Some(cond) = &drop.condition {
-                    assert_eq!(
-                        cond, "PLAYER_STAT Current GeodesCracked 16",
-                        "TODO: Handle conditions other than \
-                         OmniGeode's condition for Prismatic Shards."
-                    );
-                    self.geodes_cracked >= 15
-                } else {
-                    true
-                }
-            })
-            .scan(0.5, |cumulative_prob, drop| {
-                let drop_chance = drop.chance as f32;
-                let chance_this_list = (*cumulative_prob) * drop_chance;
-                *cumulative_prob *= 1.0 - drop_chance;
-
-                let chance_per_item =
-                    chance_this_list / (drop.item_list.len() as f32);
-                let iter = drop.item_list.iter().map(move |id| {
-                    (id.clone(), chance_per_item, StackSize::SingleItem)
-                });
-                Some(iter)
-            })
-            .flatten();
-
-        let non_table_prob = 0.5
-            * (1.0
-                + geode_data
-                    .drops
-                    .iter()
-                    .map(|drop| 1.0 - drop.chance as f32)
-                    .product::<f32>());
-
-        // If the geode doesn't generate an output from the table,
-        // there's a 50% chance (25% chance total) of generating
-        // stone/clay/gems
-        let iter_stone_clay = [
-            ("(O)390", non_table_prob * 0.5 * 0.5, StackSize::Default),
-            ("(O)330", non_table_prob * 0.5 * 0.25, StackSize::SingleItem),
-        ]
-        .into_iter();
-        let iter_gems = {
-            let gem_prob = match kind {
-                GeodeKind::Regular => [1.0, 0.0, 0.0],
-                GeodeKind::Frozen => [0.0, 1.0, 0.0],
-                GeodeKind::Magma => [0.0, 0.0, 1.0],
-                GeodeKind::Omni => [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0],
-            };
-
-            ["(O)86", "(O)84", "(O)82"]
-                .into_iter()
-                .zip(gem_prob.into_iter())
-                .map(move |(id, prob)| {
-                    (
-                        id,
-                        non_table_prob * 0.5 * 0.25 * prob,
-                        StackSize::SingleItem,
-                    )
-                })
-        };
-
-        // If the geode is producing neither a result from the table
-        // nor a result from the stone/clay/gems (25% of the time), it
-        // will generate ore.
-        let iter_ore = {
-            // Probability of producing (coal, copper, iron, gold, iridium) ore
-            let ore_prob = match kind {
-                GeodeKind::Regular if self.lowest_mine_level_reached <= 25 => {
-                    [1.0 / 3.0, 2.0 / 3.0, 0.0, 0.0, 0.0]
-                }
-                GeodeKind::Regular => {
-                    [1.0 / 3.0, 1.0 / 3.0, 1.0 / 3.0, 0.0, 0.0]
-                }
-                GeodeKind::Frozen if self.lowest_mine_level_reached <= 75 => {
-                    [0.25, 0.25, 0.5, 0.0, 0.0]
-                }
-                GeodeKind::Frozen => [0.25, 0.25, 0.25, 0.25, 0.0],
-                GeodeKind::Magma | GeodeKind::Omni => [0.2, 0.2, 0.2, 0.2, 0.2],
-            };
-
-            [
-                ("(O)382", StackSize::Default),
-                ("(O)378", StackSize::Default),
-                ("(O)380", StackSize::Default),
-                ("(O)384", StackSize::Default),
-                ("(O)386", StackSize::IridiumOre),
-            ]
-            .into_iter()
-            .zip(ore_prob.into_iter())
-            .map(move |((id, stack_size), prob)| {
-                (id, non_table_prob * 0.5 * prob, stack_size)
-            })
-        };
-
-        iter_table
-            .chain(iter_stone_clay.chain(iter_gems).chain(iter_ore).map(
-                |(id, prob, stack_size)| (ItemId::new(id), prob, stack_size),
-            ))
-            .flat_map(move |(id, prob, stack_size)| {
-                let item: Item = id.into();
-
-                let amounts = match stack_size {
-                    StackSize::Default => Either::Left(
-                        [
-                            (20, 0.01),
-                            (10, 0.099),
-                            (5, 0.297),
-                            (3, 0.297),
-                            (1, 0.297),
-                        ]
-                        .into_iter(),
-                    ),
-                    StackSize::IridiumOre => Either::Left(
-                        [
-                            (11, 0.01),
-                            (6, 0.099),
-                            (3, 0.297),
-                            (2, 0.297),
-                            (1, 0.297),
-                        ]
-                        .into_iter(),
-                    ),
-                    StackSize::SingleItem => {
-                        Either::Right([(1, 1.0)].into_iter())
-                    }
-                };
-
-                amounts.map(move |(count, count_prob)| {
-                    let item: Item = item.clone().with_count(count as usize);
-                    let item = statics.enrich_item(item);
-                    let prob: f32 = prob * count_prob;
-                    (item, prob)
-                })
-            })
     }
 }
