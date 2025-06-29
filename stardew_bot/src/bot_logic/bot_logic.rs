@@ -235,6 +235,7 @@ impl ActionForbiddenUntil {
             }
             GameAction::ConfirmMenu => {
                 out.confirm_menu = Some(current_tick + 2);
+                out.activate_tile = Some(current_tick + 2);
             }
             GameAction::LeftClick => {
                 out.left_click = Some(current_tick + 2);
