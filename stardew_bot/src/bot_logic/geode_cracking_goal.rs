@@ -77,20 +77,20 @@ impl GeodeCrackingGoal {
         &self,
         game_state: &GameState,
     ) -> Result<Option<ItemId>, Error> {
-        let mut carried = game_state.player.inventory.to_hash_map();
+        let mut available =
+            InventoryGoal::current().total_stored_and_carried(game_state)?;
         if let Some(held_item) = Self::held_item(game_state) {
-            *carried.entry(held_item.id.clone()).or_default() +=
-                held_item.count;
+            *available.entry(&held_item.id).or_default() += held_item.count;
         }
 
-        let carried: [_; 4] = std::array::from_fn(|i| {
+        let available: [_; 4] = std::array::from_fn(|i| {
             let kind = Self::GEODE_TYPES[i].id.clone();
-            let count = carried.get(&kind).cloned().unwrap_or(0);
+            let count = available.get(&kind).cloned().unwrap_or(0);
             (kind, count)
         });
 
         let total_geodes =
-            carried.iter().map(|(_, count)| *count).sum::<usize>();
+            available.iter().map(|(_, count)| *count).sum::<usize>();
         if total_geodes == 0 {
             return Ok(None);
         }
@@ -100,7 +100,7 @@ impl GeodeCrackingGoal {
         let mut used = vec![false; total_geodes];
 
         for (geode_id, count) in
-            carried.into_iter().rev().filter(|(_, count)| *count > 0)
+            available.into_iter().rev().filter(|(_, count)| *count > 0)
         {
             (0..total_geodes)
                 .filter(|i| !used[*i])

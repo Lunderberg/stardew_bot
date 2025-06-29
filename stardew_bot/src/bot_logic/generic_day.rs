@@ -1,14 +1,17 @@
-use crate::{game_state::ObjectKind, Error, GameAction, GameState};
+use crate::{
+    game_state::{Item, ObjectKind},
+    Error, GameAction, GameState,
+};
 
 use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt as _, LogicStack,
     },
-    CheckAllMail, ClearFarmGoal, CollectNearbyItems, ExpandStorageInterrupt,
-    ExpandTreeFarm, FirstDay, FishingGoal, FishingLocation, ForagingGoal,
-    GameStateExt as _, GeodeCrackingGoal, HarvestCropsGoal, InventoryGoal,
-    MineDelvingGoal, OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal,
-    WaterCropsGoal,
+    BuyFromMerchantGoal, CheckAllMail, ClearFarmGoal, CollectNearbyItems,
+    ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
+    FishingLocation, ForagingGoal, GameStateExt as _, GeodeCrackingGoal,
+    HarvestCropsGoal, InventoryGoal, MineDelvingGoal, OpportunisticForaging,
+    PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -80,7 +83,11 @@ impl BotGoal for GenericDay {
                         .sell_gems(true)
                         .sell_minerals(true),
                 )
-                .then(PlantCropsGoal::new().with_expected_seeds(200))
+                .then(BuyFromMerchantGoal::new(
+                    "Buy General",
+                    Item::KALE_SEEDS.with_count(200),
+                ))
+                .then(PlantCropsGoal::new())
         } else {
             stack
                 .then(ExpandTreeFarm::new())

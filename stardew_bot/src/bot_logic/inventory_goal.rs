@@ -36,6 +36,11 @@ pub struct InventoryGoal {
     /// not be transferred into or out of the player's inventory.
     stash_unspecified_items: bool,
 
+    /// If present, any item for which this function returns true will
+    /// be kept in the inventory, even if the
+    /// `stash_unspecified_items` is enabled.
+    keep_if: Option<Box<dyn Fn(&Item) -> bool>>,
+
     /// If true, try to use this many slots to hold items to eat for
     /// stamina recovery.
     stamina_recovery_slots: usize,
@@ -89,11 +94,8 @@ impl InventoryGoal {
         .into_iter()
         .collect();
         Self {
-            room: "Farm".into(),
             bounds,
-            stash_unspecified_items: false,
-            stamina_recovery_slots: 0,
-            with_weapon: false,
+            ..Self::current()
         }
     }
 
@@ -102,6 +104,7 @@ impl InventoryGoal {
             room: "Farm".into(),
             bounds: Default::default(),
             stash_unspecified_items: false,
+            keep_if: None,
             stamina_recovery_slots: 0,
             with_weapon: false,
         }
@@ -109,11 +112,8 @@ impl InventoryGoal {
 
     pub fn empty() -> Self {
         Self {
-            room: "Farm".into(),
-            bounds: Default::default(),
             stash_unspecified_items: true,
-            stamina_recovery_slots: 0,
-            with_weapon: false,
+            ..Self::current()
         }
     }
 
@@ -156,6 +156,13 @@ impl InventoryGoal {
     pub fn with_weapon(self) -> Self {
         Self {
             with_weapon: true,
+            ..self
+        }
+    }
+
+    pub fn keep_if(self, func: impl Fn(&Item) -> bool + 'static) -> Self {
+        Self {
+            keep_if: Some(Box::new(func)),
             ..self
         }
     }
@@ -274,25 +281,51 @@ impl InventoryGoal {
         let player_to_chest: HashMap<ItemId, usize> = player_contents
             .iter()
             .filter_map(|(item, count)| {
-                let opt_new_count = if let Some(bound) = self.bounds.get(item) {
-                    bound.max.filter(|max| max < count)
-                } else if self.stash_unspecified_items
-                    && !current_stamina_items.contains(&item)
-                    && !opt_current_weapon
-                        .map(|weapon| item == weapon)
-                        .unwrap_or(false)
-                {
-                    Some(0)
-                } else if self.stash_unspecified_items
-                    && opt_current_weapon
+                let opt_new_count = 'opt_new_count: {
+                    if let Some(bound) = self.bounds.get(item) {
+                        // The player has more than the desired
+                        // amount, should store excess.
+                        break 'opt_new_count bound
+                            .max
+                            .filter(|max| max < count);
+                    }
+
+                    if !self.stash_unspecified_items {
+                        // No further checks needed, as unspecified
+                        // items are to be kept in the inventory.
+                        break 'opt_new_count None;
+                    }
+
+                    if opt_current_weapon
                         .map(|weapon| item == weapon && *count > 1)
                         .unwrap_or(false)
-                {
-                    // The player has more than one copy of the same
-                    // weapon, so stash the copies.
-                    Some(1)
-                } else {
-                    None
+                    {
+                        // The player has more than one copy of the same
+                        // weapon, so stash the copies.
+                        break 'opt_new_count Some(1);
+                    }
+
+                    if current_stamina_items.contains(&item) {
+                        // This item is for stamina recovery, so keep
+                        // it.
+                        break 'opt_new_count None;
+                    }
+
+                    if let Some(keep_if) = &self.keep_if {
+                        let full_item = game_state
+                            .statics
+                            .enrich_item(item.clone().into())
+                            .with_count(*count);
+                        if keep_if(&full_item) {
+                            // This item passes the check to be kept
+                            // in the inventory.
+                            break 'opt_new_count None;
+                        }
+                    }
+
+                    // No exceptions would keep the item in the
+                    // player's inventory, so store it.
+                    Some(0)
                 };
 
                 opt_new_count.map(|new_count| (item.clone(), new_count))

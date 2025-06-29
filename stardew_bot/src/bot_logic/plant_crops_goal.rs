@@ -259,8 +259,12 @@ impl BotGoal for PlantCropsGoal {
             .with(Item::PICKAXE)
             .with(Item::AXE);
         if !get_tools.is_completed(game_state)? {
-            let get_tools =
-                get_tools.stamina_recovery_slots(3).otherwise_empty();
+            let get_tools = get_tools
+                .stamina_recovery_slots(3)
+                .keep_if(|item| {
+                    matches!(item.category, Some(ItemCategory::Seed))
+                })
+                .otherwise_empty();
             return Ok(get_tools.into());
         }
 

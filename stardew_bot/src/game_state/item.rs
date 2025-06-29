@@ -127,7 +127,7 @@ impl ItemId {
             | "(O)310"
             | "(O)311"
             | "(O)MossySeed"
-            | "(O)FlashShifter.StardewValleyExpandedCP_Fir_Seed"
+            | "(O)FlashShifter.StardewValleyExpandedCP_Fir_Cone"
             | "(O)FlashShifter.StardewValleyExpandedCP_Birch_Seed" => true,
             _ => false,
         }
@@ -168,6 +168,7 @@ impl Item {
     pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
     pub const PARSNIP: Item = Item::new_const("(O)24");
     pub const CARROT_SEEDS: Item = Item::new_const("(O)CarrotSeeds");
+    pub const KALE_SEEDS: Item = Item::new_const("(O)477");
 
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const WOOD: Item = Item::new_const("(O)388");
