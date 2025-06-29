@@ -278,6 +278,13 @@ impl Item {
     }
 
     pub fn gp_per_stamina(&self) -> Option<f32> {
+        if self.is_same_item(&Item::PARSNIP.clone().with_quality(Quality::Gold))
+        {
+            // Hack to avoid eating any gold-star parsnips harvested
+            // on Day 5.  Eventually, should be replaced by a check on
+            // the items remaining for any community center bundles.
+            return None;
+        }
         let stamina = self.stamina_recovery()?;
         let price = self.per_item_price() as f32;
         Some(price / stamina).filter(|&ratio| ratio > 0.0)
