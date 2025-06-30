@@ -4,7 +4,7 @@ use dotnet_debugger::env_var_flag;
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ObjectKind, Vector},
     Direction, Error, GameAction, GameState,
 };
 
@@ -191,10 +191,22 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let mut plant_crops =
-            PlantCropsGoal::new([Item::PARSNIP_SEEDS.with_count(60)])
-                .stop_time(2000)
-                .opportunistic_clay_farming(true);
+        let mut plant_crops = PlantCropsGoal::new(
+            std::iter::once(Item::PARSNIP_SEEDS.with_count(60)).chain(
+                game_state
+                    .player
+                    .inventory
+                    .iter_items()
+                    .filter(|item| !item.is_same_item(&Item::PARSNIP_SEEDS))
+                    .filter(|item| {
+                        matches!(item.category, Some(ItemCategory::Seed))
+                    })
+                    .filter(|item| !item.id.is_tree_seed())
+                    .cloned(),
+            ),
+        )
+        .stop_time(2000)
+        .opportunistic_clay_farming(true);
         if !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
         }
