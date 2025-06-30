@@ -9,7 +9,7 @@ use memory_reader::Pointer;
 
 use crate::{Direction, Error};
 
-use super::{Inventory, ItemId, Rectangle, TileMap, Vector};
+use super::{Inventory, ItemCategory, ItemId, Rectangle, TileMap, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {
@@ -332,9 +332,9 @@ pub enum ObjectKind {
     /// whose name is known, but for which unpacking has not yet been
     /// implemented.
     Other {
-        category: i32,
+        category: ItemCategory,
         name: String,
-        id: String,
+        id: ItemId,
     },
 
     /// A tile that contains an unknown object or terrain feature,
@@ -733,21 +733,30 @@ impl Location {
              name: &str,
              id: &str|
              -> ObjectKind {
+                let category: ItemCategory = category.into();
                 match (category, sheet_index, name) {
-                    (-9, 118 | 119 | 120 | 121 | 122 | 123 | 124 | 125, _) => {
-                        ObjectKind::MineBarrel
+                    (
+                        ItemCategory::BigCraftable,
+                        118 | 119 | 120 | 121 | 122 | 123 | 124 | 125,
+                        _,
+                    ) => ObjectKind::MineBarrel,
+                    (ItemCategory::Other(0), 93, _) => ObjectKind::Torch,
+                    (ItemCategory::Craftable, 599, _) => {
+                        ObjectKind::Sprinkler(Sprinkler::Regular)
                     }
-                    (0, 93, _) => ObjectKind::Torch,
-                    (-8, 599, _) => ObjectKind::Sprinkler(Sprinkler::Regular),
-                    (-8, 621, _) => ObjectKind::Sprinkler(Sprinkler::Quality),
-                    (-8, 645, _) => ObjectKind::Sprinkler(Sprinkler::Iridium),
-                    (-9, 8, _) => ObjectKind::Scarecrow,
+                    (ItemCategory::Craftable, 621, _) => {
+                        ObjectKind::Sprinkler(Sprinkler::Quality)
+                    }
+                    (ItemCategory::Craftable, 645, _) => {
+                        ObjectKind::Sprinkler(Sprinkler::Iridium)
+                    }
+                    (ItemCategory::BigCraftable, 8, _) => ObjectKind::Scarecrow,
                     (_, _, "Artifact Spot") => ObjectKind::ArtifactSpot,
                     (_, _, "Seed Spot") => ObjectKind::SeedSpot,
                     _ => ObjectKind::Other {
                         category,
                         name: name.to_string(),
-                        id: id.to_string(),
+                        id: ItemId::new(id.to_string()),
                     },
                 }
             },

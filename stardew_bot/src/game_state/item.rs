@@ -89,11 +89,13 @@ pub enum Quality {
 pub enum ItemCategory {
     Tool,
     Fish,
+    SeaProduce,
     Seed,
     Junk,
     Ore,
     Gem,
     Mineral,
+    Craftable,
     BigCraftable,
     Other(i32),
 }
@@ -376,16 +378,36 @@ impl TryFrom<i32> for Quality {
     }
 }
 
+impl std::fmt::Display for ItemCategory {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ItemCategory::Tool => write!(f, "Tool"),
+            ItemCategory::Fish => write!(f, "Fish"),
+            ItemCategory::SeaProduce => write!(f, "SeaProduce"),
+            ItemCategory::Seed => write!(f, "Seed"),
+            ItemCategory::Junk => write!(f, "Junk"),
+            ItemCategory::Ore => write!(f, "Ore"),
+            ItemCategory::Gem => write!(f, "Gem"),
+            ItemCategory::Mineral => write!(f, "Mineral"),
+            ItemCategory::Craftable => write!(f, "Craftable"),
+            ItemCategory::BigCraftable => write!(f, "BigCraftable"),
+            ItemCategory::Other(value) => write!(f, "OtherCategory({value})"),
+        }
+    }
+}
+
 impl From<i32> for ItemCategory {
     fn from(value: i32) -> Self {
         match value {
             -99 => ItemCategory::Tool,
             -4 => ItemCategory::Fish,
+            -23 => ItemCategory::SeaProduce,
             -74 => ItemCategory::Seed,
             -20 => ItemCategory::Junk,
             -15 => ItemCategory::Ore,
             -12 => ItemCategory::Mineral,
             -2 => ItemCategory::Gem,
+            -8 => ItemCategory::Craftable,
             -9 => ItemCategory::BigCraftable,
             other => ItemCategory::Other(other),
         }
