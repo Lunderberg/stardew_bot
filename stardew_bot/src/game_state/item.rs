@@ -99,6 +99,8 @@ pub enum ItemCategory {
 }
 
 impl ItemId {
+    pub const SPRINKLER: Self = Self::new_const("(O)599");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),
@@ -178,8 +180,9 @@ impl Item {
     pub const MAPLE_SEED: Item = Item::new_const("(O)310");
     pub const PINE_SEED: Item = Item::new_const("(O)311");
 
-    pub const CHEST: Item = Item::new_const("(BC)130");
+    pub const SCARECROW: Item = Item::new_const("(BC)8");
     pub const FURNACE: Item = Item::new_const("(BC)13");
+    pub const CHEST: Item = Item::new_const("(BC)130");
 
     pub const DAFFODIL: Item = Item::new_const("(O)18");
 

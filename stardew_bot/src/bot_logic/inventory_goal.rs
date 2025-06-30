@@ -585,10 +585,10 @@ impl InventoryGoal {
         Ok(self.next_transfer(game_state)?.is_none())
     }
 
-    pub fn total_stored_and_carried<'a>(
+    pub fn iter_stored_and_carried<'a>(
         &self,
         game_state: &'a GameState,
-    ) -> Result<HashMap<&'a ItemId, usize>, Error> {
+    ) -> Result<impl Iterator<Item = &'a Item> + 'a, Error> {
         let iter_current = game_state.player.inventory.iter_items();
 
         let iter_stored = game_state
@@ -598,8 +598,15 @@ impl InventoryGoal {
             .filter_map(|obj| obj.kind.as_chest())
             .flat_map(|chest| chest.iter_items());
 
-        let total: HashMap<&ItemId, usize> = iter_current
-            .chain(iter_stored)
+        Ok(iter_current.chain(iter_stored))
+    }
+
+    pub fn total_stored_and_carried<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Result<HashMap<&'a ItemId, usize>, Error> {
+        let total: HashMap<&ItemId, usize> = self
+            .iter_stored_and_carried(game_state)?
             .map(|item| (&item.id, item.count))
             .into_grouping_map()
             .sum();

@@ -74,8 +74,8 @@ impl BotGoal for GenericDay {
         } else if current_day >= 6 {
             stack
                 .then(
-                    PlantCropsGoal::new()
-                        .with_expected_seeds(200)
+                    PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
+                        .buy_missing_seeds(false)
                         .stop_time(1100),
                 )
                 .then(
@@ -83,11 +83,10 @@ impl BotGoal for GenericDay {
                         .sell_gems(true)
                         .sell_minerals(true),
                 )
-                .then(BuyFromMerchantGoal::new(
-                    "Buy General",
-                    Item::KALE_SEEDS.with_count(200),
-                ))
-                .then(PlantCropsGoal::new())
+                .then(
+                    PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
+                        .buy_missing_seeds(true),
+                )
         } else {
             stack
                 .then(ExpandTreeFarm::new())

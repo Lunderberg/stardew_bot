@@ -1,5 +1,9 @@
+use std::collections::HashMap;
+
+use itertools::Itertools as _;
+
 use crate::{
-    game_state::{Item, ObjectKind, Vector},
+    game_state::{Item, ItemId, Location, ObjectKind, Vector},
     Error, GameState,
 };
 
@@ -70,7 +74,11 @@ pub trait ObjectKindExt {
 impl ObjectKindExt for ObjectKind {
     fn get_tool(&self) -> Option<Item> {
         match self {
-            ObjectKind::Stone(_) | ObjectKind::Torch => Some(Item::PICKAXE),
+            ObjectKind::Stone(_)
+            | ObjectKind::Torch
+            | ObjectKind::Sprinkler(_)
+            | ObjectKind::Scarecrow => Some(Item::PICKAXE),
+
             ObjectKind::Mineral(_) => None,
             ObjectKind::Wood => Some(Item::AXE),
             ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| Item::AXE),
@@ -94,5 +102,38 @@ impl ObjectKindExt for ObjectKind {
             | ObjectKind::Other { .. }
             | ObjectKind::Unknown => None,
         }
+    }
+}
+
+pub trait LocationExt {
+    fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind>;
+
+    fn iter_planted_seeds(&self) -> impl Iterator<Item = &ItemId>;
+}
+impl LocationExt for Location {
+    fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind> {
+        self.objects
+            .iter()
+            .sorted_by_key(|obj| {
+                // Since some objects may be placed on top of hoe dirt
+                // or grass, collect these object types first.  The
+                // object overtop will then overwrite them in the
+                // HashMap.
+                match &obj.kind {
+                    ObjectKind::Grass => 0,
+                    ObjectKind::HoeDirt(_) => 1,
+                    _ => 2,
+                }
+            })
+            .map(|obj| (obj.tile, &obj.kind))
+            .collect()
+    }
+
+    fn iter_planted_seeds(&self) -> impl Iterator<Item = &ItemId> {
+        self.objects
+            .iter()
+            .filter_map(|obj| obj.kind.as_hoe_dirt())
+            .filter_map(|hoe_dirt| hoe_dirt.crop.as_ref())
+            .map(|crop| &crop.seed)
     }
 }

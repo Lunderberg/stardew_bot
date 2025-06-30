@@ -146,7 +146,13 @@ pub struct Bush {
 #[derive(Debug, Clone)]
 pub struct HoeDirt {
     pub is_watered: bool,
-    pub crop_phase: Option<CropPhase>,
+    pub crop: Option<Crop>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Crop {
+    pub phase: CropPhase,
+    pub seed: ItemId,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -175,6 +181,13 @@ pub struct Furnace {
     /// True if the machine has been loaded up with ingredients.
     /// Otherwise, false.
     pub has_held_item: bool,
+}
+
+#[derive(Debug, Clone)]
+pub enum Sprinkler {
+    Regular,
+    Quality,
+    Iridium,
 }
 
 /// Non-fruit trees.  This includes the small 1x1 stumps left behind
@@ -303,6 +316,14 @@ pub enum ObjectKind {
 
     /// A furnace in which ore can be smelted.
     Furnace(Furnace),
+
+    /// A sprinkler
+    Sprinkler(Sprinkler),
+
+    /// A scarecrow.  Currently only checks for the default scarecrow
+    /// type, and not for any of the rarecrows, or the upgraded
+    /// scarecrow.
+    Scarecrow,
 
     /// A placable torch
     Torch,
@@ -564,20 +585,27 @@ impl Location {
 
         graph.named_native_function(
             "new_hoe_dirt",
-            |is_watered: bool, crop_phase: Option<usize>| {
-                let crop_phase = crop_phase.map(|value| match value {
-                    0 => CropPhase::Seed,
-                    1 => CropPhase::Growing,
-                    2 => CropPhase::Harvestable,
-                    3 => CropPhase::Regrowing,
-                    other => {
-                        unreachable!("Value {other} should not be produced")
-                    }
-                });
-                ObjectKind::HoeDirt(HoeDirt {
-                    is_watered,
-                    crop_phase,
-                })
+            |is_watered: bool,
+             crop_phase: Option<usize>,
+             crop_seed: Option<&str>| {
+                let crop = if crop_phase.is_some() && crop_seed.is_some() {
+                    let phase = match crop_phase.unwrap() {
+                        0 => CropPhase::Seed,
+                        1 => CropPhase::Growing,
+                        2 => CropPhase::Harvestable,
+                        3 => CropPhase::Regrowing,
+                        other => {
+                            unreachable!("Value {other} should not be produced")
+                        }
+                    };
+                    let seed =
+                        ItemId::new(format!("(O){}", crop_seed.unwrap()));
+                    Some(Crop { phase, seed })
+                } else {
+                    None
+                };
+
+                ObjectKind::HoeDirt(HoeDirt { is_watered, crop })
             },
         )?;
 
@@ -710,6 +738,10 @@ impl Location {
                         ObjectKind::MineBarrel
                     }
                     (0, 93, _) => ObjectKind::Torch,
+                    (-8, 599, _) => ObjectKind::Sprinkler(Sprinkler::Regular),
+                    (-8, 621, _) => ObjectKind::Sprinkler(Sprinkler::Quality),
+                    (-8, 645, _) => ObjectKind::Sprinkler(Sprinkler::Iridium),
+                    (-9, 8, _) => ObjectKind::Scarecrow,
                     (_, _, "Artifact Spot") => ObjectKind::ArtifactSpot,
                     (_, _, "Seed Spot") => ObjectKind::SeedSpot,
                     _ => ObjectKind::Other {
@@ -1211,7 +1243,16 @@ impl Location {
                                 }
                             };
 
-                            new_hoe_dirt(is_watered, crop_phase)
+                            let crop_seed = crop
+                                .netSeedIndex
+                                .value
+                                .read_string();
+
+                            new_hoe_dirt(
+                                is_watered,
+                                crop_phase,
+                                crop_seed,
+                            )
                         } else {
                             new_unknown_object_kind(feature_value)
                         };
@@ -2176,14 +2217,15 @@ impl ObjectKind {
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,
 
-            ObjectKind::MineBarrel
+            ObjectKind::Sprinkler(_)
+            | ObjectKind::Scarecrow
+            | ObjectKind::MineBarrel
             | ObjectKind::Furnace(_)
             | ObjectKind::MineLadderUp
             | ObjectKind::MineLadderDown
             | ObjectKind::MineHoleDown
             | ObjectKind::MineElevator
             | ObjectKind::MineCartCoal => false,
-
             ObjectKind::Other { .. } => false,
             ObjectKind::Unknown => false,
         }
@@ -2220,26 +2262,46 @@ impl ObjectKind {
 
 impl HoeDirt {
     pub fn can_harvest(&self) -> bool {
-        matches!(self.crop_phase, Some(CropPhase::Harvestable))
+        matches!(
+            self.crop,
+            Some(Crop {
+                phase: CropPhase::Harvestable,
+                ..
+            })
+        )
     }
 
     pub fn requires_watering(&self) -> bool {
         !self.is_watered
-            && match self.crop_phase {
-                None => false,
-                Some(CropPhase::Seed) => true,
-                Some(CropPhase::Growing) => true,
-                Some(CropPhase::Harvestable) => false,
-                Some(CropPhase::Regrowing) => true,
-            }
+            && self
+                .crop
+                .as_ref()
+                .map(|crop| match crop.phase {
+                    CropPhase::Seed => true,
+                    CropPhase::Growing => true,
+                    CropPhase::Harvestable => false,
+                    CropPhase::Regrowing => true,
+                })
+                .unwrap_or(false)
     }
 
     pub fn has_crop(&self) -> bool {
-        self.crop_phase.is_some()
+        self.crop.is_some()
     }
 
     pub fn is_empty(&self) -> bool {
-        self.crop_phase.is_none()
+        self.crop.is_none()
+    }
+}
+
+impl Sprinkler {
+    pub fn id(&self) -> ItemId {
+        let id = match self {
+            Sprinkler::Regular => "(O)599",
+            Sprinkler::Quality => "(O)621",
+            Sprinkler::Iridium => "(O)645",
+        };
+        ItemId::new(id)
     }
 }
 
@@ -2536,6 +2598,8 @@ impl std::fmt::Display for ObjectKind {
             Self::MineBarrel => write!(f, "MineBarrel"),
             Self::Furnace(furnace) => write!(f, "{furnace}"),
             Self::Torch => write!(f, "Torch"),
+            Self::Scarecrow => write!(f, "Scarecrow"),
+            Self::Sprinkler(sprinkler) => write!(f, "{sprinkler}"),
 
             Self::Other { category, name, id } => {
                 write!(f, "Other({category}, '{name}', '{id}')")
@@ -2594,6 +2658,16 @@ impl std::fmt::Display for Furnace {
             write!(f, "Furnace(running)")
         } else {
             write!(f, "Furnace(empty)")
+        }
+    }
+}
+
+impl std::fmt::Display for Sprinkler {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Sprinkler::Regular => write!(f, "RegularSprinkler"),
+            Sprinkler::Quality => write!(f, "QualitySprinkler"),
+            Sprinkler::Iridium => write!(f, "IridiumSprinkler"),
         }
     }
 }
