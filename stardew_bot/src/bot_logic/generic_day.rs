@@ -72,22 +72,21 @@ impl BotGoal for GenericDay {
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
+            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
             stack
-                .then(
-                    PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
-                        .buy_missing_seeds(false)
-                        .stop_time(1100),
-                )
+                .then(crops.clone().buy_missing_seeds(false).stop_time(1100))
                 .then(
                     GeodeCrackingGoal::new()
                         .sell_gems(true)
                         .sell_minerals(true)
                         .sell_iridium_ore(true),
                 )
-                .then(
-                    PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
-                        .buy_missing_seeds(true),
-                )
+                .then(crops.clone().only_buy_missing_seeds())
+                .then(BuyFromMerchantGoal::new(
+                    "Saloon",
+                    Item::SALAD.with_count(10),
+                ))
+                .then(crops.clone())
         } else {
             stack
                 .then(ExpandTreeFarm::new())

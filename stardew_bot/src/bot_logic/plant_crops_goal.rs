@@ -20,15 +20,18 @@ use super::{
     FillWateringCan, GameStateExt as _, InventoryGoal, LocationExt as _,
 };
 
+#[derive(Clone)]
 pub struct PlantCropsGoal {
     seeds: Vec<Item>,
     plan: Option<CropPlantingPlan>,
     stop_time: i32,
     opportunistic_clay_farming: bool,
     buy_missing_seeds: bool,
+    stop_after_buying_seeds: bool,
     tick_decided_to_buy_seeds: Option<i32>,
 }
 
+#[derive(Clone)]
 struct CropPlantingPlan {
     /// After planting, what should be located at each tile.
     final_state: HashMap<Vector<isize>, ItemId>,
@@ -47,6 +50,7 @@ impl PlantCropsGoal {
             stop_time: 2600,
             opportunistic_clay_farming: false,
             buy_missing_seeds: true,
+            stop_after_buying_seeds: false,
             tick_decided_to_buy_seeds: None,
         }
     }
@@ -64,6 +68,14 @@ impl PlantCropsGoal {
     pub fn buy_missing_seeds(self, buy_missing_seeds: bool) -> Self {
         Self {
             buy_missing_seeds,
+            ..self
+        }
+    }
+
+    pub fn only_buy_missing_seeds(self) -> Self {
+        Self {
+            buy_missing_seeds: true,
+            stop_after_buying_seeds: true,
             ..self
         }
     }
@@ -304,6 +316,16 @@ impl BotGoal for PlantCropsGoal {
     ) -> Result<BotGoalResult, Error> {
         if game_state.globals.in_game_time > self.stop_time {
             return Ok(BotGoalResult::Completed);
+        }
+
+        if self.stop_after_buying_seeds {
+            // Early handling in case we want to buy the seeds while
+            // we're out, but plant them later.
+            if let Some(buy_seeds) = self.try_buy_missing_seeds(game_state)? {
+                return Ok(buy_seeds.into());
+            } else {
+                return Ok(BotGoalResult::Completed);
+            }
         }
 
         if let Some(buy_seeds) = self.try_buy_missing_seeds(game_state)? {

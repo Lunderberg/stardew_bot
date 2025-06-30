@@ -29,9 +29,28 @@ impl BuyFromMerchantGoal {
         game_state.player.inventory.count_item(&self.item)
     }
 
+    fn buy_price(&self, _game_state: &GameState) -> i32 {
+        // TODO: Read these from memory, rather than hard-coding them.
+        if self.item.is_same_item(&Item::SALAD) {
+            220
+        } else if self.item.is_same_item(&Item::PARSNIP_SEEDS) {
+            20
+        } else if self.item.is_same_item(&Item::KALE_SEEDS) {
+            70
+        } else if self.item.is_same_item(&Item::COPPER_ORE) {
+            75
+        } else {
+            0
+        }
+    }
+
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         let num_in_inventory = self.item_count(game_state);
-        num_in_inventory >= self.item.count
+        let has_desired_amount = num_in_inventory >= self.item.count;
+        let can_buy_another =
+            game_state.player.current_money >= self.buy_price(game_state);
+
+        has_desired_amount || !can_buy_another
     }
 }
 
@@ -56,9 +75,17 @@ impl BotGoal for BuyFromMerchantGoal {
 
         if let Some(menu) = &game_state.shop_menu {
             if let Some(held_item) = &menu.held_item {
-                let is_correct_item = held_item.is_same_item(&self.item);
-                let should_add_to_inventory =
-                    !is_correct_item || held_item.count >= self.item.count;
+                let should_add_to_inventory = {
+                    let is_correct_item = held_item.is_same_item(&self.item);
+
+                    let has_desired_amount =
+                        game_state.player.inventory.count_item(&self.item)
+                            + held_item.count
+                            >= self.item.count;
+                    let can_buy_another = game_state.player.current_money
+                        >= self.buy_price(game_state);
+                    !is_correct_item || has_desired_amount || !can_buy_another
+                };
 
                 if should_add_to_inventory {
                     let open_inventory_slot = game_state
