@@ -87,6 +87,7 @@ impl BotGoal for GenericDay {
                     Item::SALAD.with_count(10),
                 ))
                 .then(crops.clone())
+                .then(ForagingGoal::new().location("Beach"))
         } else {
             stack
                 .then(ExpandTreeFarm::new())

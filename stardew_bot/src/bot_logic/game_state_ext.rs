@@ -7,7 +7,7 @@ use crate::{
     Error, GameState,
 };
 
-use super::BotError;
+use super::{BotError, MovementGoal};
 
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
@@ -17,6 +17,11 @@ pub trait GameStateExt {
     fn iter_accessible_items(
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
+
+    fn closest_entrance(
+        &self,
+        target_room: &str,
+    ) -> Result<Vector<isize>, Error>;
 }
 
 impl GameStateExt for GameState {
@@ -64,6 +69,13 @@ impl GameStateExt for GameState {
             .flat_map(|inventory| inventory.iter_items());
 
         Ok(iter)
+    }
+
+    fn closest_entrance(
+        &self,
+        target_room: &str,
+    ) -> Result<Vector<isize>, Error> {
+        MovementGoal::closest_entrance(self, target_room)
     }
 }
 

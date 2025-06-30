@@ -2276,6 +2276,25 @@ impl ObjectKind {
             _ => None,
         }
     }
+
+    pub fn is_forage(&self) -> bool {
+        let ObjectKind::Other { category, name, .. } = self else {
+            return false;
+        };
+
+        matches!(
+            (category, name.as_str()),
+            (
+                ItemCategory::Fruit
+                    | ItemCategory::Greens
+                    | ItemCategory::Flowers
+                    | ItemCategory::Vegetable
+                    | ItemCategory::Fish
+                    | ItemCategory::SeaProduce,
+                _
+            ) | (ItemCategory::Other(0), "Seaweed")
+        )
+    }
 }
 
 impl HoeDirt {

@@ -12,7 +12,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
-    graph_search::GraphSearch,
+    graph_search::{GraphSearch, SearchNodeMetadata},
     impl_tile_map_graph_search::point_to_point_lower_bound,
     WaitUntilTimeOfDay,
 };
@@ -174,20 +174,19 @@ impl MovementGoal {
         is_correct_room && is_correct_location_within_room
     }
 
-    fn room_to_room_movement(
-        &self,
-        game_state: &GameState,
-    ) -> Result<Option<LogicStack>, Error> {
-        if self.target_room == game_state.player.room_name {
-            return Ok(None);
-        }
-
+    fn room_to_room_iter_dijkstra<'a>(
+        &'a self,
+        game_state: &'a GameState,
+        graph: &'a ConnectedRoomGraph<'a>,
+    ) -> Result<
+        (
+            usize,
+            impl Iterator<Item = (RoomSearchNode, SearchNodeMetadata)> + 'a,
+        ),
+        Error,
+    > {
         // Dijkstra's algorithm to search for connections between rooms
 
-        let graph = ConnectedRoomGraph {
-            locations: &game_state.locations,
-            in_game_time: game_state.globals.in_game_time,
-        };
         let initial = RoomSearchNode {
             current_pos: game_state.player.tile(),
             current_room_index: graph
@@ -198,12 +197,30 @@ impl MovementGoal {
             .get_room_index(&self.target_room)
             .ok_or_else(|| BotError::UnknownRoom(self.target_room.clone()))?;
 
-        let search_nodes: Vec<_> = graph
-            .dijkstra_search(initial)
-            .take_while_inclusive(|(node, _)| {
-                node.current_room_index != target_room_index
-            })
-            .collect();
+        let iter = graph.dijkstra_search(initial).take_while_inclusive(
+            move |(node, _)| node.current_room_index != target_room_index,
+        );
+
+        Ok((target_room_index, iter))
+    }
+
+    fn room_to_room_movement(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        if self.target_room == game_state.player.room_name {
+            return Ok(None);
+        }
+
+        let graph = ConnectedRoomGraph {
+            locations: &game_state.locations,
+            in_game_time: game_state.globals.in_game_time,
+        };
+
+        // Dijkstra's algorithm to search for connections between rooms
+        let (target_room_index, iter_search) =
+            self.room_to_room_iter_dijkstra(game_state, &graph)?;
+        let search_nodes: Vec<_> = iter_search.collect();
 
         let last = search_nodes
             .last()
@@ -252,6 +269,31 @@ impl MovementGoal {
         let goals = goals.into_iter().rev().collect();
 
         Ok(Some(goals))
+    }
+
+    pub(crate) fn closest_entrance(
+        game_state: &GameState,
+        target_room: &str,
+    ) -> Result<Vector<isize>, Error> {
+        let goal = MovementGoal::new(target_room, Vector::new(0.0, 0.0));
+
+        let graph = ConnectedRoomGraph {
+            locations: &game_state.locations,
+            in_game_time: game_state.globals.in_game_time,
+        };
+
+        let (target_room_index, mut iter_search) =
+            goal.room_to_room_iter_dijkstra(game_state, &graph)?;
+
+        let entrance = iter_search
+            .find(|(node, _)| node.current_room_index == target_room_index)
+            .map(|(node, _)| node.current_pos)
+            .ok_or_else(|| BotError::NoRouteToRoom {
+                from_room: game_state.player.room_name.clone(),
+                to_room: target_room.to_string(),
+            })?;
+
+        Ok(entrance)
     }
 
     fn within_room_movement(

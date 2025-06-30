@@ -1,4 +1,7 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    borrow::Cow,
+    collections::{HashMap, HashSet},
+};
 
 use itertools::Itertools as _;
 
@@ -11,10 +14,12 @@ use crate::{
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     graph_search::GraphSearch,
-    GameStateExt as _,
+    BotError, GameStateExt as _,
 };
 
 pub struct ForagingGoal {
+    location: Option<Cow<'static, str>>,
+
     // TODO: Extract these out into a more general handling that can
     // be applied to any goal.
     stop_at_time: Option<i32>,
@@ -24,8 +29,17 @@ pub struct ForagingGoal {
 impl ForagingGoal {
     pub fn new() -> Self {
         Self {
+            location: None,
             stop_at_time: None,
             stop_with_stamina: None,
+        }
+    }
+
+    /// Only forage at the specified location
+    pub fn location(self, location: impl Into<Cow<'static, str>>) -> Self {
+        Self {
+            location: Some(location.into()),
+            ..self
         }
     }
 
@@ -65,11 +79,92 @@ impl ForagingGoal {
 
         after_stopping_time || collected_enough_stamina
     }
+
+    fn next_forageable_in_any_room(
+        game_state: &GameState,
+    ) -> Result<Option<(String, Vector<isize>)>, Error> {
+        let condensed_map = CondensedMap::build(game_state);
+        let goal_forage: HashSet<(usize, Vector<isize>)> = game_state
+            .locations
+            .iter()
+            .enumerate()
+            .flat_map(|(i, loc)| loc.objects.iter().map(move |obj| (i, obj)))
+            .filter(|(_, obj)| match &obj.kind {
+                // TODO: Customize based on which forage is desired.
+                ObjectKind::Other { name, .. } => match name.as_str() {
+                    "Leek" => true,
+                    "Dandelion" => true,
+                    _ => false,
+                },
+                _ => false,
+            })
+            .map(|(i, obj)| (i, obj.tile))
+            .collect();
+
+        let initial = (
+            condensed_map.get_room_index(&game_state.player.room_name)?,
+            game_state.player.tile(),
+        );
+        let opt_closest_forage = condensed_map
+            .dijkstra_search(initial)
+            .find_map(|((index, tile), _)| {
+                Direction::iter()
+                    .filter(|dir| dir.is_cardinal())
+                    .map(|dir| (index, tile + dir.offset()))
+                    .find(|node| goal_forage.contains(node))
+            })
+            .map(|(index, tile)| (condensed_map.0[index].name.clone(), tile));
+
+        Ok(opt_closest_forage)
+    }
+
+    fn next_forageable_in_room(
+        game_state: &GameState,
+        room_name: &str,
+    ) -> Result<Option<Vector<isize>>, Error> {
+        let initial = if game_state.player.room_name == room_name {
+            game_state.player.tile()
+        } else {
+            game_state.closest_entrance(room_name)?
+        };
+
+        let room = game_state.get_room(room_name)?;
+        let distances =
+            room.pathfinding().include_border(true).distances(initial);
+
+        let opt_closest_forage = room
+            .objects
+            .iter()
+            .filter(|obj| obj.kind.is_forage())
+            .map(|obj| obj.tile)
+            .filter(|tile| distances.is_some(*tile))
+            .min_by_key(|tile| {
+                distances[*tile].expect("Guarded by distances.is_some()")
+            });
+
+        Ok(opt_closest_forage)
+    }
+
+    fn next_forageable<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Result<Option<(String, Vector<isize>)>, Error> {
+        if let Some(loc) = &self.location {
+            Ok(Self::next_forageable_in_room(game_state, loc)?
+                .map(|tile| (loc.to_string(), tile)))
+        } else {
+            Self::next_forageable_in_any_room(game_state)
+        }
+    }
 }
 
 impl BotGoal for ForagingGoal {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        "Foraging".into()
+        if let Some(room_name) = &self.location {
+            format!("Forage at {room_name}").into()
+        } else {
+            "Foraging".into()
+        }
     }
 
     fn apply(
@@ -120,47 +215,8 @@ impl BotGoal for ForagingGoal {
             return Ok(ActivateTile::new("Farm", fruit_tree).into());
         }
 
-        let condensed_map = CondensedMap::build(game_state);
-        let goal_forage: HashSet<(usize, Vector<isize>)> = game_state
-            .locations
-            .iter()
-            .enumerate()
-            .flat_map(|(i, loc)| loc.objects.iter().map(move |obj| (i, obj)))
-            .filter(|(_, obj)| match &obj.kind {
-                // TODO: Customize based on which forage is desired.
-                ObjectKind::Other { name, .. } => match name.as_str() {
-                    "Leek" => true,
-                    "Dandelion" => true,
-                    _ => false,
-                },
-                _ => false,
-            })
-            .map(|(i, obj)| (i, obj.tile))
-            .collect();
-
-        let initial = (
-            game_state
-                .locations
-                .iter()
-                .enumerate()
-                .find(|(_, loc)| loc.name == game_state.player.room_name)
-                .map(|(i, _)| i)
-                .expect("Player must exist within a room"),
-            game_state.player.tile(),
-        );
-        let opt_closest_forage = condensed_map
-            .dijkstra_search(initial)
-            .find_map(|((index, tile), _)| {
-                Direction::iter()
-                    .filter(|dir| dir.is_cardinal())
-                    .map(|dir| (index, tile + dir.offset()))
-                    .find(|node| goal_forage.contains(node))
-            });
-
-        if let Some(closest_forage) = opt_closest_forage {
-            let (index, tile) = closest_forage;
-            let goal =
-                ActivateTile::new(condensed_map.0[index].name.clone(), tile);
+        if let Some((room, tile)) = self.next_forageable(game_state)? {
+            let goal = ActivateTile::new(room, tile);
             Ok(goal.into())
         } else {
             Ok(BotGoalResult::Completed)
@@ -211,6 +267,18 @@ impl CondensedMap {
             .collect();
 
         Self(locations)
+    }
+
+    fn get_room_index(&self, name: &str) -> Result<usize, Error> {
+        let index = self
+            .0
+            .iter()
+            .enumerate()
+            .find(|(_, loc)| loc.name == name)
+            .map(|(i, _)| i)
+            .ok_or_else(|| BotError::UnknownRoom(name.to_string()))?;
+
+        Ok(index)
     }
 }
 
