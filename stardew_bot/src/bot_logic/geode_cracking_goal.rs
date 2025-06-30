@@ -14,6 +14,7 @@ use super::{
 pub struct GeodeCrackingGoal {
     sell_minerals: bool,
     sell_gems: bool,
+    sell_iridium_ore: bool,
 }
 
 pub struct GeodePredictor {
@@ -35,6 +36,7 @@ impl GeodeCrackingGoal {
         Self {
             sell_minerals: false,
             sell_gems: false,
+            sell_iridium_ore: false,
         }
     }
 
@@ -47,6 +49,13 @@ impl GeodeCrackingGoal {
 
     pub fn sell_gems(self, sell_gems: bool) -> Self {
         Self { sell_gems, ..self }
+    }
+
+    pub fn sell_iridium_ore(self, sell_iridium_ore: bool) -> Self {
+        Self {
+            sell_iridium_ore,
+            ..self
+        }
     }
 
     #[allow(dead_code)]
@@ -115,7 +124,11 @@ impl GeodeCrackingGoal {
                 .sorted_by_key(|(_, item)| {
                     let price = if matches!(
                         item.category,
-                        Some(ItemCategory::Mineral | ItemCategory::Gem)
+                        Some(
+                            ItemCategory::Mineral
+                                | ItemCategory::Gem
+                                | ItemCategory::Ore
+                        )
                     ) {
                         item.stack_price()
                     } else {
@@ -158,13 +171,15 @@ impl BotGoal for GeodeCrackingGoal {
             .iter_items()
             .filter(|_| game_state.player.room_name == "Blacksmith")
             .filter(|item| {
-                item.category
-                    .map(|category| match category {
-                        ItemCategory::Gem => self.sell_gems,
-                        ItemCategory::Mineral => self.sell_minerals,
-                        _ => false,
-                    })
-                    .unwrap_or(false)
+                (self.sell_iridium_ore && item.is_same_item(&Item::IRIDIUM_ORE))
+                    || item
+                        .category
+                        .map(|category| match category {
+                            ItemCategory::Gem => self.sell_gems,
+                            ItemCategory::Mineral => self.sell_minerals,
+                            _ => false,
+                        })
+                        .unwrap_or(false)
             })
             .map(|item| SellToMerchantGoal::new("Blacksmith", item.clone()))
             .collect();

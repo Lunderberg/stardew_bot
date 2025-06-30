@@ -81,7 +81,8 @@ impl BotGoal for GenericDay {
                 .then(
                     GeodeCrackingGoal::new()
                         .sell_gems(true)
-                        .sell_minerals(true),
+                        .sell_minerals(true)
+                        .sell_iridium_ore(true),
                 )
                 .then(
                     PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
