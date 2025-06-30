@@ -10,8 +10,8 @@ use super::{
     BuyFromMerchantGoal, CheckAllMail, ClearFarmGoal, CollectNearbyItems,
     ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, ForagingGoal, GameStateExt as _, GeodeCrackingGoal,
-    HarvestCropsGoal, InventoryGoal, MineDelvingGoal, OpportunisticForaging,
-    PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
+    HarvestCropsGoal, InventoryGoal, KeyEventInterrupt, MineDelvingGoal,
+    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -95,6 +95,7 @@ impl BotGoal for GenericDay {
 
         Ok(stack
             .then(ClearFarmGoal::new())
+            .with_interrupt(KeyEventInterrupt::new())
             .with_interrupt(OpportunisticForaging::new(5.0))
             .with_interrupt(CollectNearbyItems::new())
             .with_interrupt(ExpandStorageInterrupt::new())

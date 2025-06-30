@@ -1008,10 +1008,19 @@ impl Location {
              buildings: &Vec<Building>,
              characters: &Vec<Character>,
              mineshaft_details: Option<&MineshaftDetails>| {
+                let blocked = tiles.collect_blocked_tiles(*shape);
+                let diggable = tiles.collect_diggable_tiles(*shape);
+                let action_tiles = tiles.collect_action_tiles();
+                let warps = warps
+                    .iter()
+                    .cloned()
+                    .chain(tiles.iter_extra_warps())
+                    .collect();
+
                 Location {
                     name: name.into(),
                     shape: shape.clone(),
-                    warps: warps.clone(),
+                    warps,
                     resource_clumps: resource_clumps.clone(),
                     bushes: bushes.clone(),
                     objects: objects.clone(),
@@ -1020,9 +1029,9 @@ impl Location {
                     water_tiles: (!water_tiles.is_empty())
                         .then(|| water_tiles.clone()),
                     buildings: buildings.clone(),
-                    blocked: tiles.collect_blocked_tiles(*shape),
-                    diggable: tiles.collect_diggable_tiles(*shape),
-                    action_tiles: tiles.collect_action_tiles(),
+                    blocked,
+                    diggable,
+                    action_tiles,
                     characters: characters.clone(),
                     mineshaft_details: mineshaft_details.cloned(),
                 }
@@ -2496,7 +2505,9 @@ impl MapTileSheets {
         map
     }
 
-    fn collect_action_tiles(&self) -> Vec<(Vector<isize>, String)> {
+    fn iter_tile_actions(
+        &self,
+    ) -> impl Iterator<Item = (Vector<isize>, &str)> + '_ {
         self.tiles
             .iter()
             .filter(|tile| tile.layer_num == 1)
@@ -2505,8 +2516,12 @@ impl MapTileSheets {
                     .iter()
                     .filter(|(key, _)| key.as_str() == "Action")
                     .filter_map(|(_, opt_value)| opt_value.as_ref())
-                    .map(|value| (tile.location, value))
+                    .map(|value| (tile.location, value.as_str()))
             })
+    }
+
+    fn collect_action_tiles(&self) -> Vec<(Vector<isize>, String)> {
+        self.iter_tile_actions()
             .filter(|(_, action)| {
                 // Filter out some actions that are either handled
                 // elsewhere, such as warps and doors, or aren't worth
@@ -2519,12 +2534,31 @@ impl MapTileSheets {
                     "Notes",
                     "playSound",
                     "LockedDoorWarp",
+                    "WarpCommunityCenter",
+                    "Warp_Sunroom_Door",
                 ]
                 .into_iter()
                 .all(|special| !action.starts_with(special))
             })
             .map(|(tile, action)| (tile, action.to_string()))
             .collect()
+    }
+
+    fn iter_extra_warps(&self) -> impl Iterator<Item = Warp> + '_ {
+        self.iter_tile_actions().filter_map(|(tile, action)| {
+            let (room, x, y) = match action {
+                "WarpCommunityCenter" => Some(("CommunityCenter", 32, 23)),
+                "Warp_Sunroom_Door" => Some(("Sunroom", 5, 13)),
+                _ => None,
+            }?;
+
+            Some(Warp {
+                location: tile,
+                target: Vector::new(x, y),
+                target_room: room.to_string(),
+                kind: WarpKind::Door,
+            })
+        })
     }
 }
 

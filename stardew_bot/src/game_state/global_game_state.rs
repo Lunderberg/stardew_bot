@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
@@ -51,6 +51,9 @@ pub struct GlobalGameState {
     /// above 120 indicate reaching level (value-120) within
     /// SkullCavern.
     pub lowest_mine_level_reached: i32,
+
+    /// Events that have been triggered within the game.
+    pub events_triggered: HashSet<String>,
 }
 
 #[derive(RustNativeObject, Default)]
@@ -70,7 +73,8 @@ impl GlobalGameState {
              stats: &Stats,
              currently_fading_to_black: bool,
              event_up: bool,
-             lowest_mine_level_reached: i32| GlobalGameState {
+             lowest_mine_level_reached: i32,
+             events_triggered: &Vec<String>| GlobalGameState {
                 game_tick,
                 multiplayer_id,
                 game_id,
@@ -80,6 +84,7 @@ impl GlobalGameState {
                 currently_fading_to_black,
                 event_up,
                 lowest_mine_level_reached,
+                events_triggered: events_triggered.iter().cloned().collect(),
             },
         )?;
 
@@ -132,6 +137,14 @@ impl GlobalGameState {
                     .lowestMineLevel
                     .value;
 
+                let events_triggered = {
+                    let mail = StardewValley.Game1._player.mailReceived;
+                    let num = mail.Set._count.prim_cast::<usize>();
+                    (0..num)
+                        .map(|i| mail.Set._entries[i].Value.read_string())
+                        .collect()
+                };
+
                 new_global_game_state(
                     game_id,
                     multiplayer_id,
@@ -142,6 +155,7 @@ impl GlobalGameState {
                     currently_fading_to_black,
                     event_up,
                     lowest_mine_level_reached,
+                    events_triggered,
                 )
             }
         })?;
