@@ -118,6 +118,55 @@ impl ForagingGoal {
         Ok(opt_closest_forage)
     }
 
+    fn next_farm_forageable(
+        game_state: &GameState,
+    ) -> Result<Option<BotGoalResult>, Error> {
+        if game_state.player.room_name != "Farm" {
+            return Ok(None);
+        }
+
+        let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
+
+        let reachable = farm.find_reachable_tiles(farm_door);
+
+        let player_pos = game_state.player.center_pos();
+
+        let opt_fruit = farm
+            .items
+            .iter()
+            .map(|item| item.tile_pos())
+            .filter(|item_pos| item_pos.dist(player_pos) < 5.0)
+            .next();
+        if let Some(pos) = opt_fruit {
+            if pos.dist(player_pos) < 2.0 {
+                return Ok(Some(BotGoalResult::InProgress));
+            } else {
+                return Ok(Some(MovementGoal::new("Farm", pos).into()));
+            }
+        }
+
+        let opt_fruit_tree = farm
+            .objects
+            .iter()
+            .filter(|obj| {
+                Direction::iter()
+                    .any(|dir| reachable.is_set(obj.tile + dir.offset()))
+            })
+            .filter(|obj| match &obj.kind {
+                ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
+                _ => false,
+            })
+            .map(|obj| obj.tile)
+            .next();
+
+        if let Some(fruit_tree) = opt_fruit_tree {
+            return Ok(Some(ActivateTile::new("Farm", fruit_tree).into()));
+        }
+
+        Ok(None)
+    }
+
     fn next_forageable_in_room(
         game_state: &GameState,
         room_name: &str,
@@ -176,51 +225,21 @@ impl BotGoal for ForagingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let farm = game_state.get_room("Farm")?;
-        let farm_door = game_state.get_farm_door()?;
+        let opt_room: Option<&str> =
+            self.location.as_ref().map(|loc| loc.as_ref());
 
-        let reachable = farm.find_reachable_tiles(farm_door);
-
-        let player_pos = game_state.player.center_pos();
-
-        let opt_fruit = farm
-            .items
-            .iter()
-            .map(|item| item.tile_pos())
-            .filter(|item_pos| item_pos.dist(player_pos) < 5.0)
-            .next();
-        if let Some(pos) = opt_fruit {
-            if pos.dist(player_pos) < 2.0 {
-                return Ok(BotGoalResult::InProgress);
-            } else {
-                return Ok(MovementGoal::new("Farm", pos).into());
+        if matches!(opt_room, None | Some("Farm")) {
+            if let Some(farm_forage) = Self::next_farm_forageable(game_state)? {
+                return Ok(farm_forage);
             }
-        }
-
-        let opt_fruit_tree = farm
-            .objects
-            .iter()
-            .filter(|obj| {
-                Direction::iter()
-                    .any(|dir| reachable.is_set(obj.tile + dir.offset()))
-            })
-            .filter(|obj| match &obj.kind {
-                ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
-                _ => false,
-            })
-            .map(|obj| obj.tile)
-            .next();
-
-        if let Some(fruit_tree) = opt_fruit_tree {
-            return Ok(ActivateTile::new("Farm", fruit_tree).into());
         }
 
         if let Some((room, tile)) = self.next_forageable(game_state)? {
             let goal = ActivateTile::new(room, tile);
-            Ok(goal.into())
-        } else {
-            Ok(BotGoalResult::Completed)
+            return Ok(goal.into());
         }
+
+        Ok(BotGoalResult::Completed)
     }
 }
 
