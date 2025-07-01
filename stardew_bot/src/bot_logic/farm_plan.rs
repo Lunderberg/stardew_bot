@@ -54,6 +54,7 @@ impl FarmPlan {
                 .stone_clearing_cost(0)
                 .wood_clearing_cost(0)
                 .breakable_clearing_cost(0)
+                .forage_clearing_cost(0)
                 .tree_clearing_cost(0)
                 .walkable();
 

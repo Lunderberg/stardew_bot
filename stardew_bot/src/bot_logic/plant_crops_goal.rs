@@ -114,6 +114,8 @@ impl PlantCropsGoal {
                     is_watered: true,
                 }) if &crop.seed == goal => None,
 
+                ObjectKind::Other { .. } if current.is_forage() => Some(None),
+
                 ObjectKind::Stone(_)
                 | ObjectKind::Mineral(_)
                 | ObjectKind::Wood

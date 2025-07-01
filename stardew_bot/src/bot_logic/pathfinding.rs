@@ -39,6 +39,12 @@ pub struct Pathfinding<'a> {
     clear_breakables: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain
+    /// forageable objects (flowers/leeks/etc), with an additional
+    /// penalty as specified.  If `None`, do not allow walking through
+    /// tiles that contain forageable objects.
+    clear_forage: Option<u64>,
+
+    /// If `Some(cost)`, allow walking through tiles that contain
     /// trees, with an additional penalty as specified.  If `None`, do
     /// not allow walking through tiles that contain trees.
     clear_trees: Option<u64>,
@@ -132,6 +138,7 @@ impl Location {
             clear_boulders: None,
             clear_wood: None,
             clear_breakables: None,
+            clear_forage: None,
             clear_trees: None,
             grass_penalty: 100,
             include_border: false,
@@ -167,6 +174,12 @@ impl Pathfinding<'_> {
     pub fn breakable_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_breakables: Some(cost),
+            ..self
+        }
+    }
+    pub fn forage_clearing_cost(self, cost: u64) -> Self {
+        Self {
+            clear_forage: Some(cost),
             ..self
         }
     }
@@ -258,6 +271,7 @@ impl Pathfinding<'_> {
                     // rug on the floor)
                     return None;
                 }
+                other if other.is_forage() => self.clear_forage,
                 _ => None,
             };
 
