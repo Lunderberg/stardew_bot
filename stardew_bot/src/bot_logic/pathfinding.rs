@@ -215,8 +215,6 @@ impl Pathfinding<'_> {
             .filter(|(_, b)| **b)
             .map(|(tile, _)| tile);
 
-        let iter_water = loc.iter_water_tiles();
-
         let iter_bush = loc.iter_bush_tiles();
 
         let iter_furniture = loc
@@ -229,7 +227,6 @@ impl Pathfinding<'_> {
 
         let iter_unwalkable = std::iter::empty()
             .chain(iter_blocked)
-            .chain(iter_water)
             .chain(iter_bush)
             .chain(iter_furniture)
             .chain(iter_buildings)
