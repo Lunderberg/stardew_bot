@@ -92,7 +92,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
             .get(node.current_room_index)
             .into_iter()
             .flat_map(|loc| {
-                let reachable = loc.find_reachable_tiles(node.current_pos);
+                let reachable = loc.pathfinding().reachable(node.current_pos);
 
                 loc.warps
                     .iter()

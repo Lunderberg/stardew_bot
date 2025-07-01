@@ -7,7 +7,7 @@ use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use itertools::{Either, Itertools as _};
 use memory_reader::Pointer;
 
-use crate::{Direction, Error};
+use crate::Error;
 
 use super::{Inventory, ItemCategory, ItemId, Rectangle, TileMap, Vector};
 
@@ -2092,29 +2092,6 @@ impl Location {
             });
 
         map
-    }
-
-    pub fn find_reachable_tiles(
-        &self,
-        starting_tile: Vector<isize>,
-    ) -> TileMap<bool> {
-        let clear_tiles = self.collect_clear_tiles();
-        let mut reachable = clear_tiles.map(|_| false);
-        let mut to_visit = vec![starting_tile];
-
-        while let Some(visiting) = to_visit.pop() {
-            for dir in Direction::iter_cardinal() {
-                let new_pos = visiting + dir.offset();
-                let is_clear = clear_tiles.is_set(new_pos);
-                let was_previously_reachable = reachable.is_set(new_pos);
-                if is_clear && !was_previously_reachable {
-                    reachable[new_pos] = true;
-                    to_visit.push(new_pos);
-                }
-            }
-        }
-
-        reachable
     }
 
     /// Iterator that yields tiles that have a right-click action

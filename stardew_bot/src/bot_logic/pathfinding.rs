@@ -307,7 +307,9 @@ impl Pathfinding<'_> {
         let walkable = self.walkable();
 
         let mut reachable = walkable.map(|_| false);
-        reachable[initial] = true;
+        if reachable.in_bounds(initial) {
+            reachable[initial] = true;
+        }
 
         let mut to_visit = vec![initial];
         while let Some(tile) = to_visit.pop() {

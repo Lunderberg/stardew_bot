@@ -128,7 +128,7 @@ impl ForagingGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let reachable = farm.find_reachable_tiles(farm_door);
+        let reachable = farm.pathfinding().reachable(farm_door);
 
         let player_pos = game_state.player.center_pos();
 
