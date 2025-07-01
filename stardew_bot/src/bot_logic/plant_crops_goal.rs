@@ -352,51 +352,6 @@ impl BotGoal for PlantCropsGoal {
 
         self.fill_plan(game_state)?;
 
-        let farm_door = game_state.get_farm_door()?;
-        let goal =
-            MovementGoal::new("Farm", farm_door.into()).with_tolerance(1000.0);
-        if !goal.is_completed(game_state) {
-            return Ok(goal.into());
-        }
-
-        let farm = game_state.get_room("Farm")?;
-        let planted_seeds = farm.iter_planted_seeds().counts();
-
-        let get_tools = self
-            .seeds
-            .iter()
-            .filter_map(|item| {
-                let currently_planted =
-                    planted_seeds.get(&item.id).cloned().unwrap_or(0);
-                let to_plant = item.count.saturating_sub(currently_planted);
-                (to_plant > 0).then(|| item.clone().with_count(to_plant))
-            })
-            .fold(InventoryGoal::current(), |goal, item| goal.with(item))
-            .with(Item::WATERING_CAN)
-            .with(Item::HOE)
-            .with(Item::PICKAXE)
-            .with(Item::AXE)
-            .stamina_recovery_slots(1);
-        if !get_tools.is_completed(game_state)? {
-            let get_tools = get_tools
-                .stamina_recovery_slots(3)
-                .keep_if(|item| {
-                    matches!(item.category, Some(ItemCategory::Seed))
-                })
-                .otherwise_empty();
-            return Ok(get_tools.into());
-        }
-
-        let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
-            return Ok(goal.into());
-        }
-        if game_state.player.current_stamina < 2.0 {
-            return Ok(BotGoalResult::Completed);
-        }
-
-        let player_tile = game_state.player.tile();
-
         let iter_tiles_to_hoe = || -> Result<_, Error> {
             let iter = self
                 .iter_steps(game_state)?
@@ -451,6 +406,17 @@ impl BotGoal for PlantCropsGoal {
                 .collect()
         };
 
+        let initial_tile = if game_state.player.room_name == "Farm" {
+            game_state.player.tile()
+        } else {
+            game_state.closest_entrance("Farm")?
+        };
+        let farm = game_state.get_room("Farm")?;
+        let distances = farm
+            .pathfinding()
+            .include_border(true)
+            .distances(initial_tile);
+
         let opt_next_step = self
             .iter_steps(game_state)?
             .filter(|(tile, opt_item)| {
@@ -463,14 +429,50 @@ impl BotGoal for PlantCropsGoal {
                     })
                     .unwrap_or(true)
             })
+            .filter(|(tile, _)| distances.is_some(*tile))
             .min_by_key(|(tile, _)| {
-                let dist = player_tile.manhattan_dist(*tile);
+                let dist = distances[*tile].unwrap();
                 (dist != 1, dist)
             });
 
         let Some((tile, opt_item)) = opt_next_step else {
             return Ok(BotGoalResult::Completed);
         };
+
+        let planted_seeds = farm.iter_planted_seeds().counts();
+
+        let get_tools = self
+            .seeds
+            .iter()
+            .filter_map(|item| {
+                let currently_planted =
+                    planted_seeds.get(&item.id).cloned().unwrap_or(0);
+                let to_plant = item.count.saturating_sub(currently_planted);
+                (to_plant > 0).then(|| item.clone().with_count(to_plant))
+            })
+            .fold(InventoryGoal::current(), |goal, item| goal.with(item))
+            .with(Item::WATERING_CAN)
+            .with(Item::HOE)
+            .with(Item::PICKAXE)
+            .with(Item::AXE)
+            .stamina_recovery_slots(1);
+        if !get_tools.is_completed(game_state)? {
+            let get_tools = get_tools
+                .stamina_recovery_slots(3)
+                .keep_if(|item| {
+                    matches!(item.category, Some(ItemCategory::Seed))
+                })
+                .otherwise_empty();
+            return Ok(get_tools.into());
+        }
+
+        let goal = MaintainStaminaGoal::new();
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
+        }
+        if game_state.player.current_stamina < 2.0 {
+            return Ok(BotGoalResult::Completed);
+        }
 
         if let Some(item) = opt_item {
             if item.is_same_item(&Item::WATERING_CAN) {
