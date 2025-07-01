@@ -120,6 +120,7 @@ impl ObjectKindExt for ObjectKind {
 pub trait LocationExt {
     fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind>;
 
+    #[allow(dead_code)]
     fn iter_planted_seeds(&self) -> impl Iterator<Item = &ItemId>;
 }
 impl LocationExt for Location {

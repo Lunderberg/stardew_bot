@@ -159,6 +159,8 @@ impl PlantCropsGoal {
         }
     }
 
+    /// Iterator through the available planting steps that may
+    /// currently be applied.
     fn iter_steps<'a>(
         &'a self,
         game_state: &'a GameState,
@@ -199,6 +201,7 @@ impl PlantCropsGoal {
         Ok(Either::Right(iter_steps))
     }
 
+    /// Check if the planting has been completed.
     pub fn is_completed(
         &mut self,
         game_state: &GameState,
@@ -207,6 +210,8 @@ impl PlantCropsGoal {
         Ok(self.iter_steps(game_state)?.next().is_none())
     }
 
+    /// Populate the planned state of farming tiles, after all
+    /// planting has been completed.
     pub fn fill_plan(&mut self, game_state: &GameState) -> Result<(), Error> {
         if self.plan.is_some() {
             return Ok(());
@@ -250,6 +255,64 @@ impl PlantCropsGoal {
         Ok(())
     }
 
+    /// Count the number of each item is required to complete the
+    /// planned planting of the farm.
+    ///
+    /// For each `(item,count)` pair, the player's inventory and
+    /// storage should have at least `count` of `item` in order to
+    /// complete the planned planting.
+    fn iter_required_items(
+        &self,
+        game_state: &GameState,
+    ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error> {
+        let farm = game_state.get_room("Farm")?;
+        let plan = self.plan.as_ref().expect("Populated by self.fill_plan()");
+        let current_state = farm.generate_tile_lookup();
+
+        let iter_items_required = plan
+            .final_state
+            .iter()
+            .filter(|(tile, goal_item)| {
+                let opt_current = current_state.get(tile).map(|&kind| kind);
+                let opt_next_step = Self::next_step_of_tile(
+                    &game_state.statics,
+                    opt_current,
+                    goal_item,
+                );
+                opt_next_step.is_some()
+            })
+            .map(|(_, id)| id)
+            .counts()
+            .into_iter();
+
+        Ok(iter_items_required)
+    }
+
+    /// Iterate through items that are planned, but are not available.
+    fn iter_missing_items<'a>(
+        &'a self,
+        game_state: &'a GameState,
+    ) -> Result<impl Iterator<Item = Item> + 'a, Error> {
+        let items_available =
+            InventoryGoal::current().total_stored_and_carried(game_state)?;
+        let iter = self
+            .iter_required_items(game_state)?
+            .map(move |(id, required)| {
+                let available = items_available.get(id).cloned().unwrap_or(0);
+                (id, required.saturating_sub(available))
+            })
+            .filter(|(_, missing)| *missing > 0)
+            .map(|(id, count)| {
+                game_state
+                    .statics
+                    .enrich_item(id.clone().into())
+                    .with_count(count)
+            });
+
+        Ok(iter)
+    }
+
+    /// Attempt to buy enough seeds to meet the target number to farm.
     fn try_buy_missing_seeds(
         &self,
         game_state: &GameState,
@@ -258,38 +321,13 @@ impl PlantCropsGoal {
             return Ok(None);
         }
 
-        let farm = game_state.get_room("Farm")?;
-
-        let mut missing: HashMap<_, _> = self
-            .seeds
-            .iter()
-            .map(|item| (&item.id, item.count))
-            .collect();
-
-        let iter_item = InventoryGoal::current()
-            .iter_stored_and_carried(game_state)?
-            .map(|item| (&item.id, item.count));
-
-        let iter_planted = farm.iter_planted_seeds().map(|seed| (seed, 1));
-
-        iter_item
-            .chain(iter_planted)
-            .for_each(|(item_id, item_count)| {
-                if let Some(count) = missing.get_mut(item_id) {
-                    *count = count.saturating_sub(item_count);
-                }
-            });
-
         let inventory = game_state.player.inventory.to_hash_map();
 
         let buy_items = self
-            .seeds
-            .iter()
+            .iter_missing_items(game_state)?
+            .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
             .filter_map(|item| {
-                let num_missing = missing
-                    .get(&item.id)
-                    .cloned()
-                    .filter(|&count| count > 0)?;
+                let num_missing = item.count;
                 let current = inventory.get(&item.id).cloned().unwrap_or(0);
                 let goal = BuyFromMerchantGoal::new(
                     "Buy General",
@@ -442,18 +480,13 @@ impl BotGoal for PlantCropsGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        let planted_seeds = farm.iter_planted_seeds().counts();
-
         let get_tools = self
-            .seeds
-            .iter()
-            .filter_map(|item| {
-                let currently_planted =
-                    planted_seeds.get(&item.id).cloned().unwrap_or(0);
-                let to_plant = item.count.saturating_sub(currently_planted);
-                (to_plant > 0).then(|| item.clone().with_count(to_plant))
+            .iter_required_items(game_state)?
+            .fold(InventoryGoal::current(), |goal, (id, count)| {
+                let item: Item = id.clone().into();
+                let item = item.with_count(count);
+                goal.with(item)
             })
-            .fold(InventoryGoal::current(), |goal, item| goal.with(item))
             .with(Item::WATERING_CAN)
             .with(Item::HOE)
             .with(Item::PICKAXE)
