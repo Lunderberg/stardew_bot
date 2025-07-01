@@ -173,7 +173,8 @@ impl PlantCropsGoal {
         let plan = self.plan.as_ref().expect("Populated by self.fill_plan()");
 
         let current_state = farm.generate_tile_lookup();
-        let inventory = game_state.player.inventory.to_hash_map();
+        let inventory =
+            InventoryGoal::current().total_stored_and_carried(game_state)?;
 
         let iter_steps = plan
             .final_state
