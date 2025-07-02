@@ -180,7 +180,8 @@ impl BotGoal for UseItemOnTile {
             _ => false,
         };
         let requires_noncolliding_tile =
-            self.item.id.item_id.starts_with("(BC)");
+            self.item.id.item_id.starts_with("(BC)")
+                || self.item.id.item_id.starts_with("(O)");
 
         let player_pos = game_state.player.center_pos();
         if (requires_adjacent_tile && player_tile == self.tile)
