@@ -57,6 +57,7 @@ impl FarmPlan {
                 .forage_clearing_cost(0)
                 .tree_clearing_cost(0)
                 .walkable();
+            let diggable = &farm.diggable;
 
             // Off to the bottom/left, so that barns/coops can be
             // closer to the farm house.
@@ -90,7 +91,7 @@ impl FarmPlan {
 
                 let is_good_placement = std::iter::once(visiting)
                     .chain(visiting.iter_cardinal())
-                    .all(|adj| walkable.is_set(adj));
+                    .all(|adj| walkable.is_set(adj) && diggable.is_set(adj));
                 if is_good_placement {
                     sprinklers.push(visiting);
 
