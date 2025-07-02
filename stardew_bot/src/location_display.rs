@@ -190,20 +190,18 @@ impl<'a> DrawableGameLocation<'a> {
         let width = width as usize;
         let height = height as usize;
 
-        let Some(tiles) = &self.room.water_tiles else {
-            return;
-        };
+        let tiles = &self.room.water_tiles;
 
-        assert!(width * height == tiles.len());
+        assert!(tiles.width() == width);
+        assert!(tiles.height() == height);
         let points = tiles
             .iter()
-            .enumerate()
             .filter(|(_, is_water)| **is_water)
-            .map(|(index, _)| {
-                let i = index / height;
-                let j = index % height;
+            .map(|(tile, _)| {
+                let i = tile.right;
+                let j = tile.down;
                 let x = i as f64;
-                let y = (height - j) as f64;
+                let y = ((height as isize) - j) as f64;
                 (x, y)
             })
             .collect::<Vec<_>>();

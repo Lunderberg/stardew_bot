@@ -42,7 +42,7 @@ pub struct Location {
     pub furniture: Vec<Furniture>,
 
     /// Which tiles have water.
-    pub water_tiles: Option<Vec<bool>>,
+    pub water_tiles: TileMap<bool>,
 
     pub buildings: Vec<Building>,
 
@@ -1026,6 +1026,29 @@ impl Location {
                     .chain(tiles.iter_extra_warps())
                     .collect();
 
+                let water_tiles = {
+                    let mut map = TileMap::<bool>::empty(
+                        blocked.width(),
+                        blocked.height(),
+                    );
+                    let height = map.height();
+
+                    water_tiles
+                        .iter()
+                        .enumerate()
+                        .filter(|(_, is_water)| **is_water)
+                        .map(move |(index, _)| {
+                            let i = (index / height) as isize;
+                            let j = (index % height) as isize;
+                            Vector::new(i, j)
+                        })
+                        .for_each(|tile| {
+                            map[tile] = true;
+                        });
+
+                    map
+                };
+
                 Location {
                     name: name.into(),
                     shape: shape.clone(),
@@ -1035,8 +1058,7 @@ impl Location {
                     objects: objects.clone(),
                     items: items.clone(),
                     furniture: furniture.clone(),
-                    water_tiles: (!water_tiles.is_empty())
-                        .then(|| water_tiles.clone()),
+                    water_tiles,
                     buildings: buildings.clone(),
                     blocked,
                     diggable,
@@ -2005,39 +2027,14 @@ impl Location {
     }
 
     pub fn is_water(&self, tile: Vector<isize>) -> bool {
-        // TODO: Replace `Location.water_tiles` with a
-        // `TileMap<bool>`, and just look up the result.
-
-        let Some(water_tiles) = &self.water_tiles else {
-            return false;
-        };
-
-        let Vector {
-            right: width,
-            down: height,
-        } = self.shape;
-        if (0..width).contains(&tile.right) && (0..height).contains(&tile.down)
-        {
-            let index = tile.right * height + tile.down;
-            water_tiles[index as usize]
-        } else {
-            false
-        }
+        self.water_tiles.is_set(tile)
     }
 
     pub fn iter_water_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
-        let height = self.shape.down as usize;
-
         self.water_tiles
             .iter()
-            .flat_map(|vec_bool| vec_bool.iter())
-            .enumerate()
             .filter(|(_, is_water)| **is_water)
-            .map(move |(index, _)| {
-                let i = (index / height) as isize;
-                let j = (index % height) as isize;
-                Vector::new(i, j)
-            })
+            .map(|(tile, _)| tile)
     }
 
     pub fn iter_bush_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
