@@ -613,9 +613,17 @@ impl BotGoal for PlantCropsGoal {
                     .unwrap_or(true)
             })
             .filter(|(tile, _)| distances.is_some(*tile))
-            .min_by_key(|(tile, _)| {
+            .min_by_key(|(tile, opt_item)| {
                 let dist = distances[*tile].unwrap();
-                (dist != 1, dist)
+                (
+                    self.opportunistic_clay_farming.is_some()
+                        && opt_item
+                            .as_ref()
+                            .map(|item| item.is_same_item(&Item::WATERING_CAN))
+                            .unwrap_or(true),
+                    dist != 1,
+                    dist,
+                )
             });
 
         let Some((tile, opt_item)) = opt_next_step else {
