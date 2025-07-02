@@ -652,6 +652,29 @@ impl BotGoal for PlantCropsGoal {
             return Ok(BotGoalResult::Completed);
         }
 
+        let sort_inventory = OrganizeInventoryGoal::new(|item| {
+            use crate::bot_logic::SortedInventoryLocation as SIL;
+            if item.id.item_id.starts_with("(T)")
+                || item.id.item_id.starts_with("(W)")
+                || (matches!(item.category, Some(ItemCategory::Seed))
+                    && !item.id.is_tree_seed()
+                    && !item.id.is_fruit_sapling())
+                || item.is_same_item(&ItemId::SPRINKLER)
+                || item.is_same_item(&Item::SCARECROW)
+            {
+                SIL::HotBarLeft
+            } else if item.gp_per_stamina().is_some() {
+                SIL::HotBarRight
+            } else if item.is_same_item(&Item::CLAY) {
+                SIL::HotBar
+            } else {
+                SIL::Hidden
+            }
+        });
+        if !sort_inventory.is_completed(game_state) {
+            return Ok(sort_inventory.into());
+        }
+
         if let Some(item) = opt_item {
             if item.is_same_item(&Item::WATERING_CAN) {
                 let goal = FillWateringCan::if_empty();
