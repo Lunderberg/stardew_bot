@@ -18,16 +18,45 @@ use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     ActivateTile, BuyFromMerchantGoal, ClayPredictor, FarmPlan,
     FillWateringCan, GameStateExt as _, InventoryGoal, LocationExt as _,
+    OrganizeInventoryGoal,
 };
 
 #[derive(Clone)]
 pub struct PlantCropsGoal {
+    /// The seeds that should be planted
     seeds: Vec<Item>,
+
+    /// The plan on where to place seeds, sprinklers, and scarecrows.
     plan: Option<CropPlantingPlan>,
+
+    /// The time at which this goal should stop early, if not already
+    /// completed.
     stop_time: i32,
-    opportunistic_clay_farming: bool,
+
+    /// If `Some(dist)`, the maximum distance in tiles that the bot
+    /// may travel to dig up clay while preparing the field.  If
+    /// `None` (default), do not prioritize digging up clay.
+    opportunistic_clay_farming: Option<u64>,
+
+    /// If true, and if there are insufficient seeds in the player's
+    /// inventory and storage chests, buy extra seeds from Pierre.  If
+    /// false, plant the seeds that are available and do not buy extra
+    /// seeds.
     buy_missing_seeds: bool,
+
+    /// If `stop_after_buying_seeds` is true, buy any seeds from
+    /// Pierre but do not plant them.  This is mainly used to buy
+    /// seeds when near Pierre, to be planted later.
     stop_after_buying_seeds: bool,
+
+    /// A read may occur after the player's inventory has been updated
+    /// but before the game location has been updated.  This will
+    /// appear as if the player has insufficient seeds/materials, and
+    /// may cause the bot to head to Pierre or the storage chests to
+    /// buy/craft additional materials.  To avoid this, this field
+    /// tracks the game tick on which the decision to buy/craft was
+    /// made.  The decision is only applied if made again on the
+    /// following frame.
     tick_decided_to_gather_items: Option<i32>,
 }
 
@@ -48,19 +77,16 @@ impl PlantCropsGoal {
             seeds,
             plan: None,
             stop_time: 2600,
-            opportunistic_clay_farming: false,
+            opportunistic_clay_farming: None,
             buy_missing_seeds: true,
             stop_after_buying_seeds: false,
             tick_decided_to_gather_items: None,
         }
     }
 
-    pub fn opportunistic_clay_farming(
-        self,
-        opportunistic_clay_farming: bool,
-    ) -> Self {
+    pub fn opportunistic_clay_farming(self, dist: u64) -> Self {
         Self {
-            opportunistic_clay_farming,
+            opportunistic_clay_farming: Some(dist),
             ..self
         }
     }
@@ -484,6 +510,17 @@ impl BotGoal for PlantCropsGoal {
             self.tick_decided_to_gather_items = None;
         }
 
+        let initial_tile = if game_state.player.room_name == "Farm" {
+            game_state.player.tile()
+        } else {
+            game_state.closest_entrance("Farm")?
+        };
+        let farm = game_state.get_room("Farm")?;
+        let distances = farm
+            .pathfinding()
+            .include_border(true)
+            .distances(initial_tile);
+
         let iter_tiles_to_hoe = || -> Result<_, Error> {
             let iter = self
                 .iter_steps(game_state)?
@@ -499,19 +536,43 @@ impl BotGoal for PlantCropsGoal {
         };
 
         let clay_tiles: HashSet<Vector<isize>> = 'clay_tiles: {
-            if !self.opportunistic_clay_farming {
+            let Some(max_clay_dist) = self.opportunistic_clay_farming else {
                 // Not doing opporunistic clay farming.
                 break 'clay_tiles Default::default();
-            }
+            };
+
+            let is_within_clay_range = |tile: &Vector<isize>| {
+                distances
+                    .get_opt(*tile)
+                    .map(|&dist| dist <= max_clay_dist)
+                    .unwrap_or(false)
+            };
+
+            // Returns an iterator of tiles that will be hoed in
+            // preparation for planting, and are within the allowed
+            // distance for opportunistic clay farming.
+            let iter_potential_clay_tiles = || {
+                iter_tiles_to_hoe()
+                    .map(|iter| iter.filter(is_within_clay_range))
+            };
 
             let clay_predictor = ClayPredictor::new(game_state);
-            let clay_tiles: HashSet<Vector<isize>> = iter_tiles_to_hoe()?
-                .filter(|tile| clay_predictor.will_produce_clay(*tile))
-                .collect();
+            let clay_tiles: HashSet<Vector<isize>> =
+                iter_potential_clay_tiles()?
+                    .filter(|tile| clay_predictor.will_produce_clay(*tile))
+                    .collect();
 
             if !clay_tiles.is_empty() {
-                // There's at least once tile that would produce clay.
+                // There's at least one tile that would produce clay.
                 break 'clay_tiles clay_tiles;
+            }
+
+            // We are deliberately restricting the tiles that may be
+            // inspected for clay, to avoid spending time running
+            // around the farm area.  Therefore, use an empty HashSet
+            // for `clay_tiles`, allowing any nearby tile to be hoed.
+            if iter_tiles_to_hoe()?.any(|tile| !is_within_clay_range(&tile)) {
+                break 'clay_tiles Default::default();
             }
 
             // There are no tiles that will produce clay in the next
@@ -528,26 +589,16 @@ impl BotGoal for PlantCropsGoal {
                     .take_while(|will_be_clay| !will_be_clay)
                     .count()
             };
-            let longest_until_clay =
-                iter_tiles_to_hoe()?.map(|tile| uses_until_clay(tile)).max();
+            let longest_until_clay = iter_potential_clay_tiles()?
+                .map(|tile| uses_until_clay(tile))
+                .max();
 
-            iter_tiles_to_hoe()?
+            iter_potential_clay_tiles()?
                 .filter(|tile| {
                     Some(uses_until_clay(*tile)) == longest_until_clay
                 })
                 .collect()
         };
-
-        let initial_tile = if game_state.player.room_name == "Farm" {
-            game_state.player.tile()
-        } else {
-            game_state.closest_entrance("Farm")?
-        };
-        let farm = game_state.get_room("Farm")?;
-        let distances = farm
-            .pathfinding()
-            .include_border(true)
-            .distances(initial_tile);
 
         let opt_next_step = self
             .iter_steps(game_state)?

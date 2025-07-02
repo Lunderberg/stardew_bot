@@ -206,7 +206,7 @@ impl BotGoal for FirstDay {
             ),
         )
         .stop_time(2000)
-        .opportunistic_clay_farming(true);
+        .opportunistic_clay_farming(10);
         if !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
         }
