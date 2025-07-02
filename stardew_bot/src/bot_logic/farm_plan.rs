@@ -12,6 +12,7 @@ pub struct FarmPlan {
     initial_plot: Rectangle<isize>,
     tree_farm: Rectangle<isize>,
     regular_sprinklers: Vec<Vector<isize>>,
+    scarecrows: Vec<Vector<isize>>,
 }
 
 impl FarmPlan {
@@ -46,18 +47,18 @@ impl FarmPlan {
             )
         };
 
+        let walkable = farm
+            .pathfinding()
+            .stone_clearing_cost(0)
+            .wood_clearing_cost(0)
+            .breakable_clearing_cost(0)
+            .forage_clearing_cost(0)
+            .tree_clearing_cost(0)
+            .walkable();
+        let diggable = &farm.diggable;
+
         let regular_sprinklers = {
             const NUM_SPRINKLERS: usize = 50;
-
-            let walkable = farm
-                .pathfinding()
-                .stone_clearing_cost(0)
-                .wood_clearing_cost(0)
-                .breakable_clearing_cost(0)
-                .forage_clearing_cost(0)
-                .tree_clearing_cost(0)
-                .walkable();
-            let diggable = &farm.diggable;
 
             // Off to the bottom/left, so that barns/coops can be
             // closer to the farm house.
@@ -115,10 +116,65 @@ impl FarmPlan {
             sprinklers
         };
 
+        let scarecrows = {
+            let allowed = {
+                let mut map = walkable.clone();
+                regular_sprinklers
+                    .iter()
+                    .flat_map(|tile| {
+                        std::iter::once(*tile).chain(tile.iter_cardinal())
+                    })
+                    .for_each(|tile| {
+                        if map.in_bounds(tile) {
+                            map[tile] = false;
+                        }
+                    });
+                map
+            };
+
+            let mut scarecrows = Vec::<Vector<isize>>::new();
+            let mut to_cover: HashSet<Vector<isize>> = regular_sprinklers
+                .iter()
+                .flat_map(|tile| tile.iter_cardinal())
+                .collect();
+            let mut covered = HashSet::<Vector<isize>>::new();
+
+            while !to_cover.is_empty() {
+                let opt_scarecrow = to_cover
+                    .iter()
+                    .flat_map(|tile| tile.iter_adjacent())
+                    .filter(|&adj| {
+                        allowed.is_set(adj)
+                            && !to_cover.contains(&adj)
+                            && !covered.contains(&adj)
+                    })
+                    .max_by_key(|adj| {
+                        let num_covered = to_cover
+                            .iter()
+                            .filter(|b| adj.dist2(**b) < 81)
+                            .count();
+                        num_covered
+                    });
+                let Some(scarecrow) = opt_scarecrow else {
+                    break;
+                };
+
+                scarecrows.push(scarecrow);
+                to_cover.extract_if(|b| scarecrow.dist2(*b) < 81).for_each(
+                    |tile| {
+                        covered.insert(tile);
+                    },
+                );
+            }
+
+            scarecrows
+        };
+
         Ok(Self {
             initial_plot,
             tree_farm,
             regular_sprinklers,
+            scarecrows,
         })
     }
 
@@ -159,5 +215,9 @@ impl FarmPlan {
         self.regular_sprinklers
             .iter()
             .flat_map(|sprinkler| sprinkler.iter_cardinal())
+    }
+
+    pub fn iter_scarecrows(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.scarecrows.iter().cloned()
     }
 }

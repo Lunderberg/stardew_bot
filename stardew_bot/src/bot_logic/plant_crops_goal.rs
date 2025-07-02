@@ -248,9 +248,15 @@ impl PlantCropsGoal {
             .chain(plan.iter_regular_sprinklers())
             .map(|tile| (tile, ItemId::SPRINKLER));
 
-        self.plan = Some(CropPlantingPlan {
-            final_state: iter_seed_tiles.chain(iter_sprinklers).collect(),
-        });
+        let iter_scarecrows = plan
+            .iter_scarecrows()
+            .map(|tile| (tile, Item::SCARECROW.id.clone()));
+
+        let final_state = iter_seed_tiles
+            .chain(iter_sprinklers)
+            .chain(iter_scarecrows)
+            .collect();
+        self.plan = Some(CropPlantingPlan { final_state });
 
         Ok(())
     }
