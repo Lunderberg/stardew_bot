@@ -88,6 +88,7 @@ pub enum Quality {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum ItemCategory {
     Tool,
+    Weapon,
     Fruit,
     Greens,
     Flowers,
@@ -387,6 +388,7 @@ impl std::fmt::Display for ItemCategory {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ItemCategory::Tool => write!(f, "Tool"),
+            ItemCategory::Weapon => write!(f, "Weapon"),
             ItemCategory::Fruit => write!(f, "Fruit"),
             ItemCategory::Greens => write!(f, "Greens"),
             ItemCategory::Flowers => write!(f, "Flowers"),
@@ -409,6 +411,7 @@ impl From<i32> for ItemCategory {
     fn from(value: i32) -> Self {
         match value {
             -99 => ItemCategory::Tool,
+            -98 => ItemCategory::Weapon,
             -79 => ItemCategory::Fruit,
             -81 => ItemCategory::Greens,
             -80 => ItemCategory::Flowers,
