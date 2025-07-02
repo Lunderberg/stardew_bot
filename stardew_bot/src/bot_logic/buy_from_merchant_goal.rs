@@ -1,3 +1,5 @@
+use itertools::Either;
+
 use crate::{
     bot_logic::{BotError, GoToActionTile},
     game_state::Item,
@@ -6,13 +8,14 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    MenuCloser,
+    LocationExt as _, MenuCloser,
 };
 
 pub struct BuyFromMerchantGoal {
     merchant: String,
     item: Item,
     movement_goal: GoToActionTile,
+    include_stored_items: Option<String>,
 }
 
 impl BuyFromMerchantGoal {
@@ -22,11 +25,36 @@ impl BuyFromMerchantGoal {
             item,
             movement_goal: GoToActionTile::new(merchant.clone()),
             merchant,
+            include_stored_items: None,
         }
     }
 
-    pub fn item_count(&self, game_state: &GameState) -> usize {
-        game_state.player.inventory.count_item(&self.item)
+    pub fn include_stored_items(
+        self,
+        storage_location: impl Into<String>,
+    ) -> Self {
+        Self {
+            include_stored_items: Some(storage_location.into()),
+            ..self
+        }
+    }
+
+    pub fn item_count(&self, game_state: &GameState) -> Result<usize, Error> {
+        let iter_inventory = game_state.player.inventory.iter_items();
+        let iter_items =
+            if let Some(storage_location) = &self.include_stored_items {
+                let iter_stored =
+                    game_state.get_room(storage_location)?.iter_stored_items();
+                Either::Left(iter_inventory.chain(iter_stored))
+            } else {
+                Either::Right(iter_inventory)
+            };
+        let item_count = iter_items
+            .filter(|item| item.is_same_item(&self.item))
+            .map(|item| item.count)
+            .sum();
+
+        Ok(item_count)
     }
 
     fn buy_price(&self, _game_state: &GameState) -> i32 {
@@ -39,18 +67,20 @@ impl BuyFromMerchantGoal {
             70
         } else if self.item.is_same_item(&Item::COPPER_ORE) {
             75
+        } else if self.item.is_same_item(&Item::WOOD) {
+            10
         } else {
             0
         }
     }
 
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
-        let num_in_inventory = self.item_count(game_state);
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let num_in_inventory = self.item_count(game_state)?;
         let has_desired_amount = num_in_inventory >= self.item.count;
         let can_buy_another =
             game_state.player.current_money >= self.buy_price(game_state);
 
-        has_desired_amount || !can_buy_another
+        Ok(has_desired_amount || !can_buy_another)
     }
 }
 
@@ -64,7 +94,7 @@ impl BotGoal for BuyFromMerchantGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state) {
+        if self.is_completed(game_state)? {
             let cleanup = MenuCloser::new();
             if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
@@ -78,10 +108,9 @@ impl BotGoal for BuyFromMerchantGoal {
                 let should_add_to_inventory = {
                     let is_correct_item = held_item.is_same_item(&self.item);
 
-                    let has_desired_amount =
-                        game_state.player.inventory.count_item(&self.item)
-                            + held_item.count
-                            >= self.item.count;
+                    let has_desired_amount = self.item_count(game_state)?
+                        + held_item.count
+                        >= self.item.count;
                     let can_buy_another = game_state.player.current_money
                         >= self.buy_price(game_state);
                     !is_correct_item || has_desired_amount || !can_buy_another

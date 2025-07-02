@@ -140,7 +140,7 @@ impl BotGoal for FirstDay {
         }
 
         let goal = BuyFromMerchantGoal::new("Blacksmith", Item::COPPER_ORE);
-        if !goal.is_completed(game_state) && in_game_time < 1200 {
+        if !goal.is_completed(game_state)? && in_game_time < 1200 {
             return Ok(goal.into());
         }
 
@@ -151,7 +151,7 @@ impl BotGoal for FirstDay {
 
         let goal =
             BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(6));
-        if goal.item_count(game_state) == 0 && in_game_time < 1900 {
+        if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
 

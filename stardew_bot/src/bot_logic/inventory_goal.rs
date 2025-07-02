@@ -16,7 +16,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    ActivateTile, GameStateExt as _,
+    ActivateTile, GameStateExt as _, LocationExt as _,
 };
 
 const MAX_GP_PER_STAMINA: f32 = 2.5;
@@ -591,12 +591,8 @@ impl InventoryGoal {
     ) -> Result<impl Iterator<Item = &'a Item> + 'a, Error> {
         let iter_current = game_state.player.inventory.iter_items();
 
-        let iter_stored = game_state
-            .get_room(self.room.as_ref())?
-            .objects
-            .iter()
-            .filter_map(|obj| obj.kind.as_chest())
-            .flat_map(|chest| chest.iter_items());
+        let iter_stored =
+            game_state.get_room(self.room.as_ref())?.iter_stored_items();
 
         Ok(iter_current.chain(iter_stored))
     }

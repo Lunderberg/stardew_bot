@@ -122,6 +122,8 @@ pub trait LocationExt {
 
     #[allow(dead_code)]
     fn iter_planted_seeds(&self) -> impl Iterator<Item = &ItemId>;
+
+    fn iter_stored_items(&self) -> impl Iterator<Item = &Item>;
 }
 impl LocationExt for Location {
     fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind> {
@@ -148,5 +150,12 @@ impl LocationExt for Location {
             .filter_map(|obj| obj.kind.as_hoe_dirt())
             .filter_map(|hoe_dirt| hoe_dirt.crop.as_ref())
             .map(|crop| &crop.seed)
+    }
+
+    fn iter_stored_items(&self) -> impl Iterator<Item = &Item> {
+        self.objects
+            .iter()
+            .filter_map(|obj| obj.kind.as_chest())
+            .flat_map(|chest| chest.iter_items())
     }
 }
