@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::GameStateExt as _,
-    game_state::{Rectangle, Vector},
+    game_state::{ObjectKind, Rectangle, Vector},
     Error, GameState,
 };
 
@@ -139,6 +139,17 @@ impl FarmPlan {
                 .collect();
             let mut covered = HashSet::<Vector<isize>>::new();
 
+            // The farm may contain existing scarecrows.
+            farm.objects
+                .iter()
+                .filter(|obj| matches!(obj.kind, ObjectKind::Scarecrow))
+                .map(|obj| obj.tile)
+                .for_each(|scarecrow| {
+                    covered.extend(
+                        to_cover.extract_if(|b| scarecrow.dist2(*b) < 81),
+                    );
+                });
+
             while !to_cover.is_empty() {
                 let opt_scarecrow = to_cover
                     .iter()
@@ -160,11 +171,8 @@ impl FarmPlan {
                 };
 
                 scarecrows.push(scarecrow);
-                to_cover.extract_if(|b| scarecrow.dist2(*b) < 81).for_each(
-                    |tile| {
-                        covered.insert(tile);
-                    },
-                );
+                covered
+                    .extend(to_cover.extract_if(|b| scarecrow.dist2(*b) < 81));
             }
 
             scarecrows
