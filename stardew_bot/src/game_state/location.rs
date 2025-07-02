@@ -1803,8 +1803,19 @@ impl Location {
                 fn extract_map_tile(layer, layer_num, i, j) {
                     let loc = new_vector_isize(i,j);
 
-                    let tile = layer.m_tiles[i,j]
+                    let base_tile = layer.m_tiles[i,j];
+                    let static_tile = base_tile
                         .as::<xTile.Tiles.StaticTile>();
+                    let animated_tile = base_tile
+                        .as::<xTile.Tiles.AnimatedTile>();
+
+                    let tile = if static_tile.is_some() {
+                        static_tile
+                    } else if animated_tile.is_some() {
+                        animated_tile.m_tileFrames[0]
+                    } else {
+                        None
+                    };
 
                     if tile.is_some() {
                         let tile_sheet = tile
