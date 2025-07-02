@@ -181,6 +181,7 @@ impl Item {
     pub const CLAY: Item = Item::new_const("(O)330");
     pub const WOOD: Item = Item::new_const("(O)388");
     pub const STONE: Item = Item::new_const("(O)390");
+    pub const FIBER: Item = Item::new_const("(O)771");
 
     pub const OAK_SEED: Item = Item::new_const("(O)309");
     pub const MAPLE_SEED: Item = Item::new_const("(O)310");

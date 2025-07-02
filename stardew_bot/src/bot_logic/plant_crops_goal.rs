@@ -4,8 +4,8 @@ use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::{
-        graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
-        ObjectKindExt as _, UseItemOnTile,
+        graph_search::GraphSearch as _, CraftItemGoal, MaintainStaminaGoal,
+        MovementGoal, ObjectKindExt as _, UseItemOnTile,
     },
     game_state::{
         HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Sprinkler,
@@ -28,7 +28,7 @@ pub struct PlantCropsGoal {
     opportunistic_clay_farming: bool,
     buy_missing_seeds: bool,
     stop_after_buying_seeds: bool,
-    tick_decided_to_buy_seeds: Option<i32>,
+    tick_decided_to_gather_items: Option<i32>,
 }
 
 #[derive(Clone)]
@@ -51,7 +51,7 @@ impl PlantCropsGoal {
             opportunistic_clay_farming: false,
             buy_missing_seeds: true,
             stop_after_buying_seeds: false,
-            tick_decided_to_buy_seeds: None,
+            tick_decided_to_gather_items: None,
         }
     }
 
@@ -343,6 +343,78 @@ impl PlantCropsGoal {
             Ok(None)
         }
     }
+
+    /// Attempt to craft any items that are missing
+    fn try_craft_missing_items(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        let get_ingredients = |to_craft: &ItemId| -> Option<Vec<Item>> {
+            if to_craft == &ItemId::SPRINKLER {
+                Some(vec![Item::COPPER_BAR, Item::IRON_BAR])
+            } else if to_craft == &Item::SCARECROW.id {
+                Some(vec![
+                    Item::WOOD.with_count(50),
+                    Item::COAL,
+                    Item::FIBER.with_count(20),
+                ])
+            } else {
+                None
+            }
+        };
+
+        let available =
+            InventoryGoal::current().total_stored_and_carried(game_state)?;
+
+        let items_to_craft: Vec<Item> = self
+            .iter_missing_items(game_state)?
+            .filter_map(|missing| {
+                let ingredients = get_ingredients(&missing.id)?;
+                let num_craftable = ingredients
+                    .iter()
+                    .map(|ingredient| {
+                        let num_available =
+                            available.get(&ingredient.id).cloned().unwrap_or(0);
+                        num_available / ingredient.count
+                    })
+                    .min()
+                    .filter(|&num| num > 0)?;
+                let num_to_craft = num_craftable.min(missing.count);
+                Some(missing.with_count(num_to_craft))
+            })
+            .collect();
+
+        if items_to_craft.is_empty() {
+            return Ok(None);
+        }
+
+        let prepare = items_to_craft
+            .iter()
+            .flat_map(|to_craft| {
+                let ingredients = get_ingredients(&to_craft.id)
+                    .expect("Craftables have known recipe");
+                ingredients.into_iter().map(|ingredient| {
+                    (ingredient.id, ingredient.count * to_craft.count)
+                })
+            })
+            .into_grouping_map()
+            .sum()
+            .into_iter()
+            .fold(InventoryGoal::current(), |goal, (id, count)| {
+                let item: Item = id.into();
+                let item = item.with_count(count);
+                goal.with(item)
+            });
+
+        let stack = items_to_craft
+            .into_iter()
+            .map(CraftItemGoal::new)
+            .fold(LogicStack::new().then(prepare), |stack, goal| {
+                stack.then(goal)
+            });
+
+        Ok(Some(stack))
+    }
 }
 
 impl BotGoal for PlantCropsGoal {
@@ -359,6 +431,8 @@ impl BotGoal for PlantCropsGoal {
             return Ok(BotGoalResult::Completed);
         }
 
+        self.fill_plan(game_state)?;
+
         if self.stop_after_buying_seeds {
             // Early handling in case we want to buy the seeds while
             // we're out, but plant them later.
@@ -369,7 +443,20 @@ impl BotGoal for PlantCropsGoal {
             }
         }
 
-        if let Some(buy_seeds) = self.try_buy_missing_seeds(game_state)? {
+        let opt_gather = 'opt_gather: {
+            let opt = self.try_buy_missing_seeds(game_state)?;
+            if opt.is_some() {
+                break 'opt_gather opt;
+            }
+            let opt = self.try_craft_missing_items(game_state)?;
+            if opt.is_some() {
+                break 'opt_gather opt;
+            }
+
+            None
+        };
+
+        if let Some(gather_items) = opt_gather {
             // In some cases, the update to the player's inventory can
             // occur before the update to the game location.  In that
             // case, the total number of seeds may appear to be less
@@ -377,21 +464,19 @@ impl BotGoal for PlantCropsGoal {
             // off to the general store, wait until the choice to buy
             // seeds has been made for a few game ticks in a row.
             let tick = game_state.globals.game_tick;
-            if let Some(prev_tick) = self.tick_decided_to_buy_seeds {
+            if let Some(prev_tick) = self.tick_decided_to_gather_items {
                 if tick < prev_tick + 2 {
                     return Ok(BotGoalResult::InProgress);
                 }
             } else {
-                self.tick_decided_to_buy_seeds = Some(tick);
+                self.tick_decided_to_gather_items = Some(tick);
                 return Ok(BotGoalResult::InProgress);
             }
 
-            return Ok(buy_seeds.into());
+            return Ok(gather_items.into());
         } else {
-            self.tick_decided_to_buy_seeds = None;
+            self.tick_decided_to_gather_items = None;
         }
-
-        self.fill_plan(game_state)?;
 
         let iter_tiles_to_hoe = || -> Result<_, Error> {
             let iter = self
