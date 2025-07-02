@@ -94,6 +94,7 @@ pub struct Warp {
     pub target: Vector<isize>,
     pub target_room: String,
     pub kind: WarpKind,
+    pub requires_friendship: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -507,6 +508,7 @@ impl Location {
                 target: target.clone(),
                 target_room: target_room.into(),
                 kind: WarpKind::Automatic,
+                requires_friendship: None,
             },
         )?;
 
@@ -544,6 +546,7 @@ impl Location {
                                 target,
                                 target_room,
                                 kind: WarpKind::Door,
+                                requires_friendship: None,
                             })
                         }
                         Some("LockedDoorWarp") => {
@@ -566,11 +569,16 @@ impl Location {
                             let closes: i32 = iter_words
                                 .next()
                                 .and_then(|right| right.parse().ok())?;
+
+                            let requires_friendship =
+                                iter_words.next().map(|name| name.to_string());
+
                             Some(Warp {
                                 location,
                                 target,
                                 target_room,
                                 kind: WarpKind::LockedDoor { opens, closes },
+                                requires_friendship,
                             })
                         }
                         _ => None,
@@ -2030,6 +2038,7 @@ impl Location {
                             target: *target,
                             target_room: door.inside_name.clone(),
                             kind: WarpKind::Door,
+                            requires_friendship: None,
                         }
                     })
                 })
@@ -2570,6 +2579,7 @@ impl MapTileSheets {
                 target: Vector::new(x, y),
                 target_room: room.to_string(),
                 kind: WarpKind::Door,
+                requires_friendship: None,
             })
         })
     }

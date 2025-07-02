@@ -106,6 +106,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                             true
                         }
                     })
+                    .filter(|warp| warp.requires_friendship.is_none())
                     .filter(move |warp| {
                         Direction::iter_cardinal()
                             .map(|dir| dir.offset())
