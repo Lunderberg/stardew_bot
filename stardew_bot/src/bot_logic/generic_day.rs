@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, ObjectKind},
+    game_state::{Item, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
@@ -11,7 +11,8 @@ use super::{
     ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, ForagingGoal, GameStateExt as _, GeodeCrackingGoal,
     HarvestCropsGoal, InventoryGoal, KeyEventInterrupt, MineDelvingGoal,
-    OpportunisticForaging, PlantCropsGoal, ShipMostFishGoal, WaterCropsGoal,
+    MovementGoal, OpportunisticForaging, PlantCropsGoal, SellToMerchantGoal,
+    ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -72,9 +73,28 @@ impl BotGoal for GenericDay {
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
-            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
+            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
+                .opportunistic_clay_farming(5);
             stack
                 .then(crops.clone().buy_missing_seeds(false).stop_time(1100))
+                .then(
+                    InventoryGoal::empty()
+                        .with(Item::HOE)
+                        .with(Item::GEODE.with_count(1000))
+                        .with(Item::FROZEN_GEODE.with_count(1000))
+                        .with(Item::MAGMA_GEODE.with_count(1000))
+                        .with(Item::OMNI_GEODE.with_count(1000))
+                        .with(Item::CLAY.with_count(1000))
+                        .stamina_recovery_slots(1),
+                )
+                .then(SellToMerchantGoal::new("Carpenter", Item::CLAY))
+                .then(
+                    BuyFromMerchantGoal::new(
+                        "Carpenter",
+                        Item::WOOD.with_count(300),
+                    )
+                    .include_stored_items("Farm"),
+                )
                 .then(
                     GeodeCrackingGoal::new()
                         .sell_gems(true)
