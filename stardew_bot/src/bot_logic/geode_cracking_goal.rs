@@ -185,7 +185,10 @@ impl BotGoal for GeodeCrackingGoal {
             .collect();
 
         let has_full_inventory = inventory.num_empty_slots().saturating_sub(
-            if Self::held_item(game_state).is_some() {
+            if Self::held_item(game_state)
+                .filter(|held| inventory.current_slot(held).is_none())
+                .is_some()
+            {
                 1
             } else {
                 0

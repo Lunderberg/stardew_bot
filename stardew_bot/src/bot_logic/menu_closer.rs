@@ -1,4 +1,7 @@
-use crate::{game_state::Vector, Error, GameAction, GameState};
+use crate::{
+    game_state::{Item, Vector},
+    Error, GameAction, GameState,
+};
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
@@ -44,33 +47,38 @@ impl MenuCloser {
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {
-        if let Some(menu) = &game_state.pause_menu {
-            if menu.held_item().is_some() {
-                let empty_slot = game_state
+        let opt_held_item_and_inv_tiles: Option<(&Item, &[Vector<isize>])> =
+            if let Some(menu) = &game_state.pause_menu {
+                menu.held_item().and_then(|held_item| {
+                    menu.player_inventory_tiles().map(
+                        |player_inventory_tiles| {
+                            (held_item, player_inventory_tiles)
+                        },
+                    )
+                })
+            } else if let Some(menu) = &game_state.geode_menu {
+                menu.held_item.as_ref().map(|held_item| {
+                    (held_item, menu.player_item_locations.as_slice())
+                })
+            } else if let Some(menu) = &game_state.shop_menu {
+                menu.held_item.as_ref().map(|held_item| {
+                    (held_item, menu.player_item_locations.as_slice())
+                })
+            } else {
+                None
+            };
+
+        opt_held_item_and_inv_tiles.map(
+            |(held_item, player_inventory_tiles)| {
+                let output_slot = game_state
                     .player
                     .inventory
-                    .empty_slot()
+                    .preferred_slot(&held_item)
                     .expect("TODO: Handle case of fully inventory");
 
-                return Some(
-                    menu.player_inventory_tiles().unwrap()[empty_slot],
-                );
-            }
-        }
-
-        if let Some(menu) = &game_state.geode_menu {
-            if menu.held_item.is_some() {
-                let empty_slot = game_state
-                    .player
-                    .inventory
-                    .empty_slot()
-                    .expect("TODO: Handle case of fully inventory");
-
-                return Some(menu.player_item_locations[empty_slot]);
-            }
-        }
-
-        None
+                player_inventory_tiles[output_slot]
+            },
+        )
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {

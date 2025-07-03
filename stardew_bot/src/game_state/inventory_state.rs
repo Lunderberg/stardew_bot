@@ -309,6 +309,23 @@ impl Inventory {
         self.iter_slots().any(|opt_item| opt_item.is_none())
     }
 
+    /// Returns the preferred slot in which an item should be placed,
+    /// or None if the item cannot be stored in the inventory.
+    /// Typically used to select the inventory slot in which an item
+    /// held in the cursor should be placed.
+    pub fn preferred_slot(
+        &self,
+        new_item: impl AsRef<ItemId>,
+    ) -> Option<usize> {
+        let new_item = new_item.as_ref();
+        self.iter_filled_slots()
+            .find(|(_, item)| {
+                item.is_same_item(new_item) && !item.is_full_stack()
+            })
+            .map(|(slot, _)| slot)
+            .or_else(|| self.empty_slot())
+    }
+
     /// Returns true if the item can be added to this inventory.
     ///
     /// If the inventory has an empty slot, or if the inventory has a
