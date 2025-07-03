@@ -2,6 +2,7 @@ use crate::{Error, GameAction, GameState};
 
 use super::bot_logic::{
     ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+    LogicStackItem,
 };
 
 pub struct SkipCutscenes;
@@ -24,7 +25,11 @@ impl BotInterrupt for SkipCutscenes {
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
         if game_state.globals.event_up {
-            Ok(Some(SkipCurrentCutscene.into()))
+            let stack =
+                [LogicStackItem::PreventInterrupt, SkipCurrentCutscene.into()]
+                    .into_iter()
+                    .collect();
+            Ok(Some(stack))
         } else {
             Ok(None)
         }
