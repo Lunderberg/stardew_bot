@@ -353,21 +353,26 @@ impl PlantCropsGoal {
             return Ok(None);
         }
 
-        let inventory = game_state.player.inventory.to_hash_map();
-
-        let buy_items = self
-            .iter_missing_items(game_state)?
-            .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
-            .filter_map(|item| {
-                let num_missing = item.count;
-                let current = inventory.get(&item.id).cloned().unwrap_or(0);
-                let goal = BuyFromMerchantGoal::new(
-                    "Buy General",
-                    item.clone().with_count(current + num_missing),
-                );
-                Some(goal)
+        let iter_purchase = self
+            .iter_required_items(game_state)?
+            .map(|(id, count)| {
+                let item: Item = id.clone().into();
+                let item = item.with_count(count);
+                let item = game_state.statics.enrich_item(item);
+                item
             })
-            .fold(LogicStack::new(), |stack, goal| stack.then(goal));
+            .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
+            .map(|item| {
+                BuyFromMerchantGoal::new("Buy General", item)
+                    .include_stored_items("Farm")
+            });
+
+        let mut buy_items = LogicStack::new();
+        for goal in iter_purchase {
+            if !goal.is_completed(game_state)? {
+                buy_items = buy_items.then(goal);
+            }
+        }
 
         if buy_items.len() > 0 {
             Ok(Some(buy_items))
