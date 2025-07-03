@@ -15,6 +15,7 @@ use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     graph_search::GraphSearch,
     BotError, GameStateExt as _, GoToActionTile, InventoryGoal,
+    RepairBeachBridgeGoal,
 };
 
 pub struct ForagingGoal {
@@ -219,7 +220,7 @@ impl BotGoal for ForagingGoal {
     fn apply(
         &mut self,
         game_state: &GameState,
-        actions: &mut ActionCollector,
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.is_completed(game_state) {
             return Ok(BotGoalResult::Completed);
@@ -234,22 +235,9 @@ impl BotGoal for ForagingGoal {
             }
         }
 
-        let prepare = InventoryGoal::current().with(Item::WOOD.with_count(300));
-        if matches!(opt_room, Some("Beach"))
-            && prepare.has_sufficient_stored(game_state)?
-            && game_state
-                .get_room("Beach")?
-                .action_tiles
-                .iter()
-                .any(|(_, action)| action == "BrokenBeachBridge")
-        {
-            if game_state.dialogue_menu.is_some() {
-                actions.do_action(GameAction::ConfirmMenu);
-                return Ok(BotGoalResult::InProgress);
-            } else if !prepare.is_completed(game_state)? {
-                return Ok(prepare.into());
-            } else {
-                let repair_bridge = GoToActionTile::new("BrokenBeachBridge");
+        if matches!(opt_room, Some("Beach")) {
+            let repair_bridge = RepairBeachBridgeGoal::new();
+            if !repair_bridge.is_completed(game_state)? {
                 return Ok(repair_bridge.into());
             }
         }

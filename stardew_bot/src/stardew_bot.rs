@@ -305,8 +305,12 @@ impl StardewBot {
             self.update_game_state();
             let finished_updating_per_frame_values = std::time::Instant::now();
 
-            self.update_bot_logic();
+            let refresh_current_location = self.update_bot_logic();
             let finished_updating_bot_logic = std::time::Instant::now();
+
+            if refresh_current_location {
+                self.refresh_current_location();
+            }
 
             let mut side_effects = WidgetSideEffects::default();
             side_effects.broadcast(timing_stats.clone());
@@ -414,22 +418,34 @@ impl StardewBot {
         };
 
         if requires_new_location_read {
-            let loc = self
-                .game_state_reader
-                .read_full_current_location(self.tui_globals.cached_reader())?;
-
-            self.tui_globals
-                .get_mut::<GameState>()
-                .expect("Globals should always contain a GameState")
-                .update_location(loc);
+            self.try_update_current_location()?;
         }
 
         Ok(())
     }
 
-    pub fn update_bot_logic(&mut self) {
+    pub fn refresh_current_location(&mut self) {
+        if let Err(err) = self.try_update_current_location() {
+            self.buffers.running_log.add_log(format!("Error: {err}"));
+        }
+    }
+
+    fn try_update_current_location(&mut self) -> Result<(), Error> {
+        let loc = self
+            .game_state_reader
+            .read_full_current_location(self.tui_globals.cached_reader())?;
+
+        self.tui_globals
+            .get_mut::<GameState>()
+            .expect("Globals should always contain a GameState")
+            .update_location(loc);
+
+        Ok(())
+    }
+
+    pub fn update_bot_logic(&mut self) -> bool {
         if !self.x11_handler.main_window_is_active().unwrap_or(true) {
-            return;
+            return false;
         }
 
         // TODO: Either extend anymap to allow mutable access to
@@ -445,14 +461,22 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
-        let res = bot_logic
-            .update(game_state)
-            .and_then(|actions| self.apply_game_actions(actions));
-        if let Err(err) = res {
-            self.buffers.running_log.add_log(format!("Error: {err}"));
-        }
+        let res = bot_logic.update(game_state).and_then(
+            |(actions, refresh_current_location)| {
+                self.apply_game_actions(actions)?;
+                Ok(refresh_current_location)
+            },
+        );
+        let refresh_current_location = match res {
+            Ok(refresh_current_location) => refresh_current_location,
+            Err(err) => {
+                self.buffers.running_log.add_log(format!("Error: {err}"));
+                false
+            }
+        };
 
         self.tui_globals.insert(bot_logic);
+        refresh_current_location
     }
 
     pub fn handle_event(&mut self, event: Event) {

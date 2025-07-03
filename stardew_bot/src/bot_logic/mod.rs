@@ -91,6 +91,9 @@ mod impl_tile_map_graph_search;
 mod foraging_goal;
 pub use foraging_goal::*;
 
+mod repair_beach_bridge_goal;
+pub use repair_beach_bridge_goal::*;
+
 mod opportunistic_foraging;
 pub use opportunistic_foraging::*;
 

@@ -48,6 +48,13 @@ pub enum BotError {
 
     #[error("Expected item {0} to be in the inventory")]
     ExpectedItemInInventory(ItemId),
+
+    #[error(
+        "Bridge repair must refresh Beach to complete, \
+         which should only happen when the player is at the Beach, \
+         but the player is not currently at the Beach."
+    )]
+    InconsistentBridgeRepairState,
 }
 
 impl std::fmt::Debug for BotError {
