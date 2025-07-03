@@ -78,7 +78,15 @@ impl ForagingGoal {
             })
             .unwrap_or(false);
 
-        after_stopping_time || collected_enough_stamina
+        let room_exists = self
+            .location
+            .as_ref()
+            .map(|name| {
+                game_state.locations.iter().any(|loc| &loc.name == name)
+            })
+            .unwrap_or(true);
+
+        after_stopping_time || collected_enough_stamina || !room_exists
     }
 
     fn next_forageable_in_any_room(

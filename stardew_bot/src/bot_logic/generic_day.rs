@@ -108,6 +108,12 @@ impl BotGoal for GenericDay {
                 ))
                 .then(crops.clone())
                 .then(ForagingGoal::new().location("Beach"))
+                .then(ForagingGoal::new().location("Custom_Garden"))
+                .then(ForagingGoal::new().location("Custom_ShearwaterBridge"))
+                .then(ForagingGoal::new().location("Town"))
+                .then(ForagingGoal::new().location("Mountain"))
+                .then(ForagingGoal::new().location("Forest"))
+                .then(ForagingGoal::new().location("Custom_ForestWest"))
         } else {
             stack
                 .then(ExpandTreeFarm::new())
