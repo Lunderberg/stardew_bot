@@ -91,7 +91,7 @@ impl BotGoal for GenericDay {
                 .then(
                     BuyFromMerchantGoal::new(
                         "Carpenter",
-                        Item::WOOD.with_count(300),
+                        Item::WOOD.with_count(350),
                     )
                     .include_stored_items("Farm"),
                 )
