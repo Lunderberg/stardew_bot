@@ -47,14 +47,21 @@ impl FarmPlan {
             )
         };
 
-        let walkable = farm
+        let previous_sprinklers: HashSet<_> = farm
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::Sprinkler(_)))
+            .map(|obj| obj.tile)
+            .collect();
+
+        let reachable = farm
             .pathfinding()
             .stone_clearing_cost(0)
             .wood_clearing_cost(0)
             .breakable_clearing_cost(0)
             .forage_clearing_cost(0)
             .tree_clearing_cost(0)
-            .walkable();
+            .reachable(farm_door);
         let diggable = &farm.diggable;
 
         let regular_sprinklers = {
@@ -90,9 +97,12 @@ impl FarmPlan {
                     .expect("Guarded by to_visit.is_some()");
                 to_visit.remove(&visiting);
 
-                let is_good_placement = std::iter::once(visiting)
-                    .chain(visiting.iter_cardinal())
-                    .all(|adj| walkable.is_set(adj) && diggable.is_set(adj));
+                let is_good_placement = previous_sprinklers.contains(&visiting)
+                    || std::iter::once(visiting)
+                        .chain(visiting.iter_cardinal())
+                        .all(|adj| {
+                            reachable.is_set(adj) && diggable.is_set(adj)
+                        });
                 if is_good_placement {
                     sprinklers.push(visiting);
 
@@ -118,7 +128,7 @@ impl FarmPlan {
 
         let scarecrows = {
             let allowed = {
-                let mut map = walkable.clone();
+                let mut map = reachable.clone();
                 regular_sprinklers
                     .iter()
                     .flat_map(|tile| {
