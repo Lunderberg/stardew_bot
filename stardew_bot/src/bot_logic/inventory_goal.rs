@@ -297,12 +297,19 @@ impl InventoryGoal {
                     }
 
                     if opt_current_weapon
-                        .map(|weapon| item == weapon && *count > 1)
+                        .map(|weapon| item == weapon)
                         .unwrap_or(false)
                     {
-                        // The player has more than one copy of the same
-                        // weapon, so stash the copies.
-                        break 'opt_new_count Some(1);
+                        if *count > 1 {
+                            // The player has more than one copy of
+                            // the same weapon, so stash the copies.
+                            break 'opt_new_count Some(1);
+                        } else {
+                            // The player has a single instance of the
+                            // weapon in their inventory, and should
+                            // keep it.
+                            break 'opt_new_count None;
+                        }
                     }
 
                     if current_stamina_items.contains(&item) {
