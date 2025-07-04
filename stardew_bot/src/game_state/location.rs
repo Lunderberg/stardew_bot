@@ -2165,7 +2165,9 @@ impl Location {
             .filter(|obj| {
                 matches!(
                     obj.kind,
-                    ObjectKind::Tree(_) | ObjectKind::FruitTree(_)
+                    ObjectKind::Tree(_)
+                        | ObjectKind::FruitTree(_)
+                        | ObjectKind::Scarecrow,
                 )
             })
             .map(|obj| obj.tile);
