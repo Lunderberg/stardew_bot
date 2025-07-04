@@ -27,14 +27,6 @@ use super::{
 /// be overridden for a goal using `MovementGoal::with_tolerance`.
 const WAYPOINT_TOLERANCE: f32 = 0.3;
 
-/// Minimum distance (in tiles) to re-plan a route.
-///
-/// Since the planned route is tracked on a per-tile basis, the player
-/// should always be close to the next waypoint.  If something moves
-/// the player far from the expected location (e.g. lag, triggering an
-/// event, etc), then the route should be replanned.
-const REPLAN_THRESHOLD: f32 = 2.0;
-
 pub struct MovementGoal {
     target_room: String,
     target_position: Vector<f32>,
@@ -42,10 +34,13 @@ pub struct MovementGoal {
 }
 
 pub struct LocalMovementGoal {
-    room_name: String,
-    position: Vector<f32>,
-    waypoints: Vec<Vector<f32>>,
+    target_room: String,
+    target_position: Vector<f32>,
     tolerance: f32,
+
+    /// A lookup specifying the direction to move, given the tile on
+    /// which the player is standing.
+    direction_map: Option<TileMap<Direction>>,
 
     /// The type of warp to be used at the end of the movement, if
     /// any.  Used to determine if the final tile should be clicked
@@ -330,9 +325,9 @@ impl LocalMovementGoal {
         warp_kind: Option<WarpKind>,
     ) -> Self {
         Self {
-            room_name,
-            position,
-            waypoints: Vec::new(),
+            target_room: room_name,
+            target_position: position,
+            direction_map: None,
             tolerance: WAYPOINT_TOLERANCE,
             warp_kind,
             previous_position: None,
@@ -369,7 +364,7 @@ impl LocalMovementGoal {
             // We haven't reached the goal location, but it's too late
             // in the day to get there anyways.
             true
-        } else if player.room_name != self.room_name {
+        } else if player.room_name != self.target_room {
             // Reached a warp to another room, so the local movement
             // can be popped from the stack.
             true
@@ -381,59 +376,31 @@ impl LocalMovementGoal {
         } else {
             // Check completion by seeing how far we are from the
             // target position.
-            let goal_dist = self.position.manhattan_dist(player.center_pos());
+            let goal_dist =
+                self.target_position.manhattan_dist(player.center_pos());
             goal_dist < self.tolerance
         }
     }
 
-    fn update_plan(&mut self, game_state: &GameState) -> Result<(), Error> {
-        let player = &game_state.player;
-        if player.room_name != self.room_name {
-            // Reached a warp to another room, so the local movement
-            // can be popped from the stack.
-            self.waypoints.clear();
-            return Ok(());
-        }
-
-        while let Some(next_waypoint) = self.waypoints.last().cloned() {
-            let dist = next_waypoint.manhattan_dist(player.center_pos());
-            if dist < WAYPOINT_TOLERANCE {
-                self.waypoints.pop();
-            } else if dist > REPLAN_THRESHOLD {
-                self.waypoints.clear();
-            } else {
-                break;
-            }
-        }
-
-        if self.waypoints.is_empty() {
-            self.waypoints = self.generate_plan(game_state)?;
-        }
-
-        Ok(())
-    }
-
     fn generate_plan(
-        &self,
+        &mut self,
         game_state: &GameState,
-    ) -> Result<Vec<Vector<f32>>, Error> {
+    ) -> Result<TileMap<Direction>, Error> {
         let player = &game_state.player;
+        if player.room_name != self.target_room {
+            return Err(BotError::IncorrectRoomToGenerateLocalMovementPlan {
+                current_room: player.room_name.clone(),
+                expected_room: self.target_room.clone(),
+            }
+            .into());
+        }
 
-        let location = game_state
-            .locations
-            .iter()
-            .find(|loc| loc.name == player.room_name)
-            .expect("Player must be in a room");
-
-        let player_pos = player.center_pos();
+        let location = game_state.current_room()?;
         let player_tile = player.tile();
 
-        let bounds = Rectangle {
-            top_left: Vector::zero(),
-            shape: location.shape,
-        };
+        let room_bounds = location.bounds();
 
-        if !bounds.contains(player_tile) {
+        if !room_bounds.contains(player_tile) {
             // During screen transitions, the player's current room is
             // updated before the player's X/Y position is updated.
             // If the memory-read occurs between these two times, then
@@ -445,31 +412,19 @@ impl LocalMovementGoal {
             // wouldn't catch cases where the player's pre-update
             // location places them in an inaccessible part of the
             // post-update room.
-            return Ok(Vec::new());
+            return Err(BotError::PlayerIsOutOfBounds {
+                pos: player.center_pos(),
+                room_bounds,
+            }
+            .into());
         }
 
         let target_tile: Vector<isize> =
-            self.position.map(|x| x.round() as isize);
+            self.target_position.map(|x| x.round() as isize);
 
-        let waypoints = location
-            .pathfinding()
-            .include_border(
-                self.tolerance >= 1.0 || !bounds.contains(target_tile),
-            )
-            .path_between(player_tile, target_tile)?
-            .into_iter()
-            .map(|tile| tile.map(|x| x as f32))
-            .rev()
-            .filter(|pos| pos.manhattan_dist(player_pos) > WAYPOINT_TOLERANCE)
-            .collect();
+        let map = location.pathfinding().direction_map(target_tile);
 
-        Ok(waypoints)
-    }
-
-    pub fn iter_waypoints(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = Vector<f32>> + '_ {
-        self.waypoints.iter().copied()
+        Ok(map)
     }
 }
 
@@ -543,36 +498,40 @@ impl BotGoal for LocalMovementGoal {
         {
             // Something has gone wrong, as the pathfinding isn't able
             // to make progress for over half a second.  Clear the
-            // waypoints and re-plan.
-            self.waypoints.clear();
+            // direction map and re-plan.
+            self.direction_map = None;
         }
 
-        self.update_plan(game_state)?;
+        if self.direction_map.is_none() {
+            self.direction_map = Some(self.generate_plan(game_state)?);
+        }
 
-        let next_waypoint =
-            self.waypoints.last().cloned().unwrap_or(self.position);
+        let map = self
+            .direction_map
+            .as_ref()
+            .expect("Just populated direction map");
 
+        let player_tile = player.tile();
         let player_position = player.center_pos();
-        let direction = next_waypoint - player_position;
-        let dir = Direction::iter()
-            .max_by(|dir_a, dir_b| {
-                let do_dot_product = |dir: Direction| {
-                    let offset = dir.offset().map(|i| i as f32);
-                    let offset = offset / offset.mag();
-                    offset.dot(direction)
-                };
-                let dot_a = do_dot_product(*dir_a);
-                let dot_b = do_dot_product(*dir_b);
-                num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
-            })
-            .expect("Direction::iter is non-empty");
-        let target_tile = self.position.as_tile();
+        let target_tile = self.target_position.as_tile();
+
+        let dir = if player_tile == target_tile {
+            let offset = self.target_position - player.center_pos();
+            offset.closest_direction()
+        } else {
+            map.get(player_tile).cloned().ok_or_else(|| {
+                BotError::PlayerIsOutOfBounds {
+                    pos: player_position,
+                    room_bounds: map.bounds(),
+                }
+            })?
+        };
 
         actions.do_action(GameAction::Move(dir));
         actions.do_action(GameAction::MouseOverTile(target_tile));
 
         let must_open_door = self.activate_endpoint()
-            && player_position.manhattan_dist(self.position) < 1.5;
+            && player_position.manhattan_dist(self.target_position) < 1.5;
 
         if must_open_door
             && game_state.inputs.mouse_tile_location == target_tile
@@ -595,10 +554,8 @@ impl BotGoal for LocalMovementGoal {
 
     fn description(&self) -> Cow<'static, str> {
         format!(
-            "Move {} tiles to {} in {}",
-            self.waypoints.len(),
-            self.position,
-            self.room_name
+            "Move to {} within {}",
+            self.target_position, self.target_room
         )
         .into()
     }

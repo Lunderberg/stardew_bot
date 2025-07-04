@@ -2,7 +2,7 @@ use dotnet_debugger::RustNativeObject;
 
 use itertools::Itertools as _;
 
-use super::Vector;
+use super::{Rectangle, Vector};
 
 #[derive(Debug, Clone)]
 pub struct TileMap<T> {
@@ -105,6 +105,13 @@ impl<T> TileMap<T> {
                 .collect(),
             height: self.height,
             width: self.width,
+        }
+    }
+
+    pub fn bounds(&self) -> Rectangle<isize> {
+        Rectangle {
+            top_left: Vector::zero(),
+            shape: Vector::new(self.width as isize, self.height as isize),
         }
     }
 }

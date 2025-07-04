@@ -41,12 +41,12 @@ impl Direction {
     pub fn iter() -> impl Iterator<Item = Self> {
         [
             Self::North,
-            Self::NorthEast,
             Self::East,
-            Self::SouthEast,
             Self::South,
-            Self::SouthWest,
             Self::West,
+            Self::NorthEast,
+            Self::SouthEast,
+            Self::SouthWest,
             Self::NorthWest,
         ]
         .into_iter()
@@ -54,6 +54,34 @@ impl Direction {
 
     pub fn iter_cardinal() -> impl Iterator<Item = Self> {
         Self::iter().filter(|dir| dir.is_cardinal())
+    }
+
+    pub fn opposite(self) -> Direction {
+        match self {
+            Direction::North => Direction::South,
+            Direction::NorthEast => Direction::SouthWest,
+            Direction::East => Direction::West,
+            Direction::SouthEast => Direction::NorthWest,
+            Direction::South => Direction::North,
+            Direction::SouthWest => Direction::NorthEast,
+            Direction::West => Direction::East,
+            Direction::NorthWest => Direction::SouthEast,
+        }
+    }
+}
+
+impl Into<char> for Direction {
+    fn into(self) -> char {
+        match self {
+            Direction::North => '↑',
+            Direction::NorthEast => '↗',
+            Direction::East => '→',
+            Direction::SouthEast => '↘',
+            Direction::South => '↓',
+            Direction::SouthWest => '↙',
+            Direction::West => '←',
+            Direction::NorthWest => '↖',
+        }
     }
 }
 

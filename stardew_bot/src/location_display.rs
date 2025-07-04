@@ -1,8 +1,5 @@
-use std::any::Any;
-
 use itertools::Itertools as _;
 use ratatui::{
-    layout::Constraint,
     style::Color,
     symbols::Marker,
     text::Text,
@@ -11,25 +8,23 @@ use ratatui::{
             Canvas, Context as CanvasContext, Points,
             Rectangle as CanvasRectangle,
         },
-        Block, Cell, Row, Table, Widget as _,
+        Block, Widget as _,
     },
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
-    bot_logic::LocalMovementGoal,
     game_state::{
         FurnitureKind, Location, ObjectKind, Rectangle, ResourceClumpKind,
         StoneKind, TileMap, Vector,
     },
-    BotLogic, Error, GameState,
+    Error, GameState,
 };
 
 pub struct LocationDisplay;
 
 struct DrawableGameLocation<'a> {
     room: &'a Location,
-    bot_logic: &'a BotLogic,
     draw_marker: Marker,
     draw_area: ratatui::layout::Rect,
     player_position: Vector<f32>,
@@ -51,10 +46,6 @@ impl<'a> DrawableGameLocation<'a> {
                 self.paint_bushes(ctx);
                 self.paint_objects(ctx);
                 self.paint_furniture(ctx);
-
-                ctx.layer();
-
-                self.paint_waypoints(ctx);
 
                 ctx.layer();
 
@@ -333,23 +324,6 @@ impl<'a> DrawableGameLocation<'a> {
                 });
             });
     }
-
-    fn paint_waypoints(&self, ctx: &mut CanvasContext) {
-        let points: Vec<_> = self
-            .bot_logic
-            .current_goal()
-            .and_then(|goal| <dyn Any>::downcast_ref::<LocalMovementGoal>(goal))
-            .into_iter()
-            .flat_map(|move_goal| move_goal.iter_waypoints())
-            .map(|loc| loc.as_type::<f64>())
-            .map(|loc| self.to_draw_coordinates(loc))
-            .collect();
-
-        ctx.draw(&Points {
-            coords: &points,
-            color: Color::Red,
-        });
-    }
 }
 
 impl WidgetWindow<Error> for LocationDisplay {
@@ -367,39 +341,18 @@ impl WidgetWindow<Error> for LocationDisplay {
             .get::<GameState>()
             .expect("Generated/updated in top-level GUI update");
 
-        let bot_logic = globals
-            .get::<BotLogic>()
-            .expect("Generated/updated in top-level GUI update");
-
         let current_location: &str = &game_state.player.room_name;
         let position = game_state.player.center_pos();
 
         let (left_column, draw_area) = area.split_from_left(15);
 
-        let (top_area, table_area) = left_column.split_from_top(3);
+        let (top_area, _table_area) = left_column.split_from_top(3);
 
         let top_text = Text::raw(format!(
             "Current: {}\n({:.1}, {:.1})",
             current_location, position.right, position.down,
         ));
         top_text.render(top_area, buf);
-
-        let waypoint_rows = bot_logic
-            .current_goal()
-            .and_then(|goal| <dyn Any>::downcast_ref::<LocalMovementGoal>(goal))
-            .into_iter()
-            .flat_map(|move_goal| move_goal.iter_waypoints().rev())
-            .map(|waypoint| {
-                let pos = Cell::new(format!("{waypoint}"));
-                Row::new([pos])
-            });
-
-        let table = Table::new(
-            waypoint_rows,
-            [Constraint::Min(15), Constraint::Percentage(100)],
-        );
-
-        table.render(table_area, buf);
 
         let opt_current_room = game_state
             .locations
@@ -408,7 +361,6 @@ impl WidgetWindow<Error> for LocationDisplay {
         if let Some(current_room) = opt_current_room {
             DrawableGameLocation {
                 room: current_room,
-                bot_logic,
                 draw_marker: Marker::Block,
                 draw_area,
                 player_position: position,

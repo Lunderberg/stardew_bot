@@ -2066,6 +2066,13 @@ impl Location {
         }
     }
 
+    pub fn bounds(&self) -> Rectangle<isize> {
+        Rectangle {
+            top_left: Vector::zero(),
+            shape: self.shape,
+        }
+    }
+
     pub fn is_water(&self, tile: Vector<isize>) -> bool {
         self.water_tiles.is_set(tile)
     }

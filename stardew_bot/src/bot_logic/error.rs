@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::game_state::{Item, ItemId, Vector};
+use crate::game_state::{Item, ItemId, Rectangle, Vector};
 
 #[derive(Error)]
 pub enum BotError {
@@ -55,6 +55,24 @@ pub enum BotError {
          but the player is not currently at the Beach."
     )]
     InconsistentBridgeRepairState,
+
+    #[error(
+        "Cannot plan local movement within room {expected_room} \
+         while player is located in {current_room}."
+    )]
+    IncorrectRoomToGenerateLocalMovementPlan {
+        current_room: String,
+        expected_room: String,
+    },
+
+    #[error(
+        "Player's position {pos} is out of bounds \
+         for room of size {room_bounds}"
+    )]
+    PlayerIsOutOfBounds {
+        pos: Vector<f32>,
+        room_bounds: Rectangle<isize>,
+    },
 }
 
 impl std::fmt::Debug for BotError {

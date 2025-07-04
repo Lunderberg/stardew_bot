@@ -91,6 +91,7 @@ struct DijkstraEntry {
     /// The distance from the initial point to the current tile.
     dist: u64,
     tile: Vector<isize>,
+    dir: Option<Direction>,
     should_propagate: bool,
 }
 
@@ -109,15 +110,15 @@ fn heuristic_between_points(a: Vector<isize>, b: Vector<isize>) -> u64 {
 
 mod detail {
     use super::*;
-    pub trait Goal: Sized + Copy {
+    pub trait TileSet: Sized + Copy {
         fn iter(self) -> impl Iterator<Item = Vector<isize>>;
     }
-    impl Goal for Vector<isize> {
+    impl TileSet for Vector<isize> {
         fn iter(self) -> impl Iterator<Item = Vector<isize>> {
             std::iter::once(self)
         }
     }
-    impl<Iter> Goal for Iter
+    impl<Iter> TileSet for Iter
     where
         Iter: Copy,
         Iter: IntoIterator,
@@ -357,10 +358,42 @@ impl Pathfinding<'_> {
         distances
     }
 
+    /// Given a target location, return the direction to travel from
+    ///
+    /// Interrupts are often location-dependent, such as triggering
+    /// when the player is within range of a forageable item, and so
+    /// `LocalMovementGoal` is often interrupted.  When resumed, the
+    /// player may be in a different location than when interrupted,
+    /// so any waypoint-based method may have out-of-date waypoints.
+    /// Using a direction map allows the local pathfinding to resume
+    /// without interruption when this occurs.
+    pub fn direction_map(
+        &self,
+        target: impl detail::TileSet,
+    ) -> TileMap<Direction> {
+        let mut map: TileMap<Option<Direction>> =
+            self.location.blocked.map(|_| None);
+
+        for entry in self.iter_dijkstra_entries(target) {
+            map[entry.tile] = entry.dir.map(|dir| dir.opposite());
+        }
+
+        map.imap(|tile, opt_dir| {
+            opt_dir.unwrap_or_else(|| {
+                let offset = target
+                    .iter()
+                    .map(|target_tile| target_tile - tile)
+                    .min_by_key(|offset| offset.mag2())
+                    .expect("Must have at least one target tile");
+                offset.closest_direction()
+            })
+        })
+    }
+
     pub fn path_between(
         &self,
         initial: Vector<isize>,
-        goal: impl detail::Goal,
+        goal: impl detail::TileSet,
     ) -> Result<Vec<Vector<isize>>, Error> {
         let cost_map = self.movement_cost();
 
@@ -495,68 +528,92 @@ impl Pathfinding<'_> {
         Ok(path)
     }
 
-    pub fn iter_dijkstra(
+    fn iter_dijkstra_entries(
         &self,
-        initial: impl detail::Goal,
-    ) -> impl Iterator<Item = (Vector<isize>, u64)> + '_ {
-        let walkable = self.walkable();
+        initial: impl detail::TileSet,
+    ) -> impl Iterator<Item = DijkstraEntry> + '_ {
+        let cost_map = self.movement_cost();
 
-        let mut finished: TileMap<bool> = walkable.map(|_| false);
+        let mut finished: TileMap<bool> = cost_map.map(|_| false);
 
         let mut to_visit = std::collections::BTreeSet::<DijkstraEntry>::new();
         for initial in initial.iter() {
             to_visit.insert(DijkstraEntry {
                 dist: 0,
                 tile: initial,
+                dir: None,
                 should_propagate: true,
             });
         }
 
-        std::iter::from_fn(move || -> Option<(Vector<isize>, u64)> {
-            let DijkstraEntry {
-                dist,
-                tile,
-                should_propagate,
-            } = loop {
+        std::iter::from_fn(move || -> Option<DijkstraEntry> {
+            loop {
                 let entry = to_visit.pop_first()?;
 
-                if finished.in_bounds(entry.tile) && !finished[entry.tile] {
-                    break entry;
+                if finished.in_bounds(entry.tile) {
+                    if finished[entry.tile] {
+                        continue;
+                    } else {
+                        finished[entry.tile] = true;
+                    }
                 }
-            };
-            finished[tile] = true;
 
-            let iter_dir = Direction::iter()
-                .filter(|dir| self.allow_diagonal || dir.is_cardinal())
-                .filter(|_| should_propagate);
+                let iter_dir = Direction::iter()
+                    .filter(|dir| self.allow_diagonal || dir.is_cardinal())
+                    .filter(|_| entry.should_propagate);
 
-            for dir in iter_dir {
-                let offset = dir.offset();
-                let new_tile = tile + offset;
+                for dir in iter_dir {
+                    let offset = dir.offset();
+                    let new_tile = entry.tile + offset;
 
-                let is_walkable = walkable.is_set(new_tile);
-                let is_accessible = if dir.is_cardinal() {
-                    is_walkable
-                } else {
-                    is_walkable
-                        && walkable.is_set(tile + Vector::new(0, offset.down))
-                        && walkable.is_set(tile + Vector::new(offset.right, 0))
-                };
+                    let is_walkable = cost_map.is_some(new_tile);
+                    let is_accessible = if dir.is_cardinal() {
+                        is_walkable
+                    } else {
+                        is_walkable
+                            && cost_map.is_some(
+                                entry.tile + Vector::new(0, offset.down),
+                            )
+                            && cost_map.is_some(
+                                entry.tile + Vector::new(offset.right, 0),
+                            )
+                    };
 
-                if finished.in_bounds(new_tile)
-                    && !finished[new_tile]
-                    && (is_accessible || (self.include_border && !is_walkable))
-                {
-                    to_visit.insert(DijkstraEntry {
-                        dist: dist + 1,
-                        tile: new_tile,
-                        should_propagate: is_accessible,
-                    });
+                    if finished.in_bounds(new_tile)
+                        && !finished[new_tile]
+                        && (is_accessible
+                            || (self.include_border && !is_walkable))
+                    {
+                        let tile_dist =
+                            if dir.is_cardinal() { 1000 } else { 1414 };
+                        let additional_cost =
+                            cost_map.get_opt(new_tile).cloned().unwrap_or(0);
+                        let new_dist = entry.dist + tile_dist + additional_cost;
+
+                        to_visit.insert(DijkstraEntry {
+                            dist: new_dist,
+                            tile: new_tile,
+                            dir: Some(dir),
+                            should_propagate: is_accessible,
+                        });
+                    }
                 }
+
+                if !finished.in_bounds(entry.tile) {
+                    continue;
+                }
+
+                break Some(entry);
             }
-
-            Some((tile, dist))
         })
+    }
+
+    pub fn iter_dijkstra(
+        &self,
+        initial: impl detail::TileSet,
+    ) -> impl Iterator<Item = (Vector<isize>, u64)> + '_ {
+        self.iter_dijkstra_entries(initial)
+            .map(|entry| (entry.tile, entry.dist / 1000))
     }
 }
 
