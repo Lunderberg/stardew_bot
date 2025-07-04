@@ -458,7 +458,8 @@ impl BotGoal for MineDelvingGoal {
                 .with(Item::COPPER_ORE.clone().with_count(1000))
                 .with(Item::IRON_ORE.clone().with_count(1000))
                 .with(Item::GOLD_ORE.clone().with_count(1000))
-                .stamina_recovery_slots(5);
+                .stamina_recovery_slots(5)
+                .with_weapon();
 
             if !prepare.is_completed(game_state)? {
                 return Ok(prepare.into());
