@@ -1,3 +1,5 @@
+use itertools::Itertools as _;
+
 use crate::{Error, GameAction, GameState};
 
 use super::bot_logic::{
@@ -50,7 +52,27 @@ impl BotGoal for SkipCurrentCutscene {
             return Ok(BotGoalResult::Completed);
         }
 
-        let pixel = game_state.display.event_skip_button().center();
+        let pixel = if let Some(menu) = &game_state.dialogue_menu {
+            // Specific responses to questions in cutscenes
+            menu.response_pixel("Bats")
+                .or_else(|| {
+                    menu.responses
+                        .is_empty()
+                        .then(|| menu.pixel_location.center())
+                })
+                .unwrap_or_else(|| {
+                    todo!(
+                        "Handle menu choice between options [{}]",
+                        menu.responses
+                            .iter()
+                            .map(|response| &response.text)
+                            .format(", ")
+                    )
+                })
+        } else {
+            game_state.display.event_skip_button().center()
+        };
+
         actions.do_action(GameAction::MouseOverPixel(pixel));
         actions.do_action(GameAction::LeftClick);
         Ok(BotGoalResult::InProgress)

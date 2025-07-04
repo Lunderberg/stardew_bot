@@ -180,9 +180,11 @@ impl BotGoal for BuyFromMerchantGoal {
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         } else if let Some(menu) = &game_state.dialogue_menu {
-            if let Some(pixel) = menu.responses.get(0) {
-                actions.do_action(GameAction::MouseOverPixel(*pixel));
-            }
+            let Some(pixel) = menu.response_pixel("Shop") else {
+                return Ok(MenuCloser::new().into());
+            };
+
+            actions.do_action(GameAction::MouseOverPixel(pixel));
             actions.do_action(GameAction::LeftClick);
             Ok(BotGoalResult::InProgress)
         } else {

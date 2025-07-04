@@ -220,12 +220,12 @@ impl BotGoal for GeodeCrackingGoal {
         }
 
         if let Some(menu) = &game_state.dialogue_menu {
-            if menu.responses.len() < 3 {
+            let Some(pixel) = menu.response_pixel("Process") else {
                 // Not the blacksmith menu, so close it and proceed.
                 return Ok(MenuCloser::new().into());
-            }
+            };
 
-            actions.do_action(GameAction::MouseOverPixel(menu.responses[2]));
+            actions.do_action(GameAction::MouseOverPixel(pixel));
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }

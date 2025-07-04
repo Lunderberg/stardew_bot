@@ -13,8 +13,8 @@ use super::{
     graph_search::GraphSearch as _,
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
     CraftItemGoal, ExpandStorageInterrupt, ForagingGoal, GameStateExt as _,
-    GoToActionTile, MaintainStaminaGoal, MovementGoal, PlantCropsGoal,
-    SellToMerchantGoal, ShipItemGoal, UseItemOnTile,
+    GoToActionTile, MaintainStaminaGoal, MenuCloser, MovementGoal,
+    PlantCropsGoal, SellToMerchantGoal, ShipItemGoal, UseItemOnTile,
 };
 
 pub struct FirstDay;
@@ -164,10 +164,12 @@ impl BotGoal for FirstDay {
         if game_state.player.inventory.items.len() < 24 && current_money > 2000
         {
             if let Some(menu) = &game_state.dialogue_menu {
-                if let Some(pixel) = menu.responses.get(0) {
-                    actions.do_action(GameAction::MouseOverPixel(*pixel));
-                    actions.do_action(GameAction::LeftClick);
-                }
+                let Some(pixel) = menu.response_pixel("Purchase") else {
+                    return Ok(MenuCloser::new().into());
+                };
+
+                actions.do_action(GameAction::MouseOverPixel(pixel));
+                actions.do_action(GameAction::LeftClick);
                 return Ok(BotGoalResult::InProgress);
             } else {
                 let goal = GoToActionTile::new("BuyBackpack");

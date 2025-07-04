@@ -7,7 +7,13 @@ use super::{Rectangle, Vector};
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct DialogueMenu {
     pub pixel_location: Rectangle<isize>,
-    pub responses: Vec<Vector<isize>>,
+    pub responses: Vec<Response>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Response {
+    pub pixel: Vector<isize>,
+    pub text: String,
 }
 
 impl DialogueMenu {
@@ -15,12 +21,20 @@ impl DialogueMenu {
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
+            "new_response",
+            |pixel: &Vector<isize>, text: &str| Response {
+                pixel: pixel.clone(),
+                text: text.to_string(),
+            },
+        )?;
+
+        graph.named_native_function(
             "new_dialogue_menu",
             |x: isize,
              y: isize,
              width: isize,
              height: isize,
-             responses: &Vec<Vector<isize>>| DialogueMenu {
+             responses: &Vec<Response>| DialogueMenu {
                 pixel_location: Rectangle {
                     top_left: Vector::new(x, y),
                     shape: Vector::new(width, height),
@@ -45,13 +59,24 @@ impl DialogueMenu {
                     ._size
                     .prim_cast::<usize>();
                 let responses = (0..num_responses)
-                    .map(|i| menu.responseCC._items[i])
-                    .map(|response| center_of_gui_rect(response))
+                    .map(|i| {
+                        let pixel = center_of_gui_rect(
+                            menu
+                                .responseCC
+                                ._items[i]
+                        );
+                        let text = menu
+                            .responses[i]
+                            .responseKey
+                            .read_string();
+
+                        new_response(pixel, text)
+                    })
                     .collect();
 
                 if menu.is_some(){
                     new_dialogue_menu(
-                        x, y, width,height,
+                        x, y, width, height,
                         responses,
                     )
                 } else {
@@ -61,5 +86,12 @@ impl DialogueMenu {
         })?;
 
         Ok(func)
+    }
+
+    pub fn response_pixel(&self, text: &str) -> Option<Vector<isize>> {
+        self.responses
+            .iter()
+            .find(|response| response.text == text)
+            .map(|response| response.pixel)
     }
 }
