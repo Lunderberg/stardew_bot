@@ -80,7 +80,7 @@ impl BotGoal for GenericDay {
                         .clone()
                         .buy_missing_seeds(false)
                         .stop_time(1100)
-                        .opportunistic_clay_farming(5),
+                        .opportunistic_clay_farming(6),
                 )
                 .then(
                     InventoryGoal::empty()

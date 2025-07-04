@@ -24,8 +24,8 @@ impl CollectNearbyItems {
         Self {
             search_radius: 2.15,
             cluster_search_radius: 10.0,
-            cluster_radius: 2.0,
-            min_items_in_cluster: 4,
+            cluster_radius: 2.5,
+            min_items_in_cluster: 3,
         }
     }
 
