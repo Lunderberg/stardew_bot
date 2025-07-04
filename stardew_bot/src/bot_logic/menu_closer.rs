@@ -89,7 +89,7 @@ impl MenuCloser {
 
 impl BotGoal for MenuCloser {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        "Close the pause menu".into()
+        "Close menus".into()
     }
 
     fn apply(
