@@ -73,10 +73,15 @@ impl BotGoal for GenericDay {
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
-            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)])
-                .opportunistic_clay_farming(5);
+            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
             stack
-                .then(crops.clone().buy_missing_seeds(false).stop_time(1100))
+                .then(
+                    crops
+                        .clone()
+                        .buy_missing_seeds(false)
+                        .stop_time(1100)
+                        .opportunistic_clay_farming(5),
+                )
                 .then(
                     InventoryGoal::empty()
                         .with(Item::HOE)
