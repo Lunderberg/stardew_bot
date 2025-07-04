@@ -57,25 +57,28 @@ impl BotGoal for GenericDay {
 
         let stack = LogicStack::new()
             .then(CheckAllMail)
-            .then(HarvestCropsGoal::new())
-            .then(WaterCropsGoal::new());
+            .then(HarvestCropsGoal::new());
 
         let stack = if !has_fishing_rod {
             stack
+                .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::OceanByWilly))
         } else if game_state.daily.is_raining {
             stack
+                .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::River).stop_time(2400))
         } else if current_day == 4 {
             stack
+                .then(WaterCropsGoal::new())
                 .then(ClearFarmGoal::new().stop_time(2000))
                 .then(ExpandTreeFarm::new())
         } else if current_day >= 5
             && game_state.globals.lowest_mine_level_reached < 40
         {
             stack
+                .then(WaterCropsGoal::new())
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 && any_kale_planted {
@@ -129,6 +132,7 @@ impl BotGoal for GenericDay {
                 .then(crops.clone())
         } else {
             stack
+                .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::Lake))
         };
