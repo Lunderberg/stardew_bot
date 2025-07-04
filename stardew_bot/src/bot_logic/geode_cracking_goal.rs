@@ -167,22 +167,25 @@ impl BotGoal for GeodeCrackingGoal {
 
         let opt_next_geode = self.next_geode(game_state)?;
 
-        let to_sell: LogicStack = inventory
-            .iter_items()
-            .filter(|_| game_state.player.room_name == "Blacksmith")
-            .filter(|item| {
-                (self.sell_iridium_ore && item.is_same_item(&Item::IRIDIUM_ORE))
-                    || item
-                        .category
-                        .map(|category| match category {
-                            ItemCategory::Gem => self.sell_gems,
-                            ItemCategory::Mineral => self.sell_minerals,
-                            _ => false,
-                        })
-                        .unwrap_or(false)
-            })
-            .map(|item| SellToMerchantGoal::new("Blacksmith", item.clone()))
-            .collect();
+        let to_sell = SellToMerchantGoal::new(
+            "Blacksmith",
+            inventory
+                .iter_items()
+                .filter(|_| game_state.player.room_name == "Blacksmith")
+                .filter(|item| {
+                    (self.sell_iridium_ore
+                        && item.is_same_item(&Item::IRIDIUM_ORE))
+                        || item
+                            .category
+                            .map(|category| match category {
+                                ItemCategory::Gem => self.sell_gems,
+                                ItemCategory::Mineral => self.sell_minerals,
+                                _ => false,
+                            })
+                            .unwrap_or(false)
+                })
+                .cloned(),
+        );
 
         let has_full_inventory = inventory.num_empty_slots().saturating_sub(
             if Self::held_item(game_state)
@@ -198,7 +201,7 @@ impl BotGoal for GeodeCrackingGoal {
         if opt_next_geode.is_none() || has_full_inventory {
             if game_state.geode_menu.is_some() {
                 return Ok(MenuCloser::new().into());
-            } else if to_sell.len() > 0 {
+            } else if !to_sell.is_completed(game_state) {
                 return Ok(to_sell.into());
             }
         }

@@ -9,38 +9,84 @@ use super::{
 
 pub struct SellToMerchantGoal {
     merchant: String,
-    item: Item,
+    items: Vec<Item>,
     movement_goal: GoToActionTile,
+    min_to_sell: usize,
+}
+
+mod detail {
+    use super::*;
+    pub trait ItemSet: Sized {
+        fn iter(self) -> impl Iterator<Item = Item>;
+    }
+    impl ItemSet for Item {
+        fn iter(self) -> impl Iterator<Item = Item> {
+            std::iter::once(self)
+        }
+    }
+    impl<Iter> ItemSet for Iter
+    where
+        Iter: IntoIterator<Item = Item>,
+    {
+        fn iter(self) -> impl Iterator<Item = Item> {
+            self.into_iter()
+        }
+    }
 }
 
 impl SellToMerchantGoal {
-    pub fn new(merchant: impl Into<String>, item: Item) -> Self {
+    pub fn new(
+        merchant: impl Into<String>,
+        item: impl detail::ItemSet,
+    ) -> Self {
         let merchant = merchant.into();
         Self {
-            item,
+            items: item.iter().collect(),
             movement_goal: GoToActionTile::new(merchant.clone()),
             merchant,
+            min_to_sell: 0,
         }
     }
 
-    pub fn item_count(&self, game_state: &GameState) -> usize {
+    pub fn min_to_sell(self, min_to_sell: usize) -> Self {
+        Self {
+            min_to_sell,
+            ..self
+        }
+    }
+
+    fn next_slot_to_sell(&self, game_state: &GameState) -> Option<usize> {
+        // The minimum number to sell is to avoid running across the
+        // map to sell one or two items.  If we're already within the
+        // shop menu, then the minimum count isn't applied.
+        let check_min_count = !self.movement_goal.is_completed(game_state);
+
         game_state
             .player
             .inventory
-            .iter_items()
-            .filter(|item| item.is_same_item(&self.item))
-            .map(|item| item.count)
-            .sum::<usize>()
+            .iter_filled_slots()
+            .find(|(_, item)| {
+                (item.count >= self.min_to_sell || !check_min_count)
+                    && self
+                        .items
+                        .iter()
+                        .any(|to_sell| to_sell.is_same_item(item))
+            })
+            .map(|(slot, _)| slot)
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        self.item_count(game_state) == 0
+        self.next_slot_to_sell(game_state).is_none()
     }
 }
 
 impl BotGoal for SellToMerchantGoal {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        format!("Sell {} to {}", self.item, self.merchant).into()
+        if self.items.len() == 1 {
+            format!("Sell {} to {}", self.items[0], self.merchant).into()
+        } else {
+            format!("Sell to {}", self.merchant).into()
+        }
     }
 
     fn apply(
@@ -48,27 +94,17 @@ impl BotGoal for SellToMerchantGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state) {
+        let Some(slot) = self.next_slot_to_sell(game_state) else {
             let cleanup = MenuCloser::new();
             if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);
             } else {
                 return Ok(cleanup.into());
             }
-        }
+        };
 
         if let Some(menu) = &game_state.shop_menu {
-            let pixel = menu
-                .player_item_locations
-                .iter()
-                .zip(game_state.player.inventory.iter_slots())
-                .find(|(_, opt_item)| {
-                    opt_item
-                        .map(|item| item.is_same_item(&self.item))
-                        .unwrap_or(false)
-                })
-                .map(|(pixel, _)| *pixel)
-                .expect("Already checked that player has the item to sell");
+            let pixel = menu.player_item_locations[slot];
             actions.do_action(GameAction::MouseOverPixel(pixel));
             actions.do_action(GameAction::LeftClick);
             Ok(BotGoalResult::InProgress)

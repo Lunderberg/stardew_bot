@@ -144,8 +144,9 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let goal = SellToMerchantGoal::new("Carpenter", Item::CLAY);
-        if goal.item_count(game_state) > 100 && in_game_time < 1630 {
+        let goal =
+            SellToMerchantGoal::new("Carpenter", Item::CLAY).min_to_sell(100);
+        if in_game_time < 1630 && !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
 
