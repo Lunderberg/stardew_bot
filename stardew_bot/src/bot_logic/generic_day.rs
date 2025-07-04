@@ -10,9 +10,9 @@ use super::{
     BuyFromMerchantGoal, CheckAllMail, ClearFarmGoal, CollectNearbyItems,
     ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, ForagingGoal, GameStateExt as _, GeodeCrackingGoal,
-    HarvestCropsGoal, InventoryGoal, KeyEventInterrupt, MineDelvingGoal,
-    MovementGoal, OpportunisticForaging, PlantCropsGoal, SellToMerchantGoal,
-    ShipMostFishGoal, WaterCropsGoal,
+    HarvestCropsGoal, InventoryGoal, KeyEventInterrupt, LocationExt as _,
+    MineDelvingGoal, MovementGoal, OpportunisticForaging, PlantCropsGoal,
+    SellToMerchantGoal, ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;
@@ -38,6 +38,8 @@ impl BotGoal for GenericDay {
             return Ok(goal.into());
         }
 
+        let farm = game_state.get_room("Farm")?;
+
         let has_fishing_rod = game_state
             .iter_accessible_items()?
             .any(|item| item.as_fishing_rod().is_some());
@@ -48,6 +50,10 @@ impl BotGoal for GenericDay {
             .get("daysPlayed")
             .cloned()
             .unwrap_or(0);
+
+        let any_kale_planted = farm
+            .iter_planted_seeds()
+            .any(|seed| seed == &Item::KALE_SEEDS.id);
 
         let stack = LogicStack::new()
             .then(CheckAllMail)
@@ -71,6 +77,12 @@ impl BotGoal for GenericDay {
         {
             stack
                 .then(ShipMostFishGoal::new())
+                .then(MineDelvingGoal::new())
+        } else if current_day >= 6 && any_kale_planted {
+            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
+            stack
+                .then(crops)
+                .then(ExpandTreeFarm::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
             let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
@@ -115,6 +127,14 @@ impl BotGoal for GenericDay {
                     Item::SALAD.with_count(10),
                 ))
                 .then(crops.clone())
+        } else {
+            stack
+                .then(ExpandTreeFarm::new())
+                .then(FishingGoal::new(FishingLocation::Lake))
+        };
+
+        let stack = if current_day % 7 == 6 {
+            stack
                 .then(
                     InventoryGoal::empty()
                         .with(Item::HOE)
@@ -129,8 +149,6 @@ impl BotGoal for GenericDay {
                 .then(ForagingGoal::new().location("Custom_ForestWest"))
         } else {
             stack
-                .then(ExpandTreeFarm::new())
-                .then(FishingGoal::new(FishingLocation::Lake))
         };
 
         Ok(stack
