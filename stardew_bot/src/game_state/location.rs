@@ -549,6 +549,26 @@ impl Location {
                                 requires_friendship: None,
                             })
                         }
+                        Some("LoadMap") => {
+                            // LoadMap TARGETNAME RIGHT DOWN ???
+                            let target_room = iter_words.next()?.to_string();
+                            let target = {
+                                let right: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                let down: isize = iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?;
+                                Vector::new(right, down)
+                            };
+                            Some(Warp {
+                                location,
+                                target,
+                                target_room,
+                                kind: WarpKind::Automatic,
+                                requires_friendship: None,
+                            })
+                        }
                         Some("LockedDoorWarp") => {
                             // LockedDoorWarp RIGHT DOWN ROOM_NAME TIME_OPEN TIME_CLOSE
                             //
@@ -2530,16 +2550,15 @@ impl MapTileSheets {
     fn iter_tile_actions(
         &self,
     ) -> impl Iterator<Item = (Vector<isize>, &str)> + '_ {
-        self.tiles
-            .iter()
-            .filter(|tile| tile.layer_num == 1)
-            .flat_map(|tile| {
-                tile.properties
-                    .iter()
-                    .filter(|(key, _)| key.as_str() == "Action")
-                    .filter_map(|(_, opt_value)| opt_value.as_ref())
-                    .map(|value| (tile.location, value.as_str()))
-            })
+        self.tiles.iter().flat_map(|tile| {
+            tile.properties
+                .iter()
+                .filter(|(key, _)| {
+                    matches!(key.as_str(), "Action" | "TouchAction")
+                })
+                .filter_map(|(_, opt_value)| opt_value.as_ref())
+                .map(|value| (tile.location, value.as_str()))
+        })
     }
 
     fn collect_action_tiles(&self) -> Vec<(Vector<isize>, String)> {
@@ -2571,6 +2590,18 @@ impl MapTileSheets {
             let (room, x, y) = match action {
                 "WarpCommunityCenter" => Some(("CommunityCenter", 32, 23)),
                 "Warp_Sunroom_Door" => Some(("Sunroom", 5, 13)),
+                other if other.starts_with("LoadMap") => {
+                    let mut iter_words = other.split(' ');
+                    iter_words.next();
+                    let target_room = iter_words.next()?;
+                    let right: isize = iter_words
+                        .next()
+                        .and_then(|right| right.parse().ok())?;
+                    let down: isize = iter_words
+                        .next()
+                        .and_then(|right| right.parse().ok())?;
+                    Some((target_room, right, down))
+                }
                 _ => None,
             }?;
 
