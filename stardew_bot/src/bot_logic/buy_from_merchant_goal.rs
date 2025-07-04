@@ -41,14 +41,29 @@ impl BuyFromMerchantGoal {
 
     pub fn item_count(&self, game_state: &GameState) -> Result<usize, Error> {
         let iter_inventory = game_state.player.inventory.iter_items();
-        let iter_items =
-            if let Some(storage_location) = &self.include_stored_items {
+
+        let iter_stored = self
+            .include_stored_items
+            .as_ref()
+            .map(|storage_location| -> Result<_, Error> {
                 let iter_stored =
                     game_state.get_room(storage_location)?.iter_stored_items();
-                Either::Left(iter_inventory.chain(iter_stored))
-            } else {
-                Either::Right(iter_inventory)
-            };
+                Ok(iter_stored)
+            })
+            .transpose()?
+            .into_iter()
+            .flatten();
+
+        let iter_held_item = game_state
+            .shop_menu
+            .as_ref()
+            .and_then(|menu| menu.held_item.as_ref());
+
+        let iter_items = std::iter::empty()
+            .chain(iter_inventory)
+            .chain(iter_stored)
+            .chain(iter_held_item);
+
         let item_count = iter_items
             .filter(|item| item.is_same_item(&self.item))
             .map(|item| item.count)
@@ -104,13 +119,15 @@ impl BotGoal for BuyFromMerchantGoal {
         }
 
         if let Some(menu) = &game_state.shop_menu {
+            let num_current = self.item_count(game_state)?;
+            let num_remaining_to_buy =
+                self.item.count.saturating_sub(num_current);
+
             if let Some(held_item) = &menu.held_item {
                 let should_add_to_inventory = {
                     let is_correct_item = held_item.is_same_item(&self.item);
 
-                    let has_desired_amount = self.item_count(game_state)?
-                        + held_item.count
-                        >= self.item.count;
+                    let has_desired_amount = num_remaining_to_buy == 0;
                     let can_buy_another = game_state.player.current_money
                         >= self.buy_price(game_state);
                     !is_correct_item || has_desired_amount || !can_buy_another
