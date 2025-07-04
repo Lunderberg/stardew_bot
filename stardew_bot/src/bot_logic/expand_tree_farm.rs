@@ -128,7 +128,8 @@ impl BotGoal for ExpandTreeFarm {
                     .iter()
                     .map(|seed| seed.clone().with_count(100))
                     .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
-                    .with(Item::AXE);
+                    .with(Item::AXE)
+                    .with(Item::HOE);
                 return Ok(goal.into());
             }
 
