@@ -1,11 +1,17 @@
 use crate::{game_state::Vector, Error, GameAction, GameState};
 
-use super::bot_logic::{
-    ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+use super::{
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+    },
+    MovementGoal,
 };
 
 pub struct CollectNearbyItems {
     search_radius: f32,
+    cluster_search_radius: f32,
+    cluster_radius: f32,
+    min_items_in_cluster: usize,
 }
 
 struct WalkTowardDebris {
@@ -17,6 +23,9 @@ impl CollectNearbyItems {
     pub fn new() -> Self {
         Self {
             search_radius: 2.15,
+            cluster_search_radius: 10.0,
+            cluster_radius: 2.0,
+            min_items_in_cluster: 4,
         }
     }
 
@@ -26,6 +35,76 @@ impl CollectNearbyItems {
             search_radius,
             ..self
         }
+    }
+
+    fn iter_items_within_radius(
+        game_state: &GameState,
+        center: Vector<f32>,
+        max_dist: f32,
+    ) -> Result<impl Iterator<Item = Vector<f32>> + '_, Error> {
+        let max_dist2 = max_dist * max_dist;
+
+        let inventory = &game_state.player.inventory;
+        let iter = game_state
+            .current_room()?
+            .items
+            .iter()
+            .filter(|item| inventory.can_add(item))
+            .map(|item| item.position / 64.0)
+            .filter(move |pos| {
+                let dist2 = center.dist2(*pos);
+                dist2 <= max_dist2
+            });
+
+        Ok(iter)
+    }
+
+    fn nearby_cluster(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<Vector<f32>>, Error> {
+        let (sum_pos, count) = Self::iter_items_within_radius(
+            game_state,
+            game_state.player.center_pos(),
+            self.cluster_search_radius,
+        )?
+        .fold((Vector::<f32>::zero(), 0usize), |(sum, count), pos| {
+            (sum + pos, count + 1)
+        });
+        if count < self.min_items_in_cluster {
+            // Not enough items near the player to form a cluster.
+            return Ok(None);
+        }
+
+        let item_centroid = sum_pos / (count as f32);
+
+        let closest_item = Self::iter_items_within_radius(
+            game_state,
+            game_state.player.center_pos(),
+            self.cluster_search_radius,
+        )?
+        .min_by(|a, b| {
+            let a_dist2 = item_centroid.dist2(*a);
+            let b_dist2 = item_centroid.dist2(*b);
+            a_dist2.total_cmp(&b_dist2)
+        })
+        .expect("Already checked that there's items near the player");
+
+        let (sum_cluster, num_in_cluster) = Self::iter_items_within_radius(
+            game_state,
+            closest_item,
+            self.cluster_radius,
+        )?
+        .fold((Vector::<f32>::zero(), 0usize), |(sum, count), pos| {
+            (sum + pos, count + 1)
+        });
+        if num_in_cluster < self.min_items_in_cluster {
+            // The items around the player are not clustered together.
+            return Ok(None);
+        }
+
+        let cluster_centroid = sum_cluster / (num_in_cluster as f32);
+        Ok(Some(cluster_centroid))
     }
 }
 
@@ -45,6 +124,21 @@ impl BotInterrupt for CollectNearbyItems {
         };
 
         if !goal.is_completed(game_state)? {
+            return Ok(Some(goal.into()));
+        }
+
+        if let Some(cluster) =
+            self.nearby_cluster(game_state)?.filter(|cluster| {
+                // If the cluster is right on top of the player, the
+                // movement goal will terminate immediately.
+                // Therefore, skip these cases.
+                let dist = game_state.player.center_pos().dist(*cluster);
+                dist > self.search_radius
+            })
+        {
+            let goal =
+                MovementGoal::new(game_state.player.room_name.clone(), cluster)
+                    .with_tolerance(goal_dist);
             return Ok(Some(goal.into()));
         }
 
