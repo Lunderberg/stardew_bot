@@ -92,7 +92,10 @@ impl BotGoal for GenericDay {
                         .with(Item::CLAY.with_count(1000))
                         .stamina_recovery_slots(1),
                 )
-                .then(SellToMerchantGoal::new("Carpenter", Item::CLAY))
+                .then(
+                    SellToMerchantGoal::new("Carpenter", Item::CLAY)
+                        .min_to_sell(10),
+                )
                 .then(
                     BuyFromMerchantGoal::new(
                         "Carpenter",
