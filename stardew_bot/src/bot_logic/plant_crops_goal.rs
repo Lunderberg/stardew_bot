@@ -678,7 +678,9 @@ impl BotGoal for PlantCropsGoal {
                 SIL::HotBarLeft
             } else if item.gp_per_stamina().is_some() {
                 SIL::HotBarRight
-            } else if item.is_same_item(&Item::CLAY) {
+            } else if item.is_same_item(&Item::CLAY)
+                || item.is_same_item(&Item::WOOD)
+            {
                 SIL::HotBar
             } else {
                 SIL::Hidden
