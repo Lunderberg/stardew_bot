@@ -139,6 +139,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                                 },
                                 dist,
                             ))
+                            .filter(|_| dist > 5)
                         }
                     })
             })
