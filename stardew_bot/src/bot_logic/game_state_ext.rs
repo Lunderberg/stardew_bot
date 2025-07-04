@@ -75,6 +75,13 @@ impl GameStateExt for GameState {
         &self,
         target_room: &str,
     ) -> Result<Vector<isize>, Error> {
+        // Workaround since pathfinding doesn't currently know how
+        // to return from the underground mines.
+        if target_room == "Farm"
+            && self.player.room_name.starts_with("UndergroundMine")
+        {
+            return self.get_farm_door();
+        }
         MovementGoal::closest_entrance(self, target_room)
     }
 }
