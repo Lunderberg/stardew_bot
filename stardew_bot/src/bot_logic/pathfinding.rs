@@ -1,4 +1,4 @@
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::BotError,
@@ -374,7 +374,22 @@ impl Pathfinding<'_> {
         let mut map: TileMap<Option<Direction>> =
             self.location.blocked.map(|_| None);
 
-        for entry in self.iter_dijkstra_entries(target) {
+        let walkable = self.walkable();
+        let target: Vec<_> = target
+            .iter()
+            .flat_map(|tile| {
+                if walkable.is_set(tile) {
+                    Either::Left(std::iter::once(tile))
+                } else {
+                    Either::Right(
+                        tile.iter_adjacent()
+                            .filter(|adj| walkable.is_set(*adj)),
+                    )
+                }
+            })
+            .collect();
+
+        for entry in self.iter_dijkstra_entries(&target) {
             map[entry.tile] = entry.dir.map(|dir| dir.opposite());
         }
 
@@ -382,7 +397,7 @@ impl Pathfinding<'_> {
             opt_dir.unwrap_or_else(|| {
                 let offset = target
                     .iter()
-                    .map(|target_tile| target_tile - tile)
+                    .map(|&target_tile| target_tile - tile)
                     .min_by_key(|offset| offset.mag2())
                     .expect("Must have at least one target tile");
                 offset.closest_direction()
