@@ -519,12 +519,30 @@ impl BotGoal for LocalMovementGoal {
             let offset = self.target_position - player.center_pos();
             offset.closest_direction()
         } else {
-            map.get(player_tile).cloned().ok_or_else(|| {
+            let core_dir = map.get(player_tile).cloned().ok_or_else(|| {
                 BotError::PlayerIsOutOfBounds {
                     pos: player_position,
                     room_bounds: map.bounds(),
                 }
-            })?
+            })?;
+
+            let tile_offset = player_position - player_tile.map(|x| x as f32);
+            let on_west_edge = tile_offset.right < -0.2;
+            let on_east_edge = tile_offset.right > 0.2;
+            let on_north_edge = tile_offset.down < -0.2;
+            let on_south_edge = tile_offset.down > 0.2;
+
+            match core_dir {
+                Direction::North if on_west_edge => Direction::NorthEast,
+                Direction::North if on_east_edge => Direction::NorthWest,
+                Direction::South if on_west_edge => Direction::SouthEast,
+                Direction::South if on_east_edge => Direction::SouthWest,
+                Direction::East if on_north_edge => Direction::SouthEast,
+                Direction::East if on_south_edge => Direction::NorthEast,
+                Direction::West if on_north_edge => Direction::SouthWest,
+                Direction::West if on_south_edge => Direction::NorthWest,
+                other => other,
+            }
         };
 
         actions.do_action(GameAction::Move(dir));
