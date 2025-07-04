@@ -100,9 +100,20 @@ impl BotGoal for ExpandTreeFarm {
                         .any(|seed_type| seed_type.is_same_item(item))
                 })
                 .and_then(|seed_to_plant| {
-                    let reachable = farm.pathfinding().reachable(farm_door);
-                    let opt_tile_to_plant =
-                        plan.iter_planned_trees().find(|tile| reachable[*tile]);
+                    let mut valid_loc = farm.pathfinding().reachable(farm_door);
+                    farm.objects
+                        .iter()
+                        .filter(|obj| matches!(obj.kind, ObjectKind::Tree(_)))
+                        .map(|obj| obj.tile)
+                        .for_each(|tile| {
+                            if valid_loc.in_bounds(tile) {
+                                valid_loc[tile] = false;
+                            }
+                        });
+
+                    let opt_tile_to_plant = plan
+                        .iter_planned_trees()
+                        .find(|tile| valid_loc.is_set(*tile));
                     opt_tile_to_plant.map(|tile| (tile, Some(seed_to_plant)))
                 })
         };
