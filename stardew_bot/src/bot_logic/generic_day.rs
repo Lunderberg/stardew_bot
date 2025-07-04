@@ -107,6 +107,11 @@ impl BotGoal for GenericDay {
                     Item::SALAD.with_count(10),
                 ))
                 .then(crops.clone())
+                .then(
+                    InventoryGoal::empty()
+                        .with(Item::HOE)
+                        .stamina_recovery_slots(2),
+                )
                 .then(ForagingGoal::new().location("Beach"))
                 .then(ForagingGoal::new().location("Custom_Garden"))
                 .then(ForagingGoal::new().location("Custom_ShearwaterBridge"))
