@@ -2594,9 +2594,11 @@ impl MapTileSheets {
 
     fn iter_extra_warps(&self) -> impl Iterator<Item = Warp> + '_ {
         self.iter_tile_actions().filter_map(|(tile, action)| {
-            let (room, x, y) = match action {
-                "WarpCommunityCenter" => Some(("CommunityCenter", 32, 23)),
-                "Warp_Sunroom_Door" => Some(("Sunroom", 5, 13)),
+            let (room, x, y, kind) = match action {
+                "WarpCommunityCenter" => {
+                    Some(("CommunityCenter", 32, 23, WarpKind::Door))
+                }
+                "Warp_Sunroom_Door" => Some(("Sunroom", 5, 13, WarpKind::Door)),
                 other if other.starts_with("LoadMap") => {
                     let mut iter_words = other.split(' ');
                     iter_words.next();
@@ -2607,7 +2609,7 @@ impl MapTileSheets {
                     let down: isize = iter_words
                         .next()
                         .and_then(|right| right.parse().ok())?;
-                    Some((target_room, right, down))
+                    Some((target_room, right, down, WarpKind::Automatic))
                 }
                 _ => None,
             }?;
@@ -2616,7 +2618,7 @@ impl MapTileSheets {
                 location: tile,
                 target: Vector::new(x, y),
                 target_room: room.to_string(),
-                kind: WarpKind::Door,
+                kind,
                 requires_friendship: None,
             })
         })
