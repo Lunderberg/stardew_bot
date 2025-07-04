@@ -119,6 +119,12 @@ impl PlantCropsGoal {
         statics: &StaticState,
         opt_current: Option<&ObjectKind>,
         goal: &ItemId,
+
+        // Exclude showing the watering step.  When using this
+        // function to determine if additional items must be
+        // bought/crafted, a tile with unwatered seeds should not
+        // cause the bot to think the tile requires seeds.
+        assume_watered: bool,
     ) -> Option<Option<Item>> {
         if let Some(current) = opt_current {
             match current {
@@ -129,7 +135,7 @@ impl PlantCropsGoal {
 
                 ObjectKind::HoeDirt(HoeDirt {
                     is_watered: false, ..
-                }) => Some(Some(Item::WATERING_CAN)),
+                }) if !assume_watered => Some(Some(Item::WATERING_CAN)),
 
                 ObjectKind::HoeDirt(HoeDirt { crop: None, .. }) => {
                     Some(Some(goal.clone().into()))
@@ -137,8 +143,10 @@ impl PlantCropsGoal {
 
                 ObjectKind::HoeDirt(HoeDirt {
                     crop: Some(crop),
-                    is_watered: true,
-                }) if &crop.seed == goal => None,
+                    is_watered,
+                }) if &crop.seed == goal && (*is_watered || assume_watered) => {
+                    None
+                }
 
                 ObjectKind::Other { .. } if current.is_forage() => Some(None),
 
@@ -213,6 +221,7 @@ impl PlantCropsGoal {
                     &game_state.statics,
                     opt_current,
                     goal,
+                    false,
                 );
                 let next_step = opt_next_step?;
                 Some((*tile, next_step))
@@ -310,6 +319,7 @@ impl PlantCropsGoal {
                     &game_state.statics,
                     opt_current,
                     goal_item,
+                    true,
                 );
                 opt_next_step.is_some()
             })
