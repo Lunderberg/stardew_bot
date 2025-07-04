@@ -108,15 +108,37 @@ impl<T> TileMap<T> {
         }
     }
 
+    pub fn shape(&self) -> Vector<isize> {
+        Vector::new(self.width as isize, self.height as isize)
+    }
+
     pub fn bounds(&self) -> Rectangle<isize> {
         Rectangle {
             top_left: Vector::zero(),
-            shape: Vector::new(self.width as isize, self.height as isize),
+            shape: self.shape(),
         }
     }
 }
 
 impl TileMap<bool> {
+    pub fn collect_true<Iter, Index>(
+        shape: Vector<isize>,
+        iter_tiles: Iter,
+    ) -> Self
+    where
+        Iter: IntoIterator<Item = Index>,
+        Index: AsGridPos,
+    {
+        let mut map = Self::empty(shape.right as usize, shape.down as usize);
+        for tile in iter_tiles {
+            if let Some(value) = map.get_mut(tile) {
+                *value = true;
+            }
+        }
+
+        map
+    }
+
     pub fn is_set(&self, index: impl AsGridPos) -> bool {
         self.get(index).cloned().unwrap_or(false)
     }
