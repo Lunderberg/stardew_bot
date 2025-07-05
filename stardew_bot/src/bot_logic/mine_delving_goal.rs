@@ -966,57 +966,65 @@ impl BotInterrupt for MineNearbyOre {
         }
 
         let player_tile = game_state.player.tile();
+        let stone_clearing_cost = 3.0;
         let pathfinding = loc
             .pathfinding()
             .breakable_clearing_cost(200)
-            .stone_clearing_cost(2000)
+            .stone_clearing_cost((1000.0 * stone_clearing_cost) as u64)
             .include_border(true);
         let distances = pathfinding.distances(player_tile);
 
         let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
 
         let predictor = StonePredictor::new(game_state)?;
-        let mut desirable_rocks: HashMap<Vector<isize>, (f32, &ObjectKind)> =
-            loc.objects
-                .iter()
-                .filter_map(|obj| {
-                    let dist_multiplier = match &obj.kind {
-                        ObjectKind::Stone(stone) => {
-                            let prediction =
-                                predictor.drop_from_stone(obj.tile, stone);
-                            if prediction.omnigeode {
-                                2.0
-                            } else if prediction.geode {
-                                1.5
-                            } else if prediction.gem {
-                                match stone {
-                                    StoneKind::Diamond => 4.0,
-                                    _ => 2.0,
-                                }
-                            } else if prediction.coal {
-                                1.5
-                            } else if prediction.ore {
-                                1.0
-                            } else {
-                                return None;
+        let mut desirable_rocks: HashMap<
+            Vector<isize>,
+            ((f32, f32), &ObjectKind),
+        > = loc
+            .objects
+            .iter()
+            .filter_map(|obj| {
+                let dist_multiplier = match &obj.kind {
+                    ObjectKind::Stone(stone) => {
+                        let prediction =
+                            predictor.drop_from_stone(obj.tile, stone);
+                        let multiplier = if prediction.omnigeode {
+                            2.0
+                        } else if prediction.geode {
+                            1.5
+                        } else if prediction.gem {
+                            match stone {
+                                StoneKind::Diamond => 4.0,
+                                _ => 2.0,
                             }
-                        }
-                        ObjectKind::MineCartCoal => 3.0,
-
-                        ObjectKind::MineBarrel if opt_weapon.is_some() => 0.5,
-
-                        ObjectKind::Chest(_) => 4.0,
-                        ObjectKind::Mineral(_) => 1.0,
-
-                        other if other.is_forage() => 1.0,
-
-                        _ => {
+                        } else if prediction.coal {
+                            1.5
+                        } else if prediction.ore {
+                            1.0
+                        } else {
                             return None;
-                        }
-                    };
-                    Some((obj.tile, (dist_multiplier, &obj.kind)))
-                })
-                .collect();
+                        };
+
+                        (multiplier, -stone_clearing_cost)
+                    }
+                    ObjectKind::MineCartCoal => (3.0, 0.0),
+
+                    ObjectKind::MineBarrel if opt_weapon.is_some() => {
+                        (0.5, 0.0)
+                    }
+
+                    ObjectKind::Chest(_) => (4.0, 0.0),
+                    ObjectKind::Mineral(_) => (1.0, 0.0),
+
+                    other if other.is_forage() => (1.0, 0.0),
+
+                    _ => {
+                        return None;
+                    }
+                };
+                Some((obj.tile, (dist_multiplier, &obj.kind)))
+            })
+            .collect();
 
         {
             let mut to_group: HashSet<Vector<isize>> =
@@ -1038,13 +1046,17 @@ impl BotInterrupt for MineNearbyOre {
                 }
 
                 if current_group.len() > 1 {
-                    let total_multiplier = current_group
+                    let total = current_group
                         .iter()
                         .map(|tile| desirable_rocks[tile].0)
-                        .sum::<f32>();
+                        .fold(
+                            (0.0f32, 0.0f32),
+                            |(sum_mult, sum_offset), (mult, offset)| {
+                                (sum_mult + mult, sum_offset + offset)
+                            },
+                        );
                     current_group.into_iter().for_each(|tile| {
-                        desirable_rocks.get_mut(&tile).unwrap().0 =
-                            total_multiplier;
+                        desirable_rocks.get_mut(&tile).unwrap().0 = total;
                     });
                 }
             }
@@ -1052,9 +1064,9 @@ impl BotInterrupt for MineNearbyOre {
 
         let opt_closest_stone = desirable_rocks
             .iter()
-            .filter_map(|(tile, (multiplier, _))| {
+            .filter_map(|(tile, ((multiplier, offset), _))| {
                 let dist = distances.get(*tile)?.as_ref()?;
-                ((*dist as f32) < self.dist * multiplier)
+                ((*dist as f32) + offset < self.dist * multiplier)
                     .then(|| (*tile, *dist))
             })
             .min_by_key(|(_, dist)| *dist)
