@@ -701,11 +701,14 @@ impl Location {
                         let stone_kind = match id {
                             "(O)32" | "(O)34" | "(O)36" | "(O)38" | "(O)40"
                             | "(O)42" | "(O)48" | "(O)50" | "(O)52"
-                            | "(O)54" | "(O)56" | "(O)58" => StoneKind::Normal,
+                            | "(O)54" | "(O)56" | "(O)58" | "(O)760"
+                            | "(O)762" => StoneKind::Normal,
 
-                            "(O)668" | "(O)670" => StoneKind::DoubleStone,
-                            "(O)751" | "(O)859" => StoneKind::Copper,
-                            "(O)290" | "(O)860" => StoneKind::Iron,
+                            "(O)845" | "(O)846" | "(O)847" | "(O)668"
+                            | "(O)670" => StoneKind::DoubleStone,
+
+                            "(O)751" | "(O)849" => StoneKind::Copper,
+                            "(O)290" | "(O)850" => StoneKind::Iron,
                             "(O)764" | "(O)VolcanoGoldNode" => StoneKind::Gold,
                             "(O)765" => StoneKind::Iridium,
 
