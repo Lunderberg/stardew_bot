@@ -16,6 +16,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    item_set::ItemSet,
     ActivateTile, GameStateExt as _, LocationExt as _,
 };
 
@@ -129,27 +130,31 @@ impl InventoryGoal {
         self
     }
 
-    pub fn with_exactly(mut self, item: Item) -> Self {
-        let count = item.count;
-        self.bounds.insert(
-            item.id,
-            Bounds {
-                min: Some(count),
-                max: Some(count),
-            },
-        );
+    pub fn with_exactly(mut self, item_set: impl ItemSet) -> Self {
+        for item in item_set.iter_item_set() {
+            let count = item.count;
+            self.bounds.insert(
+                item.id,
+                Bounds {
+                    min: Some(count),
+                    max: Some(count),
+                },
+            );
+        }
         self
     }
 
-    pub fn with(mut self, item: Item) -> Self {
-        let count = item.count;
-        self.bounds.insert(
-            item.id,
-            Bounds {
-                min: Some(count),
-                max: None,
-            },
-        );
+    pub fn with(mut self, item_set: impl ItemSet) -> Self {
+        for item in item_set.iter_item_set() {
+            let count = item.count;
+            self.bounds.insert(
+                item.id,
+                Bounds {
+                    min: Some(count),
+                    max: None,
+                },
+            );
+        }
         self
     }
 

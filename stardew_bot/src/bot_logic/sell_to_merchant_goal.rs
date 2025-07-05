@@ -4,7 +4,7 @@ use crate::{
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    MenuCloser,
+    ItemSet, MenuCloser,
 };
 
 pub struct SellToMerchantGoal {
@@ -14,34 +14,11 @@ pub struct SellToMerchantGoal {
     min_to_sell: usize,
 }
 
-mod detail {
-    use super::*;
-    pub trait ItemSet: Sized {
-        fn iter(self) -> impl Iterator<Item = Item>;
-    }
-    impl ItemSet for Item {
-        fn iter(self) -> impl Iterator<Item = Item> {
-            std::iter::once(self)
-        }
-    }
-    impl<Iter> ItemSet for Iter
-    where
-        Iter: IntoIterator<Item = Item>,
-    {
-        fn iter(self) -> impl Iterator<Item = Item> {
-            self.into_iter()
-        }
-    }
-}
-
 impl SellToMerchantGoal {
-    pub fn new(
-        merchant: impl Into<String>,
-        item: impl detail::ItemSet,
-    ) -> Self {
+    pub fn new(merchant: impl Into<String>, item: impl ItemSet) -> Self {
         let merchant = merchant.into();
         Self {
-            items: item.iter().collect(),
+            items: item.iter_item_set().collect(),
             movement_goal: GoToActionTile::new(merchant.clone()),
             merchant,
             min_to_sell: 0,
