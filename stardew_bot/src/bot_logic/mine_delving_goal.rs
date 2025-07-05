@@ -69,6 +69,53 @@ const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
     Vector::new(8, 5),
 ];
 
+fn collect_clearable_tiles(
+    game_state: &GameState,
+) -> Result<HashMap<Vector<isize>, Option<Item>>, Error> {
+    let current_room = game_state.current_room()?;
+    let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
+
+    let iter_clearable_obj = current_room.objects.iter().filter_map(|obj| {
+        let opt_tool = match &obj.kind {
+            ObjectKind::Stone(_) => Some(Item::PICKAXE),
+            ObjectKind::Fiber | ObjectKind::MineBarrel
+                if opt_weapon.is_some() =>
+            {
+                opt_weapon.cloned()
+            }
+            ObjectKind::Mineral(_) => None,
+
+            other if other.is_forage() => None,
+
+            _ => {
+                return None;
+            }
+        };
+        Some((obj.tile, opt_tool))
+    });
+    let iter_clearable_clump = current_room
+        .resource_clumps
+        .iter()
+        .filter_map(|clump| {
+            let tool = match &clump.kind {
+                ResourceClumpKind::MineBoulder => Some(Item::PICKAXE),
+                _ => None,
+            }?;
+            Some(
+                clump
+                    .shape
+                    .iter_points()
+                    .map(move |tile| (tile, Some(tool.clone()))),
+            )
+        })
+        .flatten();
+
+    let clearable_tiles =
+        iter_clearable_obj.chain(iter_clearable_clump).collect();
+
+    Ok(clearable_tiles)
+}
+
 impl MineDelvingGoal {
     pub fn new() -> Self {
         Self
@@ -458,7 +505,7 @@ impl BotGoal for MineDelvingGoal {
                 .with(Item::COPPER_ORE.clone().with_count(1000))
                 .with(Item::IRON_ORE.clone().with_count(1000))
                 .with(Item::GOLD_ORE.clone().with_count(1000))
-                .stamina_recovery_slots(5)
+                .stamina_recovery_slots(6)
                 .with_weapon();
 
             if !prepare.is_completed(game_state)? {
@@ -537,44 +584,7 @@ impl BotGoal for MineSingleLevel {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
-
-        let clearable_tiles: HashMap<Vector<isize>, Option<Item>> = {
-            let iter_clearable_obj =
-                current_room.objects.iter().filter_map(|obj| {
-                    let opt_tool = match &obj.kind {
-                        ObjectKind::Stone(_) => Some(Item::PICKAXE),
-                        ObjectKind::Fiber | ObjectKind::MineBarrel
-                            if opt_weapon.is_some() =>
-                        {
-                            opt_weapon.cloned()
-                        }
-                        ObjectKind::Mineral(_) => None,
-                        _ => {
-                            return None;
-                        }
-                    };
-                    Some((obj.tile, opt_tool))
-                });
-            let iter_clearable_clump = current_room
-                .resource_clumps
-                .iter()
-                .filter_map(|clump| {
-                    let tool = match &clump.kind {
-                        ResourceClumpKind::MineBoulder => Some(Item::PICKAXE),
-                        _ => None,
-                    }?;
-                    Some(
-                        clump
-                            .shape
-                            .iter_points()
-                            .map(move |tile| (tile, Some(tool.clone()))),
-                    )
-                })
-                .flatten();
-
-            iter_clearable_obj.chain(iter_clearable_clump).collect()
-        };
+        let clearable_tiles = collect_clearable_tiles(game_state)?;
         let player_tile = game_state.player.tile();
 
         let should_go_up = 'go_up: {
@@ -904,10 +914,12 @@ impl BotInterrupt for MineNearbyOre {
         }
 
         let player_tile = game_state.player.tile();
-        let distances = loc
+        let pathfinding = loc
             .pathfinding()
-            .include_border(true)
-            .distances(player_tile);
+            .breakable_clearing_cost(200)
+            .stone_clearing_cost(2000)
+            .include_border(true);
+        let distances = pathfinding.distances(player_tile);
 
         let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
 
@@ -939,9 +951,12 @@ impl BotInterrupt for MineNearbyOre {
                         }
                         ObjectKind::MineCartCoal => 3.0,
 
-                        ObjectKind::MineBarrel if opt_weapon.is_some() => 1.0,
+                        ObjectKind::MineBarrel if opt_weapon.is_some() => 0.5,
 
                         ObjectKind::Chest(_) | ObjectKind::Mineral(_) => 1.0,
+
+                        other if other.is_forage() => 1.0,
+
                         _ => {
                             return None;
                         }
@@ -992,12 +1007,21 @@ impl BotInterrupt for MineNearbyOre {
             .min_by_key(|(_, dist)| *dist)
             .map(|(tile, _)| tile);
 
-        let Some(closest_stone) = opt_closest_stone else {
+        let Some(target_tile) = opt_closest_stone else {
             return Ok(None);
         };
 
-        let opt_tool =
-            desirable_rocks.get(&closest_stone).unwrap().1.get_tool();
+        let path = pathfinding
+            .allow_diagonal(false)
+            .path_between(player_tile, target_tile)?;
+
+        let clearable_tiles = collect_clearable_tiles(game_state)?;
+        let opt_blocked_tile_in_path = path
+            .into_iter()
+            .find(|tile| clearable_tiles.contains_key(&tile));
+        let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
+
+        let opt_tool = clearable_tiles.get(&target_tile).unwrap();
 
         let goal = if let Some(tool) = opt_tool {
             let tool = if tool.id.item_id.starts_with("(W)") {
@@ -1007,20 +1031,17 @@ impl BotInterrupt for MineNearbyOre {
                     return Ok(None);
                 }
             } else {
-                tool
+                tool.clone()
             };
             UseItemOnTile::new(
                 tool,
                 game_state.player.room_name.clone(),
-                closest_stone,
+                target_tile,
             )
             .into()
         } else {
-            ActivateTile::new(
-                game_state.player.room_name.clone(),
-                closest_stone,
-            )
-            .into()
+            ActivateTile::new(game_state.player.room_name.clone(), target_tile)
+                .into()
         };
 
         Ok(Some(goal))
