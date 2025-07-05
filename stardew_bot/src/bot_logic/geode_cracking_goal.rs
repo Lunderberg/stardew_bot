@@ -356,7 +356,7 @@ impl GeodePredictor {
                          OmniGeode's condition for Prismatic Shards."
                     );
 
-                    if self.geodes_cracked < 16 {
+                    if self.geodes_cracked + (other_geodes as u32) < 16 {
                         continue;
                     }
                 }
