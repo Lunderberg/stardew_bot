@@ -201,20 +201,30 @@ impl MineDelvingGoal {
         }
 
         let loc = game_state.current_room()?;
-        let num_free_furnaces = loc
+        let (num_loadable_furnaces, num_harvestable_furnaces) = loc
             .objects
             .iter()
-            .filter(|obj| {
+            .map(|obj| {
                 obj.kind
                     .as_furnace()
                     .map(|furnace| {
-                        !furnace.has_held_item || furnace.ready_to_harvest
+                        let can_harvest = furnace.ready_to_harvest;
+                        let can_load = !furnace.has_held_item || can_harvest;
+                        (can_load, can_harvest)
                     })
-                    .unwrap_or(false)
+                    .unwrap_or((false, false))
             })
-            .count();
+            .fold(
+                (0usize, 0usize),
+                |(num_loadable, num_harvestable), (can_load, can_harvest)| {
+                    (
+                        num_loadable + (can_load as usize),
+                        num_harvestable + (can_harvest as usize),
+                    )
+                },
+            );
 
-        if num_free_furnaces == 0 {
+        if num_loadable_furnaces == 0 && num_harvestable_furnaces == 0 {
             return Ok(None);
         }
 
@@ -225,9 +235,10 @@ impl MineDelvingGoal {
             available.get(item).cloned().unwrap_or(0)
         };
 
-        let num_to_smelt = num_free_furnaces.min(get_available(&Item::COAL.id));
+        let num_to_smelt =
+            num_loadable_furnaces.min(get_available(&Item::COAL.id));
 
-        if num_to_smelt == 0 {
+        if num_to_smelt == 0 && num_harvestable_furnaces == 0 {
             return Ok(None);
         }
 
@@ -238,7 +249,10 @@ impl MineDelvingGoal {
         let num_copper_bars =
             (get_available(&Item::COPPER_ORE.id) / 5).min(num_to_smelt);
 
-        if num_iron_bars == 0 && num_copper_bars == 0 {
+        if num_iron_bars == 0
+            && num_copper_bars == 0
+            && num_harvestable_furnaces == 0
+        {
             return Ok(None);
         }
 
@@ -265,12 +279,13 @@ impl MineDelvingGoal {
                 obj.kind.as_furnace().map(|furnace| (obj.tile, furnace))
             })
             .flat_map(|(tile, furnace)| -> [Option<LogicStackItem>; 2] {
-                let take_complete = furnace
-                    .ready_to_harvest
+                let can_harvest = furnace.ready_to_harvest;
+                let take_complete = can_harvest
                     .then(|| ActivateTile::new("Mine", tile))
                     .map(Into::into);
-                let start_new = (furnace.ready_to_harvest
-                    || !furnace.has_held_item)
+
+                let can_load = !furnace.has_held_item || can_harvest;
+                let start_new = can_load
                     .then(|| {
                         iter_smelt
                             .next()
