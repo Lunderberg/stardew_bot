@@ -8,8 +8,8 @@ use itertools::Itertools as _;
 use crate::{
     bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
     game_state::{
-        Chest, Inventory, Item, ItemId, Key, Location, ObjectKind, Quality,
-        Vector, WeaponKind,
+        Chest, Inventory, Item, ItemCategory, ItemId, Key, Location,
+        ObjectKind, Quality, Vector, WeaponKind,
     },
     Error, GameAction, GameState,
 };
@@ -250,6 +250,18 @@ impl InventoryGoal {
             })
             .collect();
 
+        let worst_fish_by_type: HashSet<ItemId> = iter_chest_items()?
+            .map(|(_, _, item)| item)
+            .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
+            .map(|item| (&item.id.item_id, item.quality()))
+            .into_grouping_map()
+            .min()
+            .into_iter()
+            .map(|(id_str, quality)| {
+                ItemId::new(id_str.to_string()).with_quality(quality)
+            })
+            .collect();
+
         let current_stamina_items: HashSet<&ItemId> = inventory
             .iter_items()
             .filter(|item| {
@@ -459,16 +471,32 @@ impl InventoryGoal {
                                 .map(|gp| gp < MAX_GP_PER_STAMINA)
                                 .unwrap_or(false)
                         })
+                        .filter(|(_, item)| {
+                            let is_last_fish = worst_fish_by_type
+                                .contains(&item.id)
+                                && item.count == 1;
+                            !is_last_fish
+                        })
                         .min_by(|(_, lhs), (_, rhs)| {
                             let lhs = lhs.gp_per_stamina().unwrap();
                             let rhs = rhs.gp_per_stamina().unwrap();
                             lhs.total_cmp(&rhs)
                         })
-                        .map(|(slot, _)| Transfer {
-                            chest: tile,
-                            direction: TransferDirection::ChestToPlayer,
-                            slot,
-                            size: TransferSize::All,
+                        .map(|(slot, item)| {
+                            let goal_number =
+                                if worst_fish_by_type.contains(&item.id) {
+                                    1
+                                } else {
+                                    0
+                                };
+                            let transfer_size =
+                                TransferSize::select(item.count, goal_number);
+                            Transfer {
+                                chest: tile,
+                                direction: TransferDirection::ChestToPlayer,
+                                slot,
+                                size: transfer_size,
+                            }
                         })
                 })
                 .flatten();
