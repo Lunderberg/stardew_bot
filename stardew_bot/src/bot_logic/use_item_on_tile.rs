@@ -71,7 +71,7 @@ impl BotGoal for UseItemOnTile {
                 // Therefore, animation cancel out of the swipe when
                 // reaching the 6th frame.
                 player
-                    .melee_animation_frame
+                    .weapon_swipe_animation_frame
                     .map(|frame| frame >= 5)
                     .unwrap_or(false)
             };

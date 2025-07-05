@@ -2837,15 +2837,23 @@ impl AsRef<ItemId> for FloatingItem {
 }
 
 impl Character {
-    fn center_pixel(&self) -> Vector<isize> {
+    pub fn is_monster(&self) -> bool {
+        self.health.is_some()
+    }
+
+    pub fn pixel_bounding_box(&self) -> Rectangle<isize> {
         let offset = Vector::<isize>::new(8, 16);
+        let top_left = self.position.map(|x| x as isize) + offset;
 
         let width = self.sprite_width as isize;
         let width = width * 4 * 3 / 4;
-        let bounding_box = Vector::<isize>::new(width, 32);
+        let shape = Vector::<isize>::new(width, 32);
 
-        let position = self.position.map(|x| x as isize);
-        position + offset + bounding_box / 2
+        Rectangle { top_left, shape }
+    }
+
+    fn center_pixel(&self) -> Vector<isize> {
+        self.pixel_bounding_box().center()
     }
 
     /// The tile that contains the center of the player's bounding

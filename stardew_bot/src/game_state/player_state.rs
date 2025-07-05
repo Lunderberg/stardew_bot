@@ -27,10 +27,13 @@ pub struct PlayerState {
 
     // Info related to the current action being performed
     pub using_tool: bool,
-    pub melee_animation_frame: Option<i32>,
     pub can_move: bool,
     pub can_release_tool: bool,
     pub last_click: Vector<isize>,
+
+    pub weapon_swipe_animation_frame: Option<i32>,
+    pub club_smash_animation_frame: Option<i32>,
+    pub club_cooldown: i32,
 
     // Per-player game state
     pub num_unread_mail: usize,
@@ -136,10 +139,12 @@ impl PlayerState {
              active_hotbar_index: usize,
              current_money: i32,
              using_tool: bool,
-             melee_animation_frame: Option<i32>,
              can_move: bool,
              can_release_tool: bool,
              last_click: &Vector<isize>,
+             weapon_swipe_animation_frame: Option<i32>,
+             club_smash_animation_frame: Option<i32>,
+             club_cooldown: i32,
              current_stamina: f32,
              max_stamina: i32,
              current_health: i32,
@@ -155,11 +160,13 @@ impl PlayerState {
                     inventory: inventory.clone(),
                     active_hotbar_index,
                     using_tool,
-                    melee_animation_frame,
                     can_move,
                     can_release_tool,
-                    current_money,
                     last_click: *last_click,
+                    weapon_swipe_animation_frame,
+                    club_smash_animation_frame,
+                    club_cooldown,
+                    current_money,
                     current_stamina,
                     max_stamina,
                     current_health,
@@ -253,11 +260,27 @@ impl PlayerState {
                         sprite.currentSingleAnimation == 248i32 ||
                         sprite.currentSingleAnimation == 256i32
                 );
-                let melee_animation_frame = if is_swinging_melee_weapon {
+                let weapon_swipe_animation_frame = if is_swinging_melee_weapon {
                     sprite.currentAnimationIndex
                 } else {
                     None
                 };
+
+                let is_using_club_smash = (
+                    sprite.currentSingleAnimation == 160i32 ||
+                        sprite.currentSingleAnimation == 168i32 ||
+                        sprite.currentSingleAnimation == 176i32 ||
+                        sprite.currentSingleAnimation == 184i32
+                );
+                let club_smash_animation_frame = if is_using_club_smash {
+                    sprite.currentAnimationIndex
+                } else {
+                    None
+                };
+
+                let club_cooldown = StardewValley.Tools
+                    .MeleeWeapon
+                    .clubCooldown;
 
                 new_player(
                     position,
@@ -269,10 +292,12 @@ impl PlayerState {
                     active_hotbar_index,
                     current_money,
                     using_tool,
-                    melee_animation_frame,
                     can_move,
                     can_release_tool,
                     last_click,
+                    weapon_swipe_animation_frame,
+                    club_smash_animation_frame,
+                    club_cooldown,
                     current_stamina,
                     max_stamina,
                     current_health,
