@@ -1005,7 +1005,8 @@ impl BotInterrupt for MineNearbyOre {
 
                         ObjectKind::MineBarrel if opt_weapon.is_some() => 0.5,
 
-                        ObjectKind::Chest(_) | ObjectKind::Mineral(_) => 1.0,
+                        ObjectKind::Chest(_) => 4.0,
+                        ObjectKind::Mineral(_) => 1.0,
 
                         other if other.is_forage() => 1.0,
 
