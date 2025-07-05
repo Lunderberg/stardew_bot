@@ -375,29 +375,32 @@ impl Pathfinding<'_> {
             self.location.blocked.map(|_| None);
 
         let walkable = self.walkable();
-        let target: Vec<_> = target
-            .iter()
-            .flat_map(|tile| {
-                if walkable.is_set(tile) {
-                    Either::Left(std::iter::once(tile))
-                } else {
-                    Either::Right(
-                        tile.iter_adjacent()
-                            .filter(|adj| walkable.is_set(*adj)),
-                    )
+        let mut updated_target = Vec::new();
+        for tile in target.iter() {
+            if walkable.is_set(tile) {
+                updated_target.push(tile);
+            } else {
+                for dir in Direction::iter() {
+                    let adj = tile + dir.offset();
+                    if walkable.is_set(adj) {
+                        updated_target.push(adj);
+                        map[adj] = Some(dir.opposite());
+                    }
                 }
-            })
-            .collect();
+            }
+        }
 
-        for entry in self.iter_dijkstra_entries(&target) {
-            map[entry.tile] = entry.dir.map(|dir| dir.opposite());
+        for entry in self.iter_dijkstra_entries(&updated_target) {
+            if let Some(dir) = entry.dir {
+                map[entry.tile] = Some(dir.opposite());
+            }
         }
 
         map.imap(|tile, opt_dir| {
             opt_dir.unwrap_or_else(|| {
                 let offset = target
                     .iter()
-                    .map(|&target_tile| target_tile - tile)
+                    .map(|target_tile| target_tile - tile)
                     .min_by_key(|offset| offset.mag2())
                     .expect("Must have at least one target tile");
                 offset.closest_direction()
