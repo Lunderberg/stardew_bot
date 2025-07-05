@@ -86,8 +86,13 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
         self.locations
             .get(node.current_room_index)
             .into_iter()
-            .flat_map(|loc| {
+            .flat_map(move |loc| {
                 let reachable = loc.pathfinding().reachable(node.current_pos);
+
+                let is_on_warp = loc
+                    .warps
+                    .iter()
+                    .any(|warp| node.current_pos == warp.location);
 
                 loc.warps
                     .iter()
@@ -109,7 +114,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                             .map(|offset| warp.location + offset)
                             .any(|adj_tile| reachable.is_set(adj_tile))
                     })
-                    .filter_map(|warp| {
+                    .filter_map(move |warp| {
                         if warp.location == node.current_pos {
                             self.get_room_index(&warp.target_room).map(
                                 |next_room_index| {
@@ -134,7 +139,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                                 },
                                 dist,
                             ))
-                            .filter(|_| dist > 5)
+                            .filter(|_| dist > 5 || !is_on_warp)
                         }
                     })
             })
