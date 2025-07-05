@@ -1,5 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
+use itertools::Itertools as _;
+
 use crate::{
     bot_logic::{
         bot_logic::LogicStackItem, ActivateTile, BotError, GameStateExt as _,
@@ -17,7 +19,7 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    AttackNearbyEnemy, CraftItemGoal, ObjectKindExt as _,
+    AttackNearbyEnemy, CraftItemGoal, LocationExt as _, ObjectKindExt as _,
     OrganizeInventoryGoal,
 };
 
@@ -497,29 +499,49 @@ impl BotGoal for MineDelvingGoal {
             // mines.  If the mines already have two storage chests,
             // or if the first storage chest contains wood to craft
             // the second, no need to bring wood along.
-            let wood_investment = game_state
-                .get_room("Mine")?
-                .objects
-                .iter()
-                .filter_map(|obj| obj.kind.as_chest())
-                .map(|chest| {
-                    let contents = chest
-                        .iter_items()
-                        .filter(|item| item.is_same_item(&Item::WOOD))
-                        .map(|item| item.count)
-                        .sum::<usize>();
-                    50 + contents
-                })
-                .sum::<usize>();
-            let required_wood = 100usize.saturating_sub(wood_investment);
+            let mines = game_state.get_room("Mine")?;
+
+            let currently_stored_in_mines = mines
+                .iter_stored_items()
+                .map(|item| (&item.id, item.count))
+                .into_grouping_map()
+                .sum();
+
+            let wood_from_crafted_chests = 50
+                * mines
+                    .objects
+                    .iter()
+                    .filter_map(|obj| obj.kind.as_chest())
+                    .count();
+
+            let iter_items_to_transfer = [
+                Item::WOOD.with_count(
+                    100usize.saturating_sub(wood_from_crafted_chests),
+                ),
+                Item::STONE.with_count(1000),
+                Item::COAL.with_count(100),
+                Item::COPPER_ORE.with_count(1000),
+                Item::COPPER_BAR.with_count(1000),
+                Item::IRON_ORE.with_count(1000),
+                Item::IRON_BAR.with_count(1000),
+                Item::GOLD_ORE.with_count(1000),
+            ]
+            .into_iter()
+            .map(|item| {
+                if let Some(num_current) =
+                    currently_stored_in_mines.get(&item.id)
+                {
+                    let new_count = item.count.saturating_sub(*num_current);
+                    item.with_count(new_count)
+                } else {
+                    item
+                }
+            })
+            .filter(|item| item.count > 0);
 
             let prepare = InventoryGoal::empty()
                 .with(Item::PICKAXE)
-                .with_exactly(Item::WOOD.clone().with_count(required_wood))
-                .with(Item::STONE.clone().with_count(1000))
-                .with(Item::COPPER_ORE.clone().with_count(1000))
-                .with(Item::IRON_ORE.clone().with_count(1000))
-                .with(Item::GOLD_ORE.clone().with_count(1000))
+                .with_exactly(iter_items_to_transfer)
                 .stamina_recovery_slots(6)
                 .with_weapon();
 
@@ -738,19 +760,34 @@ impl BotGoal for MineSingleLevel {
             .map(|opt| opt.as_ref())
             .flatten();
 
-        if let Some(tool) = opt_tool {
+        let stack = LogicStack::new();
+        let stack = if let Some(tool) = opt_tool {
             let room_name = game_state.player.room_name.clone();
             let goal = UseItemOnTile::new(
                 tool.clone(),
                 room_name.clone(),
                 target_tile,
             );
-            Ok(goal.into())
+            stack.then(goal)
         } else {
             let room_name = game_state.player.room_name.clone();
             let goal = ActivateTile::new(room_name.clone(), target_tile);
-            Ok(goal.into())
-        }
+            stack.then(goal)
+        };
+
+        let num_objects = current_room.objects.len();
+        let stack = stack.cancel_if(move |game_state| {
+            // If the number of objects in the room increased, then
+            // cancel out and re-plan.  This can occur if a nearby
+            // enemy is killed, dropping a ladder.
+            let current_num_objects = game_state
+                .current_room()
+                .map(|room| room.objects.len())
+                .unwrap_or(num_objects);
+            current_num_objects > num_objects
+        });
+
+        Ok(stack.into())
     }
 }
 
@@ -1036,7 +1073,15 @@ impl BotInterrupt for MineNearbyOre {
             .find(|tile| clearable_tiles.contains_key(&tile));
         let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
 
-        let opt_tool = clearable_tiles.get(&target_tile).unwrap();
+        let opt_tool = desirable_rocks
+            .get(&target_tile)
+            .map(|(_, kind)| kind.get_tool())
+            .or_else(|| {
+                clearable_tiles
+                    .get(&target_tile)
+                    .map(|opt_tool| opt_tool.clone())
+            })
+            .unwrap();
 
         let goal = if let Some(tool) = opt_tool {
             let tool = if tool.id.item_id.starts_with("(W)") {
