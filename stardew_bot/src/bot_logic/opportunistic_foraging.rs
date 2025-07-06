@@ -55,6 +55,7 @@ impl BotInterrupt for OpportunisticForaging {
                 }
                 ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
                 ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => can_hoe,
+                ObjectKind::Tree(tree) => tree.has_seed && !tree.is_stump,
                 other => other.is_forage(),
             })
             .filter(|obj| {
@@ -79,15 +80,19 @@ impl BotInterrupt for OpportunisticForaging {
             return Ok(None);
         };
 
-        let interrupt: LogicStack =
-            if let Some(tool) = forageable.kind.get_tool() {
-                let goal =
-                    UseItemOnTile::new(tool, loc.name.clone(), forageable.tile);
-                goal.into()
-            } else {
-                let goal = ActivateTile::new(loc.name.clone(), forageable.tile);
-                goal.into()
-            };
+        let opt_tool = match &forageable.kind {
+            ObjectKind::Tree(_) => None,
+            other => other.get_tool(),
+        };
+
+        let interrupt: LogicStack = if let Some(tool) = opt_tool {
+            let goal =
+                UseItemOnTile::new(tool, loc.name.clone(), forageable.tile);
+            goal.into()
+        } else {
+            let goal = ActivateTile::new(loc.name.clone(), forageable.tile);
+            goal.into()
+        };
 
         // During screen transitions, the X/Y position is updated
         // before the current room.  If a memory read occurs between
