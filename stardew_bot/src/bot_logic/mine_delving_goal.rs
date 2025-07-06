@@ -19,8 +19,8 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    AttackNearbyEnemy, CraftItemGoal, LocationExt as _, ObjectKindExt as _,
-    OrganizeInventoryGoal,
+    AttackNearbyEnemy, CraftItemGoal, LocationExt as _, MenuCloser,
+    ObjectKindExt as _, OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal;
@@ -401,17 +401,16 @@ impl MineDelvingGoal {
         Ok(copper_bars <= iron_bars)
     }
 
-    fn at_mine_entrance(
+    fn before_descending_into_mine(
         &self,
         game_state: &GameState,
-        actions: &mut ActionCollector,
-    ) -> Result<BotGoalResult, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         if let Some(start_smelting) = self.start_smelting(game_state)? {
-            return Ok(start_smelting.into());
+            return Ok(Some(start_smelting));
         }
 
         if let Some(craft_furnace) = self.expand_furnace_array(game_state)? {
-            return Ok(craft_furnace.into());
+            return Ok(Some(craft_furnace));
         }
 
         let prepare = InventoryGoal::empty()
@@ -448,7 +447,7 @@ impl MineDelvingGoal {
         };
 
         if !prepare.is_completed(game_state)? {
-            return Ok(prepare.into());
+            return Ok(Some(prepare.into()));
         }
 
         let organization = OrganizeInventoryGoal::new(|item| {
@@ -471,7 +470,27 @@ impl MineDelvingGoal {
             }
         });
         if !organization.is_completed(game_state) {
-            return Ok(organization.into());
+            return Ok(Some(organization.into()));
+        }
+
+        Ok(None)
+    }
+
+    fn at_mine_entrance(
+        &self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        // If there's anything to prepare before going down, do so.
+        // The check for the `mine_elevator_menu` is to avoid an edge
+        // case that occurs if the furnaces finish smelting at the
+        // exact same time that we opened the menu.
+        if let Some(prepare) = self.before_descending_into_mine(game_state)? {
+            let cleanup = MenuCloser::new();
+            if !cleanup.is_completed(game_state) {
+                return Ok(cleanup.into());
+            }
+            return Ok(prepare.into());
         }
 
         let elevator_depth =
