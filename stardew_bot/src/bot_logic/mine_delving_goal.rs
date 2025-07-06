@@ -314,7 +314,8 @@ impl MineDelvingGoal {
         }
 
         let mine_elevator = game_state.get_mine_elevator()?;
-        let walkable = game_state.current_room()?.pathfinding().walkable();
+        let mines = game_state.current_room()?;
+        let walkable = mines.pathfinding().walkable();
 
         let opt_build_next = OFFSETS_ELEVATOR_TO_FURNACE
             .iter()
@@ -334,6 +335,15 @@ impl MineDelvingGoal {
             return Ok(Some(
                 UseItemOnTile::new(Item::FURNACE, "Mine", tile).into(),
             ));
+        }
+
+        let all_furnaces_running = mines
+            .objects
+            .iter()
+            .filter_map(|obj| obj.kind.as_furnace())
+            .all(|furnace| furnace.has_held_item && !furnace.ready_to_harvest);
+        if !all_furnaces_running {
+            return Ok(None);
         }
 
         let prepare = InventoryGoal::current()
