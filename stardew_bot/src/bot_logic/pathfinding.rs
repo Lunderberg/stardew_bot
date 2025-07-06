@@ -318,6 +318,10 @@ impl Pathfinding<'_> {
         self.movement_cost().map(|opt_cost| opt_cost.is_some())
     }
 
+    pub fn clear(&self) -> TileMap<bool> {
+        self.movement_cost().map(|opt_cost| opt_cost == &Some(0))
+    }
+
     pub fn reachable(&self, initial: Vector<isize>) -> TileMap<bool> {
         let walkable = self.walkable();
 

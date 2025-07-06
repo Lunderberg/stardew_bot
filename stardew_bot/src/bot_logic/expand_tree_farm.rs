@@ -39,7 +39,7 @@ impl ExpandTreeFarm {
             .pathfinding()
             .include_border(true)
             .distances(initial_tile);
-        let walkable = farm.pathfinding().walkable();
+        let clear_tiles = farm.pathfinding().clear();
 
         let opt_tree_seed =
             game_state.player.inventory.iter_items().find(|item| {
@@ -57,7 +57,7 @@ impl ExpandTreeFarm {
         let iter_plant_tree = plan
             .iter_planned_trees()
             .filter(|&tile| !current_trees.is_set(tile))
-            .filter(|&tile| walkable.is_set(tile))
+            .filter(|&tile| clear_tiles.is_set(tile))
             .filter_map(|tile| {
                 opt_tree_seed.map(|seed| (tile, Some(seed.clone())))
             });
