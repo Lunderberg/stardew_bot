@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
@@ -101,6 +101,12 @@ impl BotGoal for GenericDay {
                 .then(
                     InventoryGoal::empty()
                         .with(Item::HOE)
+                        .take_if(|item| {
+                            matches!(
+                                item.category,
+                                Some(ItemCategory::Gem | ItemCategory::Mineral)
+                            )
+                        })
                         .with(Item::GEODE.with_count(1000))
                         .with(Item::FROZEN_GEODE.with_count(1000))
                         .with(Item::MAGMA_GEODE.with_count(1000))

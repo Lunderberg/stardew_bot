@@ -42,6 +42,11 @@ pub struct InventoryGoal {
     /// `stash_unspecified_items` is enabled.
     keep_if: Option<Box<dyn Fn(&Item) -> bool>>,
 
+    /// If present, any item for which this function returns true will
+    /// be taken from the storage chests, even if the
+    /// `stash_unspecified_items` is enabled.
+    take_if: Option<Box<dyn Fn(&Item) -> bool>>,
+
     /// If true, try to use this many slots to hold items to eat for
     /// stamina recovery.
     stamina_recovery_slots: usize,
@@ -106,6 +111,7 @@ impl InventoryGoal {
             bounds: Default::default(),
             stash_unspecified_items: false,
             keep_if: None,
+            take_if: None,
             stamina_recovery_slots: 0,
             with_weapon: false,
         }
@@ -168,6 +174,13 @@ impl InventoryGoal {
     pub fn keep_if(self, func: impl Fn(&Item) -> bool + 'static) -> Self {
         Self {
             keep_if: Some(Box::new(func)),
+            ..self
+        }
+    }
+
+    pub fn take_if(self, func: impl Fn(&Item) -> bool + 'static) -> Self {
+        Self {
+            take_if: Some(Box::new(func)),
             ..self
         }
     }
@@ -335,14 +348,21 @@ impl InventoryGoal {
                         break 'opt_new_count None;
                     }
 
+                    let full_item = game_state
+                        .statics
+                        .enrich_item(item.clone().into())
+                        .with_count(*count);
                     if let Some(keep_if) = &self.keep_if {
-                        let full_item = game_state
-                            .statics
-                            .enrich_item(item.clone().into())
-                            .with_count(*count);
                         if keep_if(&full_item) {
                             // This item passes the check to be kept
                             // in the inventory.
+                            break 'opt_new_count None;
+                        }
+                    }
+                    if let Some(take_if) = &self.take_if {
+                        if take_if(&full_item) {
+                            // This item passes the check to be taken
+                            // from the storage chests.
                             break 'opt_new_count None;
                         }
                     }
@@ -370,6 +390,22 @@ impl InventoryGoal {
                     .map(|new_count| (item.clone(), new_count))
             })
             .collect();
+
+        // Items that pass the `take_if` check should be grabbed out
+        // of storage.
+        if let Some(take_if) = &self.take_if {
+            iter_chest_items()?
+                .map(|(_, _, item)| item)
+                .filter(|item| take_if(item))
+                .for_each(|item| {
+                    let count = chest_to_player
+                        .entry(item.id.clone())
+                        .or_insert_with(|| {
+                            player_contents.get(&item.id).cloned().unwrap_or(0)
+                        });
+                    *count += item.count;
+                });
+        }
 
         // If the player has no weapon, wants one, and there's one
         // available to pick up, add it to the list of items to pick
