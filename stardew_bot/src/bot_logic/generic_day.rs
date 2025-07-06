@@ -74,8 +74,9 @@ impl BotGoal for GenericDay {
                 .then(WaterCropsGoal::new())
                 .then(ClearFarmGoal::new().stop_time(2000))
                 .then(ExpandTreeFarm::new())
-        } else if current_day >= 5
-            && game_state.globals.lowest_mine_level_reached < 40
+        } else if current_day == 5
+            || (current_day > 5
+                && game_state.globals.lowest_mine_level_reached < 40)
         {
             stack
                 .then(WaterCropsGoal::new())
