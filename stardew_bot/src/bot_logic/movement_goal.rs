@@ -14,7 +14,7 @@ use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::{GraphSearch, SearchNodeMetadata},
     impl_tile_map_graph_search::point_to_point_lower_bound,
-    WaitUntilTimeOfDay,
+    GameStateExt as _, WaitUntilTimeOfDay,
 };
 
 /// Epsilon distance (in tiles) to consider a target reached
@@ -31,6 +31,10 @@ pub struct MovementGoal {
     target_room: String,
     target_position: Vector<f32>,
     tolerance: f32,
+}
+
+pub struct GoToRoomGoal {
+    target_room: String,
 }
 
 pub struct LocalMovementGoal {
@@ -323,6 +327,13 @@ impl MovementGoal {
     }
 }
 
+impl GoToRoomGoal {
+    pub fn new(target_room: impl Into<String>) -> Self {
+        let target_room = target_room.into();
+        Self { target_room }
+    }
+}
+
 impl LocalMovementGoal {
     pub fn new(
         room_name: String,
@@ -468,6 +479,27 @@ impl BotGoal for MovementGoal {
             self.target_position, self.target_room
         )
         .into()
+    }
+}
+
+impl BotGoal for GoToRoomGoal {
+    fn description(&self) -> Cow<'static, str> {
+        format!("Go to '{}'", self.target_room).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        _actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        if game_state.player.room_name == self.target_room {
+            Ok(BotGoalResult::Completed)
+        } else {
+            let entrance = game_state.closest_entrance(&self.target_room)?;
+            let goal =
+                MovementGoal::new(self.target_room.clone(), entrance.into());
+            Ok(goal.into())
+        }
     }
 }
 
