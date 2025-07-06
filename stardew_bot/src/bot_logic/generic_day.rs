@@ -55,22 +55,24 @@ impl BotGoal for GenericDay {
             .iter_planted_seeds()
             .any(|seed| seed == &Item::KALE_SEEDS.id);
 
-        let stack = LogicStack::new()
-            .then(CheckAllMail)
-            .then(HarvestCropsGoal::new());
+        let stack = LogicStack::new().then(CheckAllMail);
 
         let stack = if !has_fishing_rod {
             stack
+                .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::OceanByWilly))
         } else if game_state.daily.is_raining {
+            // TODO: Conditionally apply HarvestCropsGoal, based on
+            // whether delaying the harvest will prevent a harvest at
+            // the end of the season.
             stack
-                .then(WaterCropsGoal::new())
-                .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::River).stop_time(2400))
+                .then(HarvestCropsGoal::new())
         } else if current_day == 4 {
             stack
+                .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
                 .then(ClearFarmGoal::new().stop_time(2000))
                 .then(ExpandTreeFarm::new())
@@ -79,18 +81,21 @@ impl BotGoal for GenericDay {
                 && game_state.globals.lowest_mine_level_reached < 40)
         {
             stack
+                .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 && any_kale_planted {
             let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
             stack
+                .then(HarvestCropsGoal::new())
                 .then(crops)
                 .then(ExpandTreeFarm::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
             let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
             stack
+                .then(HarvestCropsGoal::new())
                 .then(
                     crops
                         .clone()
@@ -139,6 +144,7 @@ impl BotGoal for GenericDay {
                 .then(crops.clone())
         } else {
             stack
+                .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::Lake))
