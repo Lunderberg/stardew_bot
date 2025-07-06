@@ -126,6 +126,12 @@ impl PlantCropsGoal {
         // cause the bot to think the tile requires seeds.
         assume_watered: bool,
     ) -> Option<Option<Item>> {
+        let is_seed = statics
+            .item_data
+            .get(goal)
+            .map(|data| matches!(data.category, ItemCategory::Seed))
+            .unwrap_or(false);
+
         if let Some(current) = opt_current {
             match current {
                 ObjectKind::Sprinkler(sprinkler) if goal == &sprinkler.id() => {
@@ -135,7 +141,9 @@ impl PlantCropsGoal {
 
                 ObjectKind::HoeDirt(HoeDirt {
                     is_watered: false, ..
-                }) if !assume_watered => Some(Some(Item::WATERING_CAN)),
+                }) if is_seed && !assume_watered => {
+                    Some(Some(Item::WATERING_CAN))
+                }
 
                 ObjectKind::HoeDirt(HoeDirt { crop: None, .. }) => {
                     Some(Some(goal.clone().into()))
@@ -179,11 +187,6 @@ impl PlantCropsGoal {
                 }
             }
         } else {
-            let is_seed = statics
-                .item_data
-                .get(goal)
-                .map(|data| matches!(data.category, ItemCategory::Seed))
-                .unwrap_or(false);
             let item = if is_seed {
                 Item::HOE
             } else {
