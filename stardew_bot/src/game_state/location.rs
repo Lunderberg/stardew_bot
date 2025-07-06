@@ -466,6 +466,9 @@ pub struct Character {
     /// The health of the character.  Only present for monsters.
     pub health: Option<i32>,
 
+    /// If the character ignores collisions.  True for flying monsters, false for other monster types
+    pub ignores_collisions: bool,
+
     pub is_invisible_duggy: bool,
 
     pub is_waiting_rock_crab: bool,
@@ -1011,6 +1014,7 @@ impl Location {
              y: f32,
              sprite_width: i32,
              health: Option<i32>,
+             ignores_collisions: bool,
              is_invisible_duggy: bool,
              is_waiting_rock_crab: bool|
              -> Character {
@@ -1019,6 +1023,7 @@ impl Location {
                     position: Vector::new(x, y),
                     sprite_width,
                     health,
+                    ignores_collisions,
                     is_invisible_duggy,
                     is_waiting_rock_crab,
                 }
@@ -1568,10 +1573,14 @@ impl Location {
                             .spriteWidth
                             .value;
 
-                        let health = character
-                            .as::<StardewValley.Monsters.Monster>()
-                            .health
-                            .value;
+                        let monster = character.as::<StardewValley.Monsters.Monster>();
+
+                        let health = monster.health.value;
+                        let ignores_collisions = if monster.is_some() {
+                            !monster.isGlider.value
+                        } else {
+                            false
+                        };
 
                         let is_invisible_duggy = character.isInvisible.value;
 
@@ -1588,6 +1597,7 @@ impl Location {
                             pos.X, pos.Y,
                             sprite_width,
                             health,
+                            ignores_collisions,
                             is_invisible_duggy,
                             is_waiting_rock_crab,
                         )

@@ -1,6 +1,6 @@
 use crate::{
     bot_logic::UseItemOnTile,
-    game_state::{Item, WeaponKind},
+    game_state::{Item, TileMap, Vector, WeaponKind},
     Error, GameAction, GameState,
 };
 
@@ -114,18 +114,64 @@ impl ClubSmashNearby {
         game_state: &GameState,
     ) -> Result<Option<f32>, Error> {
         let player_pos = game_state.player.position / 64.0;
+        let player_tile = game_state.player.tile();
+        let room = game_state.current_room()?;
+        let mut opt_clear_tiles: Option<TileMap<bool>> = None;
+
         let opt_dist = game_state
             .current_room()?
             .characters
             .iter()
             .filter(|character| character.is_monster())
-            .map(|character| character.center_pos())
-            .map(|pos| pos - player_pos)
-            .map(|offset| {
-                let dx = offset.right.abs();
-                let dy = offset.down.abs();
-                dx.max(dy)
+            .filter(|monster| {
+                if monster.ignores_collisions {
+                    // This is a flying monster (e.g. bat/ghost), and
+                    // can be hit through obstacles.
+                    return true;
+                }
+                if (monster.center_pos() - player_pos).max_abs()
+                    > Self::START_SMASH_DISTANCE * 2.0
+                {
+                    // This monster is far away, no need to do any
+                    // collision checks.
+                    return false;
+                }
+
+                let monster_tile = monster.tile();
+
+                let mut offset = monster_tile - player_tile;
+                if offset.right.abs() + offset.down.abs() <= 1 {
+                    // This monster's tile is the same or cardinally
+                    // adjacent to the player.  No need to do a
+                    // collision check, because there are no
+                    // intermediate tiles that could contain a block.
+                    return true;
+                }
+
+                let clear_tiles = opt_clear_tiles
+                    .get_or_insert_with(|| room.pathfinding().clear());
+
+                // Iterates through the tiles that must be clear in
+                // order to have line-of-sight to the enemy.  Starting
+                // at the player's tile, steps along cardinal
+                // directions toward the enemy's location.
+                let mut iter_tiles =
+                    std::iter::from_fn(|| -> Option<Vector<isize>> {
+                        (offset != Vector::zero()).then(|| {
+                            if offset.down.abs() >= offset.right.abs() {
+                                offset.down -= offset.down.signum();
+                            } else {
+                                offset.right -= offset.right.signum();
+                            }
+
+                            monster_tile + offset
+                        })
+                    });
+
+                iter_tiles.all(|tile| clear_tiles.is_set(tile))
             })
+            .map(|character| character.center_pos())
+            .map(|pos| (pos - player_pos).max_abs())
             .min_by(|a, b| a.total_cmp(b));
         Ok(opt_dist)
     }

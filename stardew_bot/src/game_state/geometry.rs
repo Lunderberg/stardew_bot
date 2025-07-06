@@ -105,6 +105,21 @@ impl<T> Vector<T> {
     {
         self.map(Into::into)
     }
+
+    pub fn max_abs(self) -> T
+    where
+        T: num::Signed,
+        T: PartialOrd,
+    {
+        let dx = self.right.abs();
+        let dy = self.down.abs();
+
+        if dx < dy {
+            dy
+        } else {
+            dx
+        }
+    }
 }
 
 impl Vector<f32> {
