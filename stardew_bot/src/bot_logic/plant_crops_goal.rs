@@ -64,6 +64,9 @@ pub struct PlantCropsGoal {
 struct CropPlantingPlan {
     /// After planting, what should be located at each tile.
     final_state: HashMap<Vector<isize>, ItemId>,
+
+    /// Spaces surrounding the farm that should be cleared.
+    empty_spaces: HashSet<Vector<isize>>,
 }
 
 impl PlantCropsGoal {
@@ -236,7 +239,13 @@ impl PlantCropsGoal {
                     .unwrap_or(true)
             });
 
-        Ok(Either::Right(iter_steps))
+        let iter_clear = farm
+            .objects
+            .iter()
+            .filter(|obj| plan.empty_spaces.contains(&obj.tile))
+            .map(|obj| (obj.tile, obj.kind.get_tool()));
+
+        Ok(Either::Right(iter_steps.chain(iter_clear)))
     }
 
     /// Check if the planting has been completed.
@@ -256,20 +265,6 @@ impl PlantCropsGoal {
         }
         let plan = FarmPlan::plan(game_state)?;
 
-        let farm = game_state.get_room("Farm")?;
-
-        let sprinkler_locations: HashSet<_> = farm
-            .objects
-            .iter()
-            .filter(|obj| matches!(obj.kind, ObjectKind::Sprinkler(_)))
-            .map(|obj| obj.tile)
-            .collect();
-
-        let current_sprinklers: Vec<_> = plan
-            .iter_regular_sprinklers()
-            .filter(|tile| sprinkler_locations.contains(tile))
-            .collect();
-
         let iter_seeds = self.seeds.iter().flat_map(|to_plant| {
             std::iter::repeat_n(to_plant.id.clone(), to_plant.count)
         });
@@ -281,20 +276,29 @@ impl PlantCropsGoal {
         }
         .zip(iter_seeds);
 
-        let iter_sprinklers = current_sprinklers
-            .into_iter()
-            .chain(plan.iter_regular_sprinklers())
+        let iter_sprinklers = plan
+            .iter_regular_sprinklers()
             .map(|tile| (tile, ItemId::SPRINKLER));
 
         let iter_scarecrows = plan
             .iter_scarecrows()
             .map(|tile| (tile, Item::SCARECROW.id.clone()));
 
-        let final_state = iter_seed_tiles
+        let final_state: HashMap<_, _> = iter_seed_tiles
             .chain(iter_sprinklers)
             .chain(iter_scarecrows)
             .collect();
-        self.plan = Some(CropPlantingPlan { final_state });
+
+        let empty_spaces = final_state
+            .iter()
+            .flat_map(|(tile, _)| tile.iter_cardinal())
+            .filter(|adj| !final_state.contains_key(adj))
+            .collect();
+
+        self.plan = Some(CropPlantingPlan {
+            final_state,
+            empty_spaces,
+        });
 
         Ok(())
     }

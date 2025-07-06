@@ -155,6 +155,7 @@ impl FarmPlan {
                 .filter(|obj| matches!(obj.kind, ObjectKind::Scarecrow))
                 .map(|obj| obj.tile)
                 .for_each(|scarecrow| {
+                    scarecrows.push(scarecrow);
                     covered.extend(
                         to_cover.extract_if(|b| scarecrow.dist2(*b) < 81),
                     );
