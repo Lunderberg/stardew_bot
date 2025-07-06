@@ -22,6 +22,14 @@ impl BotInterrupt for KeyEventInterrupt {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
+        if game_state.player.using_tool || game_state.any_menu_open() {
+            return Ok(None);
+        }
+
+        let check_flag = |name: &str| -> bool {
+            game_state.globals.events_triggered.contains(name)
+        };
+
         let current_day = game_state
             .globals
             .stats
@@ -29,8 +37,7 @@ impl BotInterrupt for KeyEventInterrupt {
             .cloned()
             .unwrap_or(0);
 
-        let community_center_unlocked =
-            game_state.globals.events_triggered.contains("ccDoorUnlock");
+        let community_center_unlocked = check_flag("ccDoorUnlock");
         let can_unlock_community_center = current_day >= 5
             && !game_state.daily.is_raining
             && (800..1300).contains(&game_state.globals.in_game_time);
@@ -51,12 +58,7 @@ impl BotInterrupt for KeyEventInterrupt {
         // town from the bus stop on a sunny day between 8 AM and 1
         // PM, on day 5 or later), enter the community center and
         // trigger the menu.
-        if community_center_unlocked
-            && !game_state
-                .globals
-                .events_triggered
-                .contains("seenJunimoNote")
-        {
+        if community_center_unlocked && !check_flag("seenJunimoNote") {
             // The bundle locations in the community center are
             // hard-coded, and not defined in terms of tile
             // properties.  Therefore, hard-coding the locations here
@@ -65,6 +67,10 @@ impl BotInterrupt for KeyEventInterrupt {
                 .then(ActivateTile::new("CommunityCenter", Vector::new(14, 23)))
                 .then(MenuCloser::new());
             return Ok(Some(goal.into()));
+        }
+
+        if check_flag("wizardJunimoNote") && !check_flag("canReadJunimoText") {
+            return Ok(Some(GoToRoomGoal::new("WizardHouse").into()));
         }
 
         Ok(None)
