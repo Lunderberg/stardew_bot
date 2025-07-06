@@ -134,7 +134,7 @@ impl BotGoal for GenericDay {
                 .then(crops.clone().only_buy_missing_seeds())
                 .then(BuyFromMerchantGoal::new(
                     "Saloon",
-                    Item::SALAD.with_count(10),
+                    Item::SALAD.with_count(20),
                 ))
                 .then(crops.clone())
         } else {
