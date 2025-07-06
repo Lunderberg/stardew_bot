@@ -647,9 +647,13 @@ impl BotLogic {
                              and chose to delegate to '{0}', \
                              executing it again would enter an infinite loop.",
                             self.current_goal().unwrap().description(),
-                            match &self.stack[prev] {
-                                LogicStackItem::Goal(prev_goal) => prev_goal.description(),
-                                _ => unreachable!("Contained a BotGoal first time around")
+                            match self.stack.get(prev) {
+                                Some(LogicStackItem::Goal(prev_goal)) => prev_goal.description(),
+                                Some(_) | None => format!(
+                                    "Should be unreachable, \
+                                     since {prev} contained a BotGoal \
+                                     the first time around"
+                                ).into(),
                             }
                         );
                     }
