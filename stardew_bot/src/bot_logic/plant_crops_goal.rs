@@ -629,9 +629,12 @@ impl BotGoal for PlantCropsGoal {
             })
             .filter(|(tile, _)| distances.is_some(*tile))
             .min_by_key(|(tile, opt_item)| {
+                let need_clay_before_deadline =
+                    self.opportunistic_clay_farming.is_some()
+                        && self.stop_time < 2600;
                 let dist = distances[*tile].unwrap();
                 (
-                    self.opportunistic_clay_farming.is_some()
+                    need_clay_before_deadline
                         && opt_item
                             .as_ref()
                             .map(|item| item.is_same_item(&Item::WATERING_CAN))
