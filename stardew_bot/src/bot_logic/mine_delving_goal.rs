@@ -781,34 +781,45 @@ impl BotGoal for MineSingleLevel {
             .map(|opt| opt.as_ref())
             .flatten();
 
-        let stack = LogicStack::new();
-        let stack = if let Some(tool) = opt_tool {
+        let current_tick = game_state.globals.game_tick;
+        let num_objects = current_room.objects.len();
+        let cancellation = move |game_state: &GameState| -> bool {
+            if game_state.player.using_tool || game_state.any_menu_open() {
+                // This action has some state to it, and shouldn't
+                // be interrupted.
+                return false;
+            }
+
+            // If more than half a second has passed, clear out the
+            // current movement/tile goals and re-plan.
+            let time_passed = game_state.globals.game_tick > current_tick + 30;
+
+            // If the number of objects in the room increased, then
+            // cancel out and re-plan.  This can occur if a nearby
+            // enemy is killed, dropping a ladder.
+            let new_object_appeared = {
+                let current_num_objects = game_state
+                    .current_room()
+                    .map(|room| room.objects.len())
+                    .unwrap_or(num_objects);
+                current_num_objects > num_objects
+            };
+            time_passed || new_object_appeared
+        };
+
+        if let Some(tool) = opt_tool {
             let room_name = game_state.player.room_name.clone();
             let goal = UseItemOnTile::new(
                 tool.clone(),
                 room_name.clone(),
                 target_tile,
             );
-            stack.then(goal)
+            Ok(goal.cancel_if(cancellation).into())
         } else {
             let room_name = game_state.player.room_name.clone();
             let goal = ActivateTile::new(room_name.clone(), target_tile);
-            stack.then(goal)
-        };
-
-        let num_objects = current_room.objects.len();
-        let stack = stack.cancel_if(move |game_state| {
-            // If the number of objects in the room increased, then
-            // cancel out and re-plan.  This can occur if a nearby
-            // enemy is killed, dropping a ladder.
-            let current_num_objects = game_state
-                .current_room()
-                .map(|room| room.objects.len())
-                .unwrap_or(num_objects);
-            current_num_objects > num_objects
-        });
-
-        Ok(stack.into())
+            Ok(goal.cancel_if(cancellation).into())
+        }
     }
 }
 
