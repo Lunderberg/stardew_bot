@@ -17,6 +17,9 @@ pub struct Location {
     /// this location.
     pub name: String,
 
+    /// Map-level properties of this location
+    pub properties: HashMap<String, String>,
+
     /// The size of the room.
     pub shape: Vector<isize>,
 
@@ -474,6 +477,12 @@ pub struct Character {
     pub is_waiting_rock_crab: bool,
 }
 
+#[derive(RustNativeObject, Clone, Debug)]
+struct MapProperty {
+    key: String,
+    value: String,
+}
+
 #[derive(RustNativeObject, Default, Clone, Debug)]
 struct MapTileSheets {
     known_sheets: HashSet<Pointer>,
@@ -502,6 +511,14 @@ impl Location {
     pub(crate) fn def_read_location(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
+        graph.named_native_function(
+            "new_property",
+            |key: &str, value: &str| MapProperty {
+                key: key.to_string(),
+                value: value.to_string(),
+            },
+        )?;
+
         graph.named_native_function(
             "new_warp",
             |location: &Vector<isize>,
@@ -1041,6 +1058,7 @@ impl Location {
         graph.named_native_function(
             "new_location",
             |name: &str,
+             properties: &Vec<MapProperty>,
              shape: &Vector<isize>,
              warps: &Vec<Warp>,
              resource_clumps: &Vec<ResourceClump>,
@@ -1053,6 +1071,11 @@ impl Location {
              buildings: &Vec<Building>,
              characters: &Vec<Character>,
              mineshaft_details: Option<&MineshaftDetails>| {
+                let properties = properties
+                    .iter()
+                    .map(|prop| (prop.key.to_string(), prop.value.to_string()))
+                    .collect();
+
                 let blocked = tiles.collect_blocked_tiles(*shape);
                 let diggable = tiles.collect_diggable_tiles(*shape);
                 let action_tiles = tiles.collect_action_tiles();
@@ -1087,6 +1110,7 @@ impl Location {
 
                 Location {
                     name: name.into(),
+                    properties,
                     shape: shape.clone(),
                     warps,
                     resource_clumps: resource_clumps.clone(),
@@ -1618,6 +1642,29 @@ impl Location {
                 let height = size.Height.prim_cast::<usize>();
                 let shape = new_vector_isize(width, height);
 
+                let properties = {
+                    let dict = location
+                        .map
+                        .m_propertyCollection;
+                    let num_entries = dict._entries.len();
+                    (0..num_entries)
+                        .map(|i| dict._entries[i])
+                        .map(|entry| {
+                            let key = entry
+                                .key
+                                .read_string();
+
+                            let value = entry
+                                .value
+                                .m_value
+                                .read_string();
+
+                            new_property(key, value)
+                        })
+                        .filter(|prop| prop.is_some())
+                        .collect()
+                };
+
                 // Background features of the map.
                 let back_layer = location
                     .backgroundLayers
@@ -1961,6 +2008,7 @@ impl Location {
 
                 new_location(
                     name,
+                    properties,
                     shape,
                     warps,
                     resource_clumps,
@@ -2077,6 +2125,68 @@ impl Location {
                 })
                 .for_each(|warp| location.warps.push(warp));
         }
+    }
+
+    /// Update target locations of warps to farm
+    ///
+    /// For warps going to the farm, the target of the warp may be
+    /// updated as part of the `Game1.warpFarmer` function, prior to
+    /// changing the player's location.  This is presumably to handle
+    /// different map layouts, including maps defined in mods.
+    ///
+    /// Rather than changing the warp's target at the point-of-use,
+    /// it's simpler for the bot to instead update the warp to contain
+    /// the corrected output location of each warp.
+    pub(crate) fn fix_farm_warps(locations: &mut [Location]) {
+        let Some(farm) = locations.iter().find(|loc| loc.name == "Farm") else {
+            return;
+        };
+
+        let get_tile = |name: &str| -> Vector<isize> {
+            let value = farm.properties.get(name).unwrap_or_else(|| {
+                panic!("Farm is missing property named {name}")
+            });
+            let (right, down) =
+                value.split(' ').collect_tuple().unwrap_or_else(|| {
+                    panic!(
+                        "Property {name} should contain two integers, \
+                         but instead was '{value}'"
+                    )
+                });
+            let right = right.parse().unwrap();
+            let down = down.parse().unwrap();
+            Vector::new(right, down)
+        };
+
+        let backwoods_entry = get_tile("BackwoodsEntry");
+        let bus_stop_entry = get_tile("BusStopEntry");
+        let farm_cave_entry = get_tile("FarmCaveEntry");
+        let forest_entry = get_tile("ForestEntry");
+
+        locations
+            .iter_mut()
+            .flat_map(|loc| {
+                let name = &loc.name;
+                loc.warps.iter_mut().map(move |warp| (name, warp))
+            })
+            .filter(|(_, warp)| warp.target_room == "Farm")
+            .for_each(|(from_loc, warp)| {
+                if from_loc == "FarmCave" && warp.target == Vector::new(34, 6) {
+                    warp.target = farm_cave_entry;
+                } else if from_loc == "Forest"
+                    && warp.target == Vector::new(41, 64)
+                {
+                    warp.target = forest_entry;
+                } else if from_loc == "BusStop"
+                    && warp.target == Vector::new(79, 17)
+                {
+                    warp.target = bus_stop_entry;
+                } else if from_loc == "Backwoods"
+                    && warp.target == Vector::new(40, 0)
+                {
+                    warp.target = backwoods_entry;
+                }
+            });
     }
 
     pub fn bounds(&self) -> Rectangle<isize> {
