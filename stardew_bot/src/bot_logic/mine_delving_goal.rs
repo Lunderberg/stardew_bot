@@ -8,8 +8,8 @@ use crate::{
         InventoryGoal, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
     game_state::{
-        Item, ItemId, Object, ObjectKind, Quality, ResourceClumpKind,
-        SeededRng, StoneKind, Vector,
+        Item, ItemCategory, ItemId, Object, ObjectKind, Quality,
+        ResourceClumpKind, SeededRng, StoneKind, Vector,
     },
     Error, GameAction, GameState,
 };
@@ -260,7 +260,7 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::current()
             .room("Mine")
-            .with_exactly(
+            .with(
                 Item::COAL
                     .clone()
                     .with_count(num_iron_bars + num_copper_bars),
@@ -416,6 +416,27 @@ impl MineDelvingGoal {
             .with(Item::FROZEN_GEODE.clone().with_count(1000))
             .with(Item::MAGMA_GEODE.clone().with_count(1000))
             .with(Item::OMNI_GEODE.clone().with_count(1000));
+
+        let prepare = if game_state.globals.in_game_time >= 2300 {
+            // If it's close to the end of the day, grab items that
+            // should be brought back to the farm for the next day.
+            let iter_gems = InventoryGoal::empty()
+                .room("Mine")
+                .iter_stored_and_carried(game_state)?
+                .filter(|item| {
+                    matches!(
+                        item.category,
+                        Some(ItemCategory::Gem | ItemCategory::Mineral)
+                    )
+                })
+                .sorted_by_key(|item| std::cmp::Reverse(item.stack_price()))
+                .take(5)
+                .cloned();
+            prepare.with(iter_gems)
+        } else {
+            prepare
+        };
+
         if !prepare.is_completed(game_state)? {
             return Ok(prepare.into());
         }
