@@ -6,7 +6,9 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, LogicStack, LogicStackItem,
+    },
     MovementGoal, SelectItemGoal,
 };
 
@@ -14,8 +16,11 @@ pub struct UseItemOnTile {
     item: Item,
     room: String,
     tile: Vector<isize>,
-    item_usage_game_tick: Option<i32>,
-    animation_cancel_sent: bool,
+    item_used: bool,
+}
+
+struct SwingWithAnimationCancel {
+    tool_used: bool,
 }
 
 impl UseItemOnTile {
@@ -29,8 +34,7 @@ impl UseItemOnTile {
             item,
             room,
             tile,
-            item_usage_game_tick: None,
-            animation_cancel_sent: false,
+            item_used: false,
         }
     }
 }
@@ -46,86 +50,13 @@ impl BotGoal for UseItemOnTile {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let player = &game_state.player;
+        let player_tile = player.tile();
 
-        if player.using_tool {
-            let is_tool = player
-                .selected_item()
-                .map(|item| item.id.item_id.starts_with("(T)"))
-                .unwrap_or(false);
-
-            let can_animation_cancel = if is_tool {
-                // When a tool has an effect, the `last_click` field
-                // is zeroed out.  At this point, we know that the
-                // tool's effect has been applied, and the remaining
-                // animation can be skipped.
-                player.last_click == Vector::zero()
-            } else {
-                // For a melee weapon, the `last_click` field is
-                // zeroed out almost immediately, but the weapon has
-                // an effect for each animation frame of the swipe.
-                // The animation has 7 frames.  The first 5 frames
-                // take 175 ms total.  The 6th frame takes longer,
-                // (e.g. 130 ms for the Scythe).  The player can only
-                // move again after the 6th frame finishes.
-                //
-                // Therefore, animation cancel out of the swipe when
-                // reaching the 6th frame.
-                player
-                    .weapon_swipe_animation_frame
-                    .map(|frame| frame >= 5)
-                    .unwrap_or(false)
-            };
-            if can_animation_cancel {
-                // If this is the tool usage from the current
-                // `UseItemOnTile` goal, then mark the animation
-                // cancel as complete.  (Since it's possible that the
-                // in-use tool is left over from a previous
-                // `UseItemOnTile`, only mark the animation-cancel as
-                // complete if the item usage is also complete.)
-                if self.item_usage_game_tick.is_some() {
-                    self.animation_cancel_sent = true;
-                }
-                actions.do_action(GameAction::AnimationCancel);
-            }
-            return Ok(BotGoalResult::InProgress);
-        }
-
-        let player_tile = game_state.player.tile();
-
-        let wait_for_animation_cancel = {
-            let id = &self.item.id.item_id;
-            id.starts_with("(T)") || id.starts_with("(W)")
-        };
-
-        if self
-            .item_usage_game_tick
-            .map(|usage_tick| {
-                !wait_for_animation_cancel
-                    || self.animation_cancel_sent
-                    || usage_tick + 30 < game_state.globals.game_tick
-            })
-            .unwrap_or(false)
-        {
-            // The item has been used on the tile.  In addition, one
-            // of the following three conditions has been met.
-            //
-            // 1. The item did not require animation canceling.
-            //
-            // 2. The tool's animation has been canceled.
-            //
-            // 3. At least half a second has passed since the usage of
-            //    the tool.  (e.g. Resuming after an interrupt that
-            //    triggered between the tool usage and the animation
-            //    canceling.)
+        if self.item_used {
             return Ok(BotGoalResult::Completed);
         }
 
-        if game_state
-            .player
-            .inventory
-            .current_slot(&self.item)
-            .is_none()
-        {
+        if player.inventory.current_slot(&self.item).is_none() {
             return Ok(BotGoalResult::Completed);
         }
 
@@ -165,7 +96,7 @@ impl BotGoal for UseItemOnTile {
             .with_tolerance(threshold);
 
         if !movement.is_completed(game_state) && !is_within_range(game_state) {
-            let room_name = game_state.player.room_name.clone();
+            let room_name = player.room_name.clone();
             let goal = LogicStack::new()
                 .then(movement)
                 .cancel_if(is_within_range)
@@ -192,7 +123,7 @@ impl BotGoal for UseItemOnTile {
                         })
                         .unwrap_or(true));
 
-        let player_pos = game_state.player.center_pos();
+        let player_pos = player.center_pos();
         if (requires_adjacent_tile && player_tile == self.tile)
             || (requires_noncolliding_tile
                 && player_pos.manhattan_dist(self.tile.into()) < 1.0)
@@ -207,8 +138,8 @@ impl BotGoal for UseItemOnTile {
                 .filter(|dir| clear_tiles[self.tile + dir.offset()])
                 .sorted_by(|&dir_a, &dir_b| {
                     let dot_product = |dir: Direction| {
-                        let player_offset = game_state.player.center_pos()
-                            - self.tile.map(|x| x as f32);
+                        let player_offset =
+                            player_pos - self.tile.map(|x| x as f32);
                         let dir_offset = dir.offset().map(|x| x as f32);
 
                         player_offset.dot(dir_offset)
@@ -222,19 +153,109 @@ impl BotGoal for UseItemOnTile {
             let dir_offset: Vector<f32> = dir.offset().into();
             let dir_scale = if requires_noncolliding_tile { 1.3 } else { 1.0 };
             let goal = MovementGoal::new(
-                game_state.player.room_name.clone(),
+                player.room_name.clone(),
                 tile + dir_offset * dir_scale,
             );
             return Ok(goal.into());
         }
 
         actions.do_action(GameAction::MouseOverTile(self.tile));
-        if game_state.inputs.mouse_tile_location == self.tile
-            && !game_state.inputs.left_mouse_down()
-        {
-            actions.do_action(GameAction::LeftClick);
-            self.item_usage_game_tick = Some(game_state.globals.game_tick);
+        if game_state.inputs.mouse_tile_location == self.tile {
+            self.item_used = true;
+            let wait_for_animation_cancel = {
+                let id = &self.item.id.item_id;
+                id.starts_with("(T)") || id.starts_with("(W)")
+            };
+            if wait_for_animation_cancel {
+                let stack: LogicStack = [
+                    LogicStackItem::PreventInterrupt,
+                    SwingWithAnimationCancel::new().into(),
+                ]
+                .into_iter()
+                .collect();
+                return Ok(stack.into());
+            } else {
+                actions.do_action(GameAction::LeftClick);
+            }
         }
+        Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl SwingWithAnimationCancel {
+    pub fn new() -> Self {
+        Self { tool_used: false }
+    }
+}
+
+impl BotGoal for SwingWithAnimationCancel {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
+        "Swing tool".into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        // Prior to starting this BotGoal, the player should already
+        // be lined up to use the tool, in the correct location, with
+        // the tool selected, and with the mouse in the appropriate
+        // location to use the tool.
+        //
+        // This is an implementation detail of `UseItemOnTile`,
+        // separated into a distinct `BotGoal` because this portion
+        // should not be interrupted.  (e.g. While a tool is swinging,
+        // if an enemy comes within range, the tool usage should be
+        // animation-cancelled prior to the interrupt triggering.)
+
+        let player = &game_state.player;
+        let using_tool = player.using_tool;
+
+        if !using_tool {
+            if self.tool_used {
+                // The tool use has been completed, and the animation
+                // has been cancelled.
+                return Ok(BotGoalResult::Completed);
+            } else {
+                // Start swinging the tool.
+                actions.do_action(GameAction::LeftClick);
+                return Ok(BotGoalResult::InProgress);
+            }
+        }
+
+        self.tool_used = true;
+
+        let is_tool = player
+            .selected_item()
+            .map(|item| item.id.item_id.starts_with("(T)"))
+            .unwrap_or(false);
+        let can_animation_cancel = if is_tool {
+            // When a tool has an effect, the `last_click` field
+            // is zeroed out.  At this point, we know that the
+            // tool's effect has been applied, and the remaining
+            // animation can be skipped.
+            player.last_click == Vector::zero()
+        } else {
+            // For a melee weapon, the `last_click` field is
+            // zeroed out almost immediately, but the weapon has
+            // an effect for each animation frame of the swipe.
+            // The animation has 7 frames.  The first 5 frames
+            // take 175 ms total.  The 6th frame takes longer,
+            // (e.g. 130 ms for the Scythe).  The player can only
+            // move again after the 6th frame finishes.
+            //
+            // Therefore, animation cancel out of the swipe when
+            // reaching the 6th frame.
+            player
+                .weapon_swipe_animation_frame
+                .map(|frame| frame >= 5)
+                .unwrap_or(false)
+        };
+        if can_animation_cancel {
+            actions.do_action(GameAction::AnimationCancel);
+        }
+
         Ok(BotGoalResult::InProgress)
     }
 }
