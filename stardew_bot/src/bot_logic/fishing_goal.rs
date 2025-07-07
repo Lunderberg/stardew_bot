@@ -4,10 +4,11 @@ use crate::{
     bot_logic::{
         BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, InventoryGoal,
         MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
-        StepCountForLuck,
+        StepCountForLuck, UseItemOnTile,
     },
     game_state::{
-        FacingDirection, Inventory, Item, ItemCategory, ItemId, Key, Vector,
+        FacingDirection, FishingRod, Inventory, Item, ItemCategory, ItemId,
+        Key, Quality, Vector,
     },
     Error, GameAction, GameState,
 };
@@ -15,7 +16,7 @@ use crate::{
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     movement_goal::{FaceDirectionGoal, MovementGoal},
-    OrganizeInventoryGoal,
+    ActivateTile, OrganizeInventoryGoal,
 };
 
 pub struct FishingGoal {
@@ -40,7 +41,9 @@ pub enum FishingLocation {
 }
 
 struct LoadBaitOntoFishingRod {
-    bait: ItemId,
+    /// The type of bait to load onto the fishing rod.  If None, will
+    /// load the same type of bait as is currently on the rod.
+    bait: Option<ItemId>,
 }
 
 struct FishSelling<'a>(&'a Inventory);
@@ -102,6 +105,17 @@ impl FishingLocation {
             .then(self.movement_goal())
             .then(FaceDirectionGoal(self.facing()))
     }
+
+    const fn bait_maker(&self) -> Option<(Vector<isize>, ItemId)> {
+        match self {
+            FishingLocation::River => {
+                Some((Vector::new(71, 49), ItemId::CATFISH))
+            }
+            FishingLocation::Ocean => None,
+            FishingLocation::OceanByWilly => None,
+            FishingLocation::Lake => None,
+        }
+    }
 }
 
 impl FishSelling<'_> {
@@ -136,10 +150,17 @@ impl BotGoal for FishingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let organization = OrganizeInventoryGoal::new(|item| {
+        let loc = self.loc;
+        let organization = OrganizeInventoryGoal::new(move |item| {
             use super::SortedInventoryLocation as Loc;
             if item.as_fishing_rod().is_some() {
                 Loc::HotBarLeft
+            } else if loc
+                .bait_maker()
+                .map(|(_, preferred)| preferred.item_id == item.id.item_id)
+                .unwrap_or(false)
+            {
+                Loc::HotBar
             } else if matches!(
                 item.category,
                 Some(ItemCategory::Fish | ItemCategory::Junk)
@@ -182,19 +203,51 @@ impl BotGoal for FishingGoal {
             return Ok(goal.into());
         };
 
-        let preparation = if game_state.player.room_name == "Farm" {
-            // Before leaving the farm, empty out the current
-            // inventory except for the fishing pole.
-            InventoryGoal::empty()
+        let opt_bait_maker = self
+            .loc
+            .bait_maker()
+            .map(|(bait_maker_tile, preferred_fish)| -> Result<_, Error> {
+                Ok(game_state
+                    .get_room(self.loc.room_name())?
+                    .objects
+                    .iter()
+                    .find(|obj| obj.tile == bait_maker_tile)
+                    .filter(|obj| obj.kind.as_bait_maker().is_some())
+                    .map(|bait_maker| (bait_maker, preferred_fish)))
+            })
+            .transpose()?
+            .flatten();
+
+        let has_bait_maker =
+            game_state.player.inventory.contains(&ItemId::BAIT_MAKER);
+
+        // Before leaving the farm, empty out the current inventory
+        // except for the fishing pole.  If not currently on the farm,
+        // can resume fishing without emptying out the inventory, so
+        // long as we have the fishing rod.
+        let mut preparation =
+            InventoryGoal::current().with(current_pole.clone());
+        if game_state.player.room_name == "Farm" {
+            preparation = preparation
+                .otherwise_empty()
                 .craft_missing()
-                .with(current_pole.clone())
-                .with(ItemId::BAIT_MAKER)
-        } else {
-            // If not currently on the farm, can resume fishing
-            // without emptying out the inventory, so long as we have
-            // the fishing rod.
-            InventoryGoal::new(current_pole.clone())
-        };
+                .with_exactly(
+                    ItemId::BAIT_MAKER
+                        .with_count(opt_bait_maker.is_none() as usize),
+                )
+                .with_exactly(
+                    InventoryGoal::current()
+                        .iter_stored_and_carried(game_state)?
+                        .map(|item| &item.id)
+                        .filter(|id| id.item_id == ItemId::CATFISH.item_id)
+                        .min_by_key(|item| item.quality)
+                        .map(|id| {
+                            id.clone().with_count(has_bait_maker as usize)
+                        })
+                        .unwrap_or(ItemId::CATFISH.with_count(0)),
+                );
+        }
+
         if !preparation.is_completed(game_state)? {
             return Ok(preparation.into());
         }
@@ -227,17 +280,23 @@ impl BotGoal for FishingGoal {
 
         // Load bait into fishing pole, if bait is available and the
         // fishing pole can use bait.
-        let goal = LoadBaitOntoFishingRod::new(ItemId::BAIT);
+        let goal = LoadBaitOntoFishingRod::new().bait(
+            self.loc
+                .bait_maker()
+                .filter(|_| opt_bait_maker.is_some() || has_bait_maker)
+                .map(|(_, preferred_fish)| ItemId::TARGETED_BAIT)
+                .unwrap_or(ItemId::BAIT),
+        );
         if !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
 
+        let fishing_rod = current_pole
+            .as_fishing_rod()
+            .expect("Guarded by earlier as_fishing_rod.is_some() check");
+
         if !using_bamboo_pole {
-            let opt_bait = current_pole
-                .as_fishing_rod()
-                .expect("Guarded by earlier as_fishing_rod.is_some() check")
-                .bait
-                .as_ref();
+            let opt_bait = fishing_rod.bait.as_ref();
 
             if in_game_time < 1700
                 && opt_bait
@@ -266,8 +325,12 @@ impl BotGoal for FishingGoal {
             }
         }
 
-        if !self.loc.is_completed(game_state) {
-            return Ok(self.loc.move_to_location().into());
+        let goal = MaintainStaminaGoal::new();
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
+        }
+        if game_state.player.current_stamina < 10.0 {
+            return Ok(BotGoalResult::Completed);
         }
 
         let select_pole = SelectItemGoal::new(current_pole.id.clone());
@@ -275,12 +338,59 @@ impl BotGoal for FishingGoal {
             return Ok(select_pole.into());
         }
 
-        let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
-            return Ok(goal.into());
+        if opt_bait_maker.is_none() && has_bait_maker {
+            if let Some((bait_maker_tile, _)) = self.loc.bait_maker() {
+                let goal = UseItemOnTile::new(
+                    ItemId::BAIT_MAKER,
+                    self.loc.room_name(),
+                    bait_maker_tile,
+                );
+                return Ok(goal.into());
+            }
         }
-        if game_state.player.current_stamina < 10.0 {
-            return Ok(BotGoalResult::Completed);
+
+        if let Some((obj, preferred_fish)) = opt_bait_maker {
+            let num_preferred_bait = fishing_rod
+                .bait
+                .as_ref()
+                .filter(|bait| bait.id == ItemId::TARGETED_BAIT)
+                .filter(|bait| {
+                    // TODO: Check that the specific type of
+                    // targeted bait matches the preferred fish to
+                    // catch.
+                    true
+                })
+                .map(|bait| bait.count)
+                .unwrap_or(0);
+
+            let bait_maker = obj
+                .kind
+                .as_bait_maker()
+                .expect("Protected by earlier as_bait_maker().is_some() check");
+
+            if !bait_maker.has_held_item {
+                if let Some(into_bait) = game_state
+                    .player
+                    .inventory
+                    .worst_quality_of_type(&preferred_fish)
+                {
+                    let goal = UseItemOnTile::new(
+                        into_bait.clone(),
+                        self.loc.room_name(),
+                        obj.tile,
+                    );
+                    return Ok(goal.into());
+                }
+            }
+
+            if num_preferred_bait < 10 && bait_maker.ready_to_harvest {
+                let goal = ActivateTile::new(self.loc.room_name(), obj.tile);
+                return Ok(goal.into());
+            }
+        }
+
+        if !self.loc.is_completed(game_state) {
+            return Ok(self.loc.move_to_location().into());
         }
 
         if self.stop_time > 2530 && in_game_time > 2000 {
@@ -464,36 +574,62 @@ impl BotGoal for FishOnceGoal {
 }
 
 impl LoadBaitOntoFishingRod {
-    fn new(bait: ItemId) -> Self {
-        Self { bait }
+    pub fn new() -> Self {
+        Self { bait: None }
     }
 
-    fn fishing_rod_slot(&self, game_state: &GameState) -> Option<usize> {
+    pub fn bait(self, bait: ItemId) -> Self {
+        Self {
+            bait: Some(bait),
+            ..self
+        }
+    }
+
+    /// Find the player's fishing rod
+    ///
+    /// Returns a tuple containing the inventory slot that contains
+    /// the fishing rod and the type of bait that should be loaded
+    /// onto it.
+    fn find_fishing_rod_and_bait<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Option<(usize, ItemId)> {
         game_state
             .player
             .inventory
-            .iter_slots()
-            .enumerate()
-            .filter_map(|(i, opt_item)| opt_item.map(|item| (i, item)))
+            .iter_filled_slots()
             .filter(|(_, item)| !item.is_same_item(&ItemId::BAMBOO_POLE))
-            .filter(|(_, item)| item.as_fishing_rod().is_some())
-            .map(|(i, _)| i)
-            .next()
-    }
-
-    fn bait_slot(&self, game_state: &GameState) -> Option<usize> {
-        game_state.player.inventory.current_slot(&self.bait)
+            .find_map(|(slot, item)| {
+                let rod = item.as_fishing_rod()?;
+                let bait_to_load = self
+                    .bait
+                    .as_ref()
+                    .or_else(|| rod.bait.as_ref().map(|bait| &bait.id))
+                    .cloned()
+                    .unwrap_or(ItemId::BAIT);
+                Some((slot, bait_to_load))
+            })
     }
 
     fn is_completed(&self, game_state: &GameState) -> bool {
-        self.fishing_rod_slot(game_state).is_none()
-            || self.bait_slot(game_state).is_none()
+        let can_load_bait = self
+            .find_fishing_rod_and_bait(game_state)
+            .map(|(_, bait_to_load)| {
+                game_state.player.inventory.contains(&bait_to_load)
+            })
+            .unwrap_or(false);
+
+        !can_load_bait
     }
 }
 
 impl BotGoal for LoadBaitOntoFishingRod {
     fn description(&self) -> Cow<'static, str> {
-        format!("Load {} onto fishing rod", self.bait).into()
+        if let Some(bait) = &self.bait {
+            format!("Load {bait} onto fishing rod").into()
+        } else {
+            "Reload bait on fishing rod".into()
+        }
     }
 
     fn apply(
@@ -501,14 +637,16 @@ impl BotGoal for LoadBaitOntoFishingRod {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        let Some(rod_slot) = self.fishing_rod_slot(game_state) else {
-            return Ok(BotGoalResult::InProgress);
+        let Some((rod_slot, bait_to_load)) =
+            self.find_fishing_rod_and_bait(game_state)
+        else {
+            return Ok(BotGoalResult::Completed);
         };
 
         if let Some(pause) = &game_state.pause_menu {
             if let Some(page) = pause.inventory_page() {
                 if let Some(held_item) = &page.held_item {
-                    if held_item.is_same_item(&self.bait) {
+                    if held_item.is_same_item(&bait_to_load) {
                         // The cursor is holding the bait, so load it
                         // onto the fishing rod.
                         let pixel = page.player_item_locations[rod_slot];
@@ -533,7 +671,9 @@ impl BotGoal for LoadBaitOntoFishingRod {
             }
         }
 
-        let Some(bait_slot) = self.bait_slot(game_state) else {
+        let Some(bait_slot) =
+            game_state.player.inventory.current_slot(&bait_to_load)
+        else {
             let cleanup = MenuCloser::new();
             if cleanup.is_completed(game_state) {
                 return Ok(BotGoalResult::Completed);

@@ -116,6 +116,8 @@ impl ItemId {
     pub const FIBERGLASS_ROD: Self = Self::new_const("(T)FiberglassRod");
     pub const IRIDIUM_ROD: Self = Self::new_const("(T)IridiumRod");
     pub const BAIT: Self = Self::new_const("(O)685");
+    pub const TARGETED_BAIT: Self = Self::new_const("(O)SpecificBait");
+    pub const CATFISH: Self = Self::new_const("(O)143");
 
     pub const SALAD: Self = Self::new_const("(O)196");
     pub const PARSNIP_SEEDS: Self = Self::new_const("(O)472");

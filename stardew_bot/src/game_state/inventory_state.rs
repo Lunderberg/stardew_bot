@@ -270,6 +270,18 @@ impl Inventory {
         self.iter_items().any(|inv_item| inv_item == item)
     }
 
+    pub fn worst_quality_of_type(
+        &self,
+        item: impl AsRef<ItemId>,
+    ) -> Option<&ItemId> {
+        let search_str = &*item.as_ref().item_id;
+
+        self.iter_items()
+            .map(|item| &item.id)
+            .filter(|id| id.item_id == search_str)
+            .min_by_key(|id| id.quality)
+    }
+
     pub fn current_slot(&self, item: impl AsRef<ItemId>) -> Option<usize> {
         let item = item.as_ref();
 
