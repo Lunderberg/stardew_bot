@@ -5,6 +5,7 @@ use ratatui::{
 use tui_utils::WidgetWindow;
 
 use crate::{
+    bot_logic::LocationExt as _,
     game_state::{ItemCategory, ItemId},
     Error, GameState,
 };
@@ -38,6 +39,10 @@ impl WidgetWindow<Error> for PlayerStats {
         let player_state = &game_state.player;
         let daily_state = &game_state.daily;
 
+        let farm = game_state
+            .get_room("Farm")
+            .expect("Farm should always exist");
+
         let fungible_gold = player_state.current_money
             + player_state
                 .inventory
@@ -45,6 +50,24 @@ impl WidgetWindow<Error> for PlayerStats {
                 .filter(|item| -> bool {
                     matches!(item.category, Some(ItemCategory::Fish))
                         || item.id == ItemId::CLAY
+                })
+                .map(|item| item.stack_price())
+                .sum::<i32>();
+
+        let potential_tomorrow_gold = player_state.current_money
+            + player_state
+                .inventory
+                .iter_items()
+                .chain(farm.iter_stored_items())
+                .filter(|item| -> bool {
+                    matches!(
+                        item.category,
+                        Some(
+                            ItemCategory::Fish
+                                | ItemCategory::Gem
+                                | ItemCategory::Mineral
+                        )
+                    ) || item.id == ItemId::CLAY
                 })
                 .map(|item| item.stack_price())
                 .sum::<i32>();
@@ -60,6 +83,10 @@ impl WidgetWindow<Error> for PlayerStats {
                 ]),
                 Row::default(),
                 Row::new(["Fungible GP".into(), format!("{fungible_gold}")]),
+                Row::new([
+                    "Sell-able GP".into(),
+                    format!("{potential_tomorrow_gold}"),
+                ]),
                 Row::default(),
                 Row::new([
                     "Farming XP".into(),

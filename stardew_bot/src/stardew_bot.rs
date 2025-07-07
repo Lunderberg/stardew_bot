@@ -220,7 +220,7 @@ impl StardewBot {
         layout.cycle_next();
 
         // Player states in top-right
-        layout.split_vertically(Some(10), None);
+        layout.split_vertically(Some(12), None);
         layout.switch_to_buffer(3);
         layout.cycle_next();
 
