@@ -891,6 +891,12 @@ impl From<LogicStack> for BotGoalResult {
     }
 }
 
+impl From<LogicStackItem> for LogicStack {
+    fn from(stack_item: LogicStackItem) -> Self {
+        Self(std::iter::once(stack_item).collect())
+    }
+}
+
 impl<T> From<T> for LogicStack
 where
     T: BotGoal,
@@ -906,6 +912,12 @@ where
 {
     fn from(goal: T) -> Self {
         LogicStackItem::Goal(Box::new(goal))
+    }
+}
+
+impl From<LogicStackItem> for BotGoalResult {
+    fn from(stack_item: LogicStackItem) -> Self {
+        Self::SubGoals(stack_item.into())
     }
 }
 

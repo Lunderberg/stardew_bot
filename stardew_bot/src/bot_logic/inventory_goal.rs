@@ -15,9 +15,9 @@ use crate::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
     item_set::ItemSet,
-    ActivateTile, GameStateExt as _, LocationExt as _,
+    ActivateTile, CraftItemGoal, GameStateExt as _, LocationExt as _,
 };
 
 const MAX_GP_PER_STAMINA: f32 = 2.5;
@@ -53,6 +53,9 @@ pub struct InventoryGoal {
 
     /// If true, keep the best weapon in the inventory.
     with_weapon: bool,
+
+    /// If true, craft any items that are missing.
+    craft_missing: bool,
 }
 
 struct Bounds {
@@ -115,6 +118,7 @@ impl InventoryGoal {
             take_if: None,
             stamina_recovery_slots: 0,
             with_weapon: false,
+            craft_missing: false,
         }
     }
 
@@ -172,6 +176,13 @@ impl InventoryGoal {
         }
     }
 
+    pub fn craft_missing(self) -> Self {
+        Self {
+            craft_missing: true,
+            ..self
+        }
+    }
+
     pub fn keep_if(self, func: impl Fn(&Item) -> bool + 'static) -> Self {
         Self {
             keep_if: Some(Box::new(func)),
@@ -225,6 +236,68 @@ pub(super) fn best_weapon<'a>(
 }
 
 impl InventoryGoal {
+    fn next_crafting(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<Item>, Error> {
+        if !self.craft_missing {
+            return Ok(None);
+        }
+
+        let available = self.total_stored_and_carried(game_state)?;
+        let opt_craftable = self
+            .bounds
+            .iter()
+            .sorted_by_key(|(item, _)| &item.item_id)
+            .filter_map(|(item, bound)| {
+                let min = bound.min?;
+                let current = available.get(item).cloned().unwrap_or(0);
+                let missing = min.saturating_sub(current);
+                (missing > 0).then(|| (item, missing))
+            })
+            .find_map(|(item, num_missing)| {
+                let num_craftable = item
+                    .iter_recipe()?
+                    .map(|(ingredient, count)| {
+                        let ingredient_available =
+                            available.get(&ingredient).cloned().unwrap_or(0);
+                        ingredient_available / count
+                    })
+                    .min()
+                    .unwrap_or(0);
+
+                let num_to_craft = num_missing.min(num_craftable);
+
+                (num_to_craft > 0)
+                    .then(|| item.clone().with_count(num_to_craft))
+            });
+
+        Ok(opt_craftable)
+    }
+
+    fn next_crafting_action(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStackItem>, Error> {
+        let Some(next_crafting) = self.next_crafting(game_state)? else {
+            return Ok(None);
+        };
+
+        let subgoal = InventoryGoal::current().with(
+            next_crafting.id.iter_recipe().into_iter().flatten().map(
+                |(ingredient, count)| {
+                    ingredient.with_count(next_crafting.count * count)
+                },
+            ),
+        );
+        if !subgoal.is_completed(game_state)? {
+            return Ok(Some(subgoal.into()));
+        }
+
+        let craft = CraftItemGoal::new(next_crafting);
+        Ok(Some(craft.into()))
+    }
+
     fn next_transfer(
         &self,
         game_state: &GameState,
@@ -659,7 +732,8 @@ impl InventoryGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
-        Ok(self.next_transfer(game_state)?.is_none())
+        Ok(self.next_crafting(game_state)?.is_none()
+            && self.next_transfer(game_state)?.is_none())
     }
 
     pub fn iter_stored_and_carried<'a>(
@@ -736,6 +810,12 @@ impl BotGoal for InventoryGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        if let Some(next_crafting_action) =
+            self.next_crafting_action(game_state)?
+        {
+            return Ok(next_crafting_action.into());
+        }
+
         let Some(transfer) = self.next_transfer(game_state)? else {
             // The inventory transfer is complete.  Close out the
             // chest menu if it is still open, and return control to

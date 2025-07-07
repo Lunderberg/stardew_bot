@@ -134,10 +134,14 @@ impl ItemId {
 
     pub const SPRINKLER: Self = Self::new_const("(O)599");
     pub const SCARECROW: Self = Self::new_const("(BC)8");
-    pub const FURNACE: Self = Self::new_const("(BC)13");
     pub const CHEST: Self = Self::new_const("(BC)130");
 
+    pub const FURNACE: Self = Self::new_const("(BC)13");
+    pub const BAIT_MAKER: Self = Self::new_const("(BC)BaitMaker");
+
     pub const DAFFODIL: Self = Self::new_const("(O)18");
+    pub const CORAL: Self = Self::new_const("(O)393");
+    pub const SEA_URCHIN: Self = Self::new_const("(O)397");
 
     pub const SEA_JELLY: Self = Self::new_const("(O)SeaJelly");
     pub const RIVER_JELLY: Self = Self::new_const("(O)RiverJelly");
@@ -220,6 +224,34 @@ impl ItemId {
             | "FlashShifter.StardewValleyExpandedCP_Tree_Coin" => true,
             _ => false,
         }
+    }
+
+    pub fn iter_recipe(&self) -> Option<impl Iterator<Item = (ItemId, usize)>> {
+        let items: [Option<(ItemId, usize)>; 3] = if self == &ItemId::SPRINKLER
+        {
+            [
+                Some((ItemId::COPPER_BAR, 1)),
+                Some((ItemId::IRON_BAR, 1)),
+                None,
+            ]
+        } else if self == &ItemId::SCARECROW {
+            [
+                Some((ItemId::WOOD, 50)),
+                Some((ItemId::COAL, 1)),
+                Some((ItemId::FIBER, 20)),
+            ]
+        } else if self == &ItemId::BAIT_MAKER {
+            [
+                Some((ItemId::IRON_BAR, 3)),
+                Some((ItemId::CORAL, 3)),
+                Some((ItemId::SEA_URCHIN, 1)),
+            ]
+        } else {
+            return None;
+        };
+
+        let iter = items.into_iter().flatten();
+        Some(iter)
     }
 }
 

@@ -185,7 +185,10 @@ impl BotGoal for FishingGoal {
         let preparation = if game_state.player.room_name == "Farm" {
             // Before leaving the farm, empty out the current
             // inventory except for the fishing pole.
-            InventoryGoal::empty().with(current_pole.clone())
+            InventoryGoal::empty()
+                .craft_missing()
+                .with(current_pole.clone())
+                .with(ItemId::BAIT_MAKER)
         } else {
             // If not currently on the farm, can resume fishing
             // without emptying out the inventory, so long as we have
