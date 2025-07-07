@@ -87,26 +87,28 @@ impl GameStateExt for GameState {
 }
 
 pub trait ObjectKindExt {
-    fn get_tool(&self) -> Option<Item>;
+    fn get_tool(&self) -> Option<ItemId>;
 }
 
 impl ObjectKindExt for ObjectKind {
-    fn get_tool(&self) -> Option<Item> {
+    fn get_tool(&self) -> Option<ItemId> {
         match self {
             ObjectKind::Stone(_)
             | ObjectKind::Torch
             | ObjectKind::Sprinkler(_)
-            | ObjectKind::Scarecrow => Some(Item::PICKAXE),
+            | ObjectKind::Scarecrow => Some(ItemId::PICKAXE),
 
             ObjectKind::Mineral(_) => None,
-            ObjectKind::Wood => Some(Item::AXE),
-            ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| Item::AXE),
+            ObjectKind::Wood => Some(ItemId::AXE),
+            ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| ItemId::AXE),
 
             ObjectKind::MineBarrel | ObjectKind::Fiber | ObjectKind::Grass => {
-                Some(Item::SCYTHE)
+                Some(ItemId::SCYTHE)
             }
 
-            ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => Some(Item::HOE),
+            ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => {
+                Some(ItemId::HOE)
+            }
 
             ObjectKind::MineLadderUp
             | ObjectKind::MineLadderDown

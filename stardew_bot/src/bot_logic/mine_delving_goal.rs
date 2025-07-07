@@ -73,13 +73,14 @@ const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
 
 fn collect_clearable_tiles(
     game_state: &GameState,
-) -> Result<HashMap<Vector<isize>, Option<Item>>, Error> {
+) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error> {
     let current_room = game_state.current_room()?;
-    let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
+    let opt_weapon = best_weapon(game_state.player.inventory.iter_items())
+        .map(|item| &item.id);
 
     let iter_clearable_obj = current_room.objects.iter().filter_map(|obj| {
         let opt_tool = match &obj.kind {
-            ObjectKind::Stone(_) => Some(Item::PICKAXE),
+            ObjectKind::Stone(_) => Some(ItemId::PICKAXE),
             ObjectKind::Fiber | ObjectKind::MineBarrel
                 if opt_weapon.is_some() =>
             {
@@ -100,7 +101,7 @@ fn collect_clearable_tiles(
         .iter()
         .filter_map(|clump| {
             let tool = match &clump.kind {
-                ResourceClumpKind::MineBoulder => Some(Item::PICKAXE),
+                ResourceClumpKind::MineBoulder => Some(ItemId::PICKAXE),
                 _ => None,
             }?;
             Some(
@@ -238,18 +239,18 @@ impl MineDelvingGoal {
         };
 
         let num_to_smelt =
-            num_loadable_furnaces.min(get_available(&Item::COAL.id));
+            num_loadable_furnaces.min(get_available(&ItemId::COAL));
 
         if num_to_smelt == 0 && num_harvestable_furnaces == 0 {
             return Ok(None);
         }
 
         let num_iron_bars =
-            (get_available(&Item::IRON_ORE.id) / 5).min(num_to_smelt);
+            (get_available(&ItemId::IRON_ORE) / 5).min(num_to_smelt);
         let num_to_smelt = num_to_smelt - num_iron_bars;
 
         let num_copper_bars =
-            (get_available(&Item::COPPER_ORE.id) / 5).min(num_to_smelt);
+            (get_available(&ItemId::COPPER_ORE) / 5).min(num_to_smelt);
 
         if num_iron_bars == 0
             && num_copper_bars == 0
@@ -260,19 +261,13 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::current()
             .room("Mine")
-            .with(
-                Item::COAL
-                    .clone()
-                    .with_count(num_iron_bars + num_copper_bars),
-            )
-            .with_exactly(
-                Item::COPPER_ORE.clone().with_count(num_copper_bars * 5),
-            )
-            .with_exactly(Item::IRON_ORE.clone().with_count(num_iron_bars * 5));
+            .with(ItemId::COAL.with_count(num_iron_bars + num_copper_bars))
+            .with_exactly(ItemId::COPPER_ORE.with_count(num_copper_bars * 5))
+            .with_exactly(ItemId::IRON_ORE.with_count(num_iron_bars * 5));
 
         let mut iter_smelt = std::iter::empty()
-            .chain(std::iter::repeat_n(Item::COPPER_ORE, num_copper_bars))
-            .chain(std::iter::repeat_n(Item::IRON_ORE, num_iron_bars));
+            .chain(std::iter::repeat_n(ItemId::COPPER_ORE, num_copper_bars))
+            .chain(std::iter::repeat_n(ItemId::IRON_ORE, num_iron_bars));
 
         let stack = loc
             .objects
@@ -330,10 +325,10 @@ impl MineDelvingGoal {
             .player
             .inventory
             .iter_items()
-            .any(|item| item.is_same_item(&Item::FURNACE));
+            .any(|item| item == &ItemId::FURNACE);
         if has_furnace {
             return Ok(Some(
-                UseItemOnTile::new(Item::FURNACE, "Mine", tile).into(),
+                UseItemOnTile::new(ItemId::FURNACE, "Mine", tile).into(),
             ));
         }
 
@@ -348,13 +343,13 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::current()
             .room("Mine")
-            .with(Item::STONE.clone().with_count(25))
-            .with(Item::COPPER_ORE.clone().with_count(20));
+            .with(ItemId::STONE.with_count(25))
+            .with(ItemId::COPPER_ORE.with_count(20));
         if !prepare.has_sufficient_stored(game_state)? {
             return Ok(None);
         }
         if prepare.is_completed(game_state)? {
-            Ok(Some(CraftItemGoal::new(Item::FURNACE).into()))
+            Ok(Some(CraftItemGoal::new(ItemId::FURNACE).into()))
         } else {
             Ok(Some(prepare.into()))
         }
@@ -367,13 +362,12 @@ impl MineDelvingGoal {
         let items = InventoryGoal::empty()
             .room("Mine")
             .total_stored_and_carried(game_state)?;
-        let get_count = |item: &Item| -> usize {
-            items.get(&item.id).cloned().unwrap_or(0)
-        };
+        let get_count =
+            |item: &ItemId| -> usize { items.get(item).cloned().unwrap_or(0) };
 
-        let enough_ore_to_smelt = get_count(&Item::COAL) >= 1
-            && (get_count(&Item::COPPER_ORE) >= 5
-                && get_count(&Item::IRON_ORE) >= 5);
+        let enough_ore_to_smelt = get_count(&ItemId::COAL) >= 1
+            && (get_count(&ItemId::COPPER_ORE) >= 5
+                && get_count(&ItemId::IRON_ORE) >= 5);
         let num_furnaces = game_state
             .get_room("Mine")?
             .objects
@@ -394,9 +388,9 @@ impl MineDelvingGoal {
         // copper.
 
         let copper_bars =
-            get_count(&Item::COPPER_BAR) + get_count(&Item::COPPER_ORE) / 5;
+            get_count(&ItemId::COPPER_BAR) + get_count(&ItemId::COPPER_ORE) / 5;
         let iron_bars =
-            get_count(&Item::IRON_BAR) + get_count(&Item::IRON_ORE) / 5;
+            get_count(&ItemId::IRON_BAR) + get_count(&ItemId::IRON_ORE) / 5;
 
         Ok(copper_bars <= iron_bars)
     }
@@ -415,16 +409,16 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::empty()
             .room("Mine")
-            .with(Item::PICKAXE)
+            .with(ItemId::PICKAXE)
             .stamina_recovery_slots(2)
             .with_weapon()
-            .with(Item::COAL.clone().with_count(1000))
-            .with(Item::COPPER_BAR.clone().with_count(1000))
-            .with(Item::IRON_BAR.clone().with_count(1000))
-            .with(Item::GEODE.clone().with_count(1000))
-            .with(Item::FROZEN_GEODE.clone().with_count(1000))
-            .with(Item::MAGMA_GEODE.clone().with_count(1000))
-            .with(Item::OMNI_GEODE.clone().with_count(1000));
+            .with(ItemId::COAL.clone().with_count(1000))
+            .with(ItemId::COPPER_BAR.clone().with_count(1000))
+            .with(ItemId::IRON_BAR.clone().with_count(1000))
+            .with(ItemId::GEODE.clone().with_count(1000))
+            .with(ItemId::FROZEN_GEODE.clone().with_count(1000))
+            .with(ItemId::MAGMA_GEODE.clone().with_count(1000))
+            .with(ItemId::OMNI_GEODE.clone().with_count(1000));
 
         let prepare = if game_state.globals.in_game_time >= 2300 {
             // If it's close to the end of the day, grab items that
@@ -452,17 +446,17 @@ impl MineDelvingGoal {
 
         let organization = OrganizeInventoryGoal::new(|item| {
             use super::SortedInventoryLocation as Loc;
-            if item.as_weapon().is_some() || Item::PICKAXE.is_same_item(&item) {
+            if item.as_weapon().is_some() || item == &ItemId::PICKAXE {
                 Loc::HotBarLeft
             } else if item.edibility > 0 {
                 Loc::HotBarRight
-            } else if item.is_same_item(&Item::COAL)
-                || item.is_same_item(&Item::COPPER_BAR)
-                || item.is_same_item(&Item::IRON_BAR)
-                || item.is_same_item(&Item::GEODE)
-                || item.is_same_item(&Item::FROZEN_GEODE)
-                || item.is_same_item(&Item::MAGMA_GEODE)
-                || item.is_same_item(&Item::OMNI_GEODE)
+            } else if item == &ItemId::COAL
+                || item == &ItemId::COPPER_BAR
+                || item == &ItemId::IRON_BAR
+                || item == &ItemId::GEODE
+                || item == &ItemId::FROZEN_GEODE
+                || item == &ItemId::MAGMA_GEODE
+                || item == &ItemId::OMNI_GEODE
             {
                 Loc::HotBar
             } else {
@@ -565,16 +559,16 @@ impl BotGoal for MineDelvingGoal {
                     .count();
 
             let iter_items_to_transfer = [
-                Item::WOOD.with_count(
+                ItemId::WOOD.with_count(
                     100usize.saturating_sub(wood_from_crafted_chests),
                 ),
-                Item::STONE.with_count(1000),
-                Item::COAL.with_count(100),
-                Item::COPPER_ORE.with_count(1000),
-                Item::COPPER_BAR.with_count(1000),
-                Item::IRON_ORE.with_count(1000),
-                Item::IRON_BAR.with_count(1000),
-                Item::GOLD_ORE.with_count(1000),
+                ItemId::STONE.with_count(1000),
+                ItemId::COAL.with_count(100),
+                ItemId::COPPER_ORE.with_count(1000),
+                ItemId::COPPER_BAR.with_count(1000),
+                ItemId::IRON_ORE.with_count(1000),
+                ItemId::IRON_BAR.with_count(1000),
+                ItemId::GOLD_ORE.with_count(1000),
             ]
             .into_iter()
             .map(|item| {
@@ -590,7 +584,7 @@ impl BotGoal for MineDelvingGoal {
             .filter(|item| item.count > 0);
 
             let prepare = InventoryGoal::empty()
-                .with(Item::PICKAXE)
+                .with(ItemId::PICKAXE)
                 .with_exactly(iter_items_to_transfer)
                 .stamina_recovery_slots(6)
                 .with_weapon();
@@ -728,10 +722,10 @@ impl BotGoal for MineSingleLevel {
             }
 
             let inventory = game_state.player.inventory.to_hash_map();
-            let get_count = |item: &Item| {
-                inventory.get(item.as_ref()).cloned().unwrap_or(0)
-            };
-            get_count(&Item::COPPER_ORE) >= 5 || get_count(&Item::IRON_ORE) >= 5
+            let get_count =
+                |item: &ItemId| inventory.get(item).cloned().unwrap_or(0);
+            get_count(&ItemId::COPPER_ORE) >= 5
+                || get_count(&ItemId::IRON_ORE) >= 5
         };
 
         if should_go_up && game_state.mine_elevator_menu.is_some() {
@@ -1158,9 +1152,9 @@ impl BotInterrupt for MineNearbyOre {
             .unwrap();
 
         let goal = if let Some(tool) = opt_tool {
-            let tool = if tool.id.item_id.starts_with("(W)") {
+            let tool = if tool.item_id.starts_with("(W)") {
                 if let Some(weapon) = opt_weapon {
-                    weapon.clone()
+                    weapon.id.clone()
                 } else {
                     return Ok(None);
                 }

@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ItemCategory, Vector},
+    game_state::{Item, ItemCategory, ItemId, Vector},
     Direction, Error, GameAction, GameState,
 };
 
@@ -25,10 +25,11 @@ struct SwingWithAnimationCancel {
 
 impl UseItemOnTile {
     pub fn new(
-        item: Item,
+        item: impl Into<Item>,
         room: impl Into<String>,
         tile: Vector<isize>,
     ) -> Self {
+        let item = item.into();
         let room = room.into();
         Self {
             item,
@@ -60,14 +61,14 @@ impl BotGoal for UseItemOnTile {
             return Ok(BotGoalResult::Completed);
         }
 
-        let select_item = SelectItemGoal::new(self.item.clone());
+        let select_item = SelectItemGoal::new(self.item.id.clone());
         if !select_item.is_completed(game_state) {
             return Ok(select_item.into());
         }
 
         let refilling_watering_can = self.item.as_watering_can().is_some()
             && game_state.get_room(&self.room)?.is_water(self.tile);
-        let is_scythe = self.item.is_same_item(&Item::SCYTHE);
+        let is_scythe = self.item.id == ItemId::SCYTHE;
 
         let target_tile = self.tile;
         let is_within_range = move |game_state: &GameState| -> bool {

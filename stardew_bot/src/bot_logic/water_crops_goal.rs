@@ -7,7 +7,7 @@ use crate::{
         graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
         UseItemOnTile,
     },
-    game_state::{HoeDirt, Item, ObjectKind, Vector},
+    game_state::{HoeDirt, Item, ItemId, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
@@ -97,7 +97,7 @@ impl BotGoal for WaterCropsGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        let goal = InventoryGoal::new(Item::WATERING_CAN);
+        let goal = InventoryGoal::new(ItemId::WATERING_CAN);
         if !goal.is_completed(game_state)? {
             return Ok(goal.otherwise_empty().stamina_recovery_slots(2).into());
         }
@@ -107,7 +107,7 @@ impl BotGoal for WaterCropsGoal {
             return Ok(goal.into());
         }
 
-        let action = UseItemOnTile::new(Item::WATERING_CAN, "Farm", tile);
+        let action = UseItemOnTile::new(ItemId::WATERING_CAN, "Farm", tile);
         Ok(action.into())
     }
 }

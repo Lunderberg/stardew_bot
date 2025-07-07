@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, WateringCan},
+    game_state::{Item, ItemId, WateringCan},
     Error, GameAction, GameState,
 };
 
@@ -74,7 +74,7 @@ impl BotGoal for FillWateringCan {
             .expect("Handle case where no water is reachable");
 
         let action =
-            UseItemOnTile::new(Item::WATERING_CAN, &loc.name, closest_water);
+            UseItemOnTile::new(ItemId::WATERING_CAN, &loc.name, closest_water);
 
         Ok(action.into())
     }

@@ -2,7 +2,7 @@ use crate::{
     bot_logic::{
         CraftItemGoal, GameStateExt as _, InventoryGoal, UseItemOnTile,
     },
-    game_state::{Item, Vector},
+    game_state::{Item, ItemId, Vector},
     Error, GameState,
 };
 
@@ -87,7 +87,7 @@ impl BotInterrupt for ExpandStorageInterrupt {
         let available_wood = iter_chests()
             .flat_map(|chest| chest.iter_items())
             .chain(game_state.player.inventory.iter_items())
-            .filter(|item| item.is_same_item(&Item::WOOD))
+            .filter(|item| item.is_same_item(&ItemId::WOOD))
             .map(|item| item.count)
             .sum::<usize>();
         if available_wood < 50 {
@@ -109,9 +109,9 @@ impl BotInterrupt for ExpandStorageInterrupt {
 
         let prepare = InventoryGoal::current()
             .room(room.name.clone())
-            .with(Item::WOOD.clone().with_count(50));
-        let craft = CraftItemGoal::new(Item::CHEST);
-        let place = UseItemOnTile::new(Item::CHEST, room.name.clone(), tile);
+            .with(ItemId::WOOD.clone().with_count(50));
+        let craft = CraftItemGoal::new(ItemId::CHEST.with_count(1));
+        let place = UseItemOnTile::new(ItemId::CHEST, room.name.clone(), tile);
 
         let interrupt = LogicStack::new().then(prepare).then(craft).then(place);
 

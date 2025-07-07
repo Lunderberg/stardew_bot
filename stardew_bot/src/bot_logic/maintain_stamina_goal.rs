@@ -95,7 +95,7 @@ impl BotGoal for MaintainStaminaGoal {
             unreachable!("Guarded by self.is_completed() check")
         };
 
-        let select_item = SelectItemGoal::new(item_to_eat.clone());
+        let select_item = SelectItemGoal::new(item_to_eat.id.clone());
         if !select_item.is_completed(game_state) {
             return Ok(select_item.into());
         }

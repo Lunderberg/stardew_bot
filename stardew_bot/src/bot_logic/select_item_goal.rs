@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, Key},
+    game_state::{Item, ItemId, Key},
     Error, GameAction, GameState,
 };
 
@@ -9,11 +9,11 @@ use super::{
 };
 
 pub struct SelectItemGoal {
-    item: Item,
+    item: ItemId,
 }
 
 impl SelectItemGoal {
-    pub fn new(item: Item) -> Self {
+    pub fn new(item: ItemId) -> Self {
         Self { item }
     }
 

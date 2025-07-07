@@ -6,7 +6,9 @@ use crate::{
         MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
         StepCountForLuck,
     },
-    game_state::{FacingDirection, Inventory, Item, ItemCategory, Key, Vector},
+    game_state::{
+        FacingDirection, Inventory, Item, ItemCategory, ItemId, Key, Vector,
+    },
     Error, GameAction, GameState,
 };
 
@@ -38,7 +40,7 @@ pub enum FishingLocation {
 }
 
 struct LoadBaitOntoFishingRod {
-    bait: Item,
+    bait: ItemId,
 }
 
 struct FishSelling<'a>(&'a Inventory);
@@ -155,10 +157,10 @@ impl BotGoal for FishingGoal {
 
         let inventory = &game_state.player.inventory;
 
-        if inventory.contains(&Item::FIBERGLASS_ROD) {
+        if inventory.contains(&ItemId::FIBERGLASS_ROD) {
             // Discard the Bamboo Pole as soon as we have the
             // Fiberglass Rod.
-            let goal = DiscardItemGoal::new(Item::BAMBOO_POLE);
+            let goal = DiscardItemGoal::new(ItemId::BAMBOO_POLE);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
@@ -194,7 +196,7 @@ impl BotGoal for FishingGoal {
             return Ok(preparation.into());
         }
 
-        let using_bamboo_pole = current_pole.is_same_item(&Item::BAMBOO_POLE);
+        let using_bamboo_pole = current_pole.is_same_item(&ItemId::BAMBOO_POLE);
         let in_game_time = game_state.globals.in_game_time;
 
         if using_bamboo_pole
@@ -211,7 +213,10 @@ impl BotGoal for FishingGoal {
                 >= 1800;
             if can_upgrade {
                 let goal = fish_selling.sell_all_fish().then(
-                    BuyFromMerchantGoal::new("Buy Fish", Item::FIBERGLASS_ROD),
+                    BuyFromMerchantGoal::new(
+                        "Buy Fish",
+                        ItemId::FIBERGLASS_ROD,
+                    ),
                 );
                 return Ok(goal.into());
             }
@@ -219,7 +224,7 @@ impl BotGoal for FishingGoal {
 
         // Load bait into fishing pole, if bait is available and the
         // fishing pole can use bait.
-        let goal = LoadBaitOntoFishingRod::new(Item::BAIT.clone());
+        let goal = LoadBaitOntoFishingRod::new(ItemId::BAIT);
         if !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
@@ -234,7 +239,7 @@ impl BotGoal for FishingGoal {
             if in_game_time < 1700
                 && opt_bait
                     .map(|bait| {
-                        bait.is_same_item(&Item::BAIT)
+                        bait.is_same_item(&ItemId::BAIT)
                             && bait.count < 150
                             && self.loc == FishingLocation::OceanByWilly
                             && in_game_time > 1630
@@ -251,7 +256,7 @@ impl BotGoal for FishingGoal {
                 let goal = fish_selling.sell_all_fish().then(
                     BuyFromMerchantGoal::new(
                         "Buy Fish",
-                        Item::BAIT.with_count(total_cash / 5),
+                        ItemId::BAIT.with_count(total_cash / 5),
                     ),
                 );
                 return Ok(goal.into());
@@ -262,7 +267,7 @@ impl BotGoal for FishingGoal {
             return Ok(self.loc.move_to_location().into());
         }
 
-        let select_pole = SelectItemGoal::new(current_pole.clone());
+        let select_pole = SelectItemGoal::new(current_pole.id.clone());
         if !select_pole.is_completed(game_state) {
             return Ok(select_pole.into());
         }
@@ -456,7 +461,7 @@ impl BotGoal for FishOnceGoal {
 }
 
 impl LoadBaitOntoFishingRod {
-    fn new(bait: Item) -> Self {
+    fn new(bait: ItemId) -> Self {
         Self { bait }
     }
 
@@ -467,7 +472,7 @@ impl LoadBaitOntoFishingRod {
             .iter_slots()
             .enumerate()
             .filter_map(|(i, opt_item)| opt_item.map(|item| (i, item)))
-            .filter(|(_, item)| !item.is_same_item(&Item::BAMBOO_POLE))
+            .filter(|(_, item)| !item.is_same_item(&ItemId::BAMBOO_POLE))
             .filter(|(_, item)| item.as_fishing_rod().is_some())
             .map(|(i, _)| i)
             .next()

@@ -5,7 +5,7 @@ use ratatui::{
 use tui_utils::WidgetWindow;
 
 use crate::{
-    game_state::{Item, ItemCategory},
+    game_state::{ItemCategory, ItemId},
     Error, GameState,
 };
 
@@ -44,7 +44,7 @@ impl WidgetWindow<Error> for PlayerStats {
                 .iter_items()
                 .filter(|item| -> bool {
                     matches!(item.category, Some(ItemCategory::Fish))
-                        || Item::CLAY.is_same_item(item)
+                        || item.id == ItemId::CLAY
                 })
                 .map(|item| item.stack_price())
                 .sum::<i32>();

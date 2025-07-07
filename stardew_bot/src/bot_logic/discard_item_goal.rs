@@ -1,15 +1,17 @@
 use crate::{
-    bot_logic::MenuCloser, game_state::Item, Error, GameAction, GameState,
+    bot_logic::MenuCloser,
+    game_state::{Item, ItemId},
+    Error, GameAction, GameState,
 };
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
 pub struct DiscardItemGoal {
-    item: Item,
+    item: ItemId,
 }
 
 impl DiscardItemGoal {
-    pub fn new(item: Item) -> Self {
+    pub fn new(item: ItemId) -> Self {
         Self { item }
     }
 

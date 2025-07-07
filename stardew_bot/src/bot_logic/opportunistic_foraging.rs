@@ -1,6 +1,6 @@
 use crate::{
     bot_logic::{ActivateTile, ObjectKindExt as _, UseItemOnTile},
-    game_state::{Item, ObjectKind, TileMap},
+    game_state::{Item, ItemId, ObjectKind, TileMap},
     Error, GameState,
 };
 
@@ -37,7 +37,7 @@ impl BotInterrupt for OpportunisticForaging {
             .player
             .inventory
             .iter_items()
-            .any(|item| item.is_same_item(&Item::HOE));
+            .any(|item| item == &ItemId::HOE);
         let can_hoe = has_hoe && game_state.player.current_stamina > 2.0;
         let should_hoe = can_hoe && game_state.player.room_name != "Farm";
 

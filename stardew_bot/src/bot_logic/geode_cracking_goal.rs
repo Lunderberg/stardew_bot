@@ -25,11 +25,11 @@ pub struct GeodePredictor {
 }
 
 impl GeodeCrackingGoal {
-    const GEODE_TYPES: [Item; 4] = [
-        Item::GEODE,
-        Item::FROZEN_GEODE,
-        Item::MAGMA_GEODE,
-        Item::OMNI_GEODE,
+    const GEODE_TYPES: [ItemId; 4] = [
+        ItemId::GEODE,
+        ItemId::FROZEN_GEODE,
+        ItemId::MAGMA_GEODE,
+        ItemId::OMNI_GEODE,
     ];
 
     pub fn new() -> Self {
@@ -68,7 +68,7 @@ impl GeodeCrackingGoal {
 
         let has_any_geode = Self::GEODE_TYPES
             .iter()
-            .any(|geode| available.contains_key(&geode.id));
+            .any(|geode| available.contains_key(geode));
 
         Ok(!has_any_geode)
     }
@@ -93,7 +93,7 @@ impl GeodeCrackingGoal {
         }
 
         let available: [_; 4] = std::array::from_fn(|i| {
-            let kind = Self::GEODE_TYPES[i].id.clone();
+            let kind = Self::GEODE_TYPES[i].clone();
             let count = available.get(&kind).cloned().unwrap_or(0);
             (kind, count)
         });
@@ -173,8 +173,7 @@ impl BotGoal for GeodeCrackingGoal {
                 .iter_items()
                 .filter(|_| game_state.player.room_name == "Blacksmith")
                 .filter(|item| {
-                    (self.sell_iridium_ore
-                        && item.is_same_item(&Item::IRIDIUM_ORE))
+                    (self.sell_iridium_ore && &item.id == &ItemId::IRIDIUM_ORE)
                         || item
                             .category
                             .map(|category| match category {
@@ -212,7 +211,7 @@ impl BotGoal for GeodeCrackingGoal {
 
         let prepare = Self::GEODE_TYPES
             .iter()
-            .fold(InventoryGoal::current().with(Item::HOE), |goal, geode| {
+            .fold(InventoryGoal::current().with(ItemId::HOE), |goal, geode| {
                 goal.with(geode.clone().with_count(1000))
             });
         if !prepare.is_completed(game_state)? {
@@ -320,13 +319,13 @@ impl GeodePredictor {
         geode: &ItemId,
         other_geodes: usize,
     ) -> Item {
-        let geode_data = if geode == &Item::GEODE {
+        let geode_data = if geode == &ItemId::GEODE {
             &statics.geode
-        } else if geode == &Item::FROZEN_GEODE {
+        } else if geode == &ItemId::FROZEN_GEODE {
             &statics.frozen_geode
-        } else if geode == &Item::MAGMA_GEODE {
+        } else if geode == &ItemId::MAGMA_GEODE {
             &statics.magma_geode
-        } else if geode == &Item::OMNI_GEODE {
+        } else if geode == &ItemId::OMNI_GEODE {
             &statics.omni_geode
         } else {
             panic!("Could not find geode data for {geode}")
@@ -385,13 +384,13 @@ impl GeodePredictor {
                 _ => {
                     // Generate an Earth Crystal, Frozen Tear, or Fire Quartz
                     amount = 1;
-                    if geode == &Item::GEODE {
+                    if geode == &ItemId::GEODE {
                         "(O)86"
-                    } else if geode == &Item::FROZEN_GEODE {
+                    } else if geode == &ItemId::FROZEN_GEODE {
                         "(O)84"
-                    } else if geode == &Item::MAGMA_GEODE {
+                    } else if geode == &ItemId::MAGMA_GEODE {
                         "(O)82"
-                    } else if geode == &Item::OMNI_GEODE {
+                    } else if geode == &ItemId::OMNI_GEODE {
                         match rng.rand_in_range(0..3) {
                             0 => "(O)82",
                             1 => "(O)84",
@@ -403,14 +402,14 @@ impl GeodePredictor {
                 }
             }
         } else {
-            if geode == &Item::GEODE {
+            if geode == &ItemId::GEODE {
                 match rng.rand_in_range(0..3) {
                     0 => "(O)378",
                     1 if self.lowest_mine_level_reached > 25 => "(O)380",
                     1 => "(O)378",
                     _ => "(O)382",
                 }
-            } else if geode == &Item::FROZEN_GEODE {
+            } else if geode == &ItemId::FROZEN_GEODE {
                 match rng.rand_in_range(0..4) {
                     0 => "(O)378",
                     1 => "(O)380",
@@ -418,7 +417,8 @@ impl GeodePredictor {
                     _ if self.lowest_mine_level_reached > 75 => "(O)384",
                     _ => "(O)380",
                 }
-            } else if geode == &Item::MAGMA_GEODE || geode == &Item::OMNI_GEODE
+            } else if geode == &ItemId::MAGMA_GEODE
+                || geode == &ItemId::OMNI_GEODE
             {
                 match rng.rand_in_range(0..5) {
                     0 => "(O)378",

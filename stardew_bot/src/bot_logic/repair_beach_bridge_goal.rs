@@ -1,6 +1,6 @@
 use crate::{
     bot_logic::{BotError, MovementGoal},
-    game_state::{Item, Vector},
+    game_state::{Item, ItemId, Vector},
     Error, GameAction, GameState,
 };
 
@@ -49,7 +49,7 @@ impl RepairBeachBridgeGoal {
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         let tile_exists = self.bridge_tile(game_state)?.is_some();
         let have_sufficient_wood = InventoryGoal::current()
-            .with(Item::WOOD.with_count(300))
+            .with(ItemId::WOOD.with_count(300))
             .has_sufficient_stored(game_state)?;
 
         let can_repair = tile_exists && have_sufficient_wood;
@@ -95,7 +95,8 @@ impl BotGoal for RepairBeachBridgeGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let prepare = InventoryGoal::current().with(Item::WOOD.with_count(300));
+        let prepare =
+            InventoryGoal::current().with(ItemId::WOOD.with_count(300));
         if !prepare.has_sufficient_stored(game_state)? {
             // Not enough wood collected to repair the bridge.  No
             // bridge repair is required.

@@ -8,14 +8,14 @@ use crate::{
         MovementGoal, SelectItemGoal,
     },
     game_state::{
-        Inventory, Item, Key, ObjectKind, Quality, SeededRng, Vector,
+        Inventory, Item, ItemId, Key, ObjectKind, Quality, SeededRng, Vector,
     },
     Direction, Error, GameAction, GameState,
 };
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    MaintainStaminaGoal, UseItemOnTile,
+    InventoryGoal, MaintainStaminaGoal, UseItemOnTile,
 };
 
 pub struct ClayFarmingGoal {
@@ -139,7 +139,7 @@ impl ClayFarmingGoal {
             .get_room("Beach")
             .into_iter()
             .flat_map(|loc| loc.items.iter())
-            .filter(|floating_item| floating_item.id == Item::CLAY)
+            .filter(|floating_item| floating_item.id == ItemId::CLAY)
             .min_by_key(|item| {
                 (item.position / 64.0).dist2(player_loc) as isize
             })
@@ -182,11 +182,11 @@ impl BotGoal for ClayFarmingGoal {
         let player = &game_state.player;
 
         // Pick up the hoe for use in the rest of the goal.
-        for item in [Item::HOE, Item::PICKAXE] {
-            let goal = super::InventoryGoal::new(item.clone());
-            if !goal.is_completed(game_state)? {
-                return Ok(goal.into());
-            }
+        let goal = InventoryGoal::current()
+            .with(ItemId::HOE)
+            .with(ItemId::PICKAXE);
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.into());
         }
 
         // Go to the Beach
@@ -272,9 +272,9 @@ impl BotGoal for ClayFarmingGoal {
 
         actions.do_action(GameAction::MouseOverTile(closest_clay));
         let tool = if has_hoe_dirt(closest_clay) {
-            Item::PICKAXE
+            ItemId::PICKAXE
         } else {
-            Item::HOE
+            ItemId::HOE
         };
 
         let goal = UseItemOnTile::new(tool, "Beach", closest_clay).cancel_if(

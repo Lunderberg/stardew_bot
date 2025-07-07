@@ -8,7 +8,8 @@ use crate::{
         MovementGoal, SelectItemGoal,
     },
     game_state::{
-        Inventory, Item, Key, Location, Object, ObjectKind, Quality, Vector,
+        Inventory, Item, ItemId, Key, Location, Object, ObjectKind, Quality,
+        Vector,
     },
     Direction, Error, GameAction, GameState,
 };
@@ -193,7 +194,7 @@ impl BotGoal for ClearFarmGoal {
             .map(|obj| (obj.tile, obj))
             .filter(|(_, obj)| {
                 game_state.player.current_stamina > 2.0
-                    || obj.kind.get_tool().unwrap().is_same_item(&Item::SCYTHE)
+                    || obj.kind.get_tool().unwrap() == ItemId::SCYTHE
             })
             .collect();
 
@@ -241,10 +242,10 @@ impl BotGoal for ClearFarmGoal {
         // Pick up the items that we'll need for the rest of the goal.
         // Anything else gets stashed away.
         let goal = InventoryGoal::current()
-            .with(Item::PICKAXE)
-            .with(Item::AXE)
-            .with(Item::SCYTHE)
-            .with(Item::HOE)
+            .with(ItemId::PICKAXE)
+            .with(ItemId::AXE)
+            .with(ItemId::SCYTHE)
+            .with(ItemId::HOE)
             .stamina_recovery_slots(1);
         if !goal.is_completed(game_state)? {
             let goal = goal.otherwise_empty().stamina_recovery_slots(4);

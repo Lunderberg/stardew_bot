@@ -106,7 +106,58 @@ pub enum ItemCategory {
 }
 
 impl ItemId {
+    pub const PICKAXE: Self = Self::new_const("(T)Pickaxe");
+    pub const AXE: Self = Self::new_const("(T)Axe");
+    pub const SCYTHE: Self = Self::new_const("(W)47");
+    pub const HOE: Self = Self::new_const("(T)Hoe");
+    pub const WATERING_CAN: Self = Self::new_const("(T)WateringCan");
+
+    pub const BAMBOO_POLE: Self = Self::new_const("(T)BambooPole");
+    pub const FIBERGLASS_ROD: Self = Self::new_const("(T)FiberglassRod");
+    pub const IRIDIUM_ROD: Self = Self::new_const("(T)IridiumRod");
+    pub const BAIT: Self = Self::new_const("(O)685");
+
+    pub const SALAD: Self = Self::new_const("(O)196");
+    pub const PARSNIP_SEEDS: Self = Self::new_const("(O)472");
+    pub const PARSNIP: Self = Self::new_const("(O)24");
+    pub const CARROT_SEEDS: Self = Self::new_const("(O)CarrotSeeds");
+    pub const KALE_SEEDS: Self = Self::new_const("(O)477");
+
+    pub const CLAY: Self = Self::new_const("(O)330");
+    pub const WOOD: Self = Self::new_const("(O)388");
+    pub const STONE: Self = Self::new_const("(O)390");
+    pub const FIBER: Self = Self::new_const("(O)771");
+
+    pub const OAK_SEED: Self = Self::new_const("(O)309");
+    pub const MAPLE_SEED: Self = Self::new_const("(O)310");
+    pub const PINE_SEED: Self = Self::new_const("(O)311");
+
     pub const SPRINKLER: Self = Self::new_const("(O)599");
+    pub const SCARECROW: Self = Self::new_const("(BC)8");
+    pub const FURNACE: Self = Self::new_const("(BC)13");
+    pub const CHEST: Self = Self::new_const("(BC)130");
+
+    pub const DAFFODIL: Self = Self::new_const("(O)18");
+
+    pub const SEA_JELLY: Self = Self::new_const("(O)SeaJelly");
+    pub const RIVER_JELLY: Self = Self::new_const("(O)RiverJelly");
+    pub const CAVE_JELLY: Self = Self::new_const("(O)CaveJelly");
+
+    pub const COPPER_ORE: Self = Self::new_const("(O)378");
+    pub const IRON_ORE: Self = Self::new_const("(O)380");
+    pub const GOLD_ORE: Self = Self::new_const("(O)384");
+    pub const IRIDIUM_ORE: Self = Self::new_const("(O)386");
+    pub const COAL: Self = Self::new_const("(O)382");
+
+    pub const COPPER_BAR: Self = Self::new_const("(O)334");
+    pub const IRON_BAR: Self = Self::new_const("(O)335");
+    pub const GOLD_BAR: Self = Self::new_const("(O)336");
+    pub const IRIDIUM_BAR: Self = Self::new_const("(O)337");
+
+    pub const GEODE: Self = Self::new_const("(O)535");
+    pub const FROZEN_GEODE: Self = Self::new_const("(O)536");
+    pub const MAGMA_GEODE: Self = Self::new_const("(O)537");
+    pub const OMNI_GEODE: Self = Self::new_const("(O)749");
 
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
@@ -128,6 +179,17 @@ impl ItemId {
 
     pub fn as_item(self) -> Item {
         self.into()
+    }
+
+    pub const fn with_count(self, count: usize) -> Item {
+        Item {
+            id: self,
+            count,
+            price: 0,
+            edibility: -300,
+            kind: None,
+            category: None,
+        }
     }
 
     pub fn is_tree_seed(&self) -> bool {
@@ -162,72 +224,9 @@ impl ItemId {
 }
 
 impl Item {
-    pub const PICKAXE: Item = Item::new_const("(T)Pickaxe");
-    pub const AXE: Item = Item::new_const("(T)Axe");
-    pub const SCYTHE: Item = Item::new_const("(W)47");
-    pub const HOE: Item = Item::new_const("(T)Hoe");
-    pub const WATERING_CAN: Item = Item::new_const("(T)WateringCan");
-
-    pub const BAMBOO_POLE: Item = Item::new_const("(T)BambooPole");
-    pub const FIBERGLASS_ROD: Item = Item::new_const("(T)FiberglassRod");
-    pub const IRIDIUM_ROD: Item = Item::new_const("(T)IridiumRod");
-    pub const BAIT: Item = Item::new_const("(O)685");
-
-    pub const SALAD: Item = Item::new_const("(O)196");
-    pub const PARSNIP_SEEDS: Item = Item::new_const("(O)472");
-    pub const PARSNIP: Item = Item::new_const("(O)24");
-    pub const CARROT_SEEDS: Item = Item::new_const("(O)CarrotSeeds");
-    pub const KALE_SEEDS: Item = Item::new_const("(O)477");
-
-    pub const CLAY: Item = Item::new_const("(O)330");
-    pub const WOOD: Item = Item::new_const("(O)388");
-    pub const STONE: Item = Item::new_const("(O)390");
-    pub const FIBER: Item = Item::new_const("(O)771");
-
-    pub const OAK_SEED: Item = Item::new_const("(O)309");
-    pub const MAPLE_SEED: Item = Item::new_const("(O)310");
-    pub const PINE_SEED: Item = Item::new_const("(O)311");
-
-    pub const SCARECROW: Item = Item::new_const("(BC)8");
-    pub const FURNACE: Item = Item::new_const("(BC)13");
-    pub const CHEST: Item = Item::new_const("(BC)130");
-
-    pub const DAFFODIL: Item = Item::new_const("(O)18");
-
-    pub const SEA_JELLY: Item = Item::new_const("(O)SeaJelly");
-    pub const RIVER_JELLY: Item = Item::new_const("(O)RiverJelly");
-    pub const CAVE_JELLY: Item = Item::new_const("(O)CaveJelly");
-
-    pub const COPPER_ORE: Item = Item::new_const("(O)378");
-    pub const IRON_ORE: Item = Item::new_const("(O)380");
-    pub const GOLD_ORE: Item = Item::new_const("(O)384");
-    pub const IRIDIUM_ORE: Item = Item::new_const("(O)386");
-    pub const COAL: Item = Item::new_const("(O)382");
-
-    pub const COPPER_BAR: Item = Item::new_const("(O)334");
-    pub const IRON_BAR: Item = Item::new_const("(O)335");
-    pub const GOLD_BAR: Item = Item::new_const("(O)336");
-    pub const IRIDIUM_BAR: Item = Item::new_const("(O)337");
-
-    pub const GEODE: Item = Item::new_const("(O)535");
-    pub const FROZEN_GEODE: Item = Item::new_const("(O)536");
-    pub const MAGMA_GEODE: Item = Item::new_const("(O)537");
-    pub const OMNI_GEODE: Item = Item::new_const("(O)749");
-
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         let id = ItemId::new(item_id);
         id.into()
-    }
-
-    pub const fn new_const(item_id: &'static str) -> Self {
-        Self {
-            id: ItemId::new_const(item_id),
-            count: 1,
-            price: 0,
-            edibility: -300,
-            kind: None,
-            category: None,
-        }
     }
 
     pub fn quality(&self) -> Quality {
@@ -266,9 +265,9 @@ impl Item {
             return None;
         }
 
-        if self.is_same_item(&Item::SEA_JELLY)
-            || self.is_same_item(&Item::RIVER_JELLY)
-            || self.is_same_item(&Item::CAVE_JELLY)
+        if self.is_same_item(&ItemId::SEA_JELLY)
+            || self.is_same_item(&ItemId::RIVER_JELLY)
+            || self.is_same_item(&ItemId::CAVE_JELLY)
         {
             // Temporary hard-coding to avoid eating supplies that are
             // needed for the Bait Maker.  In the future, eating the
@@ -290,7 +289,8 @@ impl Item {
     }
 
     pub fn gp_per_stamina(&self) -> Option<f32> {
-        if self.is_same_item(&Item::PARSNIP.clone().with_quality(Quality::Gold))
+        if self
+            .is_same_item(&ItemId::PARSNIP.clone().with_quality(Quality::Gold))
         {
             // Hack to avoid eating any gold-star parsnips harvested
             // on Day 5.  Eventually, should be replaced by a check on
@@ -489,13 +489,6 @@ impl AsRef<ItemId> for ItemId {
 
 impl From<ItemId> for Item {
     fn from(id: ItemId) -> Self {
-        Self {
-            id,
-            count: 1,
-            price: 0,
-            edibility: -300,
-            kind: None,
-            category: None,
-        }
+        id.with_count(1)
     }
 }

@@ -4,7 +4,7 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActivateTile, InventoryGoal, MovementGoal, UseItemOnTile},
-    game_state::{Item, ObjectKind, TileMap, Vector},
+    game_state::{Item, ItemId, ObjectKind, TileMap, Vector},
     Error, GameAction, GameState,
 };
 
@@ -20,13 +20,13 @@ impl ExpandTreeFarm {
         Self
     }
 
-    const SEED_TYPES: [Item; 3] =
-        [Item::OAK_SEED, Item::MAPLE_SEED, Item::PINE_SEED];
+    const SEED_TYPES: [ItemId; 3] =
+        [ItemId::OAK_SEED, ItemId::MAPLE_SEED, ItemId::PINE_SEED];
 
     fn next_step(
         &self,
         game_state: &GameState,
-    ) -> Result<Option<(Vector<isize>, Option<Item>)>, Error> {
+    ) -> Result<Option<(Vector<isize>, Option<ItemId>)>, Error> {
         let plan = FarmPlan::plan(game_state)?;
         let farm = game_state.get_room("Farm")?;
 
@@ -41,10 +41,12 @@ impl ExpandTreeFarm {
             .distances(initial_tile);
         let clear_tiles = farm.pathfinding().clear();
 
-        let opt_tree_seed =
-            game_state.player.inventory.iter_items().find(|item| {
-                Self::SEED_TYPES.iter().any(|seed| &item.id == &seed.id)
-            });
+        let opt_tree_seed = game_state
+            .player
+            .inventory
+            .iter_items()
+            .map(|item| &item.id)
+            .find(|id| Self::SEED_TYPES.iter().any(|seed| id == &seed));
 
         let current_trees = TileMap::collect_true(
             distances.shape(),
@@ -68,7 +70,7 @@ impl ExpandTreeFarm {
             .filter_map(|obj| {
                 let opt_tool = match &obj.kind {
                     ObjectKind::Tree(tree) if tree.growth_stage == 0 => {
-                        Some(Item::AXE)
+                        Some(ItemId::AXE)
                     }
                     ObjectKind::Tree(tree)
                         if tree.has_seed && !tree.is_stump =>
@@ -98,26 +100,26 @@ impl ExpandTreeFarm {
             .flat_map(|tile| tile.iter_adjacent())
             .unique()
             .filter(|adj| current_trees.is_set(*adj))
-            .map(|adj| (adj, Some(Item::AXE)));
+            .map(|adj| (adj, Some(ItemId::AXE)));
 
-        let opt_next_step = std::iter::empty::<(Vector<isize>, Option<Item>)>()
-            .chain(iter_plant_tree)
-            .chain(iter_seeds_to_get)
-            .chain(iter_clear_adj_trees)
-            .filter(|(tile, _)| distances.is_some(*tile))
-            .min_by_key(|(tile, opt_item)| {
-                let dist = distances
-                    .get_opt(*tile)
-                    .cloned()
-                    .expect("Protected by earlier distances.is_some() check");
+        let opt_next_step =
+            std::iter::empty::<(Vector<isize>, Option<ItemId>)>()
+                .chain(iter_plant_tree)
+                .chain(iter_seeds_to_get)
+                .chain(iter_clear_adj_trees)
+                .filter(|(tile, _)| distances.is_some(*tile))
+                .min_by_key(|(tile, opt_item)| {
+                    let dist = distances.get_opt(*tile).cloned().expect(
+                        "Protected by earlier distances.is_some() check",
+                    );
 
-                let is_planting = opt_item
-                    .as_ref()
-                    .map(|item| item.id.item_id.starts_with("(O)"))
-                    .unwrap_or(false);
+                    let is_planting = opt_item
+                        .as_ref()
+                        .map(|item| item.item_id.starts_with("(O)"))
+                        .unwrap_or(false);
 
-                (is_planting, dist)
-            });
+                    (is_planting, dist)
+                });
 
         Ok(opt_next_step)
     }
@@ -138,13 +140,13 @@ impl BotGoal for ExpandTreeFarm {
         };
 
         let inventory = &game_state.player.inventory;
-        if !inventory.contains(Item::AXE) || inventory.num_empty_slots() < 4 {
+        if !inventory.contains(ItemId::AXE) || inventory.num_empty_slots() < 4 {
             let goal = Self::SEED_TYPES
                 .iter()
                 .map(|seed| seed.clone().with_count(100))
                 .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
-                .with(Item::AXE)
-                .with(Item::HOE)
+                .with(ItemId::AXE)
+                .with(ItemId::HOE)
                 .stamina_recovery_slots(2);
             return Ok(goal.into());
         }

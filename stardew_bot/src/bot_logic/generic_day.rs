@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, ItemCategory, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ItemId, ObjectKind, Vector},
     Error, GameAction, GameState,
 };
 
@@ -53,7 +53,7 @@ impl BotGoal for GenericDay {
 
         let any_kale_planted = farm
             .iter_planted_seeds()
-            .any(|seed| seed == &Item::KALE_SEEDS.id);
+            .any(|seed| seed == &ItemId::KALE_SEEDS);
 
         let stack = LogicStack::new().then(CheckAllMail);
 
@@ -86,14 +86,16 @@ impl BotGoal for GenericDay {
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 && any_kale_planted {
-            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
+            let crops =
+                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
             stack
                 .then(HarvestCropsGoal::new())
                 .then(crops)
                 .then(ExpandTreeFarm::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
-            let crops = PlantCropsGoal::new([Item::KALE_SEEDS.with_count(200)]);
+            let crops =
+                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
             stack
                 .then(HarvestCropsGoal::new())
                 .then(
@@ -105,28 +107,28 @@ impl BotGoal for GenericDay {
                 )
                 .then(
                     InventoryGoal::empty()
-                        .with(Item::HOE)
+                        .with(ItemId::HOE)
                         .take_if(|item| {
                             matches!(
                                 item.category,
                                 Some(ItemCategory::Gem | ItemCategory::Mineral)
                             )
                         })
-                        .with(Item::GEODE.with_count(1000))
-                        .with(Item::FROZEN_GEODE.with_count(1000))
-                        .with(Item::MAGMA_GEODE.with_count(1000))
-                        .with(Item::OMNI_GEODE.with_count(1000))
-                        .with(Item::CLAY.with_count(1000))
+                        .with(ItemId::GEODE.with_count(1000))
+                        .with(ItemId::FROZEN_GEODE.with_count(1000))
+                        .with(ItemId::MAGMA_GEODE.with_count(1000))
+                        .with(ItemId::OMNI_GEODE.with_count(1000))
+                        .with(ItemId::CLAY.with_count(1000))
                         .stamina_recovery_slots(1),
                 )
                 .then(
-                    SellToMerchantGoal::new("Carpenter", Item::CLAY)
+                    SellToMerchantGoal::new("Carpenter", ItemId::CLAY)
                         .min_to_sell(10),
                 )
                 .then(
                     BuyFromMerchantGoal::new(
                         "Carpenter",
-                        Item::WOOD.with_count(350),
+                        ItemId::WOOD.with_count(350),
                     )
                     .include_stored_items("Farm"),
                 )
@@ -139,7 +141,7 @@ impl BotGoal for GenericDay {
                 .then(crops.clone().only_buy_missing_seeds())
                 .then(BuyFromMerchantGoal::new(
                     "Saloon",
-                    Item::SALAD.with_count(20),
+                    ItemId::SALAD.with_count(20),
                 ))
                 .then(crops.clone())
         } else {
@@ -154,7 +156,7 @@ impl BotGoal for GenericDay {
             stack
                 .then(
                     InventoryGoal::empty()
-                        .with(Item::HOE)
+                        .with(ItemId::HOE)
                         .stamina_recovery_slots(2),
                 )
                 .then(ForagingGoal::new().location("Beach"))

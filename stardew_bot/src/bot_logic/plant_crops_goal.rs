@@ -128,7 +128,7 @@ impl PlantCropsGoal {
         // bought/crafted, a tile with unwatered seeds should not
         // cause the bot to think the tile requires seeds.
         assume_watered: bool,
-    ) -> Option<Option<Item>> {
+    ) -> Option<Option<ItemId>> {
         let is_seed = statics
             .item_data
             .get(goal)
@@ -140,16 +140,16 @@ impl PlantCropsGoal {
                 ObjectKind::Sprinkler(sprinkler) if goal == &sprinkler.id() => {
                     None
                 }
-                ObjectKind::Scarecrow if goal == &Item::SCARECROW.id => None,
+                ObjectKind::Scarecrow if goal == &ItemId::SCARECROW => None,
 
                 ObjectKind::HoeDirt(HoeDirt {
                     is_watered: false, ..
                 }) if is_seed && !assume_watered => {
-                    Some(Some(Item::WATERING_CAN))
+                    Some(Some(ItemId::WATERING_CAN))
                 }
 
                 ObjectKind::HoeDirt(HoeDirt { crop: None, .. }) => {
-                    Some(Some(goal.clone().into()))
+                    Some(Some(goal.clone()))
                 }
 
                 ObjectKind::HoeDirt(HoeDirt {
@@ -191,7 +191,7 @@ impl PlantCropsGoal {
             }
         } else {
             let item = if is_seed {
-                Item::HOE
+                ItemId::HOE
             } else {
                 goal.clone().into()
             };
@@ -204,7 +204,7 @@ impl PlantCropsGoal {
     fn iter_steps<'a>(
         &'a self,
         game_state: &'a GameState,
-    ) -> Result<impl Iterator<Item = (Vector<isize>, Option<Item>)> + 'a, Error>
+    ) -> Result<impl Iterator<Item = (Vector<isize>, Option<ItemId>)> + 'a, Error>
     {
         if game_state.globals.in_game_time >= self.stop_time {
             return Ok(Either::Left(std::iter::empty()));
@@ -235,7 +235,7 @@ impl PlantCropsGoal {
             .filter(move |(_, opt_item)| {
                 opt_item
                     .as_ref()
-                    .map(|item| inventory.get(&item.id).is_some())
+                    .map(|item| inventory.get(item).is_some())
                     .unwrap_or(true)
             });
 
@@ -280,9 +280,8 @@ impl PlantCropsGoal {
             .iter_regular_sprinklers()
             .map(|tile| (tile, ItemId::SPRINKLER));
 
-        let iter_scarecrows = plan
-            .iter_scarecrows()
-            .map(|tile| (tile, Item::SCARECROW.id.clone()));
+        let iter_scarecrows =
+            plan.iter_scarecrows().map(|tile| (tile, ItemId::SCARECROW));
 
         let final_state: HashMap<_, _> = iter_seed_tiles
             .chain(iter_sprinklers)
@@ -405,12 +404,15 @@ impl PlantCropsGoal {
     ) -> Result<Option<LogicStack>, Error> {
         let get_ingredients = |to_craft: &ItemId| -> Option<Vec<Item>> {
             if to_craft == &ItemId::SPRINKLER {
-                Some(vec![Item::COPPER_BAR, Item::IRON_BAR])
-            } else if to_craft == &Item::SCARECROW.id {
                 Some(vec![
-                    Item::WOOD.with_count(50),
-                    Item::COAL,
-                    Item::FIBER.with_count(20),
+                    ItemId::COPPER_BAR.with_count(1),
+                    ItemId::IRON_BAR.with_count(1),
+                ])
+            } else if to_craft == &ItemId::SCARECROW {
+                Some(vec![
+                    ItemId::WOOD.with_count(50),
+                    ItemId::COAL.with_count(1),
+                    ItemId::FIBER.with_count(20),
                 ])
             } else {
                 None
@@ -549,7 +551,7 @@ impl BotGoal for PlantCropsGoal {
                 .filter(|(_, opt_item)| {
                     opt_item
                         .as_ref()
-                        .map(|item| item.is_same_item(&Item::HOE))
+                        .map(|item| item == &ItemId::HOE)
                         .unwrap_or(false)
                 })
                 .map(|(tile, _)| tile)
@@ -628,7 +630,7 @@ impl BotGoal for PlantCropsGoal {
                 opt_item
                     .as_ref()
                     .map(|item| {
-                        !item.is_same_item(&Item::HOE)
+                        item != &ItemId::HOE
                             || clay_tiles.is_empty()
                             || clay_tiles.contains(tile)
                     })
@@ -644,7 +646,7 @@ impl BotGoal for PlantCropsGoal {
                     need_clay_before_deadline
                         && opt_item
                             .as_ref()
-                            .map(|item| item.is_same_item(&Item::WATERING_CAN))
+                            .map(|item| item == &ItemId::WATERING_CAN)
                             .unwrap_or(true),
                     dist != 1,
                     dist,
@@ -662,10 +664,10 @@ impl BotGoal for PlantCropsGoal {
                 let item = item.with_count(count);
                 goal.with(item)
             })
-            .with(Item::WATERING_CAN)
-            .with(Item::HOE)
-            .with(Item::PICKAXE)
-            .with(Item::AXE)
+            .with(ItemId::WATERING_CAN)
+            .with(ItemId::HOE)
+            .with(ItemId::PICKAXE)
+            .with(ItemId::AXE)
             .stamina_recovery_slots(1);
         if !get_tools.is_completed(game_state)? {
             let get_tools = get_tools
@@ -692,15 +694,13 @@ impl BotGoal for PlantCropsGoal {
                 || (matches!(item.category, Some(ItemCategory::Seed))
                     && !item.id.is_tree_seed()
                     && !item.id.is_fruit_sapling())
-                || item.is_same_item(&ItemId::SPRINKLER)
-                || item.is_same_item(&Item::SCARECROW)
+                || item == &ItemId::SPRINKLER
+                || item == &ItemId::SCARECROW
             {
                 SIL::HotBarLeft
             } else if item.gp_per_stamina().is_some() {
                 SIL::HotBarRight
-            } else if item.is_same_item(&Item::CLAY)
-                || item.is_same_item(&Item::WOOD)
-            {
+            } else if item == &ItemId::CLAY || item == &ItemId::WOOD {
                 SIL::HotBar
             } else {
                 SIL::Hidden
@@ -711,7 +711,7 @@ impl BotGoal for PlantCropsGoal {
         }
 
         if let Some(item) = opt_item {
-            if item.is_same_item(&Item::WATERING_CAN) {
+            if item == ItemId::WATERING_CAN {
                 let goal = FillWateringCan::if_empty();
                 if !goal.is_completed(game_state) {
                     return Ok(goal.into());

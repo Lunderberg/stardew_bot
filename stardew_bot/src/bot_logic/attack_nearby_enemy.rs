@@ -252,7 +252,7 @@ impl BotGoal for ClubSmashNearby {
             return Ok(BotGoalResult::Completed);
         };
 
-        let select_club = SelectItemGoal::new(club.clone());
+        let select_club = SelectItemGoal::new(club.id.clone());
         if !select_club.is_completed(game_state) {
             // Select the club in the inventory
             return Ok(select_club.into());

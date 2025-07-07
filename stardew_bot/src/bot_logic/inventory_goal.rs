@@ -89,7 +89,8 @@ impl InventoryGoal {
         Self { room, ..self }
     }
 
-    pub fn new(item: Item) -> Self {
+    pub fn new(item: impl Into<Item>) -> Self {
+        let item = item.into();
         let bounds = [(
             item.id,
             Bounds {

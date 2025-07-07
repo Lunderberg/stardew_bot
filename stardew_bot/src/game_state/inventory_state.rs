@@ -285,7 +285,8 @@ impl Inventory {
             .map(|(i, _)| i)
     }
 
-    pub fn count_item(&self, item: &Item) -> usize {
+    pub fn count_item(&self, item: impl AsRef<ItemId>) -> usize {
+        let item = item.as_ref();
         self.iter_items()
             .filter(|inv_item| inv_item.is_same_item(item))
             .map(|inv_item| inv_item.count)

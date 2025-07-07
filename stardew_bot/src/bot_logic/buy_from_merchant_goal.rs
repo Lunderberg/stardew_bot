@@ -2,7 +2,7 @@ use itertools::Either;
 
 use crate::{
     bot_logic::{BotError, GoToActionTile},
-    game_state::Item,
+    game_state::{Item, ItemId},
     Error, GameAction, GameState,
 };
 
@@ -19,8 +19,9 @@ pub struct BuyFromMerchantGoal {
 }
 
 impl BuyFromMerchantGoal {
-    pub fn new(merchant: impl Into<String>, item: Item) -> Self {
+    pub fn new(merchant: impl Into<String>, item: impl Into<Item>) -> Self {
         let merchant = merchant.into();
+        let item = item.into();
         Self {
             item,
             movement_goal: GoToActionTile::new(merchant.clone()),
@@ -74,15 +75,15 @@ impl BuyFromMerchantGoal {
 
     fn buy_price(&self, _game_state: &GameState) -> i32 {
         // TODO: Read these from memory, rather than hard-coding them.
-        if self.item.is_same_item(&Item::SALAD) {
+        if self.item == ItemId::SALAD {
             220
-        } else if self.item.is_same_item(&Item::PARSNIP_SEEDS) {
+        } else if self.item == ItemId::PARSNIP_SEEDS {
             20
-        } else if self.item.is_same_item(&Item::KALE_SEEDS) {
+        } else if self.item == ItemId::KALE_SEEDS {
             70
-        } else if self.item.is_same_item(&Item::COPPER_ORE) {
+        } else if self.item == ItemId::COPPER_ORE {
             75
-        } else if self.item.is_same_item(&Item::WOOD) {
+        } else if self.item == ItemId::WOOD {
             10
         } else {
             0

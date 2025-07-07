@@ -4,7 +4,7 @@ use dotnet_debugger::env_var_flag;
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ItemCategory, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ItemId, ObjectKind, Vector},
     Direction, Error, GameAction, GameState,
 };
 
@@ -56,7 +56,7 @@ fn scythe_path_to_water(
 
     let opt_action = opt_tile_to_scythe.map(|tile| {
         LogicStack::new()
-            .then(UseItemOnTile::new(Item::SCYTHE.clone(), "Farm", tile))
+            .then(UseItemOnTile::new(ItemId::SCYTHE, "Farm", tile))
             .with_interrupt(CollectNearbyItems::new())
     });
 
@@ -139,19 +139,22 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        let goal = BuyFromMerchantGoal::new("Blacksmith", Item::COPPER_ORE);
+        let goal = BuyFromMerchantGoal::new(
+            "Blacksmith",
+            ItemId::COPPER_ORE.with_count(1),
+        );
         if !goal.is_completed(game_state)? && in_game_time < 1200 {
             return Ok(goal.into());
         }
 
         let goal =
-            SellToMerchantGoal::new("Carpenter", Item::CLAY).min_to_sell(100);
+            SellToMerchantGoal::new("Carpenter", ItemId::CLAY).min_to_sell(100);
         if in_game_time < 1630 && !goal.is_completed(game_state) {
             return Ok(goal.into());
         }
 
         let goal =
-            BuyFromMerchantGoal::new("Saloon", Item::SALAD.with_count(6));
+            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(6));
         if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
@@ -183,24 +186,28 @@ impl BotGoal for FirstDay {
             }
         }
 
-        if game_state.player.inventory.count_item(&Item::PARSNIP_SEEDS) == 0
+        if game_state
+            .player
+            .inventory
+            .count_item(&ItemId::PARSNIP_SEEDS)
+            == 0
             && in_game_time < 1700
             && current_money > 1200
         {
             let goal = BuyFromMerchantGoal::new(
                 "Buy General",
-                Item::PARSNIP_SEEDS.with_count(60),
+                ItemId::PARSNIP_SEEDS.with_count(60),
             );
             return Ok(goal.into());
         }
 
         let mut plant_crops = PlantCropsGoal::new(
-            std::iter::once(Item::PARSNIP_SEEDS.with_count(60)).chain(
+            std::iter::once(ItemId::PARSNIP_SEEDS.with_count(60)).chain(
                 game_state
                     .player
                     .inventory
                     .iter_items()
-                    .filter(|item| !item.is_same_item(&Item::PARSNIP_SEEDS))
+                    .filter(|item| !item.is_same_item(&ItemId::PARSNIP_SEEDS))
                     .filter(|item| {
                         matches!(item.category, Some(ItemCategory::Seed))
                     })
@@ -216,14 +223,14 @@ impl BotGoal for FirstDay {
 
         let should_ship_clay = |game_state: &GameState| -> bool {
             let current_clay =
-                game_state.player.inventory.count_item(&Item::CLAY);
+                game_state.player.inventory.count_item(&ItemId::CLAY);
             current_clay > 20 && game_state.globals.in_game_time > 2400
         };
 
         if should_ship_clay(game_state) {
             let goal = ShipItemGoal::new([
-                Item::CLAY.with_count(0),
-                Item::DAFFODIL.with_count(0),
+                ItemId::CLAY.with_count(0),
+                ItemId::DAFFODIL.with_count(0),
             ]);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
