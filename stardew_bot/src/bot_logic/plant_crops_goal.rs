@@ -183,7 +183,7 @@ impl PlantCropsGoal {
                 | ObjectKind::MineElevator
                 | ObjectKind::MineCartCoal
                 | ObjectKind::MineBarrel
-                | ObjectKind::Furnace(_)
+                | ObjectKind::CraftingMachine(_)
                 | ObjectKind::Other { .. }
                 | ObjectKind::Unknown => {
                     panic!("Planned farming tile should not contain {current}.")

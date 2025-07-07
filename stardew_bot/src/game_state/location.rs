@@ -178,13 +178,23 @@ pub struct Chest {
 }
 
 #[derive(Debug, Clone)]
-pub struct Furnace {
+pub struct CraftingMachine {
+    /// The type of crafting machine (e.g. furnace, loom, bait maker,
+    /// etc.)
+    pub kind: CraftingMachineKind,
+
     /// True if the product is ready to harvest.  Otherwise, false.
     pub ready_to_harvest: bool,
 
     /// True if the machine has been loaded up with ingredients.
     /// Otherwise, false.
     pub has_held_item: bool,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub enum CraftingMachineKind {
+    Furnace,
+    BaitMaker,
 }
 
 #[derive(Debug, Clone)]
@@ -319,7 +329,7 @@ pub enum ObjectKind {
     MineBarrel,
 
     /// A furnace in which ore can be smelted.
-    Furnace(Furnace),
+    CraftingMachine(CraftingMachine),
 
     /// A sprinkler
     Sprinkler(Sprinkler),
@@ -858,9 +868,18 @@ impl Location {
         )?;
 
         graph.named_native_function(
-            "new_furnace_kind",
-            |ready_to_harvest: bool, has_held_item: bool| {
-                ObjectKind::Furnace(Furnace {
+            "new_crafting_machine",
+            |kind: i32, ready_to_harvest: bool, has_held_item: bool| {
+                let kind = match kind {
+                    13 => CraftingMachineKind::Furnace,
+                    285 => CraftingMachineKind::BaitMaker,
+                    _ => unreachable!(
+                        "Sheet index {kind} is not a known crafting device, \
+                         and should have been filtered out."
+                    ),
+                };
+                ObjectKind::CraftingMachine(CraftingMachine {
+                    kind,
                     ready_to_harvest,
                     has_held_item,
                 })
@@ -1410,13 +1429,17 @@ impl Location {
                             new_litter_kind(name, id)
                         } else if category == -2i32 {
                             new_mineral_kind(name, id)
-                        } else if category == -9i32 && sheet_index == 13i32 {
+                        } else if category == -9i32 && (
+                            sheet_index == 13i32 ||
+                                sheet_index == 285i32
+                        ) {
                             let ready_to_harvest = obj.readyForHarvest.value;
                             let has_held_item = obj
                                 .heldObject
                                 .value
                                 .is_some();
-                            new_furnace_kind(
+                            new_crafting_machine(
+                                sheet_index,
                                 ready_to_harvest,
                                 has_held_item,
                             )
@@ -2384,7 +2407,7 @@ impl ObjectKind {
             ObjectKind::Sprinkler(_)
             | ObjectKind::Scarecrow
             | ObjectKind::MineBarrel
-            | ObjectKind::Furnace(_)
+            | ObjectKind::CraftingMachine(_)
             | ObjectKind::MineLadderUp
             | ObjectKind::MineLadderDown
             | ObjectKind::MineHoleDown
@@ -2409,11 +2432,23 @@ impl ObjectKind {
         }
     }
 
-    pub fn as_furnace(&self) -> Option<&Furnace> {
+    pub fn as_crafting_machine(&self) -> Option<&CraftingMachine> {
         match self {
-            ObjectKind::Furnace(furnace) => Some(furnace),
+            ObjectKind::CraftingMachine(crafting) => Some(crafting),
             _ => None,
         }
+    }
+
+    pub fn as_furnace(&self) -> Option<&CraftingMachine> {
+        self.as_crafting_machine().filter(|machine| {
+            matches!(machine.kind, CraftingMachineKind::Furnace)
+        })
+    }
+
+    pub fn as_bait_maker(&self) -> Option<&CraftingMachine> {
+        self.as_crafting_machine().filter(|machine| {
+            matches!(machine.kind, CraftingMachineKind::BaitMaker)
+        })
     }
 
     pub fn as_stone(&self) -> Option<&StoneKind> {
@@ -2818,7 +2853,7 @@ impl std::fmt::Display for ObjectKind {
             Self::MineElevator => write!(f, "MineElevator"),
             Self::MineCartCoal => write!(f, "MineCartCoal"),
             Self::MineBarrel => write!(f, "MineBarrel"),
-            Self::Furnace(furnace) => write!(f, "{furnace}"),
+            Self::CraftingMachine(machine) => write!(f, "{machine}"),
             Self::Torch => write!(f, "Torch"),
             Self::Scarecrow => write!(f, "Scarecrow"),
             Self::Sprinkler(sprinkler) => write!(f, "{sprinkler}"),
@@ -2872,14 +2907,24 @@ impl std::fmt::Display for MineralKind {
     }
 }
 
-impl std::fmt::Display for Furnace {
+impl std::fmt::Display for CraftingMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.ready_to_harvest {
-            write!(f, "Furnace(harvestable)")
+        let state = if self.ready_to_harvest {
+            "done"
         } else if self.has_held_item {
-            write!(f, "Furnace(running)")
+            "running"
         } else {
-            write!(f, "Furnace(empty)")
+            "empty"
+        };
+        write!(f, "{}{state})", self.kind)
+    }
+}
+
+impl std::fmt::Display for CraftingMachineKind {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            CraftingMachineKind::Furnace => write!(f, "Furnace"),
+            CraftingMachineKind::BaitMaker => write!(f, "BaitMaker"),
         }
     }
 }

@@ -372,7 +372,7 @@ impl MineDelvingGoal {
             .get_room("Mine")?
             .objects
             .iter()
-            .filter(|obj| matches!(obj.kind, ObjectKind::Furnace(_)))
+            .filter(|obj| matches!(obj.kind, ObjectKind::CraftingMachine(_)))
             .count();
         if enough_ore_to_smelt
             && num_furnaces < OFFSETS_ELEVATOR_TO_FURNACE.len()
