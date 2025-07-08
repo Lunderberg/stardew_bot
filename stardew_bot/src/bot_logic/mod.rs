@@ -24,6 +24,9 @@ pub use generic_day::*;
 mod fishing_goal;
 pub use fishing_goal::*;
 
+mod upgrade_fishing_rod;
+pub use upgrade_fishing_rod::*;
+
 mod ship_most_fish;
 pub use ship_most_fish::*;
 
