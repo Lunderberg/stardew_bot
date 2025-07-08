@@ -57,7 +57,18 @@ pub struct WateringCan {
 
 #[derive(Debug, Clone)]
 pub struct FishingRod {
+    /// The number of items that may be attached to the fishing rod.
+    ///
+    /// 0: No slots         (Bamboo Pole)
+    /// 1: Bait slot        (Fiberglass Rod)
+    /// 2: Bait + tackle    (Iridium Rod)
+    /// 3: Bait + 2x tackle (Deluxe Iridium Rod)
+    pub num_attachment_slots: i32,
+
+    /// The bait on the fishing rod, if any.
     pub bait: Option<Box<Item>>,
+
+    /// The tackle on the fishing rod, if any.
     pub tackle: Option<Box<Item>>,
 }
 

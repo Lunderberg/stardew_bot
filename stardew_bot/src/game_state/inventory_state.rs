@@ -35,10 +35,16 @@ impl Inventory {
 
         graph.named_native_function(
             "new_fishing_rod_kind",
-            |bait: Option<&Item>, tackle: Option<&Item>| {
+            |num_attachment_slots: i32,
+             bait: Option<&Item>,
+             tackle: Option<&Item>| {
                 let bait = bait.cloned().map(Box::new);
                 let tackle = tackle.cloned().map(Box::new);
-                ItemKind::FishingRod(FishingRod { bait, tackle })
+                ItemKind::FishingRod(FishingRod {
+                    num_attachment_slots,
+                    bait,
+                    tackle,
+                })
             },
         )?;
 
@@ -179,6 +185,10 @@ impl Inventory {
                     )
 
                 } else if fishing_rod.is_some() {
+                    let num_attachment_slots = fishing_rod
+                        .numAttachmentSlots
+                        .value;
+
                     let num_attachments = fishing_rod
                         .attachments
                         .elements
@@ -203,6 +213,7 @@ impl Inventory {
                     };
 
                     new_fishing_rod_kind(
+                        num_attachment_slots,
                         bait,
                         tackle,
                     )
