@@ -133,9 +133,14 @@ impl ItemId {
     pub const BAMBOO_POLE: Self = Self::new_const("(T)BambooPole");
     pub const FIBERGLASS_ROD: Self = Self::new_const("(T)FiberglassRod");
     pub const IRIDIUM_ROD: Self = Self::new_const("(T)IridiumRod");
+
     pub const BAIT: Self = Self::new_const("(O)685");
     pub const TARGETED_BAIT: Self = Self::new_const("(O)SpecificBait");
+
+    pub const SPINNER: Self = Self::new_const("(O)686");
+    pub const DRESSED_SPINNER: Self = Self::new_const("(O)687");
     pub const SONAR_BOBBER: Self = Self::new_const("(O)SonarBobber");
+
     pub const CATFISH: Self = Self::new_const("(O)143");
 
     pub const SALAD: Self = Self::new_const("(O)196");
@@ -436,6 +441,16 @@ impl Quality {
             Quality::Gold => 1.5,
             Quality::Iridium => 2.0,
         }
+    }
+}
+
+impl FishingRod {
+    pub fn can_use_bait(&self) -> bool {
+        self.num_attachment_slots >= 1
+    }
+
+    pub fn can_use_tackle(&self) -> bool {
+        self.num_attachment_slots >= 2
     }
 }
 
