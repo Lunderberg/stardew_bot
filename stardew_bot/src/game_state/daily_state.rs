@@ -74,4 +74,14 @@ impl DailyState {
 
         Ok(func)
     }
+
+    pub fn fish_price_multiplier(&self) -> f32 {
+        if self.professions.contains(&8) {
+            1.5
+        } else if self.professions.contains(&6) {
+            1.25
+        } else {
+            1.0
+        }
+    }
 }

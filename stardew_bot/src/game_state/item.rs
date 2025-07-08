@@ -399,6 +399,15 @@ impl Item {
     pub fn stack_price(&self) -> i32 {
         (self.count as i32) * self.per_item_price()
     }
+
+    /// The total price of all items in the stack, with an additional
+    /// multiplier applied to the per-item price (e.g. from skill
+    /// perks).
+    pub fn stack_price_with_perk(&self, multiplier: f32) -> i32 {
+        let per_item = self.per_item_price();
+        let per_item = ((per_item as f32) * multiplier) as i32;
+        (self.count as i32) * per_item
+    }
 }
 
 impl Quality {

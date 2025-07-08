@@ -130,14 +130,7 @@ impl<'a> FishSelling<'a> {
     pub fn new(game_state: &'a GameState) -> Self {
         let inventory = &game_state.player.inventory;
         let current_money = game_state.player.current_money;
-        let professions = &game_state.daily.professions;
-        let multiplier = if professions.contains(&8) {
-            1.5
-        } else if professions.contains(&6) {
-            1.25
-        } else {
-            1.0
-        };
+        let multiplier = game_state.daily.fish_price_multiplier();
         Self {
             inventory,
             current_money,
@@ -153,7 +146,7 @@ impl<'a> FishSelling<'a> {
 
     fn fish_money(&self) -> i32 {
         self.iter_fish()
-            .map(|item| ((item.stack_price() as f32) * self.multiplier) as i32)
+            .map(|item| item.stack_price_with_perk(self.multiplier))
             .sum::<i32>()
     }
 
