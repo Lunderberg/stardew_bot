@@ -110,6 +110,8 @@ pub enum ItemCategory {
     Flowers,
     Vegetable,
     Fish,
+    Bait,
+    Tackle,
     SeaProduce,
     Seed,
     Junk,
@@ -133,6 +135,7 @@ impl ItemId {
     pub const IRIDIUM_ROD: Self = Self::new_const("(T)IridiumRod");
     pub const BAIT: Self = Self::new_const("(O)685");
     pub const TARGETED_BAIT: Self = Self::new_const("(O)SpecificBait");
+    pub const SONAR_BOBBER: Self = Self::new_const("(O)SonarBobber");
     pub const CATFISH: Self = Self::new_const("(O)143");
 
     pub const SALAD: Self = Self::new_const("(O)196");
@@ -460,6 +463,8 @@ impl std::fmt::Display for ItemCategory {
             ItemCategory::Flowers => write!(f, "Flowers"),
             ItemCategory::Vegetable => write!(f, "Vegetables"),
             ItemCategory::Fish => write!(f, "Fish"),
+            ItemCategory::Bait => write!(f, "Bait"),
+            ItemCategory::Tackle => write!(f, "Tackle"),
             ItemCategory::SeaProduce => write!(f, "SeaProduce"),
             ItemCategory::Seed => write!(f, "Seed"),
             ItemCategory::Junk => write!(f, "Junk"),
@@ -483,6 +488,8 @@ impl From<i32> for ItemCategory {
             -80 => ItemCategory::Flowers,
             -75 => ItemCategory::Vegetable,
             -4 => ItemCategory::Fish,
+            -21 => ItemCategory::Bait,
+            -22 => ItemCategory::Tackle,
             -23 => ItemCategory::SeaProduce,
             -74 => ItemCategory::Seed,
             -20 => ItemCategory::Junk,
