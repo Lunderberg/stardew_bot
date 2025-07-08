@@ -284,7 +284,9 @@ impl BotGoal for FishingGoal {
             self.loc
                 .bait_maker()
                 .filter(|_| opt_bait_maker.is_some() || has_bait_maker)
-                .map(|(_, preferred_fish)| ItemId::TARGETED_BAIT)
+                .map(|(_, preferred_fish)| {
+                    ItemId::TARGETED_BAIT.with_subtype(preferred_fish)
+                })
                 .unwrap_or(ItemId::BAIT),
         );
         if !goal.is_completed(game_state) {
@@ -353,12 +355,10 @@ impl BotGoal for FishingGoal {
             let num_preferred_bait = fishing_rod
                 .bait
                 .as_ref()
-                .filter(|bait| bait.id == ItemId::TARGETED_BAIT)
                 .filter(|bait| {
-                    // TODO: Check that the specific type of
-                    // targeted bait matches the preferred fish to
-                    // catch.
-                    true
+                    let targeted_bait = ItemId::TARGETED_BAIT
+                        .with_subtype(preferred_fish.clone());
+                    bait.id == targeted_bait
                 })
                 .map(|bait| bait.count)
                 .unwrap_or(0);

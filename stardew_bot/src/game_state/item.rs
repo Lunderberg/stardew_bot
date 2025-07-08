@@ -32,6 +32,11 @@ pub struct ItemId {
     /// The qualified item id (e.g. "(O)CarrotSeeds").
     pub item_id: Cow<'static, str>,
 
+    /// The subtype of an item.  For most items, there is no subtype.
+    /// For targeted bait, dried fruit, and smoked fish, this is the
+    /// fish/fruit/fish used to make the item.
+    pub subtype: Option<Box<ItemId>>,
+
     /// The quality of the item.
     pub quality: Quality,
 }
@@ -169,6 +174,7 @@ impl ItemId {
         Self {
             item_id: item_id.into(),
             quality: Quality::Normal,
+            subtype: None,
         }
     }
 
@@ -176,11 +182,17 @@ impl ItemId {
         Self {
             item_id: Cow::Borrowed(item_id),
             quality: Quality::Normal,
+            subtype: None,
         }
     }
 
     pub fn with_quality(self, quality: Quality) -> Self {
         Self { quality, ..self }
+    }
+
+    pub fn with_subtype(self, subtype: ItemId) -> Self {
+        let subtype = Some(Box::new(subtype));
+        Self { subtype, ..self }
     }
 
     pub fn as_item(self) -> Item {
@@ -477,12 +489,20 @@ impl std::fmt::Display for Quality {
 
 impl std::fmt::Display for ItemId {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let Self { item_id, quality } = &self;
-        if quality.is_normal() {
-            write!(f, "{item_id}")
-        } else {
-            write!(f, "{quality} {item_id}")
+        let Self {
+            item_id,
+            quality,
+            subtype,
+        } = &self;
+        if !quality.is_normal() {
+            write!(f, "{quality} ")?;
         }
+        write!(f, "{item_id}")?;
+        if let Some(subtype) = subtype {
+            write!(f, " {subtype}")?;
+        }
+
+        Ok(())
     }
 }
 

@@ -67,14 +67,24 @@ impl Inventory {
         graph.named_native_function(
             "new_item",
             |item_id: &str,
+             subtype: Option<&str>,
              quality: i32,
              count: usize,
              price: i32,
              edibility: i32,
              category: Option<i32>| {
-                Item::new(item_id.to_string())
-                    .with_quality(quality.try_into().unwrap_or(Quality::Normal))
-                    .with_count(count)
+                let id = ItemId::new(item_id.to_string()).with_quality(
+                    quality.try_into().unwrap_or(Quality::Normal),
+                );
+                let id = if let Some(subtype) = subtype {
+                    let subtype = ItemId::new(format!("(O){subtype}"));
+                    id.with_subtype(subtype)
+                } else {
+                    id
+                };
+
+                let item: Item = id.into();
+                item.with_count(count)
                     .with_price(price)
                     .with_edibility(edibility)
                     .with_category(category.map(Into::into))
@@ -112,6 +122,11 @@ impl Inventory {
                 let object = item
                     .as::<StardewValley.Object>();
 
+                let subtype = object
+                    .preservedParentSheetIndex
+                    .value
+                    .read_string();
+
                 let price = if object.is_some() {
                     object.price.value
                 } else {
@@ -132,6 +147,7 @@ impl Inventory {
 
                 new_item(
                     item_id,
+                    subtype,
                     quality,
                     count,
                     price,
