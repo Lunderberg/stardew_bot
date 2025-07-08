@@ -46,7 +46,15 @@ struct LoadBaitOntoFishingRod {
     bait: Option<ItemId>,
 }
 
-struct FishSelling<'a>(&'a Inventory);
+struct UnloadFishingRod {
+    rod: ItemId,
+}
+
+struct FishSelling<'a> {
+    inventory: &'a Inventory,
+    current_money: i32,
+    multiplier: f32,
+}
 
 impl FishingGoal {
     pub fn new(loc: FishingLocation) -> Self {
@@ -118,21 +126,43 @@ impl FishingLocation {
     }
 }
 
-impl FishSelling<'_> {
+impl<'a> FishSelling<'a> {
+    pub fn new(game_state: &'a GameState) -> Self {
+        let inventory = &game_state.player.inventory;
+        let current_money = game_state.player.current_money;
+        let professions = &game_state.daily.professions;
+        let multiplier = if professions.contains(&8) {
+            1.5
+        } else if professions.contains(&6) {
+            1.25
+        } else {
+            1.0
+        };
+        Self {
+            inventory,
+            current_money,
+            multiplier,
+        }
+    }
+
     fn iter_fish(&self) -> impl Iterator<Item = &Item> + '_ {
-        self.0
+        self.inventory
             .iter_items()
             .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
     }
 
     fn fish_money(&self) -> i32 {
-        self.iter_fish().map(|item| item.stack_price()).sum::<i32>()
+        self.iter_fish()
+            .map(|item| ((item.stack_price() as f32) * self.multiplier) as i32)
+            .sum::<i32>()
+    }
+
+    pub fn available_money(&self) -> i32 {
+        self.current_money + self.fish_money()
     }
 
     fn sell_all_fish(&self) -> LogicStack {
-        self.iter_fish().fold(LogicStack::new(), |stack, item| {
-            stack.then(SellToMerchantGoal::new("Buy Fish", item.clone()))
-        })
+        SellToMerchantGoal::new("Buy Fish", self.iter_fish().cloned()).into()
     }
 }
 
@@ -182,6 +212,19 @@ impl BotGoal for FishingGoal {
             // Discard the Bamboo Pole as soon as we have the
             // Fiberglass Rod.
             let goal = DiscardItemGoal::new(ItemId::BAMBOO_POLE);
+            if !goal.is_completed(game_state) {
+                return Ok(goal.into());
+            }
+        }
+        if inventory.contains(&ItemId::IRIDIUM_ROD) {
+            // Unload and discard the Fiberglass Rod asas soon as we
+            // have the Iridium Rod.
+            let unload = UnloadFishingRod::new(ItemId::FIBERGLASS_ROD);
+            if !unload.is_completed(game_state) {
+                return Ok(unload.into());
+            }
+
+            let goal = DiscardItemGoal::new(ItemId::FIBERGLASS_ROD);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
@@ -253,26 +296,45 @@ impl BotGoal for FishingGoal {
         }
 
         let using_bamboo_pole = current_pole.is_same_item(&ItemId::BAMBOO_POLE);
+        let using_fiberglass_rod =
+            current_pole.is_same_item(&ItemId::FIBERGLASS_ROD);
         let in_game_time = game_state.globals.in_game_time;
+        let fish_shop_open = (900..1700).contains(&in_game_time);
 
         if using_bamboo_pole
             && game_state.player.skills.fishing_xp >= 380
-            && in_game_time < 1700
+            && fish_shop_open
         {
             // The shop is open, and we have enough XP to unlock the
             // Fiberglass Rod.  Check how much cash we can get by
             // selling all current fish, and whether that's enough to
             // buy the Fiberglass Rod.
-            let fish_selling = FishSelling(inventory);
-            let can_upgrade = game_state.player.current_money
-                + fish_selling.fish_money()
-                >= 1800;
+            let fish_selling = FishSelling::new(game_state);
+            let can_upgrade = fish_selling.available_money() >= 1800;
             if can_upgrade {
                 let goal = fish_selling.sell_all_fish().then(
                     BuyFromMerchantGoal::new(
                         "Buy Fish",
                         ItemId::FIBERGLASS_ROD,
                     ),
+                );
+                return Ok(goal.into());
+            }
+        }
+
+        if using_fiberglass_rod
+            && game_state.player.skills.fishing_xp >= 3300
+            && fish_shop_open
+        {
+            // The shop is open, and we have enough XP to unlock the
+            // Iridium Rod.  Check how much cash we can get by
+            // selling all current fish, and whether that's enough to
+            // buy the Iridium Rod.
+            let fish_selling = FishSelling::new(game_state);
+            let can_upgrade = fish_selling.available_money() >= 7500;
+            if can_upgrade {
+                let goal = fish_selling.sell_all_fish().then(
+                    BuyFromMerchantGoal::new("Buy Fish", ItemId::IRIDIUM_ROD),
                 );
                 return Ok(goal.into());
             }
@@ -313,10 +375,8 @@ impl BotGoal for FishingGoal {
                 // The fish shop is open, and we're either out of bait
                 // or low on bait and nearby.  Sell all fish and buy
                 // as much bait as available.
-                let fish_selling = FishSelling(inventory);
-                let total_cash = (game_state.player.current_money
-                    + fish_selling.fish_money())
-                    as usize;
+                let fish_selling = FishSelling::new(game_state);
+                let total_cash = fish_selling.available_money() as usize;
                 let goal = fish_selling.sell_all_fish().then(
                     BuyFromMerchantGoal::new(
                         "Buy Fish",
@@ -703,6 +763,89 @@ impl BotGoal for LoadBaitOntoFishingRod {
         let pixel = page.player_item_locations[rod_slot];
         actions.do_action(GameAction::MouseOverPixel(pixel));
         actions.do_action(GameAction::RightClick);
+
+        Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl UnloadFishingRod {
+    pub fn new(rod: ItemId) -> Self {
+        Self { rod }
+    }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        let inventory = &game_state.player.inventory;
+
+        let has_loaded_fishing_rod = inventory
+            .iter_items()
+            .filter(|item| item.id == self.rod)
+            .any(|item| {
+                item.as_fishing_rod()
+                    .map(|rod| rod.bait.is_some() || rod.tackle.is_some())
+                    .unwrap_or(false)
+            });
+
+        let has_empty_slot = inventory.has_empty_slot();
+
+        let can_unload = has_loaded_fishing_rod && has_empty_slot;
+
+        !can_unload
+    }
+}
+
+impl BotGoal for UnloadFishingRod {
+    fn description(&self) -> Cow<'static, str> {
+        format!("Unload {}", self.rod).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        let inventory = &game_state.player.inventory;
+        let opt_rod_slot = inventory
+            .iter_filled_slots()
+            .filter(|(_, item)| item.id == self.rod)
+            .find(|(_, item)| {
+                item.as_fishing_rod()
+                    .map(|rod| rod.bait.is_some() || rod.tackle.is_some())
+                    .unwrap_or(false)
+            })
+            .map(|(slot, _)| slot);
+
+        let opt_empty_slot = inventory.empty_slot();
+
+        let (Some(rod_slot), Some(empty_slot)) = (opt_rod_slot, opt_empty_slot)
+        else {
+            let cleanup = MenuCloser::new();
+            if !cleanup.is_completed(game_state) {
+                return Ok(cleanup.into());
+            }
+            return Ok(BotGoalResult::Completed);
+        };
+
+        let Some(pause) = &game_state.pause_menu else {
+            actions.do_action(GameAction::ExitMenu);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        let Some(page) = pause.inventory_page() else {
+            actions.do_action(GameAction::MouseOverPixel(pause.tab_buttons[0]));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        };
+
+        if page.held_item.is_none() {
+            let pixel = page.player_item_locations[rod_slot];
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::RightClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        let pixel = page.player_item_locations[empty_slot];
+        actions.do_action(GameAction::MouseOverPixel(pixel));
+        actions.do_action(GameAction::LeftClick);
 
         Ok(BotGoalResult::InProgress)
     }
