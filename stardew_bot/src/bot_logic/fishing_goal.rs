@@ -265,6 +265,7 @@ impl BotGoal for FishingGoal {
             InventoryGoal::current().with(current_pole.clone());
         if game_state.player.room_name == "Farm" {
             preparation = preparation
+                .stamina_recovery_slots(1)
                 .otherwise_empty()
                 .craft_missing()
                 .with_exactly(
