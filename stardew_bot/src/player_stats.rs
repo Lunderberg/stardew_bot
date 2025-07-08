@@ -51,7 +51,15 @@ impl WidgetWindow<Error> for PlayerStats {
                     matches!(item.category, Some(ItemCategory::Fish))
                         || item.id == ItemId::CLAY
                 })
-                .map(|item| item.stack_price())
+                .map(|item| {
+                    let multiplier = match &item.category {
+                        Some(ItemCategory::Fish) => {
+                            daily_state.fish_price_multiplier()
+                        }
+                        _ => 1.0,
+                    };
+                    item.stack_price_with_perk(multiplier)
+                })
                 .sum::<i32>();
 
         let potential_tomorrow_gold = player_state.current_money
