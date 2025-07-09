@@ -11,6 +11,9 @@ struct Arguments {
 
     #[structopt(long = "--show-bundle-status")]
     show_bundle_status: bool,
+
+    #[structopt(long = "--predict-geodes")]
+    predict_geodes: Option<usize>,
 }
 
 fn main() -> Result<(), Error> {
@@ -20,7 +23,9 @@ fn main() -> Result<(), Error> {
         .max_render_frames(args.num_frames);
 
     if args.show_bundle_status {
-        bot.show_bundle_status();
+        bot.show_bundle_status()?;
+    } else if let Some(num_geodes) = args.predict_geodes {
+        bot.show_geode_prediction(num_geodes)?;
     } else {
         bot.run()?;
     }

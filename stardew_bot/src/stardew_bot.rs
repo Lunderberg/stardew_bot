@@ -1,12 +1,13 @@
 use crate::{
-    game_state::GameStateReader, BotActionDisplay, BotGoalDisplay, BotLogic,
-    Error, FishingUI, GameAction, GameState, InputDisplay, LocationDisplay,
-    PlayerStats, PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate,
-    X11Handler,
+    bot_logic::GeodePredictor,
+    game_state::{GameStateReader, ItemId},
+    BotActionDisplay, BotGoalDisplay, BotLogic, Error, FishingUI, GameAction,
+    GameState, InputDisplay, LocationDisplay, PlayerStats,
+    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
 };
 
 use crossterm::event::Event;
-use itertools::Either;
+use itertools::{Either, Itertools as _};
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -261,7 +262,7 @@ impl StardewBot {
         }
     }
 
-    pub fn show_bundle_status(&self) {
+    pub fn show_bundle_status(&self) -> Result<(), Error> {
         let game_state = self
             .tui_globals
             .get::<GameState>()
@@ -317,6 +318,93 @@ impl StardewBot {
                     }
                 });
         });
+
+        Ok(())
+    }
+
+    pub fn show_geode_prediction(
+        &self,
+        num_geodes: usize,
+    ) -> Result<(), Error> {
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        let predictor = GeodePredictor::new(&game_state)?;
+        let columns = [
+            ItemId::GEODE,
+            ItemId::FROZEN_GEODE,
+            ItemId::MAGMA_GEODE,
+            ItemId::OMNI_GEODE,
+        ];
+
+        let predictions: Vec<_> = (0..num_geodes)
+            .flat_map(|i| columns.iter().map(move |geode| (i, geode)))
+            .map(|(i, geode)| {
+                let prediction =
+                    predictor.predict_ahead(&game_state.statics, geode, i);
+
+                let name = game_state
+                    .statics
+                    .item_data
+                    .get(&prediction.id)
+                    .map(|data| data.name.as_str())
+                    .unwrap_or_else(|| &*prediction.id.item_id);
+
+                if prediction.count > 1 {
+                    format!("{} {name}", prediction.count)
+                } else {
+                    format!("{name}")
+                }
+            })
+            .collect();
+
+        let col_width = predictions.iter().map(|p| p.len()).max().unwrap();
+
+        predictions.into_iter().tuples().enumerate().for_each(
+            |(i, (regular, frozen, magma, omni))| {
+                if i % 40 == 0 {
+                    let header_len = (col_width + 2) * columns.len() + 3;
+                    println!("|{:-^header_len$}|", "");
+
+                    let regular = "After";
+                    let frozen = i;
+                    let magma = "Geodes";
+                    let omni = "Cracked";
+                    println!(
+                        "| {regular: >col_width$} \
+                         | {frozen: >col_width$} \
+                         | {magma: >col_width$} \
+                         | {omni: >col_width$} \
+                         |"
+                    );
+                    let regular = "Regular";
+                    let frozen = "Frozen";
+                    let magma = "Magma";
+                    let omni = "Omni";
+                    println!(
+                        "| {regular: >col_width$} \
+                         | {frozen: >col_width$} \
+                         | {magma: >col_width$} \
+                         | {omni: >col_width$} \
+                         |"
+                    );
+
+                    println!("|{:-^header_len$}|", "");
+                }
+
+                println!(
+                    "| {regular: >col_width$} \
+                     | {frozen: >col_width$} \
+                     | {magma: >col_width$} \
+                     | {omni: >col_width$} \
+                     |"
+                );
+            },
+        );
+
+        Ok(())
     }
 
     pub fn run(&mut self) -> Result<(), Error> {
