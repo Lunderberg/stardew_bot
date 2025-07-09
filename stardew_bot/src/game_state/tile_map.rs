@@ -168,7 +168,7 @@ impl AsGridPos for (isize, isize) {
 
         let i = i as usize;
         let j = j as usize;
-        (i, j).get_flat_index(height, width)
+        (i, j).get_flat_index(width, height)
     }
 
     fn display(&self) -> impl std::fmt::Debug {
@@ -187,7 +187,7 @@ impl AsGridPos for (usize, usize) {
 }
 impl AsGridPos for Vector<usize> {
     fn get_flat_index(&self, width: usize, height: usize) -> Option<usize> {
-        (self.right, self.down).get_flat_index(height, width)
+        (self.right, self.down).get_flat_index(width, height)
     }
 
     fn display(&self) -> impl std::fmt::Debug {
@@ -196,7 +196,7 @@ impl AsGridPos for Vector<usize> {
 }
 impl AsGridPos for Vector<isize> {
     fn get_flat_index(&self, width: usize, height: usize) -> Option<usize> {
-        (self.right, self.down).get_flat_index(height, width)
+        (self.right, self.down).get_flat_index(width, height)
     }
 
     fn display(&self) -> impl std::fmt::Debug {
