@@ -17,7 +17,7 @@ mod global_game_state;
 pub use global_game_state::GlobalGameState;
 
 mod static_state;
-pub use static_state::StaticState;
+pub use static_state::*;
 
 mod daily_state;
 pub use daily_state::DailyState;

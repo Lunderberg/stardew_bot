@@ -1,10 +1,11 @@
 use std::collections::HashMap;
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use itertools::Itertools as _;
 
 use crate::Error;
 
-use super::{Item, ItemCategory, ItemId};
+use super::{Item, ItemCategory, ItemId, Quality};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct StaticState {
@@ -14,6 +15,27 @@ pub struct StaticState {
     pub omni_geode: GeodeData,
 
     pub item_data: HashMap<ItemId, ItemData>,
+
+    /// Unchanging definition of the community center bundles.
+    /// Completion of bundles is tracked in GlobalState, and is
+    /// updated as bundles are completed.
+    pub bundles: Vec<Bundle>,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Bundle {
+    pub community_center_room: String,
+    pub bundle_index: i32,
+    pub name: String,
+    pub reward: Option<Item>,
+    pub ingredients: Vec<BundleIngredient>,
+    pub num_required: usize,
+}
+
+#[derive(Debug, Clone)]
+pub enum BundleIngredient {
+    Gold(usize),
+    Item(Item),
 }
 
 #[derive(Debug, Clone)]
@@ -118,8 +140,76 @@ impl StaticState {
         )?;
 
         graph.named_native_function(
+            "new_bundle",
+            |key: &str, value: &str| -> Bundle {
+                let mut iter_key = key.split('/');
+                let community_center_room =
+                    iter_key.next().unwrap().to_string();
+                let bundle_index = iter_key.next().unwrap().parse().unwrap();
+
+                let mut iter_value = value.split('/');
+                let name = iter_value.next().unwrap().to_string();
+                let reward = iter_value
+                    .next()
+                    .unwrap()
+                    .split(' ')
+                    .tuples()
+                    .map(|(category, id_str, count)| {
+                        let category = match category {
+                            "BO" => "BC",
+                            other => other,
+                        };
+                        let count = count.parse().unwrap();
+
+                        ItemId::new(format!("({category}){id_str}"))
+                            .with_count(count)
+                    })
+                    .at_most_one()
+                    .unwrap();
+
+                let ingredients: Vec<_> = iter_value
+                    .next()
+                    .unwrap()
+                    .split(' ')
+                    .tuples()
+                    .map(|(id, count, quality)| {
+                        if id == "-1" {
+                            let gold = count.parse().unwrap();
+                            BundleIngredient::Gold(gold)
+                        } else {
+                            let count = count.parse().unwrap();
+                            let quality: i32 = quality.parse().unwrap();
+                            let quality: Quality = quality.try_into().unwrap();
+                            let item = ItemId::new(format!("(O){id}"))
+                                .with_quality(quality)
+                                .with_count(count);
+                            BundleIngredient::Item(item)
+                        }
+                    })
+                    .collect();
+
+                // An integer specifying the color of the bundle.
+                iter_value.next().unwrap();
+
+                let num_required = match iter_value.next().unwrap() {
+                    "" => ingredients.len(),
+                    other => other.parse().unwrap(),
+                };
+
+                Bundle {
+                    community_center_room,
+                    bundle_index,
+                    name,
+                    reward,
+                    ingredients,
+                    num_required,
+                }
+            },
+        )?;
+
+        graph.named_native_function(
             "new_static_state",
-            |objects: &Vec<ObjectData>| {
+            |objects: &Vec<ObjectData>, bundles: &Vec<Bundle>| {
                 let get_geode_data = |id: &str| -> GeodeData {
                     let data = objects
                         .iter()
@@ -163,6 +253,7 @@ impl StaticState {
                     magma_geode,
                     omni_geode,
                     item_data,
+                    bundles: bundles.clone(),
                 }
             },
         )?;
@@ -249,7 +340,28 @@ impl StaticState {
                     })
                     .collect();
 
-                new_static_state(objects)
+                let bundles = {
+                    let bundle_dict = StardewValley.Game1
+                        .netWorldState
+                        .value
+                        ._bundleData;
+                    let num_bundles = bundle_dict
+                        ._count
+                        .prim_cast::<usize>();
+                    (0..num_bundles)
+                        .map(|i| bundle_dict._entries[i])
+                        .map(|entry| {
+                            let key = entry.key.read_string();
+                            let value = entry.value.read_string();
+                            new_bundle(key, value)
+                        })
+                        .collect()
+                };
+
+                new_static_state(
+                    objects,
+                    bundles,
+                )
             }
         })?;
 

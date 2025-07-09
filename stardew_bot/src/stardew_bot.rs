@@ -261,6 +261,64 @@ impl StardewBot {
         }
     }
 
+    pub fn show_bundle_status(&self) {
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        game_state.statics.bundles.iter().for_each(|bundle| {
+            let flags = game_state
+                .globals
+                .bundles
+                .get(&bundle.bundle_index)
+                .unwrap();
+
+            let num_done = flags.iter().map(|b| *b as usize).sum::<usize>();
+
+            println!(
+                "'{}' Bundle ({num_done}/{})",
+                bundle.name, bundle.num_required
+            );
+
+            bundle
+                .ingredients
+                .iter()
+                .zip(flags)
+                .filter(|_| num_done < bundle.num_required)
+                .for_each(|(ingredient, &done)| {
+                    use crate::game_state::BundleIngredient;
+                    let done_char = if done { '🗹' } else { '☐' };
+
+                    match ingredient {
+                        BundleIngredient::Gold(gp) => {
+                            println!("\t{done_char} {gp} GP")
+                        }
+                        BundleIngredient::Item(item) => {
+                            let name = game_state
+                                .statics
+                                .item_data
+                                .get(&item.id.clone().with_quality(
+                                    crate::game_state::Quality::Normal,
+                                ))
+                                .map(|data| data.name.as_str())
+                                .unwrap_or_else(|| &*item.id.item_id);
+
+                            print!("\t{done_char} ");
+                            if item.count > 1 {
+                                print!("{} ", item.count);
+                            }
+                            if !item.quality().is_normal() {
+                                print!("{} ", item.quality());
+                            }
+
+                            println!("{name}")
+                        }
+                    }
+                });
+        });
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         use crossterm::event;
 

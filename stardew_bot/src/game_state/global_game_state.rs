@@ -54,15 +54,31 @@ pub struct GlobalGameState {
 
     /// Events that have been triggered within the game.
     pub events_triggered: HashSet<String>,
+
+    pub bundles: HashMap<i32, Vec<bool>>,
 }
 
 #[derive(RustNativeObject, Default)]
 struct Stats(HashMap<String, u32>);
 
+#[derive(RustNativeObject, Debug, Clone)]
+struct BundleFlags {
+    bundle_index: i32,
+    flags: Vec<bool>,
+}
+
 impl GlobalGameState {
     pub(crate) fn def_read_global_game_state(
         graph: &mut SymbolicGraph,
     ) -> Result<SymbolicValue, Error> {
+        graph.named_native_function(
+            "new_bundle_flags",
+            |bundle_index: i32, flags: &Vec<bool>| BundleFlags {
+                bundle_index,
+                flags: flags.clone(),
+            },
+        )?;
+
         graph.named_native_function(
             "new_global_game_state",
             |game_id: u64,
@@ -74,17 +90,28 @@ impl GlobalGameState {
              currently_fading_to_black: bool,
              event_up: bool,
              lowest_mine_level_reached: i32,
-             events_triggered: &Vec<String>| GlobalGameState {
-                game_tick,
-                multiplayer_id,
-                game_id,
-                game_mode_tick,
-                in_game_time,
-                stats: stats.0.clone(),
-                currently_fading_to_black,
-                event_up,
-                lowest_mine_level_reached,
-                events_triggered: events_triggered.iter().cloned().collect(),
+             events_triggered: &Vec<String>,
+             bundle_flags: &Vec<BundleFlags>| {
+                let bundles = bundle_flags
+                    .iter()
+                    .map(|bundle| (bundle.bundle_index, bundle.flags.clone()))
+                    .collect();
+                GlobalGameState {
+                    game_tick,
+                    multiplayer_id,
+                    game_id,
+                    game_mode_tick,
+                    in_game_time,
+                    stats: stats.0.clone(),
+                    currently_fading_to_black,
+                    event_up,
+                    lowest_mine_level_reached,
+                    events_triggered: events_triggered
+                        .iter()
+                        .cloned()
+                        .collect(),
+                    bundles,
+                }
             },
         )?;
 
@@ -145,6 +172,36 @@ impl GlobalGameState {
                         .collect()
                 };
 
+                let bundle_dict = StardewValley.Game1
+                    .netWorldState
+                    .value
+                    .bundles
+                    .dict;
+                let num_bundles = bundle_dict
+                    ._count
+                    .prim_cast::<usize>();
+
+                let bundle_flags = (0..num_bundles)
+                    .map(|i| bundle_dict._entries[i])
+                    .map(|entry| {
+                        let bundle_index = entry.key;
+                        let flag_list = entry.value.elements;
+                        let num_flags = flag_list
+                            ._size
+                            .prim_cast::<usize>();
+
+                        let flags = (0..num_flags)
+                            .map(|i| flag_list._items[i])
+                            .map(|flag| flag.value.prim_cast::<bool>())
+                            .collect();
+
+                        new_bundle_flags(
+                            bundle_index,
+                            flags,
+                        )
+                    })
+                    .collect();
+
                 new_global_game_state(
                     game_id,
                     multiplayer_id,
@@ -156,6 +213,7 @@ impl GlobalGameState {
                     event_up,
                     lowest_mine_level_reached,
                     events_triggered,
+                    bundle_flags,
                 )
             }
         })?;
