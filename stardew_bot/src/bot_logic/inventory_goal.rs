@@ -224,6 +224,7 @@ pub(super) fn best_weapon<'a>(
 ) -> Option<&'a Item> {
     iter.into_iter()
         .filter(|item| item.as_weapon().is_some())
+        .filter(|item| item.id != ItemId::SCYTHE)
         .max_by_key(|item| {
             let as_weapon = item.as_weapon().unwrap();
             let kind = match &as_weapon.kind {
