@@ -645,18 +645,52 @@ impl BotLogic {
                             self.stack.len() > prev + 2,
                             "Infinite loop detected.  \
                              Current goal '{0}' has completed, \
-                             but this returns control to the preceding goal '{1}'.  \
-                             Since this preceding goal '{1}' has already been run, \
+                             but this returns control \
+                             to the preceding goal '{1}'.  \
+                             Since this preceding goal '{1}' \
+                             has already been run, \
                              and chose to delegate to '{0}', \
                              executing it again would enter an infinite loop.",
                             self.current_goal().unwrap().description(),
                             match self.stack.get(prev) {
-                                Some(LogicStackItem::Goal(prev_goal)) => prev_goal.description(),
-                                Some(_) | None => format!(
+                                Some(LogicStackItem::Goal(prev_goal)) => {
+                                    prev_goal.description()
+                                }
+                                Some(LogicStackItem::PreventInterrupt) =>
+                                    format!(
+                                        "Should be unreachable, \
+                                     since {prev} contained a BotGoal \
+                                     the first time around, \
+                                     but now contains PreventInterrupt"
+                                    )
+                                    .into(),
+                                Some(LogicStackItem::CancelIf(_)) => format!(
                                     "Should be unreachable, \
                                      since {prev} contained a BotGoal \
-                                     the first time around"
-                                ).into(),
+                                     the first time around, \
+                                     but now contains CancelIf."
+                                )
+                                .into(),
+                                Some(LogicStackItem::Interrupt {
+                                    interrupt,
+                                    ..
+                                }) => {
+                                    format!(
+                                        "Should be unreachable, \
+                                         since {prev} contained a BotGoal \
+                                         the first time around, \
+                                         but now contains interrupt '{}'",
+                                        interrupt.description(),
+                                    )
+                                    .into()
+                                }
+                                None => format!(
+                                    "Should be unreachable, \
+                                     since {prev} contained a BotGoal \
+                                     the first time around, \
+                                     but is now empty."
+                                )
+                                .into(),
                             }
                         );
                     }
