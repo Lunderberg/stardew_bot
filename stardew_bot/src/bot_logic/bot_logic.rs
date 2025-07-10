@@ -125,6 +125,15 @@ pub trait BotGoal: Any {
         let cancellation = LogicStackItem::CancelIf(Box::new(condition));
         [cancellation, self.into()].into_iter().collect()
     }
+
+    fn with_interrupt(self, interrupt: impl BotInterrupt) -> LogicStack
+    where
+        Self: Sized,
+    {
+        [LogicStackItem::interrupt(interrupt), self.into()]
+            .into_iter()
+            .collect()
+    }
 }
 
 pub enum BotGoalResult {
@@ -509,14 +518,8 @@ impl BotLogic {
                 // LogicStackItem::Goal(Box::new(super::GoToActionTile::new(
                 //     "Carpenter",
                 // ))),
-                LogicStackItem::Interrupt {
-                    interrupt: Box::new(super::StepCountForLuck::new()),
-                    active_goal: None,
-                },
-                LogicStackItem::Interrupt {
-                    interrupt: Box::new(super::SkipCutscenes::new()),
-                    active_goal: None,
-                },
+                LogicStackItem::interrupt(super::StepCountForLuck::new()),
+                LogicStackItem::interrupt(super::SkipCutscenes::new()),
                 LogicStackItem::Goal(Box::new(super::GenericDay)),
             ],
             action_dead_time: ActionForbiddenUntil::initial(),
@@ -854,10 +857,7 @@ impl LogicStack {
     }
 
     pub fn with_interrupt(mut self, interrupt: impl BotInterrupt) -> Self {
-        self.0.push_front(LogicStackItem::Interrupt {
-            interrupt: Box::new(interrupt),
-            active_goal: None,
-        });
+        self.0.push_front(LogicStackItem::interrupt(interrupt));
         self
     }
 }
@@ -871,6 +871,13 @@ impl LogicStackItem {
                 interrupt.description()
             }
             LogicStackItem::PreventInterrupt => "PreventInterrupt".into(),
+        }
+    }
+
+    pub fn interrupt(interrupt: impl BotInterrupt) -> Self {
+        Self::Interrupt {
+            interrupt: Box::new(interrupt),
+            active_goal: None,
         }
     }
 }
