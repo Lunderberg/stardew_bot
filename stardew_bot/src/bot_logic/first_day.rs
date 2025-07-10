@@ -90,6 +90,24 @@ impl BotGoal for FirstDay {
             return Ok(tile_to_scythe.into());
         }
 
+        let farm = game_state.get_room("Farm")?;
+        let goal = ClearFarmGoal::new()
+            .use_priority_tiles(false)
+            .use_stamina(false)
+            .target_tile(
+                farm.warps
+                    .iter()
+                    .find(|warp| warp.target_room == "BusStop")
+                    .map(|warp| warp.location)
+                    .map_or_else(|| game_state.get_farm_door(), Ok)?,
+            )
+            .relative_weights((2, 1))
+            .stop_time(640);
+
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.into());
+        }
+
         let in_game_time = game_state.globals.in_game_time;
         let current_money = game_state.player.current_money;
 
