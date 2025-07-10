@@ -24,7 +24,18 @@ pub struct ClearFarmGoal {
     stop_time: i32,
     clear_trees: bool,
     clear_stone: bool,
+    use_stamina: bool,
+    use_priority_tiles: bool,
     priority_tiles: HashSet<Vector<isize>>,
+
+    /// When deciding what to clear next, the relative weight between
+    /// the distance from the player (first element) and the distance
+    /// from the target tile (second element).
+    relative_weights: (u64, u64),
+
+    /// The location around which to clear.  Defaults to the location
+    /// of the farm door.
+    target_tile: Option<Vector<isize>>,
 }
 
 impl ClearFarmGoal {
@@ -34,11 +45,43 @@ impl ClearFarmGoal {
             priority_tiles: HashSet::new(),
             clear_trees: false,
             clear_stone: true,
+            use_stamina: true,
+            use_priority_tiles: true,
+            relative_weights: (1, 1),
+            target_tile: None,
         }
     }
 
     pub fn stop_time(self, stop_time: i32) -> Self {
         Self { stop_time, ..self }
+    }
+
+    pub fn use_priority_tiles(self, use_priority_tiles: bool) -> Self {
+        Self {
+            use_priority_tiles,
+            ..self
+        }
+    }
+
+    pub fn relative_weights(self, relative_weights: (u64, u64)) -> Self {
+        Self {
+            relative_weights,
+            ..self
+        }
+    }
+
+    pub fn target_tile(self, target_tile: Vector<isize>) -> Self {
+        Self {
+            target_tile: Some(target_tile),
+            ..self
+        }
+    }
+
+    pub fn use_stamina(self, use_stamina: bool) -> Self {
+        Self {
+            use_stamina,
+            ..self
+        }
     }
 
     #[allow(dead_code)]
@@ -63,7 +106,9 @@ impl ClearFarmGoal {
         }
 
         let farm = game_state.get_room("Farm")?;
-        let farm_door = game_state.get_farm_door()?;
+        let target_tile = self
+            .target_tile
+            .map_or_else(|| game_state.get_farm_door(), Ok)?;
 
         let pathfinding = farm
             .pathfinding()
@@ -71,16 +116,17 @@ impl ClearFarmGoal {
             .include_border(true)
             .breakable_clearing_cost(1);
 
-        let pathfinding = if game_state.player.current_stamina > 2.0 {
-            pathfinding
-                .stone_clearing_cost(10)
-                .wood_clearing_cost(10)
-                .tree_clearing_cost(50)
-        } else {
-            pathfinding
-        };
+        let pathfinding =
+            if self.use_stamina && game_state.player.current_stamina > 2.0 {
+                pathfinding
+                    .stone_clearing_cost(10)
+                    .wood_clearing_cost(10)
+                    .tree_clearing_cost(50)
+            } else {
+                pathfinding
+            };
 
-        let reachable = pathfinding.reachable(farm_door);
+        let reachable = pathfinding.reachable(target_tile);
 
         let reachable_clutter = farm
             .objects
@@ -105,6 +151,11 @@ impl ClearFarmGoal {
         game_state: &GameState,
     ) -> Result<(), Error> {
         if !self.priority_tiles.is_empty() {
+            // Priority tiles have already been populated.
+            return Ok(());
+        }
+        if !self.use_priority_tiles {
+            // Use of priority tiles has been disabled.
             return Ok(());
         }
 
@@ -160,7 +211,9 @@ impl BotGoal for ClearFarmGoal {
         }
 
         let farm = game_state.get_room("Farm")?;
-        let farm_door = game_state.get_farm_door()?;
+        let target_tile = self
+            .target_tile
+            .map_or_else(|| game_state.get_farm_door(), Ok)?;
         let player = &game_state.player;
 
         // First, prioritize clearing out clutter that is along the
@@ -193,7 +246,7 @@ impl BotGoal for ClearFarmGoal {
             .filter(|obj| obj.kind.get_tool().is_some())
             .map(|obj| (obj.tile, obj))
             .filter(|(_, obj)| {
-                game_state.player.current_stamina > 2.0
+                (self.use_stamina && game_state.player.current_stamina > 2.0)
                     || obj.kind.get_tool().unwrap() == ItemId::SCYTHE
             })
             .collect();
@@ -216,14 +269,14 @@ impl BotGoal for ClearFarmGoal {
             .allow_diagonal(false)
             .include_border(true);
 
-        let steps_from_farm_door =
-            pathfinding_without_clearing.distances(farm_door);
+        let steps_from_target_tile =
+            pathfinding_without_clearing.distances(target_tile);
 
         let clearable_tiles = if has_priority_clutter {
             clearable_tiles
         } else if game_state.player.skills.foraging_xp < 100
             && clearable_tiles.iter().any(|(tile, obj)| {
-                steps_from_farm_door.is_some(*tile) && is_grown_tree(obj)
+                steps_from_target_tile.is_some(*tile) && is_grown_tree(obj)
             })
         {
             // Second, if foraging level 1 has not yet been reached,
@@ -232,7 +285,7 @@ impl BotGoal for ClearFarmGoal {
             clearable_tiles
                 .into_iter()
                 .filter(|(tile, obj)| {
-                    steps_from_farm_door.is_some(*tile) && is_grown_tree(obj)
+                    steps_from_target_tile.is_some(*tile) && is_grown_tree(obj)
                 })
                 .collect()
         } else {
@@ -276,7 +329,8 @@ impl BotGoal for ClearFarmGoal {
             pathfinding_without_clearing.distances(player_tile);
 
         let next_clear_heuristic = |tile: Vector<isize>| {
-            let from_door = steps_from_farm_door
+            let (weight_player, weight_target) = self.relative_weights;
+            let from_target = steps_from_target_tile
                 .get(tile)
                 .map(|opt| opt.as_ref())
                 .flatten()
@@ -288,7 +342,7 @@ impl BotGoal for ClearFarmGoal {
                 .flatten()
                 .cloned()
                 .unwrap_or(10000);
-            from_door + from_player
+            from_target * weight_target + from_player * weight_player
         };
         let min_total_steps = clearable_tiles
             .iter()
