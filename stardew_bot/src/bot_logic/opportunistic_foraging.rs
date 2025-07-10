@@ -8,11 +8,22 @@ use super::bot_logic::{BotGoal, BotInterrupt, LogicStack};
 
 pub struct OpportunisticForaging {
     radius: f32,
+    min_empty_slots: usize,
 }
 
 impl OpportunisticForaging {
     pub fn new(radius: f32) -> Self {
-        Self { radius }
+        Self {
+            radius,
+            min_empty_slots: 2,
+        }
+    }
+
+    pub fn min_empty_slots(self, min_empty_slots: usize) -> Self {
+        Self {
+            min_empty_slots,
+            ..self
+        }
     }
 }
 
@@ -29,7 +40,7 @@ impl BotInterrupt for OpportunisticForaging {
         let pos = game_state.player.center_pos();
 
         let num_empty_slots = game_state.player.inventory.num_empty_slots();
-        if num_empty_slots < 2 {
+        if num_empty_slots < self.min_empty_slots {
             return Ok(None);
         }
 
