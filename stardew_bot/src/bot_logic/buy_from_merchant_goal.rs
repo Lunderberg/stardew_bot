@@ -182,7 +182,12 @@ impl BotGoal for BuyFromMerchantGoal {
             return Ok(BotGoalResult::InProgress);
         } else if let Some(menu) = &game_state.dialogue_menu {
             let Some(pixel) = menu.response_pixel("Shop") else {
-                return Ok(MenuCloser::new().into());
+                let cleanup = MenuCloser::new();
+                if cleanup.is_completed(game_state) {
+                    return Ok(BotGoalResult::InProgress);
+                } else {
+                    return Ok(cleanup.into());
+                }
             };
 
             actions.do_action(GameAction::MouseOverPixel(pixel));
