@@ -216,7 +216,7 @@ where
             .unwrap_or_else(|| {
                 panic!(
                     "Index {:?} is out-of-bounds \
-                 for a TileMap of shape ({}, {})",
+                     for a TileMap of shape ({}, {})",
                     index.display(),
                     self.width,
                     self.height,
@@ -237,7 +237,7 @@ where
             .unwrap_or_else(|| {
                 panic!(
                     "Index {:?} is out-of-bounds \
-                 for a TileMap of shape ({}, {})",
+                     for a TileMap of shape ({}, {})",
                     index.display(),
                     self.width,
                     self.height,
