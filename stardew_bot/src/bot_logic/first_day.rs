@@ -190,21 +190,8 @@ impl BotGoal for FirstDay {
             }
         }
 
-        if game_state
-            .player
-            .inventory
-            .count_item(&ItemId::PARSNIP_SEEDS)
-            == 0
-            && in_game_time < 1700
-            && current_money > 1200
-        {
-            let goal = BuyFromMerchantGoal::new(
-                "Buy General",
-                ItemId::PARSNIP_SEEDS.with_count(60),
-            );
-            return Ok(goal.into());
-        }
-
+        // Includes buying seeds as necessary.  Which, given that
+        // today is the first day, is quite necessary.
         let mut plant_crops = PlantCropsGoal::new(
             std::iter::once(ItemId::PARSNIP_SEEDS.with_count(60)).chain(
                 game_state
