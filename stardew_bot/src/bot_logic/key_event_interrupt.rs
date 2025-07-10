@@ -43,7 +43,7 @@ impl BotInterrupt for KeyEventInterrupt {
             && (800..1300).contains(&game_state.globals.in_game_time);
         if !community_center_unlocked
             && can_unlock_community_center
-            && game_state.player.room_name != "Farm"
+            && game_state.player.room_name == "Backwoods"
         {
             let stack = LogicStack::new()
                 .then(GoToRoomGoal::new("BusStop"))
