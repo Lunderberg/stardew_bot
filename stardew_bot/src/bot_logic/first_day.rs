@@ -141,11 +141,13 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        let goal = BuyFromMerchantGoal::new(
-            "Blacksmith",
-            ItemId::COPPER_ORE.with_count(1),
-        );
-        if !goal.is_completed(game_state)? && in_game_time < 1200 {
+        if !game_state
+            .globals
+            .queued_events
+            .contains("copperFound%&NL&%")
+        {
+            let goal =
+                BuyFromMerchantGoal::new("Blacksmith", ItemId::COPPER_ORE);
             return Ok(goal.into());
         }
 

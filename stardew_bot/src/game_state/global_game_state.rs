@@ -55,6 +55,13 @@ pub struct GlobalGameState {
     /// Events that have been triggered within the game.
     pub events_triggered: HashSet<String>,
 
+    /// Events that have been queued to occur at the start of the next
+    /// day.
+    pub queued_events: HashSet<String>,
+
+    /// Flags indicatating which items have been given to a bundle.
+    /// The lookup key is the `bundle_index`, and each boolean flag
+    /// corresponds to an ingredient within that bundle.
     pub bundles: HashMap<i32, Vec<bool>>,
 }
 
@@ -91,11 +98,16 @@ impl GlobalGameState {
              event_up: bool,
              lowest_mine_level_reached: i32,
              events_triggered: &Vec<String>,
+             queued_events: &Vec<String>,
              bundle_flags: &Vec<BundleFlags>| {
                 let bundles = bundle_flags
                     .iter()
                     .map(|bundle| (bundle.bundle_index, bundle.flags.clone()))
                     .collect();
+                let events_triggered =
+                    events_triggered.iter().cloned().collect();
+
+                let queued_events = queued_events.iter().cloned().collect();
                 GlobalGameState {
                     game_tick,
                     multiplayer_id,
@@ -106,10 +118,8 @@ impl GlobalGameState {
                     currently_fading_to_black,
                     event_up,
                     lowest_mine_level_reached,
-                    events_triggered: events_triggered
-                        .iter()
-                        .cloned()
-                        .collect(),
+                    events_triggered,
+                    queued_events,
                     bundles,
                 }
             },
@@ -172,6 +182,14 @@ impl GlobalGameState {
                         .collect()
                 };
 
+                let queued_events = {
+                    let mail = StardewValley.Game1._player.mailForTomorrow;
+                    let num = mail.Set._count.prim_cast::<usize>();
+                    (0..num)
+                        .map(|i| mail.Set._entries[i].Value.read_string())
+                        .collect()
+                };
+
                 let bundle_dict = StardewValley.Game1
                     .netWorldState
                     .value
@@ -213,6 +231,7 @@ impl GlobalGameState {
                     event_up,
                     lowest_mine_level_reached,
                     events_triggered,
+                    queued_events,
                     bundle_flags,
                 )
             }
