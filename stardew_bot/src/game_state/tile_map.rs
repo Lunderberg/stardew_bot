@@ -41,7 +41,6 @@ impl<T> TileMap<T> {
         }
     }
 
-    #[allow(dead_code)]
     pub fn empty(width: usize, height: usize) -> Self
     where
         T: Default,
@@ -139,14 +138,123 @@ impl TileMap<bool> {
         map
     }
 
+    pub fn collect_false<Iter, Index>(
+        shape: Vector<isize>,
+        iter_tiles: Iter,
+    ) -> Self
+    where
+        Iter: IntoIterator<Item = Index>,
+        Index: AsGridPos,
+    {
+        let mut map =
+            Self::full(true, shape.right as usize, shape.down as usize);
+        for tile in iter_tiles {
+            if let Some(value) = map.get_mut(tile) {
+                *value = false;
+            }
+        }
+
+        map
+    }
+
+    pub fn iter_true(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.iter().filter(|(_, b)| **b).map(|(tile, _)| tile)
+    }
+
+    pub fn iter_false(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
+        self.iter().filter(|(_, b)| !**b).map(|(tile, _)| tile)
+    }
+
     pub fn is_set(&self, index: impl AsGridPos) -> bool {
         self.get(index).cloned().unwrap_or(false)
+    }
+
+    pub fn dilate(&self, structure: &TileMap<bool>) -> Self {
+        let new_shape = Vector::new(
+            self.width() + structure.width() - 1,
+            self.height() + structure.height() - 1,
+        )
+        .map(|d| d as isize);
+
+        Self::collect_true(
+            new_shape,
+            self.iter_true().flat_map(|tile| {
+                structure.iter_true().map(move |offset| tile + offset)
+            }),
+        )
+    }
+
+    pub fn erode(&self, structure: &TileMap<bool>) -> Self {
+        let new_shape = Vector::new(
+            self.width() - (structure.width() - 1),
+            self.height() - (structure.height() - 1),
+        )
+        .map(|d| d as isize);
+
+        Self::collect_true(
+            new_shape,
+            (0..new_shape.right)
+                .flat_map(|i| {
+                    (0..new_shape.down).map(move |j| Vector::new(i, j))
+                })
+                .filter(|&tile| {
+                    structure
+                        .iter_true()
+                        .all(|offset| self.is_set(tile + offset))
+                }),
+        )
+    }
+
+    pub fn close_over(&self, structure: &TileMap<bool>) -> Self {
+        self.dilate(structure).erode(structure)
+    }
+
+    fn normalize_grid_pos(
+        &self,
+        point: impl AsGridPos,
+    ) -> Option<Vector<isize>> {
+        let flat = point.get_flat_index(self.width, self.height)?;
+        Some(Vector::new(
+            (flat % self.width) as isize,
+            (flat / self.width) as isize,
+        ))
+    }
+
+    pub fn floodfill(&self, initial: impl AsGridPos) -> Self {
+        let mut output = Self::empty(self.width, self.height);
+        let mut to_visit = Vec::new();
+
+        if let Some(initial) = self
+            .normalize_grid_pos(initial)
+            .filter(|tile| !self.is_set(*tile))
+        {
+            output[initial] = true;
+            to_visit.push(initial);
+        }
+
+        while let Some(visiting) = to_visit.pop() {
+            for adj in visiting.iter_cardinal() {
+                if output.in_bounds(adj)
+                    && !self.is_set(adj)
+                    && !output.is_set(adj)
+                {
+                    output[adj] = true;
+                    to_visit.push(adj);
+                }
+            }
+        }
+
+        output
     }
 }
 
 impl<T> TileMap<Option<T>> {
     pub fn is_some(&self, index: impl AsGridPos) -> bool {
         self.get(index).map(|opt| opt.is_some()).unwrap_or(false)
+    }
+
+    pub fn is_none(&self, index: impl AsGridPos) -> bool {
+        self.get(index).map(|opt| opt.is_none()).unwrap_or(false)
     }
 
     pub fn get_opt(&self, index: impl AsGridPos) -> Option<&T> {
@@ -169,6 +277,15 @@ impl AsGridPos for (isize, isize) {
         let i = i as usize;
         let j = j as usize;
         (i, j).get_flat_index(width, height)
+    }
+
+    fn display(&self) -> impl std::fmt::Debug {
+        self
+    }
+}
+impl AsGridPos for (i32, i32) {
+    fn get_flat_index(&self, width: usize, height: usize) -> Option<usize> {
+        (self.0 as isize, self.1 as isize).get_flat_index(width, height)
     }
 
     fn display(&self) -> impl std::fmt::Debug {
