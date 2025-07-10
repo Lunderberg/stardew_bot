@@ -81,7 +81,9 @@ impl BotGoal for FirstDay {
         let foraging =
             ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
         if !foraging.is_completed(game_state) {
-            return Ok(foraging.into());
+            return Ok(foraging
+                .with_interrupt(CollectNearbyItems::new())
+                .into());
         }
 
         if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {
