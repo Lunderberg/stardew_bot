@@ -73,6 +73,9 @@ pub enum BotError {
         pos: Vector<f32>,
         room_bounds: Rectangle<isize>,
     },
+
+    #[error("Could not find any remaining monster")]
+    NoRemainingMonsterFound,
 }
 
 impl std::fmt::Debug for BotError {

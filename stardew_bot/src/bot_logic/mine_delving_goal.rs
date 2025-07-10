@@ -749,6 +749,11 @@ impl BotGoal for MineSingleLevel {
             .filter(|tile| distances.is_some(*tile))
             .min_by_key(|tile| distances[*tile].unwrap());
 
+        let has_stone = current_room
+            .objects
+            .iter()
+            .any(|obj| matches!(obj.kind, ObjectKind::Stone(_)));
+
         let target_tile = if should_go_up {
             current_room
                 .objects
@@ -767,6 +772,41 @@ impl BotGoal for MineSingleLevel {
                 .ok_or(BotError::MineLadderNotFound)?
         } else if let Some(ladder_down) = opt_ladder_down {
             ladder_down
+        } else if !has_stone {
+            // Must be an infested floor, so walk toward an enemy.
+            // Once close enough, the `AttackNearbyEnemy` interrupt
+            // will take over.
+            let iter_monsters = || {
+                current_room
+                    .characters
+                    .iter()
+                    .filter(|character| character.is_monster())
+            };
+
+            let num_monsters = iter_monsters().count();
+
+            let player_pos = game_state.player.center_pos();
+            let monster_pos = iter_monsters()
+                .map(|monster| monster.center_pos())
+                .min_by(|a, b| {
+                    let dist_a = player_pos.dist2(*a);
+                    let dist_b = player_pos.dist2(*b);
+                    dist_a.total_cmp(&dist_b)
+                })
+                .ok_or(BotError::NoRemainingMonsterFound)?;
+            let goal =
+                MovementGoal::new(current_room.name.clone(), monster_pos)
+                    .cancel_if(move |game_state| {
+                        let current_num_monsters = game_state
+                            .current_room()
+                            .ok()
+                            .into_iter()
+                            .flat_map(|room| room.characters.iter())
+                            .filter(|character| character.is_monster())
+                            .count();
+                        current_num_monsters != num_monsters
+                    });
+            return Ok(goal.into());
         } else {
             let predictor = StonePredictor::new(game_state)?;
             let ladder_stones: HashSet<Vector<isize>> = current_room
