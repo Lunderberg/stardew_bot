@@ -125,6 +125,9 @@ impl MineDelvingGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let currently_in_mines =
+            game_state.current_room()?.mineshaft_details.is_some();
+
         let current_day = game_state
             .globals
             .stats
@@ -135,7 +138,7 @@ impl MineDelvingGoal {
         let reached_bottom =
             game_state.globals.lowest_mine_level_reached >= 120;
 
-        Ok(current_day < 5 || reached_bottom)
+        Ok(!currently_in_mines && (current_day < 5 || reached_bottom))
     }
 
     fn elevator_to_floor(
@@ -669,6 +672,11 @@ impl BotGoal for MineSingleLevel {
         let player_tile = game_state.player.tile();
 
         let should_go_up = 'go_up: {
+            if self.mineshaft_level == 120 {
+                // Having reached the bottom, time to go back up.
+                break 'go_up true;
+            }
+
             if game_state.player.current_stamina <= 5.0 {
                 // Not enough food to restore stamina, go up.
                 break 'go_up true;
