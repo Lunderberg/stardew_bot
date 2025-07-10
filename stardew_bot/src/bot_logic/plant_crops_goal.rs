@@ -269,24 +269,23 @@ impl PlantCropsGoal {
             std::iter::repeat_n(to_plant.id.clone(), to_plant.count)
         });
 
-        let iter_seed_tiles = if game_state.globals.days_played() == 1 {
-            Either::Left(plan.iter_initial_plot())
+        let is_first_day = game_state.globals.days_played() == 1;
+        let final_state: HashMap<_, _> = if is_first_day {
+            plan.iter_initial_plot().zip(iter_seeds).collect()
         } else {
-            Either::Right(plan.iter_sprinkler_plot())
-        }
-        .zip(iter_seeds);
+            let iter_sprinklers = plan
+                .iter_regular_sprinklers()
+                .map(|tile| (tile, ItemId::SPRINKLER));
 
-        let iter_sprinklers = plan
-            .iter_regular_sprinklers()
-            .map(|tile| (tile, ItemId::SPRINKLER));
+            let iter_scarecrows =
+                plan.iter_scarecrows().map(|tile| (tile, ItemId::SCARECROW));
 
-        let iter_scarecrows =
-            plan.iter_scarecrows().map(|tile| (tile, ItemId::SCARECROW));
-
-        let final_state: HashMap<_, _> = iter_seed_tiles
-            .chain(iter_sprinklers)
-            .chain(iter_scarecrows)
-            .collect();
+            plan.iter_sprinkler_plot()
+                .zip(iter_seeds)
+                .chain(iter_sprinklers)
+                .chain(iter_scarecrows)
+                .collect()
+        };
 
         let empty_spaces = final_state
             .iter()
