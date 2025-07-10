@@ -58,6 +58,16 @@ impl ForagingGoal {
         }
     }
 
+    fn stamina_collected(game_state: &GameState) -> f32 {
+        game_state
+            .player
+            .inventory
+            .iter_items()
+            .filter_map(|item| item.stamina_recovery())
+            .filter(|&stamina| stamina > 0.0)
+            .sum::<f32>()
+    }
+
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         let after_stopping_time = self
             .stop_at_time
@@ -67,14 +77,7 @@ impl ForagingGoal {
         let collected_enough_stamina = self
             .stop_with_stamina
             .map(|stamina| {
-                let total_stamina_recovery = game_state
-                    .player
-                    .inventory
-                    .iter_items()
-                    .filter_map(|item| item.stamina_recovery())
-                    .filter(|&stamina| stamina > 0.0)
-                    .sum::<f32>();
-                total_stamina_recovery > (stamina as f32)
+                Self::stamina_collected(game_state) > (stamina as f32)
             })
             .unwrap_or(false);
 
@@ -251,7 +254,16 @@ impl BotGoal for ForagingGoal {
         }
 
         if let Some((room, tile)) = self.next_forageable(game_state)? {
-            let goal = ActivateTile::new(room, tile);
+            let stop_with_stamina = self.stop_with_stamina;
+            let goal =
+                ActivateTile::new(room, tile).cancel_if(move |game_state| {
+                    stop_with_stamina
+                        .map(|stamina| {
+                            Self::stamina_collected(game_state)
+                                > (stamina as f32)
+                        })
+                        .unwrap_or(false)
+                });
             return Ok(goal.into());
         }
 
