@@ -66,7 +66,11 @@ impl BotInterrupt for OpportunisticForaging {
                 }
                 ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
                 ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => can_hoe,
-                ObjectKind::Tree(tree) => tree.has_seed && !tree.is_stump,
+                ObjectKind::Tree(tree) => {
+                    tree.has_seed
+                        && !tree.is_stump
+                        && game_state.player.skills.foraging_level() >= 1
+                }
                 other => other.is_forage(),
             })
             .filter(|obj| {
