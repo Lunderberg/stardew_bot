@@ -21,15 +21,37 @@ pub struct Pathfinding<'a> {
     clear_stone: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain 2x2
-    /// boulders, with an additional penalty as specified.  If `None`,
-    /// do not allow walking through tiles that contain 2x2 boulders.
+    /// boulders on the farm, with an additional penalty as specified.
+    /// If `None`, do not allow walking through tiles that contain 2x2
+    /// boulders.
+    ///
+    /// This only applies to boulders outside of the mines, in the
+    /// mines, which requires an iron pickaxe.  See
+    /// `clear_mine_boulders` for clearing of boulders on the farm,
+    /// which can be broken using a regular pickaxe.
     clear_boulders: Option<u64>,
+
+    /// If `Some(cost)`, allow walking through tiles that contain 2x2
+    /// boulders in the mines, with an additional penalty as
+    /// specified.  If `None`, do not allow walking through tiles that
+    /// contain 2x2 boulders.
+    ///
+    /// This only applies to boulders in the mines, which can be
+    /// broken using a regular pickaxe.  See `clear_boulders` for
+    /// clearing of boulders on the farm, which requires an iron
+    /// pickaxe.
+    clear_mine_boulders: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain wood
     /// debris/twigs, with an additional penalty as specified.  If
     /// `None`, do not allow walking through tiles that contain wood
     /// debris/twigs.
     clear_wood: Option<u64>,
+
+    /// If `Some(cost)`, allow walking through tiles that contain 2x2
+    /// stumps, with an additional penalty as specified.  If `None`,
+    /// do not allow walking through tiles that contain 2x2 stumps.
+    clear_stumps: Option<u64>,
 
     /// If `Some(cost)`, allow walking through tiles that contain
     /// breakable objects (fiber/weeds on the farm, barrels in the
@@ -137,7 +159,9 @@ impl Location {
             allow_diagonal: true,
             clear_stone: None,
             clear_boulders: None,
+            clear_mine_boulders: None,
             clear_wood: None,
+            clear_stumps: None,
             clear_breakables: None,
             clear_forage: None,
             clear_trees: None,
@@ -162,13 +186,19 @@ impl Pathfinding<'_> {
     }
     pub fn mine_boulder_clearing_cost(self, cost: u64) -> Self {
         Self {
-            clear_boulders: Some(cost),
+            clear_mine_boulders: Some(cost),
             ..self
         }
     }
     pub fn wood_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_wood: Some(cost),
+            ..self
+        }
+    }
+    pub fn stump_clearing_cost(self, cost: u64) -> Self {
+        Self {
+            clear_stumps: Some(cost),
             ..self
         }
     }
@@ -200,6 +230,21 @@ impl Pathfinding<'_> {
     pub fn grass_movement_cost(self, grass_penalty: u64) -> Self {
         Self {
             grass_penalty,
+            ..self
+        }
+    }
+
+    pub fn ignoring_obstacles(self) -> Self {
+        Self {
+            clear_stone: Some(0),
+            clear_boulders: Some(0),
+            clear_mine_boulders: Some(0),
+            clear_wood: Some(0),
+            clear_stumps: Some(0),
+            clear_breakables: Some(0),
+            clear_forage: Some(0),
+            clear_trees: Some(0),
+            grass_penalty: 0,
             ..self
         }
     }
@@ -250,7 +295,9 @@ impl Pathfinding<'_> {
         // movement cost.
         let iter_clumps = loc.resource_clumps.iter().flat_map(|clump| {
             let opt_cost = match &clump.kind {
-                ResourceClumpKind::MineBoulder => self.clear_boulders,
+                ResourceClumpKind::Stump => self.clear_stumps,
+                ResourceClumpKind::Boulder => self.clear_boulders,
+                ResourceClumpKind::MineBoulder => self.clear_mine_boulders,
                 _ => None,
             };
             clump.shape.iter_points().map(move |tile| (tile, opt_cost))
@@ -351,7 +398,10 @@ impl Pathfinding<'_> {
         reachable
     }
 
-    pub fn distances(&self, initial: Vector<isize>) -> TileMap<Option<u64>> {
+    pub fn distances(
+        &self,
+        initial: impl detail::TileSet,
+    ) -> TileMap<Option<u64>> {
         let mut distances = self.location.blocked.map(|_| None);
 
         self.iter_dijkstra(initial).for_each(|(tile, dist)| {

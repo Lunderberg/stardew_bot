@@ -4,21 +4,66 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::GameStateExt as _,
-    game_state::{ObjectKind, Rectangle, Vector},
+    game_state::{ObjectKind, Rectangle, TileMap, Vector},
     Error, GameState,
 };
 
 pub struct FarmPlan {
-    initial_plot: Rectangle<isize>,
-    tree_farm: Rectangle<isize>,
-    regular_sprinklers: Vec<Vector<isize>>,
-    scarecrows: Vec<Vector<isize>>,
+    pub tree_farm: Rectangle<isize>,
+    pub arable_regions: Vec<ArableRegion>,
+}
+
+pub struct ArableRegion {
+    /// A map specifying the region within the farm.  Contains true
+    /// for locations within the region, and false otherwise.
+    pub map: TileMap<bool>,
+
+    /// A list of tiles that may be planted within the region.  Each
+    /// plantable tile is within range of a sprinkler and a scarecrow.
+    pub plantable: Vec<Vector<isize>>,
+
+    /// A list of tiles that should contain regular sprinklers.
+    pub sprinklers: Vec<Vector<isize>>,
+
+    /// A list of tiles that should contain scarecrows.
+    pub scarecrows: Vec<Vector<isize>>,
 }
 
 impl FarmPlan {
     pub fn plan(game_state: &GameState) -> Result<FarmPlan, Error> {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
+
+        let regions = Self::segmented_regions(game_state)?;
+        let distance_to_water = farm
+            .pathfinding()
+            .ignoring_obstacles()
+            .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
+
+        let num_regions = regions
+            .iter()
+            .filter_map(|(_, opt_region)| *opt_region)
+            .max()
+            .map(|max_index| max_index + 1)
+            .expect("Map should have at least one region");
+        let arable_regions: Vec<_> = (0..num_regions)
+            .map(|i_region| {
+                regions.map(|opt_region| opt_region == &Some(i_region))
+            })
+            .map(|region| {
+                let num_tiles = region.iter_true().count();
+                let sum_dist = region
+                    .iter_true()
+                    .filter_map(|tile| distance_to_water.get_opt(tile))
+                    .sum::<u64>();
+
+                let avg_dist = (sum_dist as f32) / (num_tiles as f32);
+                (region, avg_dist)
+            })
+            .sorted_by(|(_, a), (_, b)| a.total_cmp(b))
+            .map(|(region, _)| region)
+            .map(|region| ArableRegion::layout(region))
+            .collect();
 
         let initial_plot = {
             let top_right = farm_door + Vector::new(3, 5);
@@ -47,154 +92,80 @@ impl FarmPlan {
             )
         };
 
-        let previous_sprinklers: HashSet<_> = farm
+        Ok(Self {
+            tree_farm,
+            arable_regions,
+        })
+    }
+
+    fn segmented_regions(
+        game_state: &GameState,
+    ) -> Result<TileMap<Option<usize>>, Error> {
+        let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
+
+        // Collect a map of borders between arable regions.
+        let mut blocked = {
+            let blocked = TileMap::collect_true(
+                farm.blocked.shape(),
+                farm.blocked
+                    .iter_true()
+                    .chain(farm.iter_water_tiles())
+                    .chain(farm.iter_bush_tiles())
+                    .chain(farm.iter_building_tiles())
+                    .chain(farm.diggable.iter_false()),
+            );
+
+            blocked
+                .close_over(&TileMap::full(true, 5, 1))
+                .close_over(&TileMap::full(true, 1, 5))
+        };
+
+        let mut regions: TileMap<Option<usize>> = blocked.map(|_| None);
+        let mut region_num = 0usize;
+
+        while let Some(initial) = (farm_door.down..farm.shape.down)
+            .map(|j| Vector::new(farm_door.right, j))
+            .find(|&tile| regions.is_none(tile) && !blocked.is_set(tile))
+            .or_else(|| blocked.iter_false().next())
+        {
+            let region = blocked.floodfill(initial);
+            let num_tiles = region.iter_true().count();
+
+            if num_tiles > 50 {
+                for tile in region.iter_true() {
+                    regions[tile] = Some(region_num);
+                }
+                region_num += 1;
+            }
+            for tile in region.iter_true() {
+                blocked[tile] = true;
+            }
+        }
+
+        // For objects that may be moved later in the game, but not
+        // during the initial Spring planning/planting, treat them as
+        // clear when determining boundaries between regions, but
+        // remove them from the region prior to planning the contents
+        // of each region.
+        let iter_fruit_trees = farm
             .objects
             .iter()
-            .filter(|obj| matches!(obj.kind, ObjectKind::Sprinkler(_)))
-            .map(|obj| obj.tile)
-            .collect();
+            .filter(|obj| matches!(obj.kind, ObjectKind::FruitTree(_)))
+            .map(|obj| obj.tile);
 
-        let reachable = farm
-            .pathfinding()
-            .stone_clearing_cost(0)
-            .wood_clearing_cost(0)
-            .breakable_clearing_cost(0)
-            .forage_clearing_cost(0)
-            .tree_clearing_cost(0)
-            .reachable(farm_door);
-        let diggable = &farm.diggable;
+        let iter_requires_iron_tool = farm
+            .resource_clumps
+            .iter()
+            .flat_map(|clump| clump.shape.iter_points());
 
-        let regular_sprinklers = {
-            const NUM_SPRINKLERS: usize = 50;
+        iter_fruit_trees
+            .chain(iter_requires_iron_tool)
+            .for_each(|tile| {
+                regions[tile] = None;
+            });
 
-            // Off to the bottom/left, so that barns/coops can be
-            // closer to the farm house.
-            let starting_location = farm_door + Vector::new(-44, 31);
-
-            let mut sprinklers: Vec<Vector<isize>> = Default::default();
-
-            let mut seen: HashSet<Vector<isize>> = Default::default();
-            let mut to_visit: HashSet<Vector<isize>> = Default::default();
-
-            for di in -1..=1 {
-                for dj in -1..=1 {
-                    let loc = starting_location
-                        + Vector::<isize>::new(2, -1) * di
-                        + Vector::<isize>::new(1, 2) * dj;
-                    seen.insert(loc);
-                    to_visit.insert(loc);
-                }
-            }
-
-            while sprinklers.len() < NUM_SPRINKLERS && !to_visit.is_empty() {
-                let visiting = to_visit
-                    .iter()
-                    .cloned()
-                    .min_by_key(|tile| {
-                        let dist = tile.manhattan_dist(starting_location);
-                        (dist, tile.right, std::cmp::Reverse(tile.down))
-                    })
-                    .expect("Guarded by to_visit.is_some()");
-                to_visit.remove(&visiting);
-
-                let is_good_placement = previous_sprinklers.contains(&visiting)
-                    || std::iter::once(visiting)
-                        .chain(visiting.iter_cardinal())
-                        .all(|adj| {
-                            reachable.is_set(adj) && diggable.is_set(adj)
-                        });
-                if is_good_placement {
-                    sprinklers.push(visiting);
-
-                    [
-                        Vector::<isize>::new(2, -1),
-                        Vector::<isize>::new(1, 2),
-                        Vector::<isize>::new(-2, 1),
-                        Vector::<isize>::new(-1, -2),
-                    ]
-                    .into_iter()
-                    .map(|offset| visiting + offset)
-                    .for_each(|tile| {
-                        if !seen.contains(&tile) {
-                            seen.insert(tile);
-                            to_visit.insert(tile);
-                        }
-                    });
-                }
-            }
-
-            sprinklers
-        };
-
-        let scarecrows = {
-            let allowed = {
-                let mut map = reachable.clone();
-                regular_sprinklers
-                    .iter()
-                    .flat_map(|tile| {
-                        std::iter::once(*tile).chain(tile.iter_cardinal())
-                    })
-                    .for_each(|tile| {
-                        if map.in_bounds(tile) {
-                            map[tile] = false;
-                        }
-                    });
-                map
-            };
-
-            let mut scarecrows = Vec::<Vector<isize>>::new();
-            let mut to_cover: HashSet<Vector<isize>> = regular_sprinklers
-                .iter()
-                .flat_map(|tile| tile.iter_cardinal())
-                .collect();
-            let mut covered = HashSet::<Vector<isize>>::new();
-
-            // The farm may contain existing scarecrows.
-            farm.objects
-                .iter()
-                .filter(|obj| matches!(obj.kind, ObjectKind::Scarecrow))
-                .map(|obj| obj.tile)
-                .for_each(|scarecrow| {
-                    scarecrows.push(scarecrow);
-                    covered.extend(
-                        to_cover.extract_if(|b| scarecrow.dist2(*b) < 81),
-                    );
-                });
-
-            while !to_cover.is_empty() {
-                let opt_scarecrow = to_cover
-                    .iter()
-                    .flat_map(|tile| tile.iter_adjacent())
-                    .filter(|&adj| {
-                        allowed.is_set(adj)
-                            && !to_cover.contains(&adj)
-                            && !covered.contains(&adj)
-                    })
-                    .max_by_key(|adj| {
-                        let num_covered = to_cover
-                            .iter()
-                            .filter(|b| adj.dist2(**b) < 81)
-                            .count();
-                        num_covered
-                    });
-                let Some(scarecrow) = opt_scarecrow else {
-                    break;
-                };
-
-                scarecrows.push(scarecrow);
-                covered
-                    .extend(to_cover.extract_if(|b| scarecrow.dist2(*b) < 81));
-            }
-
-            scarecrows
-        };
-
-        Ok(Self {
-            initial_plot,
-            tree_farm,
-            regular_sprinklers,
-            scarecrows,
-        })
+        Ok(regions)
     }
 
     pub fn is_planned_tree(&self, tile: Vector<isize>) -> bool {
@@ -215,28 +186,117 @@ impl FarmPlan {
             })
             .map(move |offset| top_left + offset)
     }
+}
 
-    pub fn iter_initial_plot(
-        &self,
-    ) -> impl Iterator<Item = Vector<isize>> + '_ {
-        self.initial_plot.iter_points()
-    }
+impl ArableRegion {
+    fn layout(map: TileMap<bool>) -> Self {
+        let sprinklers: Vec<Vector<isize>> = {
+            let mut remaining = map.clone();
+            let mut sprinklers = Vec::<Vector<isize>>::new();
 
-    pub fn iter_regular_sprinklers(
-        &self,
-    ) -> impl Iterator<Item = Vector<isize>> + '_ {
-        self.regular_sprinklers.iter().cloned()
-    }
+            let mut to_visit = Vec::<Vector<isize>>::new();
 
-    pub fn iter_sprinkler_plot(
-        &self,
-    ) -> impl Iterator<Item = Vector<isize>> + '_ {
-        self.regular_sprinklers
+            while let Some(visiting) = to_visit.pop().or_else(|| {
+                remaining.iter_true().find(|tile| {
+                    tile.iter_cardinal().all(|adj| remaining.is_set(adj))
+                })
+            }) {
+                sprinklers.push(visiting);
+                std::iter::once(visiting)
+                    .chain(visiting.iter_cardinal())
+                    .for_each(|tile| {
+                        remaining[tile] = false;
+                    });
+
+                [
+                    Vector::<isize>::new(2, -1),
+                    Vector::<isize>::new(1, 2),
+                    Vector::<isize>::new(-2, 1),
+                    Vector::<isize>::new(-1, -2),
+                ]
+                .into_iter()
+                .map(|offset| visiting + offset)
+                .for_each(|tile| {
+                    let iter_covered =
+                        || std::iter::once(tile).chain(tile.iter_cardinal());
+                    let is_good_placement =
+                        iter_covered().all(|adj| remaining.is_set(adj));
+                    if is_good_placement {
+                        to_visit.push(tile);
+                        iter_covered().for_each(|tile| {
+                            remaining[tile] = false;
+                        });
+                    }
+                });
+            }
+
+            sprinklers
+        };
+
+        let plantable: Vec<Vector<isize>> = sprinklers
             .iter()
-            .flat_map(|sprinkler| sprinkler.iter_cardinal())
-    }
+            .flat_map(|tile| tile.iter_cardinal())
+            .collect();
 
-    pub fn iter_scarecrows(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
-        self.scarecrows.iter().cloned()
+        let scarecrows: Vec<Vector<isize>> = {
+            let mut scarecrows = Vec::<Vector<isize>>::new();
+            let mut to_cover: HashSet<Vector<isize>> =
+                plantable.iter().cloned().collect();
+            let mut covered: HashSet<Vector<isize>> =
+                sprinklers.iter().cloned().collect();
+
+            while !to_cover.is_empty() {
+                let opt_scarecrow = to_cover
+                    .iter()
+                    .flat_map(|tile| tile.iter_adjacent())
+                    .filter(|&adj| {
+                        map.is_set(adj)
+                            && !to_cover.contains(&adj)
+                            && !covered.contains(&adj)
+                    })
+                    .max_by_key(|adj| {
+                        let num_covered = to_cover
+                            .iter()
+                            .filter(|b| adj.dist2(**b) < 81)
+                            .count();
+                        let dist_from_existing = scarecrows
+                            .iter()
+                            .map(|prev| prev.dist2(*adj))
+                            .min();
+                        (num_covered, dist_from_existing)
+                    });
+                let Some(scarecrow) = opt_scarecrow else {
+                    break;
+                };
+
+                scarecrows.push(scarecrow);
+                covered
+                    .extend(to_cover.extract_if(|b| scarecrow.dist2(*b) < 81));
+            }
+
+            scarecrows
+        };
+
+        Self {
+            map,
+            plantable,
+            sprinklers,
+            scarecrows,
+        }
+    }
+}
+
+impl std::fmt::Display for ArableRegion {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut char_map = self.map.map(|b| if *b { '.' } else { ' ' });
+        std::iter::empty()
+            .chain(self.plantable.iter().map(|tile| (tile, 'o')))
+            .chain(self.sprinklers.iter().map(|tile| (tile, '+')))
+            .chain(self.scarecrows.iter().map(|tile| (tile, 'S')))
+            .for_each(|(tile, c)| {
+                char_map[*tile] = c;
+            });
+
+        write!(f, "{char_map}")
     }
 }

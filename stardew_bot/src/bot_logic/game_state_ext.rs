@@ -3,11 +3,13 @@ use std::collections::HashMap;
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ItemId, Location, ObjectKind, Vector},
+    game_state::{
+        Item, ItemId, Location, ObjectKind, ResourceClumpKind, Vector,
+    },
     Error, GameState,
 };
 
-use super::{BotError, MovementGoal};
+use super::{best_weapon, BotError, MovementGoal};
 
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
@@ -22,6 +24,10 @@ pub trait GameStateExt {
         &self,
         target_room: &str,
     ) -> Result<Vector<isize>, Error>;
+
+    fn collect_clearable_tiles(
+        &self,
+    ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error>;
 }
 
 impl GameStateExt for GameState {
@@ -84,6 +90,16 @@ impl GameStateExt for GameState {
         }
         MovementGoal::closest_entrance(self, target_room)
     }
+
+    fn collect_clearable_tiles(
+        &self,
+    ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error> {
+        let current_room = self.current_room()?;
+        let opt_weapon = best_weapon(self.player.inventory.iter_items())
+            .map(|item| &item.id);
+
+        current_room.collect_clearable_tiles(opt_weapon)
+    }
 }
 
 pub trait ObjectKindExt {
@@ -133,6 +149,11 @@ pub trait LocationExt {
     fn iter_planted_seeds(&self) -> impl Iterator<Item = &ItemId>;
 
     fn iter_stored_items(&self) -> impl Iterator<Item = &Item>;
+
+    fn collect_clearable_tiles(
+        &self,
+        opt_weapon: Option<&ItemId>,
+    ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error>;
 }
 impl LocationExt for Location {
     fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind> {
@@ -166,5 +187,54 @@ impl LocationExt for Location {
             .iter()
             .filter_map(|obj| obj.kind.as_chest())
             .flat_map(|chest| chest.iter_items())
+    }
+
+    fn collect_clearable_tiles(
+        &self,
+        opt_weapon: Option<&ItemId>,
+    ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error> {
+        let iter_clearable_obj = self.objects.iter().filter_map(|obj| {
+            let opt_tool = match &obj.kind {
+                ObjectKind::Stone(_) => Some(ItemId::PICKAXE),
+                ObjectKind::Wood => Some(ItemId::AXE),
+
+                ObjectKind::Fiber
+                | ObjectKind::Grass
+                | ObjectKind::MineBarrel
+                    if opt_weapon.is_some() =>
+                {
+                    opt_weapon.cloned()
+                }
+                ObjectKind::Mineral(_) => None,
+
+                other if other.is_forage() => None,
+
+                _ => {
+                    return None;
+                }
+            };
+            Some((obj.tile, opt_tool))
+        });
+        let iter_clearable_clump = self
+            .resource_clumps
+            .iter()
+            .filter_map(|clump| {
+                let tool = match &clump.kind {
+                    ResourceClumpKind::MineBoulder => Some(ItemId::PICKAXE),
+                    _ => None,
+                }?;
+                Some(
+                    clump
+                        .shape
+                        .iter_points()
+                        .map(move |tile| (tile, Some(tool.clone()))),
+                )
+            })
+            .flatten();
+
+        let clearable_tiles =
+            iter_clearable_obj.chain(iter_clearable_clump).collect();
+
+        Ok(clearable_tiles)
     }
 }

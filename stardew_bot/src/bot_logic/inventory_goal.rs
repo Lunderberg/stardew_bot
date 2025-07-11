@@ -224,7 +224,6 @@ pub(super) fn best_weapon<'a>(
 ) -> Option<&'a Item> {
     iter.into_iter()
         .filter(|item| item.as_weapon().is_some())
-        .filter(|item| item.id != ItemId::SCYTHE)
         .max_by_key(|item| {
             let as_weapon = item.as_weapon().unwrap();
             let kind = match &as_weapon.kind {
@@ -368,9 +367,13 @@ impl InventoryGoal {
             .take(self.stamina_recovery_slots)
             .collect();
 
-        let opt_current_weapon =
-            best_weapon(inventory.iter_items().filter(|_| self.with_weapon))
-                .map(|item| &item.id);
+        let opt_current_weapon = best_weapon(
+            inventory
+                .iter_items()
+                .filter(|_| self.with_weapon)
+                .filter(|item| item.id != ItemId::SCYTHE),
+        )
+        .map(|item| &item.id);
 
         // Items that should be transferred from the player to a
         // chest.  Values are the desired number of items in the
@@ -486,9 +489,12 @@ impl InventoryGoal {
         // available to pick up, add it to the list of items to pick
         // up.
         if self.with_weapon && opt_current_weapon.is_none() {
-            let opt_stored_weapon =
-                best_weapon(iter_chest_items()?.map(|(_, _, item)| item))
-                    .map(|item| &item.id);
+            let opt_stored_weapon = best_weapon(
+                iter_chest_items()?
+                    .map(|(_, _, item)| item)
+                    .filter(|item| item.id != ItemId::SCYTHE),
+            )
+            .map(|item| &item.id);
             if let Some(stored_weapon) = opt_stored_weapon {
                 chest_to_player.insert(stored_weapon.clone(), 1);
             }

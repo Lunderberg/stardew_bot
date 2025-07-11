@@ -102,7 +102,7 @@ impl BotGoal for FirstDay {
                     .map_or_else(|| game_state.get_farm_door(), Ok)?,
             )
             .relative_weights((2, 1))
-            .stop_time(640);
+            .stop_time(650);
 
         if !goal.is_completed(game_state)? {
             return Ok(goal.into());
@@ -177,7 +177,7 @@ impl BotGoal for FirstDay {
         }
 
         let goal =
-            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(6));
+            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(7));
         if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
@@ -217,7 +217,10 @@ impl BotGoal for FirstDay {
                     .player
                     .inventory
                     .iter_items()
-                    .filter(|item| !item.is_same_item(&ItemId::PARSNIP_SEEDS))
+                    .filter(|item| {
+                        item.id != ItemId::PARSNIP_SEEDS
+                            && item.id != ItemId::MIXED_SEEDS
+                    })
                     .filter(|item| {
                         matches!(item.category, Some(ItemCategory::Seed))
                     })
@@ -225,9 +228,8 @@ impl BotGoal for FirstDay {
                     .cloned(),
             ),
         )
-        .stop_time(2000)
         .opportunistic_clay_farming(10);
-        if !plant_crops.is_completed(game_state)? {
+        if in_game_time < 1700 && !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
         }
 

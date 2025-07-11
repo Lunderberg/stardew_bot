@@ -270,27 +270,60 @@ impl PlantCropsGoal {
         });
 
         let is_first_day = game_state.globals.days_played() == 1;
-        let final_state: HashMap<_, _> = if is_first_day {
-            plan.iter_initial_plot().zip(iter_seeds).collect()
-        } else {
-            let iter_sprinklers = plan
-                .iter_regular_sprinklers()
-                .map(|tile| (tile, ItemId::SPRINKLER));
 
-            let iter_scarecrows =
-                plan.iter_scarecrows().map(|tile| (tile, ItemId::SCARECROW));
+        let iter_craftables = plan
+            .arable_regions
+            .iter()
+            .take(if is_first_day { 0 } else { 2 })
+            .flat_map(|region| {
+                let iter_sprinklers = region
+                    .sprinklers
+                    .iter()
+                    .map(|&tile| (tile, ItemId::SPRINKLER));
 
-            plan.iter_sprinkler_plot()
-                .zip(iter_seeds)
-                .chain(iter_sprinklers)
-                .chain(iter_scarecrows)
-                .collect()
-        };
+                let iter_scarecrows = region
+                    .scarecrows
+                    .iter()
+                    .map(|&tile| (tile, ItemId::SCARECROW));
+
+                iter_sprinklers.chain(iter_scarecrows)
+            });
+
+        let farm = game_state.get_room("Farm")?;
+        let distance_to_water = farm
+            .pathfinding()
+            .ignoring_obstacles()
+            .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
+
+        let iter_seeds = plan
+            .arable_regions
+            .iter()
+            .take(if is_first_day { 1 } else { 2 })
+            .flat_map(|region| region.plantable.iter().cloned())
+            .sorted_by_key(|tile| {
+                distance_to_water
+                    .get_opt(*tile)
+                    .cloned()
+                    .unwrap_or(u64::MAX)
+            })
+            .zip(iter_seeds);
+
+        let final_state: HashMap<_, _> =
+            iter_seeds.chain(iter_craftables).collect();
+
+        let avoid_clearing: HashSet<_> = game_state
+            .get_room("Farm")?
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::FruitTree(_)))
+            .map(|obj| obj.tile)
+            .collect();
 
         let empty_spaces = final_state
             .iter()
             .flat_map(|(tile, _)| tile.iter_cardinal())
             .filter(|adj| !final_state.contains_key(adj))
+            .filter(|adj| !avoid_clearing.contains(adj))
             .collect();
 
         self.plan = Some(CropPlantingPlan {
@@ -543,6 +576,15 @@ impl BotGoal for PlantCropsGoal {
             .pathfinding()
             .include_border(true)
             .distances(initial_tile);
+        let obstructed_pathfinding = farm
+            .pathfinding()
+            .stone_clearing_cost(1000)
+            .wood_clearing_cost(1000)
+            .breakable_clearing_cost(1000)
+            .allow_diagonal(false);
+
+        let obstructed_distances =
+            obstructed_pathfinding.distances(initial_tile);
 
         let iter_tiles_to_hoe = || -> Result<_, Error> {
             let iter = self
@@ -623,7 +665,7 @@ impl BotGoal for PlantCropsGoal {
                 .collect()
         };
 
-        let opt_next_step = self
+        let opt_next_step: Option<(Vector<isize>, Option<ItemId>)> = self
             .iter_steps(game_state)?
             .filter(|(tile, opt_item)| {
                 opt_item
@@ -635,19 +677,28 @@ impl BotGoal for PlantCropsGoal {
                     })
                     .unwrap_or(true)
             })
-            .filter(|(tile, _)| distances.is_some(*tile))
             .min_by_key(|(tile, opt_item)| {
                 let need_clay_before_deadline =
                     self.opportunistic_clay_farming.is_some()
                         && self.stop_time < 2600;
-                let dist = distances[*tile].unwrap();
+
+                let tile = *tile;
+                let is_adjacent = distances.get_opt(tile) == Some(&1);
+                let dist = distances
+                    .get_opt(tile)
+                    .map(|&dist| (false, dist))
+                    .or_else(|| {
+                        obstructed_distances
+                            .get_opt(tile)
+                            .map(|&dist| (true, dist))
+                    })
+                    .unwrap_or((true, u64::MAX));
+
                 (
+                    opt_item.as_ref() == Some(&ItemId::HOE),
                     need_clay_before_deadline
-                        && opt_item
-                            .as_ref()
-                            .map(|item| item == &ItemId::WATERING_CAN)
-                            .unwrap_or(true),
-                    dist != 1,
+                        && opt_item.as_ref() == Some(&ItemId::WATERING_CAN),
+                    std::cmp::Reverse(is_adjacent),
                     dist,
                 )
             });
@@ -655,6 +706,26 @@ impl BotGoal for PlantCropsGoal {
         let Some((tile, opt_item)) = opt_next_step else {
             return Ok(BotGoalResult::Completed);
         };
+
+        let (tile, opt_item): (Vector<isize>, Option<ItemId>) =
+            if distances.is_none(tile) {
+                let clearable_tiles =
+                    farm.collect_clearable_tiles(Some(&ItemId::SCYTHE))?;
+                obstructed_pathfinding
+                    .path_between(initial_tile, tile)?
+                    .into_iter()
+                    .find_map(|tile| {
+                        clearable_tiles
+                            .get(&tile)
+                            .map(|opt_item| (tile, opt_item.clone()))
+                    })
+                    .expect(
+                        "Obstruction must exist whenever \
+                     distances.is_none() returns true.",
+                    )
+            } else {
+                (tile, opt_item)
+            };
 
         let get_tools = self
             .iter_required_items(game_state)?

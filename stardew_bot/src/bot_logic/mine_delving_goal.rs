@@ -71,54 +71,6 @@ const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
     Vector::new(8, 5),
 ];
 
-fn collect_clearable_tiles(
-    game_state: &GameState,
-) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error> {
-    let current_room = game_state.current_room()?;
-    let opt_weapon = best_weapon(game_state.player.inventory.iter_items())
-        .map(|item| &item.id);
-
-    let iter_clearable_obj = current_room.objects.iter().filter_map(|obj| {
-        let opt_tool = match &obj.kind {
-            ObjectKind::Stone(_) => Some(ItemId::PICKAXE),
-            ObjectKind::Fiber | ObjectKind::MineBarrel
-                if opt_weapon.is_some() =>
-            {
-                opt_weapon.cloned()
-            }
-            ObjectKind::Mineral(_) => None,
-
-            other if other.is_forage() => None,
-
-            _ => {
-                return None;
-            }
-        };
-        Some((obj.tile, opt_tool))
-    });
-    let iter_clearable_clump = current_room
-        .resource_clumps
-        .iter()
-        .filter_map(|clump| {
-            let tool = match &clump.kind {
-                ResourceClumpKind::MineBoulder => Some(ItemId::PICKAXE),
-                _ => None,
-            }?;
-            Some(
-                clump
-                    .shape
-                    .iter_points()
-                    .map(move |tile| (tile, Some(tool.clone()))),
-            )
-        })
-        .flatten();
-
-    let clearable_tiles =
-        iter_clearable_obj.chain(iter_clearable_clump).collect();
-
-    Ok(clearable_tiles)
-}
-
 impl MineDelvingGoal {
     pub fn new() -> Self {
         Self
@@ -668,7 +620,7 @@ impl BotGoal for MineSingleLevel {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let clearable_tiles = collect_clearable_tiles(game_state)?;
+        let clearable_tiles = game_state.collect_clearable_tiles()?;
         let player_tile = game_state.player.tile();
 
         let should_go_up = 'go_up: {
@@ -1183,7 +1135,7 @@ impl BotInterrupt for MineNearbyOre {
             .allow_diagonal(false)
             .path_between(player_tile, target_tile)?;
 
-        let clearable_tiles = collect_clearable_tiles(game_state)?;
+        let clearable_tiles = game_state.collect_clearable_tiles()?;
         let opt_blocked_tile_in_path = path
             .into_iter()
             .find(|tile| clearable_tiles.contains_key(&tile));
