@@ -104,6 +104,17 @@ impl CollectNearbyItems {
         }
 
         let cluster_centroid = sum_cluster / (num_in_cluster as f32);
+
+        let reachable = game_state
+            .current_room()?
+            .pathfinding()
+            .include_border(true)
+            .reachable(game_state.player.tile());
+        if !reachable.is_set(cluster_centroid.map(|x| x.round() as isize)) {
+            // The items are near the player, but are not accessible.
+            return Ok(None);
+        }
+
         Ok(Some(cluster_centroid))
     }
 }
