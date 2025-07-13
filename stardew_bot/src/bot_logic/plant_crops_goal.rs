@@ -8,8 +8,8 @@ use crate::{
         MovementGoal, ObjectKindExt as _, UseItemOnTile,
     },
     game_state::{
-        HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Sprinkler,
-        StaticState, Vector,
+        HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality, SeededRng,
+        Sprinkler, StaticState, Vector,
     },
     Error, GameAction, GameState,
 };
@@ -58,6 +58,27 @@ pub struct PlantCropsGoal {
     /// made.  The decision is only applied if made again on the
     /// following frame.
     tick_decided_to_gather_items: Option<i32>,
+}
+
+pub struct CropQualityPredictor {
+    /// The unique id of the game.
+    game_id: u64,
+
+    /// The number of days played so far.
+    days_played: u32,
+
+    /// The number of days required before the crop can be harvested.
+    /// If using `CropQualityPredictor` to determine where to plant
+    /// crops, this should be the growing time of the crop.  If using
+    /// `CropQualityPredictor` to determine the order in which to
+    /// harvest already-grown crops, this should be zero.
+    days_to_grow: u32,
+
+    /// The farming level at time of harvest.
+    farming_level: u8,
+
+    /// The type of fertilizer used for the crop.
+    fertilizer: Option<ItemId>,
 }
 
 #[derive(Clone)]
@@ -265,10 +286,6 @@ impl PlantCropsGoal {
         }
         let plan = FarmPlan::plan(game_state)?;
 
-        let iter_seeds = self.seeds.iter().flat_map(|to_plant| {
-            std::iter::repeat_n(to_plant.id.clone(), to_plant.count)
-        });
-
         let is_first_day = game_state.globals.days_played() == 1;
 
         let iter_craftables = plan
@@ -295,18 +312,52 @@ impl PlantCropsGoal {
             .ignoring_obstacles()
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
 
-        let iter_seeds = plan
+        let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> = plan
             .arable_regions
             .iter()
             .take(if is_first_day { 1 } else { 2 })
             .flat_map(|region| region.plantable.iter().cloned())
-            .sorted_by_key(|tile| {
-                distance_to_water
-                    .get_opt(*tile)
-                    .cloned()
-                    .unwrap_or(u64::MAX)
-            })
-            .zip(iter_seeds);
+            .map(|tile| (tile, None))
+            .collect();
+
+        for seed in &self.seeds {
+            let days_to_grow = if seed.id == ItemId::PARSNIP_SEEDS {
+                4
+            } else if seed.id == ItemId::CARROT_SEEDS {
+                3
+            } else if seed.id == ItemId::KALE_SEEDS {
+                6
+            } else {
+                todo!(
+                    "Unpack growing times from ItemData, \
+                     rather than hard-coding them."
+                )
+            };
+
+            let predictor = CropQualityPredictor::new(game_state, days_to_grow)
+                .with_farming_level(2);
+            seed_assignment
+                .iter()
+                .enumerate()
+                .filter(|(_, (_, opt_seed))| opt_seed.is_none())
+                .map(|(i, (tile, _))| (i, *tile))
+                .sorted_by_key(|(_, tile)| {
+                    let quality = predictor.predict(*tile);
+                    let dist = distance_to_water
+                        .get_opt(*tile)
+                        .cloned()
+                        .unwrap_or(u64::MAX);
+                    (std::cmp::Reverse(quality), dist)
+                })
+                .take(seed.count)
+                .for_each(|(i, _)| {
+                    seed_assignment[i].1 = Some(seed.id.clone());
+                });
+        }
+
+        let iter_seeds = seed_assignment
+            .into_iter()
+            .filter_map(|(tile, opt_seed)| opt_seed.map(|seed| (tile, seed)));
 
         let final_state: HashMap<_, _> =
             iter_seeds.chain(iter_craftables).collect();
@@ -799,6 +850,89 @@ impl BotGoal for PlantCropsGoal {
         } else {
             let action = ActivateTile::new("Farm", tile);
             Ok(action.into())
+        }
+    }
+}
+
+impl CropQualityPredictor {
+    pub fn new(game_state: &GameState, days_to_grow: u32) -> Self {
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
+        let game_id = game_state.globals.game_id;
+        let farming_level = game_state.player.skills.farming_level();
+        Self {
+            game_id,
+            days_played,
+            days_to_grow,
+            farming_level,
+            fertilizer: None,
+        }
+    }
+
+    pub fn with_farming_level(self, farming_level: u8) -> Self {
+        Self {
+            farming_level,
+            ..self
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn with_fertilizer(self, fertilizer: ItemId) -> Self {
+        Self {
+            fertilizer: Some(fertilizer),
+            ..self
+        }
+    }
+
+    fn fertilizer_boost(&self) -> u8 {
+        match self
+            .fertilizer
+            .as_ref()
+            .map(|id| &*id.item_id)
+            .unwrap_or("")
+        {
+            "(O)368" => 1,
+            "(O)369" => 2,
+            "(O)919" => 3,
+            _ => 0,
+        }
+    }
+
+    fn prob_gold(&self) -> f32 {
+        let base_chance = 0.01;
+        let from_skill = 0.2 * (self.farming_level as f32 / 10.0);
+        let from_fertilizer = 0.2
+            * (self.fertilizer_boost() as f32)
+            * ((self.farming_level + 2) as f32 / 12.0);
+        base_chance + from_skill + from_fertilizer
+    }
+
+    pub fn predict(&self, tile: Vector<isize>) -> Quality {
+        let mut rng = SeededRng::from_stardew_seed([
+            (tile.right * 7) as f64,
+            (tile.down * 11) as f64,
+            (self.days_played + self.days_to_grow) as f64,
+            self.game_id as f64,
+        ]);
+
+        let prob_gold = self.prob_gold();
+
+        // Automatic success for deluxe fertilizer, but still rolls
+        // RNG.
+        let prob_silver = (prob_gold * 2.0).min(0.75);
+
+        // Only checked for deluxe fertilizer, no RNG roll otherwise.
+        let prob_iridium = prob_gold / 2.0;
+
+        let fertilizer = self.fertilizer_boost();
+        if fertilizer >= 3 && rng.rand_float() < prob_iridium {
+            Quality::Iridium
+        } else if rng.rand_float() < prob_gold {
+            Quality::Gold
+        } else if rng.rand_float() < prob_silver || fertilizer >= 3 {
+            Quality::Silver
+        } else {
+            Quality::Normal
         }
     }
 }
