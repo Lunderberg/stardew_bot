@@ -116,7 +116,7 @@ impl BotGoal for UseItemOnTile {
                 || (self.item.id.item_id.starts_with("(O)")
                     && game_state
                         .statics
-                        .item_data
+                        .object_data
                         .get(&self.item.id)
                         .map(|data| match &data.category {
                             ItemCategory::Seed => false,

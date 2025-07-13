@@ -298,7 +298,7 @@ impl StardewBot {
                         BundleIngredient::Item(item) => {
                             let name = game_state
                                 .statics
-                                .item_data
+                                .object_data
                                 .get(&item.id.clone().with_quality(
                                     crate::game_state::Quality::Normal,
                                 ))
@@ -347,7 +347,7 @@ impl StardewBot {
 
                 let name = game_state
                     .statics
-                    .item_data
+                    .object_data
                     .get(&prediction.id)
                     .map(|data| data.name.as_str())
                     .unwrap_or_else(|| &*prediction.id.item_id);

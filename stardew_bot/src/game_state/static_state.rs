@@ -14,7 +14,14 @@ pub struct StaticState {
     pub magma_geode: GeodeData,
     pub omni_geode: GeodeData,
 
-    pub item_data: HashMap<ItemId, ItemData>,
+    /// A lookup from item id to data about that item.  Used in cases
+    /// where only an ItemId is present, and not a full item.
+    /// (e.g. Item drop tables)
+    pub object_data: HashMap<ItemId, ObjectData>,
+
+    /// A lookup from the ItemId of a seed to properties about its use
+    /// as a growable crop.
+    pub crop_data: HashMap<ItemId, CropData>,
 
     /// Unchanging definition of the community center bundles.
     /// Completion of bundles is tracked in GlobalState, and is
@@ -39,11 +46,38 @@ pub enum BundleIngredient {
 }
 
 #[derive(Debug, Clone)]
-pub struct ItemData {
+pub struct ObjectData {
     pub name: String,
     pub price: i32,
     pub edibility: i32,
     pub category: ItemCategory,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+struct RawObjectData {
+    id: String,
+    name: String,
+    geode: GeodeData,
+
+    price: i32,
+    edibility: i32,
+    category: ItemCategory,
+}
+
+#[derive(Debug, Clone)]
+pub struct CropData {
+    pub harvest_item: ItemId,
+    pub days_to_grow: i32,
+    pub uses_trellis: bool,
+    pub xp_per_harvest: i32,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+struct RawCropData {
+    seed_item: ItemId,
+    harvest_item: ItemId,
+    days_to_grow: i32,
+    uses_trellis: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -79,17 +113,6 @@ pub struct GeodeDrop {
     pub item_list: Vec<ItemId>,
 }
 
-#[derive(RustNativeObject, Debug, Clone)]
-struct ObjectData {
-    id: String,
-    name: String,
-    geode: GeodeData,
-
-    price: i32,
-    edibility: i32,
-    category: ItemCategory,
-}
-
 impl StaticState {
     pub(crate) fn def_read_static_state(
         graph: &mut SymbolicGraph,
@@ -122,19 +145,36 @@ impl StaticState {
              category: i32,
              geode_drops_default_items: bool,
              geode_drops: &Vec<GeodeDrop>|
-             -> ObjectData {
+             -> RawObjectData {
                 let geode_data = GeodeData {
                     drops_default_items: geode_drops_default_items,
                     drops: geode_drops.clone(),
                 };
 
-                ObjectData {
+                RawObjectData {
                     id: id.to_string(),
                     name: name.to_string(),
                     geode: geode_data,
                     price,
                     edibility,
                     category: category.into(),
+                }
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_crop_data",
+            |seed_item: &str,
+             harvest_item: &str,
+             days_to_grow: i32,
+             uses_trellis: bool| {
+                let seed_item = ItemId::new(format!("(O){seed_item}"));
+                let harvest_item = ItemId::new(format!("(O){harvest_item}"));
+                RawCropData {
+                    seed_item,
+                    harvest_item,
+                    days_to_grow,
+                    uses_trellis,
                 }
             },
         )?;
@@ -209,7 +249,9 @@ impl StaticState {
 
         graph.named_native_function(
             "new_static_state",
-            |objects: &Vec<ObjectData>, bundles: &Vec<Bundle>| {
+            |objects: &Vec<RawObjectData>,
+             crops: &Vec<RawCropData>,
+             bundles: &Vec<Bundle>| {
                 let get_geode_data = |id: &str| -> GeodeData {
                     let data = objects
                         .iter()
@@ -224,7 +266,7 @@ impl StaticState {
                 let magma_geode = get_geode_data("537");
                 let omni_geode = get_geode_data("749");
 
-                let item_data = objects
+                let object_data: HashMap<_, _> = objects
                     .iter()
                     .map(|data| {
                         let id = if matches!(
@@ -237,7 +279,7 @@ impl StaticState {
                         };
                         (
                             ItemId::new(id),
-                            ItemData {
+                            ObjectData {
                                 name: data.name.clone(),
                                 price: data.price,
                                 edibility: data.edibility,
@@ -247,12 +289,39 @@ impl StaticState {
                     })
                     .collect();
 
+                let crop_data: HashMap<_, _> = crops
+                    .iter()
+                    .map(|crop| {
+                        let harvest_item = crop.harvest_item.clone();
+                        let price = object_data
+                            .get(&harvest_item)
+                            .map(|item| item.price as f32)
+                            .unwrap_or_else(|| {
+                                panic!(
+                                    "Missing price data \
+                                     for crop '{harvest_item}'"
+                                )
+                            });
+                        let xp_per_harvest =
+                            (16.0 * (0.018 * price + 1.0).ln()).round() as i32;
+
+                        let crop_data = CropData {
+                            harvest_item,
+                            days_to_grow: crop.days_to_grow,
+                            uses_trellis: crop.uses_trellis,
+                            xp_per_harvest,
+                        };
+                        (crop.seed_item.clone(), crop_data)
+                    })
+                    .collect();
+
                 StaticState {
                     geode,
                     frozen_geode,
                     magma_geode,
                     omni_geode,
-                    item_data,
+                    object_data,
+                    crop_data,
                     bundles: bundles.clone(),
                 }
             },
@@ -340,6 +409,49 @@ impl StaticState {
                     })
                     .collect();
 
+                let crops = {
+                    let dict = StardewValley.Game1
+                        .cropData
+                        .as::<"System.Collections.Generic.Dictionary`2"
+                          <
+                            System.String,
+                            StardewValley.GameData.Crops.CropData,
+                          >
+                        >();
+
+                    let num_entries = dict
+                        ._count
+                        .prim_cast::<usize>();
+
+                    (0..num_entries)
+                        .map(|i| dict._entries[i])
+                        .map(|entry| {
+                            let seed_item = entry.key.read_string();
+                            let harvest_item = entry.value.HarvestItemId.read_string();
+
+                            let days_to_grow = {
+                                let phases = entry.value.DaysInPhase;
+                                let num_phases = phases
+                                    ._size
+                                    .prim_cast::<usize>();
+                                (0..num_phases)
+                                    .map(|i| phases._items[i])
+                                    .reduce(0i32, |a,b| a+b)
+                            };
+
+                            let uses_trellis = entry.value.IsRaised;
+
+                            new_crop_data(
+                                seed_item,
+                                harvest_item,
+                                days_to_grow,
+                                uses_trellis,
+                            )
+                        })
+                        .filter(|opt| opt.is_some())
+                        .collect()
+                };
+
                 let bundles = {
                     let bundle_dict = StardewValley.Game1
                         .netWorldState
@@ -360,6 +472,7 @@ impl StaticState {
 
                 new_static_state(
                     objects,
+                    crops,
                     bundles,
                 )
             }
@@ -369,7 +482,7 @@ impl StaticState {
     }
 
     pub fn enrich_item(&self, item: Item) -> Item {
-        if let Some(data) = self.item_data.get(&item.id) {
+        if let Some(data) = self.object_data.get(&item.id) {
             Item {
                 price: data.price,
                 edibility: data.edibility,

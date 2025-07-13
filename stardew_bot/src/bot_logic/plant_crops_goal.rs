@@ -151,7 +151,7 @@ impl PlantCropsGoal {
         assume_watered: bool,
     ) -> Option<Option<ItemId>> {
         let is_seed = statics
-            .item_data
+            .object_data
             .get(goal)
             .map(|data| matches!(data.category, ItemCategory::Seed))
             .unwrap_or(false);
