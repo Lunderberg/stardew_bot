@@ -401,6 +401,12 @@ impl PlantCropsGoal {
             return Ok(None);
         }
 
+        let store_is_open = (game_state.globals.days_played() % 7 != 3)
+            && (900..1700).contains(&game_state.globals.in_game_time);
+        if !store_is_open {
+            return Ok(None);
+        }
+
         let iter_purchase = self
             .iter_required_items(game_state)?
             .map(|(id, count)| {
