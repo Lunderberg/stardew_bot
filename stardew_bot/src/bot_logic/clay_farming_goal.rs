@@ -88,7 +88,7 @@ impl ClayPredictor {
 impl ClayFarmingGoal {
     pub fn new() -> Self {
         Self {
-            stop_at_stamina: 4.0,
+            stop_at_stamina: 2.0,
             stop_at_time: None,
             hard_stop: false,
         }
