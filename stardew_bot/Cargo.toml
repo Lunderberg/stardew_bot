@@ -13,7 +13,6 @@ structopt = "*"
 thiserror = "*"
 derive_more = "*"
 itertools = "*"
-priority-queue = "*"
 
 ratatui = "*"
 crossterm = "*"
@@ -28,3 +27,4 @@ dotnet_debugger = { path = "../dotnet_debugger" }
 
 geometry = {path = "./geometry"}
 game_state = {path = "./game_state"}
+bot_logic = {path = "./bot_logic"}

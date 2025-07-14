@@ -6,7 +6,9 @@ use ratatui::{
 };
 use tui_utils::WidgetWindow;
 
-use crate::{bot_logic::predict_daily_luck, Error, GameState};
+use bot_logic::predict_daily_luck;
+
+use crate::{Error, GameState};
 
 pub struct PredictedLuckDisplay;
 

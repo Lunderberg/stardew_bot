@@ -4,6 +4,7 @@ members = [
   "stardew_bot",
   "stardew_bot/geometry",
   "stardew_bot/game_state",
+  "stardew_bot/bot_logic",
   "tui_explorer",
   "dll_unpacker",
   "stardew_utils",

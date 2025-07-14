@@ -1,10 +1,10 @@
 use crate::{
-    bot_logic::GeodePredictor, BotActionDisplay, BotGoalDisplay, BotLogic,
-    Error, FishingUI, GameAction, GameState, InputDisplay, LocationDisplay,
-    PlayerStats, PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate,
-    X11Handler,
+    game_action_to_x11::apply_game_action, BotActionDisplay, BotGoalDisplay,
+    Error, FishingUI, GameState, InputDisplay, LocationDisplay, PlayerStats,
+    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
 };
 
+use bot_logic::{BotLogic, GameAction, GeodePredictor};
 use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
 
 use crossterm::event::Event;
@@ -610,12 +610,13 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
-        let res = bot_logic.update(game_state).and_then(
-            |(actions, refresh_current_location)| {
+        let res = bot_logic
+            .update(game_state)
+            .map_err(|err| -> Error { err.into() })
+            .and_then(|(actions, refresh_current_location)| {
                 self.apply_game_actions(actions)?;
                 Ok(refresh_current_location)
-            },
-        );
+            });
         let refresh_current_location = match res {
             Ok(refresh_current_location) => refresh_current_location,
             Err(err) => {
@@ -760,7 +761,7 @@ impl StardewBot {
             .expect("Globals should always contain a GameState");
 
         actions.into_iter().try_for_each(|action| {
-            action.apply(&mut self.x11_handler, game_state)
+            apply_game_action(action, &mut self.x11_handler, game_state)
         })?;
 
         Ok(())

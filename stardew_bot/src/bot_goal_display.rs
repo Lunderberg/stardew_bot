@@ -1,7 +1,9 @@
 use ratatui::widgets::{List, Widget};
 use tui_utils::WidgetWindow;
 
-use crate::{BotLogic, Error};
+use bot_logic::BotLogic;
+
+use crate::Error;
 
 pub struct BotGoalDisplay;
 

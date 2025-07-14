@@ -1,7 +1,7 @@
 use thiserror::Error;
 use tui_utils::inputs::KeySequence;
 
-use crate::{bot_logic::BotError, X11Error};
+use crate::X11Error;
 
 #[derive(Error)]
 pub enum Error {
@@ -24,16 +24,13 @@ pub enum Error {
     TuiUtilError(#[from] tui_utils::Error),
 
     #[error("BotError( {0} )")]
-    BotError(#[from] BotError),
+    BotError(#[from] bot_logic::Error),
 
     #[error("game_state::Error( {0} )")]
     GameState(#[from] game_state::Error),
 
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),
-
-    #[error("The bot has achieved all of its goals.")]
-    NoRemainingGoals,
 }
 
 impl std::fmt::Debug for Error {

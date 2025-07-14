@@ -148,6 +148,7 @@ impl X11Handler {
         Ok(title)
     }
 
+    #[allow(dead_code)]
     pub fn get_pid_blocking(&self, window: Window) -> Result<u32, Error> {
         let cookie = self.conn.get_property(
             false,
@@ -342,6 +343,7 @@ impl X11Handler {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub fn flush(&self) -> Result<(), Error> {
         self.conn.flush()?;
 

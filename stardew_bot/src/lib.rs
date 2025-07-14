@@ -7,11 +7,10 @@ pub use error::Error;
 mod x11_handler;
 pub(crate) use x11_handler::{Error as X11Error, X11Handler};
 
+mod game_action_to_x11;
+
 mod rate_counter;
 pub(crate) use rate_counter::RateCounter;
-
-mod game_action;
-pub use game_action::GameAction;
 
 mod tui_draw_rate;
 pub use tui_draw_rate::TuiDrawRate;
@@ -20,9 +19,6 @@ mod running_log;
 pub use running_log::RunningLog;
 
 pub(crate) use game_state::GameState;
-
-mod bot_logic;
-pub use bot_logic::BotLogic;
 
 mod fishing;
 pub use fishing::FishingUI;
