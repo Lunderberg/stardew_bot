@@ -6,7 +6,7 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    MovementGoal,
+    GameStateExt as _, LocationExt as _, MovementGoal,
 };
 
 pub struct CollectNearbyItems {

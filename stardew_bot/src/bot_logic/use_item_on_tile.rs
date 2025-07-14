@@ -1,10 +1,8 @@
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{
-    game_state::{Item, ItemCategory, ItemId},
-    Error, GameAction, GameState,
-};
+use crate::{Error, GameAction, GameState};
+use game_state::{Item, ItemCategory, ItemId};
 
 use super::{
     bot_logic::{

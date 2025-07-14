@@ -241,14 +241,14 @@ impl GlobalGameState {
         Ok(func)
     }
 
-    pub(crate) fn get_stat(&self, stat_name: &str) -> Result<u32, Error> {
+    pub fn get_stat(&self, stat_name: &str) -> Result<u32, Error> {
         self.stats
             .get(stat_name)
             .cloned()
             .ok_or_else(|| Error::MissingStat(stat_name.to_string()))
     }
 
-    pub(crate) fn days_played(&self) -> u32 {
+    pub fn days_played(&self) -> u32 {
         self.get_stat("daysPlayed").unwrap_or(1)
     }
 }

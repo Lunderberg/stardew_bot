@@ -8,11 +8,11 @@ use crate::{
         graph_search::GraphSearch as _, CraftItemGoal, MaintainStaminaGoal,
         MovementGoal, ObjectKindExt as _, UseItemOnTile,
     },
-    game_state::{
-        HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality, SeededRng,
-        Sprinkler, StaticState,
-    },
     Error, GameAction, GameState,
+};
+use game_state::{
+    HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality, SeededRng,
+    Sprinkler, StaticState,
 };
 
 use super::{

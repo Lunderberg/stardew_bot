@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use itertools::Itertools as _;
 
-use crate::{bot_logic::BotError, Error};
+use crate::Error;
 
 use super::{Item, ItemCategory, ItemId, Quality};
 
@@ -510,6 +510,6 @@ impl StaticState {
         let seed = seed.as_ref();
         self.crop_data
             .get(seed)
-            .ok_or_else(|| BotError::UnknownSeedKind(seed.clone()).into())
+            .ok_or_else(|| Error::UnknownSeedKind(seed.clone()).into())
     }
 }

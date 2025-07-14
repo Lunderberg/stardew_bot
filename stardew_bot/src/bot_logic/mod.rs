@@ -3,9 +3,6 @@
 mod error;
 pub use error::BotError;
 
-mod item_set;
-use item_set::ItemSet;
-
 mod game_state_ext;
 pub use game_state_ext::*;
 

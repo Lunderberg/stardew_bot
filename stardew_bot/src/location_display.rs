@@ -14,12 +14,9 @@ use ratatui::{
 };
 use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
-use crate::{
-    game_state::{
-        FurnitureKind, Location, ObjectKind, ResourceClumpKind, StoneKind,
-        TileMap,
-    },
-    Error, GameState,
+use crate::{Error, GameState};
+use game_state::{
+    FurnitureKind, Location, ObjectKind, ResourceClumpKind, StoneKind, TileMap,
 };
 
 pub struct LocationDisplay;

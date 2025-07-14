@@ -1,13 +1,14 @@
 use geometry::Direction;
 
-use crate::{
-    bot_logic::StopMovingGoal, game_state::SeededRng, Error, GameAction,
-    GameState,
-};
+use crate::{bot_logic::StopMovingGoal, Error, GameAction, GameState};
+use game_state::SeededRng;
 
-use super::bot_logic::{
-    ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
-    LogicStackItem,
+use super::{
+    bot_logic::{
+        ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
+        LogicStackItem,
+    },
+    LocationExt as _,
 };
 
 pub struct StepCountForLuck {

@@ -2,9 +2,9 @@ use geometry::Vector;
 
 use crate::{
     bot_logic::{BotError, MovementGoal},
-    game_state::{Item, ItemId},
     Error, GameAction, GameState,
 };
+use game_state::{Item, ItemId};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

@@ -3,11 +3,10 @@ use std::collections::HashSet;
 use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 
-use crate::{
-    bot_logic::GameStateExt as _,
-    game_state::{ObjectKind, TileMap},
-    Error, GameState,
-};
+use crate::{bot_logic::GameStateExt as _, Error};
+use game_state::{GameState, ObjectKind, TileMap};
+
+use super::LocationExt as _;
 
 pub struct FarmPlan {
     pub tree_farm: Rectangle<isize>,

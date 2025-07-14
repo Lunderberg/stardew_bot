@@ -1,5 +1,11 @@
+mod error;
+pub use error::Error;
+
 mod game_state;
 pub use game_state::{GameState, GameStateReader};
+
+mod item_set;
+pub use item_set::ItemSet;
 
 mod define_utility_functions;
 pub use define_utility_functions::define_utility_functions;

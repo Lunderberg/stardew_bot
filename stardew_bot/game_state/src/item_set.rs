@@ -1,4 +1,4 @@
-use crate::game_state::{Item, ItemId};
+use crate::{Item, ItemId};
 
 pub trait ItemSet: Sized {
     fn iter_item_set(self) -> impl Iterator<Item = Item>;

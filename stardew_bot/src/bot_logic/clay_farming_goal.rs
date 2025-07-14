@@ -6,12 +6,12 @@ use itertools::Itertools as _;
 use crate::{
     bot_logic::{
         bot_logic::LogicStack, graph_search::GraphSearch as _, BotError,
-        MovementGoal, SelectItemGoal,
-    },
-    game_state::{
-        Inventory, Item, ItemId, Key, ObjectKind, Quality, SeededRng,
+        LocationExt as _, MovementGoal, SelectItemGoal,
     },
     Error, GameAction, GameState,
+};
+use game_state::{
+    Inventory, Item, ItemId, Key, ObjectKind, Quality, SeededRng,
 };
 
 use super::{

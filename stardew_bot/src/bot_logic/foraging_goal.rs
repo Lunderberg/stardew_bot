@@ -8,15 +8,15 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActivateTile, MovementGoal},
-    game_state::{FloatingItem, Item, ObjectKind, TileMap},
     Error, GameAction, GameState,
 };
+use game_state::{FloatingItem, Item, ObjectKind, TileMap};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     graph_search::GraphSearch,
     BotError, GameStateExt as _, GoToActionTile, InventoryGoal,
-    RepairBeachBridgeGoal,
+    LocationExt as _, RepairBeachBridgeGoal,
 };
 
 pub struct ForagingGoal {

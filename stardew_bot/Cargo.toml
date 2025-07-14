@@ -15,8 +15,6 @@ derive_more = "*"
 itertools = "*"
 priority-queue = "*"
 
-xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
-
 ratatui = "*"
 crossterm = "*"
 chrono = "*"
@@ -29,3 +27,4 @@ stardew_utils = {path = "../stardew_utils"}
 dotnet_debugger = { path = "../dotnet_debugger" }
 
 geometry = {path = "./geometry"}
+game_state = {path = "./game_state"}

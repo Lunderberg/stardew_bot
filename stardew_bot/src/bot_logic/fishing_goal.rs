@@ -8,11 +8,11 @@ use crate::{
         MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
         StepCountForLuck, UseItemOnTile,
     },
-    game_state::{
-        FacingDirection, FishingRod, Inventory, Item, ItemCategory, ItemId,
-        Key, Quality,
-    },
-    Error, GameAction, GameState,
+    Error, GameAction,
+};
+use game_state::{
+    FacingDirection, FishingRod, GameState, Inventory, Item, ItemCategory,
+    ItemId, Key, Quality,
 };
 
 use super::{

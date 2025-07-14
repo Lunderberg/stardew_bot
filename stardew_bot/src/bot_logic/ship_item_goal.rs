@@ -1,8 +1,7 @@
 use itertools::Itertools as _;
 
-use crate::{
-    bot_logic::ActivateTile, game_state::Item, Error, GameAction, GameState,
-};
+use crate::{bot_logic::ActivateTile, Error, GameAction, GameState};
+use game_state::Item;
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

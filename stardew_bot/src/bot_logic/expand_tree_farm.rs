@@ -5,13 +5,13 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActivateTile, InventoryGoal, MovementGoal, UseItemOnTile},
-    game_state::{Item, ItemId, ObjectKind, TileMap},
     Error, GameAction, GameState,
 };
+use game_state::{Item, ItemId, ObjectKind, TileMap};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    FarmPlan, GameStateExt as _, MaintainStaminaGoal,
+    FarmPlan, GameStateExt as _, LocationExt as _, MaintainStaminaGoal,
 };
 
 pub struct ExpandTreeFarm;

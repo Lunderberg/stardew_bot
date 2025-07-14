@@ -8,11 +8,11 @@ use crate::{
         bot_logic::LogicStackItem, ActivateTile, BotError, GameStateExt as _,
         InventoryGoal, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
     },
-    game_state::{
-        Item, ItemCategory, ItemId, Object, ObjectKind, Quality,
-        ResourceClumpKind, SeededRng, StoneKind,
-    },
     Error, GameAction, GameState,
+};
+use game_state::{
+    Item, ItemCategory, ItemId, Object, ObjectKind, Quality, ResourceClumpKind,
+    SeededRng, StoneKind,
 };
 
 use super::{

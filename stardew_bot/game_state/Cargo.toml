@@ -1,0 +1,12 @@
+[package]
+name = "game_state"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+itertools = "*"
+thiserror = "*"
+xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
+
+dotnet_debugger = { path = "../../dotnet_debugger" }
+geometry = { path = "../geometry" }

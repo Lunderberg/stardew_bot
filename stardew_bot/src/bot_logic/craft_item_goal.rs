@@ -1,8 +1,8 @@
 use crate::{
     bot_logic::{bot_logic::LogicStack, MovementGoal},
-    game_state::{Inventory, Item, Key, ObjectKind, Quality},
     Error, GameAction, GameState,
 };
+use game_state::{Inventory, Item, Key, ObjectKind, Quality};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

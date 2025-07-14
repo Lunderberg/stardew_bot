@@ -4,18 +4,17 @@ use dotnet_debugger::env_var_flag;
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{
-    game_state::{Item, ItemCategory, ItemId, ObjectKind},
-    Error, GameAction, GameState,
-};
+use crate::{Error, GameAction};
+use game_state::{GameState, Item, ItemCategory, ItemId, ObjectKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::GraphSearch as _,
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
     CraftItemGoal, ExpandStorageInterrupt, ForagingGoal, GameStateExt as _,
-    GoToActionTile, MaintainStaminaGoal, MenuCloser, MovementGoal,
-    PlantCropsGoal, SellToMerchantGoal, ShipItemGoal, UseItemOnTile,
+    GoToActionTile, LocationExt as _, MaintainStaminaGoal, MenuCloser,
+    MovementGoal, PlantCropsGoal, SellToMerchantGoal, ShipItemGoal,
+    UseItemOnTile,
 };
 
 pub struct FirstDay;

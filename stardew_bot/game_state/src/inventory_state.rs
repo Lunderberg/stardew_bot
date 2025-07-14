@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
-use memory_reader::Pointer;
+use dotnet_debugger::{
+    Pointer, RustNativeObject, SymbolicGraph, SymbolicValue,
+};
 
 use crate::Error;
 

@@ -1,6 +1,8 @@
 mod error;
 pub use error::Error;
 
+pub use memory_reader::Pointer;
+
 pub(crate) mod macros;
 
 mod env_var_flags;

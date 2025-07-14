@@ -1,11 +1,8 @@
 use geometry::{Direction, TileSet, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::{
-    bot_logic::BotError,
-    game_state::{Location, ObjectKind, ResourceClumpKind, TileMap},
-    Error,
-};
+use crate::{bot_logic::BotError, Error};
+use game_state::{Location, ObjectKind, ResourceClumpKind, TileMap};
 
 use std::collections::BinaryHeap;
 
@@ -131,10 +128,10 @@ fn heuristic_between_points(a: Vector<isize>, b: Vector<isize>) -> u64 {
     1414 * diagonal_movements + 1000 * cardinal_movements
 }
 
-impl Location {
-    pub fn pathfinding(&self) -> Pathfinding {
+impl<'a> Pathfinding<'a> {
+    pub fn new(location: &'a Location) -> Self {
         Pathfinding {
-            location: self,
+            location,
             allow_diagonal: true,
             clear_stone: None,
             clear_boulders: None,
@@ -148,9 +145,7 @@ impl Location {
             include_border: false,
         }
     }
-}
 
-impl Pathfinding<'_> {
     pub fn allow_diagonal(self, allow_diagonal: bool) -> Self {
         Self {
             allow_diagonal,
@@ -175,6 +170,7 @@ impl Pathfinding<'_> {
             ..self
         }
     }
+    #[allow(dead_code)]
     pub fn stump_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_stumps: Some(cost),
@@ -187,6 +183,7 @@ impl Pathfinding<'_> {
             ..self
         }
     }
+    #[allow(dead_code)]
     pub fn forage_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_forage: Some(cost),
@@ -332,6 +329,7 @@ impl Pathfinding<'_> {
 
     /// Check if a single tile is walkable.  If checking several
     /// tiles, may be faster to use `Pathfinding.walkable` instead.
+    #[allow(dead_code)]
     pub fn tile_is_walkable(&self, tile: Vector<isize>) -> bool {
         self.location.blocked.in_bounds(tile)
             && self

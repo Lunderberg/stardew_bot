@@ -1,6 +1,6 @@
 use geometry::{Direction, Vector};
 
-use crate::game_state::TileMap;
+use game_state::TileMap;
 
 use super::graph_search::GraphSearch;
 

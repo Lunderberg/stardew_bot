@@ -1,14 +1,11 @@
-use crate::{
-    bot_logic::SelectItemGoal,
-    game_state::{FacingDirection, Item},
-    Error, GameAction, GameState,
-};
+use crate::{bot_logic::SelectItemGoal, Error, GameAction, GameState};
+use game_state::{FacingDirection, Item};
 
 use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    FaceDirectionGoal,
+    FaceDirectionGoal, GameStateExt as _,
 };
 
 #[derive(Clone)]

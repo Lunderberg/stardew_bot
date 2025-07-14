@@ -26,32 +26,14 @@ pub enum Error {
     #[error("BotError( {0} )")]
     BotError(#[from] BotError),
 
+    #[error("game_state::Error( {0} )")]
+    GameState(#[from] game_state::Error),
+
     #[error("No binding for '{0}'")]
     UnknownKeySequence(KeySequence),
 
-    #[error("Expected non-empty output from VirtualMachine")]
-    ExpectedNonEmptyValue,
-
-    #[error("Unrecognized item index {0} used as resource clump")]
-    UnrecognizedResourceClump(i32),
-
-    #[error("Unrecognized item index {0} used as furniture type")]
-    UnrecognizedFurnitureType(i32),
-
-    #[error("Tree kind '{0}' did not correspond to any known tree.")]
-    UnrecognizedTreeKind(String),
-
-    #[error("Quality should be a value from 0 to 3, but found {0}")]
-    InvalidQualityValue(i32),
-
     #[error("The bot has achieved all of its goals.")]
     NoRemainingGoals,
-
-    #[error(
-        "Expected to have player stat '{0}' defined, \
-         but it was missing."
-    )]
-    MissingStat(String),
 }
 
 impl std::fmt::Debug for Error {

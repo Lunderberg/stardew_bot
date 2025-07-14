@@ -458,6 +458,17 @@ name = "format_utils"
 version = "0.1.0"
 
 [[package]]
+name = "game_state"
+version = "0.1.0"
+dependencies = [
+ "dotnet_debugger",
+ "geometry",
+ "itertools 0.10.5",
+ "thiserror",
+ "xxhash-rust",
+]
+
+[[package]]
 name = "geometry"
 version = "0.1.0"
 dependencies = [
@@ -1209,6 +1220,7 @@ dependencies = [
  "crossterm",
  "derive_more",
  "dotnet_debugger",
+ "game_state",
  "geometry",
  "itertools 0.13.0",
  "memory_reader",
@@ -1219,7 +1231,6 @@ dependencies = [
  "thiserror",
  "tui_utils",
  "x11rb",
- "xxhash-rust",
 ]
 
 [[package]]

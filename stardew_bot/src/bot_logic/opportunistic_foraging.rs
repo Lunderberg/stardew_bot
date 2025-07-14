@@ -1,10 +1,13 @@
 use crate::{
     bot_logic::{ActivateTile, ObjectKindExt as _, UseItemOnTile},
-    game_state::{Item, ItemId, ObjectKind, TileMap},
     Error, GameState,
 };
+use game_state::{Item, ItemId, ObjectKind, TileMap};
 
-use super::bot_logic::{BotGoal, BotInterrupt, LogicStack};
+use super::{
+    bot_logic::{BotGoal, BotInterrupt, LogicStack},
+    LocationExt as _,
+};
 
 pub struct OpportunisticForaging {
     radius: f32,

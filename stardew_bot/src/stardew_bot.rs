@@ -1,10 +1,11 @@
 use crate::{
-    bot_logic::GeodePredictor,
-    game_state::{GameStateReader, ItemId},
-    BotActionDisplay, BotGoalDisplay, BotLogic, Error, FishingUI, GameAction,
-    GameState, InputDisplay, LocationDisplay, PlayerStats,
-    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
+    bot_logic::GeodePredictor, BotActionDisplay, BotGoalDisplay, BotLogic,
+    Error, FishingUI, GameAction, GameState, InputDisplay, LocationDisplay,
+    PlayerStats, PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate,
+    X11Handler,
 };
+
+use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
 
 use crossterm::event::Event;
 use itertools::{Either, Itertools as _};
@@ -288,7 +289,6 @@ impl StardewBot {
                 .zip(flags)
                 .filter(|_| num_done < bundle.num_required)
                 .for_each(|(ingredient, &done)| {
-                    use crate::game_state::BundleIngredient;
                     let done_char = if done { '🗹' } else { '☐' };
 
                     match ingredient {
@@ -299,9 +299,12 @@ impl StardewBot {
                             let name = game_state
                                 .statics
                                 .object_data
-                                .get(&item.id.clone().with_quality(
-                                    crate::game_state::Quality::Normal,
-                                ))
+                                .get(
+                                    &item
+                                        .id
+                                        .clone()
+                                        .with_quality(Quality::Normal),
+                                )
                                 .map(|data| data.name.as_str())
                                 .unwrap_or_else(|| &*item.id.item_id);
 

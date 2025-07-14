@@ -3,10 +3,11 @@ use std::{
     ops::Deref,
 };
 
-use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use dotnet_debugger::{
+    Pointer, RustNativeObject, SymbolicGraph, SymbolicValue,
+};
 use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
-use memory_reader::Pointer;
 
 use crate::Error;
 

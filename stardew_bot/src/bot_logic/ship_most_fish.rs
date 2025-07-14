@@ -1,9 +1,7 @@
 use itertools::Itertools as _;
 
-use crate::{
-    game_state::{ItemCategory, Quality},
-    Error, GameState,
-};
+use crate::Error;
+use game_state::{GameState, ItemCategory, Quality};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

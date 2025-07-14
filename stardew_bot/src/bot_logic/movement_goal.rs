@@ -3,17 +3,14 @@ use std::borrow::Cow;
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{
-    bot_logic::BotError,
-    game_state::{FacingDirection, Location, TileMap, WarpKind},
-    Error, GameAction, GameState,
-};
+use crate::{bot_logic::BotError, Error, GameAction};
+use game_state::{FacingDirection, GameState, Location, TileMap, WarpKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::{GraphSearch, SearchNodeMetadata},
     impl_tile_map_graph_search::point_to_point_lower_bound,
-    GameStateExt as _, WaitUntilTimeOfDay,
+    GameStateExt as _, LocationExt as _, WaitUntilTimeOfDay,
 };
 
 /// Epsilon distance (in tiles) to consider a target reached

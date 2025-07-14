@@ -2,7 +2,7 @@ use dotnet_debugger::{
     CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
 };
 
-use crate::{bot_logic::BotError, Error};
+use crate::Error;
 
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
@@ -61,7 +61,7 @@ pub struct GameStateDelta {
 }
 
 impl GameState {
-    pub(crate) fn build_reader(
+    pub fn build_reader(
         reader: CachedReader,
     ) -> Result<GameStateReader, Error> {
         let mut graph = SymbolicGraph::new();
@@ -361,18 +361,6 @@ impl GameState {
         self.locations.push(new_loc);
     }
 
-    pub fn get_room<'a>(&'a self, name: &str) -> Result<&'a Location, Error> {
-        self.locations
-            .iter()
-            .find(|loc| loc.name == name)
-            .ok_or_else(|| BotError::UnknownRoom(name.into()))
-            .map_err(Into::into)
-    }
-
-    pub fn current_room(&self) -> Result<&Location, Error> {
-        self.get_room(&self.player.room_name)
-    }
-
     pub fn any_menu_open(&self) -> bool {
         self.chest_menu.is_some()
             || self.dialogue_menu.is_some()
@@ -381,6 +369,18 @@ impl GameState {
             || self.mail_menu.is_some()
             || self.mine_elevator_menu.is_some()
             || self.geode_menu.is_some()
+    }
+
+    pub fn get_room<'a>(&'a self, name: &str) -> Result<&'a Location, Error> {
+        self.locations
+            .iter()
+            .find(|loc| loc.name == name)
+            .ok_or_else(|| Error::UnknownRoom(name.into()))
+            .map_err(Into::into)
+    }
+
+    pub fn current_room(&self) -> Result<&Location, Error> {
+        self.get_room(&self.player.room_name)
     }
 }
 

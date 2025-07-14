@@ -1,8 +1,5 @@
-use crate::{
-    bot_logic::SellToMerchantGoal,
-    game_state::{ItemCategory, ItemId},
-    Error, GameAction, GameState,
-};
+use crate::{bot_logic::SellToMerchantGoal, Error, GameAction};
+use game_state::{GameState, ItemCategory, ItemId};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},

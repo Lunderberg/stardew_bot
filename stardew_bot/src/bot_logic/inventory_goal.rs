@@ -8,16 +8,15 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
-    game_state::{
-        Chest, Inventory, Item, ItemCategory, ItemId, Key, Location,
-        ObjectKind, Quality, WeaponKind,
-    },
-    Error, GameAction, GameState,
+    Error, GameAction,
+};
+use game_state::{
+    Chest, GameState, Inventory, Item, ItemCategory, ItemId, ItemSet, Key,
+    Location, ObjectKind, Quality, WeaponKind,
 };
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
-    item_set::ItemSet,
     ActivateTile, CraftItemGoal, GameStateExt as _, LocationExt as _,
 };
 
@@ -216,7 +215,8 @@ impl InventoryGoal {
         &self,
         game_state: &'a GameState,
     ) -> Result<&'a Location, Error> {
-        game_state.get_room(&self.room)
+        let room = game_state.get_room(&self.room)?;
+        Ok(room)
     }
 }
 

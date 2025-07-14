@@ -4,11 +4,8 @@ use ratatui::{
 };
 use tui_utils::WidgetWindow;
 
-use crate::{
-    bot_logic::LocationExt as _,
-    game_state::{ItemCategory, ItemId},
-    Error, GameState,
-};
+use crate::{bot_logic::LocationExt as _, Error, GameState};
+use game_state::{ItemCategory, ItemId};
 
 pub struct PlayerStats {
     table_state: TableState,

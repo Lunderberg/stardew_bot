@@ -8,16 +8,16 @@ use crate::{
         bot_logic::LogicStack, graph_search::GraphSearch as _, BotError,
         MovementGoal, SelectItemGoal,
     },
-    game_state::{
-        Inventory, Item, ItemId, Key, Location, Object, ObjectKind, Quality,
-    },
     Error, GameAction, GameState,
+};
+use game_state::{
+    Inventory, Item, ItemId, Key, Location, Object, ObjectKind, Quality,
 };
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    GameStateExt as _, InventoryGoal, MaintainStaminaGoal, ObjectKindExt as _,
-    Pathfinding, UseItemOnTile,
+    GameStateExt as _, InventoryGoal, LocationExt as _, MaintainStaminaGoal,
+    ObjectKindExt as _, Pathfinding, UseItemOnTile,
 };
 
 pub struct ClearFarmGoal {

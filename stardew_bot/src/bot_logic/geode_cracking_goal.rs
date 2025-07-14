@@ -2,9 +2,9 @@ use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::{BotError, GoToActionTile, InventoryGoal, MenuCloser},
-    game_state::{Item, ItemCategory, ItemId, SeededRng, StaticState},
     Error, GameAction, GameState,
 };
+use game_state::{Item, ItemCategory, ItemId, SeededRng, StaticState};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},

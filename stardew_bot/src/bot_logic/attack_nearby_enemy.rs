@@ -1,10 +1,7 @@
 use geometry::Vector;
 
-use crate::{
-    bot_logic::UseItemOnTile,
-    game_state::{Item, TileMap, WeaponKind},
-    Error, GameAction, GameState,
-};
+use crate::{bot_logic::UseItemOnTile, Error, GameAction, GameState};
+use game_state::{Item, TileMap, WeaponKind};
 
 use super::{
     best_weapon,
@@ -12,7 +9,7 @@ use super::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
         LogicStackItem,
     },
-    SelectItemGoal,
+    LocationExt as _, SelectItemGoal,
 };
 
 pub struct AttackNearbyEnemy {}

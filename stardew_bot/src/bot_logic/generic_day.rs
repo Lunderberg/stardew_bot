@@ -1,7 +1,5 @@
-use crate::{
-    game_state::{Item, ItemCategory, ItemId, ObjectKind},
-    Error, GameAction, GameState,
-};
+use crate::{Error, GameAction};
+use game_state::{GameState, Item, ItemCategory, ItemId, ObjectKind};
 
 use super::{
     bot_logic::{

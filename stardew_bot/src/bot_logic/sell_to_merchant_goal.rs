@@ -1,10 +1,9 @@
-use crate::{
-    bot_logic::GoToActionTile, game_state::Item, Error, GameAction, GameState,
-};
+use crate::{bot_logic::GoToActionTile, Error, GameAction, GameState};
+use game_state::{Item, ItemSet};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    ItemSet, MenuCloser,
+    MenuCloser,
 };
 
 pub struct SellToMerchantGoal {

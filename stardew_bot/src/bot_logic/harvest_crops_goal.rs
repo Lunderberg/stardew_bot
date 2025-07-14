@@ -3,16 +3,13 @@ use std::collections::HashSet;
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{
-    bot_logic::GameStateExt as _,
-    game_state::{CropPhase, ItemId},
-    Error, GameState,
-};
+use crate::{bot_logic::GameStateExt as _, Error, GameState};
+use game_state::{CropPhase, ItemId};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    ActivateTile, CropQualityPredictor, InventoryGoal, MovementGoal,
-    UseItemOnTile,
+    ActivateTile, CropQualityPredictor, InventoryGoal, LocationExt as _,
+    MovementGoal, UseItemOnTile,
 };
 
 pub struct HarvestCropsGoal {}

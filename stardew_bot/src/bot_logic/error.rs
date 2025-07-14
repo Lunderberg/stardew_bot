@@ -2,7 +2,7 @@ use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::game_state::{Item, ItemId};
+use game_state::{Item, ItemId};
 
 #[derive(Error)]
 pub enum BotError {
@@ -77,9 +77,6 @@ pub enum BotError {
 
     #[error("Could not find any remaining monster")]
     NoRemainingMonsterFound,
-
-    #[error("Could not locate crop data for seed '{0}'")]
-    UnknownSeedKind(ItemId),
 }
 
 impl std::fmt::Debug for BotError {

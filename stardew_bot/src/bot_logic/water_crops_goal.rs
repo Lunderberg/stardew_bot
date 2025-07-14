@@ -8,13 +8,13 @@ use crate::{
         graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
         UseItemOnTile,
     },
-    game_state::{HoeDirt, Item, ItemId, ObjectKind},
     Error, GameAction, GameState,
 };
+use game_state::{HoeDirt, Item, ItemId, ObjectKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    FillWateringCan, GameStateExt as _, InventoryGoal,
+    FillWateringCan, GameStateExt as _, InventoryGoal, LocationExt as _,
 };
 
 pub struct WaterCropsGoal {}

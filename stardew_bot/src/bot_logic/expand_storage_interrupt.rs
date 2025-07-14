@@ -4,11 +4,14 @@ use crate::{
     bot_logic::{
         CraftItemGoal, GameStateExt as _, InventoryGoal, UseItemOnTile,
     },
-    game_state::{Item, ItemId},
-    Error, GameState,
+    Error,
 };
+use game_state::{GameState, Item, ItemId};
 
-use super::bot_logic::{BotInterrupt, LogicStack};
+use super::{
+    bot_logic::{BotInterrupt, LogicStack},
+    LocationExt as _,
+};
 
 pub struct ExpandStorageInterrupt;
 

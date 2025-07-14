@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{
-    game_state::{Item, ItemId, Location, ObjectKind, ResourceClumpKind},
-    Error, GameState,
+use crate::Error;
+use game_state::{
+    GameState, Item, ItemId, Location, ObjectKind, ResourceClumpKind,
 };
 
-use super::{best_weapon, BotError, MovementGoal};
+use super::{best_weapon, BotError, MovementGoal, Pathfinding};
 
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
@@ -153,8 +153,14 @@ pub trait LocationExt {
         &self,
         opt_weapon: Option<&ItemId>,
     ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error>;
+
+    fn pathfinding(&self) -> Pathfinding<'_>;
 }
 impl LocationExt for Location {
+    fn pathfinding(&self) -> Pathfinding<'_> {
+        Pathfinding::new(self)
+    }
+
     fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind> {
         self.objects
             .iter()
