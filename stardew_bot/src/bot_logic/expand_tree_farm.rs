@@ -1,10 +1,11 @@
 use std::collections::{HashMap, HashSet};
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActivateTile, InventoryGoal, MovementGoal, UseItemOnTile},
-    game_state::{Item, ItemId, ObjectKind, TileMap, Vector},
+    game_state::{Item, ItemId, ObjectKind, TileMap},
     Error, GameAction, GameState,
 };
 

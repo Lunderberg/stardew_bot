@@ -13,7 +13,6 @@ structopt = "*"
 thiserror = "*"
 derive_more = "*"
 itertools = "*"
-num = "0.4"
 priority-queue = "*"
 
 xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
@@ -28,3 +27,5 @@ memory_reader = {path = "../memory_reader"}
 tui_utils = { path = "../tui_utils" }
 stardew_utils = {path = "../stardew_utils"}
 dotnet_debugger = { path = "../dotnet_debugger" }
+
+geometry = {path = "./geometry"}

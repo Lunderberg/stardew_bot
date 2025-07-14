@@ -4,12 +4,13 @@ use std::{
 };
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 use memory_reader::Pointer;
 
 use crate::Error;
 
-use super::{Inventory, ItemCategory, ItemId, Rectangle, TileMap, Vector};
+use super::{Inventory, ItemCategory, ItemId, TileMap};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Location {

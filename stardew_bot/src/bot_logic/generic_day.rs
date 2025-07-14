@@ -1,5 +1,5 @@
 use crate::{
-    game_state::{Item, ItemCategory, ItemId, ObjectKind, Vector},
+    game_state::{Item, ItemCategory, ItemId, ObjectKind},
     Error, GameAction, GameState,
 };
 

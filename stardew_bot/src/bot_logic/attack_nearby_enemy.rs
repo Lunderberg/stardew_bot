@@ -1,6 +1,8 @@
+use geometry::Vector;
+
 use crate::{
     bot_logic::UseItemOnTile,
-    game_state::{Item, TileMap, Vector, WeaponKind},
+    game_state::{Item, TileMap, WeaponKind},
     Error, GameAction, GameState,
 };
 

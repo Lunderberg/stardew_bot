@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
         graph_search::GraphSearch as _, MaintainStaminaGoal, MovementGoal,
         UseItemOnTile,
     },
-    game_state::{HoeDirt, Item, ItemId, ObjectKind, Vector},
+    game_state::{HoeDirt, Item, ItemId, ObjectKind},
     Error, GameAction, GameState,
 };
 

@@ -1,11 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::env_var_flag;
+use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ItemCategory, ItemId, ObjectKind, Vector},
-    Direction, Error, GameAction, GameState,
+    game_state::{Item, ItemCategory, ItemId, ObjectKind},
+    Error, GameAction, GameState,
 };
 
 use super::{

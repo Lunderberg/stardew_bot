@@ -1,3 +1,4 @@
+use geometry::{Rectangle, Vector};
 use thiserror::Error;
 use x11rb::{
     connection::Connection as _,
@@ -13,8 +14,6 @@ use x11rb::{
     rust_connection::RustConnection,
     x11_utils::X11Error,
 };
-
-use crate::game_state::{Rectangle, Vector};
 
 #[derive(Error)]
 pub enum Error {

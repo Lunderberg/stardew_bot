@@ -1,10 +1,11 @@
 use std::collections::HashSet;
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::GameStateExt as _,
-    game_state::{CropPhase, ItemId, Vector},
+    game_state::{CropPhase, ItemId},
     Error, GameState,
 };
 

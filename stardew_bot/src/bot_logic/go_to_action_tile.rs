@@ -1,4 +1,4 @@
-use crate::{game_state::Vector, Error, GameAction, GameState};
+use crate::{Error, GameAction, GameState};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

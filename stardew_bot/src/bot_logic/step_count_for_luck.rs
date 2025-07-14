@@ -1,6 +1,8 @@
+use geometry::Direction;
+
 use crate::{
-    bot_logic::StopMovingGoal, game_state::SeededRng, Direction, Error,
-    GameAction, GameState,
+    bot_logic::StopMovingGoal, game_state::SeededRng, Error, GameAction,
+    GameState,
 };
 
 use super::bot_logic::{

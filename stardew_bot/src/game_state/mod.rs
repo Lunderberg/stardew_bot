@@ -1,9 +1,6 @@
 mod game_state;
 pub use game_state::{GameState, GameStateReader};
 
-mod geometry;
-pub use geometry::{Rectangle, Vector};
-
 mod define_utility_functions;
 pub use define_utility_functions::define_utility_functions;
 

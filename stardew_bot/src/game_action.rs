@@ -1,8 +1,9 @@
 use std::fmt::Display;
 
+use geometry::{Direction, Vector};
 use x11rb::protocol::xproto::{ButtonIndex, Keycode as X11KeyCode};
 
-use crate::{game_state::Vector, Direction, Error, GameState, X11Handler};
+use crate::{Error, GameState, X11Handler};
 
 #[derive(Debug, Clone, Copy)]
 pub enum GameAction {

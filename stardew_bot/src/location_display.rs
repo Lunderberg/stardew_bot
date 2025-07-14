@@ -1,3 +1,4 @@
+use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 use ratatui::{
     style::Color,
@@ -15,8 +16,8 @@ use tui_utils::{extensions::SplitRect as _, WidgetWindow};
 
 use crate::{
     game_state::{
-        FurnitureKind, Location, ObjectKind, Rectangle, ResourceClumpKind,
-        StoneKind, TileMap, Vector,
+        FurnitureKind, Location, ObjectKind, ResourceClumpKind, StoneKind,
+        TileMap,
     },
     Error, GameState,
 };

@@ -1,6 +1,6 @@
 use dotnet_debugger::RustNativeObject;
 
-use crate::game_state::Vector;
+use crate::Vector;
 
 #[derive(RustNativeObject, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Direction {

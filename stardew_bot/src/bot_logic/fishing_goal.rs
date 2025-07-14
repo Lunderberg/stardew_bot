@@ -1,5 +1,7 @@
 use std::{borrow::Cow, fmt::Display};
 
+use geometry::Vector;
+
 use crate::{
     bot_logic::{
         BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, InventoryGoal,
@@ -8,7 +10,7 @@ use crate::{
     },
     game_state::{
         FacingDirection, FishingRod, Inventory, Item, ItemCategory, ItemId,
-        Key, Quality, Vector,
+        Key, Quality,
     },
     Error, GameAction, GameState,
 };

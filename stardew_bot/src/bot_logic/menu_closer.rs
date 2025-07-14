@@ -1,7 +1,6 @@
-use crate::{
-    game_state::{Item, Vector},
-    Error, GameAction, GameState,
-};
+use geometry::Vector;
+
+use crate::{game_state::Item, Error, GameAction, GameState};
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 

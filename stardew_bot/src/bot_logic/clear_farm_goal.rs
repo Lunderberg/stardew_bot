@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
@@ -9,9 +10,8 @@ use crate::{
     },
     game_state::{
         Inventory, Item, ItemId, Key, Location, Object, ObjectKind, Quality,
-        Vector,
     },
-    Direction, Error, GameAction, GameState,
+    Error, GameAction, GameState,
 };
 
 use super::{

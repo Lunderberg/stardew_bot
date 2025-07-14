@@ -1,6 +1,6 @@
 use crate::{
     bot_logic::SelectItemGoal,
-    game_state::{FacingDirection, Item, Vector},
+    game_state::{FacingDirection, Item},
     Error, GameAction, GameState,
 };
 

@@ -1,8 +1,10 @@
+use geometry::Vector;
+
 use crate::{
     bot_logic::{
         CraftItemGoal, GameStateExt as _, InventoryGoal, UseItemOnTile,
     },
-    game_state::{Item, ItemId, Vector},
+    game_state::{Item, ItemId},
     Error, GameState,
 };
 

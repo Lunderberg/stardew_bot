@@ -458,6 +458,14 @@ name = "format_utils"
 version = "0.1.0"
 
 [[package]]
+name = "geometry"
+version = "0.1.0"
+dependencies = [
+ "dotnet_debugger",
+ "num",
+]
+
+[[package]]
 name = "gethostname"
 version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1201,9 +1209,9 @@ dependencies = [
  "crossterm",
  "derive_more",
  "dotnet_debugger",
+ "geometry",
  "itertools 0.13.0",
  "memory_reader",
- "num",
  "priority-queue",
  "ratatui",
  "stardew_utils",

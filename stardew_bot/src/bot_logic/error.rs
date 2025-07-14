@@ -1,7 +1,8 @@
+use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use crate::game_state::{Item, ItemId, Rectangle, Vector};
+use crate::game_state::{Item, ItemId};
 
 #[derive(Error)]
 pub enum BotError {

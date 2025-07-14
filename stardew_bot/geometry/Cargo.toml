@@ -1,0 +1,8 @@
+[package]
+name = "geometry"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+dotnet_debugger = { path = "../../dotnet_debugger" }
+num = "0.4"

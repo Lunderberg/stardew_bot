@@ -3,13 +3,14 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{bot_logic::LogicStack, MenuCloser, MovementGoal},
     game_state::{
         Chest, Inventory, Item, ItemCategory, ItemId, Key, Location,
-        ObjectKind, Quality, Vector, WeaponKind,
+        ObjectKind, Quality, WeaponKind,
     },
     Error, GameAction, GameState,
 };

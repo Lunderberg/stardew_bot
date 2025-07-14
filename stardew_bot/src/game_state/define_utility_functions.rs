@@ -1,8 +1,7 @@
 use dotnet_debugger::SymbolicGraph;
+use geometry::{Rectangle, Vector};
 
 use crate::Error;
-
-use super::{Rectangle, Vector};
 
 pub fn define_utility_functions(
     graph: &mut SymbolicGraph,

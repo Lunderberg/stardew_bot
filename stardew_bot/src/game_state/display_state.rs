@@ -1,8 +1,7 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::{Rectangle, Vector};
 
 use crate::Error;
-
-use super::{Rectangle, Vector};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct DisplayState {

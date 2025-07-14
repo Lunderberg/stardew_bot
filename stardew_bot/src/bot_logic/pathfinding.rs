@@ -1,9 +1,10 @@
+use geometry::{Direction, TileSet, Vector};
 use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::BotError,
-    game_state::{Location, ObjectKind, ResourceClumpKind, TileMap, Vector},
-    Direction, Error,
+    game_state::{Location, ObjectKind, ResourceClumpKind, TileMap},
+    Error,
 };
 
 use std::collections::BinaryHeap;
@@ -128,28 +129,6 @@ fn heuristic_between_points(a: Vector<isize>, b: Vector<isize>) -> u64 {
     let diagonal_movements = min;
     let cardinal_movements = max - min;
     1414 * diagonal_movements + 1000 * cardinal_movements
-}
-
-mod detail {
-    use super::*;
-    pub trait TileSet: Sized + Copy {
-        fn iter(self) -> impl Iterator<Item = Vector<isize>>;
-    }
-    impl TileSet for Vector<isize> {
-        fn iter(self) -> impl Iterator<Item = Vector<isize>> {
-            std::iter::once(self)
-        }
-    }
-    impl<Iter> TileSet for Iter
-    where
-        Iter: Copy,
-        Iter: IntoIterator,
-        <Iter as IntoIterator>::Item: Into<Vector<isize>>,
-    {
-        fn iter(self) -> impl Iterator<Item = Vector<isize>> {
-            self.into_iter().map(Into::into)
-        }
-    }
 }
 
 impl Location {
@@ -398,10 +377,7 @@ impl Pathfinding<'_> {
         reachable
     }
 
-    pub fn distances(
-        &self,
-        initial: impl detail::TileSet,
-    ) -> TileMap<Option<u64>> {
+    pub fn distances(&self, initial: impl TileSet) -> TileMap<Option<u64>> {
         let mut distances = self.location.blocked.map(|_| None);
 
         self.iter_dijkstra(initial).for_each(|(tile, dist)| {
@@ -421,10 +397,7 @@ impl Pathfinding<'_> {
     /// so any waypoint-based method may have out-of-date waypoints.
     /// Using a direction map allows the local pathfinding to resume
     /// without interruption when this occurs.
-    pub fn direction_map(
-        &self,
-        target: impl detail::TileSet,
-    ) -> TileMap<Direction> {
+    pub fn direction_map(&self, target: impl TileSet) -> TileMap<Direction> {
         let mut map: TileMap<Option<Direction>> =
             self.location.blocked.map(|_| None);
 
@@ -465,7 +438,7 @@ impl Pathfinding<'_> {
     pub fn path_between(
         &self,
         initial: Vector<isize>,
-        goal: impl detail::TileSet,
+        goal: impl TileSet,
     ) -> Result<Vec<Vector<isize>>, Error> {
         let cost_map = self.movement_cost();
 
@@ -602,7 +575,7 @@ impl Pathfinding<'_> {
 
     fn iter_dijkstra_entries(
         &self,
-        initial: impl detail::TileSet,
+        initial: impl TileSet,
     ) -> impl Iterator<Item = DijkstraEntry> + '_ {
         let cost_map = self.movement_cost();
 
@@ -682,7 +655,7 @@ impl Pathfinding<'_> {
 
     pub fn iter_dijkstra(
         &self,
-        initial: impl detail::TileSet,
+        initial: impl TileSet,
     ) -> impl Iterator<Item = (Vector<isize>, u64)> + '_ {
         self.iter_dijkstra_entries(initial)
             .map(|entry| (entry.tile, entry.dist / 1000))

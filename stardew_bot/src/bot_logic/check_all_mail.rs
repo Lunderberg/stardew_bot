@@ -1,6 +1,7 @@
+use geometry::Vector;
+
 use crate::{
     bot_logic::{ActivateTile, GameStateExt as _},
-    game_state::Vector,
     Error, GameAction, GameState,
 };
 

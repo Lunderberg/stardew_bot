@@ -1,8 +1,7 @@
 use dotnet_debugger::RustNativeObject;
 
+use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
-
-use super::{Rectangle, Vector};
 
 #[derive(Debug, Clone)]
 pub struct TileMap<T> {

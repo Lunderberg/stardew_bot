@@ -19,9 +19,6 @@ pub use tui_draw_rate::TuiDrawRate;
 mod running_log;
 pub use running_log::RunningLog;
 
-mod direction;
-pub use direction::Direction;
-
 mod game_state;
 pub use game_state::GameState;
 

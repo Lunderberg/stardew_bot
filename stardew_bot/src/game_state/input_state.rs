@@ -1,8 +1,7 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::Vector;
 
 use crate::Error;
-
-use super::Vector;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct InputState {

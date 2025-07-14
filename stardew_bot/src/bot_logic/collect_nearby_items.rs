@@ -1,4 +1,6 @@
-use crate::{game_state::Vector, Error, GameAction, GameState};
+use geometry::Vector;
+
+use crate::{Error, GameAction, GameState};
 
 use super::{
     bot_logic::{
@@ -200,9 +202,9 @@ impl BotGoal for WalkTowardDebris {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        let opt_nearby_item = self.iter_offsets(game_state)?.min_by(|a, b| {
-            num::traits::float::TotalOrder::total_cmp(&a.mag2(), &b.mag2())
-        });
+        let opt_nearby_item = self
+            .iter_offsets(game_state)?
+            .min_by(|a, b| a.mag2().total_cmp(&b.mag2()));
 
         if let Some(offset) = opt_nearby_item {
             actions.do_action(GameAction::Move(offset.closest_direction()));

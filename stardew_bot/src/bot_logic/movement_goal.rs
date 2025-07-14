@@ -1,13 +1,12 @@
 use std::borrow::Cow;
 
+use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::BotError,
-    game_state::{
-        FacingDirection, Location, Rectangle, TileMap, Vector, WarpKind,
-    },
-    Direction, Error, GameAction, GameState,
+    game_state::{FacingDirection, Location, TileMap, WarpKind},
+    Error, GameAction, GameState,
 };
 
 use super::{

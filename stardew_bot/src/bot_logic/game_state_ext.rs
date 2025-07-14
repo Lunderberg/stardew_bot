@@ -1,11 +1,10 @@
 use std::collections::HashMap;
 
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{
-        Item, ItemId, Location, ObjectKind, ResourceClumpKind, Vector,
-    },
+    game_state::{Item, ItemId, Location, ObjectKind, ResourceClumpKind},
     Error, GameState,
 };
 

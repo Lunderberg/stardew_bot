@@ -1,8 +1,9 @@
+use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
-    game_state::{Item, ItemCategory, ItemId, Vector},
-    Direction, Error, GameAction, GameState,
+    game_state::{Item, ItemCategory, ItemId},
+    Error, GameAction, GameState,
 };
 
 use super::{

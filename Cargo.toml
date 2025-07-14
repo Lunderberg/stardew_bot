@@ -2,6 +2,7 @@
 members = [
   "memory_reader",
   "stardew_bot",
+  "stardew_bot/geometry",
   "tui_explorer",
   "dll_unpacker",
   "stardew_utils",

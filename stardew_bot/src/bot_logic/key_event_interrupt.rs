@@ -1,4 +1,6 @@
-use crate::{game_state::Vector, Error, GameState};
+use geometry::Vector;
+
+use crate::{Error, GameState};
 
 use super::{
     bot_logic::{BotInterrupt, LogicStack},

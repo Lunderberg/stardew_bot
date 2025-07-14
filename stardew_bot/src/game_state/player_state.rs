@@ -1,8 +1,9 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::{Direction, Vector};
 
-use crate::{Direction, Error};
+use crate::Error;
 
-use super::{Inventory, Item, Vector};
+use super::{Inventory, Item};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PlayerState {

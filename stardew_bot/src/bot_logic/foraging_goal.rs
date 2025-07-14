@@ -3,12 +3,13 @@ use std::{
     collections::{HashMap, HashSet},
 };
 
+use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActivateTile, MovementGoal},
-    game_state::{FloatingItem, Item, ObjectKind, TileMap, Vector},
-    Direction, Error, GameAction, GameState,
+    game_state::{FloatingItem, Item, ObjectKind, TileMap},
+    Error, GameAction, GameState,
 };
 
 use super::{

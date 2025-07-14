@@ -1,6 +1,8 @@
+use geometry::Vector;
+
 use crate::{
     bot_logic::{BotError, MovementGoal},
-    game_state::{Item, ItemId, Vector},
+    game_state::{Item, ItemId},
     Error, GameAction, GameState,
 };
 
