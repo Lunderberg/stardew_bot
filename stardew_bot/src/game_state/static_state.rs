@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use itertools::Itertools as _;
 
-use crate::Error;
+use crate::{bot_logic::BotError, Error};
 
 use super::{Item, ItemCategory, ItemId, Quality};
 
@@ -67,17 +67,19 @@ struct RawObjectData {
 #[derive(Debug, Clone)]
 pub struct CropData {
     pub harvest_item: ItemId,
-    pub days_to_grow: i32,
+    pub days_to_grow: u32,
     pub uses_trellis: bool,
     pub xp_per_harvest: i32,
+    pub harvest_with_scythe: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
 struct RawCropData {
     seed_item: ItemId,
     harvest_item: ItemId,
-    days_to_grow: i32,
+    days_to_grow: u32,
     uses_trellis: bool,
+    harvest_with_scythe: bool,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -167,14 +169,16 @@ impl StaticState {
             |seed_item: &str,
              harvest_item: &str,
              days_to_grow: i32,
-             uses_trellis: bool| {
+             uses_trellis: bool,
+             harvest_with_scythe: bool| {
                 let seed_item = ItemId::new(format!("(O){seed_item}"));
                 let harvest_item = ItemId::new(format!("(O){harvest_item}"));
                 RawCropData {
                     seed_item,
                     harvest_item,
-                    days_to_grow,
+                    days_to_grow: days_to_grow as u32,
                     uses_trellis,
+                    harvest_with_scythe,
                 }
             },
         )?;
@@ -310,6 +314,7 @@ impl StaticState {
                             days_to_grow: crop.days_to_grow,
                             uses_trellis: crop.uses_trellis,
                             xp_per_harvest,
+                            harvest_with_scythe: crop.harvest_with_scythe,
                         };
                         (crop.seed_item.clone(), crop_data)
                     })
@@ -441,11 +446,15 @@ impl StaticState {
 
                             let uses_trellis = entry.value.IsRaised;
 
+                            let harvest_with_scythe =
+                                entry.value.HarvestMethod == 1i32;
+
                             new_crop_data(
                                 seed_item,
                                 harvest_item,
                                 days_to_grow,
                                 uses_trellis,
+                                harvest_with_scythe,
                             )
                         })
                         .filter(|opt| opt.is_some())
@@ -492,5 +501,15 @@ impl StaticState {
         } else {
             item
         }
+    }
+
+    pub fn get_crop(
+        &self,
+        seed: impl AsRef<ItemId>,
+    ) -> Result<&CropData, Error> {
+        let seed = seed.as_ref();
+        self.crop_data
+            .get(seed)
+            .ok_or_else(|| BotError::UnknownSeedKind(seed.clone()).into())
     }
 }

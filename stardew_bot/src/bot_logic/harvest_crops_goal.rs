@@ -1,12 +1,17 @@
 use std::collections::HashSet;
 
+use itertools::Itertools as _;
+
 use crate::{
-    bot_logic::GameStateExt as _, game_state::Vector, Error, GameState,
+    bot_logic::GameStateExt as _,
+    game_state::{CropPhase, ItemId, Vector},
+    Error, GameState,
 };
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    ActivateTile, InventoryGoal, MovementGoal,
+    ActivateTile, CropQualityPredictor, InventoryGoal, MovementGoal,
+    UseItemOnTile,
 };
 
 pub struct HarvestCropsGoal {}
@@ -19,18 +24,22 @@ impl HarvestCropsGoal {
     fn iter_harvestable<'a>(
         &'a self,
         game_state: &'a GameState,
-    ) -> Result<impl Iterator<Item = Vector<isize>> + 'a, Error> {
-        let iter = game_state
-            .get_room("Farm")?
-            .objects
-            .iter()
-            .filter(|obj| {
-                obj.kind
-                    .as_hoe_dirt()
-                    .map(|hoe_dirt| hoe_dirt.can_harvest())
-                    .unwrap_or(false)
-            })
-            .map(|obj| obj.tile);
+    ) -> Result<impl Iterator<Item = (Vector<isize>, &'a ItemId)> + 'a, Error>
+    {
+        let iter =
+            game_state
+                .get_room("Farm")?
+                .objects
+                .iter()
+                .filter_map(|obj| {
+                    obj.kind
+                        .as_hoe_dirt()
+                        .and_then(|hoe_dirt| hoe_dirt.crop.as_ref())
+                        .filter(|crop| {
+                            matches!(crop.phase, CropPhase::Harvestable)
+                        })
+                        .map(|crop| (obj.tile, &crop.seed))
+                });
         Ok(iter)
     }
 
@@ -54,27 +63,70 @@ impl BotGoal for HarvestCropsGoal {
         }
 
         let farm = game_state.get_room("Farm")?;
+
+        let current_predictor = CropQualityPredictor::new(game_state, 0);
+        let upcoming_predictor = {
+            let upcoming_farming_xp = self
+                .iter_harvestable(game_state)?
+                .map(|(_, seed)| seed)
+                .counts()
+                .iter()
+                .map(|(seed, count)| {
+                    game_state
+                        .statics
+                        .get_crop(seed)
+                        .map(|crop| (crop.xp_per_harvest as usize) * count)
+                })
+                .sum::<Result<usize, _>>()?;
+            let upcoming_farming_level = game_state
+                .player
+                .skills
+                .upcoming_farming_level(upcoming_farming_xp);
+            CropQualityPredictor::new(game_state, 0)
+                .with_farming_level(upcoming_farming_level)
+        };
+
         let player_tile = if game_state.player.room_name == "Farm" {
             game_state.player.tile()
         } else {
             game_state.get_farm_door()?
         };
-        let harvestable: HashSet<Vector<isize>> =
-            self.iter_harvestable(game_state)?.collect();
-
-        let opt_next_tile = farm
+        let distances = farm
             .pathfinding()
             .include_border(true)
-            .iter_dijkstra(player_tile)
-            .map(|(tile, _)| tile)
-            .find(|tile| harvestable.contains(tile));
-        let Some(next_tile) = opt_next_tile else {
+            .distances(player_tile);
+        let opt_next_tile = self
+            .iter_harvestable(game_state)?
+            .filter(|(tile, _)| distances.is_some(*tile))
+            .min_by_key(|(tile, _)| {
+                let improved_by_level_up = current_predictor.predict(*tile)
+                    != upcoming_predictor.predict(*tile);
+                let dist = distances[*tile]
+                    .expect("Protected by distances.is_some())");
+                (improved_by_level_up, dist)
+            });
+        let Some((next_tile, next_seed)) = opt_next_tile else {
             return Ok(BotGoalResult::Completed);
         };
 
-        let free_slots = game_state.player.inventory.num_empty_slots();
-        if free_slots < 3 {
-            return Ok(InventoryGoal::empty().into());
+        let must_handle_inventory = {
+            let free_slots = game_state.player.inventory.num_empty_slots();
+            let close_to_inventory =
+                distances.get_opt(player_tile).cloned().unwrap_or(0)
+                    < distances.get_opt(next_tile).cloned().unwrap();
+            (close_to_inventory && free_slots < 6) || free_slots < 2
+        };
+        if must_handle_inventory {
+            let goal = InventoryGoal::empty().with(ItemId::SCYTHE);
+            return Ok(goal.into());
+        }
+
+        if game_state.statics.get_crop(next_seed)?.harvest_with_scythe {
+            // Crop is harvested with the scythe, which can be
+            // animation-cancelled.  No extra movement planning is
+            // required.
+            let goal = UseItemOnTile::new(ItemId::SCYTHE, "Farm", next_tile);
+            return Ok(goal.into());
         }
 
         if game_state.player.can_move {
@@ -92,6 +144,11 @@ impl BotGoal for HarvestCropsGoal {
             // that case, attempt to click on the tile as it may be in
             // range.
             let distances = farm.pathfinding().distances(player_tile);
+
+            let harvestable: HashSet<Vector<isize>> = self
+                .iter_harvestable(game_state)?
+                .map(|(tile, _)| tile)
+                .collect();
 
             let count_adjacent_crops = |tile: Vector<isize>| -> usize {
                 tile.iter_nearby()

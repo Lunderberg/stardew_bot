@@ -387,6 +387,10 @@ impl PlayerSkills {
     pub fn combat_level(&self) -> u8 {
         Self::xp_to_level(self.combat_xp)
     }
+
+    pub fn upcoming_farming_level(&self, upcoming_xp: usize) -> u8 {
+        Self::xp_to_level(self.farming_xp + upcoming_xp)
+    }
 }
 
 impl FacingDirection {

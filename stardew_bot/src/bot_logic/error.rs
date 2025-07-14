@@ -76,6 +76,9 @@ pub enum BotError {
 
     #[error("Could not find any remaining monster")]
     NoRemainingMonsterFound,
+
+    #[error("Could not locate crop data for seed '{0}'")]
+    UnknownSeedKind(ItemId),
 }
 
 impl std::fmt::Debug for BotError {

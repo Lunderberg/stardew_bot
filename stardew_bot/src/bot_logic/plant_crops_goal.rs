@@ -321,21 +321,29 @@ impl PlantCropsGoal {
             .collect();
 
         for seed in &self.seeds {
-            let days_to_grow = if seed.id == ItemId::PARSNIP_SEEDS {
-                4
-            } else if seed.id == ItemId::CARROT_SEEDS {
-                3
-            } else if seed.id == ItemId::KALE_SEEDS {
-                6
-            } else {
-                todo!(
-                    "Unpack growing times from ItemData, \
-                     rather than hard-coding them."
-                )
-            };
+            let days_to_grow =
+                game_state.statics.get_crop(&seed.id)?.days_to_grow;
+            let upcoming_xp = self
+                .seeds
+                .iter()
+                .map(|seed| (&seed.id, seed.count))
+                .chain(farm.iter_planted_seeds().map(|id| (id, 1)))
+                .map(|(id, count)| {
+                    game_state.statics.get_crop(id).map(|crop| {
+                        if crop.days_to_grow <= days_to_grow {
+                            let xp = crop.xp_per_harvest as usize;
+                            xp * count
+                        } else {
+                            0
+                        }
+                    })
+                })
+                .sum::<Result<usize, _>>()?;
+            let upcoming_farming_level =
+                game_state.player.skills.upcoming_farming_level(upcoming_xp);
 
             let predictor = CropQualityPredictor::new(game_state, days_to_grow)
-                .with_farming_level(2);
+                .with_farming_level(upcoming_farming_level);
             seed_assignment
                 .iter()
                 .enumerate()
