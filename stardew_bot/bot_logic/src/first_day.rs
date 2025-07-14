@@ -4,7 +4,7 @@ use dotnet_debugger::env_var_flag;
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction};
+use crate::{bot_logic::BotInterrupt, Error, GameAction};
 use game_state::{GameState, Item, ItemCategory, ItemId, ObjectKind};
 
 use super::{
@@ -19,49 +19,7 @@ use super::{
 
 pub struct FirstDay;
 
-fn scythe_path_to_water(
-    game_state: &GameState,
-) -> Result<Option<BotGoalResult>, Error> {
-    let farm = game_state.get_room("Farm")?;
-    let farm_door = game_state.get_farm_door()?;
-
-    let water_border: Vec<Vector<isize>> = (0..farm.shape.right)
-        .cartesian_product(0..farm.shape.down)
-        .map(|(i, j)| Vector::new(i as isize, j as isize))
-        .filter(|&tile| farm.is_water(tile))
-        .filter(|&tile| {
-            Direction::iter()
-                .filter(|dir| dir.is_cardinal())
-                .any(|dir| !farm.is_water(tile + dir.offset()))
-        })
-        .collect();
-
-    let pathfinding = farm
-        .pathfinding()
-        .include_border(true)
-        .allow_diagonal(false)
-        .breakable_clearing_cost(0);
-
-    let can_scythe: HashSet<_> = farm
-        .objects
-        .iter()
-        .filter(|obj| matches!(obj.kind, ObjectKind::Grass | ObjectKind::Fiber))
-        .map(|obj| obj.tile)
-        .collect();
-
-    let opt_tile_to_scythe = pathfinding
-        .path_between(farm_door, water_border.as_slice())?
-        .into_iter()
-        .find(|tile| can_scythe.contains(tile));
-
-    let opt_action = opt_tile_to_scythe.map(|tile| {
-        LogicStack::new()
-            .then(UseItemOnTile::new(ItemId::SCYTHE, "Farm", tile))
-            .with_interrupt(CollectNearbyItems::new())
-    });
-
-    Ok(opt_action.map(Into::into))
-}
+struct ScytheNearby;
 
 impl BotGoal for FirstDay {
     fn description(&self) -> std::borrow::Cow<'static, str> {
@@ -86,10 +44,6 @@ impl BotGoal for FirstDay {
                 .into());
         }
 
-        if let Some(tile_to_scythe) = scythe_path_to_water(game_state)? {
-            return Ok(tile_to_scythe.into());
-        }
-
         let farm = game_state.get_room("Farm")?;
         let goal = ClearFarmGoal::new()
             .use_priority_tiles(false)
@@ -101,8 +55,8 @@ impl BotGoal for FirstDay {
                     .map(|warp| warp.location)
                     .map_or_else(|| game_state.get_farm_door(), Ok)?,
             )
-            .relative_weights((2, 1))
-            .stop_time(650);
+            .relative_weights((3, 1))
+            .stop_time(640);
 
         if !goal.is_completed(game_state)? {
             return Ok(goal.into());
@@ -156,7 +110,10 @@ impl BotGoal for FirstDay {
             .stop_at_stamina(4.0)
             .hard_stop();
         if !clay_farming.is_completed(game_state) {
-            return Ok(clay_farming.into());
+            let stack = LogicStack::new()
+                .then(clay_farming)
+                .with_interrupt(ScytheNearby);
+            return Ok(stack.into());
         }
 
         if !game_state
@@ -164,16 +121,22 @@ impl BotGoal for FirstDay {
             .queued_events
             .contains("copperFound%&NL&%")
         {
-            let goal =
-                BuyFromMerchantGoal::new("Blacksmith", ItemId::COPPER_ORE);
-            return Ok(goal.into());
+            let stack = LogicStack::new()
+                .then(BuyFromMerchantGoal::new(
+                    "Blacksmith",
+                    ItemId::COPPER_ORE,
+                ))
+                .with_interrupt(ScytheNearby);
+            return Ok(stack.into());
         }
 
         let goal =
             SellToMerchantGoal::new("Carpenter", [ItemId::CLAY, ItemId::FIBER])
                 .min_to_sell(100);
         if in_game_time < 1630 && !goal.is_completed(game_state) {
-            return Ok(goal.into());
+            let stack =
+                LogicStack::new().then(goal).with_interrupt(ScytheNearby);
+            return Ok(stack.into());
         }
 
         let goal =
@@ -259,5 +222,39 @@ impl BotGoal for FirstDay {
         }
 
         Ok(BotGoalResult::InProgress)
+    }
+}
+
+impl BotInterrupt for ScytheNearby {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Scythe nearby".into()
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        let player_tile = game_state.player.tile();
+
+        if !game_state.player.inventory.contains(ItemId::SCYTHE) {
+            return Ok(None);
+        }
+
+        Ok(game_state
+            .current_room()?
+            .objects
+            .iter()
+            .find(|obj| {
+                player_tile.manhattan_dist(obj.tile) == 1
+                    && matches!(obj.kind, ObjectKind::Fiber | ObjectKind::Grass)
+            })
+            .map(|obj| {
+                UseItemOnTile::new(
+                    ItemId::SCYTHE,
+                    game_state.player.room_name.clone(),
+                    obj.tile,
+                )
+                .into()
+            }))
     }
 }
