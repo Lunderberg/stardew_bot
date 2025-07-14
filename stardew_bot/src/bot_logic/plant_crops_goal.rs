@@ -287,12 +287,14 @@ impl PlantCropsGoal {
         let plan = FarmPlan::plan(game_state)?;
 
         let is_first_day = game_state.globals.days_played() == 1;
+        let iter_regions = || {
+            plan.arable_regions
+                .iter()
+                .take(if is_first_day { 1 } else { 2 })
+        };
 
-        let iter_craftables = plan
-            .arable_regions
-            .iter()
-            .take(if is_first_day { 0 } else { 2 })
-            .flat_map(|region| {
+        let iter_craftables =
+            iter_regions().filter(|_| !is_first_day).flat_map(|region| {
                 let iter_sprinklers = region
                     .sprinklers
                     .iter()
@@ -312,13 +314,11 @@ impl PlantCropsGoal {
             .ignoring_obstacles()
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
 
-        let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> = plan
-            .arable_regions
-            .iter()
-            .take(if is_first_day { 1 } else { 2 })
-            .flat_map(|region| region.plantable.iter().cloned())
-            .map(|tile| (tile, None))
-            .collect();
+        let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> =
+            iter_regions()
+                .flat_map(|region| region.plantable.iter().cloned())
+                .map(|tile| (tile, None))
+                .collect();
 
         for seed in &self.seeds {
             let days_to_grow =
@@ -378,9 +378,20 @@ impl PlantCropsGoal {
             .map(|obj| obj.tile)
             .collect();
 
-        let empty_spaces = final_state
-            .iter()
-            .flat_map(|(tile, _)| tile.iter_cardinal())
+        let reachable = farm
+            .pathfinding()
+            .wood_clearing_cost(0)
+            .stone_clearing_cost(0)
+            .breakable_clearing_cost(0)
+            .reachable(game_state.get_farm_door()?);
+
+        let empty_spaces = std::iter::empty()
+            .chain(
+                iter_regions()
+                    .flat_map(|region| region.map.iter_true())
+                    .filter(|&tile| reachable.is_set(tile)),
+            )
+            .chain(final_state.iter().flat_map(|(tile, _)| tile.iter_nearby()))
             .filter(|adj| !final_state.contains_key(adj))
             .filter(|adj| !avoid_clearing.contains(adj))
             .collect();
