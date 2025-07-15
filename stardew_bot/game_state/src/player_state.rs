@@ -38,6 +38,8 @@ pub struct PlayerState {
 
     // Per-player game state
     pub num_unread_mail: usize,
+
+    pub friendships: Vec<Friendship>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -47,6 +49,15 @@ pub struct PlayerSkills {
     pub foraging_xp: usize,
     pub mining_xp: usize,
     pub combat_xp: usize,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Friendship {
+    pub name: String,
+    pub points: i32,
+    pub talked_today: bool,
+    pub gifted_today: bool,
+    pub gifts_this_week: i32,
 }
 
 #[derive(RustNativeObject, Debug, Clone, Copy, PartialEq, Eq)]
@@ -130,6 +141,21 @@ impl PlayerState {
         )?;
 
         graph.named_native_function(
+            "new_friendship",
+            |name: &str,
+             points: i32,
+             talked_today: bool,
+             gifted_today: bool,
+             gifts_this_week: i32| Friendship {
+                name: name.to_string(),
+                points,
+                talked_today,
+                gifted_today,
+                gifts_this_week,
+            },
+        )?;
+
+        graph.named_native_function(
             "new_player",
             |position: &Vector<f32>,
              facing: &FacingDirection,
@@ -151,7 +177,8 @@ impl PlayerState {
              current_health: i32,
              max_health: i32,
              is_eating: bool,
-             num_unread_mail: usize| {
+             num_unread_mail: usize,
+             friendships: &Vec<Friendship>| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -174,11 +201,44 @@ impl PlayerState {
                     max_health,
                     is_eating,
                     num_unread_mail,
+                    friendships: friendships.clone(),
                 }
             },
         )?;
 
         let player = graph.parse(stringify! {
+            fn read_friendships() {
+                let dict = StardewValley.Game1
+                    ._player
+                    .friendshipData
+                    .dict;
+
+                let num_friends = dict
+                    ._count
+                    .prim_cast::<usize>();
+
+                (0..num_friends)
+                    .map(|i| dict._entries[i])
+                    .map(|entry| {
+                        let name = entry.key.read_string();
+                        let friend = entry.value.value;
+
+                        let points = friend.points.value;
+                        let talked_today = friend.talkedToToday.value;
+                        let gifted_today = friend.giftsToday.value > 0i32;
+                        let gifts_this_week = friend.giftsThisWeek.value;
+
+                        new_friendship(
+                            name,
+                            points,
+                            talked_today,
+                            gifted_today,
+                            gifts_this_week,
+                        )
+                    })
+                    .collect()
+            }
+
             fn read_player() {
                 let player = StardewValley.Game1._player;
 
@@ -283,6 +343,8 @@ impl PlayerState {
                     .MeleeWeapon
                     .clubCooldown;
 
+                let friendships = read_friendships();
+
                 new_player(
                     position,
                     facing,
@@ -305,6 +367,7 @@ impl PlayerState {
                     max_health,
                     is_eating,
                     num_unread_mail,
+                    friendships,
                 )
             }
         })?;
