@@ -465,7 +465,8 @@ impl StaticState {
                     let bundle_dict = StardewValley.Game1
                         .netWorldState
                         .value
-                        ._bundleData;
+                        .netBundleData
+                        .dict;
                     let num_bundles = bundle_dict
                         ._count
                         .prim_cast::<usize>();
@@ -473,7 +474,7 @@ impl StaticState {
                         .map(|i| bundle_dict._entries[i])
                         .map(|entry| {
                             let key = entry.key.read_string();
-                            let value = entry.value.read_string();
+                            let value = entry.value.value.read_string();
                             new_bundle(key, value)
                         })
                         .collect()
