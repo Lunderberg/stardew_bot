@@ -55,7 +55,7 @@ impl BotGoal for GenericDay {
 
         let stack = LogicStack::new().then(CheckAllMail);
 
-        let stack = if !has_fishing_rod {
+        let stack = if current_day == 2 || !has_fishing_rod {
             stack
                 .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
