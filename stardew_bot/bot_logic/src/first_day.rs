@@ -4,7 +4,7 @@ use dotnet_debugger::env_var_flag;
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{bot_logic::BotInterrupt, Error, GameAction};
+use crate::{bot_logic::BotInterrupt, Error, GameAction, GiveGiftGoal};
 use game_state::{GameState, Item, ItemCategory, ItemId, ObjectKind};
 
 use super::{
@@ -55,7 +55,7 @@ impl BotGoal for FirstDay {
                     .map(|warp| warp.location)
                     .map_or_else(|| game_state.get_farm_door(), Ok)?,
             )
-            .relative_weights((3, 1))
+            .relative_weights((4, 1))
             .stop_time(640);
 
         if !goal.is_completed(game_state)? {
@@ -128,6 +128,11 @@ impl BotGoal for FirstDay {
                 ))
                 .with_interrupt(ScytheNearby);
             return Ok(stack.into());
+        }
+
+        let gift_pam = GiveGiftGoal::new("Pam", ItemId::DAFFODIL);
+        if !gift_pam.is_completed(game_state)? {
+            return Ok(gift_pam.into());
         }
 
         let goal =
@@ -240,21 +245,31 @@ impl BotInterrupt for ScytheNearby {
             return Ok(None);
         }
 
-        Ok(game_state
+        let Some(tile) = game_state
             .current_room()?
             .objects
             .iter()
-            .find(|obj| {
-                player_tile.manhattan_dist(obj.tile) == 1
-                    && matches!(obj.kind, ObjectKind::Fiber | ObjectKind::Grass)
+            .filter(|obj| {
+                matches!(obj.kind, ObjectKind::Fiber | ObjectKind::Grass)
             })
-            .map(|obj| {
-                UseItemOnTile::new(
-                    ItemId::SCYTHE,
-                    game_state.player.room_name.clone(),
-                    obj.tile,
-                )
-                .into()
-            }))
+            .map(|obj| obj.tile)
+            .find(|&tile| player_tile.manhattan_dist(tile) == 1)
+        else {
+            return Ok(None);
+        };
+
+        let current_room = game_state.player.room_name.clone();
+        let stack = LogicStack::new()
+            .then(UseItemOnTile::new(
+                ItemId::SCYTHE,
+                game_state.player.room_name.clone(),
+                tile,
+            ))
+            .cancel_if(move |game_state| {
+                game_state.player.room_name != current_room
+                    || game_state.player.tile().manhattan_dist(tile) != 1
+            });
+
+        Ok(Some(stack))
     }
 }

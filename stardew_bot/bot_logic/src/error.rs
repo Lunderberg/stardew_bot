@@ -83,6 +83,9 @@ pub enum Error {
 
     #[error("Could not find any remaining monster")]
     NoRemainingMonsterFound,
+
+    #[error("Could not find villager '{0}'")]
+    VillagerNotFound(String),
 }
 
 impl std::fmt::Debug for Error {

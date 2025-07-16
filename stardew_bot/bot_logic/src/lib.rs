@@ -138,3 +138,6 @@ pub use geode_cracking_goal::*;
 
 mod key_event_interrupt;
 pub use key_event_interrupt::*;
+
+mod give_gift_goal;
+pub use give_gift_goal::*;
