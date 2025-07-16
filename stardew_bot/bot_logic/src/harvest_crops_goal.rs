@@ -108,14 +108,23 @@ impl BotGoal for HarvestCropsGoal {
         };
 
         let must_handle_inventory = {
-            let free_slots = game_state.player.inventory.num_empty_slots();
+            let inventory = &game_state.player.inventory;
+            let free_slots = inventory.num_empty_slots();
             let close_to_inventory =
                 distances.get_opt(player_tile).cloned().unwrap_or(0)
                     < distances.get_opt(next_tile).cloned().unwrap();
-            (close_to_inventory && free_slots < 6) || free_slots < 2
+            if close_to_inventory {
+                free_slots < 6
+                    || !inventory.contains(ItemId::SCYTHE)
+                    || !inventory.contains(ItemId::WATERING_CAN)
+            } else {
+                free_slots < 2
+            }
         };
         if must_handle_inventory {
-            let goal = InventoryGoal::empty().with(ItemId::SCYTHE);
+            let goal = InventoryGoal::empty()
+                .with(ItemId::SCYTHE)
+                .with(ItemId::WATERING_CAN);
             return Ok(goal.into());
         }
 
