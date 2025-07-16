@@ -11,6 +11,7 @@ use super::{
     LocationExt as _,
 };
 
+#[derive(Clone)]
 pub struct StepCountForLuck {
     /// The time in the day when the steps should start being checked.
     /// Defaults to 2500 (1:00 AM).
@@ -108,6 +109,13 @@ impl BotInterrupt for StepCountForLuck {
         }
 
         if !self.reached_lucky_step_count(game_state)? {
+            if game_state.globals.in_game_time >= 2530 {
+                // Running out of time, so the bot may be doing an
+                // activity that doesn't produce many steps.  Switch
+                // to a more active step-counting, to ensure that the
+                // day doesn't end on the wrong step count.
+                return Ok(Some(self.clone().into()));
+            }
             // Still have more steps to take before reaching target
             // step count.
             return Ok(None);
@@ -146,8 +154,14 @@ impl BotGoal for StepCountForLuck {
 
         let player_tile = game_state.player.tile();
         let blocked_dir = Direction::iter_cardinal()
-            .find(|dir| !walkable[player_tile + dir.offset()])
-            .expect("TODO: Find nearest wall to walk into");
+            .min_by_key(|dir| {
+                let offset = dir.offset();
+                (0..)
+                    .map(|dist| player_tile + offset * dist)
+                    .take_while(|tile| walkable.is_set(*tile))
+                    .count()
+            })
+            .expect("At least one direction will be minimum");
 
         actions.do_action(GameAction::Move(blocked_dir.into()));
         Ok(BotGoalResult::InProgress)
