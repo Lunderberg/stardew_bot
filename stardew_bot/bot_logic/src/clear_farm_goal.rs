@@ -197,7 +197,7 @@ impl BotGoal for ClearFarmGoal {
         self.fill_priority_tiles(game_state)?;
 
         let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
+        if !goal.is_completed(game_state)? {
             return Ok(goal.into());
         }
 
@@ -296,7 +296,7 @@ impl BotGoal for ClearFarmGoal {
             .with(ItemId::HOE)
             .stamina_recovery_slots(1);
         if !goal.is_completed(game_state)? {
-            let goal = goal.otherwise_empty().stamina_recovery_slots(4);
+            let goal = goal.otherwise_empty().stamina_recovery_slots(9);
             return Ok(goal.into());
         }
 

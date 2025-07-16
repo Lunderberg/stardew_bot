@@ -10,8 +10,8 @@ use crate::{
     bot_logic::LogicStack, Error, GameAction, MenuCloser, MovementGoal,
 };
 use game_state::{
-    Chest, GameState, Inventory, Item, ItemCategory, ItemId, ItemSet, Key,
-    Location, ObjectKind, Quality, WeaponKind,
+    BundleIngredient, Chest, GameState, Inventory, Item, ItemCategory, ItemId,
+    ItemSet, Key, Location, ObjectKind, Quality, WeaponKind,
 };
 
 use super::{
@@ -62,6 +62,7 @@ struct Bounds {
     max: Option<usize>,
 }
 
+#[derive(Debug)]
 struct Transfer {
     chest: Vector<isize>,
     direction: TransferDirection,
@@ -69,11 +70,13 @@ struct Transfer {
     size: TransferSize,
 }
 
+#[derive(Debug)]
 enum TransferDirection {
     PlayerToChest,
     ChestToPlayer,
 }
 
+#[derive(Debug)]
 pub(super) enum TransferSize {
     /// Ship the entire stack by left-clicking
     All,
@@ -337,17 +340,8 @@ impl InventoryGoal {
             })
             .collect();
 
-        let worst_fish_by_type: HashSet<ItemId> = iter_chest_items()?
-            .map(|(_, _, item)| item)
-            .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
-            .map(|item| (&item.id.item_id, item.quality()))
-            .into_grouping_map()
-            .min()
-            .into_iter()
-            .map(|(id_str, quality)| {
-                ItemId::new(id_str.to_string()).with_quality(quality)
-            })
-            .collect();
+        let reserved_items: HashMap<&ItemId, usize> =
+            game_state.iter_reserved_items()?.into_grouping_map().sum();
 
         let current_stamina_items: HashSet<&ItemId> = inventory
             .iter_items()
@@ -500,6 +494,25 @@ impl InventoryGoal {
             }
         }
 
+        let is_stamina_item = |item: &Item| -> bool {
+            // If an item is explicitly set to be stored
+            // away, it may not be used as the stamina
+            // recovery item.
+            let explicitly_stored = matches!(
+                self.bounds.get(&item.id).map(|bounds| bounds.max),
+                Some(Some(0))
+            );
+            let cheap_to_eat = item
+                .gp_per_stamina()
+                .map(|gp| gp < MAX_GP_PER_STAMINA)
+                .unwrap_or(false);
+
+            let exceeds_num_reserved =
+                item.count > reserved_items.get(&item.id).cloned().unwrap_or(0);
+
+            cheap_to_eat && exceeds_num_reserved && !explicitly_stored
+        };
+
         if let Some(chest) = &game_state.chest_menu {
             let Some(tile) = chest.chest_tile else {
                 // This chest doesn't exist at any location, such as
@@ -574,38 +587,17 @@ impl InventoryGoal {
                     chest
                         .chest_items
                         .iter_filled_slots()
-                        .filter(|(_, item)| {
-                            // If an item is explicitly set to be stored
-                            // away, it may not be used as the stamina
-                            // recovery item.
-                            self.bounds
-                                .get(&item.id)
-                                .map(|bounds| !matches!(bounds.max, Some(0)))
-                                .unwrap_or(true)
-                        })
-                        .filter(|(_, item)| {
-                            item.gp_per_stamina()
-                                .map(|gp| gp < MAX_GP_PER_STAMINA)
-                                .unwrap_or(false)
-                        })
-                        .filter(|(_, item)| {
-                            let is_last_fish = worst_fish_by_type
-                                .contains(&item.id)
-                                && item.count == 1;
-                            !is_last_fish
-                        })
+                        .filter(|(_, item)| is_stamina_item(item))
                         .min_by(|(_, lhs), (_, rhs)| {
                             let lhs = lhs.gp_per_stamina().unwrap();
                             let rhs = rhs.gp_per_stamina().unwrap();
                             lhs.total_cmp(&rhs)
                         })
                         .map(|(slot, item)| {
-                            let goal_number =
-                                if worst_fish_by_type.contains(&item.id) {
-                                    1
-                                } else {
-                                    0
-                                };
+                            let goal_number = reserved_items
+                                .get(&item.id)
+                                .cloned()
+                                .unwrap_or(0);
                             let transfer_size =
                                 TransferSize::select(item.count, goal_number);
                             Transfer {
@@ -679,22 +671,18 @@ impl InventoryGoal {
             && player_has_empty_slot)
             .then(|| {
                 iter_chest_items().map(|iter| {
-                    iter.filter(|(_, _, item)| {
-                        item.gp_per_stamina()
-                            .map(|gp| gp < MAX_GP_PER_STAMINA)
-                            .unwrap_or(false)
-                    })
-                    .min_by(|(_, _, lhs), (_, _, rhs)| {
-                        let lhs = lhs.gp_per_stamina().unwrap();
-                        let rhs = rhs.gp_per_stamina().unwrap();
-                        lhs.total_cmp(&rhs)
-                    })
-                    .map(|(tile, slot, _)| Transfer {
-                        chest: tile,
-                        direction: TransferDirection::ChestToPlayer,
-                        slot,
-                        size: TransferSize::All,
-                    })
+                    iter.filter(|(_, _, item)| is_stamina_item(item))
+                        .min_by(|(_, _, lhs), (_, _, rhs)| {
+                            let lhs = lhs.gp_per_stamina().unwrap();
+                            let rhs = rhs.gp_per_stamina().unwrap();
+                            lhs.total_cmp(&rhs)
+                        })
+                        .map(|(tile, slot, _)| Transfer {
+                            chest: tile,
+                            direction: TransferDirection::ChestToPlayer,
+                            slot,
+                            size: TransferSize::All,
+                        })
                 })
             })
             .transpose()?

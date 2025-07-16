@@ -101,7 +101,7 @@ impl BotGoal for FirstDay {
         }
 
         let goal = MaintainStaminaGoal::new();
-        if !goal.is_completed(game_state) {
+        if !goal.is_completed(game_state)? {
             return Ok(goal.into());
         }
 

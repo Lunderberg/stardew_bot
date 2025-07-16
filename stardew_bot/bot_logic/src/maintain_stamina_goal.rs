@@ -1,5 +1,6 @@
 use crate::{Error, GameAction, SelectItemGoal};
 use game_state::{FacingDirection, GameState, Item};
+use itertools::Itertools as _;
 
 use super::{
     bot_logic::{
@@ -30,41 +31,59 @@ impl MaintainStaminaGoal {
         }
     }
 
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
-        (game_state.player.current_stamina > self.min_stamina
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        Ok((game_state.player.current_stamina > self.min_stamina
             && game_state.player.current_health > self.min_health)
-            || self.item_to_eat(game_state).is_none()
+            || self.item_to_eat(game_state)?.is_none())
     }
 
     pub fn item_to_eat<'a>(
         &self,
         game_state: &'a GameState,
-    ) -> Option<&'a Item> {
-        let iter_items = || {
-            game_state
+    ) -> Result<Option<&'a Item>, Error> {
+        let iter_items = || -> Result<_, Error> {
+            let num_available = game_state
+                .iter_accessible_items()?
+                .map(|item| (&item.id, item.count))
+                .into_grouping_map()
+                .sum();
+            let num_reserved =
+                game_state.iter_reserved_items()?.into_grouping_map().sum();
+
+            let iter = game_state
                 .player
                 .inventory
                 .iter_items()
+                .filter(move |item| {
+                    let available =
+                        num_available.get(&item.id).cloned().unwrap_or(0);
+                    let reserved =
+                        num_reserved.get(&item.id).cloned().unwrap_or(0);
+                    available > reserved
+                })
                 .filter_map(|item| {
                     item.gp_per_stamina().map(|ratio| (ratio, item))
                 })
                 .filter(|(gold_per_energy, _)| {
                     *gold_per_energy < self.max_gold_per_energy
-                })
+                });
+            Ok(iter)
         };
 
         // If one of the eligible items has only a single instance
         // remaining, prioritize eating it in order to free up the
         // slot.
         let has_single_item_stack_of_food =
-            iter_items().any(|(_, item)| item.count == 1);
+            iter_items()?.any(|(_, item)| item.count == 1);
 
-        iter_items()
+        let opt_edible = iter_items()?
             .filter(|(_, item)| {
                 item.count == 1 || !has_single_item_stack_of_food
             })
             .min_by(|(a, _), (b, _)| a.total_cmp(b))
-            .map(|(_, item)| item)
+            .map(|(_, item)| item);
+
+        Ok(opt_edible)
     }
 }
 
@@ -78,7 +97,7 @@ impl BotGoal for MaintainStaminaGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state) {
+        if self.is_completed(game_state)? {
             return Ok(BotGoalResult::Completed);
         }
 
@@ -88,7 +107,7 @@ impl BotGoal for MaintainStaminaGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let Some(item_to_eat) = self.item_to_eat(game_state) else {
+        let Some(item_to_eat) = self.item_to_eat(game_state)? else {
             unreachable!("Guarded by self.is_completed() check")
         };
 
@@ -141,7 +160,7 @@ impl BotInterrupt for MaintainStaminaGoal {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
-        if self.is_completed(game_state) || game_state.any_menu_open() {
+        if self.is_completed(game_state)? || game_state.any_menu_open() {
             Ok(None)
         } else {
             Ok(Some(LogicStack::new().then(self.clone())))

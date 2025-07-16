@@ -4,7 +4,8 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use game_state::{
-    GameState, Item, ItemId, Location, ObjectKind, ResourceClumpKind,
+    BundleIngredient, GameState, Item, ItemCategory, ItemId, Location,
+    ObjectKind, ResourceClumpKind,
 };
 
 use crate::{best_weapon, Error, MovementGoal, Pathfinding};
@@ -17,6 +18,10 @@ pub trait GameStateExt {
     fn iter_accessible_items(
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
+
+    fn iter_reserved_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error>;
 
     fn closest_entrance(
         &self,
@@ -73,6 +78,44 @@ impl GameStateExt for GameState {
             .flat_map(|inventory| inventory.iter_items());
 
         Ok(iter)
+    }
+
+    fn iter_reserved_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error> {
+        let iter_worst_fish = self
+            .iter_accessible_items()?
+            .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
+            .map(|item| (&item.id.item_id, item))
+            .into_grouping_map()
+            .min_by_key(|_, item| item.quality())
+            .into_iter()
+            .map(|(_, item)| (&item.id, 1));
+
+        let iter_bundles = self
+            .statics
+            .bundles
+            .iter()
+            .filter_map(|bundle| {
+                let flags = self.globals.bundles.get(&bundle.bundle_index)?;
+
+                let num_done = flags.iter().map(|b| *b as usize).sum::<usize>();
+                (num_done < bundle.num_required).then(|| {
+                    bundle
+                        .ingredients
+                        .iter()
+                        .zip(flags)
+                        .filter(|(_, done)| !**done)
+                        .filter_map(|(ingredient, _)| match ingredient {
+                            BundleIngredient::Item(item) => Some(item),
+                            BundleIngredient::Gold(_) => None,
+                        })
+                        .map(|item| (&item.id, item.count))
+                })
+            })
+            .flatten();
+
+        Ok(iter_worst_fish.chain(iter_bundles))
     }
 
     fn closest_entrance(
