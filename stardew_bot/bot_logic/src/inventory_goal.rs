@@ -502,8 +502,14 @@ impl InventoryGoal {
                 .map(|gp| gp < MAX_GP_PER_STAMINA)
                 .unwrap_or(false);
 
-            let exceeds_num_reserved =
-                item.count > reserved_items.get(&item.id).cloned().unwrap_or(0);
+            let num_reserved = reserved_items
+                .get(
+                    &ItemId::new(item.id.item_id.clone())
+                        .with_quality(item.quality()),
+                )
+                .cloned()
+                .unwrap_or(0);
+            let exceeds_num_reserved = item.count > num_reserved;
 
             cheap_to_eat && exceeds_num_reserved && !explicitly_stored
         };
