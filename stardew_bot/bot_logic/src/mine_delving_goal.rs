@@ -52,6 +52,20 @@ struct StonePrediction {
     omnigeode: bool,
 }
 
+pub struct MineLevelPredictor {
+    game_id: u64,
+    days_played: u32,
+    days_ahead: u32,
+}
+
+#[derive(Debug, Default)]
+pub struct LevelPrediction {
+    pub is_mushroom: bool,
+    pub is_monster: bool,
+    pub is_slime: bool,
+    pub is_dinosaur: bool,
+}
+
 const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
     // Along back wall of mines
     Vector::new(1, 1),
@@ -1173,5 +1187,124 @@ impl BotInterrupt for MineNearbyOre {
         };
 
         Ok(Some(goal))
+    }
+}
+
+impl MineLevelPredictor {
+    pub fn new(game_state: &GameState) -> Self {
+        let game_id = game_state.globals.game_id;
+
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1);
+
+        Self {
+            game_id,
+            days_played,
+            days_ahead: 0,
+        }
+    }
+
+    pub fn days_ahead(self, days_ahead: u32) -> Self {
+        Self { days_ahead, ..self }
+    }
+
+    pub fn predict(&self, level: i32) -> LevelPrediction {
+        let mine_area = if level < 40 {
+            0
+        } else if level < 80 {
+            40
+        } else if level <= 120 {
+            80
+        } else {
+            121
+        };
+
+        let day = (self.days_played + self.days_ahead) as f64;
+
+        let mut prediction = LevelPrediction::default();
+
+        {
+            let mut rng = SeededRng::from_stardew_seed([
+                day,
+                (self.game_id / 2) as f64,
+                day,
+                level as f64,
+                (4 * level) as f64,
+            ]);
+
+            // Roll to see if it's dark.  (TODO: Skip this roll if
+            // dangerous mines are active).
+            if rng.rand_float() < 0.3 && level > 2 {
+                // Adjust the lighting, conditional on previous check.
+                rng.rand_i32();
+            }
+            // More lighting adjustments.
+            rng.rand_i32();
+
+            prediction.is_mushroom =
+                rng.rand_float() < 0.035 && mine_area == 80 && level % 5 != 0;
+        }
+
+        {
+            let mut rng = SeededRng::from_stardew_seed([
+                day,
+                (self.game_id / 2) as f64,
+                (100 * level) as f64,
+            ]);
+
+            let is_infested = rng.rand_float() < 0.044
+                && level % 5 != 0
+                && level % 40 > 5
+                && level % 40 < 30
+                && level % 40 != 19;
+
+            if is_infested {
+                if rng.rand_bool() {
+                    prediction.is_monster = true;
+                } else {
+                    prediction.is_slime = true;
+                }
+
+                if mine_area == 121 && level > 126 && rng.rand_bool() {
+                    prediction.is_dinosaur = false;
+                    prediction.is_monster = false;
+                    prediction.is_slime = false;
+                }
+            }
+        }
+
+        prediction
+    }
+}
+
+impl LevelPrediction {
+    pub fn is_normal(&self) -> bool {
+        !self.is_mushroom
+            && !self.is_monster
+            && !self.is_slime
+            && !self.is_dinosaur
+    }
+}
+
+impl std::fmt::Display for LevelPrediction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.is_normal() {
+            write!(f, "Normal")
+        } else {
+            write!(
+                f,
+                "{}",
+                [
+                    (self.is_mushroom, "Mushroom"),
+                    (self.is_monster, "Monster"),
+                    (self.is_slime, "Slime"),
+                    (self.is_dinosaur, "Dinosaur"),
+                ]
+                .into_iter()
+                .filter(|(flag, _)| *flag)
+                .map(|(_, tag)| tag)
+                .format("/")
+            )
+        }
     }
 }

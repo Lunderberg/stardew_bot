@@ -410,6 +410,35 @@ impl StardewBot {
         Ok(())
     }
 
+    pub fn show_mine_level_prediction(&self) -> Result<(), Error> {
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        let current_day = game_state.globals.days_played();
+
+        for days_ahead in 0..10 {
+            let day = current_day + days_ahead;
+            let season = ["Spring", "Summer", "Fall", "Winter"]
+                [((day / 28) % 4) as usize];
+            let day_in_season = day % 28;
+            println!("{season} {day_in_season}");
+
+            let predictor = bot_logic::MineLevelPredictor::new(game_state)
+                .days_ahead(days_ahead);
+
+            for level in 1..=120 {
+                let prediction = predictor.predict(level);
+                if !prediction.is_normal() {
+                    println!("\t{level: >3}: {prediction}");
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         use crossterm::event;
 

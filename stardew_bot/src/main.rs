@@ -14,6 +14,9 @@ struct Arguments {
 
     #[structopt(long = "--predict-geodes")]
     predict_geodes: Option<usize>,
+
+    #[structopt(long = "--predict-mine-levels")]
+    predict_mine_levels: bool,
 }
 
 fn main() -> Result<(), Error> {
@@ -24,6 +27,8 @@ fn main() -> Result<(), Error> {
 
     if args.show_bundle_status {
         bot.show_bundle_status()?;
+    } else if args.predict_mine_levels {
+        bot.show_mine_level_prediction()?;
     } else if let Some(num_geodes) = args.predict_geodes {
         bot.show_geode_prediction(num_geodes)?;
     } else {
