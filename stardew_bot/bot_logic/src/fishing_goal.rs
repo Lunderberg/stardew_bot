@@ -3,13 +3,13 @@ use std::{borrow::Cow, fmt::Display};
 use geometry::Vector;
 
 use crate::{
-    BuyFromMerchantGoal, DiscardItemGoal, Error, GameAction, GameStateExt as _,
-    InventoryGoal, MaintainStaminaGoal, MenuCloser, SelectItemGoal,
-    SellToMerchantGoal, StepCountForLuck, UseItemOnTile,
+    BuyFromMerchantGoal, Error, GameAction, GameStateExt as _, InventoryGoal,
+    MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
+    StepCountForLuck, UseItem, UseItemOnTile,
 };
 use game_state::{
     FacingDirection, FishingRod, GameState, Inventory, Item, ItemCategory,
-    ItemId, Key, Quality,
+    ItemId, Key,
 };
 
 use super::{
@@ -387,6 +387,16 @@ impl BotGoal for FishingGoal {
 
         if !self.loc.is_completed(game_state) {
             return Ok(self.loc.move_to_location().into());
+        }
+
+        if let Some(item) = game_state
+            .player
+            .inventory
+            .iter_items()
+            .find(|item| matches!(item.category, Some(ItemCategory::Book)))
+        {
+            let read = UseItem::new(item.id.clone());
+            return Ok(read.into());
         }
 
         if self.stop_time > 2530 && in_game_time > 2000 {

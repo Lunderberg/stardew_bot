@@ -1,5 +1,3 @@
-use itertools::Either;
-
 use crate::{Error, GameAction, GoToActionTile};
 use game_state::{GameState, Item, ItemId};
 

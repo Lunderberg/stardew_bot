@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 mod error;
 pub use error::Error;
 
@@ -105,6 +103,9 @@ pub use opportunistic_foraging::*;
 
 mod activate_tile;
 pub use activate_tile::*;
+
+mod use_item;
+pub use use_item::*;
 
 mod use_item_on_tile;
 pub use use_item_on_tile::*;

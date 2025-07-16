@@ -5,7 +5,7 @@ use crate::Error;
 
 use super::{
     bot_logic::{BotInterrupt, LogicStack},
-    ActivateTile, GoToRoomGoal, MenuCloser, MovementGoal,
+    ActivateTile, GoToRoomGoal, MenuCloser,
 };
 
 pub struct KeyEventInterrupt;

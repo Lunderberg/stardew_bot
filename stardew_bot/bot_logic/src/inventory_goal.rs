@@ -6,13 +6,8 @@ use std::{
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{
-    bot_logic::LogicStack, Error, GameAction, MenuCloser, MovementGoal,
-};
-use game_state::{
-    BundleIngredient, Chest, GameState, Inventory, Item, ItemCategory, ItemId,
-    ItemSet, Key, Location, ObjectKind, Quality, WeaponKind,
-};
+use crate::{Error, GameAction, MenuCloser};
+use game_state::{GameState, Item, ItemId, ItemSet, Location, WeaponKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},

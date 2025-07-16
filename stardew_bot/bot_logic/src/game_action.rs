@@ -2,8 +2,6 @@ use std::fmt::Display;
 
 use geometry::{Direction, Vector};
 
-use crate::Error;
-
 #[derive(Debug, Clone, Copy)]
 pub enum GameAction {
     HoldTool,

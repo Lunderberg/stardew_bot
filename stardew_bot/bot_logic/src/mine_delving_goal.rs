@@ -9,8 +9,7 @@ use crate::{
     UseItemOnTile,
 };
 use game_state::{
-    GameState, Item, ItemCategory, ItemId, Object, ObjectKind, Quality,
-    ResourceClumpKind, SeededRng, StoneKind,
+    GameState, ItemCategory, ItemId, ObjectKind, SeededRng, StoneKind,
 };
 
 use super::{

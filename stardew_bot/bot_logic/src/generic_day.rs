@@ -1,16 +1,14 @@
-use crate::{Error, GameAction};
-use game_state::{GameState, Item, ItemCategory, ItemId, ObjectKind};
+use crate::Error;
+use game_state::{GameState, ItemCategory, ItemId};
 
 use super::{
-    bot_logic::{
-        ActionCollector, BotGoal, BotGoalResult, BotInterrupt as _, LogicStack,
-    },
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     BuyFromMerchantGoal, CheckAllMail, ClearFarmGoal, CollectNearbyItems,
     ExpandStorageInterrupt, ExpandTreeFarm, FirstDay, FishingGoal,
     FishingLocation, ForagingGoal, GameStateExt as _, GeodeCrackingGoal,
     HarvestCropsGoal, InventoryGoal, KeyEventInterrupt, LocationExt as _,
-    MineDelvingGoal, MovementGoal, OpportunisticForaging, PlantCropsGoal,
-    SellToMerchantGoal, ShipMostFishGoal, WaterCropsGoal,
+    MineDelvingGoal, OpportunisticForaging, PlantCropsGoal, SellToMerchantGoal,
+    ShipMostFishGoal, WaterCropsGoal,
 };
 
 pub struct GenericDay;

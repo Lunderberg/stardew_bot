@@ -120,6 +120,8 @@ pub enum ItemCategory {
     Mineral,
     Craftable,
     BigCraftable,
+    Book,
+    SkillBook,
     Other(i32),
 }
 
@@ -489,6 +491,8 @@ impl std::fmt::Display for ItemCategory {
             ItemCategory::Mineral => write!(f, "Mineral"),
             ItemCategory::Craftable => write!(f, "Craftable"),
             ItemCategory::BigCraftable => write!(f, "BigCraftable"),
+            ItemCategory::Book => write!(f, "Book"),
+            ItemCategory::SkillBook => write!(f, "SkillBook"),
             ItemCategory::Other(value) => write!(f, "OtherCategory({value})"),
         }
     }
@@ -514,6 +518,8 @@ impl From<i32> for ItemCategory {
             -2 => ItemCategory::Gem,
             -8 => ItemCategory::Craftable,
             -9 => ItemCategory::BigCraftable,
+            -102 => ItemCategory::Book,
+            -103 => ItemCategory::SkillBook,
             other => ItemCategory::Other(other),
         }
     }

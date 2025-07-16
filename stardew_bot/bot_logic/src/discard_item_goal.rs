@@ -1,5 +1,5 @@
 use crate::{Error, GameAction, MenuCloser};
-use game_state::{GameState, Item, ItemId};
+use game_state::{GameState, ItemId};
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 

@@ -1,8 +1,8 @@
 use crate::{ActivateTile, Error, ObjectKindExt as _, UseItemOnTile};
-use game_state::{GameState, Item, ItemId, ObjectKind, TileMap};
+use game_state::{GameState, ItemId, ObjectKind, TileMap};
 
 use super::{
-    bot_logic::{BotGoal, BotInterrupt, LogicStack},
+    bot_logic::{BotInterrupt, LogicStack},
     LocationExt as _,
 };
 

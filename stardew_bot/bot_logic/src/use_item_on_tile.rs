@@ -119,6 +119,8 @@ impl BotGoal for UseItemOnTile {
                         .get(&self.item.id)
                         .map(|data| match &data.category {
                             ItemCategory::Seed => false,
+                            ItemCategory::Book => false,
+                            ItemCategory::SkillBook => false,
                             _ => true,
                         })
                         .unwrap_or(true));

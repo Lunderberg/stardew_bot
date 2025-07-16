@@ -1,13 +1,9 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use geometry::Vector;
-use itertools::Itertools as _;
 
-use crate::{
-    graph_search::GraphSearch as _, Error, GameAction, MaintainStaminaGoal,
-    MovementGoal, UseItemOnTile,
-};
-use game_state::{GameState, HoeDirt, Item, ItemId, ObjectKind};
+use crate::{Error, MaintainStaminaGoal, MovementGoal, UseItemOnTile};
+use game_state::{GameState, ItemId};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

@@ -2,7 +2,7 @@ use derive_more::From;
 use std::{any::Any, borrow::Cow, collections::VecDeque, fmt::Display};
 
 use crate::{Error, GameAction};
-use game_state::{GameState, InputState, Item, Key, ScrollWheel};
+use game_state::{GameState, Key, ScrollWheel};
 
 const MAX_RECENT_GOALS: usize = 30;
 const MAX_RECENT_ACTIONS: usize = 1000;

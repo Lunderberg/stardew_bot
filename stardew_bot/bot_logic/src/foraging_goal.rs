@@ -4,16 +4,14 @@ use std::{
 };
 
 use geometry::{Direction, Vector};
-use itertools::Itertools as _;
 
-use crate::{ActivateTile, Error, GameAction, MovementGoal};
-use game_state::{FloatingItem, GameState, Item, ObjectKind, TileMap};
+use crate::{ActivateTile, Error, MovementGoal};
+use game_state::{GameState, ObjectKind, TileMap};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     graph_search::GraphSearch,
-    GameStateExt as _, GoToActionTile, InventoryGoal, LocationExt as _,
-    RepairBeachBridgeGoal,
+    GameStateExt as _, LocationExt as _, RepairBeachBridgeGoal,
 };
 
 pub struct ForagingGoal {

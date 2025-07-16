@@ -3,11 +3,8 @@ use std::collections::{HashMap, HashSet};
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{bot_logic::LogicStack, Error, GameAction, MovementGoal};
-use game_state::{
-    GameState, Inventory, Item, ItemId, Key, Location, Object, ObjectKind,
-    Quality,
-};
+use crate::{Error, MovementGoal};
+use game_state::{GameState, ItemId, Location, Object, ObjectKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},

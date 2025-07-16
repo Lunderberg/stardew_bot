@@ -1,9 +1,9 @@
-use crate::{Error, GameAction};
-use game_state::{GameState, Item, ItemId, WateringCan};
+use crate::Error;
+use game_state::{GameState, ItemId, WateringCan};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    GameStateExt as _, LocationExt as _, UseItemOnTile,
+    LocationExt as _, UseItemOnTile,
 };
 
 pub struct FillWateringCan(WhenToFill);

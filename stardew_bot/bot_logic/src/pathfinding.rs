@@ -1,10 +1,7 @@
 use geometry::{Direction, TileSet, Vector};
-use itertools::{Either, Itertools as _};
 
 use crate::Error;
 use game_state::{Location, ObjectKind, ResourceClumpKind, TileMap};
-
-use std::collections::BinaryHeap;
 
 #[derive(Debug, Clone)]
 pub struct Pathfinding<'a> {

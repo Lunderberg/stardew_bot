@@ -1,6 +1,6 @@
 use game_state::GameState;
 
-use crate::{Error, GameAction};
+use crate::Error;
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 

@@ -4,12 +4,12 @@ use geometry::Vector;
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    graph_search::GraphSearch as _, CraftItemGoal, Error, GameAction,
-    MaintainStaminaGoal, MovementGoal, ObjectKindExt as _, UseItemOnTile,
+    CraftItemGoal, Error, MaintainStaminaGoal, ObjectKindExt as _,
+    UseItemOnTile,
 };
 use game_state::{
     GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality,
-    SeededRng, Sprinkler, StaticState,
+    SeededRng, StaticState,
 };
 
 use super::{

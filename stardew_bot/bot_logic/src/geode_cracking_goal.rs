@@ -1,4 +1,4 @@
-use itertools::{Either, Itertools as _};
+use itertools::Itertools as _;
 
 use crate::{Error, GameAction, GoToActionTile, InventoryGoal, MenuCloser};
 use game_state::{
@@ -6,7 +6,7 @@ use game_state::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     SellToMerchantGoal,
 };
 
