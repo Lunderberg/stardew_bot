@@ -444,7 +444,9 @@ impl MineDelvingGoal {
             game_state.globals.lowest_mine_level_reached.clamp(0, 120) as usize;
 
         if elevator_depth >= 5 {
-            let go_to_depth = if self.prefer_mining_copper(game_state)? {
+            let go_to_depth = if elevator_depth < 40 {
+                elevator_depth
+            } else if self.prefer_mining_copper(game_state)? {
                 20
             } else if elevator_depth < 80 {
                 elevator_depth
