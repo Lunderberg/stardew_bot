@@ -46,7 +46,7 @@ impl FarmPlan {
             .max()
             .map(|max_index| max_index + 1)
             .expect("Map should have at least one region");
-        let arable_regions: Vec<_> = (0..num_regions)
+        let iter_regions = (0..num_regions)
             .map(|i_region| {
                 regions.map(|opt_region| opt_region == &Some(i_region))
             })
@@ -61,9 +61,14 @@ impl FarmPlan {
                 (region, avg_dist)
             })
             .sorted_by(|(_, a), (_, b)| a.total_cmp(b))
-            .map(|(region, _)| region)
-            .map(|region| ArableRegion::layout(region))
-            .collect();
+            .map(|(region, _)| region);
+        let mut arable_regions = Vec::new();
+        let mut all_scarecrows = Vec::new();
+        for region in iter_regions {
+            let arable_region = ArableRegion::layout(region, &all_scarecrows);
+            all_scarecrows.extend(arable_region.scarecrows.iter().clone());
+            arable_regions.push(arable_region);
+        }
 
         let initial_plot = {
             let top_right = farm_door + Vector::new(3, 5);
@@ -189,7 +194,7 @@ impl FarmPlan {
 }
 
 impl ArableRegion {
-    fn layout(map: TileMap<bool>) -> Self {
+    fn layout(map: TileMap<bool>, other_scarecrows: &[Vector<isize>]) -> Self {
         let sprinklers: Vec<Vector<isize>> = {
             let mut remaining = map.clone();
             let mut sprinklers = Vec::<Vector<isize>>::new();
@@ -244,6 +249,10 @@ impl ArableRegion {
                 plantable.iter().cloned().collect();
             let mut covered: HashSet<Vector<isize>> =
                 sprinklers.iter().cloned().collect();
+
+            for prev in other_scarecrows {
+                covered.extend(to_cover.extract_if(|b| prev.dist2(*b) < 81));
+            }
 
             while !to_cover.is_empty() {
                 let opt_scarecrow = to_cover

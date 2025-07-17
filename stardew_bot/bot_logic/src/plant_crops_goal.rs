@@ -259,6 +259,7 @@ impl PlantCropsGoal {
             .objects
             .iter()
             .filter(|obj| plan.empty_spaces.contains(&obj.tile))
+            .filter(|obj| !matches!(obj.kind, ObjectKind::HoeDirt(_)))
             .map(|obj| (obj.tile, obj.kind.get_tool()));
 
         Ok(Either::Right(iter_steps.chain(iter_clear)))
@@ -287,21 +288,6 @@ impl PlantCropsGoal {
                 .iter()
                 .take(if is_first_day { 1 } else { 2 })
         };
-
-        let iter_craftables =
-            iter_regions().filter(|_| !is_first_day).flat_map(|region| {
-                let iter_sprinklers = region
-                    .sprinklers
-                    .iter()
-                    .map(|&tile| (tile, ItemId::SPRINKLER));
-
-                let iter_scarecrows = region
-                    .scarecrows
-                    .iter()
-                    .map(|&tile| (tile, ItemId::SCARECROW));
-
-                iter_sprinklers.chain(iter_scarecrows)
-            });
 
         let farm = game_state.get_room("Farm")?;
         let distance_to_water = farm
@@ -357,6 +343,33 @@ impl PlantCropsGoal {
                     seed_assignment[i].1 = Some(seed.id.clone());
                 });
         }
+
+        let seed_locations = TileMap::collect_true(
+            farm.shape,
+            seed_assignment
+                .iter()
+                .filter_map(|(tile, opt_seed)| opt_seed.is_some().then(|| tile))
+                .cloned(),
+        );
+
+        let iter_craftables =
+            iter_regions().filter(|_| !is_first_day).flat_map(|region| {
+                let iter_sprinklers = region
+                    .sprinklers
+                    .iter()
+                    .filter(|tile| {
+                        tile.iter_cardinal()
+                            .any(|adj| seed_locations.is_set(adj))
+                    })
+                    .map(|&tile| (tile, ItemId::SPRINKLER));
+
+                let iter_scarecrows = region
+                    .scarecrows
+                    .iter()
+                    .map(|&tile| (tile, ItemId::SCARECROW));
+
+                iter_sprinklers.chain(iter_scarecrows)
+            });
 
         let iter_seeds = seed_assignment
             .into_iter()
