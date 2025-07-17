@@ -112,14 +112,11 @@ impl SymbolicGraph {
             })
             .collect();
 
-        let last_usage = self.last_usage();
-
         self.iter_extern_funcs().try_for_each(|func_index| {
             self.func_to_virtual_machine(
                 &mut builder,
                 func_index,
                 &native_function_lookup,
-                &last_usage,
                 show_steps,
             )
         })?;
@@ -132,10 +129,10 @@ impl SymbolicGraph {
         builder: &mut VirtualMachineBuilder,
         main_func_index: OpIndex,
         native_function_lookup: &HashMap<OpIndex, FunctionIndex>,
-        last_usage: &[LastUsage],
         show_steps: bool,
     ) -> Result<(), Error> {
         let reachable = self.reachable(Some(main_func_index));
+        let last_usage = self.last_usage(&reachable);
         let scope = self.operation_scope(&reachable);
 
         let operations_by_scope = scope
@@ -183,7 +180,7 @@ impl SymbolicGraph {
             graph: self,
             builder,
             operations_by_scope: &operations_by_scope,
-            last_usage,
+            last_usage: &last_usage,
             native_function_lookup,
             show_steps,
             analysis: Analysis::new(None),
@@ -229,20 +226,26 @@ impl SymbolicGraph {
         Ok(())
     }
 
-    fn analyze_scopes(&self) -> Vec<ScopeInfo> {
-        let iter_scopes = self.iter_ops().flat_map(|(index, op)| {
-            let (a, b) = match op.kind {
-                ExprKind::Function { .. } => {
-                    (Some(Scope::Function(index)), None)
-                }
-                ExprKind::IfElse { .. } => (
-                    Some(Scope::IfBranch(index)),
-                    Some(Scope::ElseBranch(index)),
-                ),
-                _ => (None, None),
-            };
-            a.into_iter().chain(b)
-        });
+    fn analyze_scopes(&self, reachable: &[bool]) -> Vec<ScopeInfo> {
+        let operation_to_scope = self.operation_scope(&reachable);
+
+        let iter_scopes = self
+            .iter_ops()
+            .zip(reachable)
+            .filter(|(_, op_reachable)| **op_reachable)
+            .flat_map(|((index, op), _)| {
+                let (a, b) = match op.kind {
+                    ExprKind::Function { .. } => {
+                        (Some(Scope::Function(index)), None)
+                    }
+                    ExprKind::IfElse { .. } => (
+                        Some(Scope::IfBranch(index)),
+                        Some(Scope::ElseBranch(index)),
+                    ),
+                    _ => (None, None),
+                };
+                a.into_iter().chain(b)
+            });
 
         let mut info: Vec<_> = std::iter::once(Scope::Global)
             .chain(iter_scopes)
@@ -259,15 +262,15 @@ impl SymbolicGraph {
             .map(|func_info| (func_info.scope, func_info))
             .collect();
 
-        let reachable = self.reachable(self.iter_extern_funcs());
-        let operation_to_scope = self.operation_scope(&reachable);
-
         // Step 1: Collect the body of each scope.
         operation_to_scope
             .iter()
             .cloned()
             .enumerate()
             .map(|(i, scope)| (OpIndex::new(i), scope))
+            .zip(reachable)
+            .filter(|(_, op_reachable)| **op_reachable)
+            .map(|(op_scope, _)| op_scope)
             .for_each(|(op_index, scope_info)| {
                 if let Some(func_info) = scope_lookup.get_mut(&scope_info) {
                     func_info.body.push(op_index);
@@ -285,6 +288,9 @@ impl SymbolicGraph {
         // are directly used within a scope.
         self.iter_ops()
             .zip(operation_to_scope.iter().cloned())
+            .zip(reachable)
+            .filter(|(_, op_reachable)| **op_reachable)
+            .map(|(op_with_index, _)| op_with_index)
             .flat_map(|((op_index, op), scope)| match &op.kind {
                 // Generate an iterator whose elements are the node
                 // that was used, and the scope in which that usage
@@ -356,9 +362,11 @@ impl SymbolicGraph {
         info
     }
 
-    fn last_usage(&self) -> Vec<LastUsage> {
+    fn last_usage(&self, reachable: &[bool]) -> Vec<LastUsage> {
+        assert_eq!(self.num_operations(), reachable.len());
+
         let scope_info_lookup = self
-            .analyze_scopes()
+            .analyze_scopes(reachable)
             .into_iter()
             .map(|info| (info.scope, info))
             .collect();

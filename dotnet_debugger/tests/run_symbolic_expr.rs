@@ -1615,3 +1615,42 @@ fn reduction_with_identical_subexpr_in_condition_and_branch(
 
     Ok(())
 }
+
+#[test]
+fn use_global_var_from_multiple_public_functions() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.named_native_function("launder", |x: usize| x)?;
+
+    graph.parse(stringify! {
+        let upper_bound = launder(10);
+        let limit = launder(50);
+        let offset = launder(20);
+        let iter = (0..upper_bound);
+
+        pub fn main1() {
+            iter
+                .map(|i| i+offset)
+                .reduce(0usize, |a,b| a+b)
+        }
+
+        pub fn main2() {
+            iter
+                .filter(|square| square < limit)
+                .reduce(0usize, |a,b| a+b+offset)
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+
+    let result1: usize = vm.get_function("main1")?.evaluate()?.try_into()?;
+    let expected1: usize = (0..10).map(|i| i + 20).sum();
+    assert_eq!(result1, expected1);
+
+    let result2: usize = vm.get_function("main2")?.evaluate()?.try_into()?;
+    let expected2: usize =
+        (0..10).filter(|&i| i < 50).fold(0, |a, b| a + b + 20);
+    assert_eq!(result2, expected2);
+
+    Ok(())
+}
