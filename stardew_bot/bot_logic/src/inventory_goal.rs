@@ -247,13 +247,15 @@ impl InventoryGoal {
             .bounds
             .iter()
             .sorted_by_key(|(item, _)| &item.item_id)
-            .filter_map(|(item, bound)| {
+            .find_map(|(item, bound)| {
                 let min = bound.min?;
                 let current = available.get(item).cloned().unwrap_or(0);
-                let missing = min.saturating_sub(current);
-                (missing > 0).then(|| (item, missing))
-            })
-            .find_map(|(item, num_missing)| {
+                let num_missing = min.saturating_sub(current);
+
+                if num_missing == 0 {
+                    return None;
+                }
+
                 let num_craftable = item
                     .iter_recipe()?
                     .map(|(ingredient, count)| {
@@ -265,9 +267,14 @@ impl InventoryGoal {
                     .unwrap_or(0);
 
                 let num_to_craft = num_missing.min(num_craftable);
+                if num_to_craft == 0 {
+                    return None;
+                }
 
-                (num_to_craft > 0)
-                    .then(|| item.clone().with_count(num_to_craft))
+                let num_in_inventory =
+                    game_state.player.inventory.count_item(&item);
+
+                Some(item.clone().with_count(num_in_inventory + num_to_craft))
             });
 
         Ok(opt_craftable)
@@ -281,10 +288,15 @@ impl InventoryGoal {
             return Ok(None);
         };
 
+        let num_in_inventory =
+            game_state.player.inventory.count_item(&next_crafting);
+
         let subgoal = InventoryGoal::current().with(
             next_crafting.id.iter_recipe().into_iter().flatten().map(
                 |(ingredient, count)| {
-                    ingredient.with_count(next_crafting.count * count)
+                    ingredient.with_count(
+                        (next_crafting.count - num_in_inventory) * count,
+                    )
                 },
             ),
         );

@@ -3,13 +3,10 @@ use std::collections::{HashMap, HashSet};
 use geometry::Vector;
 use itertools::{Either, Itertools as _};
 
-use crate::{
-    CraftItemGoal, Error, MaintainStaminaGoal, ObjectKindExt as _,
-    UseItemOnTile,
-};
+use crate::{Error, MaintainStaminaGoal, ObjectKindExt as _, UseItemOnTile};
 use game_state::{
     GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality,
-    SeededRng, StaticState,
+    SeededRng, StaticState, TileMap,
 };
 
 use super::{
@@ -436,30 +433,6 @@ impl PlantCropsGoal {
         Ok(iter_items_required)
     }
 
-    /// Iterate through items that are planned, but are not available.
-    fn iter_missing_items<'a>(
-        &'a self,
-        game_state: &'a GameState,
-    ) -> Result<impl Iterator<Item = Item> + 'a, Error> {
-        let items_available =
-            InventoryGoal::current().total_stored_and_carried(game_state)?;
-        let iter = self
-            .iter_required_items(game_state)?
-            .map(move |(id, required)| {
-                let available = items_available.get(id).cloned().unwrap_or(0);
-                (id, required.saturating_sub(available))
-            })
-            .filter(|(_, missing)| *missing > 0)
-            .map(|(id, count)| {
-                game_state
-                    .statics
-                    .enrich_item(id.clone().into())
-                    .with_count(count)
-            });
-
-        Ok(iter)
-    }
-
     /// Attempt to buy enough seeds to meet the target number to farm.
     fn try_buy_missing_seeds(
         &self,
@@ -502,81 +475,6 @@ impl PlantCropsGoal {
             Ok(None)
         }
     }
-
-    /// Attempt to craft any items that are missing
-    fn try_craft_missing_items(
-        &self,
-        game_state: &GameState,
-    ) -> Result<Option<LogicStack>, Error> {
-        let get_ingredients = |to_craft: &ItemId| -> Option<Vec<Item>> {
-            if to_craft == &ItemId::SPRINKLER {
-                Some(vec![
-                    ItemId::COPPER_BAR.with_count(1),
-                    ItemId::IRON_BAR.with_count(1),
-                ])
-            } else if to_craft == &ItemId::SCARECROW {
-                Some(vec![
-                    ItemId::WOOD.with_count(50),
-                    ItemId::COAL.with_count(1),
-                    ItemId::FIBER.with_count(20),
-                ])
-            } else {
-                None
-            }
-        };
-
-        let available =
-            InventoryGoal::current().total_stored_and_carried(game_state)?;
-
-        let items_to_craft: Vec<Item> = self
-            .iter_missing_items(game_state)?
-            .filter_map(|missing| {
-                let ingredients = get_ingredients(&missing.id)?;
-                let num_craftable = ingredients
-                    .iter()
-                    .map(|ingredient| {
-                        let num_available =
-                            available.get(&ingredient.id).cloned().unwrap_or(0);
-                        num_available / ingredient.count
-                    })
-                    .min()
-                    .filter(|&num| num > 0)?;
-                let num_to_craft = num_craftable.min(missing.count);
-                Some(missing.with_count(num_to_craft))
-            })
-            .collect();
-
-        if items_to_craft.is_empty() {
-            return Ok(None);
-        }
-
-        let prepare = items_to_craft
-            .iter()
-            .flat_map(|to_craft| {
-                let ingredients = get_ingredients(&to_craft.id)
-                    .expect("Craftables have known recipe");
-                ingredients.into_iter().map(|ingredient| {
-                    (ingredient.id, ingredient.count * to_craft.count)
-                })
-            })
-            .into_grouping_map()
-            .sum()
-            .into_iter()
-            .fold(InventoryGoal::current(), |goal, (id, count)| {
-                let item: Item = id.into();
-                let item = item.with_count(count);
-                goal.with(item)
-            });
-
-        let stack = items_to_craft
-            .into_iter()
-            .map(CraftItemGoal::new)
-            .fold(LogicStack::new().then(prepare), |stack, goal| {
-                stack.then(goal)
-            });
-
-        Ok(Some(stack))
-    }
 }
 
 impl BotGoal for PlantCropsGoal {
@@ -605,18 +503,7 @@ impl BotGoal for PlantCropsGoal {
             }
         }
 
-        let opt_gather = 'opt_gather: {
-            let opt = self.try_buy_missing_seeds(game_state)?;
-            if opt.is_some() {
-                break 'opt_gather opt;
-            }
-            let opt = self.try_craft_missing_items(game_state)?;
-            if opt.is_some() {
-                break 'opt_gather opt;
-            }
-
-            None
-        };
+        let opt_gather = self.try_buy_missing_seeds(game_state)?;
 
         if let Some(gather_items) = opt_gather {
             // In some cases, the update to the player's inventory can
@@ -801,17 +688,16 @@ impl BotGoal for PlantCropsGoal {
                 (tile, opt_item)
             };
 
-        let get_tools = self
-            .iter_required_items(game_state)?
-            .fold(InventoryGoal::current(), |goal, (id, count)| {
-                let item: Item = id.clone().into();
-                let item = item.with_count(count);
-                goal.with(item)
-            })
+        let get_tools = InventoryGoal::current()
+            .with(
+                self.iter_required_items(game_state)?
+                    .map(|(id, count)| id.clone().with_count(count)),
+            )
             .with(ItemId::WATERING_CAN)
             .with(ItemId::HOE)
             .with(ItemId::PICKAXE)
             .with(ItemId::AXE)
+            .craft_missing()
             .stamina_recovery_slots(1);
         if !get_tools.is_completed(game_state)? {
             let get_tools = get_tools

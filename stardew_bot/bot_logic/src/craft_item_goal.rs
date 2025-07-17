@@ -78,21 +78,20 @@ impl BotGoal for CraftItemGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
+        let num_in_inventory = self.item_count(game_state);
         if let Some(held_item) = &crafting_page.held_item {
             if !held_item.is_same_item(&self.item)
-                || held_item.count >= self.item.count
+                || num_in_inventory + held_item.count >= self.item.count
             {
-                let open_inventory_slot = game_state
-                    .player
-                    .inventory
-                    .iter_slots()
-                    .zip(crafting_page.player_item_locations.iter())
-                    .filter(|(opt_slot, _)| opt_slot.is_none())
-                    .map(|(_, pixel)| *pixel)
-                    .next()
+                let inventory = &game_state.player.inventory;
+                let inventory_slot = inventory
+                    .preferred_slot(&self.item)
+                    .or_else(|| inventory.empty_slot())
                     .expect("TODO: Handle full inventory");
-                actions
-                    .do_action(GameAction::MouseOverPixel(open_inventory_slot));
+                let inventory_pixel =
+                    crafting_page.player_item_locations[inventory_slot];
+
+                actions.do_action(GameAction::MouseOverPixel(inventory_pixel));
                 actions.do_action(GameAction::LeftClick);
 
                 return Ok(BotGoalResult::InProgress);
