@@ -70,6 +70,12 @@ pub struct Pathfinding<'a> {
     /// contains grass.
     grass_penalty: u64,
 
+    /// If `Some(cost)`, allow walking through tiles that contain
+    /// craftable objects (e.g. scarecrows, sprinklers), with an
+    /// additional penalty as specified.  If `None`, do not allow
+    /// walking through tiles that contain craftable objects.
+    clear_craftables: Option<u64>,
+
     /// If true, results will allow the final tile of a path to be on
     /// an unreachable tile.  If false, the final tile of a path must
     /// not be blocked.
@@ -139,6 +145,7 @@ impl<'a> Pathfinding<'a> {
             clear_forage: None,
             clear_trees: None,
             grass_penalty: 100,
+            clear_craftables: None,
             include_border: false,
         }
     }
@@ -207,6 +214,13 @@ impl<'a> Pathfinding<'a> {
         }
     }
 
+    pub fn craftable_clearing_cost(self, cost: u64) -> Self {
+        Self {
+            clear_craftables: Some(cost),
+            ..self
+        }
+    }
+
     pub fn ignoring_obstacles(self) -> Self {
         Self {
             clear_stone: Some(0),
@@ -217,6 +231,7 @@ impl<'a> Pathfinding<'a> {
             clear_breakables: Some(0),
             clear_forage: Some(0),
             clear_trees: Some(0),
+            clear_craftables: Some(0),
             grass_penalty: 0,
             ..self
         }
@@ -287,6 +302,11 @@ impl<'a> Pathfinding<'a> {
                     self.clear_trees
                 }
                 ObjectKind::Grass => Some(self.grass_penalty),
+
+                ObjectKind::CraftingMachine(_)
+                | ObjectKind::Sprinkler(_)
+                | ObjectKind::Scarecrow => self.clear_craftables,
+
                 other if other.is_walkable() => {
                     // Can walk on this tile without penalty (e.g. a
                     // rug on the floor)
