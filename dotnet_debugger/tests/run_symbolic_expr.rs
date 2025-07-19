@@ -1654,3 +1654,38 @@ fn use_global_var_from_multiple_public_functions() -> Result<(), Error> {
 
     Ok(())
 }
+
+#[test]
+fn conditional_with_unchanged_native_obj_in_else_branch() -> Result<(), Error> {
+    #[derive(RustNativeObject)]
+    struct RustObj(usize);
+
+    let mut graph = SymbolicGraph::new();
+
+    graph.named_native_function("initialize", || RustObj(0usize))?;
+    graph.named_native_function("incremented", |obj: &RustObj| {
+        RustObj(obj.0 + 1)
+    })?;
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..10)
+                .reduce(initialize(), |value,i| {
+                    let a = if i%2 == 0 {
+                        incremented(value)
+                    } else {
+                        value
+                    };
+                    incremented(a)
+                })
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+
+    let result: usize = vm.local_eval()?.get_obj::<RustObj>(0)?.unwrap().0;
+    let expected = 15usize;
+    assert_eq!(result, expected);
+
+    Ok(())
+}

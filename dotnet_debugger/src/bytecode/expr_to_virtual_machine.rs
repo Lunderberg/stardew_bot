@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeSet, HashMap, HashSet},
+    collections::{BTreeMap, HashMap, HashSet},
     fmt::Display,
 };
 
@@ -82,8 +82,16 @@ struct ExpressionTranslator<'a> {
 
 #[derive(Clone, Default)]
 struct IndexTracking {
+    /// The next index to allocate, if there are no dead indices that
+    /// can be re-used.
     next_free_index: usize,
-    dead_indices: BTreeSet<StackIndex>,
+
+    /// Indices that used to contain a value, but the value is no
+    /// longer required.  These indices may be re-used.
+    ///
+    /// The `OpIndex` stored in the map is the most recent value
+    /// stored at this location, used for error messages.
+    dead_indices: BTreeMap<StackIndex, Option<OpIndex>>,
 
     expr_to_reserved_location: HashMap<OpIndex, StackIndex>,
 
@@ -385,11 +393,28 @@ impl SymbolicGraph {
             collector.iter_scope(Scope::Global),
         );
 
+        let reduction_accumulators: HashSet<OpIndex> = self
+            .iter_ops()
+            .filter_map(|(_, expr)| match &expr.kind {
+                ExprKind::SimpleReduce { reduction, .. } => Some(reduction),
+                _ => None,
+            })
+            .filter_map(|reduction_value| reduction_value.as_op_index())
+            .map(|reduction_index| &self[reduction_index])
+            .filter_map(|reduction| match &reduction.kind {
+                ExprKind::Function { params, .. } => params.get(0),
+                _ => None,
+            })
+            .filter_map(|accumulator| accumulator.as_op_index())
+            .collect();
+
         last_usage
             .into_iter()
             .filter(|last_usage| match &self[last_usage.expr_used].kind {
                 ExprKind::Function { .. } => false,
-                ExprKind::FunctionArg(_) => false,
+                ExprKind::FunctionArg(_) => {
+                    reduction_accumulators.contains(&last_usage.expr_used)
+                }
                 ExprKind::NativeFunction(_) => false,
                 _ => true,
             })
@@ -426,6 +451,7 @@ impl IndexTracking {
 
         self.expr_to_reserved_location.insert(op_index, stack_index);
         self.dead_indices.remove(&stack_index);
+        *self.num_aliasing.entry(stack_index).or_insert(0) += 1;
     }
 
     fn release_reservation(&mut self, op_index: OpIndex) -> StackIndex {
@@ -445,15 +471,45 @@ impl IndexTracking {
              but the reservation had never been used."
         );
 
+        let Some(num_aliasing) = self.num_aliasing.get_mut(&stack_index) else {
+            panic!(
+                "Internal inconsistency: \
+                 When releasing reservation of {stack_index} for {op_index}, \
+                 num_aliasing map had no entry for {stack_index}."
+            );
+        };
+        assert!(
+            *num_aliasing >= 2,
+            "Internal inconsistency: \
+                 When releasing reservation of {stack_index} for {op_index}, \
+                 the alias count should be at least two.  \
+                 (One for the reservation, \
+                 and one for the value stored at the reserved index.)"
+        );
+        *num_aliasing -= 1;
+
         stack_index
     }
 
     fn define_contents(&mut self, expr: OpIndex, loc: StackIndex) {
-        assert!(
-            !self.dead_indices.contains(&loc),
-            "Attempted to define {loc} as containing {expr}, \
-             but {loc} is currently listed as a dead index."
-        );
+        {
+            let previous_contents = self.dead_indices.get(&loc);
+            assert!(
+                previous_contents.is_none(),
+                "Attempted to define {loc} as containing {expr}, \
+                 but {loc} is currently listed as a dead index \
+                 that previously contained {}.  \
+                 Before defining the contents of a location, \
+                 that location must be allocated \
+                 using `ExpressionTranslater::alloc_index`.",
+                previous_contents
+                    .unwrap()
+                    .map(|prev_expr| format!("{prev_expr}"))
+                    .unwrap_or_else(|| {
+                        "a value that doesn't correspond to an OpIndex".into()
+                    }),
+            );
+        }
         {
             let current_loc = self.current_location.get(&expr);
             assert!(
@@ -481,7 +537,7 @@ impl IndexTracking {
             panic!(
                 "Internal inconsistency: \
                  When removing {expr} from {stack_index}, \
-                 reverse map had no entry for {stack_index}."
+                 num_aliasing map had no entry for {stack_index}."
             );
         };
 
@@ -494,7 +550,7 @@ impl IndexTracking {
             // expression.  The current expression owns the stack
             // location, and so the stack location can be reused.
             self.num_aliasing.remove(&stack_index);
-            self.dead_indices.insert(stack_index);
+            self.dead_indices.insert(stack_index, Some(expr));
         } else {
             // The location-to-expr map points to a different
             // expression.  The current expression is an alias,
@@ -747,8 +803,21 @@ impl ExpressionTranslator<'_> {
     }
 
     fn alloc_index(&mut self) -> StackIndex {
-        if let Some(index) = self.index_tracking.dead_indices.pop_first() {
-            self.annotate(|_| format!("Reusing dead index {index}"));
+        if let Some((index, opt_prev_expr)) =
+            self.index_tracking.dead_indices.pop_first()
+        {
+            self.annotate(|_| {
+                format!(
+                    "Reusing dead index {index}, \
+                     which previously held {}.",
+                    opt_prev_expr
+                        .map(|prev_expr| format!("{prev_expr}"))
+                        .unwrap_or_else(|| {
+                            "a value that doesn't correspond to an OpIndex"
+                                .into()
+                        })
+                )
+            });
             index
         } else {
             let index = StackIndex(self.index_tracking.next_free_index);
@@ -773,13 +842,14 @@ impl ExpressionTranslator<'_> {
             });
             index
         } else {
+            let index = self.alloc_index();
             self.annotate(|graph| {
                 format!(
-                    "For op {}, allocating output index.",
+                    "For op {}, allocated output index {index}.",
                     IndexPrinter::new(op_index, graph),
                 )
             });
-            self.alloc_index()
+            index
         }
     }
 
@@ -790,7 +860,7 @@ impl ExpressionTranslator<'_> {
                  marking as dead."
             )
         });
-        self.index_tracking.dead_indices.insert(stack_index);
+        self.index_tracking.dead_indices.insert(stack_index, None);
     }
 
     fn free_dead_indices(&mut self, op_index: OpIndex) {
@@ -1536,7 +1606,7 @@ impl ExpressionTranslator<'_> {
                     Scope::Function(reduction_index),
                 )?;
 
-                self.index_tracking.current_location.remove(&accumulator);
+                // self.index_tracking.current_location.remove(&accumulator);
                 self.index_tracking.current_location.remove(&index);
                 // self.index_tracking.release_expr(accumulator);
                 // self.index_tracking.release_expr(index);
