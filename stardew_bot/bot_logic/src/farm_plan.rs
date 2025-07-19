@@ -63,10 +63,19 @@ impl FarmPlan {
             .sorted_by(|(_, a), (_, b)| a.total_cmp(b))
             .map(|(region, _)| region);
         let mut arable_regions = Vec::new();
-        let mut all_scarecrows = Vec::new();
+        let mut all_scarecrows: Vec<Vector<isize>> = farm
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::Scarecrow))
+            .map(|obj| obj.tile)
+            .collect();
         for region in iter_regions {
             let arable_region = ArableRegion::layout(region, &all_scarecrows);
-            all_scarecrows.extend(arable_region.scarecrows.iter().clone());
+            all_scarecrows = all_scarecrows
+                .into_iter()
+                .chain(arable_region.scarecrows.iter().cloned())
+                .unique()
+                .collect();
             arable_regions.push(arable_region);
         }
 
@@ -194,7 +203,10 @@ impl FarmPlan {
 }
 
 impl ArableRegion {
-    fn layout(map: TileMap<bool>, other_scarecrows: &[Vector<isize>]) -> Self {
+    fn layout(
+        map: TileMap<bool>,
+        current_scarecrows: &[Vector<isize>],
+    ) -> Self {
         let sprinklers: Vec<Vector<isize>> = {
             let mut remaining = map.clone();
             let mut sprinklers = Vec::<Vector<isize>>::new();
@@ -250,8 +262,11 @@ impl ArableRegion {
             let mut covered: HashSet<Vector<isize>> =
                 sprinklers.iter().cloned().collect();
 
-            for prev in other_scarecrows {
+            for &prev in current_scarecrows {
                 covered.extend(to_cover.extract_if(|b| prev.dist2(*b) < 81));
+                if map.is_set(prev) {
+                    scarecrows.push(prev);
+                }
             }
 
             while !to_cover.is_empty() {
