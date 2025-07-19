@@ -87,6 +87,7 @@ pub struct MineshaftDetails {
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct LocationDelta {
     pub(crate) name: String,
+    near_player: bool,
     resource_clumps: Vec<ResourceClump>,
     objects: Vec<Object>,
     items: Vec<FloatingItem>,
@@ -1159,11 +1160,24 @@ impl Location {
              characters: &Vec<Character>| {
                 LocationDelta {
                     name: name.into(),
+                    near_player: true,
                     resource_clumps: resource_clumps.clone(),
                     objects: objects.clone(),
                     items: items.clone(),
                     characters: characters.clone(),
                 }
+            },
+        )?;
+
+        graph.named_native_function(
+            "new_nonlocal_location_delta",
+            |name: &str, characters: &Vec<Character>| LocationDelta {
+                name: name.into(),
+                near_player: false,
+                resource_clumps: Default::default(),
+                objects: Default::default(),
+                items: Default::default(),
+                characters: characters.clone(),
             },
         )?;
 
@@ -2112,6 +2126,16 @@ impl Location {
                     characters,
                 )
             }
+
+            fn read_nonlocal_location_delta(location) {
+                let name = get_location_name_ptr(location).read_string();
+                let characters = read_location_characters(location);
+
+                new_nonlocal_location_delta(
+                    name,
+                    characters,
+                )
+            }
         })?;
 
         Ok(func)
@@ -2347,6 +2371,18 @@ impl Location {
         delta: LocationDelta,
         player_pos: Vector<f32>,
     ) {
+        if delta.near_player {
+            self.apply_local_delta(delta, player_pos)
+        } else {
+            self.apply_nonlocal_delta(delta)
+        }
+    }
+
+    fn apply_local_delta(
+        &mut self,
+        delta: LocationDelta,
+        player_pos: Vector<f32>,
+    ) {
         let player_tile = player_pos / 64.0;
         let is_far_from_player = |tile: Vector<isize>| {
             let pos = tile.map(|x| x as f32);
@@ -2381,6 +2417,10 @@ impl Location {
         // just reading all of them.
         self.items = delta.items;
 
+        self.characters = delta.characters;
+    }
+
+    fn apply_nonlocal_delta(&mut self, delta: LocationDelta) {
         self.characters = delta.characters;
     }
 }

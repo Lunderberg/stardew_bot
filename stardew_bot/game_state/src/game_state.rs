@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dotnet_debugger::{
     CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
 };
@@ -42,6 +44,7 @@ pub struct GameStateReader {
 pub struct GameStateDelta {
     global_game_state: GlobalGameState,
     location_delta: LocationDelta,
+    nonlocal_location_deltas: HashMap<String, LocationDelta>,
     player: PlayerState,
     fishing: FishingState,
     daily: DailyState,
@@ -130,6 +133,7 @@ impl GameState {
             "new_game_state_delta",
             |global_game_state: &GlobalGameState,
              location_delta: &LocationDelta,
+             nonlocal_location_deltas: &Vec<LocationDelta>,
              player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
@@ -144,9 +148,14 @@ impl GameState {
              mail_menu: Option<&MailMenu>,
              mine_elevator_menu: Option<&MineElevatorMenu>,
              geode_menu: Option<&GeodeMenu>| {
+                let nonlocal_location_deltas = nonlocal_location_deltas
+                    .iter()
+                    .map(|delta| (delta.name.clone(), delta.clone()))
+                    .collect();
                 GameStateDelta {
                     global_game_state: global_game_state.clone(),
                     location_delta: location_delta.clone(),
+                    nonlocal_location_deltas,
                     player: player.clone(),
                     fishing: fishing.clone(),
                     daily: daily.clone(),
@@ -168,10 +177,7 @@ impl GameState {
         )?;
 
         graph.parse(stringify! {
-            pub fn read_full_state() {
-                let static_state = read_static_state();
-                let global_game_state = read_global_game_state();
-
+            fn iter_locations(filter_func) {
                 let location_list = StardewValley
                     .Game1
                     .game1
@@ -187,9 +193,14 @@ impl GameState {
                     >();
 
                 let num_locations = location_list._size.prim_cast::<usize>();
-                let iter_locations = (0..num_locations)
+                (0..num_locations)
+                    .filter(|i| filter_func.is_none() || filter_func(i))
                     .map(|i| location_list._items[i])
-                    .map(read_location);
+            }
+
+            pub fn read_full_state() {
+                let static_state = read_static_state();
+                let global_game_state = read_global_game_state();
 
                 let mineshaft_list = StardewValley
                     .Locations
@@ -200,7 +211,8 @@ impl GameState {
                     .map(|i| mineshaft_list._items[i])
                     .map(read_location);
 
-                let locations = iter_locations
+                let locations = iter_locations(None)
+                    .map(read_location)
                     .chain(iter_mine_levels)
                     .collect();
 
@@ -243,6 +255,19 @@ impl GameState {
             pub fn read_delta_state() {
                 let global_game_state = read_global_game_state();
                 let location_delta = read_location_delta();
+
+                let nonlocal_location_deltas = iter_locations(
+                        |i| {
+                            let game_tick = StardewValley.Game1
+                                .ticks
+                                .prim_cast::<usize>();
+                            let offset_tick = game_tick + i;
+                            offset_tick % 240 == 0
+                        }
+                    )
+                    .map(read_nonlocal_location_delta)
+                    .collect();
+
                 let player = read_player();
                 let fishing = read_fishing();
                 let daily = read_daily();
@@ -271,6 +296,7 @@ impl GameState {
                 new_game_state_delta(
                     global_game_state,
                     location_delta,
+                    nonlocal_location_deltas,
                     player,
                     fishing,
                     daily,
@@ -311,7 +337,7 @@ impl GameState {
             .all(|loc| &loc.name != &delta.location_delta.name)
     }
 
-    pub fn apply_delta(&mut self, delta: GameStateDelta) {
+    pub fn apply_delta(&mut self, mut delta: GameStateDelta) {
         let player_pos = delta.player.position;
 
         self.rng_state.apply_delta(
@@ -347,6 +373,14 @@ impl GameState {
             .find(|loc| &loc.name == &delta.location_delta.name)
         {
             loc.apply_delta(delta.location_delta, player_pos);
+        }
+
+        for loc in &mut self.locations {
+            if let Some(delta) =
+                delta.nonlocal_location_deltas.remove(&loc.name)
+            {
+                loc.apply_delta(delta, player_pos);
+            }
         }
     }
 
