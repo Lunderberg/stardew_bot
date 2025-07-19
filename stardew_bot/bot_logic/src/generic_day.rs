@@ -1,5 +1,5 @@
-use crate::Error;
-use game_state::{GameState, ItemCategory, ItemId};
+use crate::{Error, GiveGiftGoal};
+use game_state::{GameState, ItemCategory, ItemId, Quality};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
@@ -118,6 +118,9 @@ impl BotGoal for GenericDay {
                         .with(ItemId::MAGMA_GEODE.with_count(1000))
                         .with(ItemId::OMNI_GEODE.with_count(1000))
                         .with(ItemId::CLAY.with_count(1000))
+                        .with_exactly(
+                            ItemId::PARSNIP.with_quality(Quality::Gold),
+                        )
                         .stamina_recovery_slots(1),
                 )
                 .then(
@@ -127,6 +130,10 @@ impl BotGoal for GenericDay {
                 .then(BuyFromMerchantGoal::new(
                     "Carpenter",
                     ItemId::WOOD.with_count(300),
+                ))
+                .then(GiveGiftGoal::new(
+                    "Pam",
+                    ItemId::PARSNIP.with_quality(Quality::Gold),
                 ))
                 .then(
                     GeodeCrackingGoal::new()
