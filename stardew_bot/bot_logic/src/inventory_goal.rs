@@ -50,6 +50,15 @@ pub struct InventoryGoal {
 
     /// If true, craft any items that are missing.
     craft_missing: bool,
+
+    /// A read may occur after the player's inventory has been updated
+    /// but before the game location has been updated.  This will
+    /// appear as if the player has insufficient seeds/materials, and
+    /// may cause the bot to head to the storage chests to craft
+    /// additional materials.  To avoid this, this field tracks the
+    /// game tick on which the decision to buy/craft was made.  The
+    /// decision is only applied if made again on the following frame.
+    tick_decided_to_gather_items: Option<i32>,
 }
 
 struct Bounds {
@@ -116,6 +125,7 @@ impl InventoryGoal {
             stamina_recovery_slots: 0,
             with_weapon: false,
             craft_missing: false,
+            tick_decided_to_gather_items: None,
         }
     }
 
@@ -821,7 +831,25 @@ impl BotGoal for InventoryGoal {
         if let Some(next_crafting_action) =
             self.next_crafting_action(game_state)?
         {
+            // In some cases, the update to the player's inventory can
+            // occur before the update to the game location.  In that
+            // case, the total number of seeds may appear to be less
+            // than the required number of seeds.  To avoid running
+            // off to the general store, wait until the choice to buy
+            // seeds has been made for a few game ticks in a row.
+            let tick = game_state.globals.game_tick;
+            if let Some(prev_tick) = self.tick_decided_to_gather_items {
+                if tick < prev_tick + 2 {
+                    return Ok(BotGoalResult::InProgress);
+                }
+            } else {
+                self.tick_decided_to_gather_items = Some(tick);
+                return Ok(BotGoalResult::InProgress);
+            }
+
             return Ok(next_crafting_action.into());
+        } else {
+            self.tick_decided_to_gather_items = None;
         }
 
         let Some(transfer) = self.next_transfer(game_state)? else {
