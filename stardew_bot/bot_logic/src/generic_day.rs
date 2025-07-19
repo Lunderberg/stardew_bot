@@ -124,13 +124,10 @@ impl BotGoal for GenericDay {
                     SellToMerchantGoal::new("Carpenter", ItemId::CLAY)
                         .min_to_sell(10),
                 )
-                .then(
-                    BuyFromMerchantGoal::new(
-                        "Carpenter",
-                        ItemId::WOOD.with_count(350),
-                    )
-                    .include_stored_items("Farm"),
-                )
+                .then(BuyFromMerchantGoal::new(
+                    "Carpenter",
+                    ItemId::WOOD.with_count(300),
+                ))
                 .then(
                     GeodeCrackingGoal::new()
                         .sell_gems(true)
@@ -142,6 +139,7 @@ impl BotGoal for GenericDay {
                     "Saloon",
                     ItemId::SALAD.with_count(20),
                 ))
+                .then(ForagingGoal::new().location("Beach"))
                 .then(crops.clone())
         } else {
             stack
@@ -158,13 +156,7 @@ impl BotGoal for GenericDay {
                         .with(ItemId::HOE)
                         .stamina_recovery_slots(2),
                 )
-                .then(ForagingGoal::new().location("Beach"))
-                .then(ForagingGoal::new().location("Custom_Garden"))
-                .then(ForagingGoal::new().location("Custom_ShearwaterBridge"))
-                .then(ForagingGoal::new().location("Town"))
-                .then(ForagingGoal::new().location("Mountain"))
-                .then(ForagingGoal::new().location("Forest"))
-                .then(ForagingGoal::new().location("Custom_ForestWest"))
+                .then(ForagingGoal::new())
         } else {
             stack
         };
