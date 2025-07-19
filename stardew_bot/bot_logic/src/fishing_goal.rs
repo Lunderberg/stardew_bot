@@ -216,7 +216,7 @@ impl BotGoal for FishingGoal {
             preparation = preparation
                 .stamina_recovery_slots(1)
                 .otherwise_empty()
-                .craft_missing()
+                .craft_missing(true)
                 .with_exactly(
                     ItemId::BAIT_MAKER
                         .with_count(opt_bait_maker.is_none() as usize),

@@ -100,6 +100,7 @@ impl BotGoal for GenericDay {
                     crops
                         .clone()
                         .buy_missing_seeds(false)
+                        .craft_missing(false)
                         .stop_time(1100)
                         .opportunistic_clay_farming(6),
                 )

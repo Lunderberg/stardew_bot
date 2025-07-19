@@ -53,6 +53,11 @@ pub struct PlantCropsGoal {
     /// made.  The decision is only applied if made again on the
     /// following frame.
     tick_decided_to_gather_items: Option<i32>,
+
+    /// If true (default), missing items (e.g. sprinklers/scarecrows)
+    /// will be crafted as needed.  If false, these items will not be
+    /// crafted.
+    craft_missing: bool,
 }
 
 pub struct CropQualityPredictor {
@@ -100,6 +105,7 @@ impl PlantCropsGoal {
             buy_missing_seeds: true,
             stop_after_buying_seeds: false,
             tick_decided_to_gather_items: None,
+            craft_missing: true,
         }
     }
 
@@ -121,6 +127,13 @@ impl PlantCropsGoal {
         Self {
             buy_missing_seeds: true,
             stop_after_buying_seeds: true,
+            ..self
+        }
+    }
+
+    pub fn craft_missing(self, craft_missing: bool) -> Self {
+        Self {
+            craft_missing,
             ..self
         }
     }
@@ -710,7 +723,7 @@ impl BotGoal for PlantCropsGoal {
             .with(ItemId::HOE)
             .with(ItemId::PICKAXE)
             .with(ItemId::AXE)
-            .craft_missing()
+            .craft_missing(self.craft_missing)
             .stamina_recovery_slots(1);
         if !get_tools.is_completed(game_state)? {
             let get_tools = get_tools

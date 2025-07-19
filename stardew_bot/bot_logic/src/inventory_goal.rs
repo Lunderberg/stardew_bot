@@ -173,9 +173,9 @@ impl InventoryGoal {
         }
     }
 
-    pub fn craft_missing(self) -> Self {
+    pub fn craft_missing(self, craft_missing: bool) -> Self {
         Self {
-            craft_missing: true,
+            craft_missing,
             ..self
         }
     }
