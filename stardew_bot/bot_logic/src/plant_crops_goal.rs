@@ -5,8 +5,8 @@ use itertools::{Either, Itertools as _};
 
 use crate::{Error, MaintainStaminaGoal, ObjectKindExt as _, UseItemOnTile};
 use game_state::{
-    GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind, Quality,
-    SeededRng, StaticState, TileMap,
+    CropPhase, GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind,
+    Quality, SeededRng, StaticState, TileMap,
 };
 
 use super::{
@@ -308,13 +308,37 @@ impl PlantCropsGoal {
             .ignoring_obstacles()
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
 
-        let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> =
-            iter_regions()
-                .flat_map(|region| region.plantable.iter().cloned())
-                .map(|tile| (tile, None))
+        let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> = {
+            let previous: HashMap<_, _> = farm
+                .objects
+                .iter()
+                .filter_map(|obj| {
+                    let crop = obj.kind.as_hoe_dirt()?.crop.as_ref()?;
+                    matches!(crop.phase, CropPhase::Seed | CropPhase::Growing)
+                        .then(|| (obj.tile, &crop.seed))
+                })
                 .collect();
 
+            iter_regions()
+                .flat_map(|region| region.plantable.iter().cloned())
+                .map(|tile| {
+                    let opt_seed = previous.get(&tile).cloned().cloned();
+                    (tile, opt_seed)
+                })
+                .collect()
+        };
+
         for seed in &self.seeds {
+            let num_currently_planted = seed_assignment
+                .iter()
+                .filter(|(_, opt_prev_seed)| {
+                    opt_prev_seed
+                        .as_ref()
+                        .map(|prev_seed| &seed.id == prev_seed)
+                        .unwrap_or(false)
+                })
+                .count();
+
             let days_to_grow =
                 game_state.statics.get_crop(&seed.id)?.days_to_grow;
             let upcoming_xp = self
@@ -351,7 +375,7 @@ impl PlantCropsGoal {
                         .unwrap_or(u64::MAX);
                     (std::cmp::Reverse(quality), dist)
                 })
-                .take(seed.count)
+                .take(seed.count.saturating_sub(num_currently_planted))
                 .for_each(|(i, _)| {
                     seed_assignment[i].1 = Some(seed.id.clone());
                 });
