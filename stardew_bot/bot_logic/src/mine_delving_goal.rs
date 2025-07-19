@@ -394,10 +394,11 @@ impl MineDelvingGoal {
                 .room("Mine")
                 .iter_stored_and_carried(game_state)?
                 .filter(|item| {
-                    matches!(
-                        item.category,
-                        Some(ItemCategory::Gem | ItemCategory::Mineral)
-                    )
+                    item.id == ItemId::HOE
+                        || matches!(
+                            item.category,
+                            Some(ItemCategory::Gem | ItemCategory::Mineral)
+                        )
                 })
                 .sorted_by_key(|item| std::cmp::Reverse(item.stack_price()))
                 .take(5)
@@ -554,6 +555,7 @@ impl BotGoal for MineDelvingGoal {
 
             let prepare = InventoryGoal::empty()
                 .with(ItemId::PICKAXE)
+                .with(ItemId::HOE)
                 .with_exactly(iter_items_to_transfer)
                 .stamina_recovery_slots(6)
                 .with_weapon();
