@@ -459,7 +459,13 @@ impl MineDelvingGoal {
             game_state.globals.lowest_mine_level_reached.clamp(0, 120) as usize;
 
         if elevator_depth >= 5 {
-            let go_to_depth = if elevator_depth < 40 {
+            let go_to_depth = if elevator_depth < 120 && {
+                let predictor = MineLevelPredictor::new(game_state);
+                (elevator_depth..elevator_depth + 5)
+                    .all(|level| !predictor.predict(level as i32).is_infested())
+            } {
+                elevator_depth
+            } else if elevator_depth < 40 {
                 elevator_depth
             } else if self.prefer_mining_copper(game_state)? {
                 20
@@ -1285,6 +1291,10 @@ impl LevelPrediction {
             && !self.is_monster
             && !self.is_slime
             && !self.is_dinosaur
+    }
+
+    pub fn is_infested(&self) -> bool {
+        self.is_monster || self.is_slime || self.is_dinosaur
     }
 }
 
