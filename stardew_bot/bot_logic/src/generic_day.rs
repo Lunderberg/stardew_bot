@@ -66,7 +66,10 @@ impl BotGoal for GenericDay {
             // whether delaying the harvest will prevent a harvest at
             // the end of the season.
             stack
-                .then(FishingGoal::new(FishingLocation::River).stop_time(2400))
+                .then(
+                    FishingGoal::new(FishingLocation::River)
+                        .stop_time(if current_day == 3 { 2700 } else { 2400 }),
+                )
                 .then(HarvestCropsGoal::new())
         } else if current_day == 4 {
             stack
