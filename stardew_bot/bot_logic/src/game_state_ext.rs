@@ -83,6 +83,13 @@ impl GameStateExt for GameState {
     fn iter_reserved_items(
         &self,
     ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error> {
+        // On most days, avoid eating items that are reserved for
+        // bundles, or for planned crafting in the future.  On days
+        // 1/2, any fish and forage may be eaten, regardless of
+        // whether we'll need it later, because stamina/inventory
+        // management are much tighter.
+        let is_early_startup = self.globals.days_played() <= 2;
+
         let iter_worst_fish = self
             .iter_accessible_items()?
             .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
@@ -90,7 +97,8 @@ impl GameStateExt for GameState {
             .into_grouping_map()
             .min_by_key(|_, item| item.quality())
             .into_iter()
-            .map(|(_, item)| (&item.id, 1));
+            .map(|(_, item)| (&item.id, 1))
+            .filter(move |_| !is_early_startup);
 
         let iter_bundles = self
             .statics
@@ -113,7 +121,8 @@ impl GameStateExt for GameState {
                         .map(|item| (&item.id, item.count))
                 })
             })
-            .flatten();
+            .flatten()
+            .filter(move |_| !is_early_startup);
 
         Ok(iter_worst_fish.chain(iter_bundles))
     }
