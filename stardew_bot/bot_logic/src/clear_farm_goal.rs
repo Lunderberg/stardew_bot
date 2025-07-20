@@ -4,7 +4,9 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{Error, MovementGoal};
-use game_state::{GameState, ItemId, Location, Object, ObjectKind};
+use game_state::{
+    GameState, ItemId, Location, Object, ObjectKind, Tree, TreeKind,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
@@ -15,6 +17,10 @@ use super::{
 pub struct ClearFarmGoal {
     stop_time: i32,
     clear_trees: bool,
+
+    /// Clear trees types that are added by Stardew Valley Expanded.
+    clear_expanded_trees: bool,
+
     clear_stone: bool,
     use_stamina: bool,
     use_priority_tiles: bool,
@@ -36,6 +42,7 @@ impl ClearFarmGoal {
             stop_time: 2600,
             priority_tiles: HashSet::new(),
             clear_trees: false,
+            clear_expanded_trees: false,
             clear_stone: true,
             use_stamina: true,
             use_priority_tiles: true,
@@ -80,6 +87,14 @@ impl ClearFarmGoal {
     pub fn clear_trees(self, clear_trees: bool) -> Self {
         Self {
             clear_trees,
+            ..self
+        }
+    }
+
+    #[allow(dead_code)]
+    pub fn clear_expanded_trees(self, clear_expanded_trees: bool) -> Self {
+        Self {
+            clear_expanded_trees,
             ..self
         }
     }
@@ -226,9 +241,14 @@ impl BotGoal for ClearFarmGoal {
                     self.priority_tiles.contains(&obj.tile)
                 } else {
                     match &obj.kind {
+                        ObjectKind::Tree(Tree { is_stump: true, .. }) => true,
                         ObjectKind::Tree(tree) => {
-                            tree.is_stump
-                                || (self.clear_trees && tree.growth_stage > 0)
+                            (self.clear_trees && tree.growth_stage > 0)
+                                || (self.clear_expanded_trees
+                                    && matches!(
+                                        tree.kind,
+                                        TreeKind::Fir | TreeKind::Birch
+                                    ))
                         }
                         ObjectKind::Stone(_) => self.clear_stone,
                         _ => true,

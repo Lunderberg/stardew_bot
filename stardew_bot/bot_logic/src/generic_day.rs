@@ -75,7 +75,11 @@ impl BotGoal for GenericDay {
             stack
                 .then(HarvestCropsGoal::new())
                 .then(WaterCropsGoal::new())
-                .then(ClearFarmGoal::new().stop_time(2000))
+                .then(
+                    ClearFarmGoal::new()
+                        .stop_time(2000)
+                        .clear_expanded_trees(true),
+                )
                 .then(ExpandTreeFarm::new())
         } else if current_day == 5
             || (current_day > 5
