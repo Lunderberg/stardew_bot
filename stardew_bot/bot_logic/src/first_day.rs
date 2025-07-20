@@ -51,7 +51,7 @@ impl BotGoal for FirstDay {
                     .map_or_else(|| game_state.get_farm_door(), Ok)?,
             )
             .relative_weights((4, 1))
-            .stop_time(640);
+            .stop_time(620);
 
         if !goal.is_completed(game_state)? {
             return Ok(goal.into());
@@ -175,13 +175,19 @@ impl BotGoal for FirstDay {
         // Includes buying seeds as necessary.  Which, given that
         // today is the first day, is quite necessary.
         let mut plant_crops = PlantCropsGoal::new(
-            std::iter::once(ItemId::PARSNIP_SEEDS.with_count(60)).chain(
+            [
+                ItemId::PARSNIP_SEEDS.with_count(60),
+                ItemId::CAULIFLOWER_SEEDS.with_count(2),
+            ]
+            .into_iter()
+            .chain(
                 game_state
                     .player
                     .inventory
                     .iter_items()
                     .filter(|item| {
                         item.id != ItemId::PARSNIP_SEEDS
+                            && item.id != ItemId::CAULIFLOWER_SEEDS
                             && item.id != ItemId::MIXED_SEEDS
                     })
                     .filter(|item| {
