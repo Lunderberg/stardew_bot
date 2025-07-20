@@ -312,9 +312,13 @@ impl BotGoal for ClearFarmGoal {
             .with(ItemId::SCYTHE)
             .with(ItemId::HOE)
             .stamina_recovery_slots(1);
-        if !goal.is_completed(game_state)? {
+        if game_state.player.inventory.num_empty_slots() < 2
+            || !goal.is_completed(game_state)?
+        {
             let goal = goal.otherwise_empty().stamina_recovery_slots(9);
-            return Ok(goal.into());
+            if !goal.is_completed(game_state)? {
+                return Ok(goal.into());
+            }
         }
 
         // Go to the Farm
