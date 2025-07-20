@@ -126,14 +126,43 @@ impl ClayFarmingGoal {
             return None;
         }
 
-        let player_loc = game_state.player.center_pos();
-        game_state
-            .get_room("Beach")
-            .into_iter()
-            .flat_map(|loc| loc.items.iter())
+        let beach = game_state.get_room("Beach").ok()?;
+        let pathfinding = beach.pathfinding();
+
+        let player_tile = game_state.player.tile();
+        let player_distance = pathfinding.distances(player_tile);
+
+        let exit_tile = beach
+            .warps
+            .iter()
+            .map(|warp| warp.location)
+            .map(|tile| {
+                let offset = if tile.down == -1 {
+                    Vector::new(1, 0)
+                } else {
+                    Vector::zero()
+                };
+                tile + offset
+            })
+            .filter(|tile| player_distance.is_some(*tile))
+            .min_by_key(|tile| (tile.down, tile.right));
+        let exit_distance = pathfinding.distances(exit_tile);
+
+        beach
+            .items
+            .iter()
             .filter(|floating_item| floating_item.id == ItemId::CLAY)
             .min_by_key(|item| {
-                (item.position / 64.0).dist2(player_loc) as isize
+                let tile = (item.position / 64.0).map(|x| x.round() as isize);
+                match (
+                    player_distance.get_opt(tile),
+                    exit_distance.get_opt(tile),
+                ) {
+                    (Some(from_player), Some(from_exit)) => {
+                        (*from_player as i64) - (*from_exit as i64)
+                    }
+                    _ => i64::MAX,
+                }
             })
             .map(|item| item.position)
     }
