@@ -125,7 +125,9 @@ impl BotGoal for HarvestCropsGoal {
             let goal = InventoryGoal::empty()
                 .with(ItemId::SCYTHE)
                 .with(ItemId::WATERING_CAN);
-            return Ok(goal.into());
+            if !goal.is_completed(game_state)? {
+                return Ok(goal.into());
+            }
         }
 
         if game_state.statics.get_crop(next_seed)?.harvest_with_scythe {
