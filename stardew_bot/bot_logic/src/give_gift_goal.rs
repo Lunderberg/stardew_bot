@@ -69,6 +69,9 @@ impl BotGoal for GiveGiftGoal {
         if !cleanup.is_completed(game_state) {
             return Ok(cleanup.into());
         }
+        if self.is_completed(game_state)? {
+            return Ok(BotGoalResult::Completed);
+        }
 
         let (room, tile) = game_state
             .locations
