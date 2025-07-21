@@ -1,4 +1,4 @@
-use crate::{Error, GiveGiftGoal};
+use crate::{Error, GiveGiftGoal, UpgradeToolGoal};
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
 use super::{
@@ -108,12 +108,14 @@ impl BotGoal for GenericDay {
                         .clone()
                         .buy_missing_seeds(false)
                         .craft_missing(false)
-                        .stop_time(1100)
+                        .stop_time(1200)
                         .opportunistic_clay_farming(6),
                 )
                 .then(
                     InventoryGoal::empty()
                         .with(ItemId::HOE)
+                        .with(ItemId::AXE)
+                        .with(ItemId::COPPER_BAR.with_count(5))
                         .take_if(|item| {
                             matches!(
                                 item.category,
@@ -142,6 +144,7 @@ impl BotGoal for GenericDay {
                     "Pam",
                     ItemId::PARSNIP.with_quality(Quality::Gold),
                 ))
+                .then(UpgradeToolGoal::new(ItemId::AXE))
                 .then(
                     GeodeCrackingGoal::new()
                         .sell_gems(true)

@@ -5,10 +5,13 @@ use itertools::Itertools as _;
 
 use game_state::{
     BundleIngredient, GameState, Item, ItemCategory, ItemId, Location,
-    ObjectKind, ResourceClumpKind,
+    ObjectKind, ResourceClumpKind, ShopMenu,
 };
 
-use crate::{best_weapon, Error, MovementGoal, Pathfinding};
+use crate::{
+    best_weapon, bot_logic::ActionCollector, Error, GameAction, MovementGoal,
+    Pathfinding,
+};
 
 pub trait GameStateExt {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error>;
@@ -292,5 +295,46 @@ impl LocationExt for Location {
             iter_clearable_obj.chain(iter_clearable_clump).collect();
 
         Ok(clearable_tiles)
+    }
+}
+
+pub trait ShopMenuExt {
+    fn do_menu_navigation(
+        &self,
+        actions: &mut ActionCollector,
+        item: &ItemId,
+    ) -> Result<(), Error>;
+}
+impl ShopMenuExt for ShopMenu {
+    fn do_menu_navigation(
+        &self,
+        actions: &mut ActionCollector,
+        item: &ItemId,
+    ) -> Result<(), Error> {
+        let to_buy_index = self
+            .for_sale
+            .iter()
+            .enumerate()
+            .find(|(_, for_sale)| &for_sale.id == item)
+            .map(|(i, _)| i)
+            .ok_or_else(|| Error::ItemNotSold {
+                merchant: self.shop_name.clone(),
+                item: item.clone(),
+            })?;
+        if self.visible_items().contains(&to_buy_index) {
+            let button_index = to_buy_index
+                .checked_sub(self.for_sale_scroll_index)
+                .expect("Guarded by menu.visible_items().contains");
+            let pixel = self.for_sale_buttons[button_index];
+
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
+        } else if to_buy_index > self.for_sale_scroll_index {
+            actions.do_action(GameAction::ScrollDown);
+        } else {
+            actions.do_action(GameAction::ScrollUp);
+        }
+
+        Ok(())
     }
 }

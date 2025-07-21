@@ -142,3 +142,6 @@ pub use key_event_interrupt::*;
 
 mod give_gift_goal;
 pub use give_gift_goal::*;
+
+mod upgrade_tool_goal;
+pub use upgrade_tool_goal::*;

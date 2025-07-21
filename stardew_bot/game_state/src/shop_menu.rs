@@ -9,6 +9,7 @@ use super::Item;
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct ShopMenu {
+    pub shop_name: String,
     pub held_item: Option<Item>,
     pub for_sale: Vec<Item>,
     pub for_sale_buttons: Vec<Vector<isize>>,
@@ -23,12 +24,14 @@ impl ShopMenu {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_shop_menu",
-            |held_item: Option<&Item>,
+            |shop_name: &str,
+             held_item: Option<&Item>,
              for_sale: &Vec<Item>,
              for_sale_buttons: &Vec<Vector<isize>>,
              for_sale_scroll_index: usize,
              player_item_locations: &Vec<Vector<isize>>,
              exit_button: &Vector<isize>| ShopMenu {
+                shop_name: shop_name.to_string(),
                 held_item: held_item.cloned(),
                 for_sale: for_sale.clone(),
                 for_sale_buttons: for_sale_buttons.clone(),
@@ -44,6 +47,8 @@ impl ShopMenu {
                     .Game1
                     ._activeClickableMenu
                     .as::<StardewValley.Menus.ShopMenu>();
+
+                let shop_name = menu.ShopId.read_string();
 
                 let held_item = menu.heldItem.as::<StardewValley.Item>();
                 let held_item = if held_item.is_some() {
@@ -91,6 +96,7 @@ impl ShopMenu {
 
                 if menu.is_some() {
                     new_shop_menu(
+                        shop_name,
                         held_item,
                         for_sale,
                         for_sale_buttons,

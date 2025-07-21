@@ -126,11 +126,33 @@ pub enum ItemCategory {
 }
 
 impl ItemId {
-    pub const PICKAXE: Self = Self::new_const("(T)Pickaxe");
     pub const AXE: Self = Self::new_const("(T)Axe");
-    pub const SCYTHE: Self = Self::new_const("(W)47");
+    pub const COPPER_AXE: Self = Self::new_const("(T)CopperAxe");
+    pub const IRON_AXE: Self = Self::new_const("(T)IronAxe");
+    pub const GOLD_AXE: Self = Self::new_const("(T)GoldAxe");
+    pub const IRIDIUM_AXE: Self = Self::new_const("(T)IridumAxe");
+
+    pub const PICKAXE: Self = Self::new_const("(T)Pickaxe");
+    pub const COPPER_PICKAXE: Self = Self::new_const("(T)CopperPickaxe");
+    pub const IRON_PICKAXE: Self = Self::new_const("(T)IronPickaxe");
+    pub const GOLD_PICKAXE: Self = Self::new_const("(T)GoldPickaxe");
+    pub const IRIDIUM_PICKAXE: Self = Self::new_const("(T)IridumPickaxe");
+
     pub const HOE: Self = Self::new_const("(T)Hoe");
+    pub const COPPER_HOE: Self = Self::new_const("(T)CopperHoe");
+    pub const IRON_HOE: Self = Self::new_const("(T)IronHoe");
+    pub const GOLD_HOE: Self = Self::new_const("(T)GoldHoe");
+    pub const IRIDIUM_HOE: Self = Self::new_const("(T)IridumHoe");
+
     pub const WATERING_CAN: Self = Self::new_const("(T)WateringCan");
+    pub const COPPER_WATERING_CAN: Self =
+        Self::new_const("(T)CopperWateringCan");
+    pub const IRON_WATERING_CAN: Self = Self::new_const("(T)IronWateringCan");
+    pub const GOLD_WATERING_CAN: Self = Self::new_const("(T)GoldWateringCan");
+    pub const IRIDIUM_WATERING_CAN: Self =
+        Self::new_const("(T)IridumWateringCan");
+
+    pub const SCYTHE: Self = Self::new_const("(W)47");
 
     pub const BAMBOO_POLE: Self = Self::new_const("(T)BambooPole");
     pub const FIBERGLASS_ROD: Self = Self::new_const("(T)FiberglassRod");

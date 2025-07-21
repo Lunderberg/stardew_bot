@@ -1,4 +1,4 @@
-use crate::{Error, GameAction, GoToActionTile};
+use crate::{Error, GameAction, GoToActionTile, ShopMenuExt as _};
 use game_state::{GameState, Item, ItemId};
 
 use super::{
@@ -148,32 +148,7 @@ impl BotGoal for BuyFromMerchantGoal {
                 }
             }
 
-            let to_buy_index = menu
-                .for_sale
-                .iter()
-                .enumerate()
-                .find(|(_, item)| item.is_same_item(&self.item))
-                .map(|(i, _)| i)
-                .ok_or_else(|| Error::ItemNotSold {
-                    merchant: self.merchant.clone(),
-                    item: self.item.clone(),
-                })?;
-            if !menu.visible_items().contains(&to_buy_index) {
-                if to_buy_index > menu.for_sale_scroll_index {
-                    actions.do_action(GameAction::ScrollDown);
-                } else {
-                    actions.do_action(GameAction::ScrollUp);
-                }
-                return Ok(BotGoalResult::InProgress);
-            }
-
-            let button_index = to_buy_index
-                .checked_sub(menu.for_sale_scroll_index)
-                .expect("Guarded by menu.visible_items().contains");
-            let pixel = menu.for_sale_buttons[button_index];
-
-            actions.do_action(GameAction::MouseOverPixel(pixel));
-            actions.do_action(GameAction::LeftClick);
+            menu.do_menu_navigation(actions, &self.item.id)?;
             return Ok(BotGoalResult::InProgress);
         } else if let Some(menu) = &game_state.dialogue_menu {
             let Some(pixel) = menu.response_pixel("Shop") else {

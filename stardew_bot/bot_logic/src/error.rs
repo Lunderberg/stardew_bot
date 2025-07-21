@@ -2,7 +2,7 @@ use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use game_state::{Item, ItemId};
+use game_state::ItemId;
 
 #[derive(Error)]
 pub enum Error {
@@ -39,7 +39,7 @@ pub enum Error {
     NoTileWithAction(String),
 
     #[error("Cannot buy {item} from {merchant}")]
-    ItemNotSold { merchant: String, item: Item },
+    ItemNotSold { merchant: String, item: ItemId },
 
     #[error("Could not locate the farmhouse door")]
     FarmhouseDoorNotFound,
