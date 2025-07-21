@@ -747,6 +747,7 @@ impl BotGoal for PlantCropsGoal {
             .with(ItemId::HOE)
             .with(ItemId::PICKAXE)
             .with(ItemId::AXE)
+            .with(ItemId::SCYTHE)
             .craft_missing(self.craft_missing)
             .stamina_recovery_slots(1);
         if !get_tools.is_completed(game_state)? {
