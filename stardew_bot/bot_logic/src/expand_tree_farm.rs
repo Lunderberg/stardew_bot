@@ -23,6 +23,13 @@ impl ExpandTreeFarm {
         &self,
         game_state: &GameState,
     ) -> Result<Option<(Vector<isize>, Option<ItemId>)>, Error> {
+        let accessible_axe = game_state
+            .iter_accessible_items()?
+            .any(|item| item.id == ItemId::AXE);
+        if !accessible_axe {
+            return Ok(None);
+        }
+
         let plan = FarmPlan::plan(game_state)?;
         let farm = game_state.get_room("Farm")?;
 
