@@ -387,23 +387,22 @@ impl MineDelvingGoal {
             .with(ItemId::MAGMA_GEODE.clone().with_count(1000))
             .with(ItemId::OMNI_GEODE.clone().with_count(1000));
 
-        let prepare = if game_state.globals.in_game_time >= 2300 {
+        let prepare = if game_state.globals.in_game_time >= 2200 {
             // If it's close to the end of the day, grab items that
             // should be brought back to the farm for the next day.
             let iter_gems = InventoryGoal::empty()
                 .room("Mine")
                 .iter_stored_and_carried(game_state)?
                 .filter(|item| {
-                    item.id == ItemId::HOE
-                        || matches!(
-                            item.category,
-                            Some(ItemCategory::Gem | ItemCategory::Mineral)
-                        )
+                    matches!(
+                        item.category,
+                        Some(ItemCategory::Gem | ItemCategory::Mineral)
+                    )
                 })
                 .sorted_by_key(|item| std::cmp::Reverse(item.stack_price()))
                 .take(5)
                 .cloned();
-            prepare.with(iter_gems)
+            prepare.with(ItemId::HOE).with(iter_gems)
         } else {
             prepare
         };
