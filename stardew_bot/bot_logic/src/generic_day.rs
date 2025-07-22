@@ -114,6 +114,7 @@ impl BotGoal for GenericDay {
                 .then(
                     InventoryGoal::empty()
                         .with(ItemId::HOE)
+                        .with(ItemId::WOOD.with_count(1000))
                         .with(ItemId::AXE)
                         .with(ItemId::COPPER_BAR.with_count(5))
                         .take_if(|item| {
@@ -138,7 +139,7 @@ impl BotGoal for GenericDay {
                 )
                 .then(BuyFromMerchantGoal::new(
                     "Carpenter",
-                    ItemId::WOOD.with_count(300),
+                    ItemId::WOOD.with_count(650),
                 ))
                 .then(GiveGiftGoal::new(
                     "Pam",
