@@ -174,6 +174,7 @@ impl BotGoal for GenericDay {
                         .with(ItemId::HOE)
                         .stamina_recovery_slots(2),
                 )
+                .then(ForagingGoal::new().location("Forest"))
                 .then(ForagingGoal::new())
         } else {
             stack
