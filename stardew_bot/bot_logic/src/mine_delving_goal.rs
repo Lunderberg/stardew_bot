@@ -18,7 +18,7 @@ use super::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
     AttackNearbyEnemy, CraftItemGoal, LocationExt as _, MenuCloser,
-    ObjectKindExt as _, OrganizeInventoryGoal,
+    OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal;
@@ -1081,10 +1081,7 @@ impl BotInterrupt for MineNearbyOre {
         let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
 
         let predictor = StonePredictor::new(game_state)?;
-        let mut desirable_rocks: HashMap<
-            Vector<isize>,
-            ((f32, f32), &ObjectKind),
-        > = loc
+        let mut desirable_rocks: HashMap<Vector<isize>, (f32, f32)> = loc
             .objects
             .iter()
             .filter_map(|obj| {
@@ -1126,7 +1123,7 @@ impl BotInterrupt for MineNearbyOre {
                         return None;
                     }
                 };
-                Some((obj.tile, (dist_multiplier, &obj.kind)))
+                Some((obj.tile, dist_multiplier))
             })
             .collect();
 
@@ -1152,7 +1149,7 @@ impl BotInterrupt for MineNearbyOre {
                 if current_group.len() > 1 {
                     let total = current_group
                         .iter()
-                        .map(|tile| desirable_rocks[tile].0)
+                        .map(|tile| desirable_rocks[tile])
                         .fold(
                             (0.0f32, 0.0f32),
                             |(sum_mult, sum_offset), (mult, offset)| {
@@ -1160,7 +1157,7 @@ impl BotInterrupt for MineNearbyOre {
                             },
                         );
                     current_group.into_iter().for_each(|tile| {
-                        desirable_rocks.get_mut(&tile).unwrap().0 = total;
+                        *desirable_rocks.get_mut(&tile).unwrap() = total;
                     });
                 }
             }
@@ -1168,7 +1165,7 @@ impl BotInterrupt for MineNearbyOre {
 
         let opt_closest_stone = desirable_rocks
             .iter()
-            .filter_map(|(tile, ((multiplier, offset), _))| {
+            .filter_map(|(tile, (multiplier, offset))| {
                 let dist = distances.get(*tile)?.as_ref()?;
                 ((*dist as f32) + offset < self.dist * multiplier)
                     .then(|| (*tile, *dist))
@@ -1190,14 +1187,9 @@ impl BotInterrupt for MineNearbyOre {
             .find(|tile| clearable_tiles.contains_key(&tile));
         let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
 
-        let opt_tool = desirable_rocks
+        let opt_tool = clearable_tiles
             .get(&target_tile)
-            .map(|(_, kind)| kind.get_tool())
-            .or_else(|| {
-                clearable_tiles
-                    .get(&target_tile)
-                    .map(|opt_tool| opt_tool.clone())
-            })
+            .map(|opt_tool| opt_tool.clone())
             .unwrap();
 
         let goal = if let Some(tool) = opt_tool {

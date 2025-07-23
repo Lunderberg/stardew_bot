@@ -280,7 +280,9 @@ impl LocationExt for Location {
                 {
                     opt_weapon.cloned()
                 }
-                ObjectKind::Mineral(_) => None,
+                ObjectKind::Chest(_)
+                | ObjectKind::MineCartCoal
+                | ObjectKind::Mineral(_) => None,
 
                 other if other.is_forage() => None,
 
