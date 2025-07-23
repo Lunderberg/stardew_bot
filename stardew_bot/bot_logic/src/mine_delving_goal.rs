@@ -29,6 +29,16 @@ struct MineSingleLevel {
 
 struct MineNearbyOre {
     dist: f32,
+    cache: Option<NearbyOreCache>,
+}
+
+struct NearbyOreCache {
+    /// The number of objects present when this cache was created.
+    num_objects: usize,
+
+    /// A lookup from tile to the (multiplier,offset) tuple for going
+    /// to collect from that tile.
+    desirable_rocks: HashMap<Vector<isize>, (f32, f32)>,
 }
 
 struct StonePredictor {
@@ -1041,44 +1051,32 @@ impl StonePredictor {
 
 impl MineNearbyOre {
     pub fn new() -> Self {
-        Self { dist: 4.0 }
+        Self {
+            dist: 4.0,
+            cache: None,
+        }
     }
 
     pub fn with_search_distance(self, dist: f32) -> Self {
         Self { dist, ..self }
     }
-}
 
-impl BotInterrupt for MineNearbyOre {
-    fn description(&self) -> std::borrow::Cow<str> {
-        "Mine nearby ore".into()
-    }
-
-    fn check(
-        &mut self,
-        game_state: &GameState,
-    ) -> Result<Option<LogicStack>, Error> {
+    fn generate_cache(game_state: &GameState) -> Result<NearbyOreCache, Error> {
         let loc = game_state.current_room()?;
-        let Some(level) = loc
+        let mineshaft_details = loc
             .mineshaft_details
             .as_ref()
-            .map(|mineshaft| mineshaft.mineshaft_level)
-        else {
-            return Ok(None);
-        };
+            .ok_or_else(|| Error::MineNearbyOreUsedOutsideOfMines)?;
+        let level = mineshaft_details.mineshaft_level;
 
         let level_kind = (level / 40 + 1) as f32;
-
-        let player_tile = game_state.player.tile();
         let stone_clearing_cost = 3.0 * level_kind;
-        let pathfinding = loc
-            .pathfinding(&game_state.statics)
-            .breakable_clearing_cost(200)
-            .stone_clearing_cost((1000.0 * stone_clearing_cost) as u64)
-            .include_border(true);
-        let distances = pathfinding.distances(player_tile);
 
-        let opt_weapon = best_weapon(game_state.player.inventory.iter_items());
+        let has_weapon = game_state
+            .player
+            .inventory
+            .iter_items()
+            .any(|item| item.as_weapon().is_some());
 
         let predictor = StonePredictor::new(game_state)?;
         let mut desirable_rocks: HashMap<Vector<isize>, (f32, f32)> = loc
@@ -1110,9 +1108,7 @@ impl BotInterrupt for MineNearbyOre {
                     }
                     ObjectKind::MineCartCoal => (3.0, 0.0),
 
-                    ObjectKind::MineBarrel if opt_weapon.is_some() => {
-                        (0.5, 0.0)
-                    }
+                    ObjectKind::MineBarrel if has_weapon => (0.5, 0.0),
 
                     ObjectKind::Chest(_) => (4.0, 0.0),
                     ObjectKind::Mineral(_) => (1.0, 0.0),
@@ -1127,41 +1123,101 @@ impl BotInterrupt for MineNearbyOre {
             })
             .collect();
 
-        {
-            let mut to_group: HashSet<Vector<isize>> =
-                desirable_rocks.iter().map(|(tile, _)| *tile).collect();
-            while !to_group.is_empty() {
-                let seed = to_group.iter().next().cloned().unwrap();
-                to_group.remove(&seed);
+        let mut to_group: HashSet<Vector<isize>> =
+            desirable_rocks.iter().map(|(tile, _)| *tile).collect();
+        while !to_group.is_empty() {
+            let seed = to_group.iter().next().cloned().unwrap();
+            to_group.remove(&seed);
 
-                let mut current_group = vec![seed];
-                let mut to_visit = vec![seed];
-                while let Some(visiting) = to_visit.pop() {
-                    for adj in visiting.iter_nearby() {
-                        if to_group.contains(&adj) {
-                            to_group.remove(&adj);
-                            to_visit.push(adj);
-                            current_group.push(adj);
-                        }
+            let mut current_group = vec![seed];
+            let mut to_visit = vec![seed];
+            while let Some(visiting) = to_visit.pop() {
+                for adj in visiting.iter_nearby() {
+                    if to_group.contains(&adj) {
+                        to_group.remove(&adj);
+                        to_visit.push(adj);
+                        current_group.push(adj);
                     }
                 }
+            }
 
-                if current_group.len() > 1 {
-                    let total = current_group
-                        .iter()
-                        .map(|tile| desirable_rocks[tile])
-                        .fold(
-                            (0.0f32, 0.0f32),
-                            |(sum_mult, sum_offset), (mult, offset)| {
-                                (sum_mult + mult, sum_offset + offset)
-                            },
-                        );
-                    current_group.into_iter().for_each(|tile| {
-                        *desirable_rocks.get_mut(&tile).unwrap() = total;
-                    });
-                }
+            if current_group.len() > 1 {
+                let total = current_group
+                    .iter()
+                    .map(|tile| desirable_rocks[tile])
+                    .fold(
+                        (0.0f32, 0.0f32),
+                        |(sum_mult, sum_offset), (mult, offset)| {
+                            (sum_mult + mult, sum_offset + offset)
+                        },
+                    );
+                current_group.into_iter().for_each(|tile| {
+                    *desirable_rocks.get_mut(&tile).unwrap() = total;
+                });
             }
         }
+
+        Ok(NearbyOreCache {
+            num_objects: loc.objects.len(),
+            desirable_rocks,
+        })
+    }
+
+    fn update_cache(&mut self, game_state: &GameState) -> Result<(), Error> {
+        let is_up_to_date = self
+            .cache
+            .as_ref()
+            .map(|cache| -> Result<_, Error> {
+                let loc = game_state.current_room()?;
+                Ok(cache.num_objects == loc.objects.len())
+            })
+            .unwrap_or(Ok(false))?;
+
+        if !is_up_to_date {
+            self.cache = Some(Self::generate_cache(game_state)?);
+        }
+        Ok(())
+    }
+}
+
+impl BotInterrupt for MineNearbyOre {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Mine nearby ore".into()
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        let loc = game_state.current_room()?;
+        let Some(level) = loc
+            .mineshaft_details
+            .as_ref()
+            .map(|mineshaft| mineshaft.mineshaft_level)
+        else {
+            return Ok(None);
+        };
+
+        self.update_cache(game_state)?;
+        let desirable_rocks = &self
+            .cache
+            .as_ref()
+            .expect("Populated by self.update_cache")
+            .desirable_rocks;
+        if desirable_rocks.is_empty() {
+            return Ok(None);
+        }
+
+        let level_kind = (level / 40 + 1) as f32;
+
+        let player_tile = game_state.player.tile();
+        let stone_clearing_cost = 3.0 * level_kind;
+        let pathfinding = loc
+            .pathfinding(&game_state.statics)
+            .breakable_clearing_cost(200)
+            .stone_clearing_cost((1000.0 * stone_clearing_cost) as u64)
+            .include_border(true);
+        let distances = pathfinding.distances(player_tile);
 
         let opt_closest_stone = desirable_rocks
             .iter()
@@ -1190,10 +1246,12 @@ impl BotInterrupt for MineNearbyOre {
         let opt_tool = clearable_tiles
             .get(&target_tile)
             .map(|opt_tool| opt_tool.clone())
-            .unwrap();
+            .unwrap_or(None);
 
         let goal = if let Some(tool) = opt_tool {
             let tool = if tool.item_id.starts_with("(W)") {
+                let opt_weapon =
+                    best_weapon(game_state.player.inventory.iter_items());
                 if let Some(weapon) = opt_weapon {
                     weapon.id.clone()
                 } else {

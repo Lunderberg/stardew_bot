@@ -86,6 +86,9 @@ pub enum Error {
 
     #[error("Could not find villager '{0}'")]
     VillagerNotFound(String),
+
+    #[error("The MineNearbyOre was used when not in the mines")]
+    MineNearbyOreUsedOutsideOfMines,
 }
 
 impl std::fmt::Debug for Error {
