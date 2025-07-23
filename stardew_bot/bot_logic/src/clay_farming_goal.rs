@@ -228,66 +228,70 @@ impl BotGoal for ClayFarmingGoal {
 
         let player_tile = player.tile();
 
-        let total_dirt_hoed =
-            game_state.globals.get_stat("dirtHoed").unwrap_or(0);
-
         let clay_predictor = ClayPredictor::new(game_state);
-        let clay_tiles: HashSet<Vector<isize>> = beach
+
+        // The set of tiles that will yield clay if the hoe is used
+        // once elsewhere, and then once on the tile.  This is used to
+        // avoid needing to re-predict the (N+1)-th clay tiles for
+        // each possible choice of the N-th clay tile.
+        let next_clay_tiles: Vec<Vector<isize>> = beach
             .diggable
-            .iter()
-            .filter(|(_, is_diggable)| **is_diggable)
-            .map(|(tile, _)| tile)
-            .filter(|tile| clay_predictor.will_produce_clay(*tile))
+            .iter_true()
+            .filter(|tile| {
+                clay_predictor.will_produce_clay_with_offset(*tile, 1)
+            })
             .collect();
 
-        let has_hoe_dirt = |tile: Vector<isize>| -> bool {
-            beach
-                .objects
-                .iter()
-                .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
-                .any(|obj| obj.tile == tile)
-        };
+        let current_hoe_dirt: HashSet<Vector<isize>> = beach
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
+            .map(|obj| obj.tile)
+            .collect();
 
-        let opt_closest_clay: Option<Vector<isize>> = 'clay_tile: {
-            /// If the closest tile would require using the pickaxe to
-            /// clear out HoeDirt before using the Hoe, it may be
-            /// better to go to a different tile.  This value
-            /// determines how far the bot will go out of its way in
-            /// order to find a tile that can be hoed without first
-            /// requiring a use of the pickaxe.
-            const TILES_TO_AVOID_PICKAXE: u64 = 10;
+        /// If the closest tile would require using the pickaxe to
+        /// clear out HoeDirt before using the Hoe, it may be
+        /// better to go to a different tile.  This value
+        /// determines how far the bot will go out of its way in
+        /// order to find a tile that can be hoed without first
+        /// requiring a use of the pickaxe.
+        const TILES_TO_AVOID_PICKAXE: u64 = 10;
 
-            let mut clay_with_pickaxe: Option<(u64, Vector<isize>)> = None;
-            for (tile, dist) in beach
-                .pathfinding(&game_state.statics)
-                .iter_dijkstra(player_tile)
-            {
-                if clay_tiles.contains(&tile) {
-                    if has_hoe_dirt(tile) {
-                        // This tile will produce clay, but would
-                        // first require using the pickaxe.
-                        clay_with_pickaxe.get_or_insert((dist, tile));
-                    } else {
-                        // This tile will produce clay without
-                        // requiring the pickaxe.
-                        break 'clay_tile Some(tile);
-                    }
-                }
+        let distances = beach
+            .pathfinding(&game_state.statics)
+            .distances(player_tile);
 
-                if let Some((prev_dist, prev_tile)) = clay_with_pickaxe {
-                    if dist > prev_dist + TILES_TO_AVOID_PICKAXE {
-                        // We've searched all tiles that may produce
-                        // clay without requiring a pickaxe, and are
-                        // within the configured range.  Therefore,
-                        // settle for the previous result, even though
-                        // it will require using the pickaxe.
-                        break 'clay_tile Some(prev_tile);
-                    }
-                }
-            }
+        let opt_closest_clay: Option<Vector<isize>> = beach
+            .diggable
+            .iter_true()
+            .filter(|tile| distances.is_some(*tile))
+            .filter(|tile| clay_predictor.will_produce_clay(*tile))
+            .min_by_key(|tile| {
+                let dist =
+                    distances[*tile].expect("Protected by distances.is_some()");
+                let pickaxe_penalty = if current_hoe_dirt.contains(tile) {
+                    TILES_TO_AVOID_PICKAXE
+                } else {
+                    0
+                };
+                let next_dist = next_clay_tiles
+                    .iter()
+                    .map(|next| {
+                        let offset = (*tile - *next).map(|x| x.abs() as u64);
+                        let pickaxe_penalty = if next == tile
+                            || current_hoe_dirt.contains(next)
+                        {
+                            TILES_TO_AVOID_PICKAXE
+                        } else {
+                            0
+                        };
+                        offset.right + offset.down + pickaxe_penalty
+                    })
+                    .min()
+                    .unwrap_or(0);
 
-            clay_with_pickaxe.map(|(_, tile)| tile)
-        };
+                dist + pickaxe_penalty + next_dist
+            });
 
         let Some(closest_clay) = opt_closest_clay else {
             // There exists a clay tile, but we can't reach it.
@@ -295,11 +299,14 @@ impl BotGoal for ClayFarmingGoal {
         };
 
         actions.do_action(GameAction::MouseOverTile(closest_clay));
-        let tool = if has_hoe_dirt(closest_clay) {
+        let tool = if current_hoe_dirt.contains(&closest_clay) {
             ItemId::PICKAXE
         } else {
             ItemId::HOE
         };
+
+        let total_dirt_hoed =
+            game_state.globals.get_stat("dirtHoed").unwrap_or(0);
 
         let goal = UseItemOnTile::new(tool, "Beach", closest_clay).cancel_if(
             move |game_state| {
