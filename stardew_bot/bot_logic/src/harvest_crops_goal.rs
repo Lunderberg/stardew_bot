@@ -117,6 +117,7 @@ impl BotGoal for HarvestCropsGoal {
                 free_slots < 6
                     || !inventory.contains(ItemId::SCYTHE)
                     || !inventory.contains(ItemId::WATERING_CAN)
+                    || !inventory.contains(ItemId::HOE)
             } else {
                 free_slots < 2
             }
@@ -124,7 +125,8 @@ impl BotGoal for HarvestCropsGoal {
         if must_handle_inventory {
             let goal = InventoryGoal::empty()
                 .with(ItemId::SCYTHE)
-                .with(ItemId::WATERING_CAN);
+                .with(ItemId::WATERING_CAN)
+                .with(ItemId::HOE);
             if !goal.is_completed(game_state)? {
                 return Ok(goal.into());
             }
