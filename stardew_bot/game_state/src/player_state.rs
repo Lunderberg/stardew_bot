@@ -25,6 +25,7 @@ pub struct PlayerState {
     pub inventory: Inventory,
     pub active_hotbar_index: usize,
     pub current_money: i32,
+    pub buffs: Vec<Buff>,
 
     // Info related to the current action being performed
     pub using_tool: bool,
@@ -66,6 +67,14 @@ pub enum FacingDirection {
     East,
     South,
     West,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Buff {
+    pub kind: String,
+    pub source: String,
+    pub total_duration_ms: i32,
+    pub remaining_duration_ms: i32,
 }
 
 impl PlayerState {
@@ -156,6 +165,19 @@ impl PlayerState {
         )?;
 
         graph.named_native_function(
+            "new_buff",
+            |kind: &str,
+             source: &str,
+             total_duration_ms: i32,
+             remaining_duration_ms: i32| Buff {
+                kind: kind.to_string(),
+                source: source.to_string(),
+                total_duration_ms,
+                remaining_duration_ms,
+            },
+        )?;
+
+        graph.named_native_function(
             "new_player",
             |position: &Vector<f32>,
              facing: &FacingDirection,
@@ -178,7 +200,8 @@ impl PlayerState {
              max_health: i32,
              is_eating: bool,
              num_unread_mail: usize,
-             friendships: &Vec<Friendship>| {
+             friendships: &Vec<Friendship>,
+             buffs: &Vec<Buff>| {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -202,6 +225,7 @@ impl PlayerState {
                     is_eating,
                     num_unread_mail,
                     friendships: friendships.clone(),
+                    buffs: buffs.clone(),
                 }
             },
         )?;
@@ -236,6 +260,38 @@ impl PlayerState {
                             gifts_this_week,
                         )
                     })
+                    .collect()
+            }
+
+            fn read_buffs() {
+                let dict = StardewValley.Game1
+                    ._player
+                    .buffs
+                    .AppliedBuffs
+                    .as::<
+                       "System.Collections.Generic.Dictionary`2"
+                         <System.String, StardewValley.Buff>
+                    >();
+
+                let num_entries = dict
+                    ._count
+                    .prim_cast::<usize>();
+
+                (0..num_entries)
+                    .map(|i| dict._entries[i])
+                    .map(|entry| {
+                        let kind = entry.value.id.read_string();
+                        let source = entry.value.source.read_string();
+                        let total_duration_ms = entry.value.totalMillisecondsDuration;
+                        let remaining_duration_ms = entry.value.millisecondsDuration;
+                        new_buff(
+                            kind,
+                            source,
+                            total_duration_ms,
+                            remaining_duration_ms,
+                        )
+                    })
+                    .filter(|buff| buff.is_some())
                     .collect()
             }
 
@@ -344,6 +400,7 @@ impl PlayerState {
                     .clubCooldown;
 
                 let friendships = read_friendships();
+                let buffs = read_buffs();
 
                 new_player(
                     position,
@@ -368,6 +425,7 @@ impl PlayerState {
                     is_eating,
                     num_unread_mail,
                     friendships,
+                    buffs,
                 )
             }
         })?;
