@@ -482,7 +482,8 @@ pub struct Character {
     /// The health of the character.  Only present for monsters.
     pub health: Option<i32>,
 
-    /// If the character ignores collisions.  True for flying monsters, false for other monster types
+    /// If the character ignores collisions.  True for flying
+    /// monsters, false for other monster types
     pub ignores_collisions: bool,
 
     pub is_invisible_duggy: bool,
@@ -1640,7 +1641,7 @@ impl Location {
 
                         let health = monster.health.value;
                         let ignores_collisions = if monster.is_some() {
-                            !monster.isGlider.value
+                            monster.isGlider.value
                         } else {
                             false
                         };
