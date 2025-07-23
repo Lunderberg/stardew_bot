@@ -347,6 +347,11 @@ impl InventoryGoal {
         let player_contents: HashMap<ItemId, usize> = inventory.to_hash_map();
         let player_has_empty_slot = inventory.empty_slot().is_some();
 
+        let chest_contents: HashMap<&ItemId, usize> = iter_chest_items()?
+            .map(|(_, _, item)| (&item.id, item.count))
+            .into_grouping_map()
+            .sum();
+
         let preferred_chest: HashMap<ItemId, Vector<isize>> = iter_chests()?
             .flat_map(|(tile, chest)| {
                 let has_empty_slot = chest.empty_slot().is_some();
@@ -369,6 +374,16 @@ impl InventoryGoal {
                 self.bounds
                     .get(&item.id)
                     .map(|bounds| !matches!(bounds.max, Some(0)))
+                    .unwrap_or(true)
+            })
+            .filter(|item| {
+                reserved_items
+                    .get(&item.id)
+                    .map(|&num_reserved| {
+                        let num_stored =
+                            chest_contents.get(&item.id).cloned().unwrap_or(0);
+                        num_stored >= num_reserved
+                    })
                     .unwrap_or(true)
             })
             .filter_map(|item| item.gp_per_stamina().map(|gp| (gp, item)))
