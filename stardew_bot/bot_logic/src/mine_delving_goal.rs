@@ -17,8 +17,7 @@ use super::{
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    AttackNearbyEnemy, CraftItemGoal, LocationExt as _, MenuCloser,
-    OrganizeInventoryGoal,
+    AttackNearbyEnemy, LocationExt as _, MenuCloser, OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal;
@@ -320,13 +319,10 @@ impl MineDelvingGoal {
 
         let prepare = InventoryGoal::current()
             .room("Mine")
-            .with(ItemId::STONE.with_count(25))
-            .with(ItemId::COPPER_ORE.with_count(20));
-        if !prepare.has_sufficient_stored(game_state)? {
-            return Ok(None);
-        }
+            .with(ItemId::FURNACE)
+            .craft_missing(true);
         if prepare.is_completed(game_state)? {
-            Ok(Some(CraftItemGoal::new(ItemId::FURNACE).into()))
+            return Ok(None);
         } else {
             Ok(Some(prepare.into()))
         }

@@ -301,7 +301,7 @@ impl InventoryGoal {
         let num_in_inventory =
             game_state.player.inventory.count_item(&next_crafting);
 
-        let subgoal = InventoryGoal::current().with(
+        let subgoal = InventoryGoal::current().room(self.room.clone()).with(
             next_crafting.id.iter_recipe().into_iter().flatten().map(
                 |(ingredient, count)| {
                     ingredient.with_count(

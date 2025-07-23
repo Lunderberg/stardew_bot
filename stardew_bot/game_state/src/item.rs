@@ -305,6 +305,12 @@ impl ItemId {
                 Some((ItemId::CORAL, 3)),
                 Some((ItemId::SEA_URCHIN, 1)),
             ]
+        } else if self == &ItemId::FURNACE {
+            [
+                Some((ItemId::STONE, 25)),
+                Some((ItemId::COPPER_ORE, 20)),
+                None,
+            ]
         } else {
             return None;
         };
