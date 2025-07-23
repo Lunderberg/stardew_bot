@@ -6,7 +6,7 @@ use std::{
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction, MenuCloser};
+use crate::{bot_logic::LogicStack, Error, GameAction, MenuCloser};
 use game_state::{GameState, Item, ItemId, ItemSet, Location, WeaponKind};
 
 use super::{
@@ -882,8 +882,10 @@ impl BotGoal for InventoryGoal {
         let Some(chest_menu) = &game_state.chest_menu else {
             // There is no chest open.  Open the chest for the next
             // transfer.
-            let goal = ActivateTile::new(self.room.clone(), transfer.chest);
-            return Ok(goal.into());
+            let stack = LogicStack::new()
+                .then(ActivateTile::new(self.room.clone(), transfer.chest))
+                .cancel_if(|game_state| game_state.any_menu_open());
+            return Ok(stack.into());
         };
 
         if chest_menu.chest_tile != Some(transfer.chest) {
