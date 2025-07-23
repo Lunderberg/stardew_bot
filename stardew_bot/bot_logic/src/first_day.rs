@@ -1,8 +1,13 @@
+use std::collections::HashMap;
+
 use dotnet_debugger::env_var_flag;
 use geometry::Vector;
+use itertools::Itertools as _;
 
 use crate::{bot_logic::BotInterrupt, Error, GameAction, GiveGiftGoal};
-use game_state::{GameState, ItemCategory, ItemId, ObjectKind};
+use game_state::{
+    GameState, ItemCategory, ItemId, ObjectKind, Quality, Season,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
@@ -174,31 +179,79 @@ impl BotGoal for FirstDay {
 
         // Includes buying seeds as necessary.  Which, given that
         // today is the first day, is quite necessary.
-        let mut plant_crops = PlantCropsGoal::new(
-            [
-                ItemId::PARSNIP_SEEDS.with_count(60),
-                ItemId::CAULIFLOWER_SEEDS.with_count(2),
-            ]
-            .into_iter()
-            .chain(
-                game_state
-                    .player
-                    .inventory
-                    .iter_items()
-                    .filter(|item| {
-                        item.id != ItemId::PARSNIP_SEEDS
-                            && item.id != ItemId::CAULIFLOWER_SEEDS
-                            && item.id != ItemId::MIXED_SEEDS
+        let iter_seeds = {
+            let mut seeds: HashMap<ItemId, usize> = HashMap::new();
+
+            game_state
+                .player
+                .inventory
+                .iter_items()
+                .filter(|item| {
+                    matches!(item.category, Some(ItemCategory::Seed))
+                        && !item.id.is_tree_seed()
+                })
+                .for_each(|item| {
+                    if let Some(count) = seeds.get_mut(&item.id) {
+                        *count += item.count;
+                    } else {
+                        seeds.insert(item.id.clone(), item.count);
+                    }
+                });
+
+            let crop_to_seed: HashMap<_, _> = game_state
+                .statics
+                .crop_data
+                .iter()
+                .filter(|(_, crop_data)| {
+                    crop_data
+                        .seasons
+                        .iter()
+                        .any(|season| matches!(season, Season::Spring))
+                })
+                .map(|(seed, crop_data)| (&crop_data.harvest_item, seed))
+                .collect();
+
+            let iter_bundle_seeds = game_state
+                .iter_bundle_items()?
+                .filter(|(name, _, _)| {
+                    name == &"Spring Crops" || name == &"Quality Crops"
+                })
+                .filter_map(|(_, id, count)| -> Option<(&ItemId, usize)> {
+                    let key = if id.quality.is_normal() {
+                        id
+                    } else {
+                        &id.clone().with_quality(Quality::Normal)
+                    };
+                    crop_to_seed.get(key).map(|seed| {
+                        let count_with_crows =
+                            ((count as f32) * 1.4).ceil() as usize;
+                        (*seed, count_with_crows)
                     })
-                    .filter(|item| {
-                        matches!(item.category, Some(ItemCategory::Seed))
-                    })
-                    .filter(|item| !item.id.is_tree_seed())
-                    .cloned(),
-            ),
-        )
-        .opportunistic_clay_farming(10);
-        if in_game_time < 1700 && !plant_crops.is_completed(game_state)? {
+                })
+                .into_grouping_map()
+                .sum()
+                .into_iter();
+
+            std::iter::empty::<(&ItemId, usize)>()
+                .chain([(&ItemId::PARSNIP_SEEDS, 52)])
+                .chain(iter_bundle_seeds)
+                .for_each(|(seed, count)| {
+                    if let Some(to_plant) = seeds.get_mut(seed) {
+                        *to_plant = (*to_plant).max(count);
+                    } else {
+                        seeds.insert(seed.clone(), count);
+                    }
+                });
+
+            seeds
+                .into_iter()
+                .filter(|(id, _)| id != &ItemId::MIXED_SEEDS)
+                .map(|(id, count)| id.clone().with_count(count))
+                .sorted_by_key(|item| item.count)
+        };
+        let mut plant_crops =
+            PlantCropsGoal::new(iter_seeds).opportunistic_clay_farming(10);
+        if !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
         }
 
@@ -209,10 +262,7 @@ impl BotGoal for FirstDay {
         };
 
         if should_ship_clay(game_state) {
-            let goal = ShipItemGoal::new([
-                ItemId::CLAY.with_count(0),
-                ItemId::DAFFODIL.with_count(0),
-            ]);
+            let goal = ShipItemGoal::new([ItemId::CLAY.with_count(0)]);
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
