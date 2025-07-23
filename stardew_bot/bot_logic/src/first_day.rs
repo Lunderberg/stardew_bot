@@ -5,9 +5,7 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{bot_logic::BotInterrupt, Error, GameAction, GiveGiftGoal};
-use game_state::{
-    GameState, ItemCategory, ItemId, ObjectKind, Quality, Season,
-};
+use game_state::{GameState, ItemCategory, ItemId, ObjectKind, Season};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
@@ -214,26 +212,23 @@ impl BotGoal for FirstDay {
             let iter_bundle_seeds = game_state
                 .iter_bundle_items()?
                 .filter(|(name, _, _)| {
-                    name == &"Spring Crops" || name == &"Quality Crops"
+                    // While we could also buy the seeds for Quality
+                    // Crops, the seeds for anything other than
+                    // parsnips would be too expensive on Day1.  The
+                    // seeds for Quality Crops should be
+                    // purchased/planted later in spring, when money
+                    // isn't as tight.
+                    name == &"Spring Crops"
                 })
-                .filter_map(|(_, id, count)| -> Option<(&ItemId, usize)> {
-                    let key = if id.quality.is_normal() {
-                        id
-                    } else {
-                        &id.clone().with_quality(Quality::Normal)
-                    };
-                    crop_to_seed.get(key).map(|seed| {
-                        let count_with_crows =
-                            ((count as f32) * 1.4).ceil() as usize;
-                        (*seed, count_with_crows)
-                    })
-                })
-                .into_grouping_map()
-                .sum()
-                .into_iter();
+                .filter_map(|(_, id, _)| -> Option<(&ItemId, usize)> {
+                    // Buying two seeds of each type gives a spare in
+                    // case the crows eat one.  Until Day6, we can't
+                    // craft scarecrows to protect the crops.
+                    crop_to_seed.get(id).map(|seed| (*seed, 2))
+                });
 
             std::iter::empty::<(&ItemId, usize)>()
-                .chain([(&ItemId::PARSNIP_SEEDS, 52)])
+                .chain([(&ItemId::PARSNIP_SEEDS, 60)])
                 .chain(iter_bundle_seeds)
                 .for_each(|(seed, count)| {
                     if let Some(to_plant) = seeds.get_mut(seed) {
