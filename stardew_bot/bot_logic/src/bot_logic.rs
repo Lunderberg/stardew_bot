@@ -565,12 +565,13 @@ impl BotLogic {
                 .take_while(|(_, item)| {
                     !matches!(item, LogicStackItem::PreventInterrupt)
                 })
-                .find(|(_, item)| match item {
+                .filter(|(_, item)| match item {
                     LogicStackItem::CancelIf(cond) => cond(game_state),
                     LogicStackItem::PreventInterrupt
                     | LogicStackItem::Goal(_)
                     | LogicStackItem::Interrupt { .. } => false,
                 })
+                .last()
                 .map(|(i, _)| i);
             if let Some(cancellation) = opt_cancellation {
                 if self.verbose {
