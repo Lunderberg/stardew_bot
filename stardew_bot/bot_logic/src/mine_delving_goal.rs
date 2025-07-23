@@ -1059,12 +1059,18 @@ impl BotInterrupt for MineNearbyOre {
         game_state: &GameState,
     ) -> Result<Option<super::bot_logic::LogicStack>, Error> {
         let loc = game_state.current_room()?;
-        if loc.mineshaft_details.is_none() {
+        let Some(level) = loc
+            .mineshaft_details
+            .as_ref()
+            .map(|mineshaft| mineshaft.mineshaft_level)
+        else {
             return Ok(None);
-        }
+        };
+
+        let level_kind = (level / 40 + 1) as f32;
 
         let player_tile = game_state.player.tile();
-        let stone_clearing_cost = 3.0;
+        let stone_clearing_cost = 3.0 * level_kind;
         let pathfinding = loc
             .pathfinding(&game_state.statics)
             .breakable_clearing_cost(200)
@@ -1103,7 +1109,7 @@ impl BotInterrupt for MineNearbyOre {
                             return None;
                         };
 
-                        (multiplier, -stone_clearing_cost)
+                        (multiplier * level_kind, -stone_clearing_cost)
                     }
                     ObjectKind::MineCartCoal => (3.0, 0.0),
 
