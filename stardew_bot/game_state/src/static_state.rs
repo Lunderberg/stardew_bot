@@ -67,16 +67,26 @@ struct RawObjectData {
 #[derive(Debug, Clone)]
 pub struct CropData {
     pub harvest_item: ItemId,
+    pub seasons: Vec<Season>,
     pub days_to_grow: u32,
     pub uses_trellis: bool,
     pub xp_per_harvest: i32,
     pub harvest_with_scythe: bool,
 }
 
+#[derive(RustNativeObject, Debug, Clone, Copy)]
+pub enum Season {
+    Spring,
+    Summer,
+    Fall,
+    Winter,
+}
+
 #[derive(RustNativeObject, Debug, Clone)]
 struct RawCropData {
     seed_item: ItemId,
     harvest_item: ItemId,
+    seasons: Vec<Season>,
     days_to_grow: u32,
     uses_trellis: bool,
     harvest_with_scythe: bool,
@@ -164,18 +174,31 @@ impl StaticState {
             },
         )?;
 
+        graph.named_native_function("new_season", |value: i32| -> Season {
+            match value {
+                0 => Season::Spring,
+                1 => Season::Summer,
+                2 => Season::Fall,
+                3 => Season::Winter,
+                _ => todo!("Handle invalid season enum: '{value}'"),
+            }
+        })?;
+
         graph.named_native_function(
             "new_crop_data",
             |seed_item: &str,
              harvest_item: &str,
+             seasons: &Vec<Season>,
              days_to_grow: i32,
              uses_trellis: bool,
              harvest_with_scythe: bool| {
                 let seed_item = ItemId::new(format!("(O){seed_item}"));
                 let harvest_item = ItemId::new(format!("(O){harvest_item}"));
+
                 RawCropData {
                     seed_item,
                     harvest_item,
+                    seasons: seasons.clone(),
                     days_to_grow: days_to_grow as u32,
                     uses_trellis,
                     harvest_with_scythe,
@@ -311,6 +334,7 @@ impl StaticState {
 
                         let crop_data = CropData {
                             harvest_item,
+                            seasons: crop.seasons.clone(),
                             days_to_grow: crop.days_to_grow,
                             uses_trellis: crop.uses_trellis,
                             xp_per_harvest,
@@ -434,6 +458,17 @@ impl StaticState {
                             let seed_item = entry.key.read_string();
                             let harvest_item = entry.value.HarvestItemId.read_string();
 
+                            let seasons = {
+                                let list = entry.value.Seasons;
+                                let num_seasons = list
+                                    ._size
+                                    .prim_cast::<usize>();
+                                (0..num_seasons)
+                                    .map(|i| list._items[i])
+                                    .map(|season| new_season(season.value__))
+                                    .collect()
+                            };
+
                             let days_to_grow = {
                                 let phases = entry.value.DaysInPhase;
                                 let num_phases = phases
@@ -452,6 +487,7 @@ impl StaticState {
                             new_crop_data(
                                 seed_item,
                                 harvest_item,
+                                seasons,
                                 days_to_grow,
                                 uses_trellis,
                                 harvest_with_scythe,
