@@ -461,10 +461,11 @@ impl<'a> Pathfinding<'a> {
         })
     }
 
-    pub fn path_between(
+    fn path_between_points_with_tolerance(
         &self,
         initial: Vector<isize>,
         goal: impl TileSet,
+        tolerance: isize,
     ) -> Result<Vec<Vector<isize>>, Error> {
         let cost_map = self.movement_cost();
 
@@ -492,6 +493,8 @@ impl<'a> Pathfinding<'a> {
         // locations to adjacent screens).
         let best_tile_offset = Vector::<isize>::new(1, 1);
 
+        let mut opt_final_tile: Option<Vector<isize>> = None;
+
         while let Some(visiting) = to_visit.pop_first() {
             assert!(
                 best.in_bounds(visiting.tile + best_tile_offset),
@@ -509,6 +512,13 @@ impl<'a> Pathfinding<'a> {
             let tile = visiting.tile;
             best[tile + best_tile_offset] =
                 Some((visiting.dist_plus_heuristic, visiting.dir));
+
+            if goal.iter().any(|goal_tile| {
+                visiting.tile.manhattan_dist(goal_tile) <= tolerance
+            }) {
+                opt_final_tile = Some(visiting.tile);
+                break;
+            }
 
             let iter_dir = Direction::iter()
                 .filter(|_| visiting.should_propagate)
@@ -544,8 +554,8 @@ impl<'a> Pathfinding<'a> {
                     .unwrap_or(0);
 
                 let new_dist = visiting.dist + tile_dist + additional_cost;
-                let new_dist_plus_heuristic =
-                    new_dist + get_heuristic(new_tile);
+                let new_heuristic = get_heuristic(new_tile);
+                let new_dist_plus_heuristic = new_dist + new_heuristic;
 
                 let is_best = best[new_tile + best_tile_offset]
                     .map(|(prev, _)| new_dist_plus_heuristic < prev)
@@ -565,30 +575,17 @@ impl<'a> Pathfinding<'a> {
                     });
                 }
             }
-
-            let is_finished = goal.iter().any(|goal_tile| {
-                best.in_bounds(goal_tile + best_tile_offset)
-                    && best[goal_tile + best_tile_offset].is_some()
-            });
-            if is_finished {
-                break;
-            }
         }
 
-        let goal_tile = goal
-            .iter()
-            .find(|&goal_tile| {
-                best.in_bounds(goal_tile + best_tile_offset)
-                    && best[goal_tile + best_tile_offset].is_some()
-            })
-            .ok_or_else(|| Error::NoRouteToTargets {
+        let final_tile =
+            opt_final_tile.ok_or_else(|| Error::NoRouteToTargets {
                 room: self.location.name.clone(),
                 start: initial,
                 goals: goal.iter().collect(),
             })?;
 
         let mut path: Vec<_> =
-            std::iter::successors(Some(goal_tile), |&path_tile| {
+            std::iter::successors(Some(final_tile), |&path_tile| {
                 let dir = best[path_tile + best_tile_offset]?.1?;
                 Some(path_tile - dir.offset())
             })
@@ -597,6 +594,22 @@ impl<'a> Pathfinding<'a> {
         path.reverse();
 
         Ok(path)
+    }
+
+    pub fn path_between(
+        &self,
+        initial: Vector<isize>,
+        goal: impl TileSet,
+    ) -> Result<Vec<Vector<isize>>, Error> {
+        self.path_between_points_with_tolerance(initial, goal, 0)
+    }
+
+    pub fn path_to_adjacent_tile(
+        &self,
+        initial: Vector<isize>,
+        goal: impl TileSet,
+    ) -> Result<Vec<Vector<isize>>, Error> {
+        self.path_between_points_with_tolerance(initial, goal, 1)
     }
 
     fn iter_dijkstra_entries(

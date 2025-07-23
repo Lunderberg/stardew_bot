@@ -831,7 +831,7 @@ impl BotGoal for MineSingleLevel {
 
         let path = pathfinding
             .allow_diagonal(false)
-            .path_between(player_tile, target_tile)?;
+            .path_to_adjacent_tile(player_tile, target_tile)?;
 
         let opt_blocked_tile_in_path = path
             .into_iter()
@@ -1057,7 +1057,7 @@ impl BotInterrupt for MineNearbyOre {
     fn check(
         &mut self,
         game_state: &GameState,
-    ) -> Result<Option<super::bot_logic::LogicStack>, Error> {
+    ) -> Result<Option<LogicStack>, Error> {
         let loc = game_state.current_room()?;
         let Some(level) = loc
             .mineshaft_details
@@ -1182,7 +1182,7 @@ impl BotInterrupt for MineNearbyOre {
 
         let path = pathfinding
             .allow_diagonal(false)
-            .path_between(player_tile, target_tile)?;
+            .path_to_adjacent_tile(player_tile, target_tile)?;
 
         let clearable_tiles = game_state.collect_clearable_tiles()?;
         let opt_blocked_tile_in_path = path
