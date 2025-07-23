@@ -123,6 +123,12 @@ impl BotGoal for UseItemOnTile {
                             ItemCategory::SkillBook => false,
                             _ => true,
                         })
+                        .unwrap_or(true)
+                    && game_state
+                        .statics
+                        .crop_data
+                        .get(&self.item.id)
+                        .map(|crop| !crop.uses_trellis)
                         .unwrap_or(true));
 
         let player_pos = player.center_pos();
