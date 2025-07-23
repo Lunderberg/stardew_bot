@@ -3,7 +3,10 @@ use std::collections::{HashMap, HashSet};
 use geometry::Vector;
 use itertools::{Either, Itertools as _};
 
-use crate::{Error, MaintainStaminaGoal, ObjectKindExt as _, UseItemOnTile};
+use crate::{
+    ClearTreeGoal, Error, MaintainStaminaGoal, ObjectKindExt as _,
+    UseItemOnTile,
+};
 use game_state::{
     CropPhase, GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind,
     Quality, SeededRng, StaticState, TileMap,
@@ -795,6 +798,13 @@ impl BotGoal for PlantCropsGoal {
             if item == ItemId::WATERING_CAN {
                 let goal = FillWateringCan::if_empty();
                 if !goal.is_completed(game_state) {
+                    return Ok(goal.into());
+                }
+            }
+
+            if item == ItemId::AXE {
+                let goal = ClearTreeGoal::new(tile);
+                if !goal.is_completed(game_state)? {
                     return Ok(goal.into());
                 }
             }

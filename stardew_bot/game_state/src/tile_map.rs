@@ -168,6 +168,10 @@ impl TileMap<bool> {
         self.get(index).cloned().unwrap_or(false)
     }
 
+    pub fn is_unset(&self, index: impl AsGridPos) -> bool {
+        self.get(index).map(|value| !*value).unwrap_or(false)
+    }
+
     pub fn dilate(&self, structure: &TileMap<bool>) -> Self {
         let new_shape = Vector::new(
             self.width() + structure.width() - 1,

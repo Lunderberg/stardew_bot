@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{Error, MovementGoal};
+use crate::{ClearTreeGoal, Error, MovementGoal};
 use game_state::{GameState, ItemId, Object, ObjectKind, Tree, TreeKind};
 
 use super::{
@@ -355,12 +355,8 @@ impl BotGoal for ClearFarmGoal {
                 .flatten()
                 .cloned()
                 .unwrap_or(10000);
-            let from_player = steps_from_player
-                .get(tile)
-                .map(|opt| opt.as_ref())
-                .flatten()
-                .cloned()
-                .unwrap_or(10000);
+            let from_player =
+                steps_from_player.get_opt(tile).cloned().unwrap_or(10000);
             from_target * weight_target + from_player * weight_player
         };
         let min_total_steps = clearable_tiles
@@ -369,26 +365,29 @@ impl BotGoal for ClearFarmGoal {
             .min()
             .expect("Guarded by earlier clearable_tiles.is_empty() check");
 
-        let opt_goal = Self::pathfinding(game_state)?
+        let opt_goal_tile = Self::pathfinding(game_state)?
             .include_border(true)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
             .filter(|tile| next_clear_heuristic(*tile) <= min_total_steps)
-            .find_map(|tile| {
-                clearable_tiles.get(&tile).map(|obj| {
-                    let tool = obj.kind.get_tool().expect(
-                        "Lookup should only contain tiles \
-                         that can be cleared by using a tool.",
-                    );
-                    UseItemOnTile::new(tool, "Farm", tile)
-                })
-            });
-
-        if let Some(goal) = opt_goal {
-            Ok(goal.into())
-        } else {
+            .find(|tile| clearable_tiles.contains_key(tile));
+        let Some(goal_tile) = opt_goal_tile else {
             // There's still clutter on the farm, but we can't reach it.
-            Ok(BotGoalResult::Completed)
+            return Ok(BotGoalResult::Completed);
+        };
+
+        let obj = clearable_tiles
+            .get(&goal_tile)
+            .expect("Protected by clearable_tiles.contains_key");
+        let tool = obj.kind.get_tool().expect(
+            "Lookup should only contain tiles \
+                         that can be cleared by using a tool.",
+        );
+
+        if is_grown_tree(obj) {
+            Ok(ClearTreeGoal::new(goal_tile).into())
+        } else {
+            Ok(UseItemOnTile::new(tool, "Farm", goal_tile).into())
         }
     }
 }

@@ -66,6 +66,9 @@ pub use maintain_stamina_goal::*;
 mod clear_farm_goal;
 pub use clear_farm_goal::*;
 
+mod clear_tree_goal;
+pub use clear_tree_goal::*;
+
 mod fill_watering_can;
 pub use fill_watering_can::*;
 
