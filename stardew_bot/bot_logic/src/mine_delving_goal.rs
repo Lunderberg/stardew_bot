@@ -790,24 +790,42 @@ impl BotGoal for MineSingleLevel {
             return Ok(goal.into());
         } else {
             let predictor = StonePredictor::new(game_state)?;
-            let ladder_stones: HashSet<Vector<isize>> = current_room
-                .objects
-                .iter()
-                .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
-                .map(|obj| obj.tile)
+
+            let iter_stones = || {
+                current_room
+                    .objects
+                    .iter()
+                    .filter(|obj| matches!(obj.kind, ObjectKind::Stone(_)))
+                    .map(|obj| obj.tile)
+            };
+
+            let ladder_stones: HashSet<Vector<isize>> = iter_stones()
                 .filter(|tile| predictor.will_produce_ladder(*tile))
                 .collect();
+
+            let preferred_stones = if ladder_stones.is_empty() {
+                // No stone will produce a ladder if mined next.
+                // Therefore, prefer to mine stones that will have a
+                // high RNG value when rolling for the ladder.
+                // Eventually, the `1/num_stones` term will allow the
+                // ladder chance to exceed the RNG value for one of
+                // the stones.  This will occur faster if we don't
+                // break those low-RNG-roll stones ahead of time.
+                let num_stones = iter_stones().count();
+                iter_stones()
+                    .map(|tile| (tile, predictor.ladder_rng_roll(tile)))
+                    .sorted_by(|(_, a), (_, b)| b.total_cmp(a))
+                    .map(|(tile, _)| tile)
+                    .take((num_stones as f32 * 0.8).ceil() as usize)
+                    .collect()
+            } else {
+                ladder_stones
+            };
 
             pathfinding
                 .iter_dijkstra(player_tile)
                 .map(|(tile, _)| tile)
-                .find(|tile| {
-                    if ladder_stones.is_empty() {
-                        clearable_tiles.contains_key(&tile)
-                    } else {
-                        ladder_stones.contains(tile)
-                    }
-                })
+                .find(|tile| preferred_stones.contains(tile))
                 .ok_or(Error::MineLadderNotFound)?
         };
 
@@ -937,9 +955,13 @@ impl StonePredictor {
         rng
     }
 
-    pub fn will_produce_ladder(&self, tile: Vector<isize>) -> bool {
+    pub fn ladder_rng_roll(&self, tile: Vector<isize>) -> f32 {
         let mut rng = self.generate_rng(tile);
-        rng.rand_float() < self.ladder_chance()
+        rng.rand_float()
+    }
+
+    pub fn will_produce_ladder(&self, tile: Vector<isize>) -> bool {
+        self.ladder_rng_roll(tile) < self.ladder_chance()
     }
 
     pub fn drop_from_stone(
