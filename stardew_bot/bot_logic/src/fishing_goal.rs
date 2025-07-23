@@ -544,20 +544,27 @@ impl BotGoal for FishOnceGoal {
         } else if fishing.is_fishing
             && (fishing.time_until_fishing_bite
                 - fishing.fishing_bite_accumulator
-                > 20000.0)
+                > 15000.0)
         {
             // Optimization for the BambooRod.  Even though I haven't
             // found a good way to manipulate `Game1.random` calls, I
             // can still view the results.  For the BambooRod, the
             // time to wait for a fish will be between 0.5 and 30
-            // seconds.  If the waiting time is longer than 20
-            // seconds, we may as well re-roll instead of waiting.
+            // seconds.  If the waiting time is too long seconds, we
+            // may as well re-roll instead of waiting.
             //
             // This only impacts the fishing with the BambooRod,
             // because use of any bait will decrease the maximum wait
             // time from 30 seconds to 15 seconds.
+            //
+            // Even though we don't go through the minigame, set the
+            // `started_fishing` flag to true, so that the
+            // `FishOnceGoal` will return control to the
+            // `FishingGoal`.  (e.g.  In case stamina recovery is
+            // needed before the re-cast of the fishing rod.)
+            self.started_fishing = true;
             actions
-                .do_action(GameAction::ReleaseTool)
+                .do_action(GameAction::LeftClick)
                 .annotate("Skip fish with long wait");
         } else if fishing.is_fishing {
             actions
