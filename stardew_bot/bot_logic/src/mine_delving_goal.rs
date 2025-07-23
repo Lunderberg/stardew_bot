@@ -461,7 +461,9 @@ impl MineDelvingGoal {
             if !cleanup.is_completed(game_state) {
                 return Ok(cleanup.into());
             }
-            return Ok(prepare.into());
+            return Ok(prepare
+                .cancel_if(|game_state| game_state.player.room_name != "Mine")
+                .into());
         }
 
         let elevator_depth =
