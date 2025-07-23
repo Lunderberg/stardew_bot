@@ -64,7 +64,7 @@ impl BotGoal for FillWateringCan {
         let player_tile = game_state.player.tile();
 
         let closest_water = loc
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .include_border(true)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)

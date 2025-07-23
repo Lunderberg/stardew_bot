@@ -5,7 +5,7 @@ use itertools::Itertools as _;
 
 use game_state::{
     BundleIngredient, GameState, Item, ItemCategory, ItemId, Location,
-    ObjectKind, ResourceClumpKind, ShopMenu,
+    ObjectKind, ResourceClumpKind, ShopMenu, StaticState,
 };
 
 use crate::{
@@ -208,11 +208,11 @@ pub trait LocationExt {
         opt_weapon: Option<&ItemId>,
     ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error>;
 
-    fn pathfinding(&self) -> Pathfinding<'_>;
+    fn pathfinding<'a>(&'a self, statics: &'a StaticState) -> Pathfinding<'a>;
 }
 impl LocationExt for Location {
-    fn pathfinding(&self) -> Pathfinding<'_> {
-        Pathfinding::new(self)
+    fn pathfinding<'a>(&'a self, statics: &'a StaticState) -> Pathfinding<'a> {
+        Pathfinding::new(self, statics)
     }
 
     fn generate_tile_lookup(&self) -> HashMap<Vector<isize>, &ObjectKind> {

@@ -127,7 +127,7 @@ impl ClayFarmingGoal {
         }
 
         let beach = game_state.get_room("Beach").ok()?;
-        let pathfinding = beach.pathfinding();
+        let pathfinding = beach.pathfinding(&game_state.statics);
 
         let player_tile = game_state.player.tile();
         let player_distance = pathfinding.distances(player_tile);
@@ -258,7 +258,10 @@ impl BotGoal for ClayFarmingGoal {
             const TILES_TO_AVOID_PICKAXE: u64 = 10;
 
             let mut clay_with_pickaxe: Option<(u64, Vector<isize>)> = None;
-            for (tile, dist) in beach.pathfinding().iter_dijkstra(player_tile) {
+            for (tile, dist) in beach
+                .pathfinding(&game_state.statics)
+                .iter_dijkstra(player_tile)
+            {
                 if clay_tiles.contains(&tile) {
                     if has_hoe_dirt(tile) {
                         // This tile will produce clay, but would

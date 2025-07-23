@@ -99,7 +99,7 @@ impl BotInterrupt for ExpandStorageInterrupt {
             return Ok(None);
         }
 
-        let walkable = room.pathfinding().walkable();
+        let walkable = room.pathfinding(&game_state.statics).walkable();
         let Some(tile) = offsets
             .iter()
             .map(|offset| origin + *offset)

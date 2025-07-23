@@ -110,7 +110,7 @@ impl CollectNearbyItems {
 
         let reachable = game_state
             .current_room()?
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .include_border(true)
             .reachable(game_state.player.tile());
         if !reachable.is_set(cluster_centroid.map(|x| x.round() as isize)) {

@@ -277,7 +277,7 @@ impl MineDelvingGoal {
 
         let mine_elevator = game_state.get_mine_elevator()?;
         let mines = game_state.current_room()?;
-        let walkable = mines.pathfinding().walkable();
+        let walkable = mines.pathfinding(&game_state.statics).walkable();
 
         let opt_build_next = OFFSETS_ELEVATOR_TO_FURNACE
             .iter()
@@ -714,7 +714,7 @@ impl BotGoal for MineSingleLevel {
         }
 
         let pathfinding = current_room
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .include_border(true)
             .mine_boulder_clearing_cost(10000)
             .stone_clearing_cost(3000)
@@ -1044,7 +1044,7 @@ impl BotInterrupt for MineNearbyOre {
         let player_tile = game_state.player.tile();
         let stone_clearing_cost = 3.0;
         let pathfinding = loc
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .breakable_clearing_cost(200)
             .stone_clearing_cost((1000.0 * stone_clearing_cost) as u64)
             .include_border(true);

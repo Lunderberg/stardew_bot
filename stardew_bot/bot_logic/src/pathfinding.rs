@@ -1,10 +1,13 @@
 use geometry::{Direction, TileSet, Vector};
 
 use crate::Error;
-use game_state::{Location, ObjectKind, ResourceClumpKind, TileMap};
+use game_state::{
+    Location, ObjectKind, ResourceClumpKind, StaticState, TileMap,
+};
 
 #[derive(Debug, Clone)]
 pub struct Pathfinding<'a> {
+    statics: &'a StaticState,
     location: &'a Location,
 
     allow_diagonal: bool,
@@ -132,9 +135,10 @@ fn heuristic_between_points(a: Vector<isize>, b: Vector<isize>) -> u64 {
 }
 
 impl<'a> Pathfinding<'a> {
-    pub fn new(location: &'a Location) -> Self {
+    pub fn new(location: &'a Location, statics: &'a StaticState) -> Self {
         Pathfinding {
             location,
+            statics,
             allow_diagonal: true,
             clear_stone: None,
             clear_boulders: None,
@@ -307,7 +311,7 @@ impl<'a> Pathfinding<'a> {
                 | ObjectKind::Sprinkler(_)
                 | ObjectKind::Scarecrow => self.clear_craftables,
 
-                other if other.is_walkable() => {
+                other if other.is_walkable(self.statics) => {
                     // Can walk on this tile without penalty (e.g. a
                     // rug on the floor)
                     return None;

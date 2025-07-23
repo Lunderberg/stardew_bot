@@ -9,7 +9,7 @@ use dotnet_debugger::{
 use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::Error;
+use crate::{Error, StaticState};
 
 use super::{Inventory, ItemCategory, ItemId, TileMap};
 
@@ -2270,7 +2270,7 @@ impl Location {
             .flat_map(|building| building.iter_tiles())
     }
 
-    pub fn collect_clear_tiles(&self) -> TileMap<bool> {
+    pub fn collect_clear_tiles(&self, statics: &StaticState) -> TileMap<bool> {
         let mut map = self.blocked.map(|b| !b);
 
         let iter_water = self.iter_water_tiles();
@@ -2285,7 +2285,7 @@ impl Location {
         let iter_objects = self
             .objects
             .iter()
-            .filter(|obj| !obj.kind.is_walkable())
+            .filter(|obj| !obj.kind.is_walkable(statics))
             .map(|obj| obj.tile);
 
         let iter_furniture = self
@@ -2426,7 +2426,7 @@ impl Location {
 }
 
 impl ObjectKind {
-    pub fn is_walkable(&self) -> bool {
+    pub fn is_walkable(&self, statics: &StaticState) -> bool {
         match self {
             ObjectKind::Stone(_)
             | ObjectKind::Mineral(_)
@@ -2437,11 +2437,12 @@ impl ObjectKind {
             ObjectKind::Grass => true,
             ObjectKind::FruitTree(_) => false,
             ObjectKind::Tree(tree) => tree.growth_stage == 0,
-            ObjectKind::HoeDirt(_) => {
-                // TODO: Check for crops that use a trellis, which
-                // cannot be walked over.
-                true
-            }
+            ObjectKind::HoeDirt(hoe_dirt) => hoe_dirt
+                .crop
+                .as_ref()
+                .and_then(|crop| statics.crop_data.get(&crop.seed))
+                .map(|crop_data| !crop_data.uses_trellis)
+                .unwrap_or(true),
             ObjectKind::Torch => true,
             ObjectKind::ArtifactSpot => true,
             ObjectKind::SeedSpot => true,

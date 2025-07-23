@@ -150,7 +150,10 @@ impl BotGoal for StepCountForLuck {
             return Ok(BotGoalResult::Completed);
         }
 
-        let walkable = game_state.current_room()?.pathfinding().walkable();
+        let walkable = game_state
+            .current_room()?
+            .pathfinding(&game_state.statics)
+            .walkable();
 
         let player_tile = game_state.player.tile();
         let blocked_dir = Direction::iter_cardinal()

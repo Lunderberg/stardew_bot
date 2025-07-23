@@ -136,7 +136,8 @@ impl ForagingGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let reachable = farm.pathfinding().reachable(farm_door);
+        let reachable =
+            farm.pathfinding(&game_state.statics).reachable(farm_door);
 
         let player_pos = game_state.player.center_pos();
 
@@ -186,8 +187,10 @@ impl ForagingGoal {
         };
 
         let room = game_state.get_room(room_name)?;
-        let distances =
-            room.pathfinding().include_border(true).distances(initial);
+        let distances = room
+            .pathfinding(&game_state.statics)
+            .include_border(true)
+            .distances(initial);
 
         let opt_closest_forage = room
             .objects
@@ -288,7 +291,7 @@ impl CondensedMap {
             .iter()
             .map(|loc| {
                 let name = loc.name.clone();
-                let clear_tiles = loc.collect_clear_tiles();
+                let clear_tiles = loc.collect_clear_tiles(&game_state.statics);
                 let warps = loc
                     .warps
                     .iter()

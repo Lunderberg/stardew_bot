@@ -36,7 +36,7 @@ impl FarmPlan {
 
         let regions = Self::segmented_regions(game_state)?;
         let distance_to_water = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .ignoring_obstacles()
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
 

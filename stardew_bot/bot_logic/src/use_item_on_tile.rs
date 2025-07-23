@@ -134,7 +134,9 @@ impl BotGoal for UseItemOnTile {
             // to the targeted tile, and cannot be used when standing
             // on the tile itself.  Move to an adjacent clear tile.
 
-            let clear_tiles = game_state.current_room()?.collect_clear_tiles();
+            let clear_tiles = game_state
+                .current_room()?
+                .collect_clear_tiles(&game_state.statics);
             let dir = Direction::iter()
                 .filter(|dir| dir.is_cardinal())
                 .filter(|dir| clear_tiles[self.tile + dir.offset()])

@@ -304,7 +304,7 @@ impl PlantCropsGoal {
 
         let farm = game_state.get_room("Farm")?;
         let distance_to_water = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .ignoring_obstacles()
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
 
@@ -424,7 +424,7 @@ impl PlantCropsGoal {
             .collect();
 
         let reachable = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .wood_clearing_cost(0)
             .stone_clearing_cost(0)
             .breakable_clearing_cost(0)
@@ -584,11 +584,11 @@ impl BotGoal for PlantCropsGoal {
         };
         let farm = game_state.get_room("Farm")?;
         let distances = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .include_border(true)
             .distances(initial_tile);
         let obstructed_pathfinding = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .stone_clearing_cost(1000)
             .wood_clearing_cost(1000)
             .breakable_clearing_cost(1000)
@@ -732,7 +732,7 @@ impl BotGoal for PlantCropsGoal {
                     })
                     .expect(
                         "Obstruction must exist whenever \
-                     distances.is_none() returns true.",
+                         distances.is_none() returns true.",
                     )
             } else {
                 (tile, opt_item)

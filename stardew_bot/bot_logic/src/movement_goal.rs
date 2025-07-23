@@ -4,7 +4,9 @@ use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{Error, GameAction};
-use game_state::{FacingDirection, GameState, Location, TileMap, WarpKind};
+use game_state::{
+    FacingDirection, GameState, Location, StaticState, TileMap, WarpKind,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
@@ -59,6 +61,7 @@ pub struct StopMovingGoal;
 
 struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
+    statics: &'a StaticState,
     in_game_time: i32,
 }
 
@@ -87,7 +90,8 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
             .get(node.current_room_index)
             .into_iter()
             .flat_map(move |loc| {
-                let reachable = loc.pathfinding().reachable(node.current_pos);
+                let reachable =
+                    loc.pathfinding(self.statics).reachable(node.current_pos);
 
                 let is_on_warp = loc
                     .warps
@@ -216,6 +220,7 @@ impl MovementGoal {
 
         let graph = ConnectedRoomGraph {
             locations: &game_state.locations,
+            statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
         };
 
@@ -281,6 +286,7 @@ impl MovementGoal {
 
         let graph = ConnectedRoomGraph {
             locations: &game_state.locations,
+            statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
         };
 
@@ -434,7 +440,9 @@ impl LocalMovementGoal {
         let target_tile: Vector<isize> =
             self.target_position.map(|x| x.round() as isize);
 
-        let map = location.pathfinding().direction_map(target_tile);
+        let map = location
+            .pathfinding(&game_state.statics)
+            .direction_map(target_tile);
 
         Ok(map)
     }

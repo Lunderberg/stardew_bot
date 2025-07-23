@@ -61,7 +61,7 @@ impl BotInterrupt for AttackNearbyEnemy {
 
         let distances = game_state
             .current_room()?
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .distances(player_tile);
         let is_actually_nearby = distances
             .get_opt(nearby_monster.tile())
@@ -147,8 +147,9 @@ impl ClubSmashNearby {
                     return true;
                 }
 
-                let clear_tiles = opt_clear_tiles
-                    .get_or_insert_with(|| room.pathfinding().clear());
+                let clear_tiles = opt_clear_tiles.get_or_insert_with(|| {
+                    room.pathfinding(&game_state.statics).clear()
+                });
 
                 // Iterates through the tiles that must be clear in
                 // order to have line-of-sight to the enemy.  Starting

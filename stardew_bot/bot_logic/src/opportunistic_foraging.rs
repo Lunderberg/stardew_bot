@@ -76,7 +76,7 @@ impl BotInterrupt for OpportunisticForaging {
             .filter(|obj| {
                 if distances.is_none() {
                     distances = Some(
-                        loc.pathfinding()
+                        loc.pathfinding(&game_state.statics)
                             .include_border(true)
                             .distances(game_state.player.tile()),
                     );

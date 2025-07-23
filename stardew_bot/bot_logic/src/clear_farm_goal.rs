@@ -4,9 +4,7 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{Error, MovementGoal};
-use game_state::{
-    GameState, ItemId, Location, Object, ObjectKind, Tree, TreeKind,
-};
+use game_state::{GameState, ItemId, Object, ObjectKind, Tree, TreeKind};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
@@ -118,7 +116,7 @@ impl ClearFarmGoal {
             .map_or_else(|| game_state.get_farm_door(), Ok)?;
 
         let pathfinding = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .allow_diagonal(false)
             .include_border(true)
             .breakable_clearing_cost(1);
@@ -143,14 +141,19 @@ impl ClearFarmGoal {
         Ok(!reachable_clutter)
     }
 
-    fn pathfinding(farm: &Location) -> Pathfinding {
-        farm.pathfinding()
+    fn pathfinding(game_state: &GameState) -> Result<Pathfinding, Error> {
+        let farm = game_state.get_room("Farm")?;
+
+        let pathfinding = farm
+            .pathfinding(&game_state.statics)
             .allow_diagonal(false)
             .stone_clearing_cost(10)
             .wood_clearing_cost(10)
             .breakable_clearing_cost(1)
             .grass_movement_cost(1)
-            .tree_clearing_cost(50)
+            .tree_clearing_cost(50);
+
+        Ok(pathfinding)
     }
 
     fn fill_priority_tiles(
@@ -169,7 +172,7 @@ impl ClearFarmGoal {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let pathfinding = Self::pathfinding(farm).do_not_clear_trees();
+        let pathfinding = Self::pathfinding(game_state)?.do_not_clear_trees();
         let reachable = pathfinding.reachable(farm_door);
 
         self.priority_tiles = farm
@@ -277,7 +280,7 @@ impl BotGoal for ClearFarmGoal {
         };
 
         let pathfinding_without_clearing = farm
-            .pathfinding()
+            .pathfinding(&game_state.statics)
             .allow_diagonal(false)
             .include_border(true);
 
@@ -366,7 +369,7 @@ impl BotGoal for ClearFarmGoal {
             .min()
             .expect("Guarded by earlier clearable_tiles.is_empty() check");
 
-        let opt_goal = Self::pathfinding(farm)
+        let opt_goal = Self::pathfinding(game_state)?
             .include_border(true)
             .iter_dijkstra(player_tile)
             .map(|(tile, _)| tile)
