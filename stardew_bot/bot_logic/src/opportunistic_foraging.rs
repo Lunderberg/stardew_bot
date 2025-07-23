@@ -1,5 +1,6 @@
-use crate::{ActivateTile, Error, ObjectKindExt as _, UseItemOnTile};
+use crate::{ActivateTile, Error, FarmPlan, UseItemOnTile};
 use game_state::{GameState, ItemId, ObjectKind, TileMap};
+use geometry::Vector;
 
 use super::{
     bot_logic::{BotInterrupt, LogicStack},
@@ -9,6 +10,7 @@ use super::{
 pub struct OpportunisticForaging {
     radius: f32,
     min_empty_slots: usize,
+    plan: Option<FarmPlan>,
 }
 
 impl OpportunisticForaging {
@@ -16,6 +18,7 @@ impl OpportunisticForaging {
         Self {
             radius,
             min_empty_slots: 2,
+            plan: None,
         }
     }
 
@@ -39,6 +42,11 @@ impl BotInterrupt for OpportunisticForaging {
         let loc = game_state.current_room()?;
         let pos = game_state.player.center_pos();
 
+        if self.plan.is_none() {
+            self.plan = Some(FarmPlan::plan(game_state)?);
+        }
+        let plan = self.plan.as_ref().unwrap();
+
         let num_empty_slots = game_state.player.inventory.num_empty_slots();
         if num_empty_slots < self.min_empty_slots {
             return Ok(None);
@@ -56,24 +64,51 @@ impl BotInterrupt for OpportunisticForaging {
 
         let mut distances: Option<TileMap<Option<u64>>> = None;
 
-        let opt_forageable = loc
+        let opt_forageable: Option<(Vector<isize>, Option<ItemId>)> = loc
             .objects
             .iter()
             .filter(|obj| pos.dist2(obj.tile.into()) < radius2)
-            .filter(|obj| match &obj.kind {
-                ObjectKind::HoeDirt(hoe_dirt) => {
-                    hoe_dirt.has_crop() && should_hoe
-                }
-                ObjectKind::FruitTree(fruit_tree) => fruit_tree.num_fruit > 0,
-                ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => can_hoe,
-                ObjectKind::Tree(tree) => {
-                    tree.has_seed
-                        && !tree.is_stump
-                        && game_state.player.skills.foraging_level() >= 1
-                }
-                other => other.is_forage(),
+            .filter_map(|obj| {
+                let opt_tool = match &obj.kind {
+                    ObjectKind::HoeDirt(hoe_dirt)
+                        if hoe_dirt.has_crop() && should_hoe =>
+                    {
+                        Some(ItemId::HOE)
+                    }
+                    ObjectKind::FruitTree(fruit_tree)
+                        if fruit_tree.num_fruit > 0 =>
+                    {
+                        None
+                    }
+                    ObjectKind::ArtifactSpot | ObjectKind::SeedSpot
+                        if can_hoe =>
+                    {
+                        Some(ItemId::HOE)
+                    }
+                    ObjectKind::Tree(tree)
+                        if tree.has_seed
+                            && !tree.is_stump
+                            && game_state.player.skills.foraging_level()
+                                >= 1 =>
+                    {
+                        // Shake the tree to get a seed from it.
+                        None
+                    }
+                    ObjectKind::Tree(tree)
+                        if tree.growth_stage == 0
+                            && !plan.is_planned_tree(obj.tile)
+                            && can_hoe =>
+                    {
+                        Some(ItemId::HOE)
+                    }
+                    other if other.is_forage() => None,
+                    _ => {
+                        return None;
+                    }
+                };
+                Some((obj.tile, opt_tool))
             })
-            .filter(|obj| {
+            .filter(|(tile, _)| {
                 if distances.is_none() {
                     distances = Some(
                         loc.pathfinding(&game_state.statics)
@@ -83,29 +118,21 @@ impl BotInterrupt for OpportunisticForaging {
                 }
                 let map = distances.as_ref().unwrap();
 
-                if let Some(dist) = map[obj.tile] {
-                    (dist as f32) < self.radius
-                } else {
-                    false
-                }
+                map.get_opt(*tile)
+                    .map(|dist| (*dist as f32) < self.radius)
+                    .unwrap_or(false)
             })
             .next();
 
-        let Some(forageable) = opt_forageable else {
+        let Some((tile, opt_tool)) = opt_forageable else {
             return Ok(None);
         };
 
-        let opt_tool = match &forageable.kind {
-            ObjectKind::Tree(_) => None,
-            other => other.get_tool(),
-        };
-
         let interrupt: LogicStack = if let Some(tool) = opt_tool {
-            let goal =
-                UseItemOnTile::new(tool, loc.name.clone(), forageable.tile);
+            let goal = UseItemOnTile::new(tool, loc.name.clone(), tile);
             goal.into()
         } else {
-            let goal = ActivateTile::new(loc.name.clone(), forageable.tile);
+            let goal = ActivateTile::new(loc.name.clone(), tile);
             goal.into()
         };
 

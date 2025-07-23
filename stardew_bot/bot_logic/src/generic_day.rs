@@ -81,6 +81,7 @@ impl BotGoal for GenericDay {
                         .clear_expanded_trees(true),
                 )
                 .then(ExpandTreeFarm::new())
+                .then(ClearFarmGoal::new().clear_expanded_trees(true))
         } else if current_day == 5
             || (current_day > 5
                 && game_state.globals.lowest_mine_level_reached < 40)

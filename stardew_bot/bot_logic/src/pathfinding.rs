@@ -225,19 +225,26 @@ impl<'a> Pathfinding<'a> {
         }
     }
 
-    pub fn ignoring_obstacles(self) -> Self {
+    pub fn ignoring_small_obstacles(self) -> Self {
         Self {
             clear_stone: Some(0),
-            clear_boulders: Some(0),
-            clear_mine_boulders: Some(0),
             clear_wood: Some(0),
-            clear_stumps: Some(0),
             clear_breakables: Some(0),
             clear_forage: Some(0),
             clear_trees: Some(0),
             clear_craftables: Some(0),
             grass_penalty: 0,
             ..self
+        }
+    }
+
+    pub fn ignoring_obstacles(self) -> Self {
+        Self {
+            clear_boulders: Some(0),
+            clear_mine_boulders: Some(0),
+            clear_wood: Some(0),
+            clear_stumps: Some(0),
+            ..self.ignoring_small_obstacles()
         }
     }
 

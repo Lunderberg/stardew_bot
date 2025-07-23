@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{ClearTreeGoal, Error, MovementGoal};
+use crate::{ClearTreeGoal, Error, FarmPlan, MovementGoal};
 use game_state::{GameState, ItemId, Object, ObjectKind, Tree, TreeKind};
 
 use super::{
@@ -32,6 +32,8 @@ pub struct ClearFarmGoal {
     /// The location around which to clear.  Defaults to the location
     /// of the farm door.
     target_tile: Option<Vector<isize>>,
+
+    plan: Option<FarmPlan>,
 }
 
 impl ClearFarmGoal {
@@ -46,6 +48,7 @@ impl ClearFarmGoal {
             use_priority_tiles: true,
             relative_weights: (1, 1),
             target_tile: None,
+            plan: None,
         }
     }
 
@@ -197,6 +200,82 @@ impl ClearFarmGoal {
 
         Ok(())
     }
+
+    fn fill_farm_plan(&mut self, game_state: &GameState) -> Result<(), Error> {
+        if self.plan.is_none() {
+            self.plan = Some(FarmPlan::plan(game_state)?);
+        }
+        Ok(())
+    }
+
+    fn choose_target_tile(
+        &mut self,
+        game_state: &GameState,
+        clearable_tiles: &HashMap<Vector<isize>, &Object>,
+    ) -> Result<Vector<isize>, Error> {
+        if let Some(tile) = self.target_tile {
+            return Ok(tile);
+        }
+
+        self.fill_farm_plan(game_state)?;
+        let plan = self.plan.as_ref().unwrap();
+
+        let opt_region_center =
+            plan.arable_regions.iter().take(3).find_map(|region| {
+                let mut num_tiles = 0isize;
+                let mut tile_sum = Vector::<isize>::zero();
+                region
+                    .map
+                    .iter_true()
+                    .filter(|tile| clearable_tiles.contains_key(tile))
+                    .for_each(|tile| {
+                        num_tiles += 1;
+                        tile_sum = tile_sum + tile;
+                    });
+                (num_tiles > 0).then(|| tile_sum / num_tiles)
+            });
+        if let Some(tile) = opt_region_center {
+            return Ok(tile);
+        }
+
+        let farm = game_state.get_room("Farm")?;
+        let farm_door = game_state.get_farm_door()?;
+
+        let currently_reachable =
+            farm.pathfinding(&game_state.statics).reachable(farm_door);
+        let potentially_reachable = farm
+            .pathfinding(&game_state.statics)
+            .ignoring_small_obstacles()
+            .reachable(farm_door);
+
+        let opt_warp = farm
+            .warps
+            .iter()
+            .sorted_by_key(|warp| {
+                (
+                    warp.target_room == "Greenhouse",
+                    &warp.target_room,
+                    warp.location.right,
+                    warp.location.down,
+                )
+            })
+            .flat_map(|warp| {
+                // Technically, warps for screen transitions are just off
+                // the edge of the map, and aren't actually reachable.
+                // Instead, make sure that the path can reach any tiles
+                // that is adjacent to a warp.
+                warp.location.iter_cardinal()
+            })
+            .find(|&tile| {
+                potentially_reachable.is_set(tile)
+                    && currently_reachable.is_unset(tile)
+            });
+        if let Some(tile) = opt_warp {
+            return Ok(tile);
+        }
+
+        Ok(farm_door)
+    }
 }
 
 impl BotGoal for ClearFarmGoal {
@@ -221,9 +300,6 @@ impl BotGoal for ClearFarmGoal {
         }
 
         let farm = game_state.get_room("Farm")?;
-        let target_tile = self
-            .target_tile
-            .map_or_else(|| game_state.get_farm_door(), Ok)?;
         let player = &game_state.player;
 
         // First, prioritize clearing out clutter that is along the
@@ -279,34 +355,6 @@ impl BotGoal for ClearFarmGoal {
             }
         };
 
-        let pathfinding_without_clearing = farm
-            .pathfinding(&game_state.statics)
-            .allow_diagonal(false)
-            .include_border(true);
-
-        let steps_from_target_tile =
-            pathfinding_without_clearing.distances(target_tile);
-
-        let clearable_tiles = if has_priority_clutter {
-            clearable_tiles
-        } else if game_state.player.skills.foraging_xp < 100
-            && clearable_tiles.iter().any(|(tile, obj)| {
-                steps_from_target_tile.is_some(*tile) && is_grown_tree(obj)
-            })
-        {
-            // Second, if foraging level 1 has not yet been reached,
-            // prioritize cutting down trees.
-
-            clearable_tiles
-                .into_iter()
-                .filter(|(tile, obj)| {
-                    steps_from_target_tile.is_some(*tile) && is_grown_tree(obj)
-                })
-                .collect()
-        } else {
-            clearable_tiles
-        };
-
         // Pick up the items that we'll need for the rest of the goal.
         // Anything else gets stashed away.
         let goal = InventoryGoal::current()
@@ -344,15 +392,24 @@ impl BotGoal for ClearFarmGoal {
 
         let player_tile = player.tile();
 
-        let steps_from_player =
-            pathfinding_without_clearing.distances(player_tile);
+        let target_tile =
+            self.choose_target_tile(game_state, &clearable_tiles)?;
+
+        let steps_from_player = farm
+            .pathfinding(&game_state.statics)
+            .allow_diagonal(false)
+            .include_border(true)
+            .distances(player_tile);
+
+        let steps_from_target_tile = farm
+            .pathfinding(&game_state.statics)
+            .ignoring_small_obstacles()
+            .distances(target_tile);
 
         let next_clear_heuristic = |tile: Vector<isize>| {
             let (weight_player, weight_target) = self.relative_weights;
             let from_target = steps_from_target_tile
-                .get(tile)
-                .map(|opt| opt.as_ref())
-                .flatten()
+                .get_opt(tile)
                 .cloned()
                 .unwrap_or(10000);
             let from_player =
@@ -361,6 +418,7 @@ impl BotGoal for ClearFarmGoal {
         };
         let min_total_steps = clearable_tiles
             .iter()
+            .filter(|(tile, _)| steps_from_player.is_some(**tile))
             .map(|(tile, _)| next_clear_heuristic(*tile))
             .min()
             .expect("Guarded by earlier clearable_tiles.is_empty() check");
