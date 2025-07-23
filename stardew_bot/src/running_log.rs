@@ -86,14 +86,31 @@ impl<'a> Widget for &'a mut RunningLog {
 
         let row_generator = RunningLog::get_row_generator(&self.items);
 
+        let visible_range = {
+            let top = self.state.offset();
+            top..top + self.prev_draw_height
+        };
+
+        let style_regex: regex::Regex =
+            "0x[0-9a-fA-F]+".try_into().expect("Invalid regex");
+
         let items = (0..self.items.len())
-            .map(|i| row_generator(i).pop().unwrap())
-            .map(|line| -> Line { line.into() })
+            .map(|i| -> Line {
+                if visible_range.contains(&i) {
+                    row_generator(i).pop().unwrap().into()
+                } else {
+                    "".into()
+                }
+            })
             .map(|line| {
-                line.style_regex(
-                    "0x[0-9a-fA-F]+",
-                    Style::default().fg(Color::LightRed),
-                )
+                if line.spans.is_empty() {
+                    line
+                } else {
+                    line.style_regex(
+                        style_regex.clone(),
+                        Style::default().fg(Color::LightRed),
+                    )
+                }
             })
             .map(|line| {
                 if let Some(search) = self.search.as_ref() {

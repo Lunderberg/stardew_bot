@@ -17,6 +17,7 @@ itertools = "*"
 ratatui = "*"
 crossterm = "*"
 chrono = "*"
+regex = "*"
 
 x11rb = {version = "*", features = ["xtest"]}
 

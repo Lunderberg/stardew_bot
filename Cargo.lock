@@ -1248,6 +1248,7 @@ dependencies = [
  "itertools 0.13.0",
  "memory_reader",
  "ratatui",
+ "regex",
  "stardew_utils",
  "structopt",
  "thiserror",
