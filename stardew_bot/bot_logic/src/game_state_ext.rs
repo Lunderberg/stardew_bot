@@ -22,6 +22,10 @@ pub trait GameStateExt {
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
 
+    fn iter_bundle_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&str, &ItemId, usize)> + '_, Error>;
+
     fn iter_reserved_items(
         &self,
     ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error>;
@@ -83,6 +87,37 @@ impl GameStateExt for GameState {
         Ok(iter)
     }
 
+    fn iter_bundle_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&str, &ItemId, usize)> + '_, Error> {
+        let iter = self
+            .statics
+            .bundles
+            .iter()
+            .filter_map(|bundle| {
+                let flags = self.globals.bundles.get(&bundle.bundle_index)?;
+
+                let num_done = flags.iter().map(|b| *b as usize).sum::<usize>();
+                (num_done < bundle.num_required).then(|| {
+                    bundle
+                        .ingredients
+                        .iter()
+                        .zip(flags)
+                        .filter(|(_, done)| !**done)
+                        .filter_map(|(ingredient, _)| match ingredient {
+                            BundleIngredient::Item(item) => Some(item),
+                            BundleIngredient::Gold(_) => None,
+                        })
+                        .map(|item| {
+                            (bundle.name.as_str(), &item.id, item.count)
+                        })
+                })
+            })
+            .flatten();
+
+        Ok(iter)
+    }
+
     fn iter_reserved_items(
         &self,
     ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error> {
@@ -104,27 +139,8 @@ impl GameStateExt for GameState {
             .filter(move |_| !is_early_startup);
 
         let iter_bundles = self
-            .statics
-            .bundles
-            .iter()
-            .filter_map(|bundle| {
-                let flags = self.globals.bundles.get(&bundle.bundle_index)?;
-
-                let num_done = flags.iter().map(|b| *b as usize).sum::<usize>();
-                (num_done < bundle.num_required).then(|| {
-                    bundle
-                        .ingredients
-                        .iter()
-                        .zip(flags)
-                        .filter(|(_, done)| !**done)
-                        .filter_map(|(ingredient, _)| match ingredient {
-                            BundleIngredient::Item(item) => Some(item),
-                            BundleIngredient::Gold(_) => None,
-                        })
-                        .map(|item| (&item.id, item.count))
-                })
-            })
-            .flatten()
+            .iter_bundle_items()?
+            .map(|(_, id, count)| (id, count))
             .filter(move |_| !is_early_startup);
 
         Ok(iter_worst_fish.chain(iter_bundles))
