@@ -886,6 +886,19 @@ impl LogicStack {
         self
     }
 
+    pub fn then_iter<Iter, Goal>(mut self, iter_goal: Iter) -> Self
+    where
+        Iter: IntoIterator<Item = Goal>,
+        Goal: Into<LogicStackItem>,
+    {
+        // Push onto the beginning of the stack, such that the new
+        // goal will be the last item executed.
+        for goal in iter_goal {
+            self.0.push_front(goal.into());
+        }
+        self
+    }
+
     pub fn cancel_if(
         mut self,
         condition: impl Fn(&GameState) -> bool + 'static,
