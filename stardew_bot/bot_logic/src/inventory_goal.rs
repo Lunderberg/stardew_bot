@@ -244,78 +244,72 @@ pub(super) fn best_weapon<'a>(
 }
 
 impl InventoryGoal {
-    fn next_crafting(
+    fn next_crafting_action(
         &self,
         game_state: &GameState,
-    ) -> Result<Option<Item>, Error> {
+    ) -> Result<Option<LogicStackItem>, Error> {
         if !self.craft_missing {
             return Ok(None);
         }
 
         let available = self.total_stored_and_carried(game_state)?;
-        let opt_craftable = self
-            .bounds
-            .iter()
-            .sorted_by_key(|(item, _)| &item.item_id)
-            .find_map(|(item, bound)| {
-                let min = bound.min?;
-                let current = available.get(item).cloned().unwrap_or(0);
-                let num_missing = min.saturating_sub(current);
+        for (item, bound) in
+            self.bounds.iter().sorted_by_key(|(item, _)| &item.item_id)
+        {
+            let Some(min) = bound.min else {
+                continue;
+            };
+            let current = available.get(item).cloned().unwrap_or(0);
+            let num_missing = min.saturating_sub(current);
 
-                if num_missing == 0 {
-                    return None;
-                }
+            if num_missing == 0 {
+                continue;
+            }
 
-                let num_craftable = item
-                    .iter_recipe()?
-                    .map(|(ingredient, count)| {
-                        let ingredient_available =
-                            available.get(&ingredient).cloned().unwrap_or(0);
-                        ingredient_available / count
-                    })
-                    .min()
-                    .unwrap_or(0);
+            let iter_ingredients = || item.iter_recipe().into_iter().flatten();
 
-                let num_to_craft = num_missing.min(num_craftable);
-                if num_to_craft == 0 {
-                    return None;
-                }
+            let num_craftable = iter_ingredients()
+                .map(|(ingredient, count)| {
+                    let ingredient_available =
+                        available.get(&ingredient).cloned().unwrap_or(0);
+                    ingredient_available / count
+                })
+                .min()
+                .unwrap_or(0);
 
-                let num_in_inventory =
-                    game_state.player.inventory.count_item(&item);
+            let num_to_craft = num_missing.min(num_craftable);
+            if num_to_craft == 0 {
+                continue;
+            }
 
-                Some(item.clone().with_count(num_in_inventory + num_to_craft))
-            });
+            let num_in_inventory =
+                game_state.player.inventory.count_item(&item);
 
-        Ok(opt_craftable)
-    }
+            let subgoal = InventoryGoal::current()
+                .room(self.room.clone())
+                .with(iter_ingredients().map(|(ingredient, count)| {
+                    ingredient.with_count(num_to_craft * count)
+                }));
+            if !subgoal.is_completed(game_state)? {
+                return Ok(Some(subgoal.into()));
+            }
 
-    fn next_crafting_action(
-        &self,
-        game_state: &GameState,
-    ) -> Result<Option<LogicStackItem>, Error> {
-        let Some(next_crafting) = self.next_crafting(game_state)? else {
-            return Ok(None);
-        };
+            let subgoal = InventoryGoal::current()
+                .room(self.room.clone())
+                .with(iter_ingredients().map(|(ingredient, count)| {
+                    ingredient.with_count(num_to_craft * count)
+                }));
+            if !subgoal.is_completed(game_state)? {
+                return Ok(Some(subgoal.into()));
+            }
 
-        let num_in_inventory =
-            game_state.player.inventory.count_item(&next_crafting);
-
-        let subgoal = InventoryGoal::current().room(self.room.clone()).with(
-            next_crafting.id.iter_recipe().into_iter().flatten().map(
-                |(ingredient, count)| {
-                    ingredient.with_count(
-                        (next_crafting.count - num_in_inventory) * count,
-                    )
-                },
-            ),
-        );
-        if !subgoal.is_completed(game_state)? {
-            return Ok(Some(subgoal.into()));
+            let craft = CraftItemGoal::new(
+                item.clone().with_count(num_in_inventory + num_to_craft),
+            );
+            return Ok(Some(craft.into()));
         }
 
-        let craft = CraftItemGoal::new(next_crafting);
-        Ok(Some(craft.into()))
+        Ok(None)
     }
 
     fn next_transfer(
@@ -765,7 +759,7 @@ impl InventoryGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
-        Ok(self.next_crafting(game_state)?.is_none()
+        Ok(self.next_crafting_action(game_state)?.is_none()
             && self.next_transfer(game_state)?.is_none())
     }
 
