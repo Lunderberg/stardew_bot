@@ -25,7 +25,7 @@ pub struct PlayerState {
     pub inventory: Inventory,
     pub active_hotbar_index: usize,
     pub current_money: i32,
-    pub buffs: Vec<Buff>,
+    // pub buffs: Vec<Buff>,
 
     // Info related to the current action being performed
     pub using_tool: bool,
@@ -69,6 +69,7 @@ pub enum FacingDirection {
     West,
 }
 
+#[allow(dead_code)]
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Buff {
     pub kind: String,
@@ -201,7 +202,8 @@ impl PlayerState {
              is_eating: bool,
              num_unread_mail: usize,
              friendships: &Vec<Friendship>,
-             buffs: &Vec<Buff>| {
+             // buffs: &Vec<Buff>
+                | {
                 PlayerState {
                     position: position.clone(),
                     facing: *facing,
@@ -225,7 +227,7 @@ impl PlayerState {
                     is_eating,
                     num_unread_mail,
                     friendships: friendships.clone(),
-                    buffs: buffs.clone(),
+                    // buffs: buffs.clone(),
                 }
             },
         )?;
@@ -425,7 +427,7 @@ impl PlayerState {
                     is_eating,
                     num_unread_mail,
                     friendships,
-                    buffs,
+                    // buffs,
                 )
             }
         })?;
