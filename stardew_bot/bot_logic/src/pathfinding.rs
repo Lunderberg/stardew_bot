@@ -461,11 +461,10 @@ impl<'a> Pathfinding<'a> {
         })
     }
 
-    fn path_between_points_with_tolerance(
+    pub fn path_between(
         &self,
         initial: Vector<isize>,
         goal: impl TileSet,
-        tolerance: isize,
     ) -> Result<Vec<Vector<isize>>, Error> {
         let cost_map = self.movement_cost();
 
@@ -513,6 +512,7 @@ impl<'a> Pathfinding<'a> {
             best[tile + best_tile_offset] =
                 Some((visiting.dist_plus_heuristic, visiting.dir));
 
+            let tolerance = if visiting.should_propagate { 1 } else { 0 };
             if goal.iter().any(|goal_tile| {
                 visiting.tile.manhattan_dist(goal_tile) <= tolerance
             }) {
@@ -594,22 +594,6 @@ impl<'a> Pathfinding<'a> {
         path.reverse();
 
         Ok(path)
-    }
-
-    pub fn path_between(
-        &self,
-        initial: Vector<isize>,
-        goal: impl TileSet,
-    ) -> Result<Vec<Vector<isize>>, Error> {
-        self.path_between_points_with_tolerance(initial, goal, 0)
-    }
-
-    pub fn path_to_adjacent_tile(
-        &self,
-        initial: Vector<isize>,
-        goal: impl TileSet,
-    ) -> Result<Vec<Vector<isize>>, Error> {
-        self.path_between_points_with_tolerance(initial, goal, 1)
     }
 
     fn iter_dijkstra_entries(

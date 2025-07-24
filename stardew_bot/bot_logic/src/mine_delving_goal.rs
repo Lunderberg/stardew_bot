@@ -4,12 +4,12 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::LogicStackItem, ActivateTile, Error, GameAction,
+    bot_logic::LogicStackItem, ActivateTile, CraftItemGoal, Error, GameAction,
     GameStateExt as _, InventoryGoal, MaintainStaminaGoal, MovementGoal,
     UseItemOnTile,
 };
 use game_state::{
-    GameState, ItemCategory, ItemId, ObjectKind, SeededRng, StoneKind,
+    GameState, ItemCategory, ItemId, ObjectKind, SeededRng, StoneKind, TileMap,
 };
 
 use super::{
@@ -22,12 +22,24 @@ use super::{
 
 pub struct MineDelvingGoal;
 
+struct SmeltingPlan {
+    old_furnaces: usize,
+    new_furnaces: usize,
+    copper_bars: usize,
+    iron_bars: usize,
+}
+
 struct MineSingleLevel {
     mineshaft_level: i32,
 }
 
 struct MineNearbyOre {
     dist: f32,
+
+    /// The game tick on which the most recent bomb was used.  Tracked
+    /// to avoid placing multiple bombs at once.
+    most_recent_bomb: Option<i32>,
+
     cache: Option<NearbyOreCache>,
 }
 
@@ -35,9 +47,15 @@ struct NearbyOreCache {
     /// The number of objects present when this cache was created.
     num_objects: usize,
 
+    /// The number of bombs present when this cache was created.
+    num_bombs: usize,
+
     /// A lookup from tile to the (multiplier,offset) tuple for going
     /// to collect from that tile.
     desirable_rocks: HashMap<Vector<isize>, (f32, f32)>,
+
+    /// Tiles that are both clear and reachable, used to determine where bombs can be placed.
+    placeable: TileMap<bool>,
 }
 
 struct StonePredictor {
@@ -91,6 +109,117 @@ const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
     Vector::new(8, 4),
     Vector::new(8, 5),
 ];
+
+impl SmeltingPlan {
+    fn new(game_state: &GameState) -> Result<Self, Error> {
+        let mines = game_state.get_room("Mine")?;
+
+        let mut available = InventoryGoal::current()
+            .room("Mine")
+            .total_stored_and_carried(game_state)?;
+
+        // How much copper ore/coal should be reserved for crafting
+        // cherry bombs, rather than immediately smelted.
+        const CRAFTABLE_CHERRY_BOMBS: usize = 3;
+        ItemId::CHERRY_BOMB
+            .iter_recipe()
+            .into_iter()
+            .flatten()
+            .for_each(|(ingredient, count)| {
+                if let Some(current) = available.get_mut(&ingredient) {
+                    *current =
+                        current.saturating_sub(CRAFTABLE_CHERRY_BOMBS * count);
+                }
+            });
+
+        let get_available = |item: &ItemId| -> usize {
+            available.get(item).cloned().unwrap_or(0)
+        };
+        let mut copper_ore = get_available(&ItemId::COPPER_ORE);
+        let mut iron_ore = get_available(&ItemId::IRON_ORE);
+        let mut stone = get_available(&ItemId::STONE);
+        let mut coal = get_available(&ItemId::COAL);
+
+        let mut num_available_furnaces = 0;
+        let mut num_old_furnaces = 0;
+
+        mines
+            .objects
+            .iter()
+            .filter_map(|obj| obj.kind.as_furnace())
+            .for_each(|furnace| {
+                num_old_furnaces += 1;
+
+                let can_harvest = furnace.ready_to_harvest;
+                let can_load = !furnace.has_held_item || can_harvest;
+                if can_load {
+                    num_available_furnaces += 1;
+                }
+            });
+        let mut num_furnace_spaces = OFFSETS_ELEVATOR_TO_FURNACE
+            .len()
+            .saturating_sub(num_old_furnaces);
+
+        let mut plan = SmeltingPlan {
+            old_furnaces: num_old_furnaces,
+            new_furnaces: 0,
+            copper_bars: 0,
+            iron_bars: 0,
+        };
+
+        fn limiting_factor<const N: usize>(values: [usize; N]) -> usize {
+            values.into_iter().min().unwrap_or(0)
+        }
+
+        loop {
+            let iron_bars =
+                limiting_factor([iron_ore / 5, coal, num_available_furnaces]);
+            if iron_bars > 0 {
+                plan.iron_bars += iron_bars;
+                iron_ore -= 5 * iron_bars;
+                coal -= iron_bars;
+                num_available_furnaces -= iron_bars;
+            }
+
+            let copper_bars =
+                limiting_factor([copper_ore / 5, coal, num_available_furnaces]);
+            if copper_bars > 0 {
+                plan.copper_bars += copper_bars;
+                copper_ore -= 5 * copper_bars;
+                coal -= copper_bars;
+                num_available_furnaces -= copper_bars;
+            }
+
+            let new_furnaces = {
+                let for_iron = limiting_factor([
+                    copper_ore / 20,
+                    stone / 25,
+                    iron_ore / 5,
+                    coal,
+                    num_furnace_spaces,
+                ]);
+                let for_copper = limiting_factor([
+                    copper_ore / 25,
+                    stone / 25,
+                    coal,
+                    num_furnace_spaces,
+                ]);
+                for_iron.max(for_copper)
+            };
+            if new_furnaces > 0 {
+                plan.new_furnaces += new_furnaces;
+                num_available_furnaces += new_furnaces;
+                copper_ore -= new_furnaces * 20;
+                stone -= new_furnaces * 25;
+                num_furnace_spaces -= new_furnaces;
+            } else {
+                break;
+            }
+        }
+
+        Ok(plan)
+    }
+}
 
 impl MineDelvingGoal {
     pub fn new() -> Self {
@@ -180,152 +309,71 @@ impl MineDelvingGoal {
         }
 
         let loc = game_state.current_room()?;
-        let (num_loadable_furnaces, num_harvestable_furnaces) = loc
-            .objects
-            .iter()
-            .map(|obj| {
-                obj.kind
-                    .as_furnace()
-                    .map(|furnace| {
-                        let can_harvest = furnace.ready_to_harvest;
-                        let can_load = !furnace.has_held_item || can_harvest;
-                        (can_load, can_harvest)
-                    })
-                    .unwrap_or((false, false))
-            })
-            .fold(
-                (0usize, 0usize),
-                |(num_loadable, num_harvestable), (can_load, can_harvest)| {
-                    (
-                        num_loadable + (can_load as usize),
-                        num_harvestable + (can_harvest as usize),
-                    )
-                },
-            );
 
-        if num_loadable_furnaces == 0 && num_harvestable_furnaces == 0 {
-            return Ok(None);
-        }
-
-        let available = InventoryGoal::current()
-            .room("Mine")
-            .total_stored_and_carried(game_state)?;
-        let get_available = |item: &ItemId| -> usize {
-            available.get(item).cloned().unwrap_or(0)
-        };
-
-        let num_to_smelt =
-            num_loadable_furnaces.min(get_available(&ItemId::COAL));
-
-        if num_to_smelt == 0 && num_harvestable_furnaces == 0 {
-            return Ok(None);
-        }
-
-        let num_iron_bars =
-            (get_available(&ItemId::IRON_ORE) / 5).min(num_to_smelt);
-        let num_to_smelt = num_to_smelt - num_iron_bars;
-
-        let num_copper_bars =
-            (get_available(&ItemId::COPPER_ORE) / 5).min(num_to_smelt);
-
-        if num_iron_bars == 0
-            && num_copper_bars == 0
-            && num_harvestable_furnaces == 0
-        {
-            return Ok(None);
-        }
+        let plan = SmeltingPlan::new(game_state)?;
 
         let prepare = InventoryGoal::current()
             .room("Mine")
-            .with(ItemId::COAL.with_count(num_iron_bars + num_copper_bars))
-            .with_exactly(ItemId::COPPER_ORE.with_count(num_copper_bars * 5))
-            .with_exactly(ItemId::IRON_ORE.with_count(num_iron_bars * 5));
+            .craft_missing(true)
+            .with(ItemId::FURNACE.with_count(plan.new_furnaces))
+            .with(ItemId::COAL.with_count(plan.iron_bars + plan.copper_bars))
+            .with(ItemId::COPPER_ORE.with_count(plan.copper_bars * 5))
+            .with(ItemId::IRON_ORE.with_count(plan.iron_bars * 5));
 
         let mut iter_smelt = std::iter::empty()
-            .chain(std::iter::repeat_n(ItemId::COPPER_ORE, num_copper_bars))
-            .chain(std::iter::repeat_n(ItemId::IRON_ORE, num_iron_bars));
+            .chain(std::iter::repeat_n(ItemId::COPPER_ORE, plan.copper_bars))
+            .chain(std::iter::repeat_n(ItemId::IRON_ORE, plan.iron_bars));
 
-        let stack = loc
+        let iter_existing_furnaces = loc
             .objects
             .iter()
             .filter_map(|obj| {
                 obj.kind.as_furnace().map(|furnace| (obj.tile, furnace))
             })
-            .flat_map(|(tile, furnace)| -> [Option<LogicStackItem>; 2] {
+            .map(|(tile, furnace)| {
+                let can_build = false;
                 let can_harvest = furnace.ready_to_harvest;
-                let take_complete = can_harvest
-                    .then(|| ActivateTile::new("Mine", tile))
-                    .map(Into::into);
-
                 let can_load = !furnace.has_held_item || can_harvest;
-                let start_new = can_load
-                    .then(|| {
-                        iter_smelt
-                            .next()
-                            .map(|ore| UseItemOnTile::new(ore, "Mine", tile))
-                    })
-                    .flatten()
-                    .map(Into::into);
-                [take_complete, start_new]
-            })
-            .flatten()
-            .fold(LogicStack::new().then(prepare), |stack, goal| {
-                stack.with_item(goal)
+                (tile, can_build, can_harvest, can_load)
             });
 
-        Ok(Some(stack))
-    }
-
-    fn expand_furnace_array(
-        &self,
-        game_state: &GameState,
-    ) -> Result<Option<LogicStack>, Error> {
-        if game_state.player.room_name != "Mine" {
-            return Ok(None);
-        }
-
         let mine_elevator = game_state.get_mine_elevator()?;
-        let mines = game_state.current_room()?;
-        let walkable = mines.pathfinding(&game_state.statics).walkable();
-
-        let opt_build_next = OFFSETS_ELEVATOR_TO_FURNACE
+        let iter_new_furnaces = OFFSETS_ELEVATOR_TO_FURNACE
             .iter()
-            .cloned()
-            .map(|offset| mine_elevator + offset)
-            .find(|tile| walkable[*tile]);
-        let Some(tile) = opt_build_next else {
-            return Ok(None);
-        };
+            .skip(plan.old_furnaces)
+            .take(plan.new_furnaces)
+            .map(|offset| mine_elevator + *offset)
+            .map(|tile| {
+                let can_build = true;
+                let can_harvest = false;
+                let can_load = true;
+                (tile, can_build, can_harvest, can_load)
+            });
 
-        let has_furnace = game_state
-            .player
-            .inventory
-            .iter_items()
-            .any(|item| item == &ItemId::FURNACE);
-        if has_furnace {
-            return Ok(Some(
-                UseItemOnTile::new(ItemId::FURNACE, "Mine", tile).into(),
-            ));
-        }
+        let stack = LogicStack::new()
+            .then(prepare)
+            .then_iter(
+                iter_existing_furnaces
+                    .chain(iter_new_furnaces)
+                    .flat_map(|(tile,can_build,can_harvest,can_load)| -> [Option<LogicStackItem>; 3] {
+                        let build_furnace = can_build.then(|| UseItemOnTile::new(ItemId::FURNACE, "Mine",tile).into());
 
-        let all_furnaces_running = mines
-            .objects
-            .iter()
-            .filter_map(|obj| obj.kind.as_furnace())
-            .all(|furnace| furnace.has_held_item && !furnace.ready_to_harvest);
-        if !all_furnaces_running {
-            return Ok(None);
-        }
+                        let take_complete = can_harvest
+                            .then(|| ActivateTile::new("Mine", tile).into());
 
-        let prepare = InventoryGoal::current()
-            .room("Mine")
-            .with(ItemId::FURNACE)
-            .craft_missing(true);
-        if prepare.is_completed(game_state)? {
-            return Ok(None);
-        } else {
-            Ok(Some(prepare.into()))
-        }
+                        let start_new = can_load
+                            .then(|| {
+                                iter_smelt.next().map(|ore| {
+                                    UseItemOnTile::new(ore, "Mine", tile).into()
+                                })
+                            })
+                            .flatten();
+                        [build_furnace, take_complete, start_new]
+                    })
+                    .flatten()
+            );
+
+        Ok((stack.len() > 1).then(|| stack))
     }
 
     fn prefer_mining_copper(
@@ -376,17 +424,17 @@ impl MineDelvingGoal {
             return Ok(Some(start_smelting));
         }
 
-        if let Some(craft_furnace) = self.expand_furnace_array(game_state)? {
-            return Ok(Some(craft_furnace));
-        }
-
         let prepare = InventoryGoal::empty()
             .room("Mine")
             .with(ItemId::PICKAXE)
             .stamina_recovery_slots(2)
             .with_weapon()
+            .with(ItemId::CHERRY_BOMB.clone().with_count(1000))
+            .with(ItemId::STONE.clone().with_count(1000))
             .with(ItemId::COAL.clone().with_count(1000))
+            .with(ItemId::COPPER_ORE.clone().with_count(1000))
             .with(ItemId::COPPER_BAR.clone().with_count(1000))
+            .with(ItemId::IRON_ORE.clone().with_count(1000))
             .with(ItemId::IRON_BAR.clone().with_count(1000))
             .with(ItemId::GEODE.clone().with_count(1000))
             .with(ItemId::FROZEN_GEODE.clone().with_count(1000))
@@ -421,15 +469,14 @@ impl MineDelvingGoal {
             use super::SortedInventoryLocation as Loc;
             if item.as_weapon().is_some() || item == &ItemId::PICKAXE {
                 Loc::HotBarLeft
-            } else if item.edibility > 0 {
+            } else if item.gp_per_stamina().is_some() {
                 Loc::HotBarRight
             } else if item == &ItemId::COAL
                 || item == &ItemId::COPPER_BAR
+                || item == &ItemId::COPPER_ORE
                 || item == &ItemId::IRON_BAR
-                || item == &ItemId::GEODE
-                || item == &ItemId::FROZEN_GEODE
-                || item == &ItemId::MAGMA_GEODE
-                || item == &ItemId::OMNI_GEODE
+                || item == &ItemId::IRON_ORE
+                || item == &ItemId::CHERRY_BOMB
             {
                 Loc::HotBar
             } else {
@@ -453,9 +500,8 @@ impl MineDelvingGoal {
         // case that occurs if the furnaces finish smelting at the
         // exact same time that we opened the menu.
         if let Some(prepare) = self.before_descending_into_mine(game_state)? {
-            let cleanup = MenuCloser::new();
-            if !cleanup.is_completed(game_state) {
-                return Ok(cleanup.into());
+            if game_state.mine_elevator_menu.is_some() {
+                return Ok(MenuCloser::new().into());
             }
             return Ok(prepare
                 .cancel_if(|game_state| game_state.player.room_name != "Mine")
@@ -710,11 +756,8 @@ impl BotGoal for MineSingleLevel {
                 break 'go_up true;
             }
 
-            let inventory = game_state.player.inventory.to_hash_map();
-            let get_count =
-                |item: &ItemId| inventory.get(item).cloned().unwrap_or(0);
-            get_count(&ItemId::COPPER_ORE) >= 5
-                || get_count(&ItemId::IRON_ORE) >= 5
+            let smelting_plan = SmeltingPlan::new(game_state)?;
+            smelting_plan.copper_bars > 0 || smelting_plan.iron_bars > 0
         };
 
         if should_go_up && game_state.mine_elevator_menu.is_some() {
@@ -839,7 +882,7 @@ impl BotGoal for MineSingleLevel {
 
         let path = pathfinding
             .allow_diagonal(false)
-            .path_to_adjacent_tile(player_tile, target_tile)?;
+            .path_between(player_tile, target_tile)?;
 
         let opt_blocked_tile_in_path = path
             .into_iter()
@@ -1052,6 +1095,7 @@ impl MineNearbyOre {
         Self {
             dist: 4.0,
             cache: None,
+            most_recent_bomb: None,
         }
     }
 
@@ -1119,6 +1163,15 @@ impl MineNearbyOre {
                 };
                 Some((obj.tile, dist_multiplier))
             })
+            .filter(|(tile, _)| {
+                // There's generally only zero or one bombs on the
+                // map, so iterate over the bombs rather than making a
+                // lookup table.
+                loc.bombs.iter().all(|bomb| {
+                    let dist2 = bomb.tile().dist2(*tile);
+                    dist2 > bomb.dist2()
+                })
+            })
             .collect();
 
         let mut to_group: HashSet<Vector<isize>> =
@@ -1155,9 +1208,18 @@ impl MineNearbyOre {
             }
         }
 
+        let placeable = {
+            let pathfinding = loc.pathfinding(&game_state.statics);
+            let clear = pathfinding.clear();
+            let reachable = pathfinding.reachable(game_state.player.tile());
+            clear.imap(|tile, &is_clear| is_clear && reachable.is_set(tile))
+        };
+
         Ok(NearbyOreCache {
             num_objects: loc.objects.len(),
+            num_bombs: loc.bombs.len(),
             desirable_rocks,
+            placeable,
         })
     }
 
@@ -1167,7 +1229,10 @@ impl MineNearbyOre {
             .as_ref()
             .map(|cache| -> Result<_, Error> {
                 let loc = game_state.current_room()?;
-                Ok(cache.num_objects == loc.objects.len())
+                let up_to_date = cache.num_objects == loc.objects.len()
+                    && cache.num_bombs == loc.bombs.len();
+
+                Ok(up_to_date)
             })
             .unwrap_or(Ok(false))?;
 
@@ -1197,11 +1262,12 @@ impl BotInterrupt for MineNearbyOre {
         };
 
         self.update_cache(game_state)?;
-        let desirable_rocks = &self
-            .cache
-            .as_ref()
-            .expect("Populated by self.update_cache")
-            .desirable_rocks;
+        let NearbyOreCache {
+            desirable_rocks,
+            placeable,
+            ..
+        } = self.cache.as_ref().expect("Populated by self.update_cache");
+
         if desirable_rocks.is_empty() {
             return Ok(None);
         }
@@ -1231,23 +1297,91 @@ impl BotInterrupt for MineNearbyOre {
             return Ok(None);
         };
 
-        let path = pathfinding
-            .allow_diagonal(false)
-            .path_to_adjacent_tile(player_tile, target_tile)?;
-
         let clearable_tiles = game_state.collect_clearable_tiles()?;
-        let opt_blocked_tile_in_path = path
-            .into_iter()
-            .find(|tile| clearable_tiles.contains_key(&tile));
-        let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
 
-        let opt_tool = clearable_tiles
-            .get(&target_tile)
-            .map(|opt_tool| opt_tool.clone())
-            .unwrap_or(None);
+        let opt_blocked_tile_in_path = || -> Result<_, Error> {
+            Ok(pathfinding
+                .allow_diagonal(false)
+                .path_between(player_tile, target_tile)?
+                .into_iter()
+                .find(|tile| clearable_tiles.contains_key(&tile)))
+        };
 
-        let goal = if let Some(tool) = opt_tool {
-            let tool = if tool.item_id.starts_with("(W)") {
+        let craft_cherry_bomb = CraftItemGoal::new(ItemId::CHERRY_BOMB);
+        let opt_bomb_tile = || {
+            const CHERRY_BOMB_DIST2: isize = 12;
+            Some(target_tile)
+                .into_iter()
+                .filter(|_| craft_cherry_bomb.is_completable(game_state))
+                .flat_map(|tile| tile.iter_dist2(CHERRY_BOMB_DIST2))
+                .filter(|&bomb_tile| placeable.is_set(bomb_tile))
+                .map(|bomb_tile| {
+                    let num_bombed = bomb_tile
+                        .iter_dist2(CHERRY_BOMB_DIST2)
+                        .filter(|bombed_tile| {
+                            desirable_rocks.contains_key(bombed_tile)
+                        })
+                        .count();
+                    (bomb_tile, num_bombed)
+                })
+                .max_by_key(|(_, num_bombed)| *num_bombed)
+                .filter(|(_, num_bombed)| *num_bombed >= 5)
+                .map(|(bomb_tile, _)| bomb_tile)
+        };
+        let (target_tile, opt_item): (Vector<isize>, Option<ItemId>) =
+            if let Some(blocked) = opt_blocked_tile_in_path()? {
+                (blocked, None)
+            } else if let Some(bomb_tile) = opt_bomb_tile() {
+                (bomb_tile, Some(ItemId::CHERRY_BOMB))
+            } else {
+                (target_tile, None)
+            };
+
+        let opt_item = opt_item.or_else(|| {
+            clearable_tiles
+                .get(&target_tile)
+                .map(|opt_tool| opt_tool.clone())
+                .unwrap_or(None)
+        });
+
+        if opt_item == Some(ItemId::CHERRY_BOMB) {
+            // If using a cherry-bomb, prefer to move to the target
+            // location prior to crafting.  That way, we avoid
+            // crafting bombs that aren't going to be used
+            // immediately.
+            let movement = MovementGoal::new(
+                game_state.player.room_name.clone(),
+                target_tile.into(),
+            );
+            if !movement.is_completed(game_state) {
+                return Ok(Some(movement.into()));
+            }
+
+            if !craft_cherry_bomb.is_completed(game_state) {
+                // Avoid crafting another bomb immediately after
+                // placing one down.  If it looks like a good idea,
+                // it's more likely that we're in an inconsistent
+                // state, where the bomb is no longer in the player's
+                // inventory, but isn't yet added to the location's
+                // temporary sprites.
+                let used_bomb_recently = self
+                    .most_recent_bomb
+                    .map(|prev_tick| {
+                        prev_tick + 15 < game_state.globals.game_tick
+                    })
+                    .unwrap_or(false);
+
+                let opt_craft =
+                    (!used_bomb_recently).then(|| craft_cherry_bomb.into());
+
+                return Ok(opt_craft);
+            }
+
+            self.most_recent_bomb = Some(game_state.globals.game_tick);
+        }
+
+        let goal = if let Some(item) = opt_item {
+            let item = if item.item_id.starts_with("(W)") {
                 let opt_weapon =
                     best_weapon(game_state.player.inventory.iter_items());
                 if let Some(weapon) = opt_weapon {
@@ -1256,10 +1390,10 @@ impl BotInterrupt for MineNearbyOre {
                     return Ok(None);
                 }
             } else {
-                tool.clone()
+                item.clone()
             };
             UseItemOnTile::new(
-                tool,
+                item,
                 game_state.player.room_name.clone(),
                 target_tile,
             )

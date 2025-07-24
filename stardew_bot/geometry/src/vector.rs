@@ -164,6 +164,19 @@ impl Vector<isize> {
             .map(move |dir| self + dir.offset())
     }
 
+    /// Iterate over all locations that are within a radius of the
+    pub fn iter_dist2(self, dist2: isize) -> impl Iterator<Item = Self> {
+        let dist = (dist2 as f32).sqrt().ceil() as isize;
+        (-dist..dist)
+            .flat_map(move |di| {
+                (-dist..dist).map(move |dj| Vector::new(di, dj))
+            })
+            .filter(move |offset| {
+                offset.right * offset.right + offset.down * offset.down < dist2
+            })
+            .map(move |offset| self + offset)
+    }
+
     pub fn closest_direction(self) -> Direction {
         Direction::iter()
             .max_by_key(|dir| self.dot(dir.offset()))

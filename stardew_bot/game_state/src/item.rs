@@ -199,6 +199,8 @@ impl ItemId {
     pub const RIVER_JELLY: Self = Self::new_const("(O)RiverJelly");
     pub const CAVE_JELLY: Self = Self::new_const("(O)CaveJelly");
 
+    pub const CHERRY_BOMB: Self = Self::new_const("(O)286");
+
     pub const COPPER_ORE: Self = Self::new_const("(O)378");
     pub const IRON_ORE: Self = Self::new_const("(O)380");
     pub const GOLD_ORE: Self = Self::new_const("(O)384");
@@ -311,6 +313,8 @@ impl ItemId {
                 Some((ItemId::COPPER_ORE, 20)),
                 None,
             ]
+        } else if self == &ItemId::CHERRY_BOMB {
+            [Some((ItemId::COPPER_ORE, 4)), Some((ItemId::COAL, 1)), None]
         } else {
             return None;
         };

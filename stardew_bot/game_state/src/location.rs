@@ -71,6 +71,10 @@ pub struct Location {
 
     /// Additional values that are only present for the mines.
     pub mineshaft_details: Option<MineshaftDetails>,
+
+    /// Bombs that have been placed in the area, but have not yet
+    /// exploded.
+    pub bombs: Vec<Bomb>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -92,6 +96,7 @@ pub struct LocationDelta {
     objects: Vec<Object>,
     items: Vec<FloatingItem>,
     characters: Vec<Character>,
+    bombs: Vec<Bomb>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -489,6 +494,16 @@ pub struct Character {
     pub is_invisible_duggy: bool,
 
     pub is_waiting_rock_crab: bool,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct Bomb {
+    /// The position of the bomb.  Must be divided by 64 to get the
+    /// tile position.
+    pub pos: Vector<f32>,
+
+    /// The radius, in tiles, of the bomb's explosion.
+    pub radius: i32,
 }
 
 #[derive(RustNativeObject, Clone, Debug)]
@@ -1079,6 +1094,14 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_bomb",
+            |right: f32, down: f32, radius: i32| Bomb {
+                pos: Vector::new(right, down),
+                radius,
+            },
+        )?;
+
+        graph.named_native_function(
             "new_location",
             |name: &str,
              properties: &Vec<MapProperty>,
@@ -1093,7 +1116,8 @@ impl Location {
              tiles: &MapTileSheets,
              buildings: &Vec<Building>,
              characters: &Vec<Character>,
-             mineshaft_details: Option<&MineshaftDetails>| {
+             mineshaft_details: Option<&MineshaftDetails>,
+             bombs: &Vec<Bomb>| {
                 let properties = properties
                     .iter()
                     .map(|prop| (prop.key.to_string(), prop.value.to_string()))
@@ -1148,6 +1172,7 @@ impl Location {
                     action_tiles,
                     characters: characters.clone(),
                     mineshaft_details: mineshaft_details.cloned(),
+                    bombs: bombs.clone(),
                 }
             },
         )?;
@@ -1158,7 +1183,8 @@ impl Location {
              resource_clumps: &Vec<ResourceClump>,
              objects: &Vec<Object>,
              items: &Vec<FloatingItem>,
-             characters: &Vec<Character>| {
+             characters: &Vec<Character>,
+             bombs: &Vec<Bomb>| {
                 LocationDelta {
                     name: name.into(),
                     near_player: true,
@@ -1166,6 +1192,7 @@ impl Location {
                     objects: objects.clone(),
                     items: items.clone(),
                     characters: characters.clone(),
+                    bombs: bombs.clone(),
                 }
             },
         )?;
@@ -1175,10 +1202,11 @@ impl Location {
             |name: &str, characters: &Vec<Character>| LocationDelta {
                 name: name.into(),
                 near_player: false,
+                characters: characters.clone(),
                 resource_clumps: Default::default(),
                 objects: Default::default(),
                 items: Default::default(),
-                characters: characters.clone(),
+                bombs: Default::default(),
             },
         )?;
 
@@ -1671,6 +1699,31 @@ impl Location {
                 characters
             }
 
+            fn read_location_bombs(location) {
+                let sprites = location
+                    .temporarySprites
+                    .AnimatedSprites;
+
+                let num = sprites
+                    ._size
+                    .prim_cast::<usize>();
+
+                (0..num)
+                    .map(|i| sprites._items[i])
+                    .filter(|sprite| sprite.bombRadius > 0i32)
+                    .map(|sprite| {
+                        let pos = sprite.position;
+                        let bomb_radius = sprite.bombRadius;
+
+                        new_bomb(
+                            pos.X,
+                            pos.Y,
+                            bomb_radius,
+                        )
+                    })
+                    .collect()
+            }
+
             fn read_location(location) {
                 let name = get_location_name_ptr(location).read_string();
                 let size = location
@@ -2044,7 +2097,7 @@ impl Location {
                     None
                 };
 
-
+                let bombs = read_location_bombs(location);
 
                 new_location(
                     name,
@@ -2061,6 +2114,7 @@ impl Location {
                     buildings,
                     characters,
                     mineshaft_details,
+                    bombs,
                 )
             }
 
@@ -2118,6 +2172,7 @@ impl Location {
                 let items = read_location_items(location, None);
 
                 let characters = read_location_characters(location);
+                let bombs = read_location_bombs(location);
 
                 new_location_delta(
                     name,
@@ -2125,6 +2180,7 @@ impl Location {
                     objects,
                     items,
                     characters,
+                    bombs,
                 )
             }
 
@@ -2419,6 +2475,7 @@ impl Location {
         self.items = delta.items;
 
         self.characters = delta.characters;
+        self.bombs = delta.bombs;
     }
 
     fn apply_nonlocal_delta(&mut self, delta: LocationDelta) {
@@ -3080,5 +3137,18 @@ impl Character {
             let x = x as f32;
             x / 64.0
         })
+    }
+}
+
+impl Bomb {
+    pub fn tile(&self) -> Vector<isize> {
+        (self.pos / 64.0).map(|x| x as isize)
+    }
+
+    pub fn dist2(&self) -> isize {
+        // Equivalent to checking if the distance is less than
+        // `self.radius+0.5`, but only requires integer max.
+        let r = self.radius as isize;
+        r * r + r
     }
 }
