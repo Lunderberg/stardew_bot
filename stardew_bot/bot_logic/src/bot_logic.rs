@@ -813,11 +813,17 @@ impl BotLogic {
                 continue;
             };
 
+            if self.verbose {
+                println!("Interrupt '{}' triggered", interrupt.description());
+            }
+
             *active_goal = Some(current_stack_size);
-            interrupt_stack
-                .0
-                .into_iter()
-                .for_each(|item| self.stack.push(item));
+            interrupt_stack.0.into_iter().for_each(|item| {
+                if self.verbose {
+                    println!("\tPushing '{}' onto stack", item.description());
+                }
+                self.stack.push(item)
+            });
         }
 
         Ok(())
