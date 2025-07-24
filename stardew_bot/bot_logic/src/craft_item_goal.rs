@@ -1,5 +1,5 @@
 use crate::{Error, GameAction};
-use game_state::{GameState, Item};
+use game_state::{GameState, Item, ItemId};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
@@ -23,6 +23,30 @@ impl CraftItemGoal {
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         let num_in_inventory = self.item_count(game_state);
         num_in_inventory >= self.item.count
+    }
+
+    pub fn is_completable(&self, game_state: &GameState) -> bool {
+        let inventory = &game_state.player.inventory;
+        let carrying = inventory.to_hash_map();
+        let get_count = |id: &ItemId| carrying.get(id).cloned().unwrap_or(0);
+
+        let num_in_inventory = get_count(&self.item.id);
+        let iter_ingredients =
+            || self.item.id.iter_recipe().into_iter().flatten();
+        let num_craftable = iter_ingredients()
+            .map(|(ingredient, count)| get_count(&ingredient) / count)
+            .min()
+            .unwrap_or(0);
+
+        let can_craft_enough =
+            num_in_inventory + num_craftable >= self.item.count;
+        let have_inventory_space = num_in_inventory > 0
+            || inventory.has_empty_slot()
+            || iter_ingredients().any(|(ingredient, count)| {
+                num_craftable * count == get_count(&ingredient)
+            });
+
+        can_craft_enough && have_inventory_space
     }
 }
 
