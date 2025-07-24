@@ -1224,7 +1224,7 @@ impl BotInterrupt for MineNearbyOre {
                 ((*dist as f32) + offset < self.dist * multiplier)
                     .then(|| (*tile, *dist))
             })
-            .min_by_key(|(_, dist)| *dist)
+            .min_by_key(|(tile, dist)| (*dist, tile.right, tile.down))
             .map(|(tile, _)| tile);
 
         let Some(target_tile) = opt_closest_stone else {
