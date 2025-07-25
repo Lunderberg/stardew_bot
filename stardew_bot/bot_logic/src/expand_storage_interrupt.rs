@@ -115,7 +115,19 @@ impl BotInterrupt for ExpandStorageInterrupt {
         let craft = CraftItemGoal::new(ItemId::CHEST.with_count(1));
         let place = UseItemOnTile::new(ItemId::CHEST, room.name.clone(), tile);
 
-        let interrupt = LogicStack::new().then(prepare).then(craft).then(place);
+        let num_objects = room.objects.len();
+        let cancellation = move |game_state: &GameState| {
+            game_state
+                .current_room()
+                .map(|loc| loc.objects.len() != num_objects)
+                .unwrap_or(true)
+        };
+
+        let interrupt = LogicStack::new()
+            .then(prepare)
+            .then(craft)
+            .then(place)
+            .cancel_if(cancellation);
 
         Ok(Some(interrupt))
     }
