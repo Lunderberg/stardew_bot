@@ -1130,6 +1130,14 @@ impl Location {
                     .iter()
                     .cloned()
                     .chain(tiles.iter_extra_warps())
+                    .filter(|warp| {
+                        // The blockage isn't cleared until the start
+                        // of summer, but the map tiles don't show it
+                        // as a blocked area.  For now, remove these
+                        // warps so the bot doesn't try to walk
+                        // through an inaccessible area.
+                        !(name == "Mountain" && warp.target_room == "Railroad")
+                    })
                     .collect();
 
                 let water_tiles = {
