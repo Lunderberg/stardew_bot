@@ -23,12 +23,7 @@ impl ExpandTreeFarm {
         &self,
         game_state: &GameState,
     ) -> Result<Option<(Vector<isize>, Option<ItemId>)>, Error> {
-        let accessible_axe = game_state
-            .iter_accessible_items()?
-            .any(|item| item.id == ItemId::AXE);
-        if !accessible_axe {
-            return Ok(None);
-        }
+        let opt_axe = game_state.current_axe()?;
 
         let plan = FarmPlan::plan(game_state)?;
         let farm = game_state.get_room("Farm")?;
@@ -72,8 +67,10 @@ impl ExpandTreeFarm {
             .iter()
             .filter_map(|obj| {
                 let opt_tool = match &obj.kind {
-                    ObjectKind::Tree(tree) if tree.growth_stage == 0 => {
-                        Some(ItemId::AXE)
+                    ObjectKind::Tree(tree)
+                        if tree.growth_stage == 0 && opt_axe.is_some() =>
+                    {
+                        opt_axe.cloned()
                     }
                     ObjectKind::Tree(tree)
                         if tree.has_seed && !tree.is_stump =>
@@ -99,11 +96,12 @@ impl ExpandTreeFarm {
 
         let iter_clear_adj_trees = plan
             .iter_planned_trees()
+            .filter(|_| opt_axe.is_some())
             .filter(|tile| current_trees.is_set(*tile))
             .flat_map(|tile| tile.iter_adjacent())
             .unique()
             .filter(|adj| current_trees.is_set(*adj))
-            .map(|adj| (adj, Some(ItemId::AXE)));
+            .map(|adj| (adj, opt_axe.cloned()));
 
         let opt_next_step =
             std::iter::empty::<(Vector<isize>, Option<ItemId>)>()
@@ -142,15 +140,18 @@ impl BotGoal for ExpandTreeFarm {
             return Ok(BotGoalResult::Completed);
         };
 
+        let goal = InventoryGoal::current()
+            .with(
+                Self::SEED_TYPES
+                    .iter()
+                    .map(|seed| seed.clone().with_count(100)),
+            )
+            .with(ItemId::HOE)
+            .with(game_state.current_axe()?.cloned());
+
         let inventory = &game_state.player.inventory;
-        if !inventory.contains(ItemId::AXE) || inventory.num_empty_slots() < 4 {
-            let goal = Self::SEED_TYPES
-                .iter()
-                .map(|seed| seed.clone().with_count(100))
-                .fold(InventoryGoal::empty(), |goal, seed| goal.with(seed))
-                .with(ItemId::AXE)
-                .with(ItemId::HOE)
-                .stamina_recovery_slots(2);
+        if !goal.is_completed(game_state)? || inventory.num_empty_slots() < 4 {
+            let goal = goal.otherwise_empty().stamina_recovery_slots(2);
             return Ok(goal.into());
         }
 

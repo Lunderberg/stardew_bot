@@ -38,6 +38,8 @@ pub trait GameStateExt {
     fn collect_clearable_tiles(
         &self,
     ) -> Result<HashMap<Vector<isize>, Option<ItemId>>, Error>;
+
+    fn current_axe(&self) -> Result<Option<&ItemId>, Error>;
 }
 
 impl GameStateExt for GameState {
@@ -168,6 +170,20 @@ impl GameStateExt for GameState {
             .map(|item| &item.id);
 
         current_room.collect_clearable_tiles(opt_weapon)
+    }
+
+    fn current_axe(&self) -> Result<Option<&ItemId>, Error> {
+        let opt_axe =
+            self.iter_accessible_items()?
+                .map(|item| &item.id)
+                .find(|&id| {
+                    id == &ItemId::AXE
+                        || id == &ItemId::COPPER_AXE
+                        || id == &ItemId::IRON_AXE
+                        || id == &ItemId::GOLD_AXE
+                        || id == &ItemId::IRIDIUM_AXE
+                });
+        Ok(opt_axe)
     }
 }
 
