@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use geometry::Vector;
+use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
@@ -58,6 +58,8 @@ struct NearbyOreCache {
     placeable: TileMap<bool>,
 }
 
+struct WaitNearBomb;
+
 struct StonePredictor {
     game_id: u64,
     days_played: u32,
@@ -110,6 +112,10 @@ const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
     Vector::new(8, 5),
 ];
 
+// How much copper ore/coal should be reserved for crafting
+// cherry bombs, rather than immediately smelted.
+const CRAFTABLE_CHERRY_BOMBS: usize = 3;
+
 impl SmeltingPlan {
     fn new(game_state: &GameState) -> Result<Self, Error> {
         let mines = game_state.get_room("Mine")?;
@@ -118,9 +124,6 @@ impl SmeltingPlan {
             .room("Mine")
             .total_stored_and_carried(game_state)?;
 
-        // How much copper ore/coal should be reserved for crafting
-        // cherry bombs, rather than immediately smelted.
-        const CRAFTABLE_CHERRY_BOMBS: usize = 3;
         ItemId::CHERRY_BOMB
             .iter_recipe()
             .into_iter()
@@ -386,9 +389,16 @@ impl MineDelvingGoal {
         let get_count =
             |item: &ItemId| -> usize { items.get(item).cloned().unwrap_or(0) };
 
-        let enough_ore_to_smelt = get_count(&ItemId::COAL) >= 1
-            && (get_count(&ItemId::COPPER_ORE) >= 5
-                && get_count(&ItemId::IRON_ORE) >= 5);
+        let copper_ore = get_count(&ItemId::COPPER_ORE);
+        let copper_bar = get_count(&ItemId::COPPER_BAR);
+        let iron_ore = get_count(&ItemId::IRON_ORE);
+        let iron_bar = get_count(&ItemId::IRON_BAR);
+        let coal = get_count(&ItemId::COAL);
+
+        let copper_ore = copper_ore.saturating_sub(CRAFTABLE_CHERRY_BOMBS * 4);
+
+        let enough_ore_to_smelt =
+            coal >= 1 && (copper_ore >= 5 || iron_ore >= 5);
         let num_furnaces = game_state
             .get_room("Mine")?
             .objects
@@ -407,13 +417,10 @@ impl MineDelvingGoal {
 
         // If there are more iron bars than copper bars, mine more
         // copper.
+        let effective_copper_bars = copper_bar + copper_ore / 5;
+        let effective_iron_bars = iron_bar + iron_ore / 5;
 
-        let copper_bars =
-            get_count(&ItemId::COPPER_BAR) + get_count(&ItemId::COPPER_ORE) / 5;
-        let iron_bars =
-            get_count(&ItemId::IRON_BAR) + get_count(&ItemId::IRON_ORE) / 5;
-
-        Ok(copper_bars <= iron_bars)
+        Ok(effective_copper_bars <= effective_iron_bars)
     }
 
     fn before_descending_into_mine(
@@ -662,6 +669,7 @@ impl BotGoal for MineDelvingGoal {
             .with_interrupt(
                 MineNearbyOre::new().with_search_distance(mining_dist),
             )
+            .with_interrupt(WaitNearBomb::new())
             .with_interrupt(MaintainStaminaGoal::new())
             .with_interrupt(AttackNearbyEnemy::new());
         Ok(goal.into())
@@ -1146,7 +1154,7 @@ impl MineNearbyOre {
                             return None;
                         };
 
-                        (multiplier * level_kind, -stone_clearing_cost)
+                        (multiplier / level_kind, -stone_clearing_cost)
                     }
                     ObjectKind::MineCartCoal => (3.0, 0.0),
 
@@ -1313,6 +1321,7 @@ impl BotInterrupt for MineNearbyOre {
             Some(target_tile)
                 .into_iter()
                 .filter(|_| craft_cherry_bomb.is_completable(game_state))
+                .filter(|_| level_kind > 1.0)
                 .flat_map(|tile| tile.iter_dist2(CHERRY_BOMB_DIST2))
                 .filter(|&bomb_tile| placeable.is_set(bomb_tile))
                 .map(|bomb_tile| {
@@ -1404,6 +1413,72 @@ impl BotInterrupt for MineNearbyOre {
         };
 
         Ok(Some(goal))
+    }
+}
+
+impl WaitNearBomb {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl BotInterrupt for WaitNearBomb {
+    fn description(&self) -> std::borrow::Cow<str> {
+        "Wait near bomb".into()
+    }
+
+    fn check(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<LogicStack>, Error> {
+        let loc = game_state.current_room()?;
+        let Some(bomb) = loc.bombs.first() else {
+            return Ok(None);
+        };
+
+        let player_tile = game_state.player.tile();
+        let bomb_tile = bomb.tile();
+
+        let pathfinding = loc.pathfinding(&game_state.statics);
+
+        let player_dist = pathfinding.distances(player_tile);
+
+        let opt_target_tile = bomb
+            .within_range(player_tile)
+            .then(|| {
+                // Within range of the bomb, so find somewhere to run.
+                pathfinding
+                    .iter_dijkstra(player_tile)
+                    .map(|(tile, _)| tile)
+                    .find(|tile| !bomb.within_range(*tile))
+            })
+            .flatten()
+            .or_else(|| {
+                // Out of range of the bomb, so move around without
+                // going too far away.
+                let perimeter = bomb.perimeter_dist2();
+                Direction::iter_cardinal()
+                    .map(|dir| player_tile + dir.offset())
+                    .find(|adj| {
+                        player_dist.is_some(*adj)
+                            && perimeter.contains(&adj.dist2(bomb_tile))
+                    })
+            });
+
+        let Some(target_tile) = opt_target_tile else {
+            return Ok(None);
+        };
+
+        let stack = LogicStack::new()
+            .then(MovementGoal::new(loc.name.clone(), target_tile.into()))
+            .cancel_if(|game_state| {
+                game_state
+                    .current_room()
+                    .map(|loc| loc.bombs.is_empty())
+                    .unwrap_or(true)
+            });
+
+        Ok(Some(stack))
     }
 }
 

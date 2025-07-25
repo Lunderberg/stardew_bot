@@ -1,6 +1,6 @@
 use std::{
     collections::{HashMap, HashSet},
-    ops::Deref,
+    ops::{Deref, Range},
 };
 
 use dotnet_debugger::{
@@ -3158,5 +3158,19 @@ impl Bomb {
         // `self.radius+0.5`, but only requires integer max.
         let r = self.radius as isize;
         r * r + r
+    }
+
+    pub fn within_range(&self, other: Vector<isize>) -> bool {
+        self.tile().dist2(other) < self.dist2()
+    }
+
+    pub fn perimeter_dist2(&self) -> Range<isize> {
+        // r+0.5 < dist < r+1.5
+        // (r+0.5)**2 < dist2 < (r+1.5)**2
+        // r*r + r + 0.25 < dist2 < r*r + 3*r + 2.25
+        let r = self.radius as isize;
+        let min = r * r + r;
+        let max = r * r + 3 * r + 3;
+        min..max
     }
 }
