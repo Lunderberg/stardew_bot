@@ -49,7 +49,7 @@ impl BotInterrupt for AttackNearbyEnemy {
             .current_room()?
             .characters
             .iter()
-            .filter(|character| character.health.is_some())
+            .filter(|character| character.is_monster())
             .filter(|monster| {
                 !monster.is_invisible_duggy && !monster.is_waiting_rock_crab
             })
@@ -122,6 +122,9 @@ impl ClubSmashNearby {
             .characters
             .iter()
             .filter(|character| character.is_monster())
+            .filter(|monster| {
+                !monster.is_invisible_duggy && !monster.is_waiting_rock_crab
+            })
             .filter(|monster| {
                 if monster.ignores_collisions {
                     // This is a flying monster (e.g. bat/ghost), and
