@@ -1,5 +1,10 @@
 use derive_more::From;
-use std::{any::Any, borrow::Cow, collections::VecDeque, fmt::Display};
+use std::{
+    any::Any,
+    borrow::Cow,
+    collections::{HashSet, VecDeque},
+    fmt::Display,
+};
 
 use crate::{Error, GameAction};
 use game_state::{GameState, Key, ScrollWheel};
@@ -13,6 +18,7 @@ pub struct BotLogic {
     recently_finished: VecDeque<LogicStackItem>,
     recent_actions: VecDeque<VerboseAction>,
     verbose: bool,
+    recursed_during_current_update: HashSet<usize>,
 }
 
 pub struct LogicStack(VecDeque<LogicStackItem>);
@@ -525,6 +531,7 @@ impl BotLogic {
             recently_finished: Default::default(),
             recent_actions: Default::default(),
             verbose,
+            recursed_during_current_update: Default::default(),
         }
     }
 
@@ -552,6 +559,7 @@ impl BotLogic {
             ActionCollector::new(game_state, self.action_dead_time.clone());
 
         let mut previously_produced_subgoals: Option<usize> = None;
+        self.recursed_during_current_update.clear();
 
         loop {
             // Check if any CancelIf conditions should be triggered.
@@ -699,6 +707,7 @@ impl BotLogic {
                 }
                 BotGoalResult::SubGoals(sub_goals) => {
                     let stack_size = self.stack.len();
+                    self.recursed_during_current_update.insert(stack_size - 1);
                     previously_produced_subgoals = Some(stack_size - 1);
 
                     sub_goals
@@ -817,6 +826,15 @@ impl BotLogic {
                 println!("Interrupt '{}' triggered", interrupt.description());
             }
 
+            assert!(
+                !self.recursed_during_current_update.contains(&i_item),
+                "Infinite loop detected.  \
+                 Interrupt '{}' fired multiple times \
+                 during a single update.",
+                interrupt.description(),
+            );
+
+            self.recursed_during_current_update.insert(i_item);
             *active_goal = Some(current_stack_size);
             interrupt_stack.0.into_iter().for_each(|item| {
                 if self.verbose {
