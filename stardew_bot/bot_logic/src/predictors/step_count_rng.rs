@@ -4,9 +4,18 @@ pub struct StepCountPredictor {
     game_id: u32,
     days_played: u32,
     steps_taken: u32,
+    num_friendships: usize,
 }
 
 pub struct StepCountPrediction {
+    /// The index in `game_state.player.friendships` of the NPC who
+    /// will attempt to give a gift to the player.
+    pub friendship_index: usize,
+
+    /// The nummber of hearts required with the selected friend in
+    /// order for the gift-giving to succeed.
+    pub min_hearts_for_gift: i32,
+
     /// The daily luck, within the range of [-100,100], inclusive.
     pub daily_luck: i8,
 }
@@ -24,10 +33,13 @@ impl StepCountPredictor {
         let steps_taken: u32 =
             game_state.globals.get_stat("stepsTaken").unwrap_or(0);
 
+        let num_friendships = game_state.player.friendships.len();
+
         Self {
             game_id,
             days_played,
             steps_taken,
+            num_friendships,
         }
     }
 
@@ -79,16 +91,17 @@ impl StepCountPredictor {
         // Object constructor
         rng.rand_i32();
 
-        // RNG call to decide whether the player will receive the rarecrow
-        // recipe after having collected all 8 rarecrows (90.5% chance).
-        rng.rand_i32();
-
         // RNG call to decide which NPC may send a gift in the mail,
         // followed by a check to see if they will send a gift.
         // Technically, these calls may be skipped if the player hasn't
         // met any NPCs, but since both Robin and Lewis are met in the
         // opening cutscene, these RNG calls will always be made.
-        rng.rand_i32();
+        let friendship_index =
+            rng.rand_in_range(0..self.num_friendships as i32) as usize;
+        let min_hearts_for_gift = rng.rand_in_range(1..11);
+
+        // RNG call to decide whether the player will receive the rarecrow
+        // recipe after having collected all 8 rarecrows (90.5% chance).
         rng.rand_i32();
 
         // TODO: RNG calls for cursed mannequins in the same location as a
@@ -97,7 +110,11 @@ impl StepCountPredictor {
         // Now the important call, the daily luck for the next day.
         let daily_luck = rng.rand_in_range(-100..101) as i8;
 
-        StepCountPrediction { daily_luck }
+        StepCountPrediction {
+            daily_luck,
+            friendship_index,
+            min_hearts_for_gift,
+        }
     }
 }
 
