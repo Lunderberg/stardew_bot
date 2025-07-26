@@ -269,58 +269,68 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
-        game_state.statics.bundles.iter().for_each(|bundle| {
-            let flags = game_state
-                .globals
-                .bundles
-                .get(&bundle.bundle_index)
-                .unwrap();
+        game_state
+            .statics
+            .bundles
+            .iter()
+            .into_group_map_by(|bundle| &bundle.community_center_room)
+            .into_iter()
+            .for_each(|(room, bundles)| {
+                println!("{room}");
+                bundles.into_iter().for_each(|bundle| {
+                    let flags = game_state
+                        .globals
+                        .bundles
+                        .get(&bundle.bundle_index)
+                        .unwrap();
 
-            let num_done = flags.iter().map(|b| *b as usize).sum::<usize>();
+                    let num_done =
+                        flags.iter().map(|b| *b as usize).sum::<usize>();
 
-            println!(
-                "'{}' Bundle ({num_done}/{})",
-                bundle.name, bundle.num_required
-            );
+                    println!(
+                        "\t'{}' Bundle ({num_done}/{})",
+                        bundle.name, bundle.num_required
+                    );
 
-            bundle
-                .ingredients
-                .iter()
-                .zip(flags)
-                .filter(|_| num_done < bundle.num_required)
-                .for_each(|(ingredient, &done)| {
-                    let done_char = if done { '🗹' } else { '☐' };
+                    bundle
+                        .ingredients
+                        .iter()
+                        .zip(flags)
+                        .filter(|_| num_done < bundle.num_required)
+                        .for_each(|(ingredient, &done)| {
+                            let done_char = if done { '🗹' } else { '☐' };
 
-                    match ingredient {
-                        BundleIngredient::Gold(gp) => {
-                            println!("\t{done_char} {gp} GP")
-                        }
-                        BundleIngredient::Item(item) => {
-                            let name = game_state
-                                .statics
-                                .object_data
-                                .get(
-                                    &item
-                                        .id
-                                        .clone()
-                                        .with_quality(Quality::Normal),
-                                )
-                                .map(|data| data.name.as_str())
-                                .unwrap_or_else(|| &*item.id.item_id);
+                            match ingredient {
+                                BundleIngredient::Gold(gp) => {
+                                    println!("\t\t{done_char} {gp} GP")
+                                }
+                                BundleIngredient::Item(item) => {
+                                    let name = game_state
+                                        .statics
+                                        .object_data
+                                        .get(
+                                            &item
+                                                .id
+                                                .clone()
+                                                .with_quality(Quality::Normal),
+                                        )
+                                        .map(|data| data.name.as_str())
+                                        .unwrap_or_else(|| &*item.id.item_id);
 
-                            print!("\t{done_char} ");
-                            if item.count > 1 {
-                                print!("{} ", item.count);
+                                    print!("\t\t{done_char} ");
+                                    if item.count > 1 {
+                                        print!("{} ", item.count);
+                                    }
+                                    if !item.quality().is_normal() {
+                                        print!("{} ", item.quality());
+                                    }
+
+                                    println!("{name}")
+                                }
                             }
-                            if !item.quality().is_normal() {
-                                print!("{} ", item.quality());
-                            }
-
-                            println!("{name}")
-                        }
-                    }
+                        });
                 });
-        });
+            });
 
         Ok(())
     }
