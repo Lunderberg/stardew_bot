@@ -7,6 +7,9 @@ pub use game_state::{GameState, GameStateReader};
 mod item_set;
 pub use item_set::ItemSet;
 
+mod menu;
+pub use menu::*;
+
 mod define_utility_functions;
 pub use define_utility_functions::define_utility_functions;
 
@@ -43,26 +46,5 @@ pub use inventory_state::Inventory;
 mod item;
 pub use item::*;
 
-mod chest_menu;
-pub use chest_menu::ChestMenu;
-
-mod pause_menu;
-pub use pause_menu::PauseMenu;
-
-mod dialogue_menu;
-pub use dialogue_menu::DialogueMenu;
-
-mod mail_menu;
-pub use mail_menu::MailMenu;
-
-mod shop_menu;
-pub use shop_menu::ShopMenu;
-
-mod mine_elevator_menu;
-pub use mine_elevator_menu::MineElevatorMenu;
-
 mod rng_state;
 pub use rng_state::SeededRng;
-
-mod geode_menu;
-pub use geode_menu::GeodeMenu;

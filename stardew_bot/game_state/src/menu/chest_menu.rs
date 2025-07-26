@@ -1,9 +1,7 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::Vector;
 
-use crate::Error;
-
-use super::{Inventory, Item};
+use crate::{Error, Inventory, Item};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct ChestMenu {

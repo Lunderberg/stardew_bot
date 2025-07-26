@@ -1,9 +1,7 @@
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::Vector;
 
-use crate::Error;
-
-use super::Item;
+use crate::{Error, Item};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PauseMenu {
