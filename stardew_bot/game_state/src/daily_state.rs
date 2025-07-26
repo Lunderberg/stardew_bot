@@ -10,6 +10,7 @@ pub struct DailyState {
     pub is_raining: bool,
     pub tomorrow_weather: String,
     pub professions: HashSet<i32>,
+    pub tool_ready_for_pickup: bool,
 }
 
 impl DailyState {
@@ -21,12 +22,14 @@ impl DailyState {
             |daily_luck: f64,
              is_raining: bool,
              tomorrow_weather: &str,
-             professions: &Vec<i32>| {
+             professions: &Vec<i32>,
+             tool_ready_for_pickup: bool| {
                 DailyState {
                     daily_luck,
                     is_raining,
                     tomorrow_weather: tomorrow_weather.into(),
                     professions: professions.iter().cloned().collect(),
+                    tool_ready_for_pickup,
                 }
             },
         )?;
@@ -63,11 +66,27 @@ impl DailyState {
                         .collect()
                 };
 
+                let tool_ready_for_pickup = {
+                    let player = StardewValley.Game1._player;
+
+                    let upgrade_in_progress = player
+                        .toolBeingUpgraded
+                        .value
+                        .is_some();
+
+                    let days_remaining = player
+                        .daysLeftForToolUpgrade
+                        .value;
+
+                    upgrade_in_progress && (days_remaining == 0i32)
+                };
+
                 new_daily_state(
                     daily_luck,
                     is_raining,
                     tomorrow_weather,
                     professions,
+                    tool_ready_for_pickup,
                 )
             }
         })?;
