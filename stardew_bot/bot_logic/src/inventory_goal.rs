@@ -866,14 +866,19 @@ impl BotGoal for InventoryGoal {
             // chest menu if it is still open, and return control to
             // the parent goal.
             let cleanup = MenuCloser::new();
-            if cleanup.is_completed(game_state) {
-                return Ok(BotGoalResult::Completed);
-            } else {
+            if !cleanup.is_completed(game_state) {
                 return Ok(cleanup.into());
             }
+            return Ok(BotGoalResult::Completed);
         };
 
         let Some(chest_menu) = game_state.chest_menu() else {
+            // Some other menu has been left accidentally open.
+            let cleanup = MenuCloser::new();
+            if !cleanup.is_completed(game_state) {
+                return Ok(cleanup.into());
+            }
+
             // There is no chest open.  Open the chest for the next
             // transfer.
             let stack = LogicStack::new()
