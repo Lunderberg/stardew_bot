@@ -258,7 +258,7 @@ impl MineDelvingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        if let Some(menu) = &game_state.mine_elevator_menu {
+        if let Some(menu) = game_state.mine_elevator_menu() {
             let i_button = depth / 5;
             let pixel =
                 menu.buttons.get(i_button).cloned().unwrap_or_else(|| {
@@ -507,7 +507,7 @@ impl MineDelvingGoal {
         // case that occurs if the furnaces finish smelting at the
         // exact same time that we opened the menu.
         if let Some(prepare) = self.before_descending_into_mine(game_state)? {
-            if game_state.mine_elevator_menu.is_some() {
+            if game_state.mine_elevator_menu().is_some() {
                 return Ok(MenuCloser::new().into());
             }
             return Ok(prepare
@@ -696,7 +696,7 @@ impl BotGoal for MineSingleLevel {
             return Ok(BotGoalResult::Completed);
         }
 
-        if game_state.dialogue_menu.is_some() {
+        if game_state.dialogue_menu().is_some() {
             // The return-to-surface menu is open, so send a
             // confirmation.
             actions.do_action(GameAction::ConfirmMenu);
@@ -768,7 +768,7 @@ impl BotGoal for MineSingleLevel {
             smelting_plan.copper_bars > 0 || smelting_plan.iron_bars > 0
         };
 
-        if should_go_up && game_state.mine_elevator_menu.is_some() {
+        if should_go_up && game_state.mine_elevator_menu().is_some() {
             return MineDelvingGoal::elevator_to_floor(game_state, actions, 0);
         }
 

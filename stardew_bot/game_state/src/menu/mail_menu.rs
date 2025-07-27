@@ -3,6 +3,8 @@ use geometry::{Rectangle, Vector};
 
 use crate::Error;
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct MailMenu {
     pub pixel_location: Rectangle<isize>,
@@ -21,13 +23,15 @@ impl MailMenu {
              width: isize,
              height: isize,
              current_page: usize,
-             num_pages: usize| MailMenu {
-                pixel_location: Rectangle {
-                    top_left: Vector::new(x, y),
-                    shape: Vector::new(width, height),
-                },
-                current_page,
-                num_pages,
+             num_pages: usize| {
+                Menu::Mail(MailMenu {
+                    pixel_location: Rectangle {
+                        top_left: Vector::new(x, y),
+                        shape: Vector::new(width, height),
+                    },
+                    current_page,
+                    num_pages,
+                })
             },
         )?;
 

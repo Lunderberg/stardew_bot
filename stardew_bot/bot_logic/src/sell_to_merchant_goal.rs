@@ -79,12 +79,12 @@ impl BotGoal for SellToMerchantGoal {
             }
         };
 
-        if let Some(menu) = &game_state.shop_menu {
+        if let Some(menu) = game_state.shop_menu() {
             let pixel = menu.player_item_locations[slot];
             actions.do_action(GameAction::MouseOverPixel(pixel));
             actions.do_action(GameAction::LeftClick);
             Ok(BotGoalResult::InProgress)
-        } else if let Some(menu) = &game_state.dialogue_menu {
+        } else if let Some(menu) = game_state.dialogue_menu() {
             let Some(pixel) = menu.response_pixel("Shop") else {
                 return Ok(MenuCloser::new().into());
             };

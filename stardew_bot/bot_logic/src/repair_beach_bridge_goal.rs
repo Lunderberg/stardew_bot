@@ -67,7 +67,7 @@ impl BotGoal for RepairBeachBridgeGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if game_state.dialogue_menu.is_some() {
+        if game_state.dialogue_menu().is_some() {
             actions.do_action(GameAction::ConfirmMenu);
             if self.triggered_repair_dialogue {
                 self.confirmed_repair_dialogue = true;

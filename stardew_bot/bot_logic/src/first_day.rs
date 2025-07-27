@@ -155,7 +155,7 @@ impl BotGoal for FirstDay {
 
         if game_state.player.inventory.items.len() < 24 && current_money > 2000
         {
-            if let Some(menu) = &game_state.dialogue_menu {
+            if let Some(menu) = game_state.dialogue_menu() {
                 let Some(pixel) = menu.response_pixel("Purchase") else {
                     return Ok(MenuCloser::new().into());
                 };
@@ -168,7 +168,7 @@ impl BotGoal for FirstDay {
                 return Ok(goal.into());
             }
         }
-        if let Some(menu) = &game_state.dialogue_menu {
+        if let Some(menu) = game_state.dialogue_menu() {
             if menu.responses.is_empty() {
                 actions.do_action(GameAction::ExitMenu);
                 return Ok(BotGoalResult::InProgress);

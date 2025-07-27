@@ -234,7 +234,7 @@ impl BotGoal for UnloadFishingRod {
             return Ok(BotGoalResult::Completed);
         };
 
-        let Some(pause) = &game_state.pause_menu else {
+        let Some(pause) = game_state.pause_menu() else {
             actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };

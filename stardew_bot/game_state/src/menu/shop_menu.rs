@@ -5,6 +5,8 @@ use geometry::Vector;
 
 use crate::{Error, Item};
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct ShopMenu {
     pub shop_name: String,
@@ -28,14 +30,16 @@ impl ShopMenu {
              for_sale_buttons: &Vec<Vector<isize>>,
              for_sale_scroll_index: usize,
              player_item_locations: &Vec<Vector<isize>>,
-             exit_button: &Vector<isize>| ShopMenu {
-                shop_name: shop_name.to_string(),
-                held_item: held_item.cloned(),
-                for_sale: for_sale.clone(),
-                for_sale_buttons: for_sale_buttons.clone(),
-                for_sale_scroll_index,
-                player_item_locations: player_item_locations.clone(),
-                exit_button: exit_button.clone(),
+             exit_button: &Vector<isize>| {
+                Menu::Shop(ShopMenu {
+                    shop_name: shop_name.to_string(),
+                    held_item: held_item.cloned(),
+                    for_sale: for_sale.clone(),
+                    for_sale_buttons: for_sale_buttons.clone(),
+                    for_sale_scroll_index,
+                    player_item_locations: player_item_locations.clone(),
+                    exit_button: exit_button.clone(),
+                })
             },
         )?;
 

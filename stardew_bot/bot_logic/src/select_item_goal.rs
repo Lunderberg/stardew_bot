@@ -70,8 +70,7 @@ impl BotGoal for SelectItemGoal {
         }
 
         let opt_held_item = game_state
-            .pause_menu
-            .as_ref()
+            .pause_menu()
             .and_then(|pause| pause.inventory_page())
             .and_then(|inventory_page| {
                 inventory_page
@@ -135,7 +134,7 @@ impl BotGoal for SelectItemGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let Some(pause) = &game_state.pause_menu else {
+        let Some(pause) = game_state.pause_menu() else {
             actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };

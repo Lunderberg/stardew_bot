@@ -118,7 +118,7 @@ impl BotGoal for MaintainStaminaGoal {
 
         let loc = game_state.current_room()?;
 
-        if game_state.dialogue_menu.is_some() {
+        if game_state.dialogue_menu().is_some() {
             // The eat-food confirmation menu is open, so send the 'y'
             // keystroke to confirm.
             actions.do_action(GameAction::ConfirmMenu);

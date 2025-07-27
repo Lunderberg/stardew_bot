@@ -39,8 +39,7 @@ impl<Func> OrganizeInventoryGoal<Func> {
     {
         let func = &self.func;
         let opt_held_item = game_state
-            .pause_menu
-            .as_ref()
+            .pause_menu()
             .and_then(|menu| menu.held_item())
             .map(func);
 
@@ -220,7 +219,7 @@ where
         };
 
         // Open the pause menu if needed
-        let Some(menu) = &game_state.pause_menu else {
+        let Some(menu) = game_state.pause_menu() else {
             if game_state.player.can_move {
                 actions
                     .do_action(GameAction::ExitMenu)

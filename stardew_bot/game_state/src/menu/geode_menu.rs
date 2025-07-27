@@ -3,6 +3,8 @@ use geometry::Vector;
 
 use crate::{Error, Item};
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GeodeMenu {
     pub player_item_locations: Vec<Vector<isize>>,
@@ -22,12 +24,14 @@ impl GeodeMenu {
              held_item: Option<&Item>,
              crack_geode_button: &Vector<isize>,
              is_cracking_geode: bool,
-             ok_button: &Vector<isize>| GeodeMenu {
-                player_item_locations: player_item_locations.clone(),
-                held_item: held_item.cloned(),
-                crack_geode_button: crack_geode_button.clone(),
-                is_cracking_geode,
-                ok_button: ok_button.clone(),
+             ok_button: &Vector<isize>| {
+                Menu::Geode(GeodeMenu {
+                    player_item_locations: player_item_locations.clone(),
+                    held_item: held_item.cloned(),
+                    crack_geode_button: crack_geode_button.clone(),
+                    is_cracking_geode,
+                    ok_button: ok_button.clone(),
+                })
             },
         )?;
 

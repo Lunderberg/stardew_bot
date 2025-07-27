@@ -1,4 +1,4 @@
-use game_state::GameState;
+use game_state::{GameState, Menu};
 
 use crate::Error;
 
@@ -21,7 +21,7 @@ impl GoToActionTile {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
-        game_state.dialogue_menu.is_some() || game_state.shop_menu.is_some()
+        matches!(game_state.menu, Some(Menu::Dialogue(_) | Menu::Shop(_)))
     }
 }
 

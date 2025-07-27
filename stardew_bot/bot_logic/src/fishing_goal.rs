@@ -440,7 +440,7 @@ impl BotGoal for FishOnceGoal {
 
         // In case the first-geode popup appears from a treasure
         // chest.
-        if let Some(menu) = &game_state.dialogue_menu {
+        if let Some(menu) = game_state.dialogue_menu() {
             if menu.responses.is_empty() {
                 actions
                     .do_action(GameAction::LeftClick)
@@ -449,7 +449,7 @@ impl BotGoal for FishOnceGoal {
             }
         }
 
-        if let Some(menu) = &game_state.chest_menu {
+        if let Some(menu) = game_state.chest_menu() {
             self.wait_for_treasure_chest = false;
             let opt_item_pixel = menu
                 .chest_items
@@ -622,8 +622,7 @@ impl LoadBaitTackleOntoFishingRod {
 
     fn iter_items(game_state: &GameState) -> impl Iterator<Item = &Item> + '_ {
         let opt_held_item = game_state
-            .pause_menu
-            .as_ref()
+            .pause_menu()
             .and_then(|menu| menu.inventory_page())
             .and_then(|page| page.held_item.as_ref());
 
@@ -707,7 +706,7 @@ impl BotGoal for LoadBaitTackleOntoFishingRod {
         let opt_bait = self.select_bait(game_state, rod);
         let opt_tackle = self.select_tackle(game_state, rod);
 
-        if let Some(pause) = &game_state.pause_menu {
+        if let Some(pause) = game_state.pause_menu() {
             if let Some(page) = pause.inventory_page() {
                 if let Some(held_item) = &page.held_item {
                     let is_holding_correct_bait = opt_bait
@@ -758,7 +757,7 @@ impl BotGoal for LoadBaitTackleOntoFishingRod {
             }
         };
 
-        let Some(pause) = &game_state.pause_menu else {
+        let Some(pause) = game_state.pause_menu() else {
             actions.do_action(GameAction::ExitMenu);
             return Ok(BotGoalResult::InProgress);
         };

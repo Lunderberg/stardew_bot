@@ -51,8 +51,7 @@ impl BuyFromMerchantGoal {
             .flatten();
 
         let iter_held_item = game_state
-            .shop_menu
-            .as_ref()
+            .shop_menu()
             .and_then(|menu| menu.held_item.as_ref());
 
         let iter_items = std::iter::empty()
@@ -114,7 +113,7 @@ impl BotGoal for BuyFromMerchantGoal {
             }
         }
 
-        if let Some(menu) = &game_state.shop_menu {
+        if let Some(menu) = game_state.shop_menu() {
             let num_current = self.item_count(game_state)?;
             let num_remaining_to_buy =
                 self.item.count.saturating_sub(num_current);
@@ -150,7 +149,7 @@ impl BotGoal for BuyFromMerchantGoal {
 
             menu.do_menu_navigation(actions, &self.item.id)?;
             return Ok(BotGoalResult::InProgress);
-        } else if let Some(menu) = &game_state.dialogue_menu {
+        } else if let Some(menu) = game_state.dialogue_menu() {
             let Some(pixel) = menu.response_pixel("Shop") else {
                 let cleanup = MenuCloser::new();
                 if cleanup.is_completed(game_state) {

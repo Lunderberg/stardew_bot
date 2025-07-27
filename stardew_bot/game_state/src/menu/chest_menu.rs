@@ -3,6 +3,8 @@ use geometry::Vector;
 
 use crate::{Error, Inventory, Item};
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct ChestMenu {
     pub player_item_locations: Vec<Vector<isize>>,
@@ -36,14 +38,14 @@ impl ChestMenu {
                         .chain((0..num_trailing_slots).map(|_| None))
                         .collect(),
                 };
-                ChestMenu {
+                Menu::Chest(ChestMenu {
                     player_item_locations: player_item_locations.clone(),
                     chest_item_locations: chest_item_locations.clone(),
                     chest_items,
                     chest_tile: chest_tile.cloned(),
                     held_item: held_item.cloned(),
                     ok_button: ok_button.clone(),
-                }
+                })
             },
         )?;
 

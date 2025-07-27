@@ -53,7 +53,7 @@ impl BotGoal for SkipCurrentCutscene {
             return Ok(BotGoalResult::Completed);
         }
 
-        let pixel = if let Some(menu) = &game_state.dialogue_menu {
+        let pixel = if let Some(menu) = game_state.dialogue_menu() {
             // Specific responses to questions in cutscenes
             menu.response_pixel("Bats")
                 .or_else(|| {

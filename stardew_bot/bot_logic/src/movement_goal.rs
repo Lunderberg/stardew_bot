@@ -519,7 +519,7 @@ impl BotGoal for LocalMovementGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        if game_state.dialogue_menu.is_some() {
+        if game_state.dialogue_menu().is_some() {
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }

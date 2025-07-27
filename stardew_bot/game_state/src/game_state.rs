@@ -4,7 +4,7 @@ use dotnet_debugger::{
     CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
 };
 
-use crate::Error;
+use crate::{Error, Menu};
 
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
@@ -25,14 +25,7 @@ pub struct GameState {
     pub display: DisplayState,
     pub rng_state: RngState,
 
-    // Different menus that may be open
-    pub chest_menu: Option<ChestMenu>,
-    pub dialogue_menu: Option<DialogueMenu>,
-    pub shop_menu: Option<ShopMenu>,
-    pub pause_menu: Option<PauseMenu>,
-    pub mail_menu: Option<MailMenu>,
-    pub mine_elevator_menu: Option<MineElevatorMenu>,
-    pub geode_menu: Option<GeodeMenu>,
+    pub menu: Option<Menu>,
 }
 
 #[derive(Debug)]
@@ -54,13 +47,7 @@ pub struct GameStateDelta {
 
     num_mine_levels: usize,
 
-    chest_menu: Option<ChestMenu>,
-    dialogue_menu: Option<DialogueMenu>,
-    shop_menu: Option<ShopMenu>,
-    pause_menu: Option<PauseMenu>,
-    mail_menu: Option<MailMenu>,
-    mine_elevator_menu: Option<MineElevatorMenu>,
-    geode_menu: Option<GeodeMenu>,
+    menu: Option<Menu>,
 }
 
 impl GameState {
@@ -81,13 +68,7 @@ impl GameState {
         DisplayState::def_read_display_state(&mut graph)?;
         SeededRng::def_read_rng_state(&mut graph)?;
 
-        ChestMenu::def_read_chest_menu(&mut graph)?;
-        DialogueMenu::def_read_dialogue_menu(&mut graph)?;
-        ShopMenu::def_read_shop_menu(&mut graph)?;
-        PauseMenu::def_read_pause_menu(&mut graph)?;
-        MailMenu::def_read_mail_menu(&mut graph)?;
-        MineElevatorMenu::def_read_mine_elevator_menu(&mut graph)?;
-        GeodeMenu::def_read_geode_menu(&mut graph)?;
+        Menu::def_read_menu(&mut graph)?;
 
         graph.named_native_function(
             "new_game_state",
@@ -100,13 +81,7 @@ impl GameState {
              inputs: &InputState,
              display: &DisplayState,
              current_rng: &SeededRng,
-             chest_menu: Option<&ChestMenu>,
-             dialogue_menu: Option<&DialogueMenu>,
-             shop_menu: Option<&ShopMenu>,
-             pause_menu: Option<&PauseMenu>,
-             mail_menu: Option<&MailMenu>,
-             mine_elevator_menu: Option<&MineElevatorMenu>,
-             geode_menu: Option<&GeodeMenu>| {
+             menu: Option<&Menu>| {
                 GameState {
                     statics: static_state.clone(),
                     globals: global_game_state.clone(),
@@ -118,13 +93,7 @@ impl GameState {
                     display: display.clone(),
                     rng_state: RngState::new(current_rng.clone()),
 
-                    chest_menu: chest_menu.cloned(),
-                    dialogue_menu: dialogue_menu.cloned(),
-                    shop_menu: shop_menu.cloned(),
-                    pause_menu: pause_menu.cloned(),
-                    mail_menu: mail_menu.cloned(),
-                    mine_elevator_menu: mine_elevator_menu.cloned(),
-                    geode_menu: geode_menu.cloned(),
+                    menu: menu.cloned(),
                 }
             },
         )?;
@@ -141,13 +110,7 @@ impl GameState {
              display: &DisplayState,
              rng_state: &SeededRng,
              num_mine_levels: usize,
-             chest_menu: Option<&ChestMenu>,
-             dialogue_menu: Option<&DialogueMenu>,
-             shop_menu: Option<&ShopMenu>,
-             pause_menu: Option<&PauseMenu>,
-             mail_menu: Option<&MailMenu>,
-             mine_elevator_menu: Option<&MineElevatorMenu>,
-             geode_menu: Option<&GeodeMenu>| {
+             menu: Option<&Menu>| {
                 let nonlocal_location_deltas = nonlocal_location_deltas
                     .iter()
                     .map(|delta| (delta.name.clone(), delta.clone()))
@@ -165,13 +128,7 @@ impl GameState {
 
                     num_mine_levels,
 
-                    chest_menu: chest_menu.cloned(),
-                    dialogue_menu: dialogue_menu.cloned(),
-                    shop_menu: shop_menu.cloned(),
-                    pause_menu: pause_menu.cloned(),
-                    mail_menu: mail_menu.cloned(),
-                    mine_elevator_menu: mine_elevator_menu.cloned(),
-                    geode_menu: geode_menu.cloned(),
+                    menu: menu.cloned(),
                 }
             },
         )?;
@@ -223,13 +180,7 @@ impl GameState {
                 let display = read_display_state();
                 let rng_state = read_rng_state();
 
-                let chest_menu = read_chest_menu();
-                let dialogue_menu = read_dialogue_menu();
-                let shop_menu = read_shop_menu();
-                let pause_menu = read_pause_menu();
-                let mail_menu = read_mail_menu();
-                let mine_elevator_menu = read_mine_elevator_menu();
-                let geode_menu = read_geode_menu();
+                let menu = read_menu();
 
                 new_game_state(
                     static_state,
@@ -242,13 +193,7 @@ impl GameState {
                     display,
                     rng_state,
 
-                    chest_menu,
-                    dialogue_menu,
-                    shop_menu,
-                    pause_menu,
-                    mail_menu,
-                    mine_elevator_menu,
-                    geode_menu,
+                    menu,
                 )
             }
 
@@ -282,16 +227,7 @@ impl GameState {
                     ._size
                     .prim_cast::<usize>();
 
-                let has_open_menu = StardewValley.Game1
-                    ._activeClickableMenu
-                    .is_some();
-                let chest_menu = read_chest_menu();
-                let dialogue_menu = read_dialogue_menu();
-                let shop_menu = read_shop_menu();
-                let pause_menu = read_pause_menu();
-                let mail_menu = read_mail_menu();
-                let mine_elevator_menu = read_mine_elevator_menu();
-                let geode_menu = read_geode_menu();
+                let menu = read_menu();
 
                 new_game_state_delta(
                     global_game_state,
@@ -306,13 +242,7 @@ impl GameState {
 
                     num_mine_levels,
 
-                    chest_menu,
-                    dialogue_menu,
-                    shop_menu,
-                    pause_menu,
-                    mail_menu,
-                    mine_elevator_menu,
-                    geode_menu,
+                    menu,
                 )
             }
 
@@ -351,13 +281,7 @@ impl GameState {
         self.inputs = delta.inputs;
         self.display = delta.display;
 
-        self.chest_menu = delta.chest_menu;
-        self.dialogue_menu = delta.dialogue_menu;
-        self.shop_menu = delta.shop_menu;
-        self.pause_menu = delta.pause_menu;
-        self.mail_menu = delta.mail_menu;
-        self.mine_elevator_menu = delta.mine_elevator_menu;
-        self.geode_menu = delta.geode_menu;
+        self.menu = delta.menu;
 
         if delta.num_mine_levels == 0 {
             self.locations = self
@@ -396,13 +320,7 @@ impl GameState {
     }
 
     pub fn any_menu_open(&self) -> bool {
-        self.chest_menu.is_some()
-            || self.dialogue_menu.is_some()
-            || self.shop_menu.is_some()
-            || self.pause_menu.is_some()
-            || self.mail_menu.is_some()
-            || self.mine_elevator_menu.is_some()
-            || self.geode_menu.is_some()
+        self.menu.is_some()
     }
 
     pub fn get_room<'a>(&'a self, name: &str) -> Result<&'a Location, Error> {
@@ -415,6 +333,36 @@ impl GameState {
 
     pub fn current_room(&self) -> Result<&Location, Error> {
         self.get_room(&self.player.room_name)
+    }
+
+    pub fn pause_menu(&self) -> Option<&PauseMenu> {
+        self.menu.as_ref().and_then(|menu| menu.pause_menu())
+    }
+
+    pub fn chest_menu(&self) -> Option<&ChestMenu> {
+        self.menu.as_ref().and_then(|menu| menu.chest_menu())
+    }
+
+    pub fn dialogue_menu(&self) -> Option<&DialogueMenu> {
+        self.menu.as_ref().and_then(|menu| menu.dialogue_menu())
+    }
+
+    pub fn mail_menu(&self) -> Option<&MailMenu> {
+        self.menu.as_ref().and_then(|menu| menu.mail_menu())
+    }
+
+    pub fn shop_menu(&self) -> Option<&ShopMenu> {
+        self.menu.as_ref().and_then(|menu| menu.shop_menu())
+    }
+
+    pub fn geode_menu(&self) -> Option<&GeodeMenu> {
+        self.menu.as_ref().and_then(|menu| menu.geode_menu())
+    }
+
+    pub fn mine_elevator_menu(&self) -> Option<&MineElevatorMenu> {
+        self.menu
+            .as_ref()
+            .and_then(|menu| menu.mine_elevator_menu())
     }
 }
 

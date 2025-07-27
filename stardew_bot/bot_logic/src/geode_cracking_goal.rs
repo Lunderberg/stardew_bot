@@ -73,7 +73,7 @@ impl GeodeCrackingGoal {
     }
 
     fn held_item(game_state: &GameState) -> Option<&Item> {
-        if let Some(menu) = &game_state.geode_menu {
+        if let Some(menu) = game_state.geode_menu() {
             if let Some(held_item) = &menu.held_item {
                 return Some(held_item);
             }
@@ -197,7 +197,7 @@ impl BotGoal for GeodeCrackingGoal {
         ) == 0;
 
         if opt_next_geode.is_none() || has_full_inventory {
-            if game_state.geode_menu.is_some() {
+            if game_state.geode_menu().is_some() {
                 return Ok(MenuCloser::new().into());
             } else if !to_sell.is_completed(game_state) {
                 return Ok(to_sell.into());
@@ -217,7 +217,7 @@ impl BotGoal for GeodeCrackingGoal {
             return Ok(prepare.otherwise_empty().into());
         }
 
-        if let Some(menu) = &game_state.dialogue_menu {
+        if let Some(menu) = game_state.dialogue_menu() {
             let Some(pixel) = menu.response_pixel("Process") else {
                 // Not the blacksmith menu, so close it and proceed.
                 return Ok(MenuCloser::new().into());
@@ -228,7 +228,7 @@ impl BotGoal for GeodeCrackingGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        let Some(menu) = &game_state.geode_menu else {
+        let Some(menu) = game_state.geode_menu() else {
             return Ok(GoToActionTile::new("Blacksmith").into());
         };
 

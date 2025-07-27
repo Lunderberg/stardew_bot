@@ -545,7 +545,7 @@ impl InventoryGoal {
             cheap_to_eat && exceeds_num_reserved && !explicitly_stored
         };
 
-        if let Some(chest) = &game_state.chest_menu {
+        if let Some(chest) = game_state.chest_menu() {
             let Some(tile) = chest.chest_tile else {
                 // This chest doesn't exist at any location, such as
                 // the "chest" displaying fishing rewards.  Not part
@@ -873,7 +873,7 @@ impl BotGoal for InventoryGoal {
             }
         };
 
-        let Some(chest_menu) = &game_state.chest_menu else {
+        let Some(chest_menu) = game_state.chest_menu() else {
             // There is no chest open.  Open the chest for the next
             // transfer.
             let stack = LogicStack::new()

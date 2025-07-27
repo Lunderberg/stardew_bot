@@ -17,20 +17,20 @@ impl MenuCloser {
     }
 
     fn exit_button(&self, game_state: &GameState) -> Option<Vector<isize>> {
-        if let Some(menu) = &game_state.pause_menu {
+        if let Some(menu) = game_state.pause_menu() {
             Some(menu.exit_button)
-        } else if let Some(menu) = &game_state.chest_menu {
+        } else if let Some(menu) = game_state.chest_menu() {
             Some(menu.ok_button)
-        } else if let Some(menu) = &game_state.shop_menu {
+        } else if let Some(menu) = game_state.shop_menu() {
             Some(menu.exit_button)
-        } else if let Some(menu) = &game_state.dialogue_menu {
+        } else if let Some(menu) = game_state.dialogue_menu() {
             menu.responses
                 .is_empty()
                 .then(|| menu.pixel_location.center())
-        } else if let Some(menu) = &game_state.mail_menu {
+        } else if let Some(menu) = game_state.mail_menu() {
             (menu.current_page + 1 < menu.num_pages)
                 .then(|| menu.pixel_location.center())
-        } else if let Some(menu) = &game_state.geode_menu {
+        } else if let Some(menu) = game_state.geode_menu() {
             Some(menu.ok_button)
         } else {
             None
@@ -39,16 +39,15 @@ impl MenuCloser {
 
     fn must_press_escape(&self, game_state: &GameState) -> bool {
         game_state
-            .mail_menu
-            .as_ref()
+            .mail_menu()
             .map(|menu| menu.current_page + 1 == menu.num_pages)
             .unwrap_or(false)
-            || game_state.mine_elevator_menu.is_some()
+            || game_state.mine_elevator_menu().is_some()
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {
         let opt_held_item_and_inv_tiles: Option<(&Item, &[Vector<isize>])> =
-            if let Some(menu) = &game_state.pause_menu {
+            if let Some(menu) = game_state.pause_menu() {
                 menu.held_item().and_then(|held_item| {
                     menu.player_inventory_tiles().map(
                         |player_inventory_tiles| {
@@ -56,11 +55,11 @@ impl MenuCloser {
                         },
                     )
                 })
-            } else if let Some(menu) = &game_state.geode_menu {
+            } else if let Some(menu) = game_state.geode_menu() {
                 menu.held_item.as_ref().map(|held_item| {
                     (held_item, menu.player_item_locations.as_slice())
                 })
-            } else if let Some(menu) = &game_state.shop_menu {
+            } else if let Some(menu) = game_state.shop_menu() {
                 menu.held_item.as_ref().map(|held_item| {
                     (held_item, menu.player_item_locations.as_slice())
                 })

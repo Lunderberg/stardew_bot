@@ -3,6 +3,8 @@ use geometry::Vector;
 
 use crate::{Error, Item};
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct PauseMenu {
     pub tab_buttons: Vec<Vector<isize>>,
@@ -92,10 +94,12 @@ impl PauseMenu {
             "new_pause_menu",
             |tab_buttons: &Vec<Vector<isize>>,
              active_page: &MenuPage,
-             exit_button: &Vector<isize>| PauseMenu {
-                tab_buttons: tab_buttons.clone(),
-                active_page: active_page.clone(),
-                exit_button: exit_button.clone(),
+             exit_button: &Vector<isize>| {
+                Menu::Pause(PauseMenu {
+                    tab_buttons: tab_buttons.clone(),
+                    active_page: active_page.clone(),
+                    exit_button: exit_button.clone(),
+                })
             },
         )?;
 

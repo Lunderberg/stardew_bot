@@ -1,3 +1,6 @@
+mod menu;
+pub use menu::Menu;
+
 mod chest_menu;
 pub use chest_menu::ChestMenu;
 

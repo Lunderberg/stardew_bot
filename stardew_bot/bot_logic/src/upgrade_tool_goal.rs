@@ -111,10 +111,10 @@ impl BotGoal for UpgradeToolGoal {
             return Ok(prepare.into());
         }
 
-        if let Some(menu) = &game_state.shop_menu {
+        if let Some(menu) = game_state.shop_menu() {
             menu.do_menu_navigation(actions, &self.upgraded_tool())?;
             Ok(BotGoalResult::InProgress)
-        } else if let Some(menu) = &game_state.dialogue_menu {
+        } else if let Some(menu) = game_state.dialogue_menu() {
             let Some(pixel) = menu.response_pixel("Upgrade") else {
                 // Wrong menu, so close it and try again
                 let cleanup = MenuCloser::new();

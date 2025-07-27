@@ -3,6 +3,8 @@ use geometry::{Rectangle, Vector};
 
 use crate::Error;
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct DialogueMenu {
     pub pixel_location: Rectangle<isize>,
@@ -33,12 +35,14 @@ impl DialogueMenu {
              y: isize,
              width: isize,
              height: isize,
-             responses: &Vec<Response>| DialogueMenu {
-                pixel_location: Rectangle {
-                    top_left: Vector::new(x, y),
-                    shape: Vector::new(width, height),
-                },
-                responses: responses.clone(),
+             responses: &Vec<Response>| {
+                Menu::Dialogue(DialogueMenu {
+                    pixel_location: Rectangle {
+                        top_left: Vector::new(x, y),
+                        shape: Vector::new(width, height),
+                    },
+                    responses: responses.clone(),
+                })
             },
         )?;
 

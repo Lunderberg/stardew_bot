@@ -3,6 +3,8 @@ use geometry::Vector;
 
 use crate::Error;
 
+use super::Menu;
+
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct MineElevatorMenu {
     pub buttons: Vec<Vector<isize>>,
@@ -14,8 +16,10 @@ impl MineElevatorMenu {
     ) -> Result<SymbolicValue, Error> {
         graph.named_native_function(
             "new_mine_elevator_menu",
-            |buttons: &Vec<Vector<isize>>| MineElevatorMenu {
-                buttons: buttons.clone(),
+            |buttons: &Vec<Vector<isize>>| {
+                Menu::MineElevator(MineElevatorMenu {
+                    buttons: buttons.clone(),
+                })
             },
         )?;
 

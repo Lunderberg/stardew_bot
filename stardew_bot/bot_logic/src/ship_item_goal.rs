@@ -75,7 +75,7 @@ impl BotGoal for ShipItemGoal {
             }
         };
 
-        let Some(menu) = &game_state.chest_menu else {
+        let Some(menu) = game_state.chest_menu() else {
             // We have items to ship, but the menu isn't open.  Time
             // to run to the farm to ship something.
             let farm = game_state.get_room("Farm")?;
