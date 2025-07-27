@@ -372,3 +372,61 @@ impl ShopMenuExt for ShopMenu {
         Ok(())
     }
 }
+
+mod detail {
+    use super::*;
+
+    pub trait ItemOrItemRef {
+        fn item_id(self) -> ItemId;
+        fn item_id_ref(&self) -> &ItemId;
+        fn count(&self) -> usize;
+    }
+    impl ItemOrItemRef for Item {
+        fn item_id(self) -> ItemId {
+            self.id
+        }
+        fn item_id_ref(&self) -> &ItemId {
+            &self.id
+        }
+        fn count(&self) -> usize {
+            self.count
+        }
+    }
+    impl ItemOrItemRef for &Item {
+        fn item_id(self) -> ItemId {
+            self.id.clone()
+        }
+        fn item_id_ref(&self) -> &ItemId {
+            &self.id
+        }
+        fn count(&self) -> usize {
+            self.count
+        }
+    }
+}
+
+pub trait ItemIterExt {
+    fn item_counts(self) -> HashMap<ItemId, usize>;
+}
+
+impl<Iter> ItemIterExt for Iter
+where
+    Iter: Iterator,
+    <Iter as Iterator>::Item: detail::ItemOrItemRef,
+{
+    fn item_counts(self) -> HashMap<ItemId, usize> {
+        use detail::ItemOrItemRef;
+
+        let mut counts = HashMap::new();
+        for item in self {
+            if let Some(prev) = counts.get_mut(item.item_id_ref()) {
+                *prev += item.count();
+            } else {
+                let count = item.count();
+                counts.insert(item.item_id(), count);
+            }
+        }
+
+        counts
+    }
+}

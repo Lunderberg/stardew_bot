@@ -1,7 +1,7 @@
 use geometry::Vector;
 
 use crate::{Error, GameAction};
-use game_state::{GameState, Item};
+use game_state::{GameState, Item, Menu};
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
@@ -43,29 +43,38 @@ impl MenuCloser {
             .map(|menu| menu.current_page + 1 == menu.num_pages)
             .unwrap_or(false)
             || game_state.mine_elevator_menu().is_some()
+            || game_state.junimo_menu().is_some()
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {
         let opt_held_item_and_inv_tiles: Option<(&Item, &[Vector<isize>])> =
-            if let Some(menu) = game_state.pause_menu() {
-                menu.held_item().and_then(|held_item| {
+            game_state.menu.as_ref().and_then(|menu| match menu {
+                Menu::Pause(menu) => menu.held_item().and_then(|held_item| {
                     menu.player_inventory_tiles().map(
                         |player_inventory_tiles| {
                             (held_item, player_inventory_tiles)
                         },
                     )
-                })
-            } else if let Some(menu) = game_state.geode_menu() {
-                menu.held_item.as_ref().map(|held_item| {
+                }),
+
+                Menu::Shop(menu) => menu.held_item.as_ref().map(|held_item| {
                     (held_item, menu.player_item_locations.as_slice())
-                })
-            } else if let Some(menu) = game_state.shop_menu() {
-                menu.held_item.as_ref().map(|held_item| {
+                }),
+                Menu::Geode(menu) => menu.held_item.as_ref().map(|held_item| {
                     (held_item, menu.player_item_locations.as_slice())
-                })
-            } else {
-                None
-            };
+                }),
+                Menu::Junimo(menu) => {
+                    menu.held_item.as_ref().map(|held_item| {
+                        (held_item, menu.player_item_locations.as_slice())
+                    })
+                }
+
+                Menu::Chest(_)
+                | Menu::Dialogue(_)
+                | Menu::Mail(_)
+                | Menu::MineElevator(_)
+                | Menu::Other => None,
+            });
 
         opt_held_item_and_inv_tiles.map(
             |(held_item, player_inventory_tiles)| {

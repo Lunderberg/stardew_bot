@@ -4,7 +4,7 @@ use dotnet_debugger::{
     CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
 };
 
-use crate::{Error, Menu};
+use crate::{Error, JunimoMenu, Menu};
 
 use super::{
     define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
@@ -363,6 +363,10 @@ impl GameState {
         self.menu
             .as_ref()
             .and_then(|menu| menu.mine_elevator_menu())
+    }
+
+    pub fn junimo_menu(&self) -> Option<&JunimoMenu> {
+        self.menu.as_ref().and_then(|menu| menu.junimo_menu())
     }
 }
 

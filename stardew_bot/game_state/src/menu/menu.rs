@@ -5,8 +5,8 @@ use dotnet_debugger::{
 use crate::Error;
 
 use super::{
-    ChestMenu, DialogueMenu, GeodeMenu, MailMenu, MineElevatorMenu, PauseMenu,
-    ShopMenu,
+    ChestMenu, DialogueMenu, GeodeMenu, JunimoMenu, MailMenu, MineElevatorMenu,
+    PauseMenu, ShopMenu,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -18,6 +18,7 @@ pub enum Menu {
     Shop(ShopMenu),
     Geode(GeodeMenu),
     MineElevator(MineElevatorMenu),
+    Junimo(JunimoMenu),
     Other,
 }
 
@@ -32,6 +33,7 @@ impl Menu {
         MailMenu::def_read_mail_menu(graph)?;
         MineElevatorMenu::def_read_mine_elevator_menu(graph)?;
         GeodeMenu::def_read_geode_menu(graph)?;
+        JunimoMenu::def_read_junimo_menu(graph)?;
 
         graph.named_native_function("other_chest_menu", |_: Pointer| {
             Menu::Other
@@ -46,6 +48,7 @@ impl Menu {
                 let mail_menu = read_mail_menu();
                 let geode_menu = read_geode_menu();
                 let mine_elevator_menu = read_mine_elevator_menu();
+                let junimo_menu = read_junimo_menu();
 
                 if pause_menu.is_some() {
                     pause_menu
@@ -61,6 +64,8 @@ impl Menu {
                     geode_menu
                 } else if mine_elevator_menu.is_some() {
                     mine_elevator_menu
+                } else if junimo_menu.is_some() {
+                    junimo_menu
                 } else {
                     other_chest_menu(
                         StardewValley.Game1
@@ -118,6 +123,13 @@ impl Menu {
     pub fn mine_elevator_menu(&self) -> Option<&MineElevatorMenu> {
         match self {
             Self::MineElevator(menu) => Some(menu),
+            _ => None,
+        }
+    }
+
+    pub fn junimo_menu(&self) -> Option<&JunimoMenu> {
+        match self {
+            Self::Junimo(menu) => Some(menu),
             _ => None,
         }
     }

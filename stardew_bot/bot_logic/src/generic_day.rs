@@ -1,4 +1,4 @@
-use crate::{Error, GiveGiftGoal, UpgradeToolGoal};
+use crate::{Error, GiveGiftGoal, TurnInBundlesGoal, UpgradeToolGoal};
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
 use super::{
@@ -54,6 +54,14 @@ impl BotGoal for GenericDay {
             .any(|seed| seed == &ItemId::KALE_SEEDS);
 
         let stack = LogicStack::new().then(CheckAllMail);
+
+        let stack = if current_day == 9 {
+            // TODO: Turn in bundles whenever a room may be completed,
+            // rather than hard-coding the day to turn in bundles.
+            stack.then(TurnInBundlesGoal::new())
+        } else {
+            stack
+        };
 
         let stack = if current_day == 2 || !has_fishing_rod {
             stack

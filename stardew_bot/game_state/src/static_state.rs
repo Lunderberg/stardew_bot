@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::Error;
@@ -548,5 +549,39 @@ impl StaticState {
         self.crop_data
             .get(seed)
             .ok_or_else(|| Error::UnknownSeedKind(seed.clone()).into())
+    }
+}
+
+impl Bundle {
+    pub fn iter_items(&self) -> impl Iterator<Item = &Item> + '_ {
+        self.ingredients
+            .iter()
+            .filter_map(|ingredient| match ingredient {
+                BundleIngredient::Item(item) => Some(item),
+                BundleIngredient::Gold(_) => None,
+            })
+    }
+
+    pub fn num_bundles_to_unlock(&self) -> usize {
+        match self.community_center_room.as_str() {
+            "Crafts Room" => 0,
+            "Pantry" | "Fish Tank" => 1,
+            "Boiler Room" => 2,
+            "Bulletin Board" => 3,
+            "Vault" => 4,
+            _ => 99,
+        }
+    }
+
+    pub fn community_center_tile(&self) -> Option<Vector<isize>> {
+        match self.community_center_room.as_str() {
+            "Crafts Room" => Some(Vector::new(14, 23)),
+            "Pantry" => Some(Vector::new(14, 5)),
+            "Fish Tank" => Some(Vector::new(40, 10)),
+            "Bulletin Board" => Some(Vector::new(46, 11)),
+            "Boiler Room" => Some(Vector::new(63, 14)),
+            "Vault" => Some(Vector::new(55, 6)),
+            _ => None,
+        }
     }
 }

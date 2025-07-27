@@ -273,6 +273,10 @@ impl Inventory {
         Ok(func)
     }
 
+    pub fn num_slots(&self) -> usize {
+        self.items.len()
+    }
+
     pub fn iter_slots(
         &self,
     ) -> impl DoubleEndedIterator<Item = Option<&Item>> + ExactSizeIterator + '_

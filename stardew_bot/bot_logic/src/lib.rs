@@ -150,3 +150,6 @@ pub use give_gift_goal::*;
 
 mod upgrade_tool_goal;
 pub use upgrade_tool_goal::*;
+
+mod turn_in_bundles;
+pub use turn_in_bundles::*;

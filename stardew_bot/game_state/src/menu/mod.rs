@@ -21,3 +21,6 @@ pub use mine_elevator_menu::MineElevatorMenu;
 
 mod geode_menu;
 pub use geode_menu::GeodeMenu;
+
+mod junimo_menu;
+pub use junimo_menu::JunimoMenu;

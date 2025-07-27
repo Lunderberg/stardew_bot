@@ -478,6 +478,10 @@ impl Quality {
             Quality::Iridium => 2.0,
         }
     }
+
+    pub fn iter() -> impl DoubleEndedIterator<Item = Self> {
+        [Self::Normal, Self::Silver, Self::Gold, Self::Iridium].into_iter()
+    }
 }
 
 impl FishingRod {
