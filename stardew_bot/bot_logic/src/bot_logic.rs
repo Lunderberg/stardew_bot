@@ -621,11 +621,14 @@ impl BotLogic {
             // top of the stack.
             self.check_interrupts(game_state, 0)?;
 
-            let current_goal: &mut dyn BotGoal = self
+            let (i_goal, current_goal): (usize, &mut dyn BotGoal) = self
                 .stack
                 .iter_mut()
-                .filter_map(|item| match item {
-                    LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_mut()),
+                .enumerate()
+                .filter_map(|(i, item)| match item {
+                    LogicStackItem::Goal(bot_goal) => {
+                        Some((i, bot_goal.as_mut()))
+                    }
                     LogicStackItem::PreventInterrupt
                     | LogicStackItem::CancelIf(_)
                     | LogicStackItem::Interrupt { .. } => None,
@@ -636,6 +639,16 @@ impl BotLogic {
             if self.verbose {
                 println!("Running top goal '{}'", current_goal.description());
             }
+
+            assert!(
+                !self.recursed_during_current_update.contains(&i_goal),
+                "Infinite loop detected: \
+                 Current goal '{0}' has already executed on this frame, \
+                 and previously produced subgoals.  \
+                 If it runs again, it will produce those same subgoals, \
+                 in an infinite loop.",
+                current_goal.description(),
+            );
 
             let num_actions_before = actions.actions.len();
             let goal_result = current_goal.apply(game_state, &mut actions)?;
