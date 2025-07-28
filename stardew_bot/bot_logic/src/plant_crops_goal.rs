@@ -725,10 +725,12 @@ impl BotGoal for PlantCropsGoal {
                     })
                     .unwrap_or((true, u64::MAX));
 
+                let uses_hoe = opt_item.as_ref() == Some(&ItemId::HOE);
+                let uses_watering_can =
+                    opt_item.as_ref() == Some(&ItemId::WATERING_CAN);
                 (
-                    opt_item.as_ref() == Some(&ItemId::HOE),
-                    need_clay_before_deadline
-                        && opt_item.as_ref() == Some(&ItemId::WATERING_CAN),
+                    uses_hoe || uses_watering_can,
+                    need_clay_before_deadline && uses_watering_can,
                     std::cmp::Reverse(is_adjacent),
                     dist,
                 )
