@@ -278,7 +278,24 @@ impl PlantCropsGoal {
             .filter(|obj| !matches!(obj.kind, ObjectKind::HoeDirt(_)))
             .map(|obj| (obj.tile, obj.kind.get_tool()));
 
-        Ok(Either::Right(iter_steps.chain(iter_clear)))
+        let opt_axe = game_state.current_axe()?;
+        let iter =
+            iter_steps
+                .chain(iter_clear)
+                .filter_map(move |(tile, opt_item)| {
+                    let is_axe = opt_item
+                        .as_ref()
+                        .map(|id| id == &ItemId::AXE)
+                        .unwrap_or(false);
+                    if is_axe {
+                        let axe = opt_axe?.clone();
+                        Some((tile, Some(axe)))
+                    } else {
+                        Some((tile, opt_item))
+                    }
+                });
+
+        Ok(Either::Right(iter))
     }
 
     /// Check if the planting has been completed.
