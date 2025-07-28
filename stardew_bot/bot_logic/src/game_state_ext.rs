@@ -411,6 +411,19 @@ mod detail {
             self.count
         }
     }
+    impl ItemOrItemRef for (&ItemId, usize) {
+        fn item_id(self) -> ItemId {
+            self.0.clone()
+        }
+
+        fn item_id_ref(&self) -> &ItemId {
+            self.0
+        }
+
+        fn count(&self) -> usize {
+            self.1
+        }
+    }
 }
 
 pub trait ItemIterExt {
