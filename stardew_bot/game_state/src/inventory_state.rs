@@ -126,6 +126,10 @@ impl Inventory {
                     .stack
                     .value;
 
+                let category = item
+                    .category
+                    .value;
+
                 let object = item
                     .as::<StardewValley.Object>();
 
@@ -144,12 +148,6 @@ impl Inventory {
                     object.edibility.value
                 } else {
                     -300i32
-                };
-
-                let category = if object.is_some() {
-                    object.category.value
-                } else {
-                    None
                 };
 
                 new_item(

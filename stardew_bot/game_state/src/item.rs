@@ -105,6 +105,10 @@ pub enum Quality {
 pub enum ItemCategory {
     Tool,
     Weapon,
+    Boots,
+    Ring,
+    Hat,
+    Clothing,
     Fruit,
     Greens,
     Flowers,
@@ -429,10 +433,12 @@ impl Item {
     }
 
     /// Returns true if this item-stack is full, false otherwise.
-    ///
-    /// TODO: Handle item types that are not allowed to stack.
     pub fn is_full_stack(&self) -> bool {
-        self.count == 999
+        self.count
+            == self
+                .category
+                .map(|category| category.stack_size())
+                .unwrap_or(999)
     }
 
     /// The price of each item, including the multiplier from quality
@@ -476,6 +482,40 @@ impl Quality {
     }
 }
 
+impl ItemCategory {
+    pub fn stack_size(&self) -> usize {
+        match self {
+            ItemCategory::Tool
+            | ItemCategory::Weapon
+            | ItemCategory::Boots
+            | ItemCategory::Ring
+            | ItemCategory::Hat
+            | ItemCategory::Clothing => 1,
+
+            ItemCategory::Tackle => 1,
+
+            ItemCategory::Fruit
+            | ItemCategory::Greens
+            | ItemCategory::Flowers
+            | ItemCategory::Vegetable
+            | ItemCategory::Fish
+            | ItemCategory::Bait
+            | ItemCategory::SeaProduce
+            | ItemCategory::Seed
+            | ItemCategory::Junk
+            | ItemCategory::Ore
+            | ItemCategory::Gem
+            | ItemCategory::Mineral
+            | ItemCategory::Craftable
+            | ItemCategory::BigCraftable
+            | ItemCategory::Book
+            | ItemCategory::SkillBook => 999,
+
+            ItemCategory::Other(_) => 999,
+        }
+    }
+}
+
 impl FishingRod {
     pub fn can_use_bait(&self) -> bool {
         self.num_attachment_slots >= 1
@@ -505,6 +545,10 @@ impl std::fmt::Display for ItemCategory {
         match self {
             ItemCategory::Tool => write!(f, "Tool"),
             ItemCategory::Weapon => write!(f, "Weapon"),
+            ItemCategory::Boots => write!(f, "Boots"),
+            ItemCategory::Ring => write!(f, "Ring"),
+            ItemCategory::Hat => write!(f, "Hat"),
+            ItemCategory::Clothing => write!(f, "Clothing"),
             ItemCategory::Fruit => write!(f, "Fruit"),
             ItemCategory::Greens => write!(f, "Greens"),
             ItemCategory::Flowers => write!(f, "Flowers"),
@@ -532,6 +576,10 @@ impl From<i32> for ItemCategory {
         match value {
             -99 => ItemCategory::Tool,
             -98 => ItemCategory::Weapon,
+            -97 => ItemCategory::Boots,
+            -96 => ItemCategory::Ring,
+            -95 => ItemCategory::Hat,
+            -100 => ItemCategory::Clothing,
             -79 => ItemCategory::Fruit,
             -81 => ItemCategory::Greens,
             -80 => ItemCategory::Flowers,
