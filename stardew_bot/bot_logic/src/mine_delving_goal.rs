@@ -5,8 +5,8 @@ use itertools::Itertools as _;
 
 use crate::{
     bot_logic::LogicStackItem, ActivateTile, CraftItemGoal, Error, GameAction,
-    GameStateExt as _, InventoryGoal, MaintainStaminaGoal, MovementGoal,
-    UseItemOnTile,
+    GameStateExt as _, InventoryGoal, ItemIterExt as _, MaintainStaminaGoal,
+    MovementGoal, UseItemOnTile,
 };
 use game_state::{
     GameState, ItemCategory, ItemId, ObjectKind, SeededRng, StoneKind, TileMap,
@@ -451,6 +451,27 @@ impl MineDelvingGoal {
         let prepare = if game_state.globals.in_game_time >= 2200 {
             // If it's close to the end of the day, grab items that
             // should be brought back to the farm for the next day.
+
+            let stored_at_farm =
+                game_state.iter_stored_items("Farm")?.item_counts();
+            let at_mines = InventoryGoal::empty()
+                .room("Mine")
+                .iter_stored_and_carried(game_state)?
+                .item_counts();
+
+            let iter_reserved = game_state
+                .iter_reserved_items()?
+                .filter(|(id, count)| {
+                    let num_at_farm =
+                        stored_at_farm.get(id).cloned().unwrap_or(0);
+
+                    let num_at_mines = at_mines.get(id).cloned().unwrap_or(0);
+
+                    (num_at_farm < *count)
+                        && (num_at_farm + num_at_mines >= *count)
+                })
+                .map(|(id, count)| id.clone().with_count(count));
+
             let iter_gems = InventoryGoal::empty()
                 .room("Mine")
                 .iter_stored_and_carried(game_state)?
@@ -463,7 +484,11 @@ impl MineDelvingGoal {
                 .sorted_by_key(|item| std::cmp::Reverse(item.stack_price()))
                 .take(5)
                 .cloned();
-            prepare.with(ItemId::HOE).with(iter_gems)
+
+            prepare
+                .with(ItemId::HOE)
+                .with(iter_reserved)
+                .with(iter_gems)
         } else {
             prepare
         };

@@ -22,6 +22,11 @@ pub trait GameStateExt {
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
 
+    fn iter_stored_items(
+        &self,
+        loc: &str,
+    ) -> Result<impl Iterator<Item = &Item> + '_, Error>;
+
     fn iter_bundle_items(
         &self,
     ) -> Result<impl Iterator<Item = (&str, &ItemId, usize)> + '_, Error>;
@@ -77,17 +82,31 @@ impl GameStateExt for GameState {
         Ok(elevator)
     }
 
+    fn iter_stored_items(
+        &self,
+        loc: &str,
+    ) -> Result<impl Iterator<Item = &Item> + '_, Error> {
+        let iter = self
+            .get_room(loc)?
+            .objects
+            .iter()
+            .filter_map(|obj| match &obj.kind {
+                ObjectKind::Chest(chest) => Some(&chest.inventory),
+                _ => None,
+            })
+            .flat_map(|inventory| inventory.iter_items());
+
+        Ok(iter)
+    }
+
     fn iter_accessible_items(
         &self,
     ) -> Result<impl Iterator<Item = &Item> + '_, Error> {
-        let iter = std::iter::once(&self.player.inventory)
-            .chain(self.get_room("Farm")?.objects.iter().filter_map(|obj| {
-                match &obj.kind {
-                    ObjectKind::Chest(chest) => Some(&chest.inventory),
-                    _ => None,
-                }
-            }))
-            .flat_map(|inventory| inventory.iter_items());
+        let iter = self
+            .player
+            .inventory
+            .iter_items()
+            .chain(self.iter_stored_items("Farm")?);
 
         Ok(iter)
     }
