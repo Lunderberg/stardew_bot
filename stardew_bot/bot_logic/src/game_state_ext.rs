@@ -1,11 +1,11 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::LazyLock};
 
 use geometry::Vector;
 use itertools::Itertools as _;
 
 use game_state::{
     BundleIngredient, GameState, Item, ItemCategory, ItemId, Location,
-    ObjectKind, ResourceClumpKind, ShopMenu, StaticState,
+    ObjectKind, Quality, ResourceClumpKind, ShopMenu, StaticState,
 };
 
 use crate::{
@@ -41,6 +41,9 @@ pub trait GameStateExt {
 
     fn current_axe(&self) -> Result<Option<&ItemId>, Error>;
 }
+
+static RESERVED_FOR_GIFTS: LazyLock<[(ItemId, usize); 1]> =
+    LazyLock::new(|| [(ItemId::PARSNIP.with_quality(Quality::Gold), 2)]);
 
 impl GameStateExt for GameState {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error> {
@@ -137,15 +140,20 @@ impl GameStateExt for GameState {
             .into_grouping_map()
             .min_by_key(|_, item| item.quality())
             .into_iter()
-            .map(|(_, item)| (&item.id, 1))
+            .map(|(_, item)| (&item.id, 1));
+
+        let iter_bundles =
+            self.iter_bundle_items()?.map(|(_, id, count)| (id, count));
+
+        let iter_gifts =
+            RESERVED_FOR_GIFTS.iter().map(|(id, count)| (id, *count));
+
+        let iter_reserved = iter_worst_fish
+            .chain(iter_bundles)
+            .chain(iter_gifts)
             .filter(move |_| !is_early_startup);
 
-        let iter_bundles = self
-            .iter_bundle_items()?
-            .map(|(_, id, count)| (id, count))
-            .filter(move |_| !is_early_startup);
-
-        Ok(iter_worst_fish.chain(iter_bundles))
+        Ok(iter_reserved)
     }
 
     fn closest_entrance(
