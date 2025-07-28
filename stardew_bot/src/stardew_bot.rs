@@ -4,7 +4,9 @@ use crate::{
     PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
 };
 
-use bot_logic::{BotLogic, GameAction, GeodePredictor};
+use bot_logic::{
+    BotLogic, GameAction, GameStateExt as _, GeodePredictor, ItemIterExt as _,
+};
 use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
 
 use crossterm::event::Event;
@@ -269,6 +271,8 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
+        let accessible = game_state.iter_accessible_items()?.item_counts();
+
         game_state
             .statics
             .bundles
@@ -298,7 +302,19 @@ impl StardewBot {
                         .zip(flags)
                         .filter(|_| num_done < bundle.num_required)
                         .for_each(|(ingredient, &done)| {
-                            let done_char = if done { '🗹' } else { '☐' };
+                            let done_char = if done {
+                                '🗹'
+                            } else if match ingredient {
+                                BundleIngredient::Gold(_) => false,
+                                BundleIngredient::Item(item) => accessible
+                                    .get(&item.id)
+                                    .map(|&count| item.count <= count)
+                                    .unwrap_or(false),
+                            } {
+                                '☑'
+                            } else {
+                                '☐'
+                            };
 
                             match ingredient {
                                 BundleIngredient::Gold(gp) => {
