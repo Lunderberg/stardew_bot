@@ -366,7 +366,7 @@ impl BotGoal for FishingGoal {
                 .as_bait_maker()
                 .expect("Protected by earlier as_bait_maker().is_some() check");
 
-            if !bait_maker.has_held_item {
+            if bait_maker.held_item.is_none() {
                 if let Some(into_bait) =
                     inventory.worst_quality_of_type(&preferred_fish)
                 {

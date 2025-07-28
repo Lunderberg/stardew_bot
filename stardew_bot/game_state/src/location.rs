@@ -9,7 +9,7 @@ use dotnet_debugger::{
 use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::{Error, StaticState};
+use crate::{Error, Item, StaticState};
 
 use super::{Inventory, ItemCategory, ItemId, TileMap};
 
@@ -196,7 +196,7 @@ pub struct CraftingMachine {
 
     /// True if the machine has been loaded up with ingredients.
     /// Otherwise, false.
-    pub has_held_item: bool,
+    pub held_item: Option<Item>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -888,7 +888,7 @@ impl Location {
 
         graph.named_native_function(
             "new_crafting_machine",
-            |kind: i32, ready_to_harvest: bool, has_held_item: bool| {
+            |kind: i32, ready_to_harvest: bool, held_item: Option<&Item>| {
                 let kind = match kind {
                     13 => CraftingMachineKind::Furnace,
                     285 => CraftingMachineKind::BaitMaker,
@@ -900,7 +900,7 @@ impl Location {
                 ObjectKind::CraftingMachine(CraftingMachine {
                     kind,
                     ready_to_harvest,
-                    has_held_item,
+                    held_item: held_item.cloned(),
                 })
             },
         )?;
@@ -1487,14 +1487,21 @@ impl Location {
                                 sheet_index == 285i32
                         ) {
                             let ready_to_harvest = obj.readyForHarvest.value;
+
                             let has_held_item = obj
                                 .heldObject
                                 .value
                                 .is_some();
+                            let held_item = if has_held_item {
+                                read_base_item(obj.heldObject.value)
+                            } else {
+                                None
+                            };
+
                             new_crafting_machine(
                                 sheet_index,
                                 ready_to_harvest,
-                                has_held_item,
+                                held_item,
                             )
                         } else {
                             new_other_object_kind(
@@ -3020,7 +3027,7 @@ impl std::fmt::Display for CraftingMachine {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let state = if self.ready_to_harvest {
             "done"
-        } else if self.has_held_item {
+        } else if self.held_item.is_some() {
             "running"
         } else {
             "empty"

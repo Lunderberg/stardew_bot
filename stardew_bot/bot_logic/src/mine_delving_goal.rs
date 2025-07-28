@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use geometry::{Direction, Vector};
-use itertools::Itertools as _;
+use itertools::{Either, Itertools as _};
 
 use crate::{
     bot_logic::LogicStackItem, ActivateTile, CraftItemGoal, Error, GameAction,
@@ -154,7 +154,7 @@ impl SmeltingPlan {
                 num_old_furnaces += 1;
 
                 let can_harvest = furnace.ready_to_harvest;
-                let can_load = !furnace.has_held_item || can_harvest;
+                let can_load = furnace.held_item.is_none() || can_harvest;
                 if can_load {
                     num_available_furnaces += 1;
                 }
@@ -336,7 +336,7 @@ impl MineDelvingGoal {
             .map(|(tile, furnace)| {
                 let can_build = false;
                 let can_harvest = furnace.ready_to_harvest;
-                let can_load = !furnace.has_held_item || can_harvest;
+                let can_load = furnace.held_item.is_none() || can_harvest;
                 (tile, can_build, can_harvest, can_load)
             });
 
@@ -383,9 +383,28 @@ impl MineDelvingGoal {
         &self,
         game_state: &GameState,
     ) -> Result<bool, Error> {
-        let items = InventoryGoal::empty()
-            .room("Mine")
-            .total_stored_and_carried(game_state)?;
+        let mines = game_state.get_room("Mine")?;
+
+        let items = game_state
+            .player
+            .inventory
+            .iter_items()
+            .chain(
+                mines
+                    .objects
+                    .iter()
+                    .filter_map(|obj| match &obj.kind {
+                        ObjectKind::Chest(chest) => {
+                            Some(Either::Left(chest.inventory.iter_items()))
+                        }
+                        ObjectKind::CraftingMachine(machine) => {
+                            Some(Either::Right(machine.held_item.iter()))
+                        }
+                        _ => None,
+                    })
+                    .flatten(),
+            )
+            .item_counts();
         let get_count =
             |item: &ItemId| -> usize { items.get(item).cloned().unwrap_or(0) };
 
