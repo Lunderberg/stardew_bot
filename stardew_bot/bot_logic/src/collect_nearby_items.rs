@@ -141,19 +141,22 @@ impl BotInterrupt for CollectNearbyItems {
             return Ok(Some(goal.into()));
         }
 
-        if let Some(cluster) =
-            self.nearby_cluster(game_state)?.filter(|cluster| {
+        if let Some(movement) = self
+            .nearby_cluster(game_state)?
+            .filter(|cluster| {
                 // If the cluster is right on top of the player, the
                 // movement goal will terminate immediately.
                 // Therefore, skip these cases.
                 let dist = game_state.player.center_pos().dist(*cluster);
                 dist > self.search_radius
             })
-        {
-            let goal =
+            .map(|cluster| {
                 MovementGoal::new(game_state.player.room_name.clone(), cluster)
-                    .with_tolerance(goal_dist);
-            return Ok(Some(goal.into()));
+                    .with_tolerance(goal_dist)
+            })
+            .filter(|movement| !movement.is_completed(game_state))
+        {
+            return Ok(Some(movement.into()));
         }
 
         Ok(None)
