@@ -210,11 +210,13 @@ impl ItemId {
     pub const GOLD_ORE: Self = Self::new_const("(O)384");
     pub const IRIDIUM_ORE: Self = Self::new_const("(O)386");
     pub const COAL: Self = Self::new_const("(O)382");
+    pub const QUARTZ: Self = Self::new_const("(O)80");
 
     pub const COPPER_BAR: Self = Self::new_const("(O)334");
     pub const IRON_BAR: Self = Self::new_const("(O)335");
     pub const GOLD_BAR: Self = Self::new_const("(O)336");
     pub const IRIDIUM_BAR: Self = Self::new_const("(O)337");
+    pub const REFINED_QUARTZ: Self = Self::new_const("(O)338");
 
     pub const GEODE: Self = Self::new_const("(O)535");
     pub const FROZEN_GEODE: Self = Self::new_const("(O)536");

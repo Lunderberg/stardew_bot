@@ -27,6 +27,7 @@ struct SmeltingPlan {
     new_furnaces: usize,
     copper_bars: usize,
     iron_bars: usize,
+    refined_quartz: usize,
 }
 
 struct MineSingleLevel {
@@ -142,6 +143,25 @@ impl SmeltingPlan {
         let mut iron_ore = get_available(&ItemId::IRON_ORE);
         let mut stone = get_available(&ItemId::STONE);
         let mut coal = get_available(&ItemId::COAL);
+        let mut quartz = get_available(&ItemId::QUARTZ);
+
+        let mut required_refined_quartz = {
+            let num_required = game_state
+                .iter_reserved_items()?
+                .filter(|(id, _)| *id == &ItemId::REFINED_QUARTZ)
+                .map(|(_, count)| count)
+                .sum::<usize>();
+
+            let num_at_farm = game_state
+                .iter_stored_items("Farm")?
+                .filter(|item| item.id == ItemId::REFINED_QUARTZ)
+                .map(|item| item.count)
+                .sum::<usize>();
+
+            let num_at_mines = get_available(&ItemId::REFINED_QUARTZ);
+
+            num_required.saturating_sub(num_at_farm + num_at_mines)
+        };
 
         let mut num_available_furnaces = 0;
         let mut num_old_furnaces = 0;
@@ -168,6 +188,7 @@ impl SmeltingPlan {
             new_furnaces: 0,
             copper_bars: 0,
             iron_bars: 0,
+            refined_quartz: 0,
         };
 
         fn limiting_factor<const N: usize>(values: [usize; N]) -> usize {
@@ -175,6 +196,20 @@ impl SmeltingPlan {
         }
 
         loop {
+            let refined_quartz = limiting_factor([
+                quartz,
+                coal,
+                num_available_furnaces,
+                required_refined_quartz,
+            ]);
+            if refined_quartz > 0 {
+                plan.refined_quartz += refined_quartz;
+                quartz -= refined_quartz;
+                coal -= refined_quartz;
+                num_available_furnaces -= refined_quartz;
+                required_refined_quartz -= refined_quartz;
+            }
+
             let iron_bars =
                 limiting_factor([iron_ore / 5, coal, num_available_furnaces]);
             if iron_bars > 0 {
@@ -319,11 +354,15 @@ impl MineDelvingGoal {
             .room("Mine")
             .craft_missing(true)
             .with(ItemId::FURNACE.with_count(plan.new_furnaces))
-            .with(ItemId::COAL.with_count(plan.iron_bars + plan.copper_bars))
+            .with(ItemId::COAL.with_count(
+                plan.refined_quartz + plan.iron_bars + plan.copper_bars,
+            ))
             .with(ItemId::COPPER_ORE.with_count(plan.copper_bars * 5))
-            .with(ItemId::IRON_ORE.with_count(plan.iron_bars * 5));
+            .with(ItemId::IRON_ORE.with_count(plan.iron_bars * 5))
+            .with(ItemId::QUARTZ.with_count(plan.refined_quartz));
 
         let mut iter_smelt = std::iter::empty()
+            .chain(std::iter::repeat_n(ItemId::QUARTZ, plan.refined_quartz))
             .chain(std::iter::repeat_n(ItemId::COPPER_ORE, plan.copper_bars))
             .chain(std::iter::repeat_n(ItemId::IRON_ORE, plan.iron_bars));
 
@@ -353,28 +392,31 @@ impl MineDelvingGoal {
                 (tile, can_build, can_harvest, can_load)
             });
 
-        let stack = LogicStack::new()
-            .then(prepare)
-            .then_iter(
-                iter_existing_furnaces
-                    .chain(iter_new_furnaces)
-                    .flat_map(|(tile,can_build,can_harvest,can_load)| -> [Option<LogicStackItem>; 3] {
-                        let build_furnace = can_build.then(|| UseItemOnTile::new(ItemId::FURNACE, "Mine",tile).into());
+        let stack = LogicStack::new().then(prepare).then_iter(
+            iter_existing_furnaces
+                .chain(iter_new_furnaces)
+                .flat_map(
+                    |(tile, can_build, can_harvest, can_load)|
+                      -> [Option<LogicStackItem>; 3] {
 
-                        let take_complete = can_harvest
-                            .then(|| ActivateTile::new("Mine", tile).into());
+                    let build_furnace = can_build.then(|| {
+                        UseItemOnTile::new(ItemId::FURNACE, "Mine", tile).into()
+                    });
 
-                        let start_new = can_load
-                            .then(|| {
-                                iter_smelt.next().map(|ore| {
-                                    UseItemOnTile::new(ore, "Mine", tile).into()
-                                })
+                    let take_complete = can_harvest
+                        .then(|| ActivateTile::new("Mine", tile).into());
+
+                    let start_new = can_load
+                        .then(|| {
+                            iter_smelt.next().map(|ore| {
+                                UseItemOnTile::new(ore, "Mine", tile).into()
                             })
-                            .flatten();
-                        [build_furnace, take_complete, start_new]
-                    })
-                    .flatten()
-            );
+                        })
+                        .flatten();
+                    [build_furnace, take_complete, start_new]
+                })
+                .flatten(),
+        );
 
         Ok((stack.len() > 1).then(|| stack))
     }
