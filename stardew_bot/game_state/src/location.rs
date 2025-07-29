@@ -494,6 +494,10 @@ pub struct Character {
     pub is_invisible_duggy: bool,
 
     pub is_waiting_rock_crab: bool,
+
+    /// The items that are dropped on death.  Is empty for all
+    /// non-monsters.
+    pub item_drops: Vec<ItemId>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -1071,7 +1075,8 @@ impl Location {
              health: Option<i32>,
              ignores_collisions: bool,
              is_invisible_duggy: bool,
-             is_waiting_rock_crab: bool|
+             is_waiting_rock_crab: bool,
+             item_drops: Option<&Vec<String>>|
              -> Character {
                 Character {
                     name: name.to_string(),
@@ -1081,6 +1086,18 @@ impl Location {
                     ignores_collisions,
                     is_invisible_duggy,
                     is_waiting_rock_crab,
+                    item_drops: item_drops
+                        .into_iter()
+                        .flatten()
+                        .map(|name| {
+                            let name = if name.starts_with("(") {
+                                name.to_string()
+                            } else {
+                                format!("(O){name}")
+                            };
+                            ItemId::new(name)
+                        })
+                        .collect(),
                 }
             },
         )?;
@@ -1699,6 +1716,23 @@ impl Location {
                             false
                         };
 
+                        let item_drops = if monster.is_some() {
+                            let list = monster
+                                .objectsToDrop
+                                .array
+                                .value
+                                .elements;
+                            let num_items = list
+                                ._size
+                                .prim_cast::<usize>();
+                            (0..num_items)
+                                .map(|i| list._items[i].value.read_string())
+                                .filter(|id| id.is_some())
+                                .collect()
+                        } else {
+                            None
+                        };
+
                         new_character(
                             name,
                             pos.X, pos.Y,
@@ -1707,6 +1741,7 @@ impl Location {
                             ignores_collisions,
                             is_invisible_duggy,
                             is_waiting_rock_crab,
+                            item_drops,
                         )
                     })
                     .collect();
