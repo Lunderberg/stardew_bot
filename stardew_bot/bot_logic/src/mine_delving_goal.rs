@@ -22,6 +22,10 @@ use super::{
 
 pub struct MineDelvingGoal;
 
+struct GoToDepth {
+    depth: i32,
+}
+
 struct SmeltingPlan {
     old_furnaces: usize,
     new_furnaces: usize,
@@ -55,7 +59,13 @@ struct NearbyOreCache {
     /// to collect from that tile.
     desirable_rocks: HashMap<Vector<isize>, (f32, f32)>,
 
-    /// Tiles that are both clear and reachable, used to determine where bombs can be placed.
+    /// A lookup of items that should be collected for a bundle, but
+    /// which aren't already stored either in the player's inventory
+    /// or in a storage chest.
+    missing_items: HashSet<ItemId>,
+
+    /// Tiles that are both clear and reachable.  Used to determine
+    /// where bombs can be placed.
     placeable: TileMap<bool>,
 }
 
@@ -94,6 +104,13 @@ pub struct LevelPrediction {
     pub is_monster: bool,
     pub is_slime: bool,
     pub is_dinosaur: bool,
+}
+
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum MiningRegion {
+    Copper,
+    Iron,
+    Gold,
 }
 
 const OFFSETS_ELEVATOR_TO_FURNACE: [Vector<isize>; 12] = [
@@ -421,10 +438,11 @@ impl MineDelvingGoal {
         Ok((stack.len() > 1).then(|| stack))
     }
 
-    fn prefer_mining_copper(
+    fn preferred_mining_region(
         &self,
         game_state: &GameState,
-    ) -> Result<bool, Error> {
+    ) -> Result<MiningRegion, Error> {
+        let farm = game_state.get_room("Farm")?;
         let mines = game_state.get_room("Mine")?;
 
         let items = game_state
@@ -432,9 +450,9 @@ impl MineDelvingGoal {
             .inventory
             .iter_items()
             .chain(
-                mines
-                    .objects
-                    .iter()
+                [farm, mines]
+                    .into_iter()
+                    .flat_map(|loc| loc.objects.iter())
                     .filter_map(|obj| match &obj.kind {
                         ObjectKind::Chest(chest) => {
                             Some(Either::Left(chest.inventory.iter_items()))
@@ -449,6 +467,25 @@ impl MineDelvingGoal {
             .item_counts();
         let get_count =
             |item: &ItemId| -> usize { items.get(item).cloned().unwrap_or(0) };
+
+        let opt_region_for_bundle = game_state
+            .iter_reserved_items()?
+            .filter(|(id, num_required)| get_count(id) < *num_required)
+            .filter_map(|(id, _)| {
+                if id == &ItemId::BAT_WING {
+                    Some(MiningRegion::Iron)
+                } else if id == &ItemId::SOLAR_ESSENCE {
+                    Some(MiningRegion::Gold)
+                } else if id == &ItemId::VOID_ESSENCE {
+                    Some(MiningRegion::Gold)
+                } else {
+                    None
+                }
+            })
+            .min();
+        if let Some(region_for_bundle) = opt_region_for_bundle {
+            return Ok(region_for_bundle);
+        }
 
         let copper_ore = get_count(&ItemId::COPPER_ORE);
         let copper_bar = get_count(&ItemId::COPPER_BAR);
@@ -466,22 +503,28 @@ impl MineDelvingGoal {
             .iter()
             .filter(|obj| matches!(obj.kind, ObjectKind::CraftingMachine(_)))
             .count();
-        if enough_ore_to_smelt
+        let preferred_region = if enough_ore_to_smelt
             && num_furnaces < OFFSETS_ELEVATOR_TO_FURNACE.len()
         {
             // We have enough ore/coal to smelt a bar, and aren't
             // smelting it.  Therefore, it must be because we don't
             // have enough smelters.  Mine more copper to make more
             // smelters.
-            return Ok(true);
-        }
+            MiningRegion::Copper
+        } else {
+            // If there are more iron bars than copper bars, mine more
+            // copper.
+            let effective_copper_bars = copper_bar + copper_ore / 5;
+            let effective_iron_bars = iron_bar + iron_ore / 5;
 
-        // If there are more iron bars than copper bars, mine more
-        // copper.
-        let effective_copper_bars = copper_bar + copper_ore / 5;
-        let effective_iron_bars = iron_bar + iron_ore / 5;
+            if effective_copper_bars <= effective_iron_bars {
+                MiningRegion::Copper
+            } else {
+                MiningRegion::Iron
+            }
+        };
 
-        Ok(effective_copper_bars <= effective_iron_bars)
+        Ok(preferred_region)
     }
 
     fn before_descending_into_mine(
@@ -586,7 +629,7 @@ impl MineDelvingGoal {
     fn at_mine_entrance(
         &self,
         game_state: &GameState,
-        actions: &mut ActionCollector,
+        _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         // If there's anything to prepare before going down, do so.
         // The check for the `mine_elevator_menu` is to avoid an edge
@@ -601,47 +644,115 @@ impl MineDelvingGoal {
                 .into());
         }
 
-        let elevator_depth =
-            game_state.globals.lowest_mine_level_reached.clamp(0, 120) as usize;
+        let elevator_depth = {
+            let lowest_level =
+                game_state.globals.lowest_mine_level_reached.clamp(0, 120);
+            (lowest_level / 5) * 5
+        };
 
-        if elevator_depth >= 5 {
-            let go_to_depth = if elevator_depth < 120 && {
-                let predictor = MineLevelPredictor::new(game_state);
-                (elevator_depth..elevator_depth + 5)
-                    .all(|level| !predictor.predict(level as i32).is_infested())
-            } {
-                elevator_depth
-            } else if elevator_depth < 40 {
-                elevator_depth
-            } else if self.prefer_mining_copper(game_state)? {
-                20
-            } else if elevator_depth < 80 {
-                elevator_depth
-            } else {
-                60
-            };
-            let go_to_depth = go_to_depth.min(elevator_depth);
-            return Self::elevator_to_floor(game_state, actions, go_to_depth);
+        let preferred_region = self.preferred_mining_region(game_state)?;
+        let go_to_depth = if elevator_depth == 0 {
+            1
+        } else if elevator_depth < 40 {
+            elevator_depth
+        } else if preferred_region == MiningRegion::Copper {
+            20
+        } else if elevator_depth < 80 {
+            elevator_depth
+        } else if preferred_region == MiningRegion::Iron {
+            60
+        } else if elevator_depth < 120 {
+            elevator_depth
+        } else {
+            100
+        };
+
+        let goal = GoToDepth::new(go_to_depth);
+        Ok(goal.into())
+    }
+}
+
+impl GoToDepth {
+    pub fn new(depth: i32) -> Self {
+        Self { depth }
+    }
+}
+
+impl BotGoal for GoToDepth {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
+        format!("Go to level {}", self.depth).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        let current_room = game_state.current_room()?;
+
+        let is_in_mines = current_room.mineshaft_details.is_some();
+        let at_target_depth = current_room
+            .mineshaft_details
+            .as_ref()
+            .map(|mineshaft| mineshaft.mineshaft_level == self.depth)
+            .unwrap_or(false);
+
+        if at_target_depth {
+            return Ok(BotGoalResult::Completed);
         }
 
-        let mine_ladder = game_state
-            .current_room()?
-            .action_tiles
-            .iter()
-            .find(|(_, action)| {
-                if elevator_depth == 0 {
-                    action == "Mine"
-                } else {
-                    action == "MineElevator"
-                }
-            })
-            .map(|(tile, _)| tile)
-            .cloned()
-            .ok_or(Error::MineLadderNotFound)?;
+        if let Some(menu) = game_state.mine_elevator_menu() {
+            let i_button = (self.depth / 5) as usize;
+            let pixel =
+                menu.buttons.get(i_button).cloned().unwrap_or_else(|| {
+                    panic!(
+                        "TODO: Requested depth {}, \
+                         which requires button {i_button}, \
+                         but elevator only has {} buttons",
+                        self.depth,
+                        menu.buttons.len(),
+                    )
+                });
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
 
-        let descend = ActivateTile::new("Mine", mine_ladder)
-            .cancel_if(|game_state| game_state.player.room_name != "Mine");
-        return Ok(descend.into());
+        let activate_tile = if self.depth == 1 {
+            let tile = current_room
+                .action_tiles
+                .iter()
+                .find(|(_, action)| action == "Mine")
+                .map(|(tile, _)| tile)
+                .cloned()
+                .ok_or(Error::MineLadderNotFound)?;
+            ActivateTile::new("Mine", tile)
+        } else if is_in_mines {
+            let tile = current_room
+                .objects
+                .iter()
+                .find(|obj| matches!(obj.kind, ObjectKind::MineElevator))
+                .ok_or(Error::MineElevatorNotFound)?
+                .tile;
+            ActivateTile::new(game_state.player.room_name.clone(), tile)
+        } else {
+            let tile = game_state
+                .get_room("Mine")?
+                .action_tiles
+                .iter()
+                .find(|(_, action)| action == "MineElevator")
+                .map(|(tile, _)| tile)
+                .cloned()
+                .ok_or(Error::MineElevatorNotFound)?;
+            ActivateTile::new("Mine", tile)
+        };
+
+        let room_name = game_state.player.room_name.clone();
+        Ok(activate_tile
+            .cancel_if(move |game_state| {
+                game_state.player.room_name != room_name
+            })
+            .into())
     }
 }
 
@@ -990,6 +1101,7 @@ impl BotGoal for MineSingleLevel {
 
         let current_tick = game_state.globals.game_tick;
         let num_objects = current_room.objects.len();
+        let num_enemies = current_room.characters.len();
         let cancellation = move |game_state: &GameState| -> bool {
             if game_state.player.using_tool || game_state.any_menu_open() {
                 // This action has some state to it, and shouldn't
@@ -1001,17 +1113,30 @@ impl BotGoal for MineSingleLevel {
             // current movement/tile goals and re-plan.
             let time_passed = game_state.globals.game_tick > current_tick + 30;
 
+            let current_room = game_state.current_room().ok();
+
             // If the number of objects in the room increased, then
             // cancel out and re-plan.  This can occur if a nearby
             // enemy is killed, dropping a ladder.
             let new_object_appeared = {
-                let current_num_objects = game_state
-                    .current_room()
+                let current_num_objects = current_room
                     .map(|room| room.objects.len())
                     .unwrap_or(num_objects);
                 current_num_objects > num_objects
             };
-            time_passed || new_object_appeared
+
+            // If the number of enemies has changed, it may indicate
+            // either that an enemy was killed, in which case we may
+            // need to path to the newly-dropped item, or that an
+            // enemy spawned, in which case we may need to path to the
+            // enemy in order to collect useful drops from it.
+            let enemy_count_changed = {
+                let current_num_enemies = current_room
+                    .map(|room| room.characters.len())
+                    .unwrap_or(num_enemies);
+                current_num_enemies != num_enemies
+            };
+            time_passed || new_object_appeared || enemy_count_changed
         };
 
         if let Some(tool) = opt_tool {
@@ -1309,11 +1434,32 @@ impl MineNearbyOre {
             clear.imap(|tile, &is_clear| is_clear && reachable.is_set(tile))
         };
 
+        let missing_items = {
+            let stored_items = game_state
+                .player
+                .inventory
+                .iter_items()
+                .chain(game_state.iter_stored_items("Farm")?)
+                .chain(game_state.iter_stored_items("Mine")?)
+                .item_counts();
+
+            game_state
+                .iter_reserved_items()?
+                .filter(|(_, num_required)| *num_required < 50)
+                .filter(|(id, num_required)| {
+                    let num_stored = stored_items.get(id).unwrap_or(&0);
+                    num_stored < num_required
+                })
+                .map(|(id, _)| id.clone())
+                .collect()
+        };
+
         Ok(NearbyOreCache {
             num_objects: loc.objects.len(),
             num_bombs: loc.bombs.len(),
             desirable_rocks,
             placeable,
+            missing_items,
         })
     }
 
@@ -1358,6 +1504,7 @@ impl BotInterrupt for MineNearbyOre {
         self.update_cache(game_state)?;
         let NearbyOreCache {
             desirable_rocks,
+            missing_items,
             placeable,
             ..
         } = self.cache.as_ref().expect("Populated by self.update_cache");
@@ -1377,17 +1524,42 @@ impl BotInterrupt for MineNearbyOre {
             .include_border(true);
         let distances = pathfinding.distances(player_tile);
 
-        let opt_closest_stone = desirable_rocks
-            .iter()
-            .filter_map(|(tile, (multiplier, offset))| {
-                let dist = distances.get(*tile)?.as_ref()?;
-                ((*dist as f32) + offset < self.dist * multiplier)
-                    .then(|| (*tile, *dist))
-            })
-            .min_by_key(|(tile, dist)| (*dist, tile.right, tile.down))
-            .map(|(tile, _)| tile);
+        enum TargetKind {
+            Object,
+            Enemy,
+        }
 
-        let Some(target_tile) = opt_closest_stone else {
+        let iter_nearby_objects = desirable_rocks.iter().filter_map(
+            |(tile, (multiplier, offset))| {
+                let dist = *distances.get_opt(*tile)?;
+                ((dist as f32) + offset < self.dist * multiplier)
+                    .then(|| (*tile, TargetKind::Object, dist))
+            },
+        );
+
+        let iter_nearby_enemies = loc
+            .characters
+            .iter()
+            .filter(|character| {
+                character
+                    .item_drops
+                    .iter()
+                    .any(|drop| missing_items.contains(drop))
+            })
+            .map(|character| character.tile())
+            .filter_map(|tile| {
+                let dist = *distances.get_opt(tile)?;
+                let multiplier = 2.0;
+                ((dist as f32) < self.dist * multiplier)
+                    .then(|| (tile, TargetKind::Enemy, dist))
+            });
+
+        let opt_target_tile = iter_nearby_objects
+            .chain(iter_nearby_enemies)
+            .min_by_key(|(tile, _, dist)| (*dist, tile.right, tile.down))
+            .map(|(tile, kind, _)| (tile, kind));
+
+        let Some((target_tile, target_kind)) = opt_target_tile else {
             return Ok(None);
         };
 
@@ -1423,14 +1595,17 @@ impl BotInterrupt for MineNearbyOre {
                 .filter(|(_, num_bombed)| *num_bombed >= 5)
                 .map(|(bomb_tile, _)| bomb_tile)
         };
-        let (target_tile, opt_item): (Vector<isize>, Option<ItemId>) =
-            if let Some(blocked) = opt_blocked_tile_in_path()? {
-                (blocked, None)
-            } else if let Some(bomb_tile) = opt_bomb_tile() {
-                (bomb_tile, Some(ItemId::CHERRY_BOMB))
-            } else {
-                (target_tile, None)
-            };
+        let (target_tile, target_kind, opt_item): (
+            Vector<isize>,
+            TargetKind,
+            Option<ItemId>,
+        ) = if let Some(blocked) = opt_blocked_tile_in_path()? {
+            (blocked, TargetKind::Object, None)
+        } else if let Some(bomb_tile) = opt_bomb_tile() {
+            (bomb_tile, TargetKind::Object, Some(ItemId::CHERRY_BOMB))
+        } else {
+            (target_tile, target_kind, None)
+        };
 
         let opt_item = opt_item.or_else(|| {
             clearable_tiles
@@ -1475,7 +1650,26 @@ impl BotInterrupt for MineNearbyOre {
             self.most_recent_bomb = Some(game_state.globals.game_tick);
         }
 
-        let goal = if let Some(item) = opt_item {
+        let goal: LogicStack = if matches!(target_kind, TargetKind::Enemy) {
+            let movement = MovementGoal::new(
+                game_state.player.room_name.clone(),
+                target_tile.into(),
+            );
+            if movement.is_completed(game_state) {
+                return Ok(None);
+            }
+
+            let num_enemies = loc.characters.len();
+            let current_tick = game_state.globals.game_tick;
+            let cancellation = move |game_state: &GameState| -> bool {
+                current_tick + 30 < game_state.globals.game_tick
+                    || game_state
+                        .current_room()
+                        .map(|room| num_enemies != room.characters.len())
+                        .unwrap_or(false)
+            };
+            LogicStack::new().then(movement).cancel_if(cancellation)
+        } else if let Some(item) = opt_item {
             let item = if item.item_id.starts_with("(W)") {
                 let opt_weapon =
                     best_weapon(game_state.player.inventory.iter_items());

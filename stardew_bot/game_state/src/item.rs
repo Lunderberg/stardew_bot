@@ -223,6 +223,10 @@ impl ItemId {
     pub const MAGMA_GEODE: Self = Self::new_const("(O)537");
     pub const OMNI_GEODE: Self = Self::new_const("(O)749");
 
+    pub const BAT_WING: Self = Self::new_const("(O)767");
+    pub const SOLAR_ESSENCE: Self = Self::new_const("(O)768");
+    pub const VOID_ESSENCE: Self = Self::new_const("(O)769");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),
