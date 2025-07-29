@@ -72,7 +72,10 @@ impl BotInterrupt for KeyEventInterrupt {
             return Ok(Some(goal.into()));
         }
 
-        if check_flag("wizardJunimoNote") && !check_flag("canReadJunimoText") {
+        if check_flag("wizardJunimoNote")
+            && !check_flag("canReadJunimoText")
+            && game_state.player.room_name != "WizardHouse"
+        {
             return Ok(Some(GoToRoomGoal::new("WizardHouse").into()));
         }
 
