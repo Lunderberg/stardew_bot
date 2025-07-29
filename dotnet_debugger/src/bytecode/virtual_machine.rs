@@ -1007,7 +1007,9 @@ impl<Inner> CachedVMReader<Inner> {
         let start = region.start.prev_multiple_of(PAGE_SIZE);
         let end = region.end;
         (0..)
-            .map(move |i| start + i * PAGE_SIZE)
+            .map(move |i| start.checked_add(i * PAGE_SIZE))
+            .take_while(|opt_ptr| opt_ptr.is_some())
+            .map(|opt_ptr| opt_ptr.unwrap())
             .take_while(move |ptr| *ptr < end)
     }
 }
