@@ -196,12 +196,19 @@ impl BotGoal for GeodeCrackingGoal {
             },
         ) == 0;
 
-        if opt_next_geode.is_none() || has_full_inventory {
+        let can_pay_for_geode = game_state.player.current_money >= 25;
+
+        if opt_next_geode.is_none() || has_full_inventory || !can_pay_for_geode
+        {
             if game_state.geode_menu().is_some() {
                 return Ok(MenuCloser::new().into());
             } else if !to_sell.is_completed(game_state) {
                 return Ok(to_sell.into());
             }
+        }
+
+        if !can_pay_for_geode {
+            return Ok(BotGoalResult::Completed);
         }
 
         let Some(next_geode) = opt_next_geode else {
