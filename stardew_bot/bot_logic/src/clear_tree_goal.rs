@@ -1,11 +1,12 @@
 use std::borrow::Cow;
 
-use game_state::{GameState, ItemId, ObjectKind};
+use game_state::{GameState, ObjectKind};
 use geometry::{Direction, Vector};
 
 use crate::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
-    Error, LocationExt as _, MaintainStaminaGoal, MovementGoal, UseItemOnTile,
+    Error, GameStateExt as _, LocationExt as _, MaintainStaminaGoal,
+    MovementGoal, UseItemOnTile,
 };
 
 pub struct ClearTreeGoal {
@@ -19,15 +20,6 @@ impl ClearTreeGoal {
             room: "Farm".into(),
             tile,
         }
-    }
-
-    fn get_axe<'a>(&self, game_state: &'a GameState) -> Option<&'a ItemId> {
-        game_state
-            .player
-            .inventory
-            .iter_items()
-            .find(|item| item.id == ItemId::AXE)
-            .map(|item| &item.id)
     }
 
     fn tree_on_tile(&self, game_state: &GameState) -> Result<bool, Error> {
@@ -46,7 +38,7 @@ impl ClearTreeGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
-        let can_clear = self.get_axe(game_state).is_some()
+        let can_clear = game_state.current_axe()?.is_some()
             && self.tree_on_tile(game_state)?;
         Ok(!can_clear)
     }
@@ -62,7 +54,7 @@ impl BotGoal for ClearTreeGoal {
         game_state: &GameState,
         _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        let Some(axe) = self.get_axe(game_state) else {
+        let Some(axe) = game_state.current_axe()? else {
             return Ok(BotGoalResult::Completed);
         };
 

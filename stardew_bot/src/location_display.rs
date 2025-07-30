@@ -224,7 +224,8 @@ impl<'a> DrawableGameLocation<'a> {
                 self.to_draw_rectangle(
                     clump.shape,
                     match clump.kind {
-                        ResourceClumpKind::Stump => Color::Yellow,
+                        ResourceClumpKind::Stump
+                        | ResourceClumpKind::LargeLog => Color::Yellow,
                         ResourceClumpKind::Boulder => Color::DarkGray,
                         ResourceClumpKind::Meteorite => Color::Magenta,
                         ResourceClumpKind::MineBoulder => Color::DarkGray,

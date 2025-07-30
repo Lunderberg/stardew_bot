@@ -133,6 +133,7 @@ pub struct ResourceClump {
 #[derive(RustNativeObject, Debug, Clone)]
 pub enum ResourceClumpKind {
     Stump,
+    LargeLog,
     Boulder,
     Meteorite,
     MineBoulder,
@@ -2765,7 +2766,8 @@ impl TryFrom<i32> for ResourceClumpKind {
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
-            600 | 602 => Ok(Self::Stump),
+            600 => Ok(Self::Stump),
+            602 => Ok(Self::LargeLog),
             672 => Ok(Self::Boulder),
             622 => Ok(Self::Meteorite),
             752 | 754 | 756 | 758 => Ok(Self::MineBoulder),

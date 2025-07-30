@@ -4,7 +4,9 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{ClearTreeGoal, Error, FarmPlan, MovementGoal};
-use game_state::{GameState, ItemId, Object, ObjectKind, Tree, TreeKind};
+use game_state::{
+    GameState, ItemId, ObjectKind, ResourceClumpKind, Tree, TreeKind,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
@@ -211,7 +213,7 @@ impl ClearFarmGoal {
     fn choose_target_tile(
         &mut self,
         game_state: &GameState,
-        clearable_tiles: &HashMap<Vector<isize>, &Object>,
+        clearable_tiles: &HashMap<Vector<isize>, ItemId>,
     ) -> Result<Vector<isize>, Error> {
         if let Some(tile) = self.target_tile {
             return Ok(tile);
@@ -301,18 +303,23 @@ impl BotGoal for ClearFarmGoal {
 
         let farm = game_state.get_room("Farm")?;
         let player = &game_state.player;
+        let opt_axe = game_state.current_axe()?;
 
         // First, prioritize clearing out clutter that is along the
         // fastest route from the FarmHouse to any of the warps
         // present on the farm.  Clearing these tiles will allow
         // faster movement around the map in the future.
-        let has_priority_clutter = farm
-            .objects
-            .iter()
-            .filter(|obj| obj.kind.get_tool().is_some())
-            .any(|obj| self.priority_tiles.contains(&obj.tile));
+        let has_priority_clutter = false
+            && farm
+                .objects
+                .iter()
+                .filter(|obj| obj.kind.get_tool().is_some())
+                .any(|obj| self.priority_tiles.contains(&obj.tile));
 
-        let clearable_tiles: HashMap<Vector<isize>, &Object> = farm
+        self.fill_farm_plan(game_state)?;
+        let plan = self.plan.as_ref().unwrap();
+
+        let iter_objects = farm
             .objects
             .iter()
             .filter(|obj| {
@@ -322,7 +329,9 @@ impl BotGoal for ClearFarmGoal {
                     match &obj.kind {
                         ObjectKind::Tree(Tree { is_stump: true, .. }) => true,
                         ObjectKind::Tree(tree) => {
-                            (self.clear_trees && tree.growth_stage > 0)
+                            (self.clear_trees
+                                && tree.growth_stage > 0
+                                && !plan.is_planned_tree(obj.tile))
                                 || (self.clear_expanded_trees
                                     && matches!(
                                         tree.kind,
@@ -330,15 +339,53 @@ impl BotGoal for ClearFarmGoal {
                                     ))
                         }
                         ObjectKind::Stone(_) => self.clear_stone,
+
+                        ObjectKind::Chest(_)
+                        | ObjectKind::CraftingMachine(_)
+                        | ObjectKind::Scarecrow
+                        | ObjectKind::Sprinkler(_) => false,
                         _ => true,
                     }
                 }
             })
-            .filter(|obj| obj.kind.get_tool().is_some())
-            .map(|obj| (obj.tile, obj))
-            .filter(|(_, obj)| {
+            .filter_map(|obj| {
+                let tool = obj.kind.get_tool()?;
+                Some((obj.tile, tool))
+            })
+            .filter_map(|(tile, tool)| {
+                let tool = if tool == ItemId::AXE {
+                    opt_axe?.clone()
+                } else {
+                    tool
+                };
+                Some((tile, tool))
+            });
+
+        let iter_clumps = farm
+            .resource_clumps
+            .iter()
+            .filter_map(|clump| {
+                let tool = match &clump.kind {
+                    ResourceClumpKind::Stump
+                        if opt_axe == Some(&ItemId::COPPER_AXE) =>
+                    {
+                        opt_axe
+                    }
+                    _ => None,
+                }?;
+                let iter = clump
+                    .shape
+                    .iter_points()
+                    .map(move |tile| (tile, tool.clone()));
+                Some(iter)
+            })
+            .flatten();
+
+        let clearable_tiles: HashMap<Vector<isize>, ItemId> = iter_objects
+            .chain(iter_clumps)
+            .filter(|(_, tool)| {
                 (self.use_stamina && game_state.player.current_stamina > 2.0)
-                    || obj.kind.get_tool().unwrap() == ItemId::SCYTHE
+                    || tool == &ItemId::SCYTHE
             })
             .collect();
 
@@ -346,23 +393,14 @@ impl BotGoal for ClearFarmGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let is_grown_tree = |obj: &Object| -> bool {
-            match &obj.kind {
-                ObjectKind::Tree(tree) => {
-                    tree.growth_stage >= 5 && !tree.is_stump
-                }
-                _ => false,
-            }
-        };
-
         // Pick up the items that we'll need for the rest of the goal.
         // Anything else gets stashed away.
         let goal = InventoryGoal::current()
             .with(ItemId::PICKAXE)
-            .with(ItemId::AXE)
+            .with(opt_axe.into_iter().cloned())
             .with(ItemId::SCYTHE)
             .with(ItemId::HOE)
-            .stamina_recovery_slots(1);
+            .stamina_recovery_slots(2);
         if game_state.player.inventory.num_empty_slots() < 2
             || !goal.is_completed(game_state)?
         {
@@ -434,18 +472,24 @@ impl BotGoal for ClearFarmGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        let obj = clearable_tiles
+        let tool = clearable_tiles
             .get(&goal_tile)
             .expect("Protected by clearable_tiles.contains_key");
-        let tool = obj.kind.get_tool().expect(
-            "Lookup should only contain tiles \
-                         that can be cleared by using a tool.",
-        );
 
-        if is_grown_tree(obj) {
+        let is_grown_tree = farm.objects.iter().any(|obj| {
+            obj.tile == goal_tile
+                && match &obj.kind {
+                    ObjectKind::Tree(tree) => {
+                        tree.growth_stage >= 5 && !tree.is_stump
+                    }
+                    _ => false,
+                }
+        });
+
+        if is_grown_tree {
             Ok(ClearTreeGoal::new(goal_tile).into())
         } else {
-            Ok(UseItemOnTile::new(tool, "Farm", goal_tile).into())
+            Ok(UseItemOnTile::new(tool.clone(), "Farm", goal_tile).into())
         }
     }
 }
