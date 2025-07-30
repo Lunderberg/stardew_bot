@@ -404,7 +404,7 @@ impl BotGoal for FishingGoal {
             // at the end of the day, actively walk into a wall to
             // manipulate luck.
             let goal = StepCountForLuck::new();
-            if !goal.is_completed(game_state) {
+            if !goal.is_completed(game_state)? {
                 return Ok(goal.into());
             }
         }

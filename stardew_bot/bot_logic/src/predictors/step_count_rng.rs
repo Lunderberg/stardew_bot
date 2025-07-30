@@ -7,6 +7,7 @@ pub struct StepCountPredictor {
     num_friendships: usize,
 }
 
+#[derive(Debug)]
 pub struct StepCountPrediction {
     /// The index in `game_state.player.friendships` of the NPC who
     /// will attempt to give a gift to the player.
