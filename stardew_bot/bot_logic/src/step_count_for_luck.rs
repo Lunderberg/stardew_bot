@@ -21,8 +21,8 @@ pub struct StepCountForLuck {
     start_time_without_gift: i32,
 
     /// The time in the day when the steps should start being checked,
-    /// on days when a gift is being manipulated.  Defaults to 1400
-    /// (2:00 PM).
+    /// on days when a gift is being manipulated.  Defaults to 1300
+    /// (1:00 PM).
     start_time_with_gift: i32,
 
     /// The maximum number of steps that may be taken to manipulate
@@ -68,7 +68,7 @@ struct PreferredGifter {
 impl StepCountForLuck {
     pub fn new() -> Self {
         Self {
-            start_time_with_gift: 1400,
+            start_time_with_gift: 1300,
             start_time_without_gift: 2500,
             max_lookahead_without_gift: 30,
             max_lookahead_with_gift: 500,
@@ -287,6 +287,21 @@ impl BotInterrupt for StepCountForLuck {
 
         if game_state.player.movement.is_none() {
             // Not currently moving, no need to change anything.
+            return Ok(None);
+        }
+
+        if game_state.player.animation.animation_frame % 4 != 3 {
+            // The stepsTaken counter is incremented after the
+            // animation frame is incremented, and the resulting frame
+            // counter is divisible by 4.  Therefore, movement can
+            // continue on frames 0/1/2, but should be stopped on
+            // frame 3 so that we don't advance the stepTaken counter.
+            //
+            // The duration of frame 3 varies depending on the
+            // direction the player is facing, and is either 60 ms or
+            // 100 ms.  That gives 3 frames in which the movement can
+            // be stopped, enough to consistently avoid incrementing
+            // the frame counter.
             return Ok(None);
         }
 

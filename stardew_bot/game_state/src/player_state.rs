@@ -33,6 +33,7 @@ pub struct PlayerState {
     pub can_release_tool: bool,
     pub last_click: Vector<isize>,
 
+    pub animation: PlayerAnimation,
     pub weapon_swipe_animation_frame: Option<i32>,
     pub club_smash_animation_frame: Option<i32>,
     pub club_cooldown: i32,
@@ -76,6 +77,14 @@ pub struct Buff {
     pub source: String,
     pub total_duration_ms: i32,
     pub remaining_duration_ms: i32,
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct PlayerAnimation {
+    pub current_animation: i32,
+    pub animation_frame: i32,
+    pub timer: f32,
+    pub interval: f32,
 }
 
 impl PlayerState {
@@ -179,6 +188,19 @@ impl PlayerState {
         )?;
 
         graph.named_native_function(
+            "new_player_animation",
+            |current_animation: i32,
+             animation_frame: i32,
+             timer: f32,
+             interval: f32| PlayerAnimation {
+                current_animation,
+                animation_frame,
+                timer,
+                interval,
+            },
+        )?;
+
+        graph.named_native_function(
             "new_player",
             |position: &Vector<f32>,
              facing: &FacingDirection,
@@ -192,6 +214,7 @@ impl PlayerState {
              can_move: bool,
              can_release_tool: bool,
              last_click: &Vector<isize>,
+             animation: &PlayerAnimation,
              weapon_swipe_animation_frame: Option<i32>,
              club_smash_animation_frame: Option<i32>,
              club_cooldown: i32,
@@ -216,6 +239,7 @@ impl PlayerState {
                     can_move,
                     can_release_tool,
                     last_click: *last_click,
+                    animation: animation.clone(),
                     weapon_swipe_animation_frame,
                     club_smash_animation_frame,
                     club_cooldown,
@@ -373,6 +397,17 @@ impl PlayerState {
                     .prim_cast::<usize>();
 
                 let sprite = player.sprite.value.as::<StardewValley.FarmerSprite>();
+                let timer = sprite.timer;
+                let interval = sprite.interval;
+                let current_animation = sprite.currentSingleAnimation;
+                let animation_frame = sprite.currentAnimationIndex;
+                let animation = new_player_animation(
+                    current_animation,
+                    animation_frame,
+                    timer,
+                    interval,
+                );
+
                 let is_swinging_melee_weapon = (
                     sprite.currentSingleAnimation == 232i32 ||
                         sprite.currentSingleAnimation == 240i32 ||
@@ -417,6 +452,7 @@ impl PlayerState {
                     can_move,
                     can_release_tool,
                     last_click,
+                    animation,
                     weapon_swipe_animation_frame,
                     club_smash_animation_frame,
                     club_cooldown,
