@@ -689,6 +689,12 @@ impl MineDelvingGoal {
             elevator_depth
         } else if preferred_region == MiningRegion::Iron {
             60
+        } else if elevator_depth > 80 && {
+            let predictor = MineLevelPredictor::new(game_state);
+            (elevator_depth..elevator_depth + 5)
+                .any(|level| !predictor.predict(level as i32).is_infested())
+        } {
+            80
         } else if elevator_depth < 120 {
             elevator_depth
         } else {
@@ -880,10 +886,8 @@ impl BotGoal for MineDelvingGoal {
 
         // If we are returning to the copper levels after having
         // reached iron, then we're here to get more copper ore.
-        let prefer_mining_ore = (mineshaft_level < 40
-            && game_state.globals.lowest_mine_level_reached >= 40)
-            || (mineshaft_level < 80
-                && game_state.globals.lowest_mine_level_reached >= 80);
+        let prefer_mining_ore = mineshaft_level
+            < 5 * (game_state.globals.lowest_mine_level_reached / 5);
         let mining_dist = if prefer_mining_ore { 16.0 } else { 4.0 };
 
         let room_name = current_room.name.clone();
