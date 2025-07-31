@@ -496,9 +496,7 @@ impl MineDelvingGoal {
             .iter_reserved_items()?
             .filter(|(id, num_required)| get_count(id) < *num_required)
             .filter_map(|(id, _)| {
-                if id == &ItemId::BAT_WING {
-                    Some(MiningRegion::Iron)
-                } else if id == &ItemId::SOLAR_ESSENCE {
+                if id == &ItemId::SOLAR_ESSENCE {
                     Some(MiningRegion::Gold)
                 } else if id == &ItemId::VOID_ESSENCE {
                     Some(MiningRegion::Gold)
