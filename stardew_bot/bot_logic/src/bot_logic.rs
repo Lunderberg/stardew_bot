@@ -1,4 +1,5 @@
 use derive_more::From;
+use itertools::Itertools as _;
 use std::{
     any::Any,
     borrow::Cow,
@@ -848,8 +849,14 @@ impl BotLogic {
                 !self.recursed_during_current_update.contains(&i_item),
                 "Infinite loop detected.  \
                  Interrupt '{}' fired multiple times \
-                 during a single update.",
+                 during a single update.  \
+                 The second time, it produced goals [{}].",
                 interrupt.description(),
+                interrupt_stack
+                    .0
+                    .iter()
+                    .map(|item| format!("'{}'", item.description()))
+                    .format(", ")
             );
 
             self.recursed_during_current_update.insert(i_item);
