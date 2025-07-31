@@ -611,13 +611,16 @@ impl MineDelvingGoal {
                     )
                 })
                 .sorted_by_key(|item| std::cmp::Reverse(item.stack_price()))
-                .take(5)
                 .cloned();
 
-            prepare
-                .with(ItemId::HOE)
-                .with(iter_reserved)
-                .with(iter_gems)
+            let iter_bring_back = iter_reserved
+                .map(|item| (item, true))
+                .chain(iter_gems.map(|item| (item, false)))
+                .enumerate()
+                .filter(|(i, (_, is_reserved))| *is_reserved || (*i < 5))
+                .map(|(_, (item, _))| item);
+
+            prepare.with(ItemId::HOE).with(iter_bring_back)
         } else {
             prepare
         };
