@@ -9,7 +9,9 @@ use crate::{
     ItemIterExt as _, MenuCloser,
 };
 
-pub struct TurnInBundlesGoal;
+pub struct TurnInBundlesGoal {
+    stop_time: i32,
+}
 
 trait ItemLookupExt {
     /// Returns the number of items that exactly match the specified
@@ -26,6 +28,8 @@ trait ItemLookupExt {
     /// (e.g. "10 Wheat" being fulfilled by 5 normal-quality Wheat and
     /// 5 silver-star Wheat.)
     fn items_with_quality<'a>(&self, item: &Item) -> [Item; 4];
+
+    fn remove_item(&mut self, id: &ItemId, count: usize);
 }
 impl ItemLookupExt for HashMap<ItemId, usize> {
     fn item_count(&self, id: &ItemId) -> usize {
@@ -63,18 +67,29 @@ impl ItemLookupExt for HashMap<ItemId, usize> {
     fn item_count_with_exact_quality(&self, id: &ItemId) -> usize {
         self.get(id).cloned().unwrap_or(0)
     }
+
+    fn remove_item(&mut self, id: &ItemId, count: usize) {
+        if let Some(prev) = self.get_mut(id) {
+            *prev = prev.saturating_sub(count);
+            if *prev == 0 {
+                self.remove(id);
+            }
+        }
+    }
 }
 
 impl TurnInBundlesGoal {
     pub fn new() -> Self {
-        Self
+        Self { stop_time: 1100 }
     }
 
     fn to_turn_in<'a>(
         &self,
         game_state: &'a GameState,
+        include_partial_bundles: bool,
     ) -> Result<impl Iterator<Item = (&'a Bundle, Item)> + 'a, Error> {
-        let available = if game_state.player.room_name == "CommunityCenter" {
+        let mut available = if game_state.player.room_name == "CommunityCenter"
+        {
             game_state.player.inventory.iter_items().item_counts()
         } else {
             game_state.iter_accessible_items()?.item_counts()
@@ -88,6 +103,19 @@ impl TurnInBundlesGoal {
                 &bait.id == &ItemId::TARGETED_BAIT.with_subtype(ItemId::CATFISH)
             })
             .is_some();
+        if !has_catfish_bait {
+            if let Some(worst_quality) = available
+                .items_with_quality(&ItemId::CATFISH.with_count(1))
+                .into_iter()
+                .find(|item| item.count > 0)
+                .map(|item| item.quality())
+            {
+                available.remove_item(
+                    &ItemId::CATFISH.with_quality(worst_quality),
+                    1,
+                );
+            }
+        }
 
         let num_inventory_slots = game_state.player.inventory.num_slots();
 
@@ -112,22 +140,19 @@ impl TurnInBundlesGoal {
                             return true;
                         }
                         let num_available = available.item_count(&item.id);
-                        let num_available = if item.id == ItemId::CATFISH
-                            && !has_catfish_bait
-                        {
-                            num_available.saturating_sub(1)
-                        } else {
-                            num_available
-                        };
                         num_available >= item.count
                     })
                     .count();
 
-                (bundle, flags, num_completed, num_completable)
+                let is_completed = num_completed >= bundle.num_required;
+                let is_completable = num_completable >= bundle.num_required;
+
+                (bundle, flags, num_completed, is_completed, is_completable)
             })
-            .sorted_by_key(|(bundle, _, num_completed, num_completable)| {
-                let is_completed = num_completed >= &bundle.num_required;
-                let is_completable = num_completable >= &bundle.num_required;
+            .filter(|(_, _, _, is_completed, is_completable)| {
+                *is_completed || *is_completable || include_partial_bundles
+            })
+            .sorted_by_key(|(bundle, _, _, is_completed, is_completable)| {
                 (
                     !is_completed,
                     !is_completable,
@@ -136,9 +161,9 @@ impl TurnInBundlesGoal {
             })
             .scan(
                 0usize,
-                |cumsum, (bundle, flags, num_completed, num_completable)| {
+                |cumsum, (bundle, flags, num_completed, _, is_completable)| {
                     let prev_completed_bundles = *cumsum;
-                    if num_completable >= bundle.num_required {
+                    if is_completable {
                         *cumsum += 1;
                     }
                     Some((bundle, flags, num_completed, prev_completed_bundles))
@@ -159,16 +184,10 @@ impl TurnInBundlesGoal {
             })
             .flat_map(move |(bundle, item)| {
                 let num_available = available.item_count(&item.id);
-                let num_available =
-                    if item.id == ItemId::CATFISH && !has_catfish_bait {
-                        num_available.saturating_sub(1)
-                    } else {
-                        num_available
-                    };
 
                 let have_enough = num_available >= item.count;
                 available
-                    .items_with_quality(item)
+                    .items_with_quality(&item)
                     .into_iter()
                     .filter(move |_| have_enough)
                     .filter(|item| item.count > 0)
@@ -180,7 +199,7 @@ impl TurnInBundlesGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
-        Ok(self.to_turn_in(game_state)?.next().is_none())
+        Ok(self.to_turn_in(game_state, false)?.next().is_none())
     }
 }
 
@@ -195,14 +214,26 @@ impl BotGoal for TurnInBundlesGoal {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let Some((next_bundle, next_item)) =
-            self.to_turn_in(game_state)?.next()
+            self.to_turn_in(game_state, true)?.next()
         else {
+            let cleanup = MenuCloser::new();
+            if !cleanup.is_completed(game_state) {
+                return Ok(cleanup.into());
+            }
             return Ok(BotGoalResult::Completed);
         };
 
         if game_state.player.room_name != "CommunityCenter" {
-            let prepare = InventoryGoal::empty().with(
-                self.to_turn_in(game_state)?.map(|(_, item)| item.clone()),
+            if game_state.globals.in_game_time >= self.stop_time {
+                return Ok(BotGoalResult::Completed);
+            }
+
+            let prepare = InventoryGoal::empty().with_exactly(
+                self.to_turn_in(game_state, true)?
+                    .map(|(_, item)| item)
+                    .item_counts()
+                    .into_iter()
+                    .map(|(id, count)| id.with_count(count)),
             );
             if !prepare.is_completed(game_state)? {
                 return Ok(prepare.into());
