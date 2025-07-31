@@ -12,6 +12,7 @@ impl<'a> GraphRewrite for IdentifyStaticField<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         let ExprKind::FieldAccess {
             obj: SymbolicValue::Result(obj_index),

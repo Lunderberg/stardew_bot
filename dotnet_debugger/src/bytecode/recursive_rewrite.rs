@@ -22,13 +22,15 @@ where
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         // All nodes currently in the output graph have been fully
         // simplified.  If a rewrite produces a known node, then it
         // can be returned without any further simplification.
         let initial_size = graph.num_operations();
 
-        let Some(mut value) = self.inner.rewrite_expr(graph, expr)? else {
+        let Some(mut value) = self.inner.rewrite_expr(graph, expr, name)?
+        else {
             // Early bailout for the common case where the node does
             // not require any rewriting.
             return Ok(None);
@@ -51,7 +53,7 @@ where
 
             let opt_simplified = self
                 .inner
-                .rewrite_expr(graph, &intermediate_expr)?
+                .rewrite_expr(graph, &intermediate_expr, name)?
                 .or_else(|| {
                     (intermediate_expr != graph[index].kind)
                         .then(|| graph.push(intermediate_expr))

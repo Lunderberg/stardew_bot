@@ -7,6 +7,7 @@ impl GraphRewrite for ConvertBooleanOperatorToConditional {
         &self,
         graph: &mut super::SymbolicGraph,
         expr: &super::ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         Ok(match expr {
             &ExprKind::And { lhs, rhs } => Some(graph.if_else(lhs, rhs, false)),

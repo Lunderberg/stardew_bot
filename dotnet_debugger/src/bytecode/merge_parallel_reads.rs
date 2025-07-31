@@ -27,6 +27,7 @@ impl GraphRewrite for MergeParallelReads {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         let ExprKind::Function { params, output } = expr else {
             return Ok(None);

@@ -12,6 +12,7 @@ impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             ExprKind::PrimCast { value, prim_type } => {

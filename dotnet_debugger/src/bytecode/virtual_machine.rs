@@ -444,9 +444,11 @@ pub enum VMExecutionError {
 
     #[error(
         "When pushing into vector, \
-         pushed element must not be None."
+         pushed element must not be None.  \
+         However, attempted to push None \
+         into vector '{name}'."
     )]
-    MissingElementTypeInVectorAccumulation,
+    MissingElementTypeInVectorAccumulation { name: String },
 
     #[error(
         "Attempted to read output as {attempted}, \

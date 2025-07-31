@@ -1732,7 +1732,11 @@ impl SymbolicGraph {
                 &op.kind
             };
 
-            let opt_value = rewriter.rewrite_expr(&mut builder, kind)?;
+            let opt_value = rewriter.rewrite_expr(
+                &mut builder,
+                kind,
+                op.name.as_ref().map(|string| string.as_str()),
+            )?;
             let value = if let Some(value) = opt_value {
                 num_rewritten_terms += 1;
                 value
@@ -1787,26 +1791,29 @@ impl SymbolicGraph {
             let opt_remapped = op.kind.try_remap(rewrites_applied);
             let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
 
-            let opt_new_value =
-                if let Some(rewritten) = rewriter.rewrite_expr(self, kind)? {
-                    if let Some(name) = &op.name {
-                        if let SymbolicValue::Result(new_index) = rewritten {
-                            if self[new_index].name.is_none() {
-                                self.name(rewritten, name)?;
-                            }
+            let opt_new_value = if let Some(rewritten) = rewriter.rewrite_expr(
+                self,
+                kind,
+                op.name.as_ref().map(|string| string.as_str()),
+            )? {
+                if let Some(name) = &op.name {
+                    if let SymbolicValue::Result(new_index) = rewritten {
+                        if self[new_index].name.is_none() {
+                            self.name(rewritten, name)?;
                         }
                     }
-                    Some(rewritten)
-                } else if let Some(remapped) = opt_remapped {
-                    let expr = Expr {
-                        kind: remapped,
-                        name: op.name,
-                    };
-
-                    Some(self.push(expr))
-                } else {
-                    None
+                }
+                Some(rewritten)
+            } else if let Some(remapped) = opt_remapped {
+                let expr = Expr {
+                    kind: remapped,
+                    name: op.name,
                 };
+
+                Some(self.push(expr))
+            } else {
+                None
+            };
 
             if let Some(new_value) = opt_new_value {
                 rewrites_applied.insert(old_index, new_value);
@@ -1893,6 +1900,7 @@ impl SymbolicGraph {
                 &self,
                 graph: &mut SymbolicGraph,
                 expr: &ExprKind,
+                _name: Option<&str>,
             ) -> Result<Option<SymbolicValue>, Error> {
                 Ok(expr.try_remap(self.0).map(|remapped| graph.push(remapped)))
             }

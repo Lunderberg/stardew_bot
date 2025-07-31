@@ -9,6 +9,7 @@ impl GraphRewrite for RemoveUnusedPointerCast {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             ExprKind::PrimCast {

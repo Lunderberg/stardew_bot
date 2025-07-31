@@ -12,6 +12,7 @@ impl<'a> GraphRewrite for RemoveUnusedDowncast<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             ExprKind::SymbolicDowncast { obj, ty } => {

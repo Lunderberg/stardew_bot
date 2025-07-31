@@ -22,6 +22,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         macro_rules! read_value_if_required {
             ($ptr:expr, $runtime_type:expr) => {{

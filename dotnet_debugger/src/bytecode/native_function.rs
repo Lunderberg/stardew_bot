@@ -44,6 +44,7 @@ pub trait RustNativeObject: Any {
     fn collect_into_vector(
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error>
     where
         Self: Sized,
@@ -58,7 +59,9 @@ pub trait RustNativeObject: Any {
         .downcast_mut::<Vec<Self>>()
         .ok_or_else(|| VMExecutionError::ExpectedVectorToAccumulateInto)?;
         let item = item.take().ok_or_else(|| {
-            VMExecutionError::MissingElementTypeInVectorAccumulation
+            VMExecutionError::MissingElementTypeInVectorAccumulation {
+                name: output_name.to_string(),
+            }
         })?;
 
         let item = match item {
@@ -275,6 +278,7 @@ impl<T: 'static> RustNativeObject for Vec<T> {
     fn collect_into_vector(
         _: &mut StackValue,
         _: &mut Option<StackValue>,
+        _output_name: &str,
     ) -> Result<(), Error>
     where
         Self: Sized,

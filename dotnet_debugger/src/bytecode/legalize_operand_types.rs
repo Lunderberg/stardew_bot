@@ -70,6 +70,7 @@ impl GraphRewrite for LegalizeOperandTypes<'_> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             ExprKind::IndexAccess { obj, indices } => self

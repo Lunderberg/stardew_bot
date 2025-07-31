@@ -67,6 +67,7 @@ pub(crate) trait RustNativeTypeUtils {
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error>;
 
     fn vector_type(&self) -> Result<RuntimeType, Error>;
@@ -92,8 +93,9 @@ impl<T: RustNativeObject> RustNativeTypeUtils for RustNativeUtilContainer<T> {
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error> {
-        T::collect_into_vector(vec, item)
+        T::collect_into_vector(vec, item, output_name)
     }
 
     fn vector_type(&self) -> Result<RuntimeType, Error> {

@@ -21,6 +21,7 @@ struct MakeVector {
 
 struct CollectIntoVector {
     element_type: RuntimeType,
+    output_name: String,
 }
 
 impl NativeFunction for MakeVector {
@@ -62,7 +63,8 @@ impl NativeFunction for CollectIntoVector {
             return Ok(None);
         };
 
-        self.element_type.collect_into_vector(vec, item)?;
+        self.element_type
+            .collect_into_vector(vec, item, &self.output_name)?;
 
         Ok(None)
     }
@@ -160,6 +162,7 @@ impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         let &ExprKind::Collect { iterator } = expr else {
             return Ok(None);
@@ -180,6 +183,7 @@ impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
         let collect_into_vector = graph.raw_native_function(
             ExposedNativeFunction::new(CollectIntoVector {
                 element_type: *item_type.clone(),
+                output_name: name.unwrap_or_else(|| "(anon)").to_string(),
             }),
         );
 

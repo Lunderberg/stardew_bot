@@ -22,11 +22,12 @@ where
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
-        if let Some(new_value) = self.first.rewrite_expr(graph, expr)? {
+        if let Some(new_value) = self.first.rewrite_expr(graph, expr, name)? {
             Ok(Some(new_value))
         } else {
-            self.second.rewrite_expr(graph, expr)
+            self.second.rewrite_expr(graph, expr, name)
         }
     }
 }

@@ -178,8 +178,9 @@ impl RustType {
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error> {
-        self.utils.collect_into_vector(vec, item)
+        self.utils.collect_into_vector(vec, item, output_name)
     }
 
     pub(crate) fn vector_type(&self) -> Result<RuntimeType, Error> {
@@ -440,13 +441,14 @@ impl RuntimeType {
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error> {
         match self {
             RuntimeType::Prim(prim_type) => {
-                prim_type.collect_into_vector(vec, item)
+                prim_type.collect_into_vector(vec, item, output_name)
             }
             RuntimeType::Rust(rust_type) => {
-                rust_type.collect_into_vector(vec, item)
+                rust_type.collect_into_vector(vec, item, output_name)
             }
             other => {
                 Err(TypeInferenceError::InvalidVectorElementType(other.clone())
@@ -660,6 +662,7 @@ impl RuntimePrimType {
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
+        output_name: &str,
     ) -> Result<(), Error> {
         let native = match vec {
             StackValue::Native(native) => Ok(native),
@@ -669,7 +672,9 @@ impl RuntimePrimType {
         }?;
 
         let item = item.as_ref().ok_or_else(|| {
-            VMExecutionError::MissingElementTypeInVectorAccumulation
+            VMExecutionError::MissingElementTypeInVectorAccumulation {
+                name: output_name.to_string(),
+            }
         })?;
 
         let item = item.as_prim().ok_or_else(|| {

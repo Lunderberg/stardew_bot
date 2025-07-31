@@ -91,6 +91,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             &ExprKind::Map { iterator, map } => {

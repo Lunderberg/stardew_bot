@@ -17,6 +17,7 @@ impl GraphRewrite for SplitIteratorChainReduce {
         &self,
         graph: &mut super::SymbolicGraph,
         expr: &super::ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         Ok(match expr {
             &ExprKind::Reduce {

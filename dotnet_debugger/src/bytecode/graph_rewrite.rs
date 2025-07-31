@@ -10,6 +10,7 @@ pub trait GraphRewrite {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error>;
 
     fn init(&self) {}
@@ -48,8 +49,9 @@ where
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
+        name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
-        <T as GraphRewrite>::rewrite_expr(self, graph, expr)
+        <T as GraphRewrite>::rewrite_expr(self, graph, expr, name)
     }
 }
 
