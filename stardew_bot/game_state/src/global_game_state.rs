@@ -179,6 +179,7 @@ impl GlobalGameState {
                     let num = mail.Set._count.prim_cast::<usize>();
                     (0..num)
                         .map(|i| mail.Set._entries[i].Value.read_string())
+                        .filter(|mail| mail.is_some())
                         .collect()
                 };
 
