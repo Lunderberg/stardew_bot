@@ -31,7 +31,8 @@ struct SmeltingPlan {
     new_furnaces: usize,
     copper_bars: usize,
     iron_bars: usize,
-    refined_quartz: usize,
+    quartz: usize,
+    fire_quartz: usize,
 }
 
 struct MineSingleLevel {
@@ -161,6 +162,7 @@ impl SmeltingPlan {
         let mut stone = get_available(&ItemId::STONE);
         let mut coal = get_available(&ItemId::COAL);
         let mut quartz = get_available(&ItemId::QUARTZ);
+        let mut fire_quartz = get_available(&ItemId::FIRE_QUARTZ);
 
         let mut required_refined_quartz = {
             let num_required = game_state
@@ -205,7 +207,8 @@ impl SmeltingPlan {
             new_furnaces: 0,
             copper_bars: 0,
             iron_bars: 0,
-            refined_quartz: 0,
+            quartz: 0,
+            fire_quartz: 0,
         };
 
         fn limiting_factor<const N: usize>(values: [usize; N]) -> usize {
@@ -213,18 +216,33 @@ impl SmeltingPlan {
         }
 
         loop {
-            let refined_quartz = limiting_factor([
+            let fire_quartz_to_smelt = limiting_factor([
+                fire_quartz,
+                coal,
+                num_available_furnaces,
+                required_refined_quartz,
+            ]);
+            if fire_quartz_to_smelt > 0 {
+                plan.fire_quartz += fire_quartz_to_smelt;
+                fire_quartz -= fire_quartz_to_smelt;
+                coal -= fire_quartz_to_smelt;
+                num_available_furnaces -= fire_quartz_to_smelt;
+                required_refined_quartz = required_refined_quartz
+                    .saturating_sub(3 * fire_quartz_to_smelt);
+            }
+
+            let quartz_to_smelt = limiting_factor([
                 quartz,
                 coal,
                 num_available_furnaces,
                 required_refined_quartz,
             ]);
-            if refined_quartz > 0 {
-                plan.refined_quartz += refined_quartz;
-                quartz -= refined_quartz;
-                coal -= refined_quartz;
-                num_available_furnaces -= refined_quartz;
-                required_refined_quartz -= refined_quartz;
+            if quartz_to_smelt > 0 {
+                plan.quartz += quartz_to_smelt;
+                quartz -= quartz_to_smelt;
+                coal -= quartz_to_smelt;
+                num_available_furnaces -= quartz_to_smelt;
+                required_refined_quartz -= quartz_to_smelt;
             }
 
             let iron_bars =
@@ -372,14 +390,19 @@ impl MineDelvingGoal {
             .craft_missing(true)
             .with(ItemId::FURNACE.with_count(plan.new_furnaces))
             .with(ItemId::COAL.with_count(
-                plan.refined_quartz + plan.iron_bars + plan.copper_bars,
+                plan.fire_quartz
+                    + plan.quartz
+                    + plan.iron_bars
+                    + plan.copper_bars,
             ))
             .with(ItemId::COPPER_ORE.with_count(plan.copper_bars * 5))
             .with(ItemId::IRON_ORE.with_count(plan.iron_bars * 5))
-            .with(ItemId::QUARTZ.with_count(plan.refined_quartz));
+            .with(ItemId::QUARTZ.with_count(plan.quartz))
+            .with(ItemId::FIRE_QUARTZ.with_count(plan.fire_quartz));
 
         let mut iter_smelt = std::iter::empty()
-            .chain(std::iter::repeat_n(ItemId::QUARTZ, plan.refined_quartz))
+            .chain(std::iter::repeat_n(ItemId::FIRE_QUARTZ, plan.fire_quartz))
+            .chain(std::iter::repeat_n(ItemId::QUARTZ, plan.quartz))
             .chain(std::iter::repeat_n(ItemId::COPPER_ORE, plan.copper_bars))
             .chain(std::iter::repeat_n(ItemId::IRON_ORE, plan.iron_bars));
 
@@ -477,6 +500,8 @@ impl MineDelvingGoal {
                 } else if id == &ItemId::SOLAR_ESSENCE {
                     Some(MiningRegion::Gold)
                 } else if id == &ItemId::VOID_ESSENCE {
+                    Some(MiningRegion::Gold)
+                } else if id == &ItemId::REFINED_QUARTZ {
                     Some(MiningRegion::Gold)
                 } else {
                     None
