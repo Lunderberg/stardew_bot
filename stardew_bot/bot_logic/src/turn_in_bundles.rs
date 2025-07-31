@@ -80,6 +80,17 @@ impl TurnInBundlesGoal {
             game_state.iter_accessible_items()?.item_counts()
         };
 
+        let has_catfish_bait = game_state
+            .iter_accessible_items()?
+            .find_map(|item| item.as_fishing_rod())
+            .and_then(|rod| rod.bait.as_ref())
+            .filter(|bait| {
+                &bait.id == &ItemId::TARGETED_BAIT.with_subtype(ItemId::CATFISH)
+            })
+            .is_some();
+
+        let num_inventory_slots = game_state.player.inventory.num_slots();
+
         let iter = game_state
             .statics
             .bundles
@@ -97,7 +108,18 @@ impl TurnInBundlesGoal {
                     .iter_items()
                     .zip(flags)
                     .filter(|(item, done)| {
-                        **done || available.item_count(&item.id) >= item.count
+                        if **done {
+                            return true;
+                        }
+                        let num_available = available.item_count(&item.id);
+                        let num_available = if item.id == ItemId::CATFISH
+                            && !has_catfish_bait
+                        {
+                            num_available.saturating_sub(1)
+                        } else {
+                            num_available
+                        };
+                        num_available >= item.count
                     })
                     .count();
 
@@ -136,7 +158,15 @@ impl TurnInBundlesGoal {
                     .map(move |(item, _)| (bundle, item))
             })
             .flat_map(move |(bundle, item)| {
-                let have_enough = available.item_count(&item.id) >= item.count;
+                let num_available = available.item_count(&item.id);
+                let num_available =
+                    if item.id == ItemId::CATFISH && !has_catfish_bait {
+                        num_available.saturating_sub(1)
+                    } else {
+                        num_available
+                    };
+
+                let have_enough = num_available >= item.count;
                 available
                     .items_with_quality(item)
                     .into_iter()
