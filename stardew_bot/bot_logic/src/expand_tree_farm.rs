@@ -1,7 +1,9 @@
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{ActivateTile, Error, InventoryGoal, UseItemOnTile};
+use crate::{
+    bot_logic::LogicStack, ActivateTile, Error, InventoryGoal, UseItemOnTile,
+};
 use game_state::{GameState, ItemId, ObjectKind, TileMap};
 
 use super::{
@@ -164,8 +166,20 @@ impl BotGoal for ExpandTreeFarm {
         }
 
         if let Some(item) = opt_item {
-            let goal = UseItemOnTile::new(item.clone(), "Farm", tile);
-            Ok(goal.into())
+            let num_objects = game_state
+                .get_room("Farm")
+                .map(|loc| loc.objects.len())
+                .unwrap_or(0);
+            let stack = LogicStack::new()
+                .then(UseItemOnTile::new(item.clone(), "Farm", tile))
+                .cancel_if(move |game_state| {
+                    let current_num_objects = game_state
+                        .get_room("Farm")
+                        .map(|loc| loc.objects.len())
+                        .unwrap_or(0);
+                    current_num_objects != num_objects
+                });
+            Ok(stack.into())
         } else {
             let goal = ActivateTile::new("Farm", tile);
             Ok(goal.into())
