@@ -1,5 +1,6 @@
 use crate::{
-    Error, GiveGiftGoal, ItemIterExt as _, TurnInBundlesGoal, UpgradeToolGoal,
+    Error, GiveGiftGoal, GoToActionTile, ItemIterExt as _, TurnInBundlesGoal,
+    UpgradeToolGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
@@ -101,6 +102,41 @@ impl BotGoal for GenericDay {
                 .then(WaterCropsGoal::new())
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
+        } else if current_day >= 6 && game_state.daily.tool_ready_for_pickup {
+            let crops =
+                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
+            stack
+                .then(HarvestCropsGoal::new())
+                .then(crops)
+                .then(
+                    ClearFarmGoal::new()
+                        .clear_expanded_trees(true)
+                        .stop_time(1030),
+                )
+                .then(
+                    InventoryGoal::empty()
+                        .with(ItemId::HOE)
+                        .with(ItemId::GEODE.with_count(1000))
+                        .with(ItemId::FROZEN_GEODE.with_count(1000))
+                        .with(ItemId::MAGMA_GEODE.with_count(1000))
+                        .with(ItemId::OMNI_GEODE.with_count(1000))
+                        .with_exactly(
+                            ItemId::PARSNIP.with_quality(Quality::Gold),
+                        )
+                        .stamina_recovery_slots(1),
+                )
+                .then(GiveGiftGoal::new(
+                    "Pam",
+                    ItemId::PARSNIP.with_quality(Quality::Gold),
+                ))
+                .then(GoToActionTile::new("Blacksmith"))
+                .then(GeodeCrackingGoal::new().sell_minerals(true))
+                .then(BuyFromMerchantGoal::new(
+                    "Saloon",
+                    ItemId::SALAD.with_count(20),
+                ))
+        } else if current_day == 8 {
+            stack.then(GeodeCrackingGoal::new())
         } else if current_day >= 6 && any_kale_planted {
             let crops =
                 PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
@@ -212,7 +248,7 @@ impl BotGoal for GenericDay {
         };
 
         Ok(stack
-            .then(ClearFarmGoal::new())
+            .then(ClearFarmGoal::new().clear_expanded_trees(true))
             .with_interrupt(KeyEventInterrupt::new())
             .with_interrupt(OpportunisticForaging::new(5.0))
             .with_interrupt(CollectNearbyItems::new())
