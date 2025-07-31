@@ -591,8 +591,13 @@ impl BotLogic {
                 // Truncate to just above the cancellation, without
                 // recording those goals as completed.  Then, pop the
                 // cancellation, recording it as completed.
+                let old_len = self.stack.len();
                 self.stack.truncate(cancellation + 1);
                 self.pop_from_logic_stack();
+
+                for i in self.stack.len()..old_len {
+                    self.recursed_during_current_update.remove(&i);
+                }
             }
 
             // Any cancellations or interrupts on the top of the stack no longer
@@ -862,6 +867,9 @@ impl BotLogic {
 
     fn pop_from_logic_stack(&mut self) {
         let item = self.stack.pop().expect("Bot has run out of goals");
+        self.recursed_during_current_update
+            .remove(&self.stack.len());
+
         self.recently_finished.push_back(item);
 
         while self.recently_finished.len() > MAX_RECENT_GOALS {
