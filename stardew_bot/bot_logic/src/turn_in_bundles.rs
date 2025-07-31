@@ -173,7 +173,8 @@ impl TurnInBundlesGoal {
                     .filter(move |_| have_enough)
                     .filter(|item| item.count > 0)
                     .map(move |item| (bundle, item))
-            });
+            })
+            .take(num_inventory_slots);
 
         Ok(iter)
     }
