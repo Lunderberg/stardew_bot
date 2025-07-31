@@ -211,6 +211,9 @@ impl ItemId {
     pub const IRIDIUM_ORE: Self = Self::new_const("(O)386");
     pub const COAL: Self = Self::new_const("(O)382");
     pub const QUARTZ: Self = Self::new_const("(O)80");
+    pub const EARTH_CRYSTAL: Self = Self::new_const("(O)86");
+    pub const FROZEN_TEAR: Self = Self::new_const("(O)84");
+    pub const FIRE_QUARTZ: Self = Self::new_const("(O)82");
 
     pub const COPPER_BAR: Self = Self::new_const("(O)334");
     pub const IRON_BAR: Self = Self::new_const("(O)335");

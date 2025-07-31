@@ -9,7 +9,8 @@ use crate::{
     MovementGoal, UseItemOnTile,
 };
 use game_state::{
-    GameState, ItemCategory, ItemId, ObjectKind, SeededRng, StoneKind, TileMap,
+    GameState, ItemCategory, ItemId, MineralKind, ObjectKind, SeededRng,
+    StoneKind, TileMap,
 };
 
 use super::{
@@ -1371,6 +1372,14 @@ impl MineNearbyOre {
             .iter_items()
             .any(|item| item.as_weapon().is_some());
 
+        let has_empty_slot = game_state.player.inventory.has_empty_slot();
+        let inventory: HashSet<_> = game_state
+            .player
+            .inventory
+            .iter_items()
+            .map(|item| &item.id)
+            .collect();
+
         let predictor = StonePredictor::new(game_state)?;
         let mut desirable_rocks: HashMap<Vector<isize>, (f32, f32)> = loc
             .objects
@@ -1404,7 +1413,22 @@ impl MineNearbyOre {
                     ObjectKind::MineBarrel if has_weapon => (0.5, 0.0),
 
                     ObjectKind::Chest(_) => (4.0, 0.0),
-                    ObjectKind::Mineral(_) => (1.0, 0.0),
+                    ObjectKind::Mineral(mineral)
+                        if has_empty_slot || {
+                            let id = match mineral {
+                                MineralKind::Quartz => &ItemId::QUARTZ,
+                                MineralKind::EarthCrystal => {
+                                    &ItemId::EARTH_CRYSTAL
+                                }
+                                MineralKind::FrozenTear => &ItemId::FROZEN_TEAR,
+                                MineralKind::FireQuartz => &ItemId::FIRE_QUARTZ,
+                                MineralKind::Other { id, .. } => id,
+                            };
+                            inventory.contains(id)
+                        } =>
+                    {
+                        (1.0, 0.0)
+                    }
 
                     other if other.is_forage() => (1.0, 0.0),
 

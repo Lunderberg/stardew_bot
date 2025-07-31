@@ -406,7 +406,7 @@ pub enum MineralKind {
     EarthCrystal,
     FrozenTear,
     FireQuartz,
-    Other { name: String, id: String },
+    Other { name: String, id: ItemId },
 }
 
 /// An item on the ground that may be picked up
@@ -740,7 +740,7 @@ impl Location {
                     "(O)82" => ObjectKind::Mineral(MineralKind::FireQuartz),
                     _ => ObjectKind::Mineral(MineralKind::Other {
                         name: name.to_string(),
-                        id: id.to_string(),
+                        id: ItemId::new(id.to_string()),
                     }),
                 }
             },
