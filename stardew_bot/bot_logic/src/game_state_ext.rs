@@ -503,6 +503,12 @@ pub trait ItemLookupExt {
     /// 5 silver-star Wheat.)
     fn items_with_quality(&self, item: &Item) -> [Item; 4];
 
+    /// Iterate over the items necessary to provide the specified item/count, with quality being at least
+    fn iter_items_with_quality(
+        &self,
+        item: &Item,
+    ) -> impl Iterator<Item = Item> + use<Self>;
+
     /// Remove an item from this lookup.
     fn remove_item(&mut self, id: &ItemId, count: usize);
 }
@@ -537,6 +543,15 @@ impl ItemLookupExt for HashMap<ItemId, usize> {
         }
 
         outputs
+    }
+
+    fn iter_items_with_quality(
+        &self,
+        item: &Item,
+    ) -> impl Iterator<Item = Item> + use<> {
+        self.items_with_quality(item)
+            .into_iter()
+            .filter(|item| item.count > 0)
     }
 
     fn item_count_with_exact_quality(&self, id: &ItemId) -> usize {

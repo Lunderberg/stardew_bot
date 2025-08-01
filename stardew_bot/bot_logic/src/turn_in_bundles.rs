@@ -38,10 +38,9 @@ impl TurnInBundlesGoal {
             .is_some();
         if !has_catfish_bait {
             if let Some(worst_quality) = available
-                .items_with_quality(&ItemId::CATFISH.with_count(1))
-                .into_iter()
-                .find(|item| item.count > 0)
+                .iter_items_with_quality(&ItemId::CATFISH.with_count(1))
                 .map(|item| item.quality())
+                .next()
             {
                 available.remove_item(
                     &ItemId::CATFISH.with_quality(worst_quality),
@@ -120,10 +119,8 @@ impl TurnInBundlesGoal {
 
                 let have_enough = num_available >= item.count;
                 available
-                    .items_with_quality(&item)
-                    .into_iter()
+                    .iter_items_with_quality(&item)
                     .filter(move |_| have_enough)
-                    .filter(|item| item.count > 0)
                     .map(move |item| (bundle, item))
             })
             .take(num_inventory_slots);
