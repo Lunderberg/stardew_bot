@@ -548,8 +548,9 @@ impl BotGoal for LocalMovementGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        if game_state.menu.is_some() {
-            return Ok(MenuCloser::new().into());
+        let cleanup = MenuCloser::new();
+        if !cleanup.is_completed(game_state) {
+            return Ok(cleanup.into());
         }
 
         if self
