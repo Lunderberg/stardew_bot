@@ -384,6 +384,7 @@ impl GameStateReader {
             .ok_or(Error::ExpectedNonEmptyValue)?;
 
         Location::add_building_warps(&mut state.locations);
+        Location::add_minecart_warps(&mut state.locations);
         Location::fix_farm_warps(&mut state.locations);
 
         Ok(state)

@@ -122,6 +122,17 @@ pub enum WarpKind {
     /// The times are integer values, which show the time of day.
     /// For example, 2:00 PM would be the integer 1400.
     LockedDoor { opens: i32, closes: i32 },
+
+    /// A minecart that may be activated, and can travel to the
+    /// location by select the destination.
+    Minecart {
+        /// The destination to select
+        destination: String,
+
+        /// The event that must be triggered in order to unlock this
+        /// minecart.
+        event: String,
+    },
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -2281,6 +2292,89 @@ impl Location {
                     })
                 })
                 .for_each(|warp| location.warps.push(warp));
+        }
+    }
+
+    pub(crate) fn add_minecart_warps(locations: &mut [Location]) {
+        // Hard-coding these locations is a bit dirty, but I don't
+        // quite feel like unpacking the entirety of
+        // `StardewValley.Game1.content`, then looking for the cached
+        // `"Data/Minecarts"` key, and unpacking the
+        // `StardewValley.GameData.Minecarts.MinecartDestinationData`
+        // struct at the moment.
+        let get_minecart_warp =
+            |destination: &str, location: Vector<isize>| -> Warp {
+                if destination == "Bus" {
+                    Warp {
+                        location,
+                        target: Vector::new(14, 4),
+                        target_room: "BusStop".to_string(),
+                        kind: WarpKind::Minecart {
+                            destination: "Bus".to_string(),
+                            event: "ccBoilerRoom".to_string(),
+                        },
+                        requires_friendship: None,
+                    }
+                } else if destination == "Mines" {
+                    Warp {
+                        location,
+                        target: Vector::new(13, 9),
+                        target_room: "Mine".to_string(),
+                        kind: WarpKind::Minecart {
+                            destination: "Mines".to_string(),
+                            event: "ccBoilerRoom".to_string(),
+                        },
+                        requires_friendship: None,
+                    }
+                } else if destination == "Town" {
+                    Warp {
+                        location,
+                        target: Vector::new(105, 80),
+                        target_room: "Town".to_string(),
+                        kind: WarpKind::Minecart {
+                            destination: "Town".to_string(),
+                            event: "ccBoilerRoom".to_string(),
+                        },
+                        requires_friendship: None,
+                    }
+                } else if destination == "Quarry" {
+                    Warp {
+                        location,
+                        target: Vector::new(124, 12),
+                        target_room: "Mountain".to_string(),
+                        kind: WarpKind::Minecart {
+                            destination: "Quarry".to_string(),
+                            event: "ccCraftsRoom".to_string(),
+                        },
+                        requires_friendship: None,
+                    }
+                } else {
+                    panic!("Unknown minecart stop: {destination}")
+                }
+            };
+
+        for loc in locations.iter_mut() {
+            if loc.name == "BusStop" {
+                let location = Vector::new(14, 3);
+                loc.warps.push(get_minecart_warp("Town", location));
+                loc.warps.push(get_minecart_warp("Quarry", location));
+                loc.warps.push(get_minecart_warp("Mines", location));
+            } else if loc.name == "Mine" {
+                let location = Vector::new(12, 9);
+                loc.warps.push(get_minecart_warp("Town", location));
+                loc.warps.push(get_minecart_warp("Quarry", location));
+                loc.warps.push(get_minecart_warp("Bus", location));
+            } else if loc.name == "Town" {
+                let location = Vector::new(105, 79);
+                loc.warps.push(get_minecart_warp("Mines", location));
+                loc.warps.push(get_minecart_warp("Quarry", location));
+                loc.warps.push(get_minecart_warp("Bus", location));
+            } else if loc.name == "Mountain" {
+                let location = Vector::new(124, 11);
+                loc.warps.push(get_minecart_warp("Mines", location));
+                loc.warps.push(get_minecart_warp("Town", location));
+                loc.warps.push(get_minecart_warp("Bus", location));
+            }
         }
     }
 

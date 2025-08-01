@@ -1,9 +1,9 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashSet};
 
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction};
+use crate::{Error, GameAction, MenuCloser};
 use game_state::{
     FacingDirection, GameState, Location, StaticState, TileMap, WarpKind,
 };
@@ -63,12 +63,14 @@ struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
     statics: &'a StaticState,
     in_game_time: i32,
+    events: &'a HashSet<String>,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 struct RoomSearchNode {
     current_pos: Vector<isize>,
     current_room_index: usize,
+    warp_index: Option<usize>,
 }
 
 impl ConnectedRoomGraph<'_> {
@@ -100,50 +102,50 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
 
                 loc.warps
                     .iter()
-                    .filter(|warp| {
+                    .enumerate()
+                    .filter(|(_, warp)| {
                         // TODO: Handle case where the player has the
                         // key to the town.
-                        if let WarpKind::LockedDoor { closes, .. } = &warp.kind
-                        {
-                            self.in_game_time < *closes
-                        } else {
-                            true
+                        match &warp.kind {
+                            WarpKind::Automatic | WarpKind::Door => true,
+                            WarpKind::LockedDoor { closes, .. } => {
+                                self.in_game_time < *closes
+                            }
+                            WarpKind::Minecart { event, .. } => {
+                                self.events.contains(event)
+                            }
                         }
                     })
-                    .filter(|warp| warp.requires_friendship.is_none())
-                    .filter(move |warp| {
+                    .filter(|(_, warp)| warp.requires_friendship.is_none())
+                    .filter(move |(_, warp)| {
                         Direction::iter_cardinal()
                             .map(|dir| dir.offset())
                             .chain(Some(Vector::new(0, 0)))
                             .map(|offset| warp.location + offset)
                             .any(|adj_tile| reachable.is_set(adj_tile))
                     })
-                    .filter_map(move |warp| {
+                    .filter_map(move |(warp_index, warp)| {
                         if warp.location == node.current_pos {
-                            self.get_room_index(&warp.target_room).map(
-                                |next_room_index| {
-                                    (
-                                        RoomSearchNode {
-                                            current_pos: warp.target,
-                                            current_room_index: next_room_index,
-                                        },
-                                        1,
-                                    )
-                                },
-                            )
+                            let next_room_index =
+                                self.get_room_index(&warp.target_room)?;
+                            let node = RoomSearchNode {
+                                current_pos: warp.target,
+                                current_room_index: next_room_index,
+                                warp_index: Some(warp_index),
+                            };
+                            Some((node, 1))
                         } else {
                             let dist = point_to_point_lower_bound(
                                 node.current_pos,
                                 warp.location,
                             );
-                            Some((
-                                RoomSearchNode {
-                                    current_pos: warp.location,
-                                    current_room_index: node.current_room_index,
-                                },
-                                dist,
-                            ))
-                            .filter(|_| dist > 5 || !is_on_warp)
+                            let node = RoomSearchNode {
+                                current_pos: warp.location,
+                                current_room_index: node.current_room_index,
+                                warp_index: Some(warp_index),
+                            };
+                            Some((node, dist))
+                                .filter(|_| dist > 5 || !is_on_warp)
                         }
                     })
             })
@@ -198,6 +200,7 @@ impl MovementGoal {
             current_room_index: graph
                 .get_room_index(&game_state.player.room_name)
                 .unwrap(),
+            warp_index: None,
         };
         let target_room_index = graph
             .get_room_index(&self.target_room)
@@ -222,6 +225,7 @@ impl MovementGoal {
             locations: &game_state.locations,
             statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
+            events: &game_state.globals.events_triggered,
         };
 
         // Dijkstra's algorithm to search for connections between rooms
@@ -245,20 +249,21 @@ impl MovementGoal {
             })
             .map(|(node, _)| node)
             .tuple_windows()
-            .filter(|(a, b)| a.current_room_index == b.current_room_index)
-            .map(|(a, _)| {
+            .filter(|(a, b)| a.current_room_index != b.current_room_index)
+            .map(|(b, a)| {
                 let loc = &game_state.locations[a.current_room_index];
                 let tile = a.current_pos;
-                let warp_kind = loc
-                    .warps
-                    .iter()
-                    .find(|warp| warp.location == tile)
-                    .map(|warp| warp.kind.clone());
+
+                let warp_kind =
+                    b.warp_index.map(|index| loc.warps[index].kind.clone());
+
                 let opt_tolerance = match warp_kind {
                     None | Some(WarpKind::Automatic) => None,
-                    Some(WarpKind::Door | WarpKind::LockedDoor { .. }) => {
-                        Some(1.4)
-                    }
+                    Some(
+                        WarpKind::Door
+                        | WarpKind::LockedDoor { .. }
+                        | WarpKind::Minecart { .. },
+                    ) => Some(1.4),
                 };
                 let goal = LocalMovementGoal::new(
                     loc.name.clone(),
@@ -288,6 +293,7 @@ impl MovementGoal {
             locations: &game_state.locations,
             statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
+            events: &game_state.globals.events_triggered,
         };
 
         let (target_room_index, mut iter_search) =
@@ -360,7 +366,12 @@ impl LocalMovementGoal {
         self.warp_kind
             .as_ref()
             .map(|kind| {
-                matches!(kind, WarpKind::Door | WarpKind::LockedDoor { .. })
+                matches!(
+                    kind,
+                    WarpKind::Door
+                        | WarpKind::LockedDoor { .. }
+                        | WarpKind::Minecart { .. }
+                )
             })
             .unwrap_or(false)
     }
@@ -519,9 +530,26 @@ impl BotGoal for LocalMovementGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        if game_state.dialogue_menu().is_some() {
+        let opt_minecart_pixel = game_state.dialogue_menu().and_then(|menu| {
+            let WarpKind::Minecart { destination, .. } =
+                self.warp_kind.as_ref()?
+            else {
+                return None;
+            };
+
+            menu.responses
+                .iter()
+                .find(|response| &response.text == destination)
+                .map(|response| response.pixel)
+        });
+        if let Some(pixel) = opt_minecart_pixel {
+            actions.do_action(GameAction::MouseOverPixel(pixel));
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
+        }
+
+        if game_state.menu.is_some() {
+            return Ok(MenuCloser::new().into());
         }
 
         if self
