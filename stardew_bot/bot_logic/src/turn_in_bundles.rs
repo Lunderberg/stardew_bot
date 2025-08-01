@@ -1,81 +1,14 @@
-use std::collections::HashMap;
-
-use game_state::{Bundle, GameState, Item, ItemId, Menu, Quality};
+use game_state::{Bundle, GameState, Item, ItemId, Menu};
 use itertools::Itertools as _;
 
 use crate::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, Error, GameAction, GameStateExt as _, InventoryGoal,
-    ItemIterExt as _, MenuCloser,
+    ItemIterExt as _, ItemLookupExt as _, MenuCloser,
 };
 
 pub struct TurnInBundlesGoal {
     stop_time: i32,
-}
-
-trait ItemLookupExt {
-    /// Returns the number of items that exactly match the specified
-    /// item id.
-    fn item_count_with_exact_quality(&self, id: &ItemId) -> usize;
-
-    /// Returns the number of items that match the id, and meet or
-    /// exceed the specified item quality.
-    fn item_count(&self, id: &ItemId) -> usize;
-
-    /// Returns the items that should be used for the bundle.  Because
-    /// the bundle may require items of multiple qualities in order to
-    /// be completed, this may require more than one item stack.
-    /// (e.g. "10 Wheat" being fulfilled by 5 normal-quality Wheat and
-    /// 5 silver-star Wheat.)
-    fn items_with_quality<'a>(&self, item: &Item) -> [Item; 4];
-
-    fn remove_item(&mut self, id: &ItemId, count: usize);
-}
-impl ItemLookupExt for HashMap<ItemId, usize> {
-    fn item_count(&self, id: &ItemId) -> usize {
-        Quality::iter()
-            .filter(|quality| quality >= &id.quality)
-            .map(|quality| {
-                self.item_count_with_exact_quality(
-                    &id.clone().with_quality(quality),
-                )
-            })
-            .sum()
-    }
-
-    fn items_with_quality<'a>(&self, item: &Item) -> [Item; 4] {
-        let mut num_remaining = item.count;
-        let mut outputs = [
-            Quality::Normal,
-            Quality::Silver,
-            Quality::Gold,
-            Quality::Iridium,
-        ]
-        .map(|quality| item.id.clone().with_quality(quality).with_count(1));
-
-        for output in &mut outputs {
-            let count = self
-                .item_count_with_exact_quality(&output.id)
-                .min(num_remaining);
-            output.count = count;
-            num_remaining -= count;
-        }
-
-        outputs
-    }
-
-    fn item_count_with_exact_quality(&self, id: &ItemId) -> usize {
-        self.get(id).cloned().unwrap_or(0)
-    }
-
-    fn remove_item(&mut self, id: &ItemId, count: usize) {
-        if let Some(prev) = self.get_mut(id) {
-            *prev = prev.saturating_sub(count);
-            if *prev == 0 {
-                self.remove(id);
-            }
-        }
-    }
 }
 
 impl TurnInBundlesGoal {

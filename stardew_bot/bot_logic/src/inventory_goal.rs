@@ -6,7 +6,10 @@ use std::{
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{bot_logic::LogicStack, Error, GameAction, MenuCloser};
+use crate::{
+    bot_logic::LogicStack, Error, GameAction, ItemIterExt as _,
+    ItemLookupExt as _, MenuCloser,
+};
 use game_state::{GameState, Item, ItemId, ItemSet, Location, WeaponKind};
 
 use super::{
@@ -252,14 +255,14 @@ impl InventoryGoal {
             return Ok(None);
         }
 
-        let available = self.total_stored_and_carried(game_state)?;
+        let available = self.iter_stored_and_carried(game_state)?.item_counts();
         for (item, bound) in
             self.bounds.iter().sorted_by_key(|(item, _)| &item.item_id)
         {
             let Some(min) = bound.min else {
                 continue;
             };
-            let current = available.get(item).cloned().unwrap_or(0);
+            let current = available.item_count(item);
             let num_missing = min.saturating_sub(current);
 
             if num_missing == 0 {
@@ -271,7 +274,7 @@ impl InventoryGoal {
             let num_craftable = iter_ingredients()
                 .map(|(ingredient, count)| {
                     let ingredient_available =
-                        available.get(&ingredient).cloned().unwrap_or(0);
+                        available.item_count(&ingredient);
                     ingredient_available / count
                 })
                 .min()
@@ -282,27 +285,22 @@ impl InventoryGoal {
                 continue;
             }
 
+            let subgoal = InventoryGoal::current()
+                .room(self.room.clone())
+                .with(iter_ingredients().flat_map(|(ingredient, count)| {
+                    available
+                        .items_with_quality(
+                            &ingredient.with_count(num_to_craft * count),
+                        )
+                        .into_iter()
+                        .filter(|item| item.count > 0)
+                }));
+            if !subgoal.is_completed(game_state)? {
+                return Ok(Some(subgoal.into()));
+            }
+
             let num_in_inventory =
                 game_state.player.inventory.count_item(&item);
-
-            let subgoal = InventoryGoal::current()
-                .room(self.room.clone())
-                .with(iter_ingredients().map(|(ingredient, count)| {
-                    ingredient.with_count(num_to_craft * count)
-                }));
-            if !subgoal.is_completed(game_state)? {
-                return Ok(Some(subgoal.into()));
-            }
-
-            let subgoal = InventoryGoal::current()
-                .room(self.room.clone())
-                .with(iter_ingredients().map(|(ingredient, count)| {
-                    ingredient.with_count(num_to_craft * count)
-                }));
-            if !subgoal.is_completed(game_state)? {
-                return Ok(Some(subgoal.into()));
-            }
-
             let craft = CraftItemGoal::new(
                 item.clone().with_count(num_in_inventory + num_to_craft),
             );
