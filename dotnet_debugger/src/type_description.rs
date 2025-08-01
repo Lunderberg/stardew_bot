@@ -226,7 +226,7 @@ impl<'a> TypeHandleRef<'a> {
             ) => {
                 let row = reader
                     .runtime_module(method_table.module())?
-                    .metadata(&reader)?
+                    .metadata(reader)?
                     .get(method_table.token().expect(
                         "Class/ValueType should have metadata token",
                     ))?;
@@ -374,7 +374,7 @@ impl TypedPointer<TypeHandle> {
         if self.as_usize() & 2 > 0 {
             None
         } else {
-            let ptr: Pointer = self.clone().into();
+            let ptr: Pointer = (*self).into();
             let ptr: TypedPointer<MethodTable> = ptr.into();
             Some(ptr)
         }

@@ -127,7 +127,7 @@ impl ColumnFormatter for HexColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            &globals.get::<Vec<Annotation>>().unwrap(),
+            globals.get::<Vec<Annotation>>().unwrap(),
         )
     }
 }
@@ -159,7 +159,7 @@ impl ColumnFormatter for AsciiColumn {
         formatted_cell::<Self>(
             printed_row,
             pointer_at_cursor,
-            &globals.get::<Vec<Annotation>>().unwrap(),
+            globals.get::<Vec<Annotation>>().unwrap(),
         )
     }
 }

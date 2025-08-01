@@ -65,6 +65,12 @@ struct PreferredGifter {
     current_hearts: i32,
 }
 
+impl Default for StepCountForLuck {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl StepCountForLuck {
     pub fn new() -> Self {
         Self {
@@ -128,12 +134,10 @@ impl StepCountForLuck {
                 game_state.player.friendships.iter().enumerate().find_map(
                     |(index, friendship)| {
                         let current_hearts = friendship.points / 250;
-                        (friendship.name == name && current_hearts > 0).then(
-                            || PreferredGifter {
+                        (friendship.name == name && current_hearts > 0).then_some(PreferredGifter {
                                 index,
                                 current_hearts,
-                            },
-                        )
+                            })
                     },
                 )
             });
@@ -345,7 +349,7 @@ impl BotGoal for StepCountForLuck {
             })
             .expect("At least one direction will be minimum");
 
-        actions.do_action(GameAction::Move(blocked_dir.into()));
+        actions.do_action(GameAction::Move(blocked_dir));
         Ok(BotGoalResult::InProgress)
     }
 }

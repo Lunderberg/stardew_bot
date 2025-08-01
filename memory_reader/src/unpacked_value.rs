@@ -46,9 +46,9 @@ impl<T> UnpackedValue<T> {
         self.value
     }
 }
-impl<T> Into<(Range<Pointer>, T)> for UnpackedValue<T> {
-    fn into(self) -> (Range<Pointer>, T) {
-        (self.loc(), self.value())
+impl<T> From<UnpackedValue<T>> for (Range<Pointer>, T) {
+    fn from(val: UnpackedValue<T>) -> Self {
+        (val.loc(), val.value())
     }
 }
 

@@ -67,8 +67,8 @@ impl DisplayState {
         let top_left = (tile * 64 - self.viewport.top_left).map(|x| {
             let x = x as f32;
             let x = x * self.zoom_level;
-            let x = x as isize;
-            x
+            
+            x as isize
         });
 
         let size = (64.0 * self.zoom_level) as isize;

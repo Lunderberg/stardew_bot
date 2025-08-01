@@ -44,7 +44,7 @@ impl ChestMenu {
                     chest_items,
                     chest_tile: chest_tile.cloned(),
                     held_item: held_item.cloned(),
-                    ok_button: ok_button.clone(),
+                    ok_button: *ok_button,
                 })
             },
         )?;

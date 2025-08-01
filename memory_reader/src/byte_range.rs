@@ -151,15 +151,15 @@ impl<'a> ByteRange<'a> {
     }
 }
 
-impl<'a> Into<Range<Pointer>> for ByteRange<'a> {
-    fn into(self) -> std::ops::Range<Pointer> {
-        self.ptr_range()
+impl<'a> From<ByteRange<'a>> for Range<Pointer> {
+    fn from(val: ByteRange<'a>) -> Self {
+        val.ptr_range()
     }
 }
 
-impl<'a> Into<&'a [u8]> for ByteRange<'a> {
-    fn into(self) -> &'a [u8] {
-        self.bytes
+impl<'a> From<ByteRange<'a>> for &'a [u8] {
+    fn from(val: ByteRange<'a>) -> Self {
+        val.bytes
     }
 }
 

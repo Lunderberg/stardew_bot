@@ -12,6 +12,12 @@ pub struct PlayerStats {
     table_state: TableState,
 }
 
+impl Default for PlayerStats {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl PlayerStats {
     pub fn new() -> Self {
         Self {

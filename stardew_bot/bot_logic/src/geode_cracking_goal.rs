@@ -23,6 +23,12 @@ pub struct GeodePredictor {
     lowest_mine_level_reached: i32,
 }
 
+impl Default for GeodeCrackingGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl GeodeCrackingGoal {
     const GEODE_TYPES: [ItemId; 4] = [
         ItemId::GEODE,
@@ -172,7 +178,7 @@ impl BotGoal for GeodeCrackingGoal {
                 .iter_items()
                 .filter(|_| game_state.player.room_name == "Blacksmith")
                 .filter(|item| {
-                    (self.sell_iridium_ore && &item.id == &ItemId::IRIDIUM_ORE)
+                    (self.sell_iridium_ore && item.id == ItemId::IRIDIUM_ORE)
                         || item
                             .category
                             .map(|category| match category {
@@ -406,38 +412,36 @@ impl GeodePredictor {
                     }
                 }
             }
-        } else {
-            if geode == &ItemId::GEODE {
-                match rng.rand_in_range(0..3) {
-                    0 => "(O)378",
-                    1 if self.lowest_mine_level_reached > 25 => "(O)380",
-                    1 => "(O)378",
-                    _ => "(O)382",
-                }
-            } else if geode == &ItemId::FROZEN_GEODE {
-                match rng.rand_in_range(0..4) {
-                    0 => "(O)378",
-                    1 => "(O)380",
-                    2 => "(O)382",
-                    _ if self.lowest_mine_level_reached > 75 => "(O)384",
-                    _ => "(O)380",
-                }
-            } else if geode == &ItemId::MAGMA_GEODE
-                || geode == &ItemId::OMNI_GEODE
-            {
-                match rng.rand_in_range(0..5) {
-                    0 => "(O)378",
-                    1 => "(O)380",
-                    2 => "(O)382",
-                    3 => "(O)384",
-                    _ => {
-                        amount = amount / 2 + 1;
-                        "(O)386"
-                    }
-                }
-            } else {
-                unreachable!("Item id {geode} was not a geode")
+        } else if geode == &ItemId::GEODE {
+            match rng.rand_in_range(0..3) {
+                0 => "(O)378",
+                1 if self.lowest_mine_level_reached > 25 => "(O)380",
+                1 => "(O)378",
+                _ => "(O)382",
             }
+        } else if geode == &ItemId::FROZEN_GEODE {
+            match rng.rand_in_range(0..4) {
+                0 => "(O)378",
+                1 => "(O)380",
+                2 => "(O)382",
+                _ if self.lowest_mine_level_reached > 75 => "(O)384",
+                _ => "(O)380",
+            }
+        } else if geode == &ItemId::MAGMA_GEODE
+            || geode == &ItemId::OMNI_GEODE
+        {
+            match rng.rand_in_range(0..5) {
+                0 => "(O)378",
+                1 => "(O)380",
+                2 => "(O)382",
+                3 => "(O)384",
+                _ => {
+                    amount = amount / 2 + 1;
+                    "(O)386"
+                }
+            }
+        } else {
+            unreachable!("Item id {geode} was not a geode")
         };
 
         statics

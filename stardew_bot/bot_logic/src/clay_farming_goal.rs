@@ -77,6 +77,12 @@ impl ClayPredictor {
     }
 }
 
+impl Default for ClayFarmingGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClayFarmingGoal {
     pub fn new() -> Self {
         Self {
@@ -277,7 +283,7 @@ impl BotGoal for ClayFarmingGoal {
                 let next_dist = next_clay_tiles
                     .iter()
                     .map(|next| {
-                        let offset = (*tile - *next).map(|x| x.abs() as u64);
+                        let offset = (*tile - *next).map(|x| x.unsigned_abs() as u64);
                         let pickaxe_penalty = if next == tile
                             || current_hoe_dirt.contains(next)
                         {

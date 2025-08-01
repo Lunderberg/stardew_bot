@@ -13,8 +13,8 @@ impl RuntimeObject {
         method_table: TypedPointer<MethodTable>,
     ) -> Self {
         Self {
-            location: location.into(),
-            method_table: method_table.into(),
+            location,
+            method_table,
         }
     }
 

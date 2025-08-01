@@ -195,7 +195,7 @@ impl RustType {
 impl Clone for RustType {
     fn clone(&self) -> Self {
         Self {
-            type_id: self.type_id.clone(),
+            type_id: self.type_id,
             utils: self.utils.clone(),
         }
     }

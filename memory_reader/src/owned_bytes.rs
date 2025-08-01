@@ -54,15 +54,15 @@ impl IntoIterator for OwnedBytes {
     }
 }
 
-impl<'a> Into<ByteRange<'a>> for &'a OwnedBytes {
-    fn into(self) -> ByteRange<'a> {
-        ByteRange::new(self.start, &self.bytes)
+impl<'a> From<&'a OwnedBytes> for ByteRange<'a> {
+    fn from(val: &'a OwnedBytes) -> Self {
+        ByteRange::new(val.start, &val.bytes)
     }
 }
 
-impl<'a> Into<Range<Pointer>> for &'a OwnedBytes {
-    fn into(self) -> Range<Pointer> {
-        self.start..self.start + self.bytes.len()
+impl From<&OwnedBytes> for Range<Pointer> {
+    fn from(val: &OwnedBytes) -> Self {
+        val.start..val.start + val.bytes.len()
     }
 }
 

@@ -9,9 +9,9 @@ impl GraphRewrite for ConvertBooleanOperatorToConditional {
         expr: &super::ExprKind,
         _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
-        Ok(match expr {
-            &ExprKind::And { lhs, rhs } => Some(graph.if_else(lhs, rhs, false)),
-            &ExprKind::Or { lhs, rhs } => Some(graph.if_else(lhs, true, rhs)),
+        Ok(match *expr {
+            ExprKind::And { lhs, rhs } => Some(graph.if_else(lhs, rhs, false)),
+            ExprKind::Or { lhs, rhs } => Some(graph.if_else(lhs, true, rhs)),
             _ => None,
         })
     }

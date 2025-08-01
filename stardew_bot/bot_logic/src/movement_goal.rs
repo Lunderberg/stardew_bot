@@ -420,8 +420,7 @@ impl LocalMovementGoal {
             return Err(Error::IncorrectRoomToGenerateLocalMovementPlan {
                 current_room: player.room_name.clone(),
                 expected_room: self.target_room.clone(),
-            }
-            .into());
+            });
         }
 
         let location = game_state.current_room()?;
@@ -444,8 +443,7 @@ impl LocalMovementGoal {
             return Err(Error::PlayerIsOutOfBounds {
                 pos: player.center_pos(),
                 room_bounds,
-            }
-            .into());
+            });
         }
 
         let target_tile: Vector<isize> =

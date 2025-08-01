@@ -28,9 +28,9 @@ impl GeodeMenu {
                 Menu::Geode(GeodeMenu {
                     player_item_locations: player_item_locations.clone(),
                     held_item: held_item.cloned(),
-                    crack_geode_button: crack_geode_button.clone(),
+                    crack_geode_button: *crack_geode_button,
                     is_cracking_geode,
-                    ok_button: ok_button.clone(),
+                    ok_button: *ok_button,
                 })
             },
         )?;

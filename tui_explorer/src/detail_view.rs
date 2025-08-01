@@ -49,7 +49,7 @@ impl DetailView {
 
         let from_formatters = self.formatters.iter().filter_map(|formatter| {
             formatter
-                .format(globals.reader(), &current_region, pointer)
+                .format(globals.reader(), current_region, pointer)
                 .map(|text| (formatter.name().to_string(), text))
         });
 
@@ -57,7 +57,7 @@ impl DetailView {
     }
 }
 
-impl<'a> Widget for &'a DetailView {
+impl Widget for &DetailView {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,
@@ -90,7 +90,7 @@ impl<'a> Widget for &'a DetailView {
                     ])
                     .spacing(1)
                     .split(row_area)
-                    .into_iter()
+                    .iter()
                     .cloned()
                     .collect_tuple()
                     .unwrap();

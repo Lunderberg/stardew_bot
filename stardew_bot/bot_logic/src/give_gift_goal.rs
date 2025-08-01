@@ -112,7 +112,7 @@ impl BotGoal for GiveGiftGoal {
                     .find(|id| id.item_id.starts_with("(T)"))
             })
             .flatten()
-            .or_else(|| self.can_give_gift(game_state).then(|| &self.gift));
+            .or_else(|| self.can_give_gift(game_state).then_some(&self.gift));
 
         let Some(to_select) = opt_to_select else {
             return Ok(BotGoalResult::Completed);

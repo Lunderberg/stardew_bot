@@ -13,6 +13,12 @@ struct UnloadFishingRod {
     rod: ItemId,
 }
 
+impl Default for UpgradeFishingRodGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl UpgradeFishingRodGoal {
     pub fn new() -> Self {
         Self

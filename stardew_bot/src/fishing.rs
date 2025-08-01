@@ -28,6 +28,12 @@ struct FishHistory {
     fish_target_position: f32,
 }
 
+impl Default for FishingUI {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FishingUI {
     pub fn new() -> Self {
         Self {
@@ -48,7 +54,7 @@ impl FishingUI {
             .map(|prev| prev.tick != tick)
             .unwrap_or(true);
 
-        (minigame_in_progress && is_new_tick).then(|| FishHistory {
+        (minigame_in_progress && is_new_tick).then_some(FishHistory {
             tick,
             bar_position: fishing_state.bar_position
                 ..fishing_state.bar_position

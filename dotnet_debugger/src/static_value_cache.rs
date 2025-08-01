@@ -220,7 +220,7 @@ impl<'a> CachedReader<'a> {
 
         let layouts = dll_data
             .iter()
-            .map(|data| dll_unpacker::unpack_metadata_layout(data))
+            .map(dll_unpacker::unpack_metadata_layout)
             .collect::<Result<Vec<_>, _>>()?;
 
         let metadata: Vec<_> = layouts
@@ -275,7 +275,7 @@ impl<'a> CachedReader<'a> {
         // Read each module, populating the cache for later use.
         module_pointers
             .into_iter()
-            .filter_map(|opt_ptr| opt_ptr)
+            .flatten()
             .try_for_each(|ptr| -> Result<_, Error> {
                 self.runtime_module(ptr)?;
                 Ok(())
@@ -301,7 +301,7 @@ impl<'a> CachedReader<'a> {
                 let namespace = row.namespace()?;
                 let name = row.name()?;
                 let lookup_key = if namespace.is_empty() {
-                    format!("{name}")
+                    name.to_string()
                 } else {
                     format!("{namespace}.{name}")
                 };
@@ -513,13 +513,12 @@ impl<'a> CachedReader<'a> {
             },
             SignatureType::GenericVarFromType(sig_index) => {
                 let sig_index = *sig_index as usize;
-                let expected_type_handle = parent_generic_types
+                let expected_type_handle = *parent_generic_types
                     .get(sig_index)
                     .ok_or_else(|| Error::InvalidGenericTypeVar {
                         index: sig_index,
                         num_vars: parent_generic_types.len(),
-                    })?
-                    .clone();
+                    })?;
 
                 type_handle_ptr == expected_type_handle
             }
@@ -645,14 +644,11 @@ impl<'a> CachedReader<'a> {
                     )));
                 }
 
-                let ptr_to_loader_module = type_args
-                    .iter()
-                    .next()
+                let ptr_to_loader_module = type_args.first()
                     .map(|arg| -> Result<_, Error> {
                         self.ptr_to_loader_module(module_ptr, arg.deref())
                     })
-                    .expect("Expect at least one arg for GenericInst")?
-                    .clone();
+                    .expect("Expect at least one arg for GenericInst")?;
 
                 let (ptr_to_defining_module, type_def_index) =
                     self.module_defining_type(module_ptr, index)?;
@@ -660,7 +656,7 @@ impl<'a> CachedReader<'a> {
                 let iter_loaded_types =
                     [ptr_to_loader_module, Some(ptr_to_defining_module)]
                         .into_iter()
-                        .filter_map(|opt_ptr| opt_ptr)
+                        .flatten()
                         .unique()
                         .map(|module_ptr| self.runtime_module(module_ptr))
                         .filter_map_ok(|module| {
@@ -806,13 +802,12 @@ impl<'a> CachedReader<'a> {
                     .generic_types(self)?;
 
                 let var_index = var_index as usize;
-                let ptr_type_handle = generic_types
+                let ptr_type_handle = *generic_types
                     .get(var_index)
                     .ok_or_else(|| Error::InvalidGenericTypeVar {
                         index: var_index,
                         num_vars: generic_types.len(),
-                    })?
-                    .clone();
+                    })?;
 
                 let type_handle = self.type_handle(ptr_type_handle)?;
 
@@ -1275,8 +1270,7 @@ impl<'a> CachedReader<'a> {
                         let parent = method_table.parent_method_table();
                         Ok(parent)
                     })
-                    .map(|res| res.transpose())
-                    .flatten()
+                    .and_then(|res| res.transpose())
             },
         )
         .flat_map_ok(|method_table_ptr| {
@@ -1475,7 +1469,7 @@ impl<'a> CachedReader<'a> {
                                 &field,
                             )?;
                             let start = field.location(
-                                &module,
+                                module,
                                 FieldContainer::Static,
                                 self,
                             )?;
@@ -1533,7 +1527,7 @@ impl<'a> Deref for CachedReader<'a> {
 
 impl<'a> AsRef<MemoryReader> for CachedReader<'a> {
     fn as_ref(&self) -> &MemoryReader {
-        &self.reader
+        self.reader
     }
 }
 

@@ -11,6 +11,12 @@ pub struct TurnInBundlesGoal {
     stop_time: i32,
 }
 
+impl Default for TurnInBundlesGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TurnInBundlesGoal {
     pub fn new() -> Self {
         Self { stop_time: 1100 }
@@ -33,7 +39,7 @@ impl TurnInBundlesGoal {
             .find_map(|item| item.as_fishing_rod())
             .and_then(|rod| rod.bait.as_ref())
             .filter(|bait| {
-                &bait.id == &ItemId::TARGETED_BAIT.with_subtype(ItemId::CATFISH)
+                bait.id == ItemId::TARGETED_BAIT.with_subtype(ItemId::CATFISH)
             })
             .is_some();
         if !has_catfish_bait {
@@ -119,7 +125,7 @@ impl TurnInBundlesGoal {
 
                 let have_enough = num_available >= item.count;
                 available
-                    .iter_items_with_quality(&item)
+                    .iter_items_with_quality(item)
                     .filter(move |_| have_enough)
                     .map(move |item| (bundle, item))
             })

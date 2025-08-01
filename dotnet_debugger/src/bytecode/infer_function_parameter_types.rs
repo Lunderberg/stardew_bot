@@ -93,8 +93,8 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
         expr: &ExprKind,
         _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
-        Ok(match expr {
-            &ExprKind::Map { iterator, map } => {
+        Ok(match *expr {
+            ExprKind::Map { iterator, map } => {
                 let replacements: HashMap<_, _> =
                     [Self::get_new_param(graph, map, 0, |graph| {
                         self.get_iterator_element_type(graph, iterator)
@@ -108,7 +108,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                     .map(|new_map| graph.map(iterator, new_map))
             }
 
-            &ExprKind::Filter { iterator, filter } => {
+            ExprKind::Filter { iterator, filter } => {
                 let replacements: HashMap<_, _> =
                     [Self::get_new_param(graph, filter, 0, |graph| {
                         self.get_iterator_element_type(graph, iterator)
@@ -122,7 +122,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                     .map(|new_filter| graph.filter(iterator, new_filter))
             }
 
-            &ExprKind::Reduce {
+            ExprKind::Reduce {
                 initial,
                 iterator,
                 reduction,
@@ -146,7 +146,7 @@ impl GraphRewrite for InferFunctionParameterTypes<'_> {
                 )
             }
 
-            &ExprKind::SimpleReduce {
+            ExprKind::SimpleReduce {
                 initial,
                 extent,
                 reduction,

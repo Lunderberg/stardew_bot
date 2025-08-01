@@ -569,8 +569,8 @@ impl Location {
             |location: &Vector<isize>,
              target: &Vector<isize>,
              target_room: &str| Warp {
-                location: location.clone(),
-                target: target.clone(),
+                location: *location,
+                target: *target,
                 target_room: target_room.into(),
                 kind: WarpKind::Automatic,
                 requires_friendship: None,
@@ -737,7 +737,7 @@ impl Location {
             "new_bush",
             |kind: usize, top_left: &Vector<isize>| Bush {
                 kind,
-                top_left: top_left.clone(),
+                top_left: *top_left,
             },
         )?;
 
@@ -833,7 +833,7 @@ impl Location {
                 match (category, sheet_index, name) {
                     (
                         ItemCategory::BigCraftable,
-                        118 | 119 | 120 | 121 | 122 | 123 | 124 | 125,
+                        118..=125,
                         _,
                     ) => ObjectKind::MineBarrel,
                     (ItemCategory::Other(0), 93, _) => ObjectKind::Torch,
@@ -924,7 +924,7 @@ impl Location {
         graph.named_native_function(
             "new_object",
             |tile: &Vector<isize>, kind: &ObjectKind| Object {
-                tile: tile.clone(),
+                tile: *tile,
                 kind: kind.clone(),
             },
         )?;
@@ -957,7 +957,7 @@ impl Location {
             "new_furniture",
             |shape: &Rectangle<isize>, kind: &FurnitureKind| -> Furniture {
                 Furniture {
-                    shape: shape.clone(),
+                    shape: *shape,
                     kind: *kind,
                 }
             },
@@ -981,7 +981,7 @@ impl Location {
             "new_resource_clump",
             |shape: &Rectangle<isize>, kind: &ResourceClumpKind| {
                 ResourceClump {
-                    shape: shape.clone(),
+                    shape: *shape,
                     kind: kind.clone(),
                 }
             },
@@ -991,7 +991,7 @@ impl Location {
             "new_building_door",
             |relative_location: &Vector<isize>, inside_name: &str| {
                 BuildingDoor {
-                    relative_location: relative_location.clone(),
+                    relative_location: *relative_location,
                     inside_name: inside_name.into(),
                 }
             },
@@ -1016,7 +1016,7 @@ impl Location {
              door: Option<&BuildingDoor>,
              data_lookup: &BuildingDataLookup,
              building_type: &str| {
-                let shape = shape.clone();
+                let shape = *shape;
                 let door = door.cloned();
                 let collision_map =
                     data_lookup.collision_maps.get(building_type).cloned();
@@ -1195,7 +1195,7 @@ impl Location {
                 Location {
                     name: name.into(),
                     properties,
-                    shape: shape.clone(),
+                    shape: *shape,
                     warps,
                     resource_clumps: resource_clumps.clone(),
                     bushes: bushes.clone(),
@@ -2264,8 +2264,7 @@ impl Location {
         let entrance_lookup: HashMap<String, Vector<isize>> = locations
             .iter()
             .filter_map(|loc| {
-                loc.warps
-                    .get(0)
+                loc.warps.first()
                     .map(|warp| warp.location + Vector::new(0, -1))
                     .map(|entrance| (loc.name.clone(), entrance))
             })

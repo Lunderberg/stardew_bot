@@ -12,6 +12,12 @@ use super::{
 
 pub struct WaterCropsGoal {}
 
+impl Default for WaterCropsGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl WaterCropsGoal {
     pub fn new() -> Self {
         Self {}

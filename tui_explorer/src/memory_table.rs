@@ -105,7 +105,7 @@ impl MemoryTable {
         let res_address = if text.starts_with("0x") {
             usize::from_str_radix(text.strip_prefix("0x").unwrap(), 16)
         } else {
-            usize::from_str_radix(&text, 10)
+            usize::from_str_radix(text, 10)
         };
         let address = match res_address {
             Ok(address) => address,
@@ -126,7 +126,7 @@ impl MemoryTable {
             address.into()
         };
 
-        let address: Pointer = address.into();
+        let address: Pointer = address;
 
         side_effects.broadcast(ChangeAddress(address));
     }

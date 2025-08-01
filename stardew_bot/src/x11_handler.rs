@@ -46,7 +46,7 @@ pub enum Error {
 }
 impl std::fmt::Debug for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }
 
@@ -86,9 +86,7 @@ impl X11Handler {
 
         let root = conn
             .setup()
-            .roots
-            .iter()
-            .next()
+            .roots.first()
             .ok_or(Error::MissingRootWindow)?
             .root;
 
@@ -277,7 +275,7 @@ impl X11Handler {
             /* propagate = */ false,
             window,
             X11EventMask::STRUCTURE_NOTIFY,
-            &event,
+            event,
         )?;
 
         Ok(())

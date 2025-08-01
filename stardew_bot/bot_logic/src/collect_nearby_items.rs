@@ -22,6 +22,12 @@ struct WalkTowardDebris {
     goal_dist_squared: f32,
 }
 
+impl Default for CollectNearbyItems {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectNearbyItems {
     pub fn new() -> Self {
         Self {

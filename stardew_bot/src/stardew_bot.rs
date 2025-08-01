@@ -360,7 +360,7 @@ impl StardewBot {
             .get::<GameState>()
             .expect("Globals should always contain a GameState");
 
-        let predictor = GeodePredictor::new(&game_state)?;
+        let predictor = GeodePredictor::new(game_state)?;
         let columns = [
             ItemId::GEODE,
             ItemId::FROZEN_GEODE,
@@ -384,7 +384,7 @@ impl StardewBot {
                 if prediction.count > 1 {
                     format!("{} {name}", prediction.count)
                 } else {
-                    format!("{name}")
+                    name.to_string()
                 }
             })
             .collect();
@@ -563,7 +563,7 @@ impl StardewBot {
 
         if self.show_startup_times {
             let main_loop_time = after_main_loop - before_main_loop;
-            println!("Main loop: {:?}", main_loop_time);
+            println!("Main loop: {main_loop_time:?}");
             if num_frames > 0 {
                 println!(
                     "Main loop per frame: {:?}",
@@ -740,7 +740,7 @@ impl StardewBot {
                 // the active window, or to a buffer selection window
                 // if present.
                 self.layout.apply_key_binding(
-                    &keystrokes,
+                    keystrokes,
                     &self.tui_globals,
                     &mut side_effects,
                     &mut self.buffers.buffer_list(),

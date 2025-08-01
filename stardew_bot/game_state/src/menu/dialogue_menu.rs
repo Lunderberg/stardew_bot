@@ -24,7 +24,7 @@ impl DialogueMenu {
         graph.named_native_function(
             "new_response",
             |pixel: &Vector<isize>, text: &str| Response {
-                pixel: pixel.clone(),
+                pixel: *pixel,
                 text: text.to_string(),
             },
         )?;

@@ -82,7 +82,7 @@ impl Pointer {
         offset: usize,
     ) -> Result<<Self as CheckedAdd<usize>>::Output, Error> {
         self.checked_add(offset)
-            .ok_or_else(|| Error::PointerOverflow(self, offset))
+            .ok_or(Error::PointerOverflow(self, offset))
     }
 
     #[inline]

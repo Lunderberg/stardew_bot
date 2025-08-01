@@ -225,7 +225,7 @@ impl PlantCropsGoal {
             let item = if is_seed {
                 ItemId::HOE
             } else {
-                goal.clone().into()
+                goal.clone()
             };
             Some(Some(item))
         }
@@ -254,7 +254,7 @@ impl PlantCropsGoal {
             .final_state
             .iter()
             .filter_map(move |(tile, goal)| {
-                let opt_current = current_state.get(tile).map(|&kind| kind);
+                let opt_current = current_state.get(tile).copied();
                 let opt_next_step = Self::next_step_of_tile(
                     &game_state.statics,
                     opt_current,
@@ -405,7 +405,7 @@ impl PlantCropsGoal {
             farm.shape,
             seed_assignment
                 .iter()
-                .filter_map(|(tile, opt_seed)| opt_seed.is_some().then(|| tile))
+                .filter_map(|(tile, opt_seed)| opt_seed.is_some().then_some(tile))
                 .cloned(),
         );
 
@@ -487,7 +487,7 @@ impl PlantCropsGoal {
             .final_state
             .iter()
             .filter(|(tile, goal_item)| {
-                let opt_current = current_state.get(tile).map(|&kind| kind);
+                let opt_current = current_state.get(tile).copied();
                 let opt_next_step = Self::next_step_of_tile(
                     &game_state.statics,
                     opt_current,
@@ -523,8 +523,8 @@ impl PlantCropsGoal {
             .map(|(id, count)| {
                 let item: Item = id.clone().into();
                 let item = item.with_count(count);
-                let item = game_state.statics.enrich_item(item);
-                item
+                
+                game_state.statics.enrich_item(item)
             })
             .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
             .map(|item| {
@@ -686,7 +686,7 @@ impl BotGoal for PlantCropsGoal {
                     .count()
             };
             let longest_until_clay = iter_potential_clay_tiles()?
-                .map(|tile| uses_until_clay(tile))
+                .map(&uses_until_clay)
                 .max();
 
             iter_potential_clay_tiles()?

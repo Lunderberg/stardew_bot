@@ -98,12 +98,12 @@ impl GraphRewrite for ConstantFold {
             },
 
             &ExprKind::IsSome(SymbolicValue::Result(arg)) => {
-                match &graph[arg].kind {
+                match graph[arg].kind {
                     // (None).is_some() => false
-                    &ExprKind::None => Some(false.into()),
+                    ExprKind::None => Some(false.into()),
 
                     // Function definitions are always non-None.
-                    &ExprKind::Function { .. } => Some(true.into()),
+                    ExprKind::Function { .. } => Some(true.into()),
 
                     _ => None,
                 }

@@ -76,7 +76,7 @@ impl GraphRewrite for LegalizeOperandTypes<'_> {
             ExprKind::IndexAccess { obj, indices } => self
                 .require_prim_array(
                     graph,
-                    &indices,
+                    indices,
                     RuntimePrimType::NativeUInt,
                 )?
                 .map(|indices| {

@@ -441,9 +441,13 @@ impl<'a> SymbolicParser<'a> {
         if precedence < OpPrecedence::BooleanAnd
             && OpPrecedence::BooleanAnd < upper_bound
         {
-            while let Some(_) = self.tokens.next_if(|token| {
-                token.kind.is_punct(Punctuation::DoubleAmpersand)
-            })? {
+            while self
+                .tokens
+                .next_if(|token| {
+                    token.kind.is_punct(Punctuation::DoubleAmpersand)
+                })?
+                .is_some()
+            {
                 let rhs =
                     self.expect_expr_op_precedence(OpPrecedence::BooleanAnd)?;
                 expr = self.graph.boolean_and(expr, rhs);
@@ -454,9 +458,10 @@ impl<'a> SymbolicParser<'a> {
         if precedence < OpPrecedence::BooleanOr
             && OpPrecedence::BooleanOr < upper_bound
         {
-            while let Some(_) = self
+            while self
                 .tokens
                 .next_if(|token| token.kind.is_punct(Punctuation::DoublePipe))?
+                .is_some()
             {
                 let rhs =
                     self.expect_expr_op_precedence(OpPrecedence::BooleanOr)?;
@@ -467,10 +472,13 @@ impl<'a> SymbolicParser<'a> {
 
         if precedence < OpPrecedence::RangeExtent
             && OpPrecedence::RangeExtent < upper_bound
-        {
-            if let Some(_) = self.tokens.next_if(|token| {
-                token.kind.is_punct(Punctuation::DoublePeriod)
-            })? {
+            && self
+                .tokens
+                .next_if(|token| {
+                    token.kind.is_punct(Punctuation::DoublePeriod)
+                })?
+                .is_some()
+            {
                 match expr {
                     SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)) => {
                         // Ranges must all start with zero.
@@ -486,16 +494,16 @@ impl<'a> SymbolicParser<'a> {
                 expr = self.graph.range(extent);
                 upper_bound = OpPrecedence::RangeExtent;
             }
-        }
 
         if precedence < OpPrecedence::TupleElement
             && OpPrecedence::TupleElement < upper_bound
             && matches!(self.peek_punct()?, Some(Punctuation::Comma))
         {
             let mut elements = vec![expr];
-            while let Some(_) = self
+            while self
                 .tokens
                 .next_if(|token| token.kind.is_punct(Punctuation::Comma))?
+                .is_some()
             {
                 if matches!(self.peek_punct()?, Some(Punctuation::RightParen)) {
                     // Early break, in case of trailing comma at the
@@ -606,14 +614,11 @@ impl<'a> SymbolicParser<'a> {
     }
 
     fn peek_punct(&mut self) -> Result<Option<Punctuation>, Error> {
-        let opt_keyword = self
-            .tokens
-            .peek()?
-            .map(|token| match token.kind {
+        let opt_keyword =
+            self.tokens.peek()?.and_then(|token| match token.kind {
                 TokenKind::Punct(punct) => Some(punct),
                 _ => None,
-            })
-            .flatten();
+            });
 
         Ok(opt_keyword)
     }
@@ -644,7 +649,7 @@ impl<'a> SymbolicParser<'a> {
         )?;
 
         let value: RuntimePrimValue = match token.kind {
-            TokenKind::Const(value) => value.into(),
+            TokenKind::Const(value) => value,
             _ => unreachable!("Handled by earlier check"),
         };
 
@@ -734,7 +739,7 @@ impl<'a> SymbolicParser<'a> {
         name: &'a str,
         value: SymbolicValue,
     ) -> Result<(), Error> {
-        let name = name.into();
+        let name = name;
 
         if SymbolicGraph::is_reserved_name(name) {
             // The variable name is a reserved name.  It may be an
@@ -743,8 +748,7 @@ impl<'a> SymbolicParser<'a> {
 
             let mut char_iter = name.char_indices().peekable();
             char_iter.next();
-            while let Some(_) = char_iter.next_if(|(_, c)| c.is_ascii_digit()) {
-            }
+            while char_iter.next_if(|(_, c)| c.is_ascii_digit()).is_some() {}
             char_iter.next();
 
             if let Some((char_index, _)) = char_iter.next() {
@@ -947,7 +951,7 @@ impl<'a> SymbolicParser<'a> {
                     let expr = if field.text == "prim_cast" {
                         let prim_type = ty
                             .try_prim_type()
-                            .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                            .ok_or(ParseError::ExpectedPrimType(ty))?;
                         self.graph.prim_cast(obj, prim_type)
                     } else if let Some(prim_type) = ty.try_prim_type() {
                         self.graph.prim_cast(obj, prim_type)
@@ -1023,7 +1027,7 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     let prim_type = ty
                         .try_prim_type()
-                        .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                        .ok_or(ParseError::ExpectedPrimType(ty))?;
                     Ok(self.graph.read_value(obj, prim_type))
                 }
                 "read_bytes" => {
@@ -1043,7 +1047,7 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     let prim_type = ty
                         .try_prim_type()
-                        .ok_or_else(|| ParseError::ExpectedPrimType(ty))?;
+                        .ok_or(ParseError::ExpectedPrimType(ty))?;
                     let offset = args
                         .into_iter()
                         .exactly_one()
@@ -1077,7 +1081,7 @@ impl<'a> SymbolicParser<'a> {
                 .into()),
             }
         } else {
-            Ok(self.graph.access_field(obj, field.text.to_string()))
+            Ok(self.graph.access_field(obj, field.text))
         }
     }
 
@@ -1304,9 +1308,10 @@ impl<'a> SymbolicParser<'a> {
         let mut name =
             self.expect_ident(|| "namespace and name of class")?.text;
 
-        while let Some(_) = self
+        while self
             .tokens
             .next_if(|token| token.kind.is_punct(Punctuation::Period))?
+            .is_some()
         {
             namespace.push(name);
             name = self.expect_ident(|| "namespace and name of class")?.text;
@@ -1317,7 +1322,7 @@ impl<'a> SymbolicParser<'a> {
 
         if opening_double_quote.is_some() {
             self.expect_punct(
-                || format!("Closing \" after class name 'full_name'"),
+                || "Closing \" after class name 'full_name'".to_string(),
                 Punctuation::DoubleQuote,
             )?;
         }
@@ -1459,8 +1464,7 @@ impl<'a> SymbolicTokenizer<'a> {
         };
         let mut num_bytes = self.text[start..]
             .char_indices()
-            .skip(1)
-            .next()
+            .nth(1)
             .map(|(i, _)| i)
             .unwrap_or_else(|| self.text.len() - start);
 
@@ -1549,7 +1553,7 @@ impl<'a> SymbolicTokenizer<'a> {
                     .unwrap_or_else(|| self.text.len() - start);
 
                 Keyword::from_string(&self.text[start..start + num_bytes])
-                    .map(|keyword| TokenKind::Keyword(keyword))
+                    .map(TokenKind::Keyword)
                     .unwrap_or(TokenKind::Ident)
             }
             _ => {
@@ -1591,7 +1595,7 @@ impl<'a> SymbolicTokenizer<'a> {
                         "u16" => Ok((value as u16).into()),
                         "u32" => Ok((value as u32).into()),
                         "u64" => Ok((value as u64).into()),
-                        "usize" => Ok((value as usize).into()),
+                        "usize" => Ok(value.into()),
 
                         other => {
                             Err(ParseError::InvalidSuffixForIntegerLiteral(
@@ -1607,7 +1611,7 @@ impl<'a> SymbolicTokenizer<'a> {
 
         let end = start + num_bytes;
         self.peek = Some(Token {
-            text: &self.text.get(start..end).unwrap_or_else(|| {
+            text: self.text.get(start..end).unwrap_or_else(|| {
                 panic!(
                     "Token {kind:?} at indices {start}..{end}, \
                      but these are out of range \
@@ -1643,8 +1647,7 @@ impl<'a> SymbolicTokenizer<'a> {
             self.offset = self.text[self.offset..]
                 .char_indices()
                 .skip_while(|&(_, c)| c != '\n')
-                .skip(1)
-                .next()
+                .nth(1)
                 .map(|(i, _)| self.offset + i)
                 .unwrap_or_else(|| self.text.len());
         }
@@ -1653,6 +1656,6 @@ impl<'a> SymbolicTokenizer<'a> {
 
 impl std::fmt::Debug for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self)
+        write!(f, "{self}")
     }
 }

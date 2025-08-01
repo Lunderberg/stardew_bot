@@ -320,7 +320,7 @@ impl Ord for InternalInfo {
 }
 
 impl InternalInfo {
-    fn priority(&self) -> impl Eq + Ord {
+    fn priority(&self) -> impl Ord {
         (
             Reverse(self.initial_to_node + self.heuristic),
             self.initial_to_node,

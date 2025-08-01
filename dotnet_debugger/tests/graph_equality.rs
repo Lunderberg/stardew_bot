@@ -53,39 +53,39 @@ macro_rules! verify_equivalent_graphs {
 verify_equivalent_graphs! {
     // empty_graphs_are_equivalent: |_graph| {},
     equivalent_static_field: |graph: &mut SymbolicGraph| {
-        let field = graph.static_field("class_name", "field_name");
-        field
+        
+        graph.static_field("class_name", "field_name")
     },
     equivalent_instance_field: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class_name", "static_field_name");
-        let field = graph.access_field(obj, "instance_field_name");
-        field
+        
+        graph.access_field(obj, "instance_field_name")
     },
     equivalent_downcast: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class_name", "field_name");
-        let subclass = graph.downcast(obj, "subclass_name");
-        subclass
+        
+        graph.downcast(obj, "subclass_name")
     },
     equivalent_static_index_access: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class_name", "field_name");
-        let element = graph.access_index(obj, 0);
-        element
+        
+        graph.access_index(obj, 0)
     },
     equivalent_dynamic_index_access: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class1", "field1");
         let index = graph.static_field("class2", "field2");
-        let element = graph.access_index(obj, index);
-        element
+        
+        graph.access_index(obj, index)
     },
     equivalent_array_length: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class_name", "field_name");
-        let length = graph.num_array_elements(obj);
-        length
+        
+        graph.num_array_elements(obj)
     },
     equivalent_multi_dim_array_extent: |graph: &mut SymbolicGraph| {
         let obj = graph.static_field("class_name", "field_name");
-        let extent = graph.array_extent(obj, 0);
-        extent
+        
+        graph.array_extent(obj, 0)
     },
 }
 

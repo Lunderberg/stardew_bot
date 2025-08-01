@@ -228,14 +228,14 @@ impl SymbolicGraph {
 
         let return_instruction = Instruction::Return { outputs };
         translator.push_annotated(return_instruction, || {
-            format!("return from top-level function")
+            "return from top-level function".to_string()
         });
 
         Ok(())
     }
 
     fn analyze_scopes(&self, reachable: &[bool]) -> Vec<ScopeInfo> {
-        let operation_to_scope = self.operation_scope(&reachable);
+        let operation_to_scope = self.operation_scope(reachable);
 
         let iter_scopes = self
             .iter_ops()
@@ -348,8 +348,7 @@ impl SymbolicGraph {
                 let definition_scope = operation_to_scope[i];
                 std::iter::successors(Some(used_in_scope), |scope| {
                     scope_lookup
-                        .get(scope)
-                        .and_then(|info| Some(info.parent_scope))
+                        .get(scope).map(|info| info.parent_scope)
                 })
                 .take_while(move |scope| {
                     *scope != Scope::Global && *scope != definition_scope
@@ -402,7 +401,7 @@ impl SymbolicGraph {
             .filter_map(|reduction_value| reduction_value.as_op_index())
             .map(|reduction_index| &self[reduction_index])
             .filter_map(|reduction| match &reduction.kind {
-                ExprKind::Function { params, .. } => params.get(0),
+                ExprKind::Function { params, .. } => params.first(),
                 _ => None,
             })
             .filter_map(|accumulator| accumulator.as_op_index())
@@ -679,14 +678,13 @@ impl<'a> LastUsageCollector<'a> {
                         self.iter_scope(Scope::ElseBranch(visiting)).next()
                     {
                         for index in &encountered_if {
-                            if encountered.contains(index) {
-                                if !encountered_else.contains(index) {
+                            if encountered.contains(index)
+                                && !encountered_else.contains(index) {
                                     last_usage.push(LastUsage {
                                         usage_point: start_of_else,
                                         expr_used: *index,
                                     })
                                 }
-                            }
                         }
                     }
 
@@ -694,14 +692,13 @@ impl<'a> LastUsageCollector<'a> {
                         self.iter_scope(Scope::IfBranch(visiting)).next()
                     {
                         for index in &encountered_else {
-                            if encountered.contains(index) {
-                                if !encountered_if.contains(index) {
+                            if encountered.contains(index)
+                                && !encountered_if.contains(index) {
                                     last_usage.push(LastUsage {
                                         usage_point: start_of_if,
                                         expr_used: *index,
                                     });
                                 }
-                            }
                         }
                     }
 
@@ -1354,11 +1351,10 @@ impl ExpressionTranslator<'_> {
 
         match &self.graph[func].kind {
             ExprKind::NativeFunction(native_func) => {
-                let native_func_index = self
+                let native_func_index = *self
                     .native_function_lookup
                     .get(&func)
-                    .expect("All functions should already be checked")
-                    .clone();
+                    .expect("All functions should already be checked");
 
                 let vm_args: Vec<_> = args
                     .iter()
@@ -1654,7 +1650,7 @@ impl ExpressionTranslator<'_> {
         self.push_annotated(
             Instruction::LessThan {
                 lhs: loop_iter.into(),
-                rhs: extent.into(),
+                rhs: extent,
                 output: loop_condition,
             },
             || format!("loop condition for {expr_name}"),

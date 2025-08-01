@@ -318,29 +318,29 @@ macro_rules! forward_visitor_as_mutator {
                 node
             }
 
-            fn is_leaf_node<'node>(
+            fn is_leaf_node(
                 &self,
-                node: &'node mut ObjectTreeNode,
+                node: &mut ObjectTreeNode,
             ) -> Option<bool> {
                 <$ext as TreeVisitorExtension>::is_leaf_node(self, node)
             }
 
-            fn previsit<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+            fn previsit(&mut self, node: &mut ObjectTreeNode) {
                 <$ext as TreeVisitorExtension>::previsit(self, node)
             }
 
-            fn visit_leaf<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+            fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
                 <$ext as TreeVisitorExtension>::visit_leaf(self, node)
             }
 
-            fn child_filter<'node>(
+            fn child_filter(
                 &mut self,
-                node: &'node mut ObjectTreeNode,
+                node: &mut ObjectTreeNode,
             ) -> bool {
                 <$ext as TreeVisitorExtension>::child_filter(self, node)
             }
 
-            fn postvisit<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+            fn postvisit(&mut self, node: &mut ObjectTreeNode) {
                 <$ext as TreeVisitorExtension>::postvisit(self, node)
             }
         }
@@ -702,8 +702,7 @@ impl ObjectExplorer {
         let mut graph = SymbolicGraph::new();
 
         let static_field = {
-            let ObjectTreeNode::Object { class_name, .. } = &node_chain
-                .get(0)
+            let ObjectTreeNode::Object { class_name, .. } = &node_chain.first()
                 .ok_or(Error::InvalidMetadataDisplayIndex)?
             else {
                 panic!("Outermost node should be static field");
@@ -942,7 +941,7 @@ impl ObjectTreeNode {
             let runtime_type =
                 reader.field_to_runtime_type(mtable_of_parent, &field)?;
             let value = ObjectTreeNode::initial_value(
-                location.clone(),
+                location,
                 runtime_type.clone(),
                 reader,
                 display_options,
@@ -997,56 +996,53 @@ impl ObjectTreeNode {
         // `GenericInst`.  Granted, this wouldn't cover all cases,
         // as there could also be a generic `List<Object>`, so
         // maybe the later check will still be necessary anyways.
-        match &self {
-            ObjectTreeNode::Value {
+        if let ObjectTreeNode::Value {
                 value: RuntimeValue::Object(ptr),
                 contents: None,
                 location,
                 should_read,
-            } => {
-                let ptr = *ptr;
-                let should_read = should_read.clone();
+            } = &self {
+            let ptr = *ptr;
+            let should_read = should_read.clone();
 
-                let obj = reader.object(ptr)?;
-                let method_table = reader.method_table(obj.method_table())?;
+            let obj = reader.object(ptr)?;
+            let method_table = reader.method_table(obj.method_table())?;
 
-                let ptr: Pointer = ptr.into();
-                let runtime_type = method_table.runtime_type(reader)?;
-                let opt_value = match runtime_type {
-                    RuntimeType::DotNet(DotNetType::String) => {
-                        Some(RuntimeValue::String(ptr.into()))
-                    }
-
-                    RuntimeType::DotNet(DotNetType::Array { .. }) => {
-                        Some(RuntimeValue::Array(ptr.into()))
-                    }
-                    RuntimeType::Prim(_)
-                    | RuntimeType::DotNet(
-                        DotNetType::ValueType { .. }
-                        | DotNetType::Class { .. }
-                        | DotNetType::MultiDimArray { .. },
-                    ) => None,
-
-                    other @ (RuntimeType::Unknown
-                    | RuntimeType::Rust(_)
-                    | RuntimeType::Function(_)
-                    | RuntimeType::Tuple(_)
-                    | RuntimeType::Iterator(_)
-                    | RuntimeType::ByteArray) => {
-                        use dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext as ErrVariant;
-                        return Err(ErrVariant(other.clone()).into());
-                    }
-                };
-                if let Some(value) = opt_value {
-                    *self = ObjectTreeNode::Value {
-                        value,
-                        contents: None,
-                        location: location.clone(),
-                        should_read,
-                    };
+            let ptr: Pointer = ptr.into();
+            let runtime_type = method_table.runtime_type(reader)?;
+            let opt_value = match runtime_type {
+                RuntimeType::DotNet(DotNetType::String) => {
+                    Some(RuntimeValue::String(ptr.into()))
                 }
+
+                RuntimeType::DotNet(DotNetType::Array { .. }) => {
+                    Some(RuntimeValue::Array(ptr.into()))
+                }
+                RuntimeType::Prim(_)
+                | RuntimeType::DotNet(
+                    DotNetType::ValueType { .. }
+                    | DotNetType::Class { .. }
+                    | DotNetType::MultiDimArray { .. },
+                ) => None,
+
+                other @ (RuntimeType::Unknown
+                | RuntimeType::Rust(_)
+                | RuntimeType::Function(_)
+                | RuntimeType::Tuple(_)
+                | RuntimeType::Iterator(_)
+                | RuntimeType::ByteArray) => {
+                    use dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext as ErrVariant;
+                    return Err(ErrVariant(other.clone()).into());
+                }
+            };
+            if let Some(value) = opt_value {
+                *self = ObjectTreeNode::Value {
+                    value,
+                    contents: None,
+                    location: location.clone(),
+                    should_read,
+                };
             }
-            _ => {}
         }
 
         // Reading each type
@@ -1091,7 +1087,7 @@ impl ObjectTreeNode {
                         .map(|(parent_of_field, field)| -> Result<_, Error> {
                             Self::initial_field(
                                 parent_of_field,
-                                FieldContainer::Class(instance_location.into()),
+                                FieldContainer::Class(instance_location),
                                 field,
                                 reader,
                                 display_options,
@@ -1170,7 +1166,7 @@ impl ObjectTreeNode {
                             prefetch,
                         )?;
 
-                        let indices = split_index(index, &shape);
+                        let indices = split_index(index, shape);
 
                         let node = ObjectTreeNode::ListItem {
                             indices: Some(indices),
@@ -1219,11 +1215,11 @@ impl ObjectTreeNode {
         Ok(())
     }
 
-    fn expand_marked<'a>(
+    fn expand_marked(
         &mut self,
         display_options: &DisplayOptions,
         reader: CachedReader<'_>,
-        side_effects: &'a mut WidgetSideEffects,
+        side_effects: &mut WidgetSideEffects,
     ) {
         let visitor = ReadMarkedNodes {
             display_options,
@@ -1301,7 +1297,7 @@ impl TreeMutatorExtension for ToggleReadOnDisplayedNodes {
         self.current_line += 1;
     }
 
-    fn visit_leaf<'node>(&mut self, node: &'node mut ObjectTreeNode) {
+    fn visit_leaf(&mut self, node: &mut ObjectTreeNode) {
         if self.display_region.contains(&self.current_line) {
             let should_read = match node {
                 ObjectTreeNode::Value {
@@ -1344,11 +1340,8 @@ struct ReadMarkedNodes<'a> {
 }
 impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
     fn previsit(&mut self, node: &mut ObjectTreeNode) {
-        match node {
-            ObjectTreeNode::Field { field_name, .. } => {
-                self.current_path.push(field_name.clone());
-            }
-            _ => {}
+        if let ObjectTreeNode::Field { field_name, .. } = node {
+            self.current_path.push(field_name.clone());
         }
 
         let res = node.expand_if_marked(self.display_options, self.reader);
@@ -1364,11 +1357,8 @@ impl<'a> TreeMutatorExtension for ReadMarkedNodes<'a> {
     }
 
     fn postvisit(&mut self, node: &mut ObjectTreeNode) {
-        match &node {
-            ObjectTreeNode::Field { .. } => {
-                self.current_path.pop();
-            }
-            _ => {}
+        if let ObjectTreeNode::Field { .. } = &node {
+            self.current_path.pop();
         }
     }
 }
@@ -1476,7 +1466,7 @@ impl TreeVisitorExtension for FollowDisplayAlias<'_> {
 
 struct CollapseNonExpandedNodes;
 impl TreeVisitorExtension for CollapseNonExpandedNodes {
-    fn is_leaf_node<'node>(&self, node: &'node ObjectTreeNode) -> Option<bool> {
+    fn is_leaf_node(&self, node: &ObjectTreeNode) -> Option<bool> {
         match node {
             ObjectTreeNode::Object {
                 display_expanded, ..
@@ -1523,13 +1513,10 @@ impl<'a> TreeVisitorExtension for AddressFinder<'a> {
         self.current_line += 1;
     }
 
-    fn previsit<'node>(&mut self, node: &'node ObjectTreeNode) {
+    fn previsit(&mut self, node: &ObjectTreeNode) {
         if self.selected == self.current_line {
-            match node {
-                ObjectTreeNode::Value { location, .. } => {
-                    *self.ptr = Some(location.start);
-                }
-                _ => {}
+            if let ObjectTreeNode::Value { location, .. } = node {
+                *self.ptr = Some(location.start);
             }
         }
     }
@@ -1661,7 +1648,7 @@ impl LineCollector {
     }
 }
 
-impl<'a> TreeVisitorExtension for &'a mut LineCollector {
+impl TreeVisitorExtension for &mut LineCollector {
     fn next_display_line(&mut self) {
         self.lines.push(String::new());
     }
@@ -1953,11 +1940,11 @@ impl DisplayOptions {
 
             self.string_sort_key(&search_string)
         }();
-        res_sort_key.unwrap_or_else(|_| (true, 0, 0))
+        res_sort_key.unwrap_or((true, 0, 0))
     }
 
     fn class_sort_key(&self, class_name: &ClassName) -> impl Ord {
-        let res_sort_key = || -> Result<_, Error> {
+        let res_sort_key = {
             let name = &class_name.name;
 
             let search_string = if let Some(namespace) = &class_name.namespace {
@@ -1967,8 +1954,8 @@ impl DisplayOptions {
             };
 
             self.string_sort_key(search_string)
-        }();
-        res_sort_key.unwrap_or_else(|_| (true, 0, 0))
+        };
+        res_sort_key.unwrap_or((true, 0, 0))
     }
 
     fn string_sort_key(
@@ -1979,14 +1966,14 @@ impl DisplayOptions {
             .sort_top
             .iter()
             .enumerate()
-            .find(|(_, regex)| regex.is_match(&search_string))
+            .find(|(_, regex)| regex.is_match(search_string))
         {
             (false, 0, top_match)
         } else if let Some((bottom_match, _)) = self
             .sort_bottom
             .iter()
             .enumerate()
-            .find(|(_, regex)| regex.is_match(&search_string))
+            .find(|(_, regex)| regex.is_match(search_string))
         {
             (false, 2, bottom_match)
         } else {

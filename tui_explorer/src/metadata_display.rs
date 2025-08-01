@@ -137,7 +137,7 @@ impl MetadataDisplay {
                     if row.fields.is_none() {
                         let runtime_module =
                             reader.runtime_module(module_ptr)?;
-                        let metadata = runtime_module.metadata(&reader)?;
+                        let metadata = runtime_module.metadata(reader)?;
 
                         let mut fields = FieldAnnotations::default();
 
@@ -237,7 +237,7 @@ impl DllMetadata {
 
         std::iter::once(header).chain(
             self.is_expanded
-                .then(|| &self.tables)
+                .then_some(&self.tables)
                 .into_iter()
                 .flatten()
                 .flat_map(|table| table.iter_lines()),
@@ -266,7 +266,7 @@ impl DisplayTable {
         };
         std::iter::once(header).chain(
             self.is_expanded
-                .then(|| &self.rows)
+                .then_some(&self.rows)
                 .into_iter()
                 .flatten()
                 .flat_map(|row| row.iter_lines()),
@@ -294,7 +294,7 @@ impl DisplayRow {
             is_expanded: self.is_expanded,
             loc: None,
             name: format!("{}[{}]", self.kind, self.index).into(),
-            value: self.name.as_ref().map(|s| s.as_str()),
+            value: self.name.as_deref(),
         };
         std::iter::once(header).chain(
             self.fields
@@ -313,7 +313,7 @@ impl DisplayRow {
                         value: if value.is_empty() {
                             None
                         } else {
-                            Some(&value)
+                            Some(value)
                         },
                     }
                 }),
@@ -328,7 +328,7 @@ impl MetadataDisplay {
             .sorted_by_key(|module_ptr| {
                 let get_name = || -> Result<_, Error> {
                     let module = reader.runtime_module(*module_ptr)?;
-                    let metadata = module.metadata(&reader)?;
+                    let metadata = module.metadata(reader)?;
 
                     let assembly_index = MetadataTableIndex::<Assembly>::new(0);
                     let name =
@@ -344,7 +344,7 @@ impl MetadataDisplay {
             })
             .map(|module_ptr| -> Result<DllMetadata, Error> {
                 let module = reader.runtime_module(module_ptr)?;
-                let metadata = module.metadata(&reader)?;
+                let metadata = module.metadata(reader)?;
 
                 let assembly_index = MetadataTableIndex::<Assembly>::new(0);
                 let name = metadata.get(assembly_index)?.name()?.to_string();
@@ -483,7 +483,7 @@ impl WidgetWindow<Error> for MetadataDisplay {
                 if let Some(selected) = self.table_state.selected() {
                     if let Some(loc) = self
                         .iter_lines()
-                        .nth(selected as usize)
+                        .nth(selected)
                         .and_then(|item| item.loc)
                     {
                         side_effects.broadcast(ChangeAddress(loc));

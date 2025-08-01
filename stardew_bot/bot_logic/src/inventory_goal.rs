@@ -297,7 +297,7 @@ impl InventoryGoal {
             }
 
             let num_in_inventory =
-                game_state.player.inventory.count_item(&item);
+                game_state.player.inventory.count_item(item);
             let craft = CraftItemGoal::new(
                 item.clone().with_count(num_in_inventory + num_to_craft),
             );
@@ -377,7 +377,7 @@ impl InventoryGoal {
             })
             .filter_map(|item| item.gp_per_stamina().map(|gp| (gp, item)))
             .filter(|(gp, _)| *gp <= MAX_GP_PER_STAMINA)
-            .sorted_by(|(lhs_gp, _), (rhs_gp, _)| lhs_gp.total_cmp(&rhs_gp))
+            .sorted_by(|(lhs_gp, _), (rhs_gp, _)| lhs_gp.total_cmp(rhs_gp))
             .map(|(_, item)| &item.id)
             .take(self.stamina_recovery_slots)
             .collect();
@@ -586,7 +586,7 @@ impl InventoryGoal {
                     let current = player_contents
                         .get(&item.id)
                         .cloned()
-                        .or_else(|| player_has_empty_slot.then(|| 0))?;
+                        .or_else(|| player_has_empty_slot.then_some(0))?;
                     let transfer_size = TransferSize::select(
                         item.count,
                         (item.count + current).saturating_sub(goal),
@@ -642,7 +642,7 @@ impl InventoryGoal {
                 // may be consumed for stamina.  The player doesn't
                 // currently have an item that may be consumed for
                 // stamina, so it should be taken from the chest.
-                return Ok(opt_take_stamina_item.into());
+                return Ok(opt_take_stamina_item);
             }
         }
 
@@ -650,19 +650,18 @@ impl InventoryGoal {
             .iter()
             .filter(|(item, _)| player_to_chest.contains_key(item))
             .min_by_key(|(_, tile)| (tile.down, -tile.right))
-            .map(|(item, tile)| {
+            .and_then(|(item, tile)| {
                 let current = player_contents.get(item).cloned()?;
                 let goal = player_to_chest.get(item).cloned()?;
                 let transfer_size = TransferSize::select(current, goal);
-                let slot = inventory.current_slot(&item)?;
+                let slot = inventory.current_slot(item)?;
                 Some(Transfer {
                     chest: *tile,
                     direction: TransferDirection::PlayerToChest,
                     slot,
                     size: transfer_size,
                 })
-            })
-            .flatten();
+            });
         if opt_open_preferred_chest.is_some() {
             // The player has items to store, and the item already
             // exists in one of the storage chests.  Open that chest
@@ -729,7 +728,7 @@ impl InventoryGoal {
                 player_to_chest
                     .iter()
                     .next()
-                    .map(|(item, goal)| {
+                    .and_then(|(item, goal)| {
                         let slot = inventory.current_slot(item)?;
                         let current = player_contents.get(item).cloned()?;
                         let transfer_size =
@@ -741,7 +740,6 @@ impl InventoryGoal {
                             size: transfer_size,
                         })
                     })
-                    .flatten()
             });
         if opt_store_in_empty_slot.is_some() {
             // There's an item the player wants in the inventory, but

@@ -183,14 +183,11 @@ impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
         let collect_into_vector = graph.raw_native_function(
             ExposedNativeFunction::new(CollectIntoVector {
                 element_type: *item_type.clone(),
-                output_name: name.unwrap_or_else(|| "(anon)").to_string(),
+                output_name: name.unwrap_or("(anon)").to_string(),
             }),
         );
 
-        let dummy_initial_args = collect_dummy_args(graph, iterator)
-            .into_iter()
-            .map(|op_index| op_index.into())
-            .collect();
+        let dummy_initial_args = collect_dummy_args(graph, iterator);
 
         let initial = graph.function_call(make_vector, dummy_initial_args);
 

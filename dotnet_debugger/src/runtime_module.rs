@@ -182,9 +182,7 @@ impl RuntimeModule {
         // range of `dll_method_defs` gives a ~3x performance
         // improvement for this function, by skipping the hash
         // altogether.
-        let method_def_range: Range<Pointer> = dll_method_defs
-            .iter()
-            .map(|(ptr, _)| *ptr)
+        let method_def_range: Range<Pointer> = dll_method_defs.keys().copied()
             .minmax()
             .into_option()
             .map(|(a, b)| a..b)
@@ -420,12 +418,12 @@ impl RuntimeModule {
                     let p_next: Pointer = bytes
                         .subrange(
                             offset + Pointer::SIZE * 0
-                                ..offset + Pointer::SIZE * 1,
+                                ..offset + Pointer::SIZE,
                         )
                         .unpack()?;
                     let p_table: Pointer = bytes
                         .subrange(
-                            offset + Pointer::SIZE * 1
+                            offset + Pointer::SIZE
                                 ..offset + Pointer::SIZE * 2,
                         )
                         .unpack()?;
@@ -589,7 +587,7 @@ impl RuntimeModule {
 
         annotator
             .range(self.type_def_table(reader)?.location.clone())
-            .name(format!("TypeDefToMethodDef table"));
+            .name("TypeDefToMethodDef table".to_string());
 
         annotator
             .opt_value(self.ptr_to_loaded_types_unpacked(reader)?)
@@ -945,9 +943,7 @@ impl MethodTableLookup {
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {
         self.method_tables
-            .iter()
-            .cloned()
-            .filter(|ptr| !ptr.start.is_null())
+            .iter().filter(|&ptr| !ptr.start.is_null()).cloned()
             .map(move |location| {
                 let bytes = reader.read_bytes(location)?;
                 Ok(MethodTable { bytes })
@@ -1074,7 +1070,7 @@ impl LoadedParamTypes {
     > {
         let iter = self
             .iter_bucket_ptrs(reader)?
-            .filter_map(|opt_ptr| opt_ptr)
+            .flatten()
             .flat_map(move |ptr| {
                 std::iter::successors(Some(ptr.read(reader)), |res_entry| {
                     match res_entry {

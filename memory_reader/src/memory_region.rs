@@ -310,11 +310,11 @@ impl Index<RangeInclusive<Pointer>> for MemoryRegion {
     }
 }
 
-impl<'a> Into<ByteRange<'a>> for &'a MemoryRegion {
-    fn into(self) -> ByteRange<'a> {
+impl<'a> From<&'a MemoryRegion> for ByteRange<'a> {
+    fn from(val: &'a MemoryRegion) -> Self {
         ByteRange {
-            start: self.start,
-            bytes: &self.bytes,
+            start: val.start,
+            bytes: &val.bytes,
         }
     }
 }

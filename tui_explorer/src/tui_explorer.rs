@@ -268,7 +268,7 @@ impl TuiExplorerBuilder {
             .find_map(|module_ptr| {
                 let module = reader.runtime_module(module_ptr).ok()?;
                 let module_name = module.name(reader).ok()?;
-                (name == module_name).then(|| module.location)
+                (name == module_name).then_some(module.location)
             })
             .ok_or_else(|| Error::RuntimeModuleNotFound(name.to_string()))?;
         Ok(Self {
@@ -301,7 +301,7 @@ impl TuiExplorerBuilder {
         let reader = self.tui_globals.cached_reader();
         let module_ptr = reader.runtime_module_by_name("Stardew Valley")?;
         let runtime_module = reader.runtime_module(module_ptr)?;
-        let metadata = runtime_module.metadata(&reader)?;
+        let metadata = runtime_module.metadata(reader)?;
 
         let game_obj_method_table = runtime_module
             .iter_method_tables(self.tui_globals.reader())?
@@ -354,7 +354,7 @@ impl TuiExplorerBuilder {
 
         self.tui_globals
             .get_or_default::<Vec<Annotation>>()
-            .extend(annotator.into_iter());
+            .extend(annotator);
 
         Ok(self)
     }
@@ -363,7 +363,7 @@ impl TuiExplorerBuilder {
         let reader = self.tui_globals.cached_reader();
         let module_ptr = reader.runtime_module_by_name("Stardew Valley")?;
         let runtime_module = reader.runtime_module(module_ptr)?;
-        let metadata = runtime_module.metadata(&reader)?;
+        let metadata = runtime_module.metadata(reader)?;
 
         metadata.iter_heap_locations().for_each(|(kind, range)| {
             self.running_log
@@ -379,7 +379,7 @@ impl TuiExplorerBuilder {
             });
 
         let module_ptr =
-            dotnet_debugger::RuntimeModule::locate(metadata, None, &reader)?;
+            dotnet_debugger::RuntimeModule::locate(metadata, None, reader)?;
 
         self.running_log.add_log(format!(
             "Found module pointer at {module_ptr} for {}",
@@ -544,7 +544,7 @@ impl TuiExplorerBuilder {
                     .try_for_each(|field| -> Result<_, Error> {
                         let field_name = metadata.get(field.token())?.name()?;
                         let location = field.location(
-                            &runtime_module,
+                            runtime_module,
                             if field.is_static() {
                                 FieldContainer::Static
                             } else {
@@ -579,7 +579,7 @@ impl TuiExplorerBuilder {
 
         self.tui_globals
             .get_or_default::<Vec<Annotation>>()
-            .extend(annotator.into_iter());
+            .extend(annotator);
 
         Ok(self)
     }
@@ -766,7 +766,7 @@ impl TuiExplorer {
                 // the active window, or to a buffer selection window
                 // if present.
                 self.layout.apply_key_binding(
-                    &keystrokes,
+                    keystrokes,
                     &self.tui_globals,
                     &mut side_effects,
                     &mut buffer_list,
@@ -822,7 +822,6 @@ impl TuiExplorer {
                         self.buffers
                             .running_log
                             .add_log(format!("Error: {err}"));
-                        return;
                     }
                 }
             });

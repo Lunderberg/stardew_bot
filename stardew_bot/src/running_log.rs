@@ -77,7 +77,7 @@ impl RunningLog {
     }
 }
 
-impl<'a> Widget for &'a mut RunningLog {
+impl Widget for &mut RunningLog {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

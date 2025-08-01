@@ -8,7 +8,7 @@ pub(crate) fn point_to_point_lower_bound(
     node_from: Vector<isize>,
     node_to: Vector<isize>,
 ) -> u64 {
-    let offset = (node_from - node_to).map(|x| x.abs() as u64);
+    let offset = (node_from - node_to).map(|x| x.unsigned_abs() as u64);
     let min = offset.right.min(offset.down);
     let max = offset.right.max(offset.down);
 

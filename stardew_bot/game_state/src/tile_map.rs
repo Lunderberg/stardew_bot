@@ -375,7 +375,7 @@ impl std::fmt::Display for TileMap<char> {
                 write!(fmt, "{}", self[(i, j)])?;
             }
             if j + 1 < self.height {
-                write!(fmt, "\n")?;
+                writeln!(fmt)?;
             }
         }
         Ok(())

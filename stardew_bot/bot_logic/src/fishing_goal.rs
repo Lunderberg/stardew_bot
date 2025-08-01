@@ -414,6 +414,12 @@ impl BotGoal for FishingGoal {
     }
 }
 
+impl Default for FishOnceGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FishOnceGoal {
     pub fn new() -> Self {
         Self {

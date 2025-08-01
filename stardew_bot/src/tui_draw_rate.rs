@@ -20,6 +20,12 @@ pub struct TuiDrawRate {
     widget_history: VecDeque<Vec<WidgetTimingStatistics>>,
 }
 
+impl Default for TuiDrawRate {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TuiDrawRate {
     pub fn new() -> Self {
         Self {

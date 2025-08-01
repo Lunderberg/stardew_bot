@@ -3,7 +3,7 @@ use stardew_utils::stardew_valley_pid;
 use criterion::{criterion_group, criterion_main, Bencher, Criterion};
 
 fn bench_find_process_id(b: &mut Bencher) {
-    b.iter(|| stardew_valley_pid());
+    b.iter(stardew_valley_pid);
 }
 
 fn bench_flat_image(c: &mut Criterion) {

@@ -126,7 +126,7 @@ impl InfoFormatter for FormatUTF16String {
             .iter_from_pointer(location)
             .map(|byte| byte.value)
             .iter_as::<[u8; 2]>()
-            .map(|arr| u16::from_be_bytes(arr));
+            .map(u16::from_be_bytes);
 
         let out: String = char::decode_utf16(u16_iter)
             .map_while(|res| res.ok())

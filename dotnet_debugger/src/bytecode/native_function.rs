@@ -372,7 +372,7 @@ impl WrapReturn for () {
     const IS_VOID: bool = true;
 }
 
-impl<'b, T> UnwrapArg for &'b T
+impl<T> UnwrapArg for &T
 where
     T: RustNativeObject,
 {
@@ -405,7 +405,7 @@ where
     }
 }
 
-impl<'b, T> UnwrapArg for &'b mut T
+impl<T> UnwrapArg for &mut T
 where
     T: RustNativeObject,
 {
@@ -440,7 +440,7 @@ where
     const IS_MUTABLE: bool = true;
 }
 
-impl<'a> UnwrapArg for &'a str {
+impl UnwrapArg for &str {
     type Unwrapped<'t> = &'t str;
 
     fn unwrap_arg<'t>(

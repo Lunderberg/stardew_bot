@@ -66,7 +66,7 @@ impl Symbol {
                 let name = cpp_demangle::Symbol::new(&symbol.name)
                     .ok()
                     .and_then(|sym| sym.demangle(&Default::default()).ok())
-                    .unwrap_or_else(|| symbol.name);
+                    .unwrap_or(symbol.name);
                 Symbol { name, ..symbol }
             })
     }

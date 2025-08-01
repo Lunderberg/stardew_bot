@@ -13,6 +13,12 @@ use super::{
 
 pub struct ExpandTreeFarm;
 
+impl Default for ExpandTreeFarm {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExpandTreeFarm {
     pub fn new() -> Self {
         Self
@@ -92,8 +98,8 @@ impl ExpandTreeFarm {
                 // If a seed is already planted in a location that
                 // will become the tree farm, let it remain where it
                 // is.
-                let should_collect = opt_tool.is_none() || !is_tree_farm_tile;
-                should_collect
+                
+                opt_tool.is_none() || !is_tree_farm_tile
             });
 
         let iter_clear_adj_trees = plan

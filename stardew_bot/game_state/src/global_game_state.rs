@@ -125,7 +125,7 @@ impl GlobalGameState {
             },
         )?;
 
-        graph.named_native_function("new_game_stats", || Stats::default())?;
+        graph.named_native_function("new_game_stats", Stats::default)?;
         graph.named_native_function(
             "define_game_stat",
             |stats: &mut Stats, name: &str, value: u32| {

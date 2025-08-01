@@ -124,7 +124,7 @@ struct DijkstraEntry {
 /// Internal implementation, provide a lower bound on the distance
 /// between two tiles.
 fn heuristic_between_points(a: Vector<isize>, b: Vector<isize>) -> u64 {
-    let offset = (a - b).map(|x| x.abs() as u64);
+    let offset = (a - b).map(|x| x.unsigned_abs() as u64);
 
     let min = offset.right.min(offset.down);
     let max = offset.right.max(offset.down);
@@ -548,8 +548,7 @@ impl<'a> Pathfinding<'a> {
 
                 let tile_dist = if dir.is_cardinal() { 1000 } else { 1414 };
                 let additional_cost = cost_map
-                    .get(new_tile)
-                    .map(Clone::clone)
+                    .get(new_tile).copied()
                     .flatten()
                     .unwrap_or(0);
 

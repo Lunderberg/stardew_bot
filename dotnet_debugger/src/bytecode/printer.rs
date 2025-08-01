@@ -275,7 +275,7 @@ impl<'a> GraphPrinter<'a> {
                 .filter(|(index, _)| reachable[index.0])
                 .for_each(|(index, op)| {
                     if let Some(name) =
-                        op.name.as_ref().map(|name| name.as_str())
+                        op.name.as_deref()
                     {
                         if let Some(prev_index) = name_lookup.get(name) {
                             requires_name_prefix[index.0] = true;

@@ -157,9 +157,7 @@ impl GameStateExt for GameState {
             .filter(|item| matches!(item.category, Some(ItemCategory::Fish)))
             .map(|item| (&item.id.item_id, item))
             .into_grouping_map()
-            .min_by_key(|_, item| item.quality())
-            .into_iter()
-            .map(|(_, item)| (&item.id, 1));
+            .min_by_key(|_, item| item.quality()).into_values().map(|item| (&item.id, 1));
 
         let iter_bundles =
             self.iter_bundle_items()?.map(|(_, id, count)| (id, count));
@@ -228,7 +226,7 @@ impl ObjectKindExt for ObjectKind {
 
             ObjectKind::Mineral(_) => None,
             ObjectKind::Wood => Some(ItemId::AXE),
-            ObjectKind::Tree(tree) => (tree.health > 0.0).then(|| ItemId::AXE),
+            ObjectKind::Tree(tree) => (tree.health > 0.0).then_some(ItemId::AXE),
 
             ObjectKind::MineBarrel | ObjectKind::Fiber | ObjectKind::Grass => {
                 Some(ItemId::SCYTHE)

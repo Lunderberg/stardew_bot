@@ -49,9 +49,7 @@ impl BotActionDisplay {
         move |row: usize| -> Vec<String> {
             bot_logic
                 .iter_recent_actions()
-                .rev()
-                .skip(row)
-                .next()
+                .rev().nth(row)
                 .map(|action| format!("{action}"))
                 .into_iter()
                 .collect()

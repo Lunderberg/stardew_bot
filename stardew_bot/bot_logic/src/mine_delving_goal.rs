@@ -295,6 +295,12 @@ impl SmeltingPlan {
     }
 }
 
+impl Default for MineDelvingGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MineDelvingGoal {
     pub fn new() -> Self {
         Self
@@ -459,7 +465,7 @@ impl MineDelvingGoal {
                 .flatten(),
         );
 
-        Ok((stack.len() > 1).then(|| stack))
+        Ok((stack.len() > 1).then_some(stack))
     }
 
     fn preferred_mining_region(
@@ -691,7 +697,7 @@ impl MineDelvingGoal {
         } else if elevator_depth > 80 && {
             let predictor = MineLevelPredictor::new(game_state);
             (elevator_depth..elevator_depth + 5)
-                .any(|level| !predictor.predict(level as i32).is_infested())
+                .any(|level| !predictor.predict(level).is_infested())
         } {
             80
         } else if elevator_depth < 120 {
@@ -1122,13 +1128,12 @@ impl BotGoal for MineSingleLevel {
 
         let opt_blocked_tile_in_path = path
             .into_iter()
-            .find(|tile| clearable_tiles.contains_key(&tile));
+            .find(|tile| clearable_tiles.contains_key(tile));
         let target_tile = opt_blocked_tile_in_path.unwrap_or(target_tile);
 
         let opt_tool = clearable_tiles
             .get(&target_tile)
-            .map(|opt| opt.as_ref())
-            .flatten();
+            .and_then(|opt| opt.as_ref());
 
         let current_tick = game_state.globals.game_tick;
         let num_objects = current_room.objects.len();
@@ -1448,7 +1453,7 @@ impl MineNearbyOre {
             .collect();
 
         let mut to_group: HashSet<Vector<isize>> =
-            desirable_rocks.iter().map(|(tile, _)| *tile).collect();
+            desirable_rocks.keys().copied().collect();
         while !to_group.is_empty() {
             let seed = to_group.iter().next().cloned().unwrap();
             to_group.remove(&seed);
@@ -1587,7 +1592,7 @@ impl BotInterrupt for MineNearbyOre {
             |(tile, (multiplier, offset))| {
                 let dist = *distances.get_opt(*tile)?;
                 ((dist as f32) + offset < self.dist * multiplier)
-                    .then(|| (*tile, TargetKind::Object, dist))
+                    .then_some((*tile, TargetKind::Object, dist))
             },
         );
 
@@ -1605,7 +1610,7 @@ impl BotInterrupt for MineNearbyOre {
                 let dist = *distances.get_opt(tile)?;
                 let multiplier = 2.0;
                 ((dist as f32) < self.dist * multiplier)
-                    .then(|| (tile, TargetKind::Enemy, dist))
+                    .then_some((tile, TargetKind::Enemy, dist))
             });
 
         let opt_target_tile = iter_nearby_objects
@@ -1624,7 +1629,7 @@ impl BotInterrupt for MineNearbyOre {
                 .allow_diagonal(false)
                 .path_between(player_tile, target_tile)?
                 .into_iter()
-                .find(|tile| clearable_tiles.contains_key(&tile)))
+                .find(|tile| clearable_tiles.contains_key(tile)))
         };
 
         let craft_cherry_bomb = CraftItemGoal::new(ItemId::CHERRY_BOMB);
@@ -1663,8 +1668,7 @@ impl BotInterrupt for MineNearbyOre {
 
         let opt_item = opt_item.or_else(|| {
             clearable_tiles
-                .get(&target_tile)
-                .map(|opt_tool| opt_tool.clone())
+                .get(&target_tile).cloned()
                 .unwrap_or(None)
         });
 

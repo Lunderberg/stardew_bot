@@ -86,7 +86,7 @@ impl GraphRewrite for MergeParallelReads {
                 }
             }
 
-            if reads.len() == 0 {
+            if reads.is_empty() {
                 break;
             }
             if reads.len() == 1 {
@@ -97,11 +97,8 @@ impl GraphRewrite for MergeParallelReads {
                 continue;
             }
 
-            let reads: Vec<_> = reads
-                .into_iter()
-                .map(|(_, read)| read)
-                .sorted_by_key(|read| read.op)
-                .collect();
+            let reads: Vec<_> =
+                reads.into_values().sorted_by_key(|read| read.op).collect();
 
             let new_read = graph.read_byte_regions(
                 reads.iter().flat_map(|read| read.regions.iter()).cloned(),

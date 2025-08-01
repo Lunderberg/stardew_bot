@@ -38,6 +38,12 @@ pub struct ClearFarmGoal {
     plan: Option<FarmPlan>,
 }
 
+impl Default for ClearFarmGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ClearFarmGoal {
     pub fn new() -> Self {
         Self {

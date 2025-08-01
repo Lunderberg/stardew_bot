@@ -63,7 +63,7 @@ impl RuntimeMultiDimArray {
 
         // TODO: Provide the statically-known rank so that it doesn't
         // need to be re-read at this point.
-        let rank = method_table.get_ee_class(reader)?.multi_dim_rank() as usize;
+        let rank = method_table.get_ee_class(reader)?.multi_dim_rank();
 
         let full_header_size = Self::header_size(rank);
 

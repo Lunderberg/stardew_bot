@@ -65,8 +65,8 @@ impl ReadTypedPointer for RuntimeString {
     }
 }
 
-impl Into<String> for RuntimeString {
-    fn into(self) -> String {
-        self.0
+impl From<RuntimeString> for String {
+    fn from(val: RuntimeString) -> Self {
+        val.0
     }
 }

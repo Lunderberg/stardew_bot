@@ -7,11 +7,23 @@ use crate::InfoFormatter;
 pub struct FormatHexValue<T>(PhantomData<T>);
 pub struct FormatDecValue<T>(PhantomData<T>);
 
+impl<T> Default for FormatHexValue<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> FormatHexValue<T> {
     pub fn new() -> Self {
         Self(PhantomData)
     }
 }
+impl<T> Default for FormatDecValue<T> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T> FormatDecValue<T> {
     pub fn new() -> Self {
         Self(PhantomData)

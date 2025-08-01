@@ -266,7 +266,7 @@ impl BotGoal for FirstDay {
         let goal = ClearFarmGoal::new().clear_stone(false);
         if !goal.is_completed(game_state)? {
             return Ok(goal
-                .cancel_if(move |game_state| should_ship_clay(game_state))
+                .cancel_if(should_ship_clay)
                 .with_interrupt(CollectNearbyItems::new())
                 .with_interrupt(ExpandStorageInterrupt::new())
                 .into());

@@ -38,7 +38,7 @@ impl ShopMenu {
                     for_sale_buttons: for_sale_buttons.clone(),
                     for_sale_scroll_index,
                     player_item_locations: player_item_locations.clone(),
-                    exit_button: exit_button.clone(),
+                    exit_button: *exit_button,
                 })
             },
         )?;

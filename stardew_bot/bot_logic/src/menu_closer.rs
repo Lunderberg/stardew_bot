@@ -9,6 +9,12 @@ pub struct MenuCloser {
     previous_click: Option<i32>,
 }
 
+impl Default for MenuCloser {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MenuCloser {
     pub fn new() -> Self {
         Self {
@@ -30,11 +36,7 @@ impl MenuCloser {
         } else if let Some(menu) = game_state.mail_menu() {
             (menu.current_page + 1 < menu.num_pages)
                 .then(|| menu.pixel_location.center())
-        } else if let Some(menu) = game_state.geode_menu() {
-            Some(menu.ok_button)
-        } else {
-            None
-        }
+        } else { game_state.geode_menu().map(|menu| menu.ok_button) }
     }
 
     fn must_press_escape(&self, game_state: &GameState) -> bool {
@@ -81,7 +83,7 @@ impl MenuCloser {
                 let output_slot = game_state
                     .player
                     .inventory
-                    .preferred_slot(&held_item)
+                    .preferred_slot(held_item)
                     .expect("TODO: Handle case of fully inventory");
 
                 player_inventory_tiles[output_slot]

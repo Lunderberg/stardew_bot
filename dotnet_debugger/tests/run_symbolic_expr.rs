@@ -262,7 +262,7 @@ fn native_function_call_accepting_native_option() -> Result<(), Error> {
 fn collecting_into_vector() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
-    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    let init_vector = graph.native_function(Vec::<usize>::new);
     graph.name(init_vector, "init_vector")?;
 
     let push_vector =
@@ -347,7 +347,7 @@ fn sum_of_integers_in_native_function() -> Result<(), Error> {
 fn collect_integers_into_vector() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
-    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    let init_vector = graph.native_function(Vec::<usize>::new);
     graph.name(init_vector, "init_vector")?;
 
     let push_vector =
@@ -380,7 +380,7 @@ fn collect_integers_into_vector() -> Result<(), Error> {
 fn collect_two_vectors_of_integers() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
-    let init_vector = graph.native_function(|| Vec::<usize>::new());
+    let init_vector = graph.native_function(Vec::<usize>::new);
     graph.name(init_vector, "init_vector")?;
 
     let push_vector =
@@ -432,7 +432,7 @@ fn collect_vector_of_rust_native_objects() -> Result<(), Error> {
     let make_obj = graph.native_function(|a: usize, b: usize| MyObj(a, b));
     graph.name(make_obj, "make_obj")?;
 
-    let init_vector = graph.native_function(|| Vec::<MyObj>::new());
+    let init_vector = graph.native_function(Vec::<MyObj>::new);
     graph.name(init_vector, "init_vector")?;
 
     let push_vector =
@@ -564,14 +564,14 @@ fn eval_nested_reductions_with_enclosed_variables() -> Result<(), Error> {
             if d % 2 == 0 {
                 let sum = c;
                 let sum = sum + b2;
-                let sum = sum + b2;
-                sum
+                
+                sum + b2
             } else {
                 let sum = c;
                 let d2 = d * 2;
                 let sum = sum + d2;
-                let sum = sum + d2;
-                sum
+                
+                sum + d2
             }
         })
     });
@@ -1098,14 +1098,14 @@ fn reduce_into_vec_of_vecs() -> Result<(), Error> {
         graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));
     graph.name(new_obj, "new_obj")?;
 
-    let new_vec_usize = graph.native_function(|| Vec::<usize>::new());
+    let new_vec_usize = graph.native_function(Vec::<usize>::new);
     graph.name(new_vec_usize, "new_vec_usize")?;
 
     let collect_into_vec_usize = graph
         .native_function(|vec: &mut Vec<usize>, item: usize| vec.push(item));
     graph.name(collect_into_vec_usize, "collect_into_vec_usize")?;
 
-    let new_vec_obj = graph.native_function(|| Vec::<RustObj>::new());
+    let new_vec_obj = graph.native_function(Vec::<RustObj>::new);
     graph.name(new_vec_obj, "new_vec_obj")?;
 
     let collect_into_vec_obj =
@@ -1158,14 +1158,14 @@ fn collect_into_vec_of_vecs() -> Result<(), Error> {
         graph.native_function(|vec: &Vec<usize>| RustObj(vec.clone()));
     graph.name(new_obj, "new_obj")?;
 
-    let new_vec_usize = graph.native_function(|| Vec::<usize>::new());
+    let new_vec_usize = graph.native_function(Vec::<usize>::new);
     graph.name(new_vec_usize, "new_vec_usize")?;
 
     let collect_into_vec_usize = graph
         .native_function(|vec: &mut Vec<usize>, item: usize| vec.push(item));
     graph.name(collect_into_vec_usize, "collect_into_vec_usize")?;
 
-    let new_vec_obj = graph.native_function(|| Vec::<RustObj>::new());
+    let new_vec_obj = graph.native_function(Vec::<RustObj>::new);
     graph.name(new_vec_obj, "new_vec_obj")?;
 
     let collect_into_vec_obj =
@@ -1226,7 +1226,7 @@ fn reduction_with_numeric_conditional_in_map() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize| -> Option<usize> {
-        (a % 2 == 0).then(|| a)
+        (a % 2 == 0).then_some(a)
     });
     graph.name(func, "func")?;
 
@@ -1263,7 +1263,7 @@ fn reduction_with_none_check_in_map() -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize| -> Option<usize> {
-        (a % 2 == 0).then(|| a)
+        (a % 2 == 0).then_some(a)
     });
     graph.name(func, "func")?;
 
@@ -1369,7 +1369,7 @@ fn boolean_not() -> Result<(), Error> {
     let vm = graph.compile(None)?;
     let result: usize = vm.local_eval()?.try_into()?;
 
-    let expected: usize = (0..10).map(|i| if !(3 < i) { 10 } else { 1 }).sum();
+    let expected: usize = (0..10).map(|i| if 3 >= i { 10 } else { 1 }).sum();
 
     assert_eq!(result, expected);
     Ok(())

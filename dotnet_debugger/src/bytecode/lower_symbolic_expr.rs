@@ -376,9 +376,8 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                         let num_elements_ptr = graph.add(ptr, Pointer::SIZE);
                         let expr = graph
                             .read_value(num_elements_ptr, RuntimePrimType::U64);
-                        let expr =
-                            graph.prim_cast(expr, RuntimePrimType::NativeUInt);
-                        expr
+
+                        graph.prim_cast(expr, RuntimePrimType::NativeUInt)
                     }
 
                     _ => {

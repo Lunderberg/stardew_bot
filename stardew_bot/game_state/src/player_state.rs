@@ -119,7 +119,7 @@ impl PlayerState {
                     }
                 };
 
-                let dir_0 = directions.get(0).cloned().and_then(to_dir);
+                let dir_0 = directions.first().cloned().and_then(to_dir);
                 let dir_1 = directions.get(1).cloned().and_then(to_dir);
                 match (dir_0, dir_1) {
                     (d, None) => d,
@@ -228,7 +228,7 @@ impl PlayerState {
              // buffs: &Vec<Buff>
                 | {
                 PlayerState {
-                    position: position.clone(),
+                    position: *position,
                     facing: *facing,
                     movement: movement.cloned(),
                     room_name: room_name.into(),
@@ -500,8 +500,7 @@ impl PlayerState {
         self.inventory
             .items
             .get(self.active_hotbar_index)
-            .map(|opt_item| opt_item.as_ref())
-            .flatten()
+            .and_then(|opt_item| opt_item.as_ref())
     }
 }
 

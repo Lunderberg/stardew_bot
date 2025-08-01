@@ -148,7 +148,7 @@ impl BotGoal for BuyFromMerchantGoal {
             }
 
             menu.do_menu_navigation(actions, &self.item.id)?;
-            return Ok(BotGoalResult::InProgress);
+            Ok(BotGoalResult::InProgress)
         } else if let Some(menu) = game_state.dialogue_menu() {
             let Some(pixel) = menu.response_pixel("Shop") else {
                 let cleanup = MenuCloser::new();

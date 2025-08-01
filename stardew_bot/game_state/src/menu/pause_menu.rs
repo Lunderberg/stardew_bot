@@ -98,7 +98,7 @@ impl PauseMenu {
                 Menu::Pause(PauseMenu {
                     tab_buttons: tab_buttons.clone(),
                     active_page: active_page.clone(),
-                    exit_button: exit_button.clone(),
+                    exit_button: *exit_button,
                 })
             },
         )?;

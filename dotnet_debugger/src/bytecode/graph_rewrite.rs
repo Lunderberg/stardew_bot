@@ -37,7 +37,7 @@ pub trait GraphRewrite {
     }
 }
 
-impl<'a, T> GraphRewrite for &'a T
+impl<T> GraphRewrite for &T
 where
     T: GraphRewrite,
 {

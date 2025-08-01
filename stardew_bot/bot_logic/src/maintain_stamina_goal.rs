@@ -22,6 +22,12 @@ pub struct MaintainStaminaGoal {
     max_gold_per_energy: f32,
 }
 
+impl Default for MaintainStaminaGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MaintainStaminaGoal {
     pub fn new() -> Self {
         Self {

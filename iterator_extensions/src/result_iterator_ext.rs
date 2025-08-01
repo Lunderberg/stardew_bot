@@ -15,7 +15,7 @@ pub trait ResultIteratorExt: Iterator + Sized {
         Self: Iterator<Item = Result<T, E>>,
         Func: FnMut(T) -> Result<U, E>,
     {
-        self.map(move |res| res.and_then(|item| func(item)))
+        self.map(move |res| res.and_then(&mut func))
     }
 
     /// Apply a fallible filter function to an iterator of results.
@@ -90,7 +90,7 @@ pub trait ResultIteratorExt: Iterator + Sized {
     {
         self.flat_map(move |res_item: Result<T, E>| {
             let res_iter: Result<OutIter, E> =
-                res_item.and_then(|item| func(item));
+                res_item.and_then(&mut func);
             match res_iter {
                 Ok(iter) => Either::Left(iter.into_iter().map(Ok)),
                 Err(err) => Either::Right(std::iter::once(Err(err))),

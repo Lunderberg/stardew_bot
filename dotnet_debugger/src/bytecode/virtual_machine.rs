@@ -500,10 +500,10 @@ impl VMResults {
             .transpose()
     }
 
-    pub fn get_any<'a>(
-        &'a self,
+    pub fn get_any(
+        &self,
         index: impl NormalizeStackIndex,
-    ) -> Result<Option<&'a dyn Any>, Error> {
+    ) -> Result<Option<&dyn Any>, Error> {
         self.get_as(index)
     }
 
@@ -533,10 +533,10 @@ impl VMResults {
             .map(|boxed| *boxed))
     }
 
-    pub fn get_obj<'a, T: RustNativeObject>(
-        &'a self,
+    pub fn get_obj<T: RustNativeObject>(
+        &self,
         index: impl NormalizeStackIndex,
-    ) -> Result<Option<&'a T>, Error> {
+    ) -> Result<Option<&T>, Error> {
         let index = index.normalize_stack_index();
         let opt_value = self[index].as_ref();
 
@@ -558,11 +558,11 @@ impl VMResults {
         Ok(opt_obj)
     }
 
-    fn collect_native_function_args_impl<'a, 'b>(
+    fn collect_native_function_args_impl<'a>(
         &'a mut self,
         vm_args: &[VMArg],
         inline_consts: &'a mut [Option<StackValue>],
-        collected_args: &'b mut [MaybeUninit<&'a mut Option<StackValue>>],
+        collected_args: &mut [MaybeUninit<&'a mut Option<StackValue>>],
     ) {
         assert_eq!(vm_args.len(), inline_consts.len());
         assert_eq!(vm_args.len(), collected_args.len());
@@ -693,8 +693,7 @@ impl StackValue {
         match self {
             StackValue::Prim(prim) => prim.read_string_ptr(reader),
             other => {
-                Err(Error::InvalidOperandForDotnetString(other.runtime_type())
-                    .into())
+                Err(Error::InvalidOperandForDotnetString(other.runtime_type()))
             }
         }
     }
@@ -837,8 +836,8 @@ pub trait VMReader {
         &mut self,
         regions: &mut [(Pointer, &mut [u8])],
     ) -> Result<(), Error> {
-        for (ptr, buf) in regions.into_iter() {
-            self.read_bytes(*ptr, *buf)?;
+        for (ptr, buf) in regions.iter_mut() {
+            self.read_bytes(*ptr, buf)?;
         }
         Ok(())
     }
@@ -1268,11 +1267,10 @@ impl VirtualMachine {
         &'a self,
         name: &str,
     ) -> Result<VMEvaluator<'a>, Error> {
-        let entry_point = self
+        let entry_point = *self
             .entry_points
             .get(name)
-            .ok_or_else(|| VMExecutionError::NoSuchFunction(name.into()))?
-            .clone();
+            .ok_or_else(|| VMExecutionError::NoSuchFunction(name.into()))?;
 
         let values = {
             let stack = (0..self.stack_size).map(|_| None).collect();
@@ -2187,8 +2185,8 @@ impl Instruction {
         };
 
         std::iter::empty()
-            .chain(opt_a.into_iter())
-            .chain(opt_b.into_iter())
+            .chain(opt_a)
+            .chain(opt_b)
     }
 
     fn op_name(&self) -> &'static str {

@@ -10,6 +10,12 @@ use super::{
 
 pub struct KeyEventInterrupt;
 
+impl Default for KeyEventInterrupt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl KeyEventInterrupt {
     pub fn new() -> Self {
         Self
@@ -54,7 +60,7 @@ impl BotInterrupt for KeyEventInterrupt {
                 .cancel_if(|game_state| {
                     game_state.globals.events_triggered.contains("ccDoorUnlock")
                 });
-            return Ok(Some(stack.into()));
+            return Ok(Some(stack));
         }
 
         // When the community center has been unlocked (entering the
@@ -69,7 +75,7 @@ impl BotInterrupt for KeyEventInterrupt {
             let goal = LogicStack::new()
                 .then(ActivateTile::new("CommunityCenter", Vector::new(14, 23)))
                 .then(MenuCloser::new());
-            return Ok(Some(goal.into()));
+            return Ok(Some(goal));
         }
 
         if check_flag("wizardJunimoNote")

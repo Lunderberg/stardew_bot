@@ -23,6 +23,12 @@ pub struct ForagingGoal {
     stop_with_stamina: Option<i32>,
 }
 
+impl Default for ForagingGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ForagingGoal {
     pub fn new() -> Self {
         Self {
@@ -144,9 +150,7 @@ impl ForagingGoal {
         let opt_fruit = farm
             .items
             .iter()
-            .map(|item| item.tile_pos())
-            .filter(|item_pos| item_pos.dist(player_pos) < 5.0)
-            .next();
+            .map(|item| item.tile_pos()).find(|item_pos| item_pos.dist(player_pos) < 5.0);
         if let Some(pos) = opt_fruit {
             if pos.dist(player_pos) < 2.0 {
                 return Ok(Some(BotGoalResult::InProgress));
@@ -205,9 +209,9 @@ impl ForagingGoal {
         Ok(opt_closest_forage)
     }
 
-    fn next_forageable<'a>(
+    fn next_forageable(
         &self,
-        game_state: &'a GameState,
+        game_state: &GameState,
     ) -> Result<Option<(String, Vector<isize>)>, Error> {
         if let Some(loc) = &self.location {
             Ok(Self::next_forageable_in_room(game_state, loc)?

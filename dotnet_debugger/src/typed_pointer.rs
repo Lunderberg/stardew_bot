@@ -106,9 +106,9 @@ impl<T> From<Pointer> for TypedPointer<T> {
     }
 }
 
-impl<T> Into<Pointer> for TypedPointer<T> {
-    fn into(self) -> Pointer {
-        self.ptr
+impl<T> From<TypedPointer<T>> for Pointer {
+    fn from(val: TypedPointer<T>) -> Self {
+        val.ptr
     }
 }
 

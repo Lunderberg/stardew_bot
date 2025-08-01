@@ -12,6 +12,12 @@ use super::{
 
 pub struct ExpandStorageInterrupt;
 
+impl Default for ExpandStorageInterrupt {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ExpandStorageInterrupt {
     pub fn new() -> Self {
         Self

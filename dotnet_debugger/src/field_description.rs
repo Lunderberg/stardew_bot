@@ -44,7 +44,7 @@ impl FieldDescriptions {
     }
 
     pub fn iter<'a>(&'a self) -> impl Iterator<Item = FieldDescription<'a>> {
-        (&self).into_iter()
+        self.into_iter()
     }
 }
 

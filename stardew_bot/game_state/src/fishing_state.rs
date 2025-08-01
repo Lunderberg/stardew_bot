@@ -510,14 +510,14 @@ impl FishingState {
             // should re-derive the equation of motion to include the
             // additional velocity for the floater/sinker type, but
             // this should be good enough for now.
-            let predicted = predicted
+            
+
+            predicted
                 + match fish_movement_kind {
                     FishMovementKind::Sink => bar_height / 3.0,
                     FishMovementKind::Floater => -bar_height / 3.0,
                     _ => 0.0,
-                };
-
-            predicted
+                }
         }
     }
 

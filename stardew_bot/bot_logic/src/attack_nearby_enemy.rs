@@ -16,6 +16,12 @@ pub struct AttackNearbyEnemy {}
 
 struct ClubSmashNearby;
 
+impl Default for AttackNearbyEnemy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl AttackNearbyEnemy {
     pub fn new() -> Self {
         Self {}
@@ -83,7 +89,7 @@ impl BotInterrupt for AttackNearbyEnemy {
         )
         .cancel_if(move |game_state| game_state.player.room_name != room_name);
 
-        Ok(Some(goal.into()))
+        Ok(Some(goal))
     }
 }
 

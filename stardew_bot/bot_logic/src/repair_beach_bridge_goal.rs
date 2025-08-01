@@ -24,6 +24,12 @@ pub struct RepairBeachBridgeGoal {
     confirmed_repair_dialogue: bool,
 }
 
+impl Default for RepairBeachBridgeGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl RepairBeachBridgeGoal {
     pub fn new() -> Self {
         Self {
@@ -88,7 +94,7 @@ impl BotGoal for RepairBeachBridgeGoal {
             // that the repair-bridge tile still exists.  Force a full
             // refresh of the beach in order to get back in-sync.
             if game_state.player.room_name != "Beach" {
-                return Err(Error::InconsistentBridgeRepairState.into());
+                return Err(Error::InconsistentBridgeRepairState);
             }
             actions.refresh_current_location();
             return Ok(BotGoalResult::InProgress);

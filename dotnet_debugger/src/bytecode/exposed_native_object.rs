@@ -40,9 +40,9 @@ impl ExposedNativeObject {
     }
 }
 
-impl Into<Box<dyn Any>> for ExposedNativeObject {
-    fn into(self) -> Box<dyn Any> {
-        self.obj
+impl From<ExposedNativeObject> for Box<dyn Any> {
+    fn from(val: ExposedNativeObject) -> Self {
+        val.obj
     }
 }
 
@@ -105,7 +105,7 @@ impl<T: RustNativeObject> RustNativeTypeUtils for RustNativeUtilContainer<T> {
     fn type_name(&self) -> Cow<'static, str> {
         let name = std::any::type_name::<T>();
 
-        fn last_path_segment<'a>(segment: &'a str) -> &'a str {
+        fn last_path_segment(segment: &str) -> &str {
             if let Some((_, last)) = segment.rsplit_once("::") {
                 last
             } else {
@@ -115,7 +115,7 @@ impl<T: RustNativeObject> RustNativeTypeUtils for RustNativeUtilContainer<T> {
 
         if name.contains('<') {
             let name: String = name
-                .split_inclusive(|c| c == '<' || c == '>')
+                .split_inclusive(['<', '>'])
                 .map(last_path_segment)
                 .join("");
             name.into()

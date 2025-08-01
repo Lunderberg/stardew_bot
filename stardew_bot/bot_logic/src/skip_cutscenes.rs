@@ -12,6 +12,12 @@ pub struct SkipCutscenes;
 
 pub struct SkipCurrentCutscene;
 
+impl Default for SkipCutscenes {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SkipCutscenes {
     pub fn new() -> Self {
         Self

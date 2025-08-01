@@ -10,6 +10,12 @@ use super::{
 
 pub struct ShipMostFishGoal;
 
+impl Default for ShipMostFishGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ShipMostFishGoal {
     #[allow(dead_code)]
     pub fn new() -> Self {

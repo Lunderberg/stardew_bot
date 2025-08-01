@@ -117,7 +117,7 @@ macro_rules! infer_binary_op {
 
 impl<'a> TypeInference<'a> {
     pub fn new(reader: Option<CachedReader<'a>>) -> Self {
-        let opt_reader = reader.into();
+        let opt_reader = reader;
         Self {
             opt_reader,
             cache: Default::default(),
@@ -128,7 +128,7 @@ impl<'a> TypeInference<'a> {
         self.opt_reader.ok_or(TypeInferenceError::NoRemoteProcess)
     }
 
-    fn expect_cache<'b>(&'b self, value: SymbolicValue) -> &'b RuntimeType {
+    fn expect_cache(&self, value: SymbolicValue) -> &RuntimeType {
         match value {
             SymbolicValue::Const(prim) => prim.static_runtime_type_ref(),
             SymbolicValue::Result(op_index) => {

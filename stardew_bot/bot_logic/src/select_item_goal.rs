@@ -62,7 +62,7 @@ impl BotGoal for SelectItemGoal {
             .iter()
             .copied()
             .find_map(Self::key_to_hotbar)
-            .map(|index| GameAction::StopSelectingHotbar(index));
+            .map(GameAction::StopSelectingHotbar);
 
         if let Some(cleanup) = opt_cleanup {
             actions.do_action(cleanup);

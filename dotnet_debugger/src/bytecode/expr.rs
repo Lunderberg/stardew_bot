@@ -439,7 +439,7 @@ impl SymbolicType {
         let method_table_ptr = reader
             .method_table_by_name(&self.full_name)?
             .ok_or_else(|| {
-                Error::UnexpectedNullMethodTable(format!("{}", self))
+                Error::UnexpectedNullMethodTable(format!("{self}"))
             })?;
 
         if self.generics.is_empty() {
@@ -611,9 +611,7 @@ impl SymbolicGraph {
     pub fn is_reserved_name(name: &str) -> bool {
         name.starts_with('_')
             && name
-                .chars()
-                .skip(1)
-                .next()
+                .chars().nth(1)
                 .map(|c| c.is_ascii_digit())
                 .unwrap_or(true)
     }
@@ -1358,19 +1356,16 @@ impl SymbolicGraph {
         self.iter_ops()
             .rev()
             .filter(|(OpIndex(i), _)| reachable[*i])
-            .for_each(|(func_index, op)| match &op.kind {
-                ExprKind::Function { params, output } => {
-                    self.collect_subgraph(
-                        params.iter().cloned(),
-                        Some(*output),
-                    )
-                    .into_iter()
-                    .for_each(|index| {
-                        outermost_legal_scope[index.0] =
-                            Scope::Function(func_index);
-                    });
-                }
-                _ => {}
+            .for_each(|(func_index, op)| if let ExprKind::Function { params, output } = &op.kind {
+                self.collect_subgraph(
+                    params.iter().cloned(),
+                    Some(*output),
+                )
+                .into_iter()
+                .for_each(|index| {
+                    outermost_legal_scope[index.0] =
+                        Scope::Function(func_index);
+                });
             });
 
         // Step 2: Visit each expression in reverse order of
@@ -1735,7 +1730,7 @@ impl SymbolicGraph {
             let opt_value = rewriter.rewrite_expr(
                 &mut builder,
                 kind,
-                op.name.as_ref().map(|string| string.as_str()),
+                op.name.as_deref(),
             )?;
             let value = if let Some(value) = opt_value {
                 num_rewritten_terms += 1;
@@ -1794,7 +1789,7 @@ impl SymbolicGraph {
             let opt_new_value = if let Some(rewritten) = rewriter.rewrite_expr(
                 self,
                 kind,
-                op.name.as_ref().map(|string| string.as_str()),
+                op.name.as_deref(),
             )? {
                 if let Some(name) = &op.name {
                     if let SymbolicValue::Result(new_index) = rewritten {
@@ -1837,7 +1832,7 @@ impl SymbolicGraph {
 
         let subgraph = loop {
             let subgraph = self.collect_subgraph(
-                replacements.iter().map(|(key, _)| (*key).into()),
+                replacements.keys().map(|key| (*key).into()),
                 Some(value),
             );
 
@@ -2352,13 +2347,13 @@ impl ExprKind {
     ) -> Option<Self> {
         let remap = |value: &SymbolicValue| -> Option<SymbolicValue> {
             match value {
-                SymbolicValue::Result(index) => map.get(&index).cloned(),
+                SymbolicValue::Result(index) => map.get(index).cloned(),
                 _ => None,
             }
         };
 
         let remap_or_no_op = |value: &SymbolicValue| -> SymbolicValue {
-            remap(value).unwrap_or_else(|| *value)
+            remap(value).unwrap_or(*value)
         };
 
         let vec_requires_remap = |slice: &[SymbolicValue]| -> bool {
@@ -2391,10 +2386,10 @@ impl ExprKind {
             ExprKind::Function { params, output } => {
                 let opt_output = remap(output);
                 let requires_remap =
-                    opt_output.is_some() || vec_requires_remap(&params);
+                    opt_output.is_some() || vec_requires_remap(params);
                 requires_remap.then(|| {
                     let params = params.iter().map(remap_or_no_op).collect();
-                    let output = opt_output.unwrap_or_else(|| *output);
+                    let output = opt_output.unwrap_or(*output);
                     ExprKind::Function { params, output }
                 })
             }
@@ -2403,7 +2398,7 @@ impl ExprKind {
                 let requires_remap =
                     opt_func.is_some() || vec_requires_remap(args);
                 requires_remap.then(|| {
-                    let func = opt_func.unwrap_or_else(|| *func);
+                    let func = opt_func.unwrap_or(*func);
                     let args = args.iter().map(remap_or_no_op).collect();
                     ExprKind::FunctionCall { func, args }
                 })
@@ -2415,8 +2410,8 @@ impl ExprKind {
                 let opt_iterator = remap(iterator);
                 let opt_map = remap(map);
                 (opt_iterator.is_some() || opt_map.is_some()).then(|| {
-                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
-                    let map = opt_map.unwrap_or_else(|| *map);
+                    let iterator = opt_iterator.unwrap_or(*iterator);
+                    let map = opt_map.unwrap_or(*map);
                     ExprKind::Map { iterator, map }
                 })
             }
@@ -2424,8 +2419,8 @@ impl ExprKind {
                 let opt_iterator = remap(iterator);
                 let opt_filter = remap(filter);
                 (opt_iterator.is_some() || opt_filter.is_some()).then(|| {
-                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
-                    let filter = opt_filter.unwrap_or_else(|| *filter);
+                    let iterator = opt_iterator.unwrap_or(*iterator);
+                    let filter = opt_filter.unwrap_or(*filter);
                     ExprKind::Filter { iterator, filter }
                 })
             }
@@ -2433,8 +2428,8 @@ impl ExprKind {
                 let opt_iter_a = remap(iter_a);
                 let opt_iter_b = remap(iter_b);
                 (opt_iter_a.is_some() || opt_iter_b.is_some()).then(|| {
-                    let iter_a = opt_iter_a.unwrap_or_else(|| *iter_a);
-                    let iter_b = opt_iter_b.unwrap_or_else(|| *iter_b);
+                    let iter_a = opt_iter_a.unwrap_or(*iter_a);
+                    let iter_b = opt_iter_b.unwrap_or(*iter_b);
                     ExprKind::Chain(iter_a, iter_b)
                 })
             }
@@ -2454,9 +2449,9 @@ impl ExprKind {
                     || opt_iterator.is_some()
                     || opt_reduction.is_some())
                 .then(|| {
-                    let initial = opt_initial.unwrap_or_else(|| *initial);
-                    let iterator = opt_iterator.unwrap_or_else(|| *iterator);
-                    let reduction = opt_reduction.unwrap_or_else(|| *reduction);
+                    let initial = opt_initial.unwrap_or(*initial);
+                    let iterator = opt_iterator.unwrap_or(*iterator);
+                    let reduction = opt_reduction.unwrap_or(*reduction);
                     ExprKind::Reduce {
                         initial,
                         iterator,
@@ -2477,9 +2472,9 @@ impl ExprKind {
                     || opt_extent.is_some()
                     || opt_reduction.is_some())
                 .then(|| {
-                    let initial = opt_initial.unwrap_or_else(|| *initial);
-                    let extent = opt_extent.unwrap_or_else(|| *extent);
-                    let reduction = opt_reduction.unwrap_or_else(|| *reduction);
+                    let initial = opt_initial.unwrap_or(*initial);
+                    let extent = opt_extent.unwrap_or(*extent);
+                    let reduction = opt_reduction.unwrap_or(*reduction);
                     ExprKind::SimpleReduce {
                         initial,
                         extent,
@@ -2504,9 +2499,9 @@ impl ExprKind {
             ExprKind::IndexAccess { obj, indices } => {
                 let opt_obj = remap(obj);
                 let requires_remap =
-                    opt_obj.is_some() || vec_requires_remap(&indices);
+                    opt_obj.is_some() || vec_requires_remap(indices);
                 requires_remap.then(|| {
-                    let obj = opt_obj.unwrap_or_else(|| *obj);
+                    let obj = opt_obj.unwrap_or(*obj);
                     let indices = indices.iter().map(remap_or_no_op).collect();
                     ExprKind::IndexAccess { obj, indices }
                 })
@@ -2514,7 +2509,7 @@ impl ExprKind {
             ExprKind::PrimCast { value, prim_type } => {
                 remap(value).map(|value| ExprKind::PrimCast {
                     value,
-                    prim_type: prim_type.clone(),
+                    prim_type: *prim_type,
                 })
             }
             ExprKind::SymbolicDowncast { obj, ty } => {
@@ -2531,8 +2526,8 @@ impl ExprKind {
                 let opt_dim = remap(dim);
                 let requires_remap = opt_array.is_some() || opt_dim.is_some();
                 (requires_remap).then(|| {
-                    let array = opt_array.unwrap_or_else(|| *array);
-                    let dim = opt_array.unwrap_or_else(|| *dim);
+                    let array = opt_array.unwrap_or(*array);
+                    let dim = opt_array.unwrap_or(*dim);
                     ExprKind::ArrayExtent { array, dim }
                 })
             }
@@ -2543,7 +2538,7 @@ impl ExprKind {
                 })
             }
             ExprKind::IsSome(value) => {
-                remap(value).map(|value| ExprKind::IsSome(value))
+                remap(value).map(ExprKind::IsSome)
             }
 
             ExprKind::IfElse {
@@ -2558,10 +2553,10 @@ impl ExprKind {
                     || opt_if_branch.is_some()
                     || opt_else_branch.is_some();
                 requires_remap.then(|| {
-                    let condition = opt_condition.unwrap_or_else(|| *condition);
-                    let if_branch = opt_if_branch.unwrap_or_else(|| *if_branch);
+                    let condition = opt_condition.unwrap_or(*condition);
+                    let if_branch = opt_if_branch.unwrap_or(*if_branch);
                     let else_branch =
-                        opt_else_branch.unwrap_or_else(|| *else_branch);
+                        opt_else_branch.unwrap_or(*else_branch);
                     ExprKind::IfElse {
                         condition,
                         if_branch,
@@ -2606,20 +2601,20 @@ impl ExprKind {
             } => remap(method_table_ptr).map(|method_table_ptr| {
                 ExprKind::IsSubclassOf {
                     method_table_ptr,
-                    ty: ty.clone(),
+                    ty: *ty,
                 }
             }),
 
             ExprKind::PhysicalDowncast { obj, ty } => {
                 remap(obj).map(|obj| ExprKind::PhysicalDowncast {
                     obj,
-                    ty: ty.clone(),
+                    ty: *ty,
                 })
             }
             ExprKind::ReadPrim { ptr, prim_type } => {
                 remap(ptr).map(|ptr| ExprKind::ReadPrim {
                     ptr,
-                    prim_type: prim_type.clone(),
+                    prim_type: *prim_type,
                 })
             }
             ExprKind::ReadBytes(regions) => {
@@ -2651,8 +2646,8 @@ impl ExprKind {
                 let requires_remap =
                     opt_bytes.is_some() || opt_offset.is_some();
                 requires_remap.then(|| {
-                    let bytes = opt_bytes.unwrap_or_else(|| *bytes);
-                    let offset = opt_offset.unwrap_or_else(|| *offset);
+                    let bytes = opt_bytes.unwrap_or(*bytes);
+                    let offset = opt_offset.unwrap_or(*offset);
                     ExprKind::CastBytes {
                         bytes,
                         offset,
@@ -2682,14 +2677,14 @@ impl ExprKind {
 
             // Dynamic number of upstream inputs
             ExprKind::Function { params, output } => {
-                ([Some(*output), None, None], Some(&params), None)
+                ([Some(*output), None, None], Some(params), None)
             }
             ExprKind::FunctionCall { func, args } => {
-                ([Some(*func), None, None], Some(&args), None)
+                ([Some(*func), None, None], Some(args), None)
             }
-            ExprKind::Tuple(items) => ([None, None, None], Some(&items), None),
+            ExprKind::Tuple(items) => ([None, None, None], Some(items), None),
             ExprKind::IndexAccess { obj, indices } => {
-                ([Some(*obj), None, None], Some(&indices), None)
+                ([Some(*obj), None, None], Some(indices), None)
             }
             ExprKind::ReadBytes(regions) => (
                 [None, None, None],
@@ -2778,7 +2773,7 @@ impl ExprKind {
         };
 
         let iter_static =
-            static_inputs.into_iter().filter_map(|opt_value| opt_value);
+            static_inputs.into_iter().flatten();
         let iter_dynamic_a = dynamic_inputs_a.into_iter().flatten().cloned();
         let iter_dynamic_b = dynamic_inputs_b.into_iter().flatten();
 

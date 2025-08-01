@@ -127,7 +127,7 @@ impl StepCountPredictor {
 /// how many PRNG rolls are consumed by the dish-of-the-day updates.
 fn is_allowed_dish_of_the_day(value: i32) -> bool {
     assert!(
-        194 <= value && value < 240,
+        (194..240).contains(&value),
         "Value {value} is outside allowed range \
          for the DishOfTheDay."
     );

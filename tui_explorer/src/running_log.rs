@@ -79,13 +79,13 @@ impl RunningLog {
 
         Regex::new("0x[0-9A-Fa-f]+")
             .expect("Invalid regex")
-            .find(&line)
+            .find(line)
             .map(|addr_match| addr_match.as_str())
             .map(|addr_str| {
                 usize::from_str_radix(&addr_str[2..], 16)
                     .expect("Conversion should succeed from prev regex")
             })
-            .map(|addr_usize| Pointer::new(addr_usize))
+            .map(Pointer::new)
     }
 
     fn jump_to_highlighted_address(
@@ -109,7 +109,7 @@ impl RunningLog {
     }
 }
 
-impl<'a> Widget for &'a mut RunningLog {
+impl Widget for &mut RunningLog {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

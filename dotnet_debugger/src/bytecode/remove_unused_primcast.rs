@@ -17,7 +17,7 @@ impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
         Ok(match expr {
             ExprKind::PrimCast { value, prim_type } => {
                 let value_type = self.0.infer_type(graph, *value)?;
-                (value_type == prim_type).then(|| *value)
+                (value_type == prim_type).then_some(*value)
             }
 
             _ => None,

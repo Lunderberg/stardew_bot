@@ -455,7 +455,7 @@ impl TryInto<usize> for RuntimePrimValue {
             Self::U16(val) => Ok(val as usize),
             Self::U32(val) => Ok(val as usize),
             Self::U64(val) => Ok(val as usize),
-            Self::NativeUInt(val) => Ok(val as usize),
+            Self::NativeUInt(val) => Ok(val),
             Self::I8(val) if val >= 0 => Ok(val as usize),
             Self::I16(val) if val >= 0 => Ok(val as usize),
             Self::I32(val) if val >= 0 => Ok(val as usize),

@@ -14,6 +14,12 @@ use super::{
 
 pub struct HarvestCropsGoal {}
 
+impl Default for HarvestCropsGoal {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HarvestCropsGoal {
     pub fn new() -> Self {
         Self {}

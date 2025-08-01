@@ -56,7 +56,7 @@ impl MemoryMapRegion {
     }
 
     pub fn name(&self) -> Option<&str> {
-        self.name.as_ref().map(|s| s.as_str())
+        self.name.as_deref()
     }
 
     pub fn short_name(&self) -> &str {

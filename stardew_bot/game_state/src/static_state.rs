@@ -548,7 +548,7 @@ impl StaticState {
         let seed = seed.as_ref();
         self.crop_data
             .get(seed)
-            .ok_or_else(|| Error::UnknownSeedKind(seed.clone()).into())
+            .ok_or_else(|| Error::UnknownSeedKind(seed.clone()))
     }
 }
 

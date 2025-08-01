@@ -70,9 +70,9 @@ impl Direction {
     }
 }
 
-impl Into<char> for Direction {
-    fn into(self) -> char {
-        match self {
+impl From<Direction> for char {
+    fn from(val: Direction) -> Self {
+        match val {
             Direction::North => '↑',
             Direction::NorthEast => '↗',
             Direction::East => '→',

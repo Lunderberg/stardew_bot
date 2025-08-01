@@ -264,7 +264,7 @@ impl GameState {
     pub fn requires_new_location_read(&self, delta: &GameStateDelta) -> bool {
         self.locations
             .iter()
-            .all(|loc| &loc.name != &delta.location_delta.name)
+            .all(|loc| loc.name != delta.location_delta.name)
     }
 
     pub fn apply_delta(&mut self, mut delta: GameStateDelta) {
@@ -294,7 +294,7 @@ impl GameState {
         if let Some(loc) = self
             .locations
             .iter_mut()
-            .find(|loc| &loc.name == &delta.location_delta.name)
+            .find(|loc| loc.name == delta.location_delta.name)
         {
             loc.apply_delta(delta.location_delta, player_pos);
         }
@@ -327,9 +327,7 @@ impl GameState {
         self.locations
             .iter()
             .find(|loc| loc.name == name)
-            .ok_or_else(|| Error::UnknownRoom(name.into()))
-            .map_err(Into::into)
-    }
+            .ok_or_else(|| Error::UnknownRoom(name.into()))}
 
     pub fn current_room(&self) -> Result<&Location, Error> {
         self.get_room(&self.player.room_name)
@@ -394,25 +392,25 @@ impl GameStateReader {
         &self,
         cache: CachedReader,
     ) -> Result<GameStateDelta, Error> {
-        Ok(self
+        self
             .vm
             .get_function("read_delta_state")?
             .with_reader(cache)
             .evaluate()?
             .take_obj(0)?
-            .ok_or(Error::ExpectedNonEmptyValue)?)
+            .ok_or(Error::ExpectedNonEmptyValue)
     }
 
     pub fn read_full_current_location(
         &self,
         cache: CachedReader,
     ) -> Result<Location, Error> {
-        Ok(self
+        self
             .vm
             .get_function("read_full_current_location")?
             .with_reader(cache)
             .evaluate()?
             .take_obj(0)?
-            .ok_or(Error::ExpectedNonEmptyValue)?)
+            .ok_or(Error::ExpectedNonEmptyValue)
     }
 }

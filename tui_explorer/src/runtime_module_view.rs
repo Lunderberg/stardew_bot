@@ -35,7 +35,7 @@ impl RuntimeModuleView {
                 let name =
                     module.dll_region_info(&reader)?.short_name().to_string();
                 let loaded_types = module
-                    .loaded_types(&reader)?
+                    .loaded_types(reader)?
                     .into_iter()
                     .map(Ok)
                     .and_flat_map_ok(|loaded_types| {
@@ -135,7 +135,7 @@ impl WidgetWindow<Error> for RuntimeModuleView {
                                                 i_line -= module.num_lines();
                                             }
                                         }
-                                        return Vec::new();
+                                        Vec::new()
                                     },
                                 )
                                 .then(|| {

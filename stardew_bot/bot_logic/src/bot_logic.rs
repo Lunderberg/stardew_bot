@@ -188,33 +188,33 @@ impl ActionForbiddenUntil {
             .inputs
             .keys_pressed
             .contains(&Key::X)
-            .then(|| tick);
+            .then_some(tick);
         let confirm_menu = game_state
             .inputs
             .keys_pressed
             .contains(&Key::Y)
-            .then(|| tick);
+            .then_some(tick);
         let animation_cancel = game_state
             .inputs
             .keys_pressed
             .iter()
             .any(|key| matches!(key, Key::Delete | Key::RightShift | Key::R))
-            .then(|| tick);
+            .then_some(tick);
         let exit_menu = game_state
             .inputs
             .keys_pressed
             .contains(&Key::Escape)
-            .then(|| tick);
+            .then_some(tick);
 
         let scroll_up = (game_state.inputs.scroll_wheel
             == Some(ScrollWheel::ScrollingUp))
-        .then(|| tick);
+        .then_some(tick);
         let scroll_down = (game_state.inputs.scroll_wheel
             == Some(ScrollWheel::ScrollingDown))
-        .then(|| tick);
+        .then_some(tick);
 
-        let left_click = game_state.inputs.left_mouse_down().then(|| tick);
-        let right_click = game_state.inputs.right_mouse_down().then(|| tick);
+        let left_click = game_state.inputs.left_mouse_down().then_some(tick);
+        let right_click = game_state.inputs.right_mouse_down().then_some(tick);
 
         Self {
             activate_tile,
@@ -908,6 +908,12 @@ impl BotLogic {
             LogicStackItem::Goal(bot_goal) => Some(bot_goal.as_ref()),
             _ => None,
         })
+    }
+}
+
+impl Default for LogicStack {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
