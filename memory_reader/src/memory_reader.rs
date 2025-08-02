@@ -275,6 +275,7 @@ impl MemoryReader {
         let write_file = OpenOptions::new()
             .write(true)
             .create(true)
+            .truncate(true)
             .open(filename.into())
             .expect("Could not open output file");
         let mut writer = BufWriter::new(write_file);
@@ -339,7 +340,7 @@ impl MemoryReader {
 
     pub fn print_stack(&self) -> Result<()> {
         self.read_stack()?
-            .into_iter()
+            .into_iter_bytes()
             .iter_as::<MemoryValue<Pointer>>()
             .for_each(|value| {
                 let as_pointer: Pointer = value.value;
@@ -372,7 +373,7 @@ impl MemoryReader {
         let stack = self.read_stack()?;
 
         Ok(stack
-            .into_iter()
+            .into_iter_bytes()
             .iter_as::<MemoryValue<Pointer>>()
             .filter_map(|ptr_ptr| {
                 self.find_containing_region(ptr_ptr.value)
@@ -385,11 +386,12 @@ impl MemoryReader {
     ) -> Result<impl Iterator<Item = MemoryValue<Pointer>> + '_> {
         let stack = self.read_stack()?;
 
-        Ok(stack.into_iter().iter_as::<MemoryValue<Pointer>>().filter(
-            |ptr_ptr: &MemoryValue<Pointer>| -> bool {
+        Ok(stack
+            .into_iter_bytes()
+            .iter_as::<MemoryValue<Pointer>>()
+            .filter(|ptr_ptr: &MemoryValue<Pointer>| -> bool {
                 self.find_containing_region(ptr_ptr.value).is_some()
-            },
-        ))
+            }))
     }
 
     pub fn potential_frame_pointers(

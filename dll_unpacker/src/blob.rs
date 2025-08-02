@@ -61,8 +61,8 @@ impl<'a> UnpackedBlob<'a> {
     }
 }
 
-impl<'a> Into<Range<Pointer>> for UnpackedBlob<'a> {
-    fn into(self) -> Range<Pointer> {
-        self.bytes.into()
+impl<'a> From<UnpackedBlob<'a>> for Range<Pointer> {
+    fn from(value: UnpackedBlob<'a>) -> Self {
+        value.bytes.into()
     }
 }

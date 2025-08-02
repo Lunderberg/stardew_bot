@@ -478,22 +478,22 @@ impl<'a> SymbolicParser<'a> {
                     token.kind.is_punct(Punctuation::DoublePeriod)
                 })?
                 .is_some()
-            {
-                match expr {
-                    SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)) => {
-                        // Ranges must all start with zero.
-                    }
-                    _ => {
-                        return Err(
-                            ParseError::RangeExpressionsMustStartAtZero.into(),
-                        );
-                    }
+        {
+            match expr {
+                SymbolicValue::Const(RuntimePrimValue::NativeUInt(0)) => {
+                    // Ranges must all start with zero.
                 }
-                let extent =
-                    self.expect_expr_op_precedence(OpPrecedence::RangeExtent)?;
-                expr = self.graph.range(extent);
-                upper_bound = OpPrecedence::RangeExtent;
+                _ => {
+                    return Err(
+                        ParseError::RangeExpressionsMustStartAtZero.into()
+                    );
+                }
             }
+            let extent =
+                self.expect_expr_op_precedence(OpPrecedence::RangeExtent)?;
+            expr = self.graph.range(extent);
+            upper_bound = OpPrecedence::RangeExtent;
+        }
 
         if precedence < OpPrecedence::TupleElement
             && OpPrecedence::TupleElement < upper_bound
@@ -739,8 +739,6 @@ impl<'a> SymbolicParser<'a> {
         name: &'a str,
         value: SymbolicValue,
     ) -> Result<(), Error> {
-        let name = name;
-
         if SymbolicGraph::is_reserved_name(name) {
             // The variable name is a reserved name.  It may be an
             // anonymous placeholder, or it may be an actual name,

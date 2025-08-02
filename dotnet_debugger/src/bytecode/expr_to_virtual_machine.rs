@@ -347,8 +347,7 @@ impl SymbolicGraph {
                 let OpIndex(i) = index_used;
                 let definition_scope = operation_to_scope[i];
                 std::iter::successors(Some(used_in_scope), |scope| {
-                    scope_lookup
-                        .get(scope).map(|info| info.parent_scope)
+                    scope_lookup.get(scope).map(|info| info.parent_scope)
                 })
                 .take_while(move |scope| {
                     *scope != Scope::Global && *scope != definition_scope
@@ -679,12 +678,13 @@ impl<'a> LastUsageCollector<'a> {
                     {
                         for index in &encountered_if {
                             if encountered.contains(index)
-                                && !encountered_else.contains(index) {
-                                    last_usage.push(LastUsage {
-                                        usage_point: start_of_else,
-                                        expr_used: *index,
-                                    })
-                                }
+                                && !encountered_else.contains(index)
+                            {
+                                last_usage.push(LastUsage {
+                                    usage_point: start_of_else,
+                                    expr_used: *index,
+                                })
+                            }
                         }
                     }
 
@@ -693,12 +693,13 @@ impl<'a> LastUsageCollector<'a> {
                     {
                         for index in &encountered_else {
                             if encountered.contains(index)
-                                && !encountered_if.contains(index) {
-                                    last_usage.push(LastUsage {
-                                        usage_point: start_of_if,
-                                        expr_used: *index,
-                                    });
-                                }
+                                && !encountered_if.contains(index)
+                            {
+                                last_usage.push(LastUsage {
+                                    usage_point: start_of_if,
+                                    expr_used: *index,
+                                });
+                            }
                         }
                     }
 
@@ -1208,11 +1209,11 @@ impl ExpressionTranslator<'_> {
     /// Translate a scoped expression
     ///
     /// * `op_index`: The index of the expression that requires the
-    ///       scoped.  (e.g. A `FunctionCall`, `IfElse`, or
-    ///       `SimpleReduce` expression)
+    ///   scoped.  (e.g. A `FunctionCall`, `IfElse`, or `SimpleReduce`
+    ///   expression)
     ///
     /// * `value`: The value that should be produced as the output of
-    ///       the scope.
+    ///   the scope.
     ///
     /// * `out_index`: The index to which `value` should be written.
     ///

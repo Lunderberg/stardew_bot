@@ -166,7 +166,7 @@ impl<'a> Metadata<'a> {
             .for_each(|(table_kind, i_row, ptr_range)| {
                 annotator
                     .range(ptr_range)
-                    .name(format!("{}[{}]", table_kind, i_row));
+                    .name(format!("{table_kind}[{i_row}]"));
             });
 
         self.module_table()

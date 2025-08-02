@@ -416,10 +416,7 @@ impl MethodTable {
                 let is_non_instantiated_generic = match type_handle {
                     TypeHandle::MethodTable(_) => false,
                     TypeHandle::TypeDescription(type_desc) => {
-                        match type_desc.element_type() {
-                            CorElementType::Var => true,
-                            _ => false,
-                        }
+                        matches!(type_desc.element_type(), CorElementType::Var)
                     }
                 };
 

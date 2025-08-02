@@ -1,7 +1,7 @@
-/// Numeric traits
-///
-/// These are used instead of `num_traits`, as its corresponding
-/// traits require that `RHS` and `Output` are `Self`.
+//! Numeric traits
+//!
+//! These are used instead of `num_traits`, as its corresponding
+//! traits require that `RHS` and `Output` are `Self`.
 
 pub trait CheckedAdd<RHS = Self> {
     type Output;

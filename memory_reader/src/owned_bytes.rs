@@ -32,6 +32,10 @@ impl OwnedBytes {
         self.bytes.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.bytes.is_empty()
+    }
+
     pub fn start(&self) -> Pointer {
         self.start
     }

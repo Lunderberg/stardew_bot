@@ -69,10 +69,7 @@ impl<T> std::ops::Deref for TypedPointer<T> {
 
 impl<T> Clone for TypedPointer<T> {
     fn clone(&self) -> Self {
-        Self {
-            ptr: self.ptr,
-            _phantom: PhantomData,
-        }
+        *self
     }
 }
 impl<T> Copy for TypedPointer<T> {}

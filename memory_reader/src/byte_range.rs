@@ -50,7 +50,7 @@ impl<'a> ByteRange<'a> {
     }
 
     pub fn contains_range(&self, range: impl NormalizeRange) -> bool {
-        let range: Range<Pointer> = range.as_ptr(self.ptr_range());
+        let range: Range<Pointer> = range.normalize_to_ptr(self.ptr_range());
         self.start <= range.start && range.end <= self.end()
     }
 
@@ -131,7 +131,7 @@ impl<'a> ByteRange<'a> {
     }
 
     pub fn subrange(&self, range: impl NormalizeRange) -> Self {
-        let range = range.as_offset(self.start..self.end());
+        let range = range.normalize_to_offset(self.start..self.end());
         Self {
             start: self.start + range.start,
             bytes: &self.bytes[range],
@@ -147,7 +147,7 @@ impl<'a> ByteRange<'a> {
     }
 
     pub fn address_range(&self, range: impl NormalizeRange) -> Range<Pointer> {
-        range.as_ptr(self.start..self.end())
+        range.normalize_to_ptr(self.start..self.end())
     }
 }
 

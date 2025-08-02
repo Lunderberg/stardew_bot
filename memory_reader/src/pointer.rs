@@ -12,7 +12,7 @@ pub struct Pointer {
 impl std::cmp::PartialOrd for Pointer {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        self.address.partial_cmp(&other.address)
+        Some(self.address.cmp(&other.address))
     }
 }
 

@@ -501,7 +501,10 @@ macro_rules! decl_metadata_table {
                 pub(crate) fn [< $field_name _unpacked >](
                     &self,
                 ) -> Result<UnpackedValue<$field_type>, Error> {
-                    Ok(self.get_field_bytes($field_index).unpack()?)
+                    self
+                        .get_field_bytes($field_index)
+                        .unpack()
+                        .map_err(Into::into)
                 }
 
                 pub fn $field_name(&self) -> Result<$field_type, Error> {
@@ -1281,7 +1284,7 @@ impl<'a> MetadataTypeDefOrRef<'a> {
                 (row.namespace()?, row.name()?.to_string())
             }
             MetadataTypeDefOrRef::TypeSpec(spec) => {
-                ("", format!("{}", spec.signature()?).into())
+                ("", format!("{}", spec.signature()?))
             }
         };
 
@@ -1525,9 +1528,9 @@ impl<TableTag> MetadataTableIndex<TableTag> {
     }
 }
 
-impl<TableTag> Into<usize> for MetadataTableIndex<TableTag> {
-    fn into(self) -> usize {
-        self.index
+impl<TableTag> From<MetadataTableIndex<TableTag>> for usize {
+    fn from(value: MetadataTableIndex<TableTag>) -> Self {
+        value.index
     }
 }
 
@@ -1632,8 +1635,7 @@ impl<'a> DLLUnpacker<'a> {
 
         let addr = self.virtual_address_to_raw(data_dir.rva)?;
 
-        let size = data_dir.size as usize;
-        let bytes = self.bytes.subrange(addr..addr + size);
+        let bytes = self.bytes.subrange(addr..addr + data_dir.size);
         Ok(ClrRuntimeHeader { bytes })
     }
 
@@ -1641,7 +1643,7 @@ impl<'a> DLLUnpacker<'a> {
         let clr_runtime_header = self.clr_runtime_header()?;
         let metadata_range = clr_runtime_header.metadata_range()?.value();
         let raw_start = self.virtual_address_to_raw(metadata_range.rva)?;
-        let num_bytes = metadata_range.size as usize;
+        let num_bytes = metadata_range.size;
         let bytes = self.bytes.subrange(raw_start..raw_start + num_bytes);
         Ok(RawCLRMetadata { bytes })
     }
@@ -1938,7 +1940,7 @@ impl<'a> MetadataTableHeader<'a> {
                 };
                 let kind = match MetadataTableKind::from_bit_index(i_bit) {
                     Ok(val) => val,
-                    Err(err) => return Some(Err(err.into())),
+                    Err(err) => return Some(Err(err)),
                 };
                 Some(Ok((num_rows, kind)))
             });
@@ -1989,7 +1991,7 @@ impl<'a> MetadataTableHeader<'a> {
                     .table_options()
                     .iter()
                     .cloned()
-                    .filter_map(|opt_index| opt_index)
+                    .flatten()
                     .map(|index| num_rows[index])
                     .max()
                     .expect("Coded index must contain at least one index.");
@@ -2238,8 +2240,8 @@ impl<'a> Metadata<'a> {
         Ok(Some(full_name))
     }
 
-    pub fn location_of<'b, Index>(
-        &'b self,
+    pub fn location_of<Index>(
+        &self,
         index: Index,
     ) -> Result<Range<Pointer>, Error>
     where
@@ -2620,7 +2622,7 @@ impl MetadataLayout {
 impl EnumKey for MetadataHeapKind {
     const N: usize = 3;
 
-    fn as_index(self) -> usize {
+    fn into_index(self) -> usize {
         match self {
             Self::String => 0,
             Self::GUID => 1,
@@ -2636,7 +2638,7 @@ impl EnumKey for MetadataHeapKind {
 impl EnumKey for MetadataTableKind {
     const N: usize = 38;
 
-    fn as_index(self) -> usize {
+    fn into_index(self) -> usize {
         match self {
             Self::Module => 0,
             Self::TypeRef => 1,
@@ -2727,7 +2729,7 @@ impl EnumKey for MetadataTableKind {
 impl EnumKey for MetadataCodedIndexKind {
     const N: usize = 13;
 
-    fn as_index(self) -> usize {
+    fn into_index(self) -> usize {
         match self {
             Self::TypeDefOrRef => 0,
             Self::HasConstant => 1,
@@ -2768,16 +2770,16 @@ impl EnumKey for MetadataCodedIndexKind {
 impl EnumKey for MetadataIndexKind {
     const N: usize = 3 + 38 + 13;
 
-    fn as_index(self) -> usize {
+    fn into_index(self) -> usize {
         match self {
-            Self::Heap(heap_kind) => heap_kind.as_index(),
+            Self::Heap(heap_kind) => heap_kind.into_index(),
             Self::Table(table_kind) => {
-                MetadataHeapKind::N + table_kind.as_index()
+                MetadataHeapKind::N + table_kind.into_index()
             }
             Self::CodedIndex(coded_index_kind) => {
                 MetadataTableKind::N
                     + MetadataHeapKind::N
-                    + coded_index_kind.as_index()
+                    + coded_index_kind.into_index()
             }
         }
     }
@@ -2888,9 +2890,7 @@ impl<'a, TableTag> MetadataTable<'a, TableTag> {
 
     pub fn iter_rows(
         self,
-    ) -> impl Iterator<Item = MetadataRow<'a, TableTag>>
-           + DoubleEndedIterator
-           + ExactSizeIterator
+    ) -> impl DoubleEndedIterator<Item = MetadataRow<'a, TableTag>> + ExactSizeIterator
     where
         TableTag: MetadataTableTag,
     {

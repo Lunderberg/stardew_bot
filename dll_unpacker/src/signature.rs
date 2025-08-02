@@ -226,7 +226,7 @@ impl<'a> Signature<'a> {
 
     fn unpacker(&self) -> SignatureDecompressor<'a> {
         SignatureDecompressor {
-            bytes: self.bytes.clone(),
+            bytes: self.bytes,
             verbose: false,
             offset: 0,
             metadata: self.metadata,
@@ -503,7 +503,7 @@ impl<'a> SignatureDecompressor<'a> {
 
                 let num_type_args = self.next_unsigned()?;
                 let type_args = (0..num_type_args)
-                    .map(|_| self.next_type().map(|ty| Box::new(ty)))
+                    .map(|_| self.next_type().map(Box::new))
                     .collect::<Result<_, _>>()?;
 
                 SignatureType::GenericInst {
@@ -620,7 +620,7 @@ impl TryFrom<u32> for ElementType {
 impl<'a> std::fmt::Display for Signature<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut iter = SignatureDecompressor {
-            bytes: self.bytes.clone(),
+            bytes: self.bytes,
             verbose: false,
             offset: 0,
             metadata: self.metadata,

@@ -14,7 +14,7 @@ pub struct EnumMap<Key, Value> {
 pub trait EnumKey: Sized {
     const N: usize;
 
-    fn as_index(self) -> usize;
+    fn into_index(self) -> usize;
 
     fn iter_keys() -> impl Iterator<Item = Self>;
 }
@@ -56,7 +56,7 @@ where
     type Output = Value;
 
     fn index(&self, index: Index) -> &Self::Output {
-        &self.values[index.into().as_index()]
+        &self.values[index.into().into_index()]
     }
 }
 
@@ -66,6 +66,6 @@ where
     Index: Into<Key>,
 {
     fn index_mut(&mut self, index: Index) -> &mut Self::Output {
-        &mut self.values[index.into().as_index()]
+        &mut self.values[index.into().into_index()]
     }
 }

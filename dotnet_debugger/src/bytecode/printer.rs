@@ -274,9 +274,7 @@ impl<'a> GraphPrinter<'a> {
                 .iter_ops()
                 .filter(|(index, _)| reachable[index.0])
                 .for_each(|(index, op)| {
-                    if let Some(name) =
-                        op.name.as_deref()
-                    {
+                    if let Some(name) = op.name.as_deref() {
                         if let Some(prev_index) = name_lookup.get(name) {
                             requires_name_prefix[index.0] = true;
                             requires_name_prefix[prev_index.0] = true;
@@ -586,8 +584,10 @@ impl<'a> GraphPrinter<'a> {
 
                     macro_rules! handle_binary_op {
                         ($op:literal, $precedence:expr, $lhs:expr, $rhs:expr) => {{
-                            let requires_paren =
-                                !($precedence >= parent_precedence);
+                            let requires_paren = matches!(
+                                $precedence.partial_cmp(&parent_precedence),
+                                None | Some(std::cmp::Ordering::Less)
+                            );
 
                             std::iter::empty()
                                 .chain(

@@ -24,6 +24,14 @@ use crate::{
     RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
 };
 
+type CachedTypeDef = (TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>);
+
+type FieldLookupKey = (
+    TypedPointer<MethodTable>, // Parent's method table
+    TypedPointer<MethodTable>, // Field's method table
+    MetadataTableIndex<Field>,
+);
+
 /// Cache containing known state of the remote process.  Only values
 /// that are stable across the lifetime of the remote process should
 /// be stored here.  For example, the location of a static field may
@@ -48,19 +56,9 @@ pub struct StaticValueCache {
         FrozenMap<TypeInModule, Box<TypedPointer<MethodTable>>>,
     method_table_by_name: FrozenMap<String, Box<TypedPointer<MethodTable>>>,
 
-    module_defining_type: FrozenMap<
-        TypeInModule,
-        Box<(TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>)>,
-    >,
+    module_defining_type: FrozenMap<TypeInModule, Box<CachedTypeDef>>,
 
-    field_to_runtime_type: FrozenMap<
-        (
-            TypedPointer<MethodTable>, // Parent's method table
-            TypedPointer<MethodTable>, // Field's method table
-            MetadataTableIndex<Field>,
-        ),
-        Box<RuntimeType>,
-    >,
+    field_to_runtime_type: FrozenMap<FieldLookupKey, Box<RuntimeType>>,
     field_to_type_name: FrozenMap<
         (TypedPointer<MethodTable>, MetadataTableIndex<Field>),
         Box<String>,
@@ -273,13 +271,12 @@ impl<'a> CachedReader<'a> {
         })?;
 
         // Read each module, populating the cache for later use.
-        module_pointers
-            .into_iter()
-            .flatten()
-            .try_for_each(|ptr| -> Result<_, Error> {
+        module_pointers.into_iter().flatten().try_for_each(
+            |ptr| -> Result<_, Error> {
                 self.runtime_module(ptr)?;
                 Ok(())
-            })?;
+            },
+        )?;
 
         Ok(())
     }
@@ -644,7 +641,8 @@ impl<'a> CachedReader<'a> {
                     )));
                 }
 
-                let ptr_to_loader_module = type_args.first()
+                let ptr_to_loader_module = type_args
+                    .first()
                     .map(|arg| -> Result<_, Error> {
                         self.ptr_to_loader_module(module_ptr, arg.deref())
                     })

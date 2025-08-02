@@ -611,7 +611,8 @@ impl SymbolicGraph {
     pub fn is_reserved_name(name: &str) -> bool {
         name.starts_with('_')
             && name
-                .chars().nth(1)
+                .chars()
+                .nth(1)
                 .map(|c| c.is_ascii_digit())
                 .unwrap_or(true)
     }
@@ -1338,7 +1339,6 @@ impl SymbolicGraph {
     /// `Scope::IfBranch(if_else_index)`: The expression is used by
     /// the if branch of the `ExprKind::IfElse` declared at
     /// `if_else_index`, and is not used by any other
-
     pub(crate) fn operation_scope(&self, reachable: &[bool]) -> Vec<Scope> {
         assert_eq!(reachable.len(), self.ops.len());
 
@@ -1356,16 +1356,18 @@ impl SymbolicGraph {
         self.iter_ops()
             .rev()
             .filter(|(OpIndex(i), _)| reachable[*i])
-            .for_each(|(func_index, op)| if let ExprKind::Function { params, output } = &op.kind {
-                self.collect_subgraph(
-                    params.iter().cloned(),
-                    Some(*output),
-                )
-                .into_iter()
-                .for_each(|index| {
-                    outermost_legal_scope[index.0] =
-                        Scope::Function(func_index);
-                });
+            .for_each(|(func_index, op)| {
+                if let ExprKind::Function { params, output } = &op.kind {
+                    self.collect_subgraph(
+                        params.iter().cloned(),
+                        Some(*output),
+                    )
+                    .into_iter()
+                    .for_each(|index| {
+                        outermost_legal_scope[index.0] =
+                            Scope::Function(func_index);
+                    });
+                }
             });
 
         // Step 2: Visit each expression in reverse order of
@@ -1786,11 +1788,9 @@ impl SymbolicGraph {
             let opt_remapped = op.kind.try_remap(rewrites_applied);
             let kind = opt_remapped.as_ref().unwrap_or(&op.kind);
 
-            let opt_new_value = if let Some(rewritten) = rewriter.rewrite_expr(
-                self,
-                kind,
-                op.name.as_deref(),
-            )? {
+            let opt_new_value = if let Some(rewritten) =
+                rewriter.rewrite_expr(self, kind, op.name.as_deref())?
+            {
                 if let Some(name) = &op.name {
                     if let SymbolicValue::Result(new_index) = rewritten {
                         if self[new_index].name.is_none() {
@@ -2537,9 +2537,7 @@ impl ExprKind {
                     ty: ty.clone(),
                 })
             }
-            ExprKind::IsSome(value) => {
-                remap(value).map(ExprKind::IsSome)
-            }
+            ExprKind::IsSome(value) => remap(value).map(ExprKind::IsSome),
 
             ExprKind::IfElse {
                 condition,
@@ -2555,8 +2553,7 @@ impl ExprKind {
                 requires_remap.then(|| {
                     let condition = opt_condition.unwrap_or(*condition);
                     let if_branch = opt_if_branch.unwrap_or(*if_branch);
-                    let else_branch =
-                        opt_else_branch.unwrap_or(*else_branch);
+                    let else_branch = opt_else_branch.unwrap_or(*else_branch);
                     ExprKind::IfElse {
                         condition,
                         if_branch,
@@ -2605,12 +2602,8 @@ impl ExprKind {
                 }
             }),
 
-            ExprKind::PhysicalDowncast { obj, ty } => {
-                remap(obj).map(|obj| ExprKind::PhysicalDowncast {
-                    obj,
-                    ty: *ty,
-                })
-            }
+            ExprKind::PhysicalDowncast { obj, ty } => remap(obj)
+                .map(|obj| ExprKind::PhysicalDowncast { obj, ty: *ty }),
             ExprKind::ReadPrim { ptr, prim_type } => {
                 remap(ptr).map(|ptr| ExprKind::ReadPrim {
                     ptr,
@@ -2772,8 +2765,7 @@ impl ExprKind {
             ),
         };
 
-        let iter_static =
-            static_inputs.into_iter().flatten();
+        let iter_static = static_inputs.into_iter().flatten();
         let iter_dynamic_a = dynamic_inputs_a.into_iter().flatten().cloned();
         let iter_dynamic_b = dynamic_inputs_b.into_iter().flatten();
 

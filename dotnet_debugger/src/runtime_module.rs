@@ -182,7 +182,9 @@ impl RuntimeModule {
         // range of `dll_method_defs` gives a ~3x performance
         // improvement for this function, by skipping the hash
         // altogether.
-        let method_def_range: Range<Pointer> = dll_method_defs.keys().copied()
+        let method_def_range: Range<Pointer> = dll_method_defs
+            .keys()
+            .copied()
             .minmax()
             .into_option()
             .map(|(a, b)| a..b)
@@ -318,7 +320,7 @@ impl RuntimeModule {
     /// * metadata: The unpacked metadata for the DLL to be located.
     ///
     /// * module_vtable_loc: The location of the module's vtable, if
-    /// present.
+    ///   present.
     ///
     /// * reader: The memory reader to inspect the running subprocess.
     pub fn locate(
@@ -416,15 +418,11 @@ impl RuntimeModule {
                 .zip(num_type_defs.iter())
                 .and_all(|(bytes, num_type_defs)| -> Result<_, Error> {
                     let p_next: Pointer = bytes
-                        .subrange(
-                            offset + Pointer::SIZE * 0
-                                ..offset + Pointer::SIZE,
-                        )
+                        .subrange(offset..offset + Pointer::SIZE)
                         .unpack()?;
                     let p_table: Pointer = bytes
                         .subrange(
-                            offset + Pointer::SIZE
-                                ..offset + Pointer::SIZE * 2,
+                            offset + Pointer::SIZE..offset + Pointer::SIZE * 2,
                         )
                         .unpack()?;
                     let dw_count: u32 = bytes
@@ -943,7 +941,9 @@ impl MethodTableLookup {
         reader: &'a MemoryReader,
     ) -> impl Iterator<Item = Result<MethodTable, Error>> + 'a {
         self.method_tables
-            .iter().filter(|&ptr| !ptr.start.is_null()).cloned()
+            .iter()
+            .filter(|&ptr| !ptr.start.is_null())
+            .cloned()
             .map(move |location| {
                 let bytes = reader.read_bytes(location)?;
                 Ok(MethodTable { bytes })
@@ -1068,19 +1068,19 @@ impl LoadedParamTypes {
         impl Iterator<Item = Result<LoadedParamTypeEntry, Error>> + 'a,
         Error,
     > {
-        let iter = self
-            .iter_bucket_ptrs(reader)?
-            .flatten()
-            .flat_map(move |ptr| {
-                std::iter::successors(Some(ptr.read(reader)), |res_entry| {
-                    match res_entry {
-                        Ok(entry) => {
-                            entry.next_entry().map(|next| next.read(reader))
+        let iter =
+            self.iter_bucket_ptrs(reader)?
+                .flatten()
+                .flat_map(move |ptr| {
+                    std::iter::successors(Some(ptr.read(reader)), |res_entry| {
+                        match res_entry {
+                            Ok(entry) => {
+                                entry.next_entry().map(|next| next.read(reader))
+                            }
+                            Err(_) => None,
                         }
-                        Err(_) => None,
-                    }
-                })
-            });
+                    })
+                });
 
         Ok(iter)
     }

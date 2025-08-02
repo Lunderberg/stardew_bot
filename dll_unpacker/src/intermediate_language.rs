@@ -76,7 +76,7 @@ impl<'a> CILMethod<'a> {
                 let mut remaining = self.bytes.subrange(padded_end..);
 
                 let iter = std::iter::from_fn(move || {
-                    if remaining.len() == 0 {
+                    if remaining.is_empty() {
                         return None;
                     }
 
@@ -183,8 +183,8 @@ impl<'a> CILFatMethodHeader<'a> {
 impl<'a> std::fmt::Display for CILMethodHeader<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            CILMethodHeader::Tiny(header) => write!(f, "{}", header),
-            CILMethodHeader::Fat(header) => write!(f, "{}", header),
+            CILMethodHeader::Tiny(header) => write!(f, "{header}"),
+            CILMethodHeader::Fat(header) => write!(f, "{header}"),
         }
     }
 }
