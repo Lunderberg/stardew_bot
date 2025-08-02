@@ -649,11 +649,16 @@ impl BotLogic {
             assert!(
                 !self.recursed_during_current_update.contains(&i_goal),
                 "Infinite loop detected: \
-                 Current goal '{0}' has already executed on this frame, \
+                 Current goal '{}' has already executed on this frame, \
                  and previously produced subgoals.  \
                  If it runs again, it will produce those same subgoals, \
-                 in an infinite loop.",
+                 in an infinite loop.\n\
+                 Current stack:\n\t{}",
                 current_goal.description(),
+                self.stack
+                    .iter()
+                    .map(|item| item.description())
+                    .format("\n\t")
             );
 
             let num_actions_before = actions.actions.len();
