@@ -506,7 +506,7 @@ pub trait ItemLookupExt {
     fn iter_items_with_quality<ItemType>(
         &self,
         item: ItemType,
-    ) -> impl Iterator<Item = Item> + use<Self, ItemType>
+    ) -> impl Iterator<Item = (ItemId, usize)> + use<Self, ItemType>
     where
         ItemType: detail::ItemOrItemRef;
 
@@ -528,7 +528,7 @@ impl ItemLookupExt for HashMap<ItemId, usize> {
     fn iter_items_with_quality<ItemType>(
         &self,
         item: ItemType,
-    ) -> impl Iterator<Item = Item> + use<ItemType>
+    ) -> impl Iterator<Item = (ItemId, usize)> + use<ItemType>
     where
         ItemType: detail::ItemOrItemRef,
     {
@@ -551,10 +551,7 @@ impl ItemLookupExt for HashMap<ItemId, usize> {
                 *count = new_count;
             });
 
-        counts
-            .into_iter()
-            .filter(|(_, count)| *count > 0)
-            .map(|(id, count)| id.with_count(count))
+        counts.into_iter().filter(|(_, count)| *count > 0)
     }
 
     fn item_count_with_exact_quality(&self, id: &ItemId) -> usize {

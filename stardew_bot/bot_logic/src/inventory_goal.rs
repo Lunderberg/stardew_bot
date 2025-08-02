@@ -288,9 +288,11 @@ impl InventoryGoal {
             let subgoal = InventoryGoal::current()
                 .room(self.room.clone())
                 .with(iter_ingredients().flat_map(|(ingredient, count)| {
-                    available.iter_items_with_quality(
-                        ingredient.with_count(num_to_craft * count),
-                    )
+                    available
+                        .iter_items_with_quality(
+                            ingredient.with_count(num_to_craft * count),
+                        )
+                        .map(|(id, count)| id.with_count(count))
                 }));
             if !subgoal.is_completed(game_state)? {
                 return Ok(Some(subgoal.into()));
