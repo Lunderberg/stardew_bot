@@ -10,7 +10,9 @@ use crate::{
     bot_logic::LogicStack, Error, GameAction, ItemIterExt as _,
     ItemLookupExt as _, MenuCloser,
 };
-use game_state::{GameState, Item, ItemId, ItemSet, Location, WeaponKind};
+use game_state::{
+    GameState, Item, ItemCategory, ItemId, ItemSet, Location, WeaponKind,
+};
 
 use super::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
@@ -47,6 +49,10 @@ pub struct InventoryGoal {
     /// If true, try to use this many slots to hold items to eat for
     /// stamina recovery.
     stamina_recovery_slots: usize,
+
+    /// Categories of items to be picked up.  If an item is required
+    /// for a bundle, it will not be picked up by category.
+    with_categories: Vec<ItemCategory>,
 
     /// If true, keep the best weapon in the inventory.
     with_weapon: bool,
@@ -126,6 +132,7 @@ impl InventoryGoal {
             keep_if: None,
             take_if: None,
             stamina_recovery_slots: 0,
+            with_categories: Vec::new(),
             with_weapon: false,
             craft_missing: false,
             tick_decided_to_gather_items: None,
@@ -176,6 +183,11 @@ impl InventoryGoal {
                 },
             );
         }
+        self
+    }
+
+    pub fn with_category(mut self, category: ItemCategory) -> Self {
+        self.with_categories.push(category);
         self
     }
 
@@ -393,6 +405,28 @@ impl InventoryGoal {
         )
         .map(|item| &item.id);
 
+        let is_desired_category = |item: &Item| -> bool {
+            let explicitly_stored = matches!(
+                self.bounds.get(&item.id).map(|bounds| bounds.max),
+                Some(Some(0))
+            );
+
+            let is_correct_category = item
+                .category
+                .as_ref()
+                .map(|item_category| {
+                    self.with_categories.iter().any(|desired_category| {
+                        item_category == desired_category
+                    })
+                })
+                .unwrap_or(false);
+
+            let num_reserved = reserved_items.item_count(&item.id);
+            let exceeds_num_reserved = item.count > num_reserved;
+
+            is_correct_category && exceeds_num_reserved && !explicitly_stored
+        };
+
         // Items that should be transferred from the player to a
         // chest.  Values are the desired number of items in the
         // player's inventory after the tranfer.
@@ -448,6 +482,13 @@ impl InventoryGoal {
                         .statics
                         .enrich_item(item.clone().into())
                         .with_count(*count);
+
+                    if is_desired_category(&full_item) {
+                        // This item is from a desired category, so keep
+                        // it.
+                        break 'opt_new_count None;
+                    }
+
                     if let Some(keep_if) = &self.keep_if {
                         if keep_if(&full_item) {
                             // This item passes the check to be kept
@@ -644,6 +685,39 @@ impl InventoryGoal {
                 // stamina, so it should be taken from the chest.
                 return Ok(opt_take_stamina_item);
             }
+
+            let opt_take_category = (!self.with_categories.is_empty())
+                .then(|| {
+                    chest
+                        .chest_items
+                        .iter_filled_slots()
+                        .filter(|(_, item)| is_desired_category(item))
+                        .find_map(|(slot, item)| {
+                            let goal_number = reserved_items
+                                .get(&item.id)
+                                .cloned()
+                                .unwrap_or(0);
+                            (goal_number < item.count).then(|| {
+                                let transfer_size = TransferSize::select(
+                                    item.count,
+                                    goal_number,
+                                );
+                                Transfer {
+                                    chest: tile,
+                                    direction: TransferDirection::ChestToPlayer,
+                                    slot,
+                                    size: transfer_size,
+                                }
+                            })
+                        })
+                })
+                .flatten();
+
+            if opt_take_category.is_some() {
+                // There is a chest open, and it contains an item that
+                // is listed as a desired category.
+                return Ok(opt_take_category);
+            }
         }
 
         let opt_open_preferred_chest = preferred_chest
@@ -719,6 +793,29 @@ impl InventoryGoal {
             // and there is a consumable available in a chest.  Open
             // the chest to retrieve it.
             return Ok(opt_retrieve_stamina_item);
+        }
+
+        let opt_retrieve_category = (!self.with_categories.is_empty()
+            && player_has_empty_slot)
+            .then(|| {
+                iter_chest_items().map(|mut iter| {
+                    iter.find(|(_, _, item)| is_desired_category(item)).map(
+                        |(tile, slot, _)| Transfer {
+                            chest: tile,
+                            direction: TransferDirection::ChestToPlayer,
+                            slot,
+                            size: TransferSize::All,
+                        },
+                    )
+                })
+            })
+            .transpose()?
+            .flatten();
+        if opt_retrieve_category.is_some() {
+            // The player would like to pick up items from a category,
+            // and there are items of that category within a chest.
+            // Open the chest to retrieve them.
+            return Ok(opt_retrieve_category);
         }
 
         let opt_store_in_empty_slot = iter_chests()?

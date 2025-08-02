@@ -1,6 +1,5 @@
 use crate::{
-    Error, GiveGiftGoal, GoToActionTile, ItemIterExt as _, TurnInBundlesGoal,
-    UpgradeToolGoal,
+    Error, GiveGiftGoal, GoToActionTile, TurnInBundlesGoal, UpgradeToolGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
@@ -164,32 +163,8 @@ impl BotGoal for GenericDay {
                         .with(ItemId::WOOD.with_count(1000))
                         .with(ItemId::AXE)
                         .with(ItemId::COPPER_BAR.with_count(5))
-                        .with({
-                            let bundle_items =
-                                game_state.iter_reserved_items()?.item_counts();
-                            game_state
-                                .iter_accessible_items()?
-                                .filter(|item| {
-                                    matches!(
-                                        item.category,
-                                        Some(
-                                            ItemCategory::Gem
-                                                | ItemCategory::Mineral
-                                        )
-                                    )
-                                })
-                                .filter_map(move |item| {
-                                    let num_reserved = bundle_items
-                                        .get(&item.id)
-                                        .cloned()
-                                        .unwrap_or(0);
-                                    (item.count > num_reserved).then(|| {
-                                        item.clone().with_count(
-                                            item.count - num_reserved,
-                                        )
-                                    })
-                                })
-                        })
+                        .with_category(ItemCategory::Gem)
+                        .with_category(ItemCategory::Mineral)
                         .with(ItemId::GEODE.with_count(1000))
                         .with(ItemId::FROZEN_GEODE.with_count(1000))
                         .with(ItemId::MAGMA_GEODE.with_count(1000))
