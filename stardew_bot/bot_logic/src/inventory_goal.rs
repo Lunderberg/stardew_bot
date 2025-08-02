@@ -289,15 +289,14 @@ impl InventoryGoal {
                 .room(self.room.clone())
                 .with(iter_ingredients().flat_map(|(ingredient, count)| {
                     available.iter_items_with_quality(
-                        &ingredient.with_count(num_to_craft * count),
+                        ingredient.with_count(num_to_craft * count),
                     )
                 }));
             if !subgoal.is_completed(game_state)? {
                 return Ok(Some(subgoal.into()));
             }
 
-            let num_in_inventory =
-                game_state.player.inventory.count_item(item);
+            let num_in_inventory = game_state.player.inventory.count_item(item);
             let craft = CraftItemGoal::new(
                 item.clone().with_count(num_in_inventory + num_to_craft),
             );
@@ -336,10 +335,9 @@ impl InventoryGoal {
         let player_contents: HashMap<ItemId, usize> = inventory.to_hash_map();
         let player_has_empty_slot = inventory.empty_slot().is_some();
 
-        let chest_contents: HashMap<&ItemId, usize> = iter_chest_items()?
+        let chest_contents: HashMap<ItemId, usize> = iter_chest_items()?
             .map(|(_, _, item)| (&item.id, item.count))
-            .into_grouping_map()
-            .sum();
+            .item_counts();
 
         let preferred_chest: HashMap<ItemId, Vector<isize>> = iter_chests()?
             .flat_map(|(tile, chest)| {
@@ -351,8 +349,16 @@ impl InventoryGoal {
             })
             .collect();
 
-        let reserved_items: HashMap<&ItemId, usize> =
-            game_state.iter_reserved_items()?.into_grouping_map().sum();
+        let reserved_items: HashMap<ItemId, usize> = {
+            let all_items = iter_chest_items()?
+                .map(|(_, _, item)| item)
+                .chain(inventory.iter_items())
+                .item_counts();
+            game_state
+                .iter_reserved_items()?
+                .flat_map(|item| all_items.iter_items_with_quality(item))
+                .item_counts()
+        };
 
         let current_stamina_items: HashSet<&ItemId> = inventory
             .iter_items()
@@ -366,14 +372,9 @@ impl InventoryGoal {
                     .unwrap_or(true)
             })
             .filter(|item| {
-                reserved_items
-                    .get(&item.id)
-                    .map(|&num_reserved| {
-                        let num_stored =
-                            chest_contents.get(&item.id).cloned().unwrap_or(0);
-                        num_stored >= num_reserved
-                    })
-                    .unwrap_or(true)
+                let num_reserved = reserved_items.item_count(&item.id);
+                let num_stored = chest_contents.item_count(&item.id);
+                num_stored >= num_reserved
             })
             .filter_map(|item| item.gp_per_stamina().map(|gp| (gp, item)))
             .filter(|(gp, _)| *gp <= MAX_GP_PER_STAMINA)
@@ -528,13 +529,10 @@ impl InventoryGoal {
                 .map(|gp| gp < MAX_GP_PER_STAMINA)
                 .unwrap_or(false);
 
-            let num_reserved = reserved_items
-                .get(
-                    &ItemId::new(item.id.item_id.clone())
-                        .with_quality(item.quality()),
-                )
-                .cloned()
-                .unwrap_or(0);
+            let num_reserved = reserved_items.item_count(
+                &ItemId::new(item.id.item_id.clone())
+                    .with_quality(item.quality()),
+            );
             let exceeds_num_reserved = item.count > num_reserved;
 
             cheap_to_eat && exceeds_num_reserved && !explicitly_stored
@@ -725,21 +723,17 @@ impl InventoryGoal {
             .filter(|(_, chest)| chest.inventory.empty_slot().is_some())
             .min_by_key(|(tile, _)| (tile.down, -tile.right))
             .and_then(|(tile, _)| {
-                player_to_chest
-                    .iter()
-                    .next()
-                    .and_then(|(item, goal)| {
-                        let slot = inventory.current_slot(item)?;
-                        let current = player_contents.get(item).cloned()?;
-                        let transfer_size =
-                            TransferSize::select(current, *goal);
-                        Some(Transfer {
-                            chest: tile,
-                            direction: TransferDirection::PlayerToChest,
-                            slot,
-                            size: transfer_size,
-                        })
+                player_to_chest.iter().next().and_then(|(item, goal)| {
+                    let slot = inventory.current_slot(item)?;
+                    let current = player_contents.get(item).cloned()?;
+                    let transfer_size = TransferSize::select(current, *goal);
+                    Some(Transfer {
+                        chest: tile,
+                        direction: TransferDirection::PlayerToChest,
+                        slot,
+                        size: transfer_size,
                     })
+                })
             });
         if opt_store_in_empty_slot.is_some() {
             // There's an item the player wants in the inventory, but

@@ -498,18 +498,17 @@ pub trait ItemLookupExt {
     /// exceed the specified item quality.
     fn item_count(&self, id: &ItemId) -> usize;
 
-    /// Returns the items that should be used for the bundle.  Because
+    /// Iterates over the items that should be used for the bundle.  Because
     /// the bundle may require items of multiple qualities in order to
     /// be completed, this may require more than one item stack.
     /// (e.g. "10 Wheat" being fulfilled by 5 normal-quality Wheat and
     /// 5 silver-star Wheat.)
-    fn items_with_quality(&self, item: &Item) -> [Item; 4];
-
-    /// Iterate over the items necessary to provide the specified item/count, with quality being at least
-    fn iter_items_with_quality(
+    fn iter_items_with_quality<ItemType>(
         &self,
-        item: &Item,
-    ) -> impl Iterator<Item = Item> + use<Self>;
+        item: ItemType,
+    ) -> impl Iterator<Item = Item> + use<Self, ItemType>
+    where
+        ItemType: detail::ItemOrItemRef;
 
     /// Remove an item from this lookup.
     fn remove_item(&mut self, id: &ItemId, count: usize);
@@ -526,34 +525,36 @@ impl ItemLookupExt for HashMap<ItemId, usize> {
             .sum()
     }
 
-    fn items_with_quality(&self, item: &Item) -> [Item; 4] {
-        let mut num_remaining = item.count;
-        let mut outputs = [
-            Quality::Normal,
-            Quality::Silver,
-            Quality::Gold,
-            Quality::Iridium,
-        ]
-        .map(|quality| item.id.clone().with_quality(quality).with_count(1));
-
-        for output in &mut outputs {
-            let count = self
-                .item_count_with_exact_quality(&output.id)
-                .min(num_remaining);
-            output.count = count;
-            num_remaining -= count;
-        }
-
-        outputs
-    }
-
-    fn iter_items_with_quality(
+    fn iter_items_with_quality<ItemType>(
         &self,
-        item: &Item,
-    ) -> impl Iterator<Item = Item> + use<> {
-        self.items_with_quality(item)
+        item: ItemType,
+    ) -> impl Iterator<Item = Item> + use<ItemType>
+    where
+        ItemType: detail::ItemOrItemRef,
+    {
+        let item_id = item.item_id_ref();
+        let mut num_remaining = item.count();
+
+        let mut counts = [
+            (item_id.clone().with_quality(Quality::Normal), 0usize),
+            (item_id.clone().with_quality(Quality::Silver), 0usize),
+            (item_id.clone().with_quality(Quality::Gold), 0usize),
+            (item_id.clone().with_quality(Quality::Iridium), 0usize),
+        ];
+        counts
+            .iter_mut()
+            .filter(|(id, _)| id.quality >= item_id.quality)
+            .for_each(|(id, count)| {
+                let new_count =
+                    self.item_count_with_exact_quality(id).min(num_remaining);
+                num_remaining -= new_count;
+                *count = new_count;
+            });
+
+        counts
             .into_iter()
-            .filter(|item| item.count > 0)
+            .filter(|(_, count)| *count > 0)
+            .map(|(id, count)| id.with_count(count))
     }
 
     fn item_count_with_exact_quality(&self, id: &ItemId) -> usize {
