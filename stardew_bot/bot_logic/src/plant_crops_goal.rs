@@ -222,11 +222,7 @@ impl PlantCropsGoal {
                 }
             }
         } else {
-            let item = if is_seed {
-                ItemId::HOE
-            } else {
-                goal.clone()
-            };
+            let item = if is_seed { ItemId::HOE } else { goal.clone() };
             Some(Some(item))
         }
     }
@@ -405,7 +401,9 @@ impl PlantCropsGoal {
             farm.shape,
             seed_assignment
                 .iter()
-                .filter_map(|(tile, opt_seed)| opt_seed.is_some().then_some(tile))
+                .filter_map(|(tile, opt_seed)| {
+                    opt_seed.is_some().then_some(tile)
+                })
                 .cloned(),
         );
 
@@ -523,7 +521,7 @@ impl PlantCropsGoal {
             .map(|(id, count)| {
                 let item: Item = id.clone().into();
                 let item = item.with_count(count);
-                
+
                 game_state.statics.enrich_item(item)
             })
             .filter(|item| matches!(item.category, Some(ItemCategory::Seed)))
@@ -685,9 +683,8 @@ impl BotGoal for PlantCropsGoal {
                     .take_while(|will_be_clay| !will_be_clay)
                     .count()
             };
-            let longest_until_clay = iter_potential_clay_tiles()?
-                .map(&uses_until_clay)
-                .max();
+            let longest_until_clay =
+                iter_potential_clay_tiles()?.map(&uses_until_clay).max();
 
             iter_potential_clay_tiles()?
                 .filter(|tile| {

@@ -1624,13 +1624,14 @@ impl BotInterrupt for MineNearbyOre {
             Enemy,
         }
 
-        let iter_nearby_objects = desirable_rocks.iter().filter_map(
-            |(tile, (multiplier, offset))| {
-                let dist = *distances.get_opt(*tile)?;
-                ((dist as f32) + offset < self.dist * multiplier)
-                    .then_some((*tile, TargetKind::Object, dist))
-            },
-        );
+        let iter_nearby_objects =
+            desirable_rocks.iter().filter_map(
+                |(tile, (multiplier, offset))| {
+                    let dist = *distances.get_opt(*tile)?;
+                    ((dist as f32) + offset < self.dist * multiplier)
+                        .then_some((*tile, TargetKind::Object, dist))
+                },
+            );
 
         let iter_nearby_enemies = loc
             .characters
@@ -1645,8 +1646,11 @@ impl BotInterrupt for MineNearbyOre {
             .filter_map(|tile| {
                 let dist = *distances.get_opt(tile)?;
                 let multiplier = 2.0;
-                ((dist as f32) < self.dist * multiplier)
-                    .then_some((tile, TargetKind::Enemy, dist))
+                ((dist as f32) < self.dist * multiplier).then_some((
+                    tile,
+                    TargetKind::Enemy,
+                    dist,
+                ))
             });
 
         let opt_target_tile = iter_nearby_objects
@@ -1703,9 +1707,7 @@ impl BotInterrupt for MineNearbyOre {
         };
 
         let opt_item = opt_item.or_else(|| {
-            clearable_tiles
-                .get(&target_tile).cloned()
-                .unwrap_or(None)
+            clearable_tiles.get(&target_tile).cloned().unwrap_or(None)
         });
 
         if opt_item == Some(ItemId::CHERRY_BOMB) {

@@ -449,8 +449,7 @@ impl GeodePredictor {
                 _ if self.lowest_mine_level_reached > 75 => "(O)384",
                 _ => "(O)380",
             }
-        } else if geode == &ItemId::MAGMA_GEODE
-            || geode == &ItemId::OMNI_GEODE
+        } else if geode == &ItemId::MAGMA_GEODE || geode == &ItemId::OMNI_GEODE
         {
             match rng.rand_in_range(0..5) {
                 0 => "(O)378",
