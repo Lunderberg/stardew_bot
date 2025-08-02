@@ -938,6 +938,18 @@ impl LogicStack {
         self
     }
 
+    pub fn then_if(
+        self,
+        goal: impl BotGoal + 'static,
+        condition: bool,
+    ) -> Self {
+        if condition {
+            self.then(goal)
+        } else {
+            self
+        }
+    }
+
     pub fn then_iter<Iter, Goal>(mut self, iter_goal: Iter) -> Self
     where
         Iter: IntoIterator<Item = Goal>,

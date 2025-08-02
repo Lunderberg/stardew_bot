@@ -143,7 +143,7 @@ impl BotGoal for GenericDay {
             stack
                 .then(HarvestCropsGoal::new())
                 .then(crops)
-                .then(ExpandTreeFarm::new())
+                .then_if(ExpandTreeFarm::new(), current_day % 2 == 0)
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 {
             let crops =
