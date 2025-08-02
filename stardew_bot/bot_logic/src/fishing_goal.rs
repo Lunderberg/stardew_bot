@@ -39,7 +39,7 @@ pub enum FishingLocation {
     Lake,
 }
 
-struct LoadBaitTackleOntoFishingRod {
+pub struct LoadBaitTackleOntoFishingRod {
     /// The type of bait to load onto the fishing rod.  If None, will
     /// load the same type of bait as is currently on the rod.
     bait: Option<ItemId>,
@@ -683,7 +683,7 @@ impl LoadBaitTackleOntoFishingRod {
             })
     }
 
-    fn is_completed(&self, game_state: &GameState) -> bool {
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
         let Some((_, rod)) = self.find_fishing_rod(game_state) else {
             return true;
         };

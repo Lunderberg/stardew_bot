@@ -14,6 +14,7 @@ pub struct GeodeCrackingGoal {
     sell_minerals: bool,
     sell_gems: bool,
     sell_iridium_ore: bool,
+    target_money: Option<i32>,
 }
 
 pub struct GeodePredictor {
@@ -42,6 +43,7 @@ impl GeodeCrackingGoal {
             sell_minerals: false,
             sell_gems: false,
             sell_iridium_ore: false,
+            target_money: None,
         }
     }
 
@@ -59,6 +61,13 @@ impl GeodeCrackingGoal {
     pub fn sell_iridium_ore(self, sell_iridium_ore: bool) -> Self {
         Self {
             sell_iridium_ore,
+            ..self
+        }
+    }
+
+    pub fn target_money(self, target_money: i32) -> Self {
+        Self {
+            target_money: Some(target_money),
             ..self
         }
     }
@@ -176,7 +185,6 @@ impl BotGoal for GeodeCrackingGoal {
             "Blacksmith",
             inventory
                 .iter_items()
-                .filter(|_| game_state.player.room_name == "Blacksmith")
                 .filter(|item| {
                     (self.sell_iridium_ore && item.id == ItemId::IRIDIUM_ORE)
                         || item
@@ -188,7 +196,18 @@ impl BotGoal for GeodeCrackingGoal {
                             })
                             .unwrap_or(false)
                 })
-                .cloned(),
+                .sorted_by_key(|item| item.price * (item.count as i32))
+                .scan(game_state.player.current_money, |cumsum, item| {
+                    let before_sell = *cumsum;
+                    *cumsum += item.price * (item.count as i32);
+                    Some((before_sell, item))
+                })
+                .filter(|(cumsum, _)| {
+                    self.target_money
+                        .map(|target| *cumsum < target)
+                        .unwrap_or(true)
+                })
+                .map(|(_, item)| item.clone()),
         );
 
         let has_full_inventory = inventory.num_empty_slots().saturating_sub(
@@ -208,7 +227,10 @@ impl BotGoal for GeodeCrackingGoal {
         {
             if game_state.geode_menu().is_some() {
                 return Ok(MenuCloser::new().into());
-            } else if !to_sell.is_completed(game_state) {
+            } else if (opt_next_geode.is_some()
+                || game_state.player.room_name == "Blacksmith")
+                && !to_sell.is_completed(game_state)
+            {
                 return Ok(to_sell.into());
             }
         }
@@ -221,13 +243,13 @@ impl BotGoal for GeodeCrackingGoal {
             return Ok(BotGoalResult::Completed);
         };
 
-        let prepare = Self::GEODE_TYPES
-            .iter()
-            .fold(InventoryGoal::current().with(ItemId::HOE), |goal, geode| {
-                goal.with(geode.clone().with_count(1000))
-            });
+        let prepare = InventoryGoal::current().with(
+            Self::GEODE_TYPES
+                .into_iter()
+                .map(|geode_type| geode_type.with_count(1000)),
+        );
         if !prepare.is_completed(game_state)? {
-            return Ok(prepare.otherwise_empty().into());
+            return Ok(prepare.with(ItemId::HOE).otherwise_empty().into());
         }
 
         if let Some(menu) = game_state.dialogue_menu() {

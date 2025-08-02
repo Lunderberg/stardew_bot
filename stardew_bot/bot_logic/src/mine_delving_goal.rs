@@ -21,7 +21,15 @@ use super::{
     AttackNearbyEnemy, LocationExt as _, MenuCloser, OrganizeInventoryGoal,
 };
 
-pub struct MineDelvingGoal;
+pub struct MineDelvingGoal {
+    /// If true, prepare for the mines including items already in the
+    /// inventory.  If false (default), clear out the inventory as
+    /// part of preparation.
+    keep_previous_inventory: bool,
+
+    /// Time at which mining should stop.
+    stop_time: i32,
+}
 
 struct GoToDepth {
     depth: i32,
@@ -38,6 +46,7 @@ struct SmeltingPlan {
 
 struct MineSingleLevel {
     mineshaft_level: i32,
+    stop_time: i32,
 }
 
 struct MineNearbyOre {
@@ -303,7 +312,24 @@ impl Default for MineDelvingGoal {
 
 impl MineDelvingGoal {
     pub fn new() -> Self {
-        Self
+        Self {
+            keep_previous_inventory: false,
+            stop_time: 2600,
+        }
+    }
+
+    pub fn keep_previous_inventory(
+        self,
+        keep_previous_inventory: bool,
+    ) -> Self {
+        Self {
+            keep_previous_inventory,
+            ..self
+        }
+    }
+
+    pub fn stop_time(self, stop_time: i32) -> Self {
+        Self { stop_time, ..self }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
@@ -625,7 +651,10 @@ impl MineDelvingGoal {
                 .filter(|(i, (_, is_reserved))| *is_reserved || (*i < 5))
                 .map(|(_, (item, _))| item);
 
-            prepare.with(ItemId::HOE).with(iter_bring_back)
+            prepare
+                .with(ItemId::HOE)
+                .with(ItemId::IRIDIUM_ROD)
+                .with(iter_bring_back)
         } else {
             prepare
         };
@@ -664,6 +693,10 @@ impl MineDelvingGoal {
         game_state: &GameState,
         _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        if game_state.globals.in_game_time >= self.stop_time {
+            return Ok(BotGoalResult::Completed);
+        }
+
         // If there's anything to prepare before going down, do so.
         // The check for the `mine_elevator_menu` is to avoid an edge
         // case that occurs if the furnaces finish smelting at the
@@ -855,7 +888,7 @@ impl BotGoal for MineDelvingGoal {
             })
             .filter(|item| item.count > 0);
 
-            let prepare = InventoryGoal::empty()
+            let prepare = InventoryGoal::new(!self.keep_previous_inventory)
                 .with(ItemId::PICKAXE)
                 .with(ItemId::HOE)
                 .with_exactly(iter_items_to_transfer)
@@ -896,16 +929,15 @@ impl BotGoal for MineDelvingGoal {
         let mining_dist = if prefer_mining_ore { 16.0 } else { 4.0 };
 
         let room_name = current_room.name.clone();
-        let goal = MineSingleLevel { mineshaft_level }
-            .cancel_if(move |game_state| {
-                game_state.player.room_name != room_name
-            })
-            .with_interrupt(
-                MineNearbyOre::new().with_search_distance(mining_dist),
-            )
-            .with_interrupt(WaitNearBomb::new())
-            .with_interrupt(MaintainStaminaGoal::new())
-            .with_interrupt(AttackNearbyEnemy::new());
+        let goal = MineSingleLevel {
+            mineshaft_level,
+            stop_time: self.stop_time,
+        }
+        .cancel_if(move |game_state| game_state.player.room_name != room_name)
+        .with_interrupt(MineNearbyOre::new().with_search_distance(mining_dist))
+        .with_interrupt(WaitNearBomb::new())
+        .with_interrupt(MaintainStaminaGoal::new())
+        .with_interrupt(AttackNearbyEnemy::new());
         Ok(goal.into())
     }
 }
@@ -958,6 +990,10 @@ impl BotGoal for MineSingleLevel {
                 // We are revisiting this level for ore.
                 // Therefore, go back up as soon as the
                 // MineNearbyOre interrupts are completed.
+                break 'go_up true;
+            }
+
+            if game_state.globals.in_game_time >= self.stop_time {
                 break 'go_up true;
             }
 

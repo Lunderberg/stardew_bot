@@ -1,7 +1,7 @@
 use geometry::Vector;
 
 use crate::{Error, GameAction};
-use game_state::{GameState, Item, Menu};
+use game_state::{DialogueMenu, GameState, Item, Menu};
 
 use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 
@@ -22,30 +22,53 @@ impl MenuCloser {
         }
     }
 
+    fn is_minecart_menu(menu: &DialogueMenu) -> bool {
+        menu.responses
+            .iter()
+            .filter(|response| {
+                response.text == "Bus"
+                    || response.text == "Town"
+                    || response.text == "Quarry"
+                    || response.text == "Mines"
+            })
+            .count()
+            > 2
+    }
+
     fn exit_button(&self, game_state: &GameState) -> Option<Vector<isize>> {
-        if let Some(menu) = game_state.pause_menu() {
-            Some(menu.exit_button)
-        } else if let Some(menu) = game_state.chest_menu() {
-            Some(menu.ok_button)
-        } else if let Some(menu) = game_state.shop_menu() {
-            Some(menu.exit_button)
-        } else if let Some(menu) = game_state.dialogue_menu() {
-            menu.responses
+        match game_state.menu.as_ref()? {
+            Menu::Pause(menu) => Some(menu.exit_button),
+            Menu::Chest(menu) => Some(menu.ok_button),
+            Menu::Dialogue(menu) => menu
+                .responses
                 .is_empty()
-                .then(|| menu.pixel_location.center())
-        } else if let Some(menu) = game_state.mail_menu() {
-            (menu.current_page + 1 < menu.num_pages)
-                .then(|| menu.pixel_location.center())
-        } else { game_state.geode_menu().map(|menu| menu.ok_button) }
+                .then(|| menu.pixel_location.center()),
+            Menu::Mail(menu) => (menu.current_page + 1 < menu.num_pages)
+                .then(|| menu.pixel_location.center()),
+            Menu::Shop(menu) => Some(menu.exit_button),
+            Menu::Geode(menu) => Some(menu.ok_button),
+            Menu::MineElevator(_) => None,
+            Menu::Junimo(_) => None,
+            Menu::Other => None,
+        }
     }
 
     fn must_press_escape(&self, game_state: &GameState) -> bool {
-        game_state
-            .mail_menu()
-            .map(|menu| menu.current_page + 1 == menu.num_pages)
-            .unwrap_or(false)
-            || game_state.mine_elevator_menu().is_some()
-            || game_state.junimo_menu().is_some()
+        let Some(menu) = &game_state.menu else {
+            return false;
+        };
+
+        match menu {
+            Menu::Pause(_) => false,
+            Menu::Chest(_) => false,
+            Menu::Dialogue(menu) => Self::is_minecart_menu(menu),
+            Menu::Mail(menu) => menu.current_page + 1 == menu.num_pages,
+            Menu::Shop(_) => false,
+            Menu::Geode(_) => false,
+            Menu::MineElevator(_) => true,
+            Menu::Junimo(_) => true,
+            Menu::Other => false,
+        }
     }
 
     fn drop_held_item(&self, game_state: &GameState) -> Option<Vector<isize>> {

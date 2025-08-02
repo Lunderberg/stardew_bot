@@ -107,19 +107,9 @@ impl InventoryGoal {
         Self { room, ..self }
     }
 
-    pub fn new(item: impl Into<Item>) -> Self {
-        let item = item.into();
-        let bounds = [(
-            item.id,
-            Bounds {
-                min: Some(item.count),
-                max: Some(item.count),
-            },
-        )]
-        .into_iter()
-        .collect();
+    pub fn new(stash_unspecified_items: bool) -> Self {
         Self {
-            bounds,
+            stash_unspecified_items,
             ..Self::current()
         }
     }

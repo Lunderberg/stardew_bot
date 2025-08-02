@@ -547,7 +547,9 @@ impl BotGoal for LocalMovementGoal {
         }
 
         let cleanup = MenuCloser::new();
-        if !cleanup.is_completed(game_state) {
+        if game_state.dialogue_menu().is_none()
+            && !cleanup.is_completed(game_state)
+        {
             return Ok(cleanup.into());
         }
 

@@ -1,4 +1,6 @@
-use crate::{Error, GameAction, SellToMerchantGoal};
+use crate::{
+    Error, GameAction, LoadBaitTackleOntoFishingRod, SellToMerchantGoal,
+};
 use game_state::{GameState, ItemCategory, ItemId};
 
 use super::{
@@ -7,7 +9,9 @@ use super::{
     MovementGoal,
 };
 
-pub struct UpgradeFishingRodGoal;
+pub struct UpgradeFishingRodGoal {
+    buy_tackle: bool,
+}
 
 struct UnloadFishingRod {
     rod: ItemId,
@@ -21,7 +25,11 @@ impl Default for UpgradeFishingRodGoal {
 
 impl UpgradeFishingRodGoal {
     pub fn new() -> Self {
-        Self
+        Self { buy_tackle: false }
+    }
+
+    pub fn buy_tackle(self, buy_tackle: bool) -> Self {
+        Self { buy_tackle, ..self }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
@@ -42,7 +50,11 @@ impl UpgradeFishingRodGoal {
                 return Ok(Some(goal.into()));
             }
         }
-        if inventory.contains(&ItemId::IRIDIUM_ROD) {
+        if let Some(rod) = inventory
+            .iter_items()
+            .find(|item| item.id == ItemId::IRIDIUM_ROD)
+            .and_then(|item| item.as_fishing_rod())
+        {
             // Unload and discard the Fiberglass Rod asas soon as we
             // have the Iridium Rod.
             let unload = UnloadFishingRod::new(ItemId::FIBERGLASS_ROD);
@@ -50,9 +62,25 @@ impl UpgradeFishingRodGoal {
                 return Ok(Some(unload.into()));
             }
 
-            let goal = DiscardItemGoal::new(ItemId::FIBERGLASS_ROD);
-            if !goal.is_completed(game_state) {
-                return Ok(Some(goal.into()));
+            let discard = DiscardItemGoal::new(ItemId::FIBERGLASS_ROD);
+            if !discard.is_completed(game_state) {
+                return Ok(Some(discard.into()));
+            }
+
+            let load = LoadBaitTackleOntoFishingRod::new();
+            if !load.is_completed(game_state) {
+                return Ok(Some(load.into()));
+            }
+
+            if game_state.player.room_name == "FishShop"
+                && rod.tackle.is_none()
+                && game_state.player.current_money >= 500
+                && self.buy_tackle
+            {
+                let buy = BuyFromMerchantGoal::new("Buy Fish", ItemId::SPINNER);
+                if !buy.is_completed(game_state)? {
+                    return Ok(Some(buy.into()));
+                }
             }
         }
 
@@ -133,7 +161,11 @@ impl UpgradeFishingRodGoal {
         game_state: &GameState,
     ) -> Result<Option<ItemId>, Error> {
         let opt_fishing_rod_level = game_state
-            .iter_accessible_items()?
+            .player
+            .inventory
+            .iter_items()
+            .chain(game_state.iter_stored_items("Farm")?)
+            .chain(game_state.iter_stored_items("Mine")?)
             .filter_map(|item| item.as_fishing_rod())
             .map(|rod| rod.num_attachment_slots)
             .max();
