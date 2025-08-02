@@ -969,7 +969,7 @@ impl BotGoal for InventoryGoal {
             // transfer.
             let stack = LogicStack::new()
                 .then(ActivateTile::new(self.room.clone(), transfer.chest))
-                .cancel_if(|game_state| game_state.any_menu_open());
+                .cancel_if(|game_state| game_state.chest_menu().is_some());
             return Ok(stack.into());
         };
 
