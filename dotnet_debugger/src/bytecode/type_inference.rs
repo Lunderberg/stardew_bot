@@ -84,6 +84,19 @@ pub enum TypeInferenceError {
     FindMapRequiresMappingFunction(RuntimeType),
 
     #[error(
+        "The .reduce() method requires a reduction function, \
+         but instead received an argument of type '{0}'."
+    )]
+    ReductionMustBeAFunction(RuntimeType),
+
+    #[error(
+        "The .reduce() method requires a reduction function, \
+         which accepts two arguments, \
+         but instead received a reduction function of type '{0}'."
+    )]
+    ReductionMustTakeTwoArguments(RuntimeType),
+
+    #[error(
         "Cannot chain iterator of type '{0}' \
          with iterator of type '{1}'."
     )]
@@ -338,9 +351,55 @@ impl<'a> TypeInference<'a> {
                         }
                     }
                 }
-                ExprKind::Reduce { initial, .. }
-                | ExprKind::SimpleReduce { initial, .. } => {
-                    self.expect_cache(*initial).clone()
+                ExprKind::Reduce {
+                    initial, reduction, ..
+                }
+                | ExprKind::SimpleReduce {
+                    initial, reduction, ..
+                } => {
+                    let initial = self.expect_cache(*initial).clone();
+                    let reduction = self.expect_cache(*reduction).clone();
+
+                    let (reduction_param, reduction_output) = match &reduction {
+                        RuntimeType::Unknown => {
+                            Ok((RuntimeType::Unknown, RuntimeType::Unknown))
+                        }
+
+                        RuntimeType::Function(FunctionType {
+                            params,
+                            output,
+                        }) => {
+                            let first_param = if let Some(params) = params {
+                                if params.len() == 2 {
+                                    Ok(params[0].clone())
+                                } else {
+                                    Err(TypeInferenceError::ReductionMustTakeTwoArguments(
+                                        reduction.clone(),
+                                    ))
+                                }
+                            } else {
+                                Ok(RuntimeType::Unknown)
+                            }?;
+
+                            Ok((first_param, output.as_ref().clone()))
+                        }
+
+                        other => {
+                            Err(TypeInferenceError::ReductionMustBeAFunction(
+                                other.clone(),
+                            ))
+                        }
+                    }?;
+
+                    if initial != RuntimeType::Unknown {
+                        initial
+                    } else if reduction_param != RuntimeType::Unknown {
+                        reduction_param
+                    } else if reduction_output != RuntimeType::Unknown {
+                        reduction_output
+                    } else {
+                        RuntimeType::Unknown
+                    }
                 }
                 ExprKind::NativeFunction(func) => func.signature()?,
                 ExprKind::Tuple(elements) => {
