@@ -343,12 +343,12 @@ impl<'a> GraphPrinter<'a> {
         let mut prev_print_type = PrevPrintType::None;
 
         let mut current_indent = Indent(0);
-        let mut same_line_as_previous_brace = false;
+        let mut same_line_as_previous_brace = vec![false];
 
         macro_rules! advance_line {
             () => {
                 write!(fmt, "\n{current_indent}")?;
-                same_line_as_previous_brace = false;
+                *same_line_as_previous_brace.last_mut().unwrap() = false;
             };
         }
 
@@ -390,12 +390,12 @@ impl<'a> GraphPrinter<'a> {
                     write!(fmt, " {{")?;
                     prev_print_type = PrevPrintType::OpenBrace;
                     current_indent += self.indent_width;
-                    same_line_as_previous_brace = true;
+                    same_line_as_previous_brace.push(true);
                 }
                 PrintItem::BraceClose => {
                     current_indent -= self.indent_width;
 
-                    if same_line_as_previous_brace {
+                    if same_line_as_previous_brace.pop().unwrap() {
                         write!(fmt, " ")?;
                     } else {
                         advance_line!();
@@ -548,12 +548,12 @@ impl<'a> GraphPrinter<'a> {
                             to_print.push(PrintItem::Stmt(op_index));
                         });
 
-                    same_line_as_previous_brace = true;
+                    same_line_as_previous_brace.push(true);
                     prev_print_type = PrevPrintType::OpenBrace;
                 }
                 PrintItem::FunctionClose { is_stmt, .. } => {
                     current_indent -= self.indent_width;
-                    if same_line_as_previous_brace {
+                    if same_line_as_previous_brace.pop().unwrap() {
                         write!(fmt, " ")?;
                     } else {
                         advance_line!();
@@ -721,6 +721,60 @@ impl<'a> GraphPrinter<'a> {
                                 PrintItem::ParenOpen,
                                 PrintItem::Expr(
                                     *iter_b,
+                                    OpPrecedence::MinPrecedence,
+                                ),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::First { iterator } => {
+                            [
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::Str(".first()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::Find {
+                            iterator,
+                            condition,
+                        } => {
+                            [
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::Str(".find"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *condition,
+                                    OpPrecedence::MinPrecedence,
+                                ),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::FindMap {
+                            iterator,
+                            condition,
+                        } => {
+                            [
+                                PrintItem::Expr(
+                                    *iterator,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::Str(".find_map"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *condition,
                                     OpPrecedence::MinPrecedence,
                                 ),
                                 PrintItem::ParenClose,

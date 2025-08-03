@@ -973,6 +973,9 @@ impl ExpressionTranslator<'_> {
                 | ExprKind::Map { .. }
                 | ExprKind::Filter { .. }
                 | ExprKind::Chain { .. }
+                | ExprKind::First { .. }
+                | ExprKind::Find { .. }
+                | ExprKind::FindMap { .. }
                 | ExprKind::Collect { .. }
                 | ExprKind::Reduce { .. }) => panic!(
                     "All {} expressions should be simplified \

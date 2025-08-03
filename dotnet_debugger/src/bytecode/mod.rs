@@ -55,6 +55,15 @@ pub use split_iterator_chain_reduce::SplitIteratorChainReduce;
 mod convert_collect_to_reduce;
 pub use convert_collect_to_reduce::ConvertCollectToReduce;
 
+mod convert_find_to_filter_first;
+pub use convert_find_to_filter_first::ConvertFindToFilterFirst;
+
+mod convert_first_to_reduce;
+pub use convert_first_to_reduce::ConvertFirstToReduce;
+
+mod convert_find_map_to_filter_find;
+pub use convert_find_map_to_filter_find::ConvertFindMapToFilterFind;
+
 mod convert_boolean_operator_to_conditional;
 pub use convert_boolean_operator_to_conditional::ConvertBooleanOperatorToConditional;
 

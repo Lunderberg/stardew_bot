@@ -1229,6 +1229,82 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    iterator_first,
+
+    indoc!{"
+        let res_main = (0..100).first();
+        pub fn main() { res_main }
+    "},
+    |graph| {
+        let iter = graph.range(100usize);
+
+        let res_main = graph.first(iter);
+        graph.name(res_main, "res_main").unwrap();
+
+        let func_main = graph.function_def(vec![], res_main);
+        graph.name(func_main, "main").unwrap();
+        graph.mark_extern_func(func_main).unwrap();
+    },
+}
+
+test_print_and_parse! {
+    iterator_find,
+
+    indoc!{"
+        let res_main = (0..100).find(|i| { i > 50 });
+        pub fn main() { res_main }
+    "},
+    |graph| {
+        let iter = graph.range(100usize);
+
+        let i = graph.function_arg(RuntimeType::Unknown);
+        graph.name(i, "i").unwrap();
+        let compare = graph.greater_than(i, 50usize);
+        let condition = graph.function_def(vec![i], compare);
+
+        let res_main = graph.find(iter, condition);
+        graph.name(res_main, "res_main").unwrap();
+
+        let func_main = graph.function_def(vec![], res_main);
+        graph.name(func_main, "main").unwrap();
+        graph.mark_extern_func(func_main).unwrap();
+    },
+}
+
+test_print_and_parse! {
+    iterator_find_map,
+
+    indoc!{"
+        let res_main = (0..100).find_map(|i| {
+            let j = i*i;
+            if j > 50 { j } else { None }
+        });
+        pub fn main() { res_main }
+    "},
+    |graph| {
+        let iter = graph.range(100usize);
+
+        let i = graph.function_arg(RuntimeType::Unknown);
+        graph.name(i, "i").unwrap();
+
+        let j = graph.mul(i,i);
+        graph.name(j,"j").unwrap();
+
+        let compare = graph.greater_than(j, 50usize);
+        let none = graph.none();
+        let output = graph.if_else(compare, j, none);
+        let condition = graph.function_def(vec![i], output);
+
+        let res_main = graph.find_map(iter, condition);
+        graph.name(res_main, "res_main").unwrap();
+
+        let func_main = graph.function_def(vec![], res_main);
+        graph.name(func_main, "main").unwrap();
+        graph.mark_extern_func(func_main).unwrap();
+    },
+}
+
+test_print_and_parse! {
     iterator_chain,
 
     indoc!{"

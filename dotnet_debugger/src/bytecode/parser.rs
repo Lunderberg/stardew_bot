@@ -994,6 +994,26 @@ impl<'a> SymbolicParser<'a> {
                         .expect("Protected by length check");
                     Ok(self.graph.chain(obj, iter_b))
                 }
+                "first" => {
+                    let _ = self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.first(obj))
+                }
+                "find" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let condition = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.find(obj, condition))
+                }
+                "find_map" => {
+                    let (_, args) = self.expect_function_arguments(0, 1)?;
+                    let condition = args
+                        .into_iter()
+                        .exactly_one()
+                        .expect("Protected by length check");
+                    Ok(self.graph.find_map(obj, condition))
+                }
                 "collect" => {
                     let _ = self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.collect(obj))

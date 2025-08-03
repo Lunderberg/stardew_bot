@@ -66,6 +66,24 @@ pub enum TypeInferenceError {
     CollectRequiresIterator(RuntimeType),
 
     #[error(
+        "Attempted to use .find() method on type '{0}', \
+         but .find() method requires an iterator."
+    )]
+    FindRequiresIterator(RuntimeType),
+
+    #[error(
+        "Attempted to use .first() method on type '{0}', \
+         but .first() method requires an iterator."
+    )]
+    FirstRequiresIterator(RuntimeType),
+
+    #[error(
+        "Attempted to .find_map() method with argument '{0}', \
+         but .find_map() method requires an function as argument."
+    )]
+    FindMapRequiresMappingFunction(RuntimeType),
+
+    #[error(
         "Cannot chain iterator of type '{0}' \
          with iterator of type '{1}'."
     )]
@@ -236,6 +254,54 @@ impl<'a> TypeInference<'a> {
                 ExprKind::Filter { iterator, .. } => {
                     let iter = self.expect_cache(*iterator);
                     iter.clone()
+                }
+                ExprKind::First { iterator } => {
+                    let iter = self.expect_cache(*iterator);
+                    match iter {
+                        RuntimeType::Unknown => RuntimeType::Unknown,
+
+                        RuntimeType::Iterator(IteratorType { item }) => {
+                            item.as_ref().clone()
+                        }
+
+                        other => {
+                            Err(TypeInferenceError::FirstRequiresIterator(
+                                other.clone(),
+                            ))?
+                        }
+                    }
+                }
+                ExprKind::Find { iterator, .. } => {
+                    let iter = self.expect_cache(*iterator);
+                    match iter {
+                        RuntimeType::Unknown => RuntimeType::Unknown,
+
+                        RuntimeType::Iterator(IteratorType { item }) => {
+                            item.as_ref().clone()
+                        }
+
+                        other => {
+                            Err(TypeInferenceError::FindRequiresIterator(
+                                other.clone(),
+                            ))?
+                        }
+                    }
+                }
+                ExprKind::FindMap { condition, .. } => {
+                    let cond = self.expect_cache(*condition);
+                    match cond {
+                        RuntimeType::Unknown => RuntimeType::Unknown,
+
+                        RuntimeType::Function(FunctionType {
+                            output, ..
+                        }) => output.as_ref().clone(),
+
+                        other => Err(
+                            TypeInferenceError::FindMapRequiresMappingFunction(
+                                other.clone(),
+                            ),
+                        )?,
+                    }
                 }
                 ExprKind::Chain(iter_a, iter_b) => {
                     let iter_a_type = self.expect_cache(*iter_a);

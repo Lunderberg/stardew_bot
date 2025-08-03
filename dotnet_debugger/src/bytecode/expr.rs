@@ -91,8 +91,31 @@ pub enum ExprKind {
         iterator: SymbolicValue,
 
         /// The filter function to apply.  Should have signature
-        /// `Fn(ItemA) -> bool`
+        /// `Fn(Item) -> bool`
         filter: SymbolicValue,
+    },
+
+    First {
+        /// The iterator whose value should be retrieved.
+        iterator: SymbolicValue,
+    },
+
+    Find {
+        /// The iterator that should be searched.
+        iterator: SymbolicValue,
+
+        /// The condition with which to return a value.  Should have
+        /// signature `Fn(Item) -> bool`.
+        condition: SymbolicValue,
+    },
+
+    FindMap {
+        /// The iterator that should be searched.
+        iterator: SymbolicValue,
+
+        /// The condition with which to return a value.  Should have
+        /// signature `Fn(Item) -> Option<OutputType>`.
+        condition: SymbolicValue,
     },
 
     /// Collect an iterator into a vector.
@@ -748,6 +771,32 @@ impl SymbolicGraph {
         iter_b: SymbolicValue,
     ) -> SymbolicValue {
         self.push(ExprKind::Chain(iter_a, iter_b))
+    }
+
+    pub fn first(&mut self, iterator: SymbolicValue) -> SymbolicValue {
+        self.push(ExprKind::First { iterator })
+    }
+
+    pub fn find(
+        &mut self,
+        iterator: SymbolicValue,
+        condition: SymbolicValue,
+    ) -> SymbolicValue {
+        self.push(ExprKind::Find {
+            iterator,
+            condition,
+        })
+    }
+
+    pub fn find_map(
+        &mut self,
+        iterator: SymbolicValue,
+        condition: SymbolicValue,
+    ) -> SymbolicValue {
+        self.push(ExprKind::FindMap {
+            iterator,
+            condition,
+        })
     }
 
     pub fn collect(&mut self, iterator: SymbolicValue) -> SymbolicValue {
@@ -2265,6 +2314,9 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             .then(super::InlineIteratorFilter)
             .then(super::SplitIteratorChainReduce)
             .then(super::ConvertCollectToReduce(&analysis))
+            .then(super::ConvertFindToFilterFirst)
+            .then(super::ConvertFirstToReduce)
+            .then(super::ConvertFindMapToFilterFind)
             .then(super::ConvertBooleanOperatorToConditional)
             .then(super::LowerSymbolicExpr(&analysis))
             .then(super::SeparateReadAndParseBytes);
@@ -2424,6 +2476,36 @@ impl ExprKind {
                     ExprKind::Filter { iterator, filter }
                 })
             }
+            ExprKind::Find {
+                iterator,
+                condition,
+            } => {
+                let opt_iterator = remap(iterator);
+                let opt_condition = remap(condition);
+                (opt_iterator.is_some() || opt_condition.is_some()).then(|| {
+                    let iterator = opt_iterator.unwrap_or(*iterator);
+                    let condition = opt_condition.unwrap_or(*condition);
+                    ExprKind::Find {
+                        iterator,
+                        condition,
+                    }
+                })
+            }
+            ExprKind::FindMap {
+                iterator,
+                condition,
+            } => {
+                let opt_iterator = remap(iterator);
+                let opt_condition = remap(condition);
+                (opt_iterator.is_some() || opt_condition.is_some()).then(|| {
+                    let iterator = opt_iterator.unwrap_or(*iterator);
+                    let condition = opt_condition.unwrap_or(*condition);
+                    ExprKind::FindMap {
+                        iterator,
+                        condition,
+                    }
+                })
+            }
             ExprKind::Chain(iter_a, iter_b) => {
                 let opt_iter_a = remap(iter_a);
                 let opt_iter_b = remap(iter_b);
@@ -2433,6 +2515,11 @@ impl ExprKind {
                     ExprKind::Chain(iter_a, iter_b)
                 })
             }
+
+            ExprKind::First { iterator } => {
+                remap(iterator).map(|iterator| ExprKind::First { iterator })
+            }
+
             ExprKind::Collect { iterator } => {
                 remap(iterator).map(|iterator| ExprKind::Collect { iterator })
             }
@@ -2691,6 +2778,7 @@ impl ExprKind {
 
             // One upstream input
             ExprKind::Range { extent: value }
+            | ExprKind::First { iterator: value }
             | ExprKind::Collect { iterator: value }
             | ExprKind::FieldAccess { obj: value, .. }
             | ExprKind::SymbolicDowncast { obj: value, .. }
@@ -2710,12 +2798,22 @@ impl ExprKind {
             }
 
             // Two upstreams inputs
-            &ExprKind::Map { iterator, map } => {
-                ([Some(iterator), Some(map), None], None, None)
+            ExprKind::Map {
+                iterator,
+                map: func,
             }
-            &ExprKind::Filter { iterator, filter } => {
-                ([Some(iterator), Some(filter), None], None, None)
+            | ExprKind::Filter {
+                iterator,
+                filter: func,
             }
+            | ExprKind::Find {
+                iterator,
+                condition: func,
+            }
+            | ExprKind::FindMap {
+                iterator,
+                condition: func,
+            } => ([Some(*iterator), Some(*func), None], None, None),
             &ExprKind::Chain(iter_a, iter_b) => {
                 ([Some(iter_a), Some(iter_b), None], None, None)
             }
@@ -2800,6 +2898,9 @@ impl ExprKind {
             ExprKind::Range { .. } => "Range",
             ExprKind::Map { .. } => "Map",
             ExprKind::Filter { .. } => "Filter",
+            ExprKind::First { .. } => "First",
+            ExprKind::Find { .. } => "Find",
+            ExprKind::FindMap { .. } => "FindMap",
             ExprKind::Chain { .. } => "Chain",
             ExprKind::Collect { .. } => "Collect",
             ExprKind::Reduce { .. } => "Reduce",
@@ -3030,10 +3131,47 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::Find {
+                    iterator: lhs_iterator,
+                    condition: rhs_condition,
+                } => match rhs_kind {
+                    ExprKind::Find {
+                        iterator: rhs_iterator,
+                        condition: lhs_condition,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_condition, rhs_condition)
+                    }
+                    _ => false,
+                },
+                ExprKind::FindMap {
+                    iterator: lhs_iterator,
+                    condition: lhs_condition,
+                } => match rhs_kind {
+                    ExprKind::FindMap {
+                        iterator: rhs_iterator,
+                        condition: rhs_condition,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
+                            && equivalent_value!(lhs_condition, rhs_condition)
+                    }
+                    _ => false,
+                },
                 ExprKind::Chain(lhs_iter_a, lhs_iter_b) => match rhs_kind {
                     ExprKind::Chain(rhs_iter_a, rhs_iter_b) => {
                         equivalent_value!(lhs_iter_a, rhs_iter_a)
                             && equivalent_value!(lhs_iter_b, rhs_iter_b)
+                    }
+                    _ => false,
+                },
+
+                ExprKind::First {
+                    iterator: lhs_iterator,
+                } => match rhs_kind {
+                    ExprKind::First {
+                        iterator: rhs_iterator,
+                    } => {
+                        equivalent_value!(lhs_iterator, rhs_iterator)
                     }
                     _ => false,
                 },
@@ -3048,6 +3186,7 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+
                 ExprKind::Reduce {
                     initial: lhs_initial,
                     iterator: lhs_iterator,
@@ -3391,6 +3530,21 @@ impl Display for ExprKind {
             }
             ExprKind::Filter { iterator, filter } => {
                 write!(f, "{iterator}.filter({filter})")
+            }
+            ExprKind::Find {
+                iterator,
+                condition,
+            } => {
+                write!(f, "{iterator}.find({condition})")
+            }
+            ExprKind::FindMap {
+                iterator,
+                condition,
+            } => {
+                write!(f, "{iterator}.find_map({condition})")
+            }
+            ExprKind::First { iterator } => {
+                write!(f, "{iterator}.first()")
             }
             ExprKind::Chain(iter_a, iter_b) => {
                 write!(f, "{iter_a}.chain({iter_b})")

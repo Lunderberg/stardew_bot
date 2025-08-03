@@ -564,13 +564,13 @@ fn eval_nested_reductions_with_enclosed_variables() -> Result<(), Error> {
             if d % 2 == 0 {
                 let sum = c;
                 let sum = sum + b2;
-                
+
                 sum + b2
             } else {
                 let sum = c;
                 let d2 = d * 2;
                 let sum = sum + d2;
-                
+
                 sum + d2
             }
         })
@@ -916,6 +916,92 @@ fn eval_iterator_filter() -> Result<(), Error> {
         .filter(|i| i % 2 == 0)
         .map(|i| i * i)
         .sum::<usize>();
+
+    assert_eq!(result, expected);
+    Ok(())
+}
+
+#[test]
+fn eval_iterator_find() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..100)
+                .find(|i: usize| i>50 && i%2==0)
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected = 52;
+
+    assert_eq!(result, expected);
+    Ok(())
+}
+
+#[test]
+fn eval_iterator_find_none() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..100)
+                .find(|i: usize| i>200)
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let results = vm.local_eval()?;
+    assert!(results[0].is_none());
+
+    Ok(())
+}
+
+#[test]
+fn eval_iterator_find_map() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..100)
+                .find_map(|i: usize| {
+                    let j = i*i;
+                    if j>50 && j%2==0 {
+                        j
+                    } else {
+                        None
+                    }
+                })
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected = 64;
+
+    assert_eq!(result, expected);
+    Ok(())
+}
+
+#[test]
+fn eval_iterator_first() -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..100)
+                .filter(|i: usize| i>50 && i%2==0)
+                .first()
+        }
+    })?;
+
+    let vm = graph.compile(None)?;
+    let result: usize = vm.local_eval()?.try_into()?;
+
+    let expected = 52;
 
     assert_eq!(result, expected);
     Ok(())
