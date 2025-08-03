@@ -5,7 +5,7 @@ use geometry::Vector;
 use crate::{
     BuyFromMerchantGoal, Error, GameAction, GameStateExt as _, InventoryGoal,
     MaintainStaminaGoal, MenuCloser, SelectItemGoal, SellToMerchantGoal,
-    StepCountForLuck, UseItem, UseItemOnTile,
+    StepCountForLuck, UseItem, UseItemOnTile, WaitUntilTimeOfDay,
 };
 use game_state::{
     FacingDirection, FishingRod, GameState, Inventory, Item, ItemCategory,
@@ -309,6 +309,7 @@ impl BotGoal for FishingGoal {
                             && in_game_time > 1630
                     })
                     .unwrap_or(true)
+                && (opt_bait_maker.is_none() && !has_bait_maker)
             {
                 // The fish shop is open, and we're either out of bait
                 // or low on bait and nearby.  Sell all fish and buy
@@ -381,6 +382,13 @@ impl BotGoal for FishingGoal {
 
             if num_preferred_bait < 10 && bait_maker.ready_to_harvest {
                 let goal = ActivateTile::new(self.loc.room_name(), obj.tile);
+                return Ok(goal.into());
+            }
+
+            if num_preferred_bait == 0 && bait_maker.held_item.is_some() {
+                let goal = WaitUntilTimeOfDay::new(
+                    game_state.globals.in_game_time + 10,
+                );
                 return Ok(goal.into());
             }
         }
