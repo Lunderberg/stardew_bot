@@ -66,5 +66,28 @@ pub fn define_utility_functions(
         }
     })?;
 
+    graph.parse(stringify! {
+        fn iter_locations(filter_func) {
+            let location_list = StardewValley
+                .Game1
+                .game1
+                ._locations
+                .as::<
+                "System.Collections.ObjectModel.Collection`1"
+                <StardewValley.GameLocation>
+                >()
+                .items
+                .as::<
+                "System.Collections.Generic.List`1"
+                <StardewValley.GameLocation>
+                >();
+
+            let num_locations = location_list._size.prim_cast::<usize>();
+            (0..num_locations)
+                .filter(|i| filter_func.is_none() || filter_func(i))
+                .map(|i| location_list._items[i])
+        }
+    })?;
+
     Ok(())
 }

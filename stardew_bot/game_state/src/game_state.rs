@@ -58,8 +58,8 @@ impl GameState {
 
         define_utility_functions(&mut graph)?;
         StaticState::def_read_static_state(&mut graph)?;
-        GlobalGameState::def_read_global_game_state(&mut graph)?;
         Inventory::def_read_inventory(&mut graph)?;
+        GlobalGameState::def_read_global_game_state(&mut graph)?;
         Location::def_read_location(&mut graph)?;
         PlayerState::def_read_player(&mut graph)?;
         FishingState::def_read_fishing(&mut graph)?;
@@ -134,27 +134,6 @@ impl GameState {
         )?;
 
         graph.parse(stringify! {
-            fn iter_locations(filter_func) {
-                let location_list = StardewValley
-                    .Game1
-                    .game1
-                    ._locations
-                    .as::<
-                      "System.Collections.ObjectModel.Collection`1"
-                      <StardewValley.GameLocation>
-                    >()
-                    .items
-                    .as::<
-                      "System.Collections.Generic.List`1"
-                      <StardewValley.GameLocation>
-                    >();
-
-                let num_locations = location_list._size.prim_cast::<usize>();
-                (0..num_locations)
-                    .filter(|i| filter_func.is_none() || filter_func(i))
-                    .map(|i| location_list._items[i])
-            }
-
             pub fn read_full_state() {
                 let static_state = read_static_state();
                 let global_game_state = read_global_game_state();
@@ -327,7 +306,8 @@ impl GameState {
         self.locations
             .iter()
             .find(|loc| loc.name == name)
-            .ok_or_else(|| Error::UnknownRoom(name.into()))}
+            .ok_or_else(|| Error::UnknownRoom(name.into()))
+    }
 
     pub fn current_room(&self) -> Result<&Location, Error> {
         self.get_room(&self.player.room_name)
@@ -392,8 +372,7 @@ impl GameStateReader {
         &self,
         cache: CachedReader,
     ) -> Result<GameStateDelta, Error> {
-        self
-            .vm
+        self.vm
             .get_function("read_delta_state")?
             .with_reader(cache)
             .evaluate()?
@@ -405,8 +384,7 @@ impl GameStateReader {
         &self,
         cache: CachedReader,
     ) -> Result<Location, Error> {
-        self
-            .vm
+        self.vm
             .get_function("read_full_current_location")?
             .with_reader(cache)
             .evaluate()?

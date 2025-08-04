@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
-use crate::Error;
+use crate::{Error, Inventory};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GlobalGameState {
@@ -63,6 +63,9 @@ pub struct GlobalGameState {
     /// The lookup key is the `bundle_index`, and each boolean flag
     /// corresponds to an ingredient within that bundle.
     pub bundles: HashMap<i32, Vec<bool>>,
+
+    /// Items that have been shipped using the shipping bin.
+    pub shipped_items: Inventory,
 }
 
 #[derive(RustNativeObject, Default)]
@@ -99,7 +102,8 @@ impl GlobalGameState {
              lowest_mine_level_reached: i32,
              events_triggered: &Vec<String>,
              queued_events: &Vec<String>,
-             bundle_flags: &Vec<BundleFlags>| {
+             bundle_flags: &Vec<BundleFlags>,
+             shipped_items: &Inventory| {
                 let bundles = bundle_flags
                     .iter()
                     .map(|bundle| (bundle.bundle_index, bundle.flags.clone()))
@@ -121,6 +125,7 @@ impl GlobalGameState {
                     events_triggered,
                     queued_events,
                     bundles,
+                    shipped_items: shipped_items.clone(),
                 }
             },
         )?;
@@ -222,6 +227,15 @@ impl GlobalGameState {
                     })
                     .collect();
 
+                let shipped_items = {
+                    let farm = iter_locations(None)
+                        .find_map(|loc| loc.as::<StardewValley.Farm>());
+                    let shipping_inventory = farm
+                        .sharedShippingBin
+                        .value;
+                    read_inventory(shipping_inventory)
+                };
+
                 new_global_game_state(
                     game_id,
                     multiplayer_id,
@@ -235,6 +249,7 @@ impl GlobalGameState {
                     events_triggered,
                     queued_events,
                     bundle_flags,
+                    shipped_items,
                 )
             }
         })?;
