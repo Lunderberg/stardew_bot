@@ -4,7 +4,7 @@ use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 
 use crate::{Error, GameStateExt as _};
-use game_state::{GameState, ObjectKind, TileMap};
+use game_state::{GameState, ItemId, ObjectKind, ResourceClumpKind, TileMap};
 
 use super::LocationExt as _;
 
@@ -168,16 +168,26 @@ impl FarmPlan {
             .filter(|obj| matches!(obj.kind, ObjectKind::FruitTree(_)))
             .map(|obj| obj.tile);
 
-        let iter_requires_iron_tool = farm
-            .resource_clumps
-            .iter()
-            .flat_map(|clump| clump.shape.iter_points());
+        let current_axe = game_state.current_axe()?;
 
-        iter_fruit_trees
-            .chain(iter_requires_iron_tool)
-            .for_each(|tile| {
-                regions[tile] = None;
-            });
+        let iter_clumps =
+            farm.resource_clumps
+                .iter()
+                .filter(|clump| match clump.kind {
+                    ResourceClumpKind::Stump => {
+                        current_axe == Some(&ItemId::COPPER_AXE)
+                    }
+                    ResourceClumpKind::LargeLog => false,
+                    ResourceClumpKind::Boulder
+                    | ResourceClumpKind::Meteorite => false,
+                    ResourceClumpKind::MineBoulder => true,
+                    ResourceClumpKind::GiantCrop(_) => current_axe.is_some(),
+                })
+                .flat_map(|clump| clump.shape.iter_points());
+
+        iter_fruit_trees.chain(iter_clumps).for_each(|tile| {
+            regions[tile] = None;
+        });
 
         Ok(regions)
     }
