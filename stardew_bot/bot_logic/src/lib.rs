@@ -153,3 +153,6 @@ pub use upgrade_tool_goal::*;
 
 mod turn_in_bundles;
 pub use turn_in_bundles::*;
+
+mod sell_for_cash_goal;
+pub use sell_for_cash_goal::*;

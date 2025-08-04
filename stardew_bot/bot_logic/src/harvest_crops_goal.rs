@@ -47,6 +47,13 @@ impl HarvestCropsGoal {
         Ok(iter)
     }
 
+    pub fn num_harvestable(
+        &self,
+        game_state: &GameState,
+    ) -> Result<usize, Error> {
+        Ok(self.iter_harvestable(game_state)?.count())
+    }
+
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         Ok(self.iter_harvestable(game_state)?.next().is_none())
     }

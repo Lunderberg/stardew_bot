@@ -1,5 +1,5 @@
 use crate::{
-    Error, GiveGiftGoal, GoToActionTile, TurnInBundlesGoal,
+    Error, GiveGiftGoal, GoToActionTile, SellForCashGoal, TurnInBundlesGoal,
     UpgradeFishingRodGoal, UpgradeToolGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId, Quality};
@@ -76,12 +76,21 @@ impl BotGoal for GenericDay {
             // TODO: Conditionally apply HarvestCropsGoal, based on
             // whether delaying the harvest will prevent a harvest at
             // the end of the season.
+            let harvest = HarvestCropsGoal::new();
+            let stop_fishing_time = if current_day == 3 {
+                2700
+            } else if harvest.num_harvestable(game_state)? > 150 {
+                2200
+            } else {
+                2400
+            };
+
             stack
                 .then(
                     FishingGoal::new(FishingLocation::River)
-                        .stop_time(if current_day == 3 { 2700 } else { 2400 }),
+                        .stop_time(stop_fishing_time),
                 )
-                .then(HarvestCropsGoal::new())
+                .then(harvest)
         } else if current_day == 4 {
             stack
                 .then(HarvestCropsGoal::new())
@@ -267,6 +276,11 @@ impl BotGoal for GenericDay {
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::Lake))
         };
+
+        // Sell items in order to have enough cash for strawberry
+        // seeds at the egg festival.
+        let stack =
+            stack.then_if(SellForCashGoal::new(40000), current_day == 12);
 
         let stack = if current_day % 7 == 6 {
             stack
