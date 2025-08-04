@@ -381,13 +381,7 @@ impl Item {
         }
 
         let base_recovery = (self.edibility as f32) * 2.5;
-        let quality_multiplier = match self.quality() {
-            Quality::Normal => 1.0,
-            Quality::Silver => 1.4,
-            Quality::Gold => 1.8,
-            Quality::Iridium => 2.6,
-        };
-        Some(base_recovery * quality_multiplier)
+        Some(base_recovery * self.quality().stamina_multiplier())
     }
 
     pub fn gp_per_stamina(&self) -> Option<f32> {
@@ -471,6 +465,15 @@ impl Quality {
             Quality::Silver => 1.25,
             Quality::Gold => 1.5,
             Quality::Iridium => 2.0,
+        }
+    }
+
+    pub fn stamina_multiplier(&self) -> f32 {
+        match self {
+            Quality::Normal => 1.0,
+            Quality::Silver => 1.4,
+            Quality::Gold => 1.8,
+            Quality::Iridium => 2.6,
         }
     }
 
