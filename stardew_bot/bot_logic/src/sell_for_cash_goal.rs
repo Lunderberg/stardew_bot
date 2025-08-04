@@ -23,11 +23,19 @@ impl SellForCashGoal {
         let wallet = game_state.player.current_money;
         let pass_out_penalty = (((wallet as f32) * 0.1) as i32).min(1000);
 
+        let fish_price_multiplier = game_state.daily.fish_price_multiplier();
+
         let shipped = game_state
             .globals
             .shipped_items
             .iter_items()
-            .map(|item| item.stack_price())
+            .map(|item| {
+                let category_multiplier = match item.category {
+                    Some(ItemCategory::Fish) => fish_price_multiplier,
+                    _ => 1.0,
+                };
+                item.stack_price_with_perk(category_multiplier)
+            })
             .sum::<i32>();
 
         let total = wallet - pass_out_penalty + shipped;
@@ -115,8 +123,9 @@ impl BotGoal for SellForCashGoal {
             })
             .filter(|(_, prev_sold, _, _)| *prev_sold < additional_money)
             .map(|(id, prev_sold, price, count)| {
-                let count = count
-                    .min(((additional_money - prev_sold) / price) as usize);
+                let goal_to_sell =
+                    (additional_money - prev_sold + (price - 1)) / price;
+                let count = count.min(goal_to_sell as usize);
                 id.with_count(count)
             })
             .collect();
