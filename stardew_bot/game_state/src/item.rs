@@ -380,19 +380,6 @@ impl Item {
             return None;
         }
 
-        if self.is_same_item(&ItemId::SEA_JELLY)
-            || self.is_same_item(&ItemId::RIVER_JELLY)
-            || self.is_same_item(&ItemId::CAVE_JELLY)
-        {
-            // Temporary hard-coding to avoid eating supplies that are
-            // needed for the Bait Maker.  In the future, eating the
-            // jellies should be allowed, so long as either (1) at
-            // least one BaitMaker has been crafted, (2) the storage
-            // chests contain another instance of the same jelly, or
-            // (3) the player contains another instance of the jelly.
-            return None;
-        }
-
         let base_recovery = (self.edibility as f32) * 2.5;
         let quality_multiplier = match self.quality() {
             Quality::Normal => 1.0,

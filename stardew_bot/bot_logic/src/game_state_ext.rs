@@ -50,6 +50,15 @@ pub trait GameStateExt {
 static RESERVED_FOR_GIFTS: LazyLock<[(ItemId, usize); 1]> =
     LazyLock::new(|| [(ItemId::PARSNIP.with_quality(Quality::Gold), 2)]);
 
+static RESERVED_FOR_CRAFTING: LazyLock<[(ItemId, usize); 3]> =
+    LazyLock::new(|| {
+        [
+            (ItemId::SEA_JELLY, 2),
+            (ItemId::RIVER_JELLY, 2),
+            (ItemId::CAVE_JELLY, 2),
+        ]
+    });
+
 impl GameStateExt for GameState {
     fn get_farm_door(&self) -> Result<Vector<isize>, Error> {
         let farm = self.get_room("Farm")?;
@@ -167,9 +176,13 @@ impl GameStateExt for GameState {
         let iter_gifts =
             RESERVED_FOR_GIFTS.iter().map(|(id, count)| (id, *count));
 
+        let iter_crafting =
+            RESERVED_FOR_CRAFTING.iter().map(|(id, count)| (id, *count));
+
         let iter_reserved = iter_worst_fish
             .chain(iter_bundles)
             .chain(iter_gifts)
+            .chain(iter_crafting)
             .filter(move |_| !is_early_startup);
 
         Ok(iter_reserved)
