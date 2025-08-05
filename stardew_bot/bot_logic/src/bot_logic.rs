@@ -68,7 +68,7 @@ pub struct ActionCollector {
 
     forbidden: ActionForbiddenUntil,
 
-    game_tick: i32,
+    game_mode_tick: i32,
 
     is_activating_tile: bool,
     is_confirming_menu: bool,
@@ -97,7 +97,7 @@ struct ActionForbiddenUntil {
 
 pub struct VerboseAction {
     action: GameAction,
-    game_tick: i32,
+    game_mode_tick: i32,
     goal: Option<Cow<'static, str>>,
     detail: Option<Cow<'static, str>>,
 
@@ -182,7 +182,7 @@ impl ActionForbiddenUntil {
         // If an action is currently taking place, then any attempts
         // to repeat it may not occur until at least the next game
         // tick.
-        let tick = game_state.globals.game_tick + 1;
+        let tick = game_state.globals.game_mode_tick + 1;
 
         let activate_tile = game_state
             .inputs
@@ -300,8 +300,9 @@ impl ActionForbiddenUntil {
         }
     }
 
-    fn at_game_tick(self, game_tick: i32) -> Self {
-        let filter = |expires_at: &i32| -> bool { game_tick < *expires_at };
+    fn at_game_mode_tick(self, game_mode_tick: i32) -> Self {
+        let filter =
+            |expires_at: &i32| -> bool { game_mode_tick < *expires_at };
 
         Self {
             activate_tile: self.activate_tile.filter(filter),
@@ -347,7 +348,7 @@ impl ActionCollector {
             actions: Vec::new(),
             refresh_current_location: false,
             forbidden,
-            game_tick: game_state.globals.game_tick,
+            game_mode_tick: game_state.globals.game_mode_tick,
             is_activating_tile,
             is_confirming_menu,
             is_animation_cancelling,
@@ -386,7 +387,7 @@ impl ActionCollector {
 
         let waited_dead_time = |wait_until: Option<i32>| -> bool {
             wait_until
-                .map(|tick| self.game_tick >= tick)
+                .map(|tick| self.game_mode_tick >= tick)
                 .unwrap_or(true)
         };
 
@@ -416,7 +417,7 @@ impl ActionCollector {
 
         self.actions.push(VerboseAction {
             action,
-            game_tick: self.game_tick,
+            game_mode_tick: self.game_mode_tick,
             goal: None,
             detail: None,
             allowed,
@@ -545,7 +546,7 @@ impl BotLogic {
         self.action_dead_time = self
             .action_dead_time
             .clone()
-            .at_game_tick(game_state.globals.game_tick);
+            .at_game_mode_tick(game_state.globals.game_mode_tick);
 
         // If any actions are in-progress, based on the current game
         // state, mark inputs that may not be taken again until the
@@ -782,7 +783,7 @@ impl BotLogic {
         // event until two frames have passed..)
         self.action_dead_time = self.action_dead_time.clone().merge(
             ActionForbiddenUntil::from_actions(
-                game_state.globals.game_tick,
+                game_state.globals.game_mode_tick,
                 actions
                     .actions
                     .iter()
@@ -1060,7 +1061,7 @@ where
 
 impl Display for VerboseAction {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}: ", self.game_tick)?;
+        write!(f, "{}: ", self.game_mode_tick)?;
 
         if !self.allowed {
             write!(f, "(suppressed) ")?;
