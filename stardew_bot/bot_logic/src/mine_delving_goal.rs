@@ -333,6 +333,8 @@ impl MineDelvingGoal {
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let after_stop_time = game_state.globals.in_game_time >= self.stop_time;
+
         let currently_in_mines =
             game_state.current_room()?.mineshaft_details.is_some();
 
@@ -346,7 +348,8 @@ impl MineDelvingGoal {
         let reached_bottom =
             game_state.globals.lowest_mine_level_reached >= 120;
 
-        Ok(!currently_in_mines && (current_day < 5 || reached_bottom))
+        Ok(!currently_in_mines
+            && (current_day < 5 || reached_bottom || after_stop_time))
     }
 
     fn elevator_to_floor(
