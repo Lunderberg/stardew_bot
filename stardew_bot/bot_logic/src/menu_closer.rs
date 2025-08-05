@@ -136,13 +136,13 @@ impl BotGoal for MenuCloser {
 
         let should_wait = self
             .previous_click
-            .map(|prev_tick| prev_tick + 5 <= game_state.globals.game_tick)
+            .map(|prev_tick| prev_tick + 5 <= game_state.globals.game_mode_tick)
             .unwrap_or(false);
         if should_wait {
             return Ok(BotGoalResult::InProgress);
         }
 
-        self.previous_click = Some(game_state.globals.game_tick);
+        self.previous_click = Some(game_state.globals.game_mode_tick);
 
         if let Some(empty_slot) = self.drop_held_item(game_state) {
             actions
