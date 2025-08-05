@@ -263,11 +263,7 @@ impl GameState {
         self.menu = delta.menu;
 
         if delta.num_mine_levels == 0 {
-            self.locations = self
-                .locations
-                .drain(..)
-                .filter(|loc| loc.mineshaft_details.is_none())
-                .collect();
+            self.locations.retain(|loc| loc.mineshaft_details.is_none());
         }
 
         if let Some(loc) = self
@@ -364,6 +360,19 @@ impl GameStateReader {
         Location::add_building_warps(&mut state.locations);
         Location::add_minecart_warps(&mut state.locations);
         Location::fix_farm_warps(&mut state.locations);
+
+        if state
+            .locations
+            .iter()
+            .all(|loc| loc.name != state.player.room_name)
+        {
+            // The player is currently in a temporary location, which
+            // is not stored in any of the usual locations.
+            // Therefore, read the current location and add it to the
+            // list of locations.
+            let current_location = self.read_full_current_location(cache)?;
+            state.update_location(current_location);
+        }
 
         Ok(state)
     }
