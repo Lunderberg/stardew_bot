@@ -33,7 +33,14 @@ impl BotInterrupt for SkipCutscenes {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
-        if game_state.globals.event_up {
+        let is_festival = game_state
+            .current_room()?
+            .current_event
+            .as_ref()
+            .map(|event| event.is_festival)
+            .unwrap_or(false);
+
+        if game_state.globals.event_up && !is_festival {
             let stack =
                 [LogicStackItem::PreventInterrupt, SkipCurrentCutscene.into()]
                     .into_iter()
@@ -55,7 +62,13 @@ impl BotGoal for SkipCurrentCutscene {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if !game_state.globals.event_up {
+        let is_festival = game_state
+            .current_room()?
+            .current_event
+            .as_ref()
+            .map(|event| event.is_festival)
+            .unwrap_or(false);
+        if !game_state.globals.event_up || is_festival {
             return Ok(BotGoalResult::Completed);
         }
 
