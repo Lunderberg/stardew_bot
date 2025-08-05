@@ -75,6 +75,9 @@ pub struct Location {
     /// Bombs that have been placed in the area, but have not yet
     /// exploded.
     pub bombs: Vec<Bomb>,
+
+    /// Extra state for an in-progress event (e.g. the Egg Festival).
+    pub current_event: Option<EventState>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -97,6 +100,7 @@ pub struct LocationDelta {
     items: Vec<FloatingItem>,
     characters: Vec<Character>,
     bombs: Vec<Bomb>,
+    current_event: Option<EventState>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -133,6 +137,14 @@ pub enum WarpKind {
         /// minecart.
         event: String,
     },
+}
+
+#[derive(RustNativeObject, Debug, Clone)]
+pub struct EventState {
+    pub characters: Vec<Character>,
+    pub host_name: String,
+    pub is_festival: bool,
+    pub props: Vec<Vector<isize>>,
 }
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -489,6 +501,8 @@ pub struct BuildingDoor {
 pub struct Character {
     /// The name of the NPC/Monster
     pub name: String,
+
+    pub simple_non_villager_npc: bool,
 
     /// The pixel position of the character.  Must be divided by 64 to
     /// get the tile position.
@@ -1081,6 +1095,7 @@ impl Location {
         graph.named_native_function(
             "new_character",
             |name: &str,
+             simple_non_villager_npc: bool,
              x: f32,
              y: f32,
              sprite_width: i32,
@@ -1092,6 +1107,7 @@ impl Location {
              -> Character {
                 Character {
                     name: name.to_string(),
+                    simple_non_villager_npc,
                     position: Vector::new(x, y),
                     sprite_width,
                     health,
@@ -1131,6 +1147,19 @@ impl Location {
         )?;
 
         graph.named_native_function(
+            "new_event_state",
+            |characters: &Vec<Character>,
+             host_name: &str,
+             is_festival: bool,
+             props: &Vec<Vector<isize>>| EventState {
+                characters: characters.clone(),
+                host_name: host_name.to_string(),
+                is_festival,
+                props: props.clone(),
+            },
+        )?;
+
+        graph.named_native_function(
             "new_location",
             |name: &str,
              properties: &Vec<MapProperty>,
@@ -1146,7 +1175,8 @@ impl Location {
              buildings: &Vec<Building>,
              characters: &Vec<Character>,
              mineshaft_details: Option<&MineshaftDetails>,
-             bombs: &Vec<Bomb>| {
+             bombs: &Vec<Bomb>,
+             current_event: Option<&EventState>| {
                 let properties = properties
                     .iter()
                     .map(|prop| (prop.key.to_string(), prop.value.to_string()))
@@ -1210,6 +1240,7 @@ impl Location {
                     characters: characters.clone(),
                     mineshaft_details: mineshaft_details.cloned(),
                     bombs: bombs.clone(),
+                    current_event: current_event.cloned(),
                 }
             },
         )?;
@@ -1221,7 +1252,8 @@ impl Location {
              objects: &Vec<Object>,
              items: &Vec<FloatingItem>,
              characters: &Vec<Character>,
-             bombs: &Vec<Bomb>| {
+             bombs: &Vec<Bomb>,
+             current_event: Option<&EventState>| {
                 LocationDelta {
                     name: name.into(),
                     near_player: true,
@@ -1230,6 +1262,7 @@ impl Location {
                     items: items.clone(),
                     characters: characters.clone(),
                     bombs: bombs.clone(),
+                    current_event: current_event.cloned(),
                 }
             },
         )?;
@@ -1244,6 +1277,7 @@ impl Location {
                 objects: Default::default(),
                 items: Default::default(),
                 bombs: Default::default(),
+                current_event: None,
             },
         )?;
 
@@ -1679,6 +1713,89 @@ impl Location {
                 furniture
             }
 
+            fn read_character_name(character) {
+                let name_ptr = if character._displayName.is_some() {
+                    character._displayName
+                } else {
+                    character.name.value
+                };
+                name_ptr.read_string()
+            }
+
+            fn read_character(character) {
+                let name = read_character_name(character);
+
+                let simple_non_villager_npc = character
+                    .simpleNonVillagerNPC
+                    .value;
+
+                let pos = character
+                    .position
+                    .Field
+                    .value;
+
+                let sprite_width = character
+                    .sprite
+                    .value
+                    .spriteWidth
+                    .value;
+
+                let monster = character.as::<StardewValley.Monsters.Monster>();
+
+                let health = if monster.is_some() {
+                    monster.health.value
+                } else {
+                    None
+                };
+
+                let ignores_collisions = if monster.is_some() {
+                    monster.isGlider.value
+                } else {
+                    false
+                };
+
+                let is_invisible_duggy = character.isInvisible.value;
+
+                let as_rock_crab = character
+                    .as::<StardewValley.Monsters.RockCrab>();
+                let is_waiting_rock_crab = if as_rock_crab.is_some() {
+                    as_rock_crab.waiter
+                } else {
+                    false
+                };
+
+                let item_drops = if monster.is_some() {
+                    let list = monster
+                        .objectsToDrop
+                        .array
+                        .value
+                        .elements;
+                    let num_items = list
+                        ._size
+                        .prim_cast::<usize>();
+                    (0..num_items)
+                        .map(|i| list._items[i].value.read_string())
+                        .filter(|id| id.is_some())
+                        .collect()
+                } else {
+                    None
+                };
+
+
+
+                new_character(
+                    name,
+                    simple_non_villager_npc,
+                    pos.X, pos.Y,
+                    sprite_width,
+                    health,
+                    ignores_collisions,
+                    is_invisible_duggy,
+                    is_waiting_rock_crab,
+                    item_drops,
+                )
+            }
+
             fn read_location_characters(location) {
                 let character_list = location
                     .characters
@@ -1690,72 +1807,7 @@ impl Location {
 
                 let characters = (0..num_characters)
                     .map(|i_character| character_list._items[i_character])
-                    .map(|character| {
-                        let name_ptr = if character._displayName.is_some() {
-                            character._displayName
-                        } else {
-                            character.name.value
-                        };
-                        let name = name_ptr.read_string();
-
-                        let pos = character
-                            .position
-                            .Field
-                            .value;
-
-                        let sprite_width = character
-                            .sprite
-                            .value
-                            .spriteWidth
-                            .value;
-
-                        let monster = character.as::<StardewValley.Monsters.Monster>();
-
-                        let health = monster.health.value;
-                        let ignores_collisions = if monster.is_some() {
-                            monster.isGlider.value
-                        } else {
-                            false
-                        };
-
-                        let is_invisible_duggy = character.isInvisible.value;
-
-                        let as_rock_crab = character
-                            .as::<StardewValley.Monsters.RockCrab>();
-                        let is_waiting_rock_crab = if as_rock_crab.is_some() {
-                            as_rock_crab.waiter
-                        } else {
-                            false
-                        };
-
-                        let item_drops = if monster.is_some() {
-                            let list = monster
-                                .objectsToDrop
-                                .array
-                                .value
-                                .elements;
-                            let num_items = list
-                                ._size
-                                .prim_cast::<usize>();
-                            (0..num_items)
-                                .map(|i| list._items[i].value.read_string())
-                                .filter(|id| id.is_some())
-                                .collect()
-                        } else {
-                            None
-                        };
-
-                        new_character(
-                            name,
-                            pos.X, pos.Y,
-                            sprite_width,
-                            health,
-                            ignores_collisions,
-                            is_invisible_duggy,
-                            is_waiting_rock_crab,
-                            item_drops,
-                        )
-                    })
+                    .map(|character| read_character(character))
                     .collect();
 
                 characters
@@ -1784,6 +1836,57 @@ impl Location {
                         )
                     })
                     .collect()
+            }
+
+            fn read_location_current_event(location) {
+                let event = location.currentEvent;
+
+                let characters = {
+                    let actors = event.actors;
+
+                    let num = actors
+                        ._size
+                        .prim_cast::<usize>();
+
+                    (0..num)
+                        .map(|i| actors._items[i])
+                        .map(|actor| read_character(actor))
+                        .collect()
+                };
+
+                let props = {
+                    let list = event.festivalProps;
+
+                    let num = list
+                        ._size
+                        .prim_cast::<usize>();
+
+                    (0..num)
+                        .map(|i| list._items[i])
+                        .map(|prop| {
+                            let x = prop.boundingRect.X;
+                            let y = prop.boundingRect.Y;
+                            new_vector_isize(x/64, y/64)
+                        })
+                        .collect()
+                };
+
+                let host_name = read_character_name(
+                    event.festivalHost
+                );
+
+                let is_festival = event.isFestival;
+
+                if event.is_some() {
+                    new_event_state(
+                        characters,
+                        host_name,
+                        is_festival,
+                        props,
+                    )
+                } else {
+                    None
+                }
             }
 
             fn read_location(location) {
@@ -2161,6 +2264,8 @@ impl Location {
 
                 let bombs = read_location_bombs(location);
 
+                let current_event = read_location_current_event(location);
+
                 new_location(
                     name,
                     properties,
@@ -2177,6 +2282,7 @@ impl Location {
                     characters,
                     mineshaft_details,
                     bombs,
+                    current_event,
                 )
             }
 
@@ -2236,6 +2342,8 @@ impl Location {
                 let characters = read_location_characters(location);
                 let bombs = read_location_bombs(location);
 
+                let current_event = read_location_current_event(location);
+
                 new_location_delta(
                     name,
                     resource_clumps,
@@ -2243,6 +2351,7 @@ impl Location {
                     items,
                     characters,
                     bombs,
+                    current_event,
                 )
             }
 
@@ -2620,6 +2729,7 @@ impl Location {
 
         self.characters = delta.characters;
         self.bombs = delta.bombs;
+        self.current_event = delta.current_event;
     }
 
     fn apply_nonlocal_delta(&mut self, delta: LocationDelta) {
