@@ -11,6 +11,7 @@ use super::{
 };
 
 pub struct CollectNearbyItems {
+    previous_trigger: Option<i32>,
     search_radius: f32,
     cluster_search_radius: f32,
     cluster_radius: f32,
@@ -31,6 +32,7 @@ impl Default for CollectNearbyItems {
 impl CollectNearbyItems {
     pub fn new() -> Self {
         Self {
+            previous_trigger: None,
             search_radius: 2.10,
             cluster_search_radius: 10.0,
             cluster_radius: 2.5,
@@ -137,6 +139,14 @@ impl BotInterrupt for CollectNearbyItems {
         &mut self,
         game_state: &GameState,
     ) -> Result<Option<LogicStack>, Error> {
+        if self
+            .previous_trigger
+            .map(|prev| game_state.globals.game_tick < prev + 2)
+            .unwrap_or(false)
+        {
+            return Ok(None);
+        }
+
         let goal_dist = 1.55;
         let goal = WalkTowardDebris {
             search_radius_squared: self.search_radius * self.search_radius,
@@ -144,6 +154,7 @@ impl BotInterrupt for CollectNearbyItems {
         };
 
         if !goal.is_completed(game_state)? {
+            self.previous_trigger = Some(game_state.globals.game_tick);
             return Ok(Some(goal.into()));
         }
 
@@ -162,6 +173,7 @@ impl BotInterrupt for CollectNearbyItems {
             })
             .filter(|movement| !movement.is_completed(game_state))
         {
+            self.previous_trigger = Some(game_state.globals.game_tick);
             return Ok(Some(movement.into()));
         }
 
