@@ -165,12 +165,21 @@ impl PlayerState {
              points: i32,
              talked_today: bool,
              gifted_today: bool,
-             gifts_this_week: i32| Friendship {
-                name: name.to_string(),
-                points,
-                talked_today,
-                gifted_today,
-                gifts_this_week,
+             gifts_this_week: i32| {
+                // In Stardew Valley Expanded, Marlon becomes a
+                // friend-able NPC.  The name of the NPC in the
+                // friendship menu is different from the name of the
+                // NPC in the `StardewValley.Character` class.
+                // Normalizing them here means that it doesn't require
+                // special handling in all NPC interaction goals.
+                let name = if name == "MarlonFay" { "Marlon" } else { name };
+                Friendship {
+                    name: name.to_string(),
+                    points,
+                    talked_today,
+                    gifted_today,
+                    gifts_this_week,
+                }
             },
         )?;
 
