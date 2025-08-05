@@ -340,6 +340,10 @@ impl GoToRoomGoal {
         let target_room = target_room.into();
         Self { target_room }
     }
+
+    pub fn is_completed(&self, game_state: &GameState) -> bool {
+        self.target_room == game_state.player.room_name
+    }
 }
 
 impl LocalMovementGoal {

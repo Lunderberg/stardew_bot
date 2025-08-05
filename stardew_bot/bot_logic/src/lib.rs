@@ -156,3 +156,6 @@ pub use turn_in_bundles::*;
 
 mod sell_for_cash_goal;
 pub use sell_for_cash_goal::*;
+
+mod egg_festival;
+pub use egg_festival::*;

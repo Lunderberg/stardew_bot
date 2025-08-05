@@ -89,6 +89,12 @@ pub enum Error {
 
     #[error("The MineNearbyOre was used when not in the mines")]
     MineNearbyOreUsedOutsideOfMines,
+
+    #[error(
+        "Temporary map for egg festival is loaded, \
+         but not event data was found."
+    )]
+    MissingEventDataDuringEggFestival,
 }
 
 impl std::fmt::Debug for Error {

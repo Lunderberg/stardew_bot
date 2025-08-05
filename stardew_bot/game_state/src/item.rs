@@ -178,6 +178,7 @@ impl ItemId {
     pub const CARROT_SEEDS: Self = Self::new_const("(O)CarrotSeeds");
     pub const KALE_SEEDS: Self = Self::new_const("(O)477");
     pub const MIXED_SEEDS: Self = Self::new_const("(O)770");
+    pub const STRAWBERRY_SEEDS: Self = Self::new_const("(O)745");
 
     pub const CLAY: Self = Self::new_const("(O)330");
     pub const WOOD: Self = Self::new_const("(O)388");

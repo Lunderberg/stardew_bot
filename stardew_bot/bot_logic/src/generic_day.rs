@@ -1,6 +1,6 @@
 use crate::{
-    Error, GiveGiftGoal, GoToActionTile, SellForCashGoal, TurnInBundlesGoal,
-    UpgradeFishingRodGoal, UpgradeToolGoal,
+    EggFestival, Error, GiveGiftGoal, GoToActionTile, SellForCashGoal,
+    TurnInBundlesGoal, UpgradeFishingRodGoal, UpgradeToolGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
@@ -146,6 +146,11 @@ impl BotGoal for GenericDay {
                 ))
         } else if current_day == 8 {
             stack.then(GeodeCrackingGoal::new())
+        } else if current_day == 13 {
+            stack
+                .then(ExpandTreeFarm::new())
+                .then(MineDelvingGoal::new().stop_time(1300))
+                .then(EggFestival::new())
         } else if current_day >= 6 && any_kale_planted {
             let crops =
                 PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);

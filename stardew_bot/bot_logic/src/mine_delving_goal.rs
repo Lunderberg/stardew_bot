@@ -613,7 +613,9 @@ impl MineDelvingGoal {
             .with(ItemId::MAGMA_GEODE.clone().with_count(1000))
             .with(ItemId::OMNI_GEODE.clone().with_count(1000));
 
-        let prepare = if game_state.globals.in_game_time >= 2200 {
+        let prepare = if game_state.globals.in_game_time
+            >= 2200.min(self.stop_time - 100)
+        {
             // If it's close to the end of the day, grab items that
             // should be brought back to the farm for the next day.
 
@@ -1073,13 +1075,12 @@ impl BotGoal for MineSingleLevel {
             current_room
                 .objects
                 .iter()
-                .filter(|obj| {
-                    matches!(
-                        obj.kind,
-                        ObjectKind::MineLadderUp
-                            | ObjectKind::MineLadderDown
-                            | ObjectKind::MineElevator
-                    )
+                .filter(|obj| match obj.kind {
+                    ObjectKind::MineLadderUp | ObjectKind::MineElevator => true,
+                    ObjectKind::MineLadderDown => {
+                        game_state.globals.in_game_time < self.stop_time
+                    }
+                    _ => false,
                 })
                 .map(|obj| obj.tile)
                 .filter(|tile| distances.is_some(*tile))
