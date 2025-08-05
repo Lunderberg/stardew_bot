@@ -144,8 +144,6 @@ impl BotGoal for GenericDay {
                     "Saloon",
                     ItemId::SALAD.with_count(20),
                 ))
-        } else if current_day == 8 {
-            stack.then(GeodeCrackingGoal::new())
         } else if current_day == 13 {
             stack
                 .then(ExpandTreeFarm::new())
