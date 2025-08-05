@@ -311,11 +311,18 @@ impl PlantCropsGoal {
         }
         let plan = FarmPlan::plan(game_state)?;
 
-        let is_first_day = game_state.globals.days_played() == 1;
+        let num_seeds = self.seeds.iter().map(|seed| seed.count).sum::<usize>();
+
         let iter_regions = || {
             plan.arable_regions
                 .iter()
-                .take(if is_first_day { 1 } else { 2 })
+                .scan(0usize, |cumsum, region| {
+                    let prev_tiles = *cumsum;
+                    *cumsum += region.plantable.len();
+                    Some((prev_tiles, region))
+                })
+                .filter(|(prev_tiles, _)| *prev_tiles < num_seeds)
+                .map(|(_, region)| region)
         };
 
         let farm = game_state.get_room("Farm")?;
@@ -407,6 +414,7 @@ impl PlantCropsGoal {
                 .cloned(),
         );
 
+        let is_first_day = game_state.globals.days_played() == 1;
         let iter_craftables =
             iter_regions().filter(|_| !is_first_day).flat_map(|region| {
                 let iter_sprinklers = region

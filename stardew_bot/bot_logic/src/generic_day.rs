@@ -52,9 +52,36 @@ impl BotGoal for GenericDay {
             .cloned()
             .unwrap_or(0);
 
-        let any_kale_planted = farm
-            .iter_planted_seeds()
-            .any(|seed| seed == &ItemId::KALE_SEEDS);
+        let should_buy_iridium_rod = {
+            let has_iridium_rod = game_state
+                .player
+                .inventory
+                .iter_items()
+                .chain(game_state.iter_stored_items("Farm")?)
+                .chain(game_state.iter_stored_items("Mine")?)
+                .filter_map(|item| item.as_fishing_rod())
+                .any(|rod| rod.can_use_tackle());
+
+            !has_iridium_rod
+                && game_state.globals.events_triggered.contains("ccBoilerRoom")
+                && game_state.daily.tomorrow_weather == "Rain"
+                && game_state.globals.days_played() % 7 != 6
+        };
+
+        let main_crop_planted = farm.iter_planted_seeds().any(|seed| {
+            seed == &ItemId::PARSNIP_SEEDS
+                || seed == &ItemId::KALE_SEEDS
+                || seed == &ItemId::STRAWBERRY_SEEDS
+        });
+
+        let plant_crops = if current_day <= 5 {
+            PlantCropsGoal::new([ItemId::PARSNIP_SEEDS.with_count(60)])
+                .buy_missing_seeds(false)
+        } else if current_day <= 11 {
+            PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)])
+        } else {
+            PlantCropsGoal::new([ItemId::STRAWBERRY_SEEDS.with_count(400)])
+        };
 
         let stack = LogicStack::new().then(CheckAllMail);
 
@@ -112,11 +139,9 @@ impl BotGoal for GenericDay {
                 .then(ShipMostFishGoal::new())
                 .then(MineDelvingGoal::new())
         } else if current_day >= 6 && game_state.daily.tool_ready_for_pickup {
-            let crops =
-                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
             stack
                 .then(HarvestCropsGoal::new())
-                .then(crops)
+                .then(plant_crops)
                 .then(
                     ClearFarmGoal::new()
                         .clear_expanded_trees(true)
@@ -149,79 +174,13 @@ impl BotGoal for GenericDay {
                 .then(ExpandTreeFarm::new())
                 .then(MineDelvingGoal::new().stop_time(1300))
                 .then(EggFestival::new())
-        } else if current_day >= 6 && any_kale_planted {
-            let crops =
-                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
-
-            let has_iridium_rod = game_state
-                .player
-                .inventory
-                .iter_items()
-                .chain(game_state.iter_stored_items("Farm")?)
-                .chain(game_state.iter_stored_items("Mine")?)
-                .filter_map(|item| item.as_fishing_rod())
-                .any(|rod| rod.can_use_tackle());
-            let should_buy_iridium_rod = !has_iridium_rod
-                && game_state.globals.events_triggered.contains("ccBoilerRoom")
-                && game_state.daily.tomorrow_weather == "Rain"
-                && game_state.globals.days_played() % 7 != 6;
-            stack
-                .then(HarvestCropsGoal::new())
-                .then(crops)
-                .then(WaterCropsGoal::new())
-                .then_if(ExpandTreeFarm::new(), current_day % 2 == 0)
-                .then_if(
-                    InventoryGoal::empty()
-                        .with_exactly(ItemId::QUARTZ.with_count(0))
-                        .with_exactly(ItemId::FIRE_QUARTZ.with_count(0))
-                        .with_category(ItemCategory::Gem)
-                        .with_category(ItemCategory::Mineral)
-                        .with(ItemId::GEODE.with_count(1000))
-                        .with(ItemId::FROZEN_GEODE.with_count(1000))
-                        .with(ItemId::MAGMA_GEODE.with_count(1000))
-                        .with(ItemId::OMNI_GEODE.with_count(1000)),
-                    should_buy_iridium_rod
-                        && (game_state.player.room_name == "Farm"
-                            || game_state.player.room_name == "FarmHouse"),
-                )
-                .then_if(
-                    MineDelvingGoal::new()
-                        .keep_previous_inventory(true)
-                        .stop_time(1400),
-                    should_buy_iridium_rod,
-                )
-                .then_if(
-                    InventoryGoal::empty()
-                        .room("Mine")
-                        .with_exactly(ItemId::QUARTZ.with_count(0))
-                        .with_exactly(ItemId::FIRE_QUARTZ.with_count(0))
-                        .with_category(ItemCategory::Gem)
-                        .with_category(ItemCategory::Mineral)
-                        .with(ItemId::GEODE.with_count(1000))
-                        .with(ItemId::FROZEN_GEODE.with_count(1000))
-                        .with(ItemId::MAGMA_GEODE.with_count(1000))
-                        .with(ItemId::OMNI_GEODE.with_count(1000)),
-                    should_buy_iridium_rod,
-                )
-                .then_if(
-                    GeodeCrackingGoal::new()
-                        .sell_gems(true)
-                        .sell_minerals(true)
-                        .target_money(8000),
-                    should_buy_iridium_rod,
-                )
-                .then_if(
-                    UpgradeFishingRodGoal::new().buy_tackle(true),
-                    should_buy_iridium_rod,
-                )
-                .then(MineDelvingGoal::new())
-        } else if current_day >= 6 {
-            let crops =
-                PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)]);
+        } else if (14..).contains(&current_day) && !main_crop_planted {
+            stack.then(plant_crops)
+        } else if (6..12).contains(&current_day) && !main_crop_planted {
             stack
                 .then(HarvestCropsGoal::new())
                 .then(
-                    crops
+                    plant_crops
                         .clone()
                         .buy_missing_seeds(false)
                         .craft_missing(false)
@@ -265,13 +224,64 @@ impl BotGoal for GenericDay {
                         .sell_minerals(true)
                         .sell_iridium_ore(true),
                 )
-                .then(crops.clone().only_buy_missing_seeds())
+                .then(plant_crops.clone().only_buy_missing_seeds())
                 .then(BuyFromMerchantGoal::new(
                     "Saloon",
                     ItemId::SALAD.with_count(20),
                 ))
                 .then(ForagingGoal::new().location("Beach"))
-                .then(crops.clone())
+                .then(plant_crops.clone())
+        } else if current_day >= 6 && should_buy_iridium_rod {
+            stack
+                .then(HarvestCropsGoal::new())
+                .then(plant_crops)
+                .then(WaterCropsGoal::new())
+                .then_if(ExpandTreeFarm::new(), current_day % 2 == 0)
+                .then_if(
+                    InventoryGoal::empty()
+                        .with_exactly(ItemId::QUARTZ.with_count(0))
+                        .with_exactly(ItemId::FIRE_QUARTZ.with_count(0))
+                        .with_category(ItemCategory::Gem)
+                        .with_category(ItemCategory::Mineral)
+                        .with(ItemId::GEODE.with_count(1000))
+                        .with(ItemId::FROZEN_GEODE.with_count(1000))
+                        .with(ItemId::MAGMA_GEODE.with_count(1000))
+                        .with(ItemId::OMNI_GEODE.with_count(1000)),
+                    game_state.player.room_name == "Farm"
+                        || game_state.player.room_name == "FarmHouse",
+                )
+                .then(
+                    MineDelvingGoal::new()
+                        .keep_previous_inventory(true)
+                        .stop_time(1400),
+                )
+                .then(
+                    InventoryGoal::empty()
+                        .room("Mine")
+                        .with_exactly(ItemId::QUARTZ.with_count(0))
+                        .with_exactly(ItemId::FIRE_QUARTZ.with_count(0))
+                        .with_category(ItemCategory::Gem)
+                        .with_category(ItemCategory::Mineral)
+                        .with(ItemId::GEODE.with_count(1000))
+                        .with(ItemId::FROZEN_GEODE.with_count(1000))
+                        .with(ItemId::MAGMA_GEODE.with_count(1000))
+                        .with(ItemId::OMNI_GEODE.with_count(1000)),
+                )
+                .then(
+                    GeodeCrackingGoal::new()
+                        .sell_gems(true)
+                        .sell_minerals(true)
+                        .target_money(8000),
+                )
+                .then(UpgradeFishingRodGoal::new().buy_tackle(true))
+                .then(MineDelvingGoal::new())
+        } else if current_day >= 6 {
+            stack
+                .then(HarvestCropsGoal::new())
+                .then(plant_crops)
+                .then(WaterCropsGoal::new())
+                .then_if(ExpandTreeFarm::new(), current_day % 2 == 0)
+                .then(MineDelvingGoal::new())
         } else {
             stack
                 .then(HarvestCropsGoal::new())
