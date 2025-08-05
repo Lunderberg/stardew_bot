@@ -88,6 +88,10 @@ pub struct Pathfinding<'a> {
     /// to the final tile.  Excluding the border is useful when
     /// identifying tiles on which the player may stand.
     include_border: bool,
+
+    /// If true, treat NPCs as obstacles to be avoided.  If false,
+    /// ignore NPCs while pathfinding.
+    avoid_npcs: bool,
 }
 
 /// Tracking for points during A* search.
@@ -151,6 +155,7 @@ impl<'a> Pathfinding<'a> {
             grass_penalty: 100,
             clear_craftables: None,
             include_border: false,
+            avoid_npcs: true,
         }
     }
 
@@ -248,6 +253,10 @@ impl<'a> Pathfinding<'a> {
         }
     }
 
+    pub fn avoid_npcs(self, avoid_npcs: bool) -> Self {
+        Self { avoid_npcs, ..self }
+    }
+
     pub fn include_border(self, include_border: bool) -> Self {
         Self {
             include_border,
@@ -283,11 +292,24 @@ impl<'a> Pathfinding<'a> {
 
         let iter_buildings = loc.iter_building_tiles();
 
+        let iter_npcs = loc
+            .characters
+            .iter()
+            .chain(
+                loc.current_event
+                    .iter()
+                    .flat_map(|event| event.characters.iter()),
+            )
+            .filter(|_| self.avoid_npcs)
+            .filter(|character| !character.is_monster())
+            .map(|character| character.tile());
+
         let iter_unwalkable = std::iter::empty()
             .chain(iter_blocked)
             .chain(iter_bush)
             .chain(iter_furniture)
             .chain(iter_buildings)
+            .chain(iter_npcs)
             .map(|tile| (tile, None));
 
         // Handle tiles that may be passable, but with an additional
