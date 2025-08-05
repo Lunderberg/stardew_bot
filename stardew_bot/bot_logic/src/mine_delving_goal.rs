@@ -553,16 +553,18 @@ impl MineDelvingGoal {
         let coal = get_count(&ItemId::COAL);
 
         let copper_ore = copper_ore.saturating_sub(CRAFTABLE_CHERRY_BOMBS * 4);
+        let coal = coal.saturating_sub(CRAFTABLE_CHERRY_BOMBS);
 
-        let enough_ore_to_smelt =
-            coal >= 1 && (copper_ore >= 5 || iron_ore >= 5);
+        let enough_ore_to_smelt = copper_ore >= 5 || iron_ore >= 5;
         let num_furnaces = game_state
             .get_room("Mine")?
             .objects
             .iter()
             .filter(|obj| matches!(obj.kind, ObjectKind::CraftingMachine(_)))
             .count();
-        let preferred_region = if enough_ore_to_smelt
+        let preferred_region = if coal == 0 {
+            MiningRegion::Iron
+        } else if enough_ore_to_smelt
             && num_furnaces < OFFSETS_ELEVATOR_TO_FURNACE.len()
         {
             // We have enough ore/coal to smelt a bar, and aren't
@@ -1640,10 +1642,9 @@ impl BotInterrupt for MineNearbyOre {
             .characters
             .iter()
             .filter(|character| {
-                character
-                    .item_drops
-                    .iter()
-                    .any(|drop| missing_items.contains(drop))
+                character.item_drops.iter().any(|drop| {
+                    missing_items.contains(drop) || drop == &ItemId::COAL
+                })
             })
             .map(|character| character.tile())
             .filter_map(|tile| {
