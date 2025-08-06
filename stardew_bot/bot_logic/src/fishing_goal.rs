@@ -217,7 +217,7 @@ impl BotGoal for FishingGoal {
         }
         if game_state.player.room_name == "Farm" {
             preparation = preparation
-                .stamina_recovery_slots(1)
+                .stamina_recovery_slots(2)
                 .otherwise_empty()
                 .craft_missing(true)
                 .with_exactly(

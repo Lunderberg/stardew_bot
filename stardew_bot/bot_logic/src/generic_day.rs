@@ -68,20 +68,25 @@ impl BotGoal for GenericDay {
                 && game_state.globals.days_played() % 7 != 6
         };
 
-        let main_crop_planted = farm.iter_planted_seeds().any(|seed| {
-            seed == &ItemId::PARSNIP_SEEDS
-                || seed == &ItemId::KALE_SEEDS
-                || seed == &ItemId::STRAWBERRY_SEEDS
-        });
-
-        let plant_crops = if current_day <= 5 {
+        let plant_crops = if current_day < 5 {
             PlantCropsGoal::new([ItemId::PARSNIP_SEEDS.with_count(60)])
                 .buy_missing_seeds(false)
-        } else if current_day <= 11 {
+        } else if current_day < 14 {
             PlantCropsGoal::new([ItemId::KALE_SEEDS.with_count(200)])
         } else {
             PlantCropsGoal::new([ItemId::STRAWBERRY_SEEDS.with_count(400)])
+                .buy_missing_seeds(false)
         };
+
+        let main_crop_planted = farm
+            .iter_planted_seeds()
+            .filter(|seed| {
+                seed == &&ItemId::PARSNIP_SEEDS
+                    || seed == &&ItemId::KALE_SEEDS
+                    || seed == &&ItemId::STRAWBERRY_SEEDS
+            })
+            .count()
+            >= plant_crops.num_seeds() * 9 / 10;
 
         let stack = LogicStack::new().then(CheckAllMail);
 
@@ -99,7 +104,7 @@ impl BotGoal for GenericDay {
                 .then(WaterCropsGoal::new())
                 .then(ExpandTreeFarm::new())
                 .then(FishingGoal::new(FishingLocation::OceanByWilly))
-        } else if game_state.daily.is_raining {
+        } else if game_state.daily.is_raining && main_crop_planted {
             // TODO: Conditionally apply HarvestCropsGoal, based on
             // whether delaying the harvest will prevent a harvest at
             // the end of the season.
@@ -175,7 +180,32 @@ impl BotGoal for GenericDay {
                 .then(MineDelvingGoal::new().stop_time(1300))
                 .then(EggFestival::new())
         } else if (14..).contains(&current_day) && !main_crop_planted {
-            stack.then(plant_crops)
+            let low_on_coal = game_state
+                .iter_accessible_items()?
+                .filter(|item| item.id == ItemId::COAL)
+                .map(|item| item.count)
+                .sum::<usize>()
+                < 10;
+            stack
+                .then_if(plant_crops.clone().stop_time(900), low_on_coal)
+                .then_if(
+                    GeodeCrackingGoal::new()
+                        .sell_gems(true)
+                        .sell_minerals(true),
+                    low_on_coal,
+                )
+                .then_if(
+                    BuyFromMerchantGoal::new(
+                        "Blacksmith",
+                        ItemId::COAL.with_count(50),
+                    ),
+                    low_on_coal,
+                )
+                .then(plant_crops)
+                .then_if(
+                    FishingGoal::new(FishingLocation::River).stop_time(2400),
+                    game_state.daily.is_raining,
+                )
         } else if (6..12).contains(&current_day) && !main_crop_planted {
             stack
                 .then(HarvestCropsGoal::new())
@@ -290,10 +320,22 @@ impl BotGoal for GenericDay {
                 .then(FishingGoal::new(FishingLocation::Lake))
         };
 
-        // Sell items in order to have enough cash for strawberry
-        // seeds at the egg festival.
-        let stack =
-            stack.then_if(SellForCashGoal::new(40000), current_day == 12);
+        let stack = stack
+            .then_if(
+                // Sell items in order to have enough cash for strawberry
+                // seeds at the egg festival.
+                SellForCashGoal::new(40000),
+                current_day == 12,
+            )
+            .then_if(
+                // If a rainy day has time after catfish, try to get
+                // an eel for the bundle.
+                FishingGoal::new(FishingLocation::Ocean),
+                game_state.daily.is_raining
+                    && game_state
+                        .iter_missing_items()?
+                        .any(|(id, _)| id == &ItemId::EEL),
+            );
 
         let stack = if current_day % 7 == 6 {
             stack

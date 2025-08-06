@@ -79,6 +79,8 @@ impl BuyFromMerchantGoal {
             75
         } else if self.item == ItemId::WOOD {
             10
+        } else if self.item == ItemId::COAL {
+            150
         } else {
             0
         }

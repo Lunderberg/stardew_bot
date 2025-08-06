@@ -170,6 +170,7 @@ impl ItemId {
     pub const SONAR_BOBBER: Self = Self::new_const("(O)SonarBobber");
 
     pub const CATFISH: Self = Self::new_const("(O)143");
+    pub const EEL: Self = Self::new_const("(O)148");
 
     pub const SALAD: Self = Self::new_const("(O)196");
     pub const PARSNIP_SEEDS: Self = Self::new_const("(O)472");
@@ -226,6 +227,8 @@ impl ItemId {
     pub const FROZEN_GEODE: Self = Self::new_const("(O)536");
     pub const MAGMA_GEODE: Self = Self::new_const("(O)537");
     pub const OMNI_GEODE: Self = Self::new_const("(O)749");
+
+    pub const PRISMATIC_SHARD: Self = Self::new_const("(O)74");
 
     pub const BATTERY: Self = Self::new_const("(O)787");
     pub const BAT_WING: Self = Self::new_const("(O)767");

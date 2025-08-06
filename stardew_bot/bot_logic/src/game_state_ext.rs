@@ -35,6 +35,10 @@ pub trait GameStateExt {
         &self,
     ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error>;
 
+    fn iter_missing_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error>;
+
     fn closest_entrance(
         &self,
         target_room: &str,
@@ -50,12 +54,13 @@ pub trait GameStateExt {
 static RESERVED_FOR_GIFTS: LazyLock<[(ItemId, usize); 1]> =
     LazyLock::new(|| [(ItemId::PARSNIP.with_quality(Quality::Gold), 2)]);
 
-static RESERVED_FOR_CRAFTING: LazyLock<[(ItemId, usize); 3]> =
+static RESERVED_FOR_CRAFTING: LazyLock<[(ItemId, usize); 4]> =
     LazyLock::new(|| {
         [
             (ItemId::SEA_JELLY, 2),
             (ItemId::RIVER_JELLY, 2),
             (ItemId::CAVE_JELLY, 2),
+            (ItemId::PRISMATIC_SHARD, 1),
         ]
     });
 
@@ -186,6 +191,19 @@ impl GameStateExt for GameState {
             .filter(move |_| !is_early_startup);
 
         Ok(iter_reserved)
+    }
+
+    fn iter_missing_items(
+        &self,
+    ) -> Result<impl Iterator<Item = (&ItemId, usize)> + '_, Error> {
+        let available = self.iter_accessible_items()?.item_counts();
+        let iter =
+            self.iter_reserved_items()?.filter_map(move |(id, count)| {
+                let num_available = available.item_count(id);
+                (num_available < count).then(|| (id, count - num_available))
+            });
+
+        Ok(iter)
     }
 
     fn closest_entrance(

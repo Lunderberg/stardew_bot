@@ -315,6 +315,10 @@ impl PlantCropsGoal {
         Ok(Either::Right(iter))
     }
 
+    pub fn num_seeds(&self) -> usize {
+        self.seeds.iter().map(|seed| seed.count).sum::<usize>()
+    }
+
     /// Check if the planting has been completed.
     pub fn is_completed(
         &mut self,
@@ -332,7 +336,7 @@ impl PlantCropsGoal {
         }
         let plan = FarmPlan::plan(game_state)?;
 
-        let num_seeds = self.seeds.iter().map(|seed| seed.count).sum::<usize>();
+        let num_seeds = self.num_seeds();
 
         let iter_regions = || {
             plan.arable_regions
@@ -819,7 +823,7 @@ impl BotGoal for PlantCropsGoal {
             .with(ItemId::WATERING_CAN)
             .with(ItemId::HOE)
             .with(ItemId::PICKAXE)
-            .with(ItemId::AXE)
+            .with(game_state.current_axe()?.cloned())
             .with(ItemId::SCYTHE)
             .craft_missing(self.craft_missing)
             .stamina_recovery_slots(1);
@@ -872,7 +876,7 @@ impl BotGoal for PlantCropsGoal {
                 }
             }
 
-            if item == ItemId::AXE {
+            if item == ItemId::AXE || item == ItemId::COPPER_AXE {
                 let goal = ClearTreeGoal::new(tile);
                 if !goal.is_completed(game_state)? {
                     return Ok(goal.into());

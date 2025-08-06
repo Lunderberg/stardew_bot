@@ -1,6 +1,9 @@
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction, GoToActionTile, InventoryGoal, MenuCloser};
+use crate::{
+    Error, GameAction, GameStateExt as _, GoToActionTile, InventoryGoal,
+    ItemIterExt as _, ItemLookupExt as _, MenuCloser,
+};
 use game_state::{
     GameState, Item, ItemCategory, ItemId, SeededRng, StaticState,
 };
@@ -181,6 +184,15 @@ impl BotGoal for GeodeCrackingGoal {
 
         let opt_next_geode = self.next_geode(game_state)?;
 
+        let reserved_items = {
+            let mut reserved = game_state.iter_reserved_items()?.item_counts();
+
+            game_state.iter_stored_items("Farm")?.for_each(|stored| {
+                reserved.remove_item(&stored.id, stored.count);
+            });
+            reserved
+        };
+
         let to_sell = SellToMerchantGoal::new(
             "Blacksmith",
             inventory
@@ -196,6 +208,12 @@ impl BotGoal for GeodeCrackingGoal {
                             })
                             .unwrap_or(false)
                 })
+                .filter_map(|item| {
+                    let new_count = item
+                        .count
+                        .saturating_sub(reserved_items.item_count(&item.id));
+                    (new_count > 0).then(|| item.clone().with_count(new_count))
+                })
                 .sorted_by_key(|item| item.price * (item.count as i32))
                 .scan(game_state.player.current_money, |cumsum, item| {
                     let before_sell = *cumsum;
@@ -207,7 +225,7 @@ impl BotGoal for GeodeCrackingGoal {
                         .map(|target| *cumsum < target)
                         .unwrap_or(true)
                 })
-                .map(|(_, item)| item.clone()),
+                .map(|(_, item)| item),
         );
 
         let has_full_inventory = inventory.num_empty_slots().saturating_sub(
@@ -249,7 +267,18 @@ impl BotGoal for GeodeCrackingGoal {
                 .map(|geode_type| geode_type.with_count(1000)),
         );
         if !prepare.is_completed(game_state)? {
-            return Ok(prepare.with(ItemId::HOE).otherwise_empty().into());
+            let prepare = prepare.with(ItemId::HOE).otherwise_empty();
+            let prepare = if self.sell_gems {
+                prepare.with_category(ItemCategory::Gem)
+            } else {
+                prepare
+            };
+            let prepare = if self.sell_minerals {
+                prepare.with_category(ItemCategory::Mineral)
+            } else {
+                prepare
+            };
+            return Ok(prepare.into());
         }
 
         if let Some(menu) = game_state.dialogue_menu() {
@@ -264,7 +293,9 @@ impl BotGoal for GeodeCrackingGoal {
         }
 
         let Some(menu) = game_state.geode_menu() else {
-            return Ok(GoToActionTile::new("Blacksmith").into());
+            let goal = GoToActionTile::new("Blacksmith")
+                .cancel_if(|game_state| game_state.geode_menu().is_some());
+            return Ok(goal.into());
         };
 
         if menu.is_cracking_geode {
