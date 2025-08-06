@@ -363,13 +363,15 @@ impl<'a> Pathfinding<'a> {
         let mut map = self.location.blocked.map(|_| Some(0));
 
         self.movement_cost_component().for_each(|(tile, opt_cost)| {
-            map[tile] = match (map[tile], opt_cost) {
-                (None, _) | (_, None) => None,
-                (Some(a), Some(b)) => {
-                    // Add the two costs together, as some objects can
-                    // coexist on the same tile.  For example, a stone
-                    // that has grass underneath it.
-                    Some(a + b)
+            if map.in_bounds(tile) {
+                map[tile] = match (map[tile], opt_cost) {
+                    (None, _) | (_, None) => None,
+                    (Some(a), Some(b)) => {
+                        // Add the two costs together, as some objects can
+                        // coexist on the same tile.  For example, a stone
+                        // that has grass underneath it.
+                        Some(a + b)
+                    }
                 }
             };
         });
