@@ -188,13 +188,13 @@ impl FarmPlan {
                 .iter()
                 .filter(|clump| match clump.kind {
                     ResourceClumpKind::Stump => {
-                        current_axe == Some(&ItemId::COPPER_AXE)
+                        current_axe != Some(&ItemId::COPPER_AXE)
                     }
-                    ResourceClumpKind::LargeLog => false,
+                    ResourceClumpKind::LargeLog => true,
                     ResourceClumpKind::Boulder
-                    | ResourceClumpKind::Meteorite => false,
+                    | ResourceClumpKind::Meteorite => true,
                     ResourceClumpKind::MineBoulder => true,
-                    ResourceClumpKind::GiantCrop(_) => current_axe.is_some(),
+                    ResourceClumpKind::GiantCrop(_) => current_axe.is_none(),
                 })
                 .flat_map(|clump| clump.shape.iter_points());
 
