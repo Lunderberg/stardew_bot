@@ -70,6 +70,7 @@ pub struct CropData {
     pub harvest_item: ItemId,
     pub seasons: Vec<Season>,
     pub days_to_grow: u32,
+    pub regrow_days: Option<u32>,
     pub uses_trellis: bool,
     pub xp_per_harvest: i32,
     pub harvest_with_scythe: bool,
@@ -89,6 +90,7 @@ struct RawCropData {
     harvest_item: ItemId,
     seasons: Vec<Season>,
     days_to_grow: u32,
+    regrow_days: Option<u32>,
     uses_trellis: bool,
     harvest_with_scythe: bool,
 }
@@ -191,16 +193,24 @@ impl StaticState {
              harvest_item: &str,
              seasons: &Vec<Season>,
              days_to_grow: i32,
+             regrow_days: i32,
              uses_trellis: bool,
              harvest_with_scythe: bool| {
                 let seed_item = ItemId::new(format!("(O){seed_item}"));
                 let harvest_item = ItemId::new(format!("(O){harvest_item}"));
+
+                let regrow_days = if regrow_days > 0 {
+                    Some(regrow_days as u32)
+                } else {
+                    None
+                };
 
                 RawCropData {
                     seed_item,
                     harvest_item,
                     seasons: seasons.clone(),
                     days_to_grow: days_to_grow as u32,
+                    regrow_days,
                     uses_trellis,
                     harvest_with_scythe,
                 }
@@ -337,6 +347,7 @@ impl StaticState {
                             harvest_item,
                             seasons: crop.seasons.clone(),
                             days_to_grow: crop.days_to_grow,
+                            regrow_days: crop.regrow_days,
                             uses_trellis: crop.uses_trellis,
                             xp_per_harvest,
                             harvest_with_scythe: crop.harvest_with_scythe,
@@ -485,11 +496,14 @@ impl StaticState {
                             let harvest_with_scythe =
                                 entry.value.HarvestMethod == 1i32;
 
+                            let regrow_days = entry.value.RegrowDays;
+
                             new_crop_data(
                                 seed_item,
                                 harvest_item,
                                 seasons,
                                 days_to_grow,
+                                regrow_days,
                                 uses_trellis,
                                 harvest_with_scythe,
                             )

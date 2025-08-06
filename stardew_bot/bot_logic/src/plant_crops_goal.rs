@@ -356,12 +356,36 @@ impl PlantCropsGoal {
             let previous: HashMap<_, _> = farm
                 .objects
                 .iter()
-                .filter_map(|obj| {
+                .filter_map(|obj| -> Option<Result<_, Error>> {
                     let crop = obj.kind.as_hoe_dirt()?.crop.as_ref()?;
-                    matches!(crop.phase, CropPhase::Seed | CropPhase::Growing)
-                        .then(|| (obj.tile, &crop.seed))
+                    let has_crop_after_harvest = match &crop.phase {
+                        CropPhase::Seed
+                        | CropPhase::Growing
+                        | CropPhase::Regrowing => {
+                            // Today's harvest will not impact these
+                            // tiles, and so we shouldn't plan to
+                            // plant a new seed at this tile.
+                            true
+                        }
+
+                        CropPhase::Harvestable => {
+                            // Today's harvest will get a crop from
+                            // this tile.  Whether the tile can then
+                            // be re-planted depends on whether it is
+                            // a re-growing crop.
+                            let crop_data =
+                                match game_state.statics.get_crop(&crop.seed) {
+                                    Ok(ok) => ok,
+                                    Err(err) => {
+                                        return Some(Err(err.into()));
+                                    }
+                                };
+                            crop_data.regrow_days.is_some()
+                        }
+                    };
+                    has_crop_after_harvest.then(|| Ok((obj.tile, &crop.seed)))
                 })
-                .collect();
+                .collect::<Result<_, _>>()?;
 
             iter_regions()
                 .flat_map(|region| region.plantable.iter().cloned())
