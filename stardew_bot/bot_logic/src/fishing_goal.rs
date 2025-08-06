@@ -192,7 +192,10 @@ impl BotGoal for FishingGoal {
         let has_bait_maker = inventory.contains(&ItemId::BAIT_MAKER);
         let opt_current_pole = game_state
             .iter_accessible_items()?
-            .find(|item| item.as_fishing_rod().is_some());
+            .filter(|item| item.as_fishing_rod().is_some())
+            .max_by_key(|item| {
+                item.as_fishing_rod().unwrap().num_attachment_slots
+            });
 
         // Before leaving the farm, empty out the current inventory
         // except for the fishing pole.  If not currently on the farm,
