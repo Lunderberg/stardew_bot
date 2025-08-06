@@ -127,6 +127,19 @@ impl FarmPlan {
                     .chain(farm.iter_water_tiles())
                     .chain(farm.iter_bush_tiles())
                     .chain(farm.iter_building_tiles())
+                    .chain(
+                        farm.buildings
+                            .iter()
+                            .filter(|building| building.kind == "Greenhouse")
+                            .flat_map(|building| {
+                                let top_left = building.shape.top_left;
+                                (-1..8).flat_map(move |di| {
+                                    (0..8).map(move |dj| {
+                                        top_left + Vector::new(di, dj)
+                                    })
+                                })
+                            }),
+                    )
                     .chain(farm.diggable.iter_false()),
             );
 
