@@ -9,7 +9,7 @@ use crate::{
 };
 use game_state::{
     CropPhase, GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind,
-    Quality, SeededRng, StaticState, TileMap,
+    Quality, ResourceClumpKind, SeededRng, StaticState, TileMap,
 };
 
 use super::{
@@ -243,6 +243,24 @@ impl PlantCropsGoal {
         let plan = self.plan.as_ref().expect("Populated by self.fill_plan()");
 
         let current_state = farm.generate_tile_lookup();
+        let to_clear_clumps: HashMap<Vector<isize>, Option<ItemId>> = farm
+            .resource_clumps
+            .iter()
+            .flat_map(|clump| {
+                let tool = match clump.kind {
+                    ResourceClumpKind::Stump => ItemId::COPPER_AXE,
+                    ResourceClumpKind::LargeLog => ItemId::IRON_AXE,
+                    ResourceClumpKind::Boulder => ItemId::IRON_PICKAXE,
+                    ResourceClumpKind::Meteorite => ItemId::GOLD_PICKAXE,
+                    ResourceClumpKind::MineBoulder => ItemId::PICKAXE,
+                    ResourceClumpKind::GiantCrop(_) => ItemId::AXE,
+                };
+                clump
+                    .shape
+                    .iter_points()
+                    .map(move |tile| (tile, Some(tool.clone())))
+            })
+            .collect();
         let inventory =
             InventoryGoal::current().total_stored_and_carried(game_state)?;
 
@@ -250,13 +268,16 @@ impl PlantCropsGoal {
             .final_state
             .iter()
             .filter_map(move |(tile, goal)| {
-                let opt_current = current_state.get(tile).copied();
-                let opt_next_step = Self::next_step_of_tile(
-                    &game_state.statics,
-                    opt_current,
-                    goal,
-                    false,
-                );
+                let opt_next_step =
+                    to_clear_clumps.get(&tile).cloned().or_else(|| {
+                        let opt_current = current_state.get(tile).copied();
+                        Self::next_step_of_tile(
+                            &game_state.statics,
+                            opt_current,
+                            goal,
+                            false,
+                        )
+                    });
                 let next_step = opt_next_step?;
                 Some((*tile, next_step))
             })
