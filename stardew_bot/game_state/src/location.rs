@@ -176,6 +176,9 @@ pub struct Bush {
     /// internally as a floating-point value, but since all
     /// occurrences are aligned to tiles, I cast it to integers.
     pub top_left: Vector<isize>,
+
+    /// If the bush currently has a berry that can be foraged.
+    pub has_berry: bool,
 }
 
 /// A tile of dirt that has been cleared with a Hoe.
@@ -749,9 +752,10 @@ impl Location {
 
         graph.named_native_function(
             "new_bush",
-            |kind: usize, top_left: &Vector<isize>| Bush {
+            |kind: usize, top_left: &Vector<isize>, has_berry: bool| Bush {
                 kind,
                 top_left: *top_left,
+                has_berry,
             },
         )?;
 
@@ -845,11 +849,9 @@ impl Location {
              -> ObjectKind {
                 let category: ItemCategory = category.into();
                 match (category, sheet_index, name) {
-                    (
-                        ItemCategory::BigCraftable,
-                        118..=125,
-                        _,
-                    ) => ObjectKind::MineBarrel,
+                    (ItemCategory::BigCraftable, 118..=125, _) => {
+                        ObjectKind::MineBarrel
+                    }
                     (ItemCategory::Other(0), 93, _) => ObjectKind::Torch,
                     (ItemCategory::Craftable, 599, _) => {
                         ObjectKind::Sprinkler(Sprinkler::Regular)
@@ -2032,7 +2034,16 @@ impl Location {
                             let down = feature.netTilePosition.value.Y;
                             new_vector_isize(right,down)
                         };
-                        new_bush(kind, top_left)
+                        let has_berry = (
+                            feature.tileSheetOffset.value == 1i32
+                                && !feature.townBush.value
+                        );
+
+                        new_bush(
+                            kind,
+                            top_left,
+                            has_berry,
+                        )
                     })
                     .collect();
 
@@ -2373,7 +2384,8 @@ impl Location {
         let entrance_lookup: HashMap<String, Vector<isize>> = locations
             .iter()
             .filter_map(|loc| {
-                loc.warps.first()
+                loc.warps
+                    .first()
                     .map(|warp| warp.location + Vector::new(0, -1))
                     .map(|entrance| (loc.name.clone(), entrance))
             })
