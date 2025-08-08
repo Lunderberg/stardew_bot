@@ -168,7 +168,9 @@ impl SmeltingPlan {
             available.get(item).cloned().unwrap_or(0)
         };
         let mut copper_ore = get_available(&ItemId::COPPER_ORE);
+        let mut copper_bars = get_available(&ItemId::COPPER_BAR);
         let mut iron_ore = get_available(&ItemId::IRON_ORE);
+        let mut iron_bars = get_available(&ItemId::IRON_BAR);
         let mut stone = get_available(&ItemId::STONE);
         let mut coal = get_available(&ItemId::COAL);
         let mut quartz = get_available(&ItemId::QUARTZ);
@@ -255,24 +257,10 @@ impl SmeltingPlan {
                 required_refined_quartz -= quartz_to_smelt;
             }
 
-            let iron_bars =
+            let new_iron_bars =
                 limiting_factor([iron_ore / 5, coal, num_available_furnaces]);
-            if iron_bars > 0 {
-                plan.iron_bars += iron_bars;
-                iron_ore -= 5 * iron_bars;
-                coal -= iron_bars;
-                num_available_furnaces -= iron_bars;
-            }
-
-            let copper_bars =
+            let new_copper_bars =
                 limiting_factor([copper_ore / 5, coal, num_available_furnaces]);
-            if copper_bars > 0 {
-                plan.copper_bars += copper_bars;
-                copper_ore -= 5 * copper_bars;
-                coal -= copper_bars;
-                num_available_furnaces -= copper_bars;
-            }
-
             let new_furnaces = {
                 let for_iron = limiting_factor([
                     copper_ore / 20,
@@ -289,7 +277,22 @@ impl SmeltingPlan {
                 ]);
                 for_iron.max(for_copper)
             };
-            if new_furnaces > 0 {
+
+            if new_iron_bars > 0
+                && (iron_bars <= copper_bars || new_copper_bars == 0)
+            {
+                plan.iron_bars += new_iron_bars;
+                iron_bars += new_iron_bars;
+                iron_ore -= 5 * new_iron_bars;
+                coal -= new_iron_bars;
+                num_available_furnaces -= new_iron_bars;
+            } else if new_copper_bars > 0 {
+                plan.copper_bars += new_copper_bars;
+                copper_bars += new_copper_bars;
+                copper_ore -= 5 * new_copper_bars;
+                coal -= new_copper_bars;
+                num_available_furnaces -= new_copper_bars;
+            } else if new_furnaces > 0 {
                 plan.new_furnaces += new_furnaces;
                 num_available_furnaces += new_furnaces;
                 copper_ore -= new_furnaces * 20;
