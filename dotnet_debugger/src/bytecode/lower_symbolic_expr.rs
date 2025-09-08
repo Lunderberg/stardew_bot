@@ -22,7 +22,7 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
-        _name: Option<&str>,
+        name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         macro_rules! read_value_if_required {
             ($ptr:expr, $runtime_type:expr) => {{
@@ -171,6 +171,12 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 };
 
                 let ptr = graph.add(ptr, field_description.offset());
+                if let Some(name) = name {
+                    graph.name(ptr, format!("member_ptr_{field}_of_{name}"))?;
+                } else {
+                    graph.name(ptr, format!("member_ptr_{field}"))?;
+                }
+
                 let value = read_value_if_required!(ptr, field_type);
 
                 Some(value)
