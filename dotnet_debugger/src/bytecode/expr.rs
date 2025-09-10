@@ -7,13 +7,14 @@ use itertools::Itertools as _;
 
 use env_var_flag::env_var_flag;
 use iterator_extensions::ResultIteratorExt as _;
-use memory_reader::Pointer;
+use memory_reader::{Pointer, TypedPointer};
 
 use crate::{
     bytecode::printer::IndexPrinter,
     runtime_type::{FunctionType, RuntimePrimType},
+    type_description::TypeHandlePtrExt as _,
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
-    RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,
+    RuntimePrimValue, RuntimeType, VirtualMachine,
 };
 
 use super::{

@@ -5,6 +5,7 @@ use memory_reader::Pointer;
 use crate::{
     runtime_type::{DotNetType, RuntimePrimType},
     Error, RuntimeArray, RuntimeMultiDimArray, RuntimeType,
+    TypeHandlePtrExt as _,
 };
 
 use super::{

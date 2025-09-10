@@ -4,12 +4,11 @@ use dll_unpacker::{
     dll_unpacker::{Field, MetadataTableIndex},
     Annotation as _, Annotator, RelativeVirtualAddress,
 };
-use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
-
-use crate::{
-    unpack_fields, CorElementType, Error, MethodTable, RuntimeModule,
-    TypedPointer,
+use memory_reader::{
+    ByteRange, MemoryReader, OwnedBytes, Pointer, TypedPointer,
 };
+
+use crate::{unpack_fields, CorElementType, Error, MethodTable, RuntimeModule};
 
 pub struct FieldDescriptions {
     pub bytes: OwnedBytes,

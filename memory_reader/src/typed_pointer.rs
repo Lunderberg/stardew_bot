@@ -1,8 +1,6 @@
 use std::marker::PhantomData;
 
-use memory_reader::{MemoryReader, Pointer, UnpackBytes, UnpackOptBytes};
-
-use crate::Error;
+use crate::{ByteRange, MemoryReader, Pointer, UnpackBytes, UnpackOptBytes};
 
 pub struct TypedPointer<T> {
     ptr: Pointer,
@@ -10,10 +8,12 @@ pub struct TypedPointer<T> {
 }
 
 pub trait ReadTypedPointer: Sized {
+    type Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,
-    ) -> Result<Self, Error>;
+    ) -> Result<Self, Self::Error>;
 }
 
 impl<T> TypedPointer<T> {
@@ -24,7 +24,10 @@ impl<T> TypedPointer<T> {
         }
     }
 
-    pub fn read(&self, reader: &MemoryReader) -> Result<T, Error>
+    pub fn read(
+        &self,
+        reader: &MemoryReader,
+    ) -> Result<T, <T as ReadTypedPointer>::Error>
     where
         T: ReadTypedPointer,
     {
@@ -121,9 +124,7 @@ impl<T> std::ops::BitAnd<usize> for TypedPointer<T> {
 impl<'a, T> UnpackBytes<'a> for TypedPointer<T> {
     type Error = <Pointer as UnpackBytes<'a>>::Error;
 
-    fn unpack(
-        bytes: memory_reader::ByteRange<'a>,
-    ) -> Result<Self, Self::Error> {
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
         let ptr: Pointer = bytes.unpack()?;
         Ok(ptr.into())
     }
@@ -132,9 +133,7 @@ impl<'a, T> UnpackBytes<'a> for TypedPointer<T> {
 impl<'a, T> UnpackOptBytes<'a> for TypedPointer<T> {
     type Error = <Self as UnpackBytes<'a>>::Error;
 
-    fn unpack_opt(
-        bytes: memory_reader::ByteRange<'a>,
-    ) -> Result<Option<Self>, Self::Error> {
+    fn unpack_opt(bytes: ByteRange<'a>) -> Result<Option<Self>, Self::Error> {
         let ptr: Self = bytes.unpack()?;
         Ok(ptr.as_non_null())
     }

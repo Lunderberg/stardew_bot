@@ -11,13 +11,13 @@ use arrayvec::ArrayVec;
 use derive_more::derive::From;
 use itertools::{Either, Itertools};
 use lru::LruCache;
-use memory_reader::{OwnedBytes, Pointer};
+use memory_reader::{OwnedBytes, Pointer, TypedPointer};
 use thiserror::Error;
 
 use crate::{
     runtime_type::{RuntimePrimType, RustType},
     CachedReader, Error, MethodTable, RuntimePrimValue, RuntimeString,
-    RuntimeType, TypedPointer,
+    RuntimeType,
 };
 
 use super::{
@@ -2184,9 +2184,7 @@ impl Instruction {
             Instruction::Swap(lhs, rhs) => (Some(*lhs), Some(*rhs)),
         };
 
-        std::iter::empty()
-            .chain(opt_a)
-            .chain(opt_b)
+        std::iter::empty().chain(opt_a).chain(opt_b)
     }
 
     fn op_name(&self) -> &'static str {

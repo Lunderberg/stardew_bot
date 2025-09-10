@@ -12,16 +12,16 @@ use dll_unpacker::{
 };
 use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools};
-use memory_reader::{MemoryMapRegion, MemoryReader, Pointer};
+use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, TypedPointer};
 
 use crate::runtime_type::{DotNetType, RuntimePrimType};
 use crate::{
     extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
-    TypeHandle,
+    TypeHandle, TypeHandlePtrExt as _,
 };
 use crate::{
     Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
-    RuntimeObject, RuntimeType, RuntimeValue, TypedPointer,
+    RuntimeObject, RuntimeType, RuntimeValue,
 };
 
 type CachedTypeDef = (TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>);

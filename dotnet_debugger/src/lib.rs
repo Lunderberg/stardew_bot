@@ -7,9 +7,6 @@ pub(crate) mod macros;
 
 pub use bytecode_proc_macros::*;
 
-mod typed_pointer;
-pub use typed_pointer::*;
-
 mod runtime_module;
 pub use runtime_module::*;
 

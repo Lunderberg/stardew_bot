@@ -9,8 +9,9 @@ use format_utils::Indent;
 
 use crate::{
     bytecode::expr::Scope, ExprKind, MethodTable, RuntimePrimType,
-    RuntimePrimValue, RuntimeType, TypedPointer,
+    RuntimePrimValue, RuntimeType,
 };
+use memory_reader::TypedPointer;
 
 use super::{
     expr::StaticField, OpIndex, OpPrecedence, SymbolicGraph, SymbolicType,

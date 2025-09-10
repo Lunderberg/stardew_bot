@@ -1,12 +1,10 @@
 use std::ops::Range;
 
-use dotnet_debugger::{
-    DotNetType, FieldContainer, RuntimeObject, RuntimeType, TypedPointer,
-};
+use dotnet_debugger::{DotNetType, FieldContainer, RuntimeObject, RuntimeType};
 use iterator_extensions::ResultIteratorExt as _;
 use itertools::Itertools as _;
 use memory_reader::{
-    MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol,
+    MemoryMapRegion, MemoryReader, MemoryRegion, Pointer, Symbol, TypedPointer,
 };
 use stardew_utils::stardew_valley_pid;
 

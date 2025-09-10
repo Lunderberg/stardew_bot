@@ -25,6 +25,9 @@ pub use memory_region::*;
 mod pointer;
 pub use pointer::*;
 
+mod typed_pointer;
+pub use typed_pointer::*;
+
 mod memory_value;
 pub use memory_value::*;
 

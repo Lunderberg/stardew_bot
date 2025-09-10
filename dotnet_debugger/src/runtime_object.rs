@@ -1,6 +1,6 @@
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, ReadTypedPointer, TypedPointer};
 
-use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
+use crate::{Error, MethodTable};
 
 pub struct RuntimeObject {
     location: TypedPointer<RuntimeObject>,
@@ -36,6 +36,8 @@ impl RuntimeObject {
 }
 
 impl ReadTypedPointer for RuntimeObject {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

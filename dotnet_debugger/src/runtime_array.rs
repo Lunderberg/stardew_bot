@@ -1,11 +1,10 @@
 use std::ops::Range;
 
-use memory_reader::{ByteRange, MemoryReader, Pointer};
-
-use crate::{
-    unpack_fields, Error, MethodTable, ReadTypedPointer, RuntimeType,
-    TypedPointer,
+use memory_reader::{
+    ByteRange, MemoryReader, Pointer, ReadTypedPointer, TypedPointer,
 };
+
+use crate::{unpack_fields, Error, MethodTable, RuntimeType};
 
 pub struct RuntimeArray {
     start: Pointer,
@@ -60,6 +59,8 @@ impl RuntimeArray {
 }
 
 impl ReadTypedPointer for RuntimeArray {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

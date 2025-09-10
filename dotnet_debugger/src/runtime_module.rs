@@ -12,10 +12,10 @@ use itertools::Itertools as _;
 use memory_reader::{
     extensions::*, MemoryMapRegion, MemoryRegion, OwnedBytes, UnpackedValue,
 };
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, ReadTypedPointer, TypedPointer};
 
 use crate::{extensions::*, unpack_fields, TypeHandle};
-use crate::{Error, MethodTable, ReadTypedPointer, TypedPointer};
+use crate::{Error, MethodTable};
 
 /// Contains layout information that can be applied to any RuntimeModule.
 ///
@@ -1098,6 +1098,8 @@ impl LoadedParamTypes {
 }
 
 impl ReadTypedPointer for LoadedParamTypeEntry {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

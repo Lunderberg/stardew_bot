@@ -1,10 +1,10 @@
 use std::{borrow::Cow, cmp::Reverse};
 
 use dll_unpacker::{Assembly, MetadataTableIndex, MetadataTableKind};
-use dotnet_debugger::{CachedReader, RuntimeModule, TypedPointer};
+use dotnet_debugger::{CachedReader, RuntimeModule};
 use format_utils::Indent;
 use itertools::Itertools;
-use memory_reader::Pointer;
+use memory_reader::{Pointer, TypedPointer};
 use ratatui::{
     layout::Constraint,
     style::{Modifier, Style},

@@ -12,10 +12,10 @@ use ratatui::{
 use dotnet_debugger::{
     CachedReader, DotNetType, FieldContainer, FieldDescription, MethodTable,
     RuntimeType, RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue,
-    TypedPointer,
+    TypeHandlePtrExt as _,
 };
 use format_utils::Indent;
-use memory_reader::{OwnedBytes, Pointer};
+use memory_reader::{OwnedBytes, Pointer, TypedPointer};
 use tui_utils::{
     extensions::{
         HighlightLine as _, SplitRect as _, WidgetWithScrollbar as _,
@@ -318,10 +318,7 @@ macro_rules! forward_visitor_as_mutator {
                 node
             }
 
-            fn is_leaf_node(
-                &self,
-                node: &mut ObjectTreeNode,
-            ) -> Option<bool> {
+            fn is_leaf_node(&self, node: &mut ObjectTreeNode) -> Option<bool> {
                 <$ext as TreeVisitorExtension>::is_leaf_node(self, node)
             }
 
@@ -333,10 +330,7 @@ macro_rules! forward_visitor_as_mutator {
                 <$ext as TreeVisitorExtension>::visit_leaf(self, node)
             }
 
-            fn child_filter(
-                &mut self,
-                node: &mut ObjectTreeNode,
-            ) -> bool {
+            fn child_filter(&mut self, node: &mut ObjectTreeNode) -> bool {
                 <$ext as TreeVisitorExtension>::child_filter(self, node)
             }
 
@@ -702,7 +696,8 @@ impl ObjectExplorer {
         let mut graph = SymbolicGraph::new();
 
         let static_field = {
-            let ObjectTreeNode::Object { class_name, .. } = &node_chain.first()
+            let ObjectTreeNode::Object { class_name, .. } = &node_chain
+                .first()
                 .ok_or(Error::InvalidMetadataDisplayIndex)?
             else {
                 panic!("Outermost node should be static field");
@@ -997,11 +992,12 @@ impl ObjectTreeNode {
         // as there could also be a generic `List<Object>`, so
         // maybe the later check will still be necessary anyways.
         if let ObjectTreeNode::Value {
-                value: RuntimeValue::Object(ptr),
-                contents: None,
-                location,
-                should_read,
-            } = &self {
+            value: RuntimeValue::Object(ptr),
+            contents: None,
+            location,
+            should_read,
+        } = &self
+        {
             let ptr = *ptr;
             let should_read = should_read.clone();
 

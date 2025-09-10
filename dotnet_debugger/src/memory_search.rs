@@ -1,7 +1,7 @@
 use itertools::Itertools as _;
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, TypedPointer};
 
-use crate::{Error, MethodTable, RuntimeObject, TypedPointer};
+use crate::{Error, MethodTable, RuntimeObject};
 
 /// Returns an iterator of pointers that would be valid objects to the
 /// specified type.

@@ -1,9 +1,9 @@
 use std::ops::Range;
 
 use itertools::Itertools;
-use memory_reader::{MemoryReader, OwnedBytes, Pointer};
+use memory_reader::{MemoryReader, OwnedBytes, Pointer, ReadTypedPointer};
 
-use crate::{Error, ReadTypedPointer};
+use crate::Error;
 
 pub struct RuntimeString(
     // This field is used, but only in the implementation of Display.
@@ -55,6 +55,8 @@ impl RuntimeString {
 }
 
 impl ReadTypedPointer for RuntimeString {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

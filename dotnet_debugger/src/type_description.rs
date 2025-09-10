@@ -1,11 +1,13 @@
 use std::borrow::Borrow;
 
-use memory_reader::{MemoryReader, OwnedBytes, Pointer};
+use memory_reader::{
+    MemoryReader, OwnedBytes, Pointer, ReadTypedPointer, TypedPointer,
+};
 
 use crate::{
     runtime_type::{DotNetType, FunctionType, IteratorType, TupleType},
     unpack_fields, CachedReader, CorElementType, Error, MethodTable,
-    ReadTypedPointer, RuntimePrimType, RuntimeType, TypedPointer,
+    RuntimePrimType, RuntimeType,
 };
 
 pub struct TypeDescription {
@@ -369,8 +371,11 @@ impl<'a> TypeHandleRef<'a> {
     }
 }
 
-impl TypedPointer<TypeHandle> {
-    pub fn as_method_table(&self) -> Option<TypedPointer<MethodTable>> {
+pub trait TypeHandlePtrExt {
+    fn as_method_table(&self) -> Option<TypedPointer<MethodTable>>;
+}
+impl TypeHandlePtrExt for TypedPointer<TypeHandle> {
+    fn as_method_table(&self) -> Option<TypedPointer<MethodTable>> {
         if self.as_usize() & 2 > 0 {
             None
         } else {
@@ -382,6 +387,8 @@ impl TypedPointer<TypeHandle> {
 }
 
 impl ReadTypedPointer for TypeDescription {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: memory_reader::Pointer,
         reader: &memory_reader::MemoryReader,
@@ -392,6 +399,8 @@ impl ReadTypedPointer for TypeDescription {
 }
 
 impl ReadTypedPointer for TypeHandle {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

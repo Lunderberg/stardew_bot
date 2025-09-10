@@ -1,9 +1,9 @@
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, TypedPointer};
 
 use crate::runtime_type::RuntimePrimType;
 use crate::{
     Error, MethodTable, RuntimeArray, RuntimeMultiDimArray, RuntimeObject,
-    RuntimeString, RuntimeType, TypedPointer,
+    RuntimeString, RuntimeType,
 };
 
 /// A value read out from the remote process.  This only handles

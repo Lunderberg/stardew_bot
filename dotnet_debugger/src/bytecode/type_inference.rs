@@ -8,7 +8,7 @@ use crate::{
         DotNetType, FunctionType, IteratorType, RuntimePrimType, RustType,
         TupleType,
     },
-    CachedReader, Error, RuntimeType,
+    CachedReader, Error, RuntimeType, TypeHandlePtrExt as _,
 };
 
 use super::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};

@@ -1,13 +1,13 @@
 use std::borrow::Cow;
 
 use derive_more::derive::From;
-use memory_reader::Pointer;
+use memory_reader::{Pointer, TypedPointer};
 
 use crate::{
     bytecode::{ExposedNativeObject, RustNativeTypeUtils},
     runtime_value::RuntimePrimValue,
     Error, MethodTable, RuntimeValue, RustNativeObject, StackValue,
-    TypeInferenceError, TypedPointer, VMExecutionError,
+    TypeInferenceError, VMExecutionError,
 };
 
 /// The runtime representation of the static type of a field.

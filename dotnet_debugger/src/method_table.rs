@@ -5,12 +5,15 @@ use dll_unpacker::{
     Annotation, Annotator,
 };
 use iterator_extensions::ResultIteratorExt as _;
-use memory_reader::{ByteRange, MemoryReader, OwnedBytes, Pointer};
+use memory_reader::{
+    ByteRange, MemoryReader, OwnedBytes, Pointer, ReadTypedPointer,
+    TypedPointer,
+};
 
 use crate::{
     runtime_type::DotNetType, unpack_fields, CorElementType, Error,
-    FieldDescription, FieldDescriptions, ReadTypedPointer, RuntimeModule,
-    RuntimePrimType, RuntimeType, TypeHandle, TypedPointer,
+    FieldDescription, FieldDescriptions, RuntimeModule, RuntimePrimType,
+    RuntimeType, TypeHandle,
 };
 
 #[derive(Clone)]
@@ -543,6 +546,8 @@ impl MethodTable {
 }
 
 impl ReadTypedPointer for MethodTable {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,
@@ -664,6 +669,8 @@ impl EEClass {
 }
 
 impl ReadTypedPointer for EEClass {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,

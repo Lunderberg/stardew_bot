@@ -1,8 +1,8 @@
 use std::ops::Range;
 
-use memory_reader::{MemoryReader, Pointer};
+use memory_reader::{MemoryReader, Pointer, ReadTypedPointer};
 
-use crate::{Error, ReadTypedPointer, RuntimeArrayHeader, RuntimeType};
+use crate::{Error, RuntimeArrayHeader, RuntimeType};
 
 pub struct RuntimeMultiDimArray {
     location: Pointer,
@@ -125,6 +125,8 @@ impl RuntimeMultiDimArray {
 }
 
 impl ReadTypedPointer for RuntimeMultiDimArray {
+    type Error = Error;
+
     fn read_typed_ptr(
         ptr: Pointer,
         reader: &MemoryReader,
