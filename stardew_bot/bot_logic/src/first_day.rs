@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dotnet_debugger::env_var_flag;
+use env_var_flag::env_var_flag;
 use geometry::Vector;
 use itertools::Itertools as _;
 

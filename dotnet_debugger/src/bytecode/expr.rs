@@ -5,12 +5,12 @@ use std::{
 
 use itertools::Itertools as _;
 
+use env_var_flag::env_var_flag;
 use iterator_extensions::ResultIteratorExt as _;
 use memory_reader::Pointer;
 
 use crate::{
     bytecode::printer::IndexPrinter,
-    env_var_flag,
     runtime_type::{FunctionType, RuntimePrimType},
     CachedReader, Error, FieldDescription, MethodTable, OpIndex,
     RuntimePrimValue, RuntimeType, TypedPointer, VirtualMachine,

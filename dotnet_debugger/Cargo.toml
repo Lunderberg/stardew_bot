@@ -18,6 +18,7 @@ iterator_extensions = { path = "../iterator_extensions" }
 memory_reader = { path = "../memory_reader" }
 dll_unpacker = { path = "../dll_unpacker" }
 format_utils = { path = "../format_utils" }
+env_var_flag = { path = "../env_var_flag" }
 
 bytecode_proc_macros = { path = "../bytecode_proc_macros" }
 

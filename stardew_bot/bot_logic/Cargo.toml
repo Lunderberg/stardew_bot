@@ -9,6 +9,6 @@ thiserror = "*"
 derive_more = "*"
 priority-queue = "*"
 
-dotnet_debugger = { path = "../../dotnet_debugger" }
+env_var_flag = { path = "../../env_var_flag" }
 geometry = { path = "../geometry" }
 game_state = { path = "../game_state" }

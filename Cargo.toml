@@ -1,18 +1,19 @@
 [workspace]
 members = [
+  "bytecode_proc_macros",
+  "dll_unpacker",
+  "dotnet_debugger",
+  "env_var_flag",
+  "format_utils",
+  "iterator_extensions",
   "memory_reader",
   "stardew_bot",
-  "stardew_bot/geometry",
-  "stardew_bot/game_state",
   "stardew_bot/bot_logic",
-  "tui_explorer",
-  "dll_unpacker",
+  "stardew_bot/game_state",
+  "stardew_bot/geometry",
   "stardew_utils",
-  "dotnet_debugger",
-  "iterator_extensions",
+  "tui_explorer",
   "tui_utils",
-  "format_utils",
-  "bytecode_proc_macros",
 ]
 resolver = "2"
 

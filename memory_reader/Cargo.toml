@@ -12,3 +12,5 @@ proc-maps = "*"
 nix = {version="0.30.1", features=["feature", "uio", "process"]}
 elf = "*"
 cpp_demangle = "0.4.3"
+
+env_var_flag = { path = "../env_var_flag" }

@@ -15,6 +15,8 @@ use itertools::Itertools;
 use nix::sys::uio::{process_vm_readv, RemoteIoVec};
 use nix::unistd::SysconfVar;
 
+use env_var_flag::env_var_flag;
+
 pub struct MemoryReader {
     pid: u32,
     regions: Vec<MemoryMapRegion>,
@@ -35,21 +37,7 @@ impl MemoryReader {
 
         let page_size = nix::unistd::sysconf(SysconfVar::PAGE_SIZE)?
             .map(|c_long| c_long as usize)
-            .filter(|_| {
-                std::env::var("READ_ON_PAGE_BOUNDARIES")
-                    .map(|var| {
-                        if var.is_empty() {
-                            false
-                        } else if var.eq_ignore_ascii_case("true") {
-                            true
-                        } else if let Ok(value) = var.parse::<usize>() {
-                            value > 0
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false)
-            })
+            .filter(|_| env_var_flag("READ_ON_PAGE_BOUNDARIES"))
             .unwrap_or(usize::MAX);
 
         let max_num_iovec = nix::unistd::sysconf(SysconfVar::IOV_MAX) //?

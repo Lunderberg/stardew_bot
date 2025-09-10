@@ -113,7 +113,7 @@ name = "bot_logic"
 version = "0.1.0"
 dependencies = [
  "derive_more",
- "dotnet_debugger",
+ "env_var_flag",
  "game_state",
  "geometry",
  "itertools 0.14.0",
@@ -413,6 +413,7 @@ dependencies = [
  "derive_more",
  "dll_unpacker",
  "elsa",
+ "env_var_flag",
  "format_utils",
  "indoc",
  "iterator_extensions",
@@ -443,6 +444,10 @@ checksum = "d98e71ae4df57d214182a2e5cb90230c0192c6ddfcaa05c36453d46a54713e10"
 dependencies = [
  "stable_deref_trait",
 ]
+
+[[package]]
+name = "env_var_flag"
+version = "0.1.0"
 
 [[package]]
 name = "equivalent"
@@ -744,6 +749,7 @@ version = "0.1.0"
 dependencies = [
  "cpp_demangle",
  "elf",
+ "env_var_flag",
  "itertools 0.13.0",
  "nix",
  "proc-maps",

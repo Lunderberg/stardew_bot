@@ -5,9 +5,6 @@ pub use memory_reader::Pointer;
 
 pub(crate) mod macros;
 
-mod env_var_flags;
-pub use env_var_flags::*;
-
 pub use bytecode_proc_macros::*;
 
 mod typed_pointer;
