@@ -11,9 +11,9 @@ use ratatui::{
 
 use dotnet_debugger::{
     CachedReader, DotNetType, FieldContainer, FieldDescription, MethodTable,
-    RuntimeType, RuntimeValue, SymbolicGraph, SymbolicType, SymbolicValue,
-    TypeHandlePtrExt as _,
+    RuntimeType, RuntimeValue, TypeHandlePtrExt as _,
 };
+use dsl::{SymbolicGraph, SymbolicType, SymbolicValue};
 use format_utils::Indent;
 use memory_reader::{OwnedBytes, Pointer, TypedPointer};
 use tui_utils::{
@@ -892,18 +892,8 @@ impl ObjectTreeNode {
                     contents: Some(Box::new(contents)),
                 }
             }
-            other @ (RuntimeType::Unknown
-            | RuntimeType::Rust(_)
-            | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)
-            | RuntimeType::ByteArray) => {
-                return Err(
-                    dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext(
-                        other.clone(),
-                    )
-                    .into(),
-                );
+            RuntimeType::Unknown => {
+                return Err(Error::UnexpectedUnknownType);
             }
         };
 
@@ -1021,14 +1011,8 @@ impl ObjectTreeNode {
                     | DotNetType::MultiDimArray { .. },
                 ) => None,
 
-                other @ (RuntimeType::Unknown
-                | RuntimeType::Rust(_)
-                | RuntimeType::Function(_)
-                | RuntimeType::Tuple(_)
-                | RuntimeType::Iterator(_)
-                | RuntimeType::ByteArray) => {
-                    use dotnet_debugger::Error::UnexpectedTypeFoundInDotNetContext as ErrVariant;
-                    return Err(ErrVariant(other.clone()).into());
+                RuntimeType::Unknown => {
+                    return Err(Error::UnexpectedUnknownType);
                 }
             };
             if let Some(value) = opt_value {

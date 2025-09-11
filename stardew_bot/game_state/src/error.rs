@@ -7,6 +7,9 @@ pub enum Error {
     #[error("dotnet_debugger::Error( {0} )")]
     DotnetDebugger(#[from] dotnet_debugger::Error),
 
+    #[error("dsl::Error( {0} )")]
+    DSL(#[from] dsl::Error),
+
     #[error("Expected non-empty output from VirtualMachine")]
     ExpectedNonEmptyValue,
 

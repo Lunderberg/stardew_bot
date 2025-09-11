@@ -1,4 +1,4 @@
-use dotnet_debugger::SymbolicGraph;
+use dsl::SymbolicGraph;
 use geometry::{Rectangle, Vector};
 
 use crate::Error;

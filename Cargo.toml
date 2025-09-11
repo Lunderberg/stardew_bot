@@ -1,8 +1,9 @@
 [workspace]
 members = [
-  "bytecode_proc_macros",
   "dll_unpacker",
   "dotnet_debugger",
+  "dsl",
+  "dsl_proc_macros",
   "env_var_flag",
   "format_utils",
   "iterator_extensions",

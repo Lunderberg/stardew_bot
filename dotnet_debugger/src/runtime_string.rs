@@ -11,23 +11,32 @@ pub struct RuntimeString(
 );
 
 impl RuntimeString {
-    pub(crate) fn read_string<Reader>(
+    pub fn read_string<Reader, Error>(
         ptr: Pointer,
         mut read_bytes: Reader,
     ) -> Result<Self, Error>
     where
         Reader: FnMut(Range<Pointer>) -> Result<OwnedBytes, Error>,
+        Error: From<crate::Error>,
     {
         const SHORT_READ: usize = 32;
 
         // Advance past the System.String method table
-        let ptr = ptr.try_add(Pointer::SIZE)?;
+        let ptr = ptr
+            .try_add(Pointer::SIZE)
+            .map_err(|err| -> crate::Error { err.into() })?;
 
-        let bytes = read_bytes(ptr..ptr.try_add(SHORT_READ)?)?;
+        let bytes = read_bytes(
+            ptr..ptr
+                .try_add(SHORT_READ)
+                .map_err(|err| -> crate::Error { err.into() })?,
+        )?;
         let num_u16_code_units =
             i32::from_ne_bytes(bytes[0..4].try_into().unwrap());
         if num_u16_code_units < 0 {
-            return Err(Error::NegativeStringLength(num_u16_code_units));
+            return Err(
+                crate::Error::NegativeStringLength(num_u16_code_units).into()
+            );
         }
 
         let num_str_bytes = (num_u16_code_units as usize) * 2;
@@ -36,7 +45,11 @@ impl RuntimeString {
         let bytes = if num_total_bytes <= SHORT_READ {
             bytes
         } else {
-            read_bytes(ptr..ptr.try_add(num_total_bytes)?)?
+            read_bytes(
+                ptr..ptr
+                    .try_add(num_total_bytes)
+                    .map_err(|err| -> crate::Error { err.into() })?,
+            )?
         };
 
         let iter_u16 = bytes
@@ -47,8 +60,9 @@ impl RuntimeString {
             .tuples()
             .map(|(a, b)| u16::from_ne_bytes([a, b]));
 
-        let string =
-            char::decode_utf16(iter_u16).collect::<Result<String, _>>()?;
+        let string = char::decode_utf16(iter_u16)
+            .collect::<Result<String, _>>()
+            .map_err(|err| -> crate::Error { err.into() })?;
 
         Ok(RuntimeString(string))
     }

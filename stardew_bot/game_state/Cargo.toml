@@ -9,4 +9,5 @@ thiserror = "*"
 xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
 
 dotnet_debugger = { path = "../../dotnet_debugger" }
+dsl = { path = "../../dsl" }
 geometry = { path = "../geometry" }

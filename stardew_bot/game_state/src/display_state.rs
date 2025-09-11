@@ -1,4 +1,4 @@
-use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::{Rectangle, Vector};
 
 use crate::Error;
@@ -67,7 +67,7 @@ impl DisplayState {
         let top_left = (tile * 64 - self.viewport.top_left).map(|x| {
             let x = x as f32;
             let x = x * self.zoom_level;
-            
+
             x as isize
         });
 

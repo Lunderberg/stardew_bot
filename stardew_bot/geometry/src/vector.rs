@@ -1,4 +1,4 @@
-use dotnet_debugger::RustNativeObject;
+use dsl::RustNativeObject;
 
 use crate::Direction;
 

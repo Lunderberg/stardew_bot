@@ -1,4 +1,4 @@
-use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::Vector;
 
 use crate::Error;

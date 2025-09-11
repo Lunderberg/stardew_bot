@@ -1,4 +1,4 @@
-use dotnet_debugger::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::Error;
 
@@ -510,7 +510,6 @@ impl FishingState {
             // should re-derive the equation of motion to include the
             // additional velocity for the floater/sinker type, but
             // this should be good enough for now.
-            
 
             predicted
                 + match fish_movement_kind {

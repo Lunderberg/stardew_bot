@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 
-use dotnet_debugger::{
-    Pointer, RustNativeObject, SymbolicGraph, SymbolicValue,
-};
+use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 
 use crate::Error;
 

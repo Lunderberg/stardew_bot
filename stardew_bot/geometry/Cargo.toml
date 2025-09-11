@@ -4,5 +4,5 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dotnet_debugger = { path = "../../dotnet_debugger" }
+dsl = { path = "../../dsl" }
 num = "0.4"

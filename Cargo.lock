@@ -128,14 +128,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "79296716171880943b8470b5f8d03aa55eb2e645a4874bdbb28adb49162e012c"
 
 [[package]]
-name = "bytecode_proc_macros"
-version = "0.1.0"
-dependencies = [
- "quote",
- "syn 2.0.87",
-]
-
-[[package]]
 name = "cassowary"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -398,7 +390,7 @@ name = "dll_unpacker"
 version = "0.1.0"
 dependencies = [
  "derive_more",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "memory_reader",
  "paste",
  "thiserror",
@@ -408,20 +400,44 @@ dependencies = [
 name = "dotnet_debugger"
 version = "0.1.0"
 dependencies = [
- "arrayvec",
- "bytecode_proc_macros",
  "derive_more",
  "dll_unpacker",
+ "elsa",
+ "env_var_flag",
+ "iterator_extensions",
+ "itertools 0.14.0",
+ "memory_reader",
+ "paste",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "derive_more",
+ "dll_unpacker",
+ "dotnet_debugger",
+ "dsl_proc_macros",
  "elsa",
  "env_var_flag",
  "format_utils",
  "indoc",
  "iterator_extensions",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "lru 0.14.0",
  "memory_reader",
  "paste",
  "thiserror",
+]
+
+[[package]]
+name = "dsl_proc_macros"
+version = "0.1.0"
+dependencies = [
+ "quote",
+ "syn 2.0.87",
 ]
 
 [[package]]
@@ -480,8 +496,9 @@ name = "game_state"
 version = "0.1.0"
 dependencies = [
  "dotnet_debugger",
+ "dsl",
  "geometry",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "thiserror",
  "xxhash-rust",
 ]
@@ -490,7 +507,7 @@ dependencies = [
 name = "geometry"
 version = "0.1.0"
 dependencies = [
- "dotnet_debugger",
+ "dsl",
  "num",
 ]
 
@@ -610,7 +627,7 @@ dependencies = [
 name = "iterator_extensions"
 version = "0.1.0"
 dependencies = [
- "itertools 0.13.0",
+ "itertools 0.14.0",
 ]
 
 [[package]]
@@ -750,7 +767,7 @@ dependencies = [
  "cpp_demangle",
  "elf",
  "env_var_flag",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "nix",
  "proc-maps",
  "thiserror",
@@ -1251,7 +1268,7 @@ dependencies = [
  "dotnet_debugger",
  "game_state",
  "geometry",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "memory_reader",
  "ratatui",
  "regex",
@@ -1414,9 +1431,10 @@ dependencies = [
  "crossterm",
  "dll_unpacker",
  "dotnet_debugger",
+ "dsl",
  "format_utils",
  "iterator_extensions",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "memory_reader",
  "ratatui",
  "regex",
@@ -1434,7 +1452,7 @@ dependencies = [
  "anymap",
  "crossterm",
  "dotnet_debugger",
- "itertools 0.13.0",
+ "itertools 0.14.0",
  "memory_reader",
  "ratatui",
  "regex",

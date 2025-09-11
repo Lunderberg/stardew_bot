@@ -28,6 +28,9 @@ pub enum Error {
     #[error("dotnet_debugger::Error( {0} )")]
     DotnetDebugger(#[from] dotnet_debugger::Error),
 
+    #[error("dsl::Error( {0} )")]
+    DSL(#[from] dsl::Error),
+
     #[error("stardew_utils::Error{{ {err} }}")]
     StardewUtilError {
         #[from]
@@ -87,6 +90,9 @@ pub enum Error {
 
     #[error("Attempted to access MetadataDisplay at invalid index")]
     InvalidMetadataDisplayIndex,
+
+    #[error("Found RuntimeType::Unknown in context requiring known type")]
+    UnexpectedUnknownType,
 }
 
 impl std::fmt::Debug for Error {

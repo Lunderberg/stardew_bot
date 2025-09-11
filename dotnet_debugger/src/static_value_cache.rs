@@ -915,15 +915,8 @@ impl<'a> CachedReader<'a> {
                 let opt_method_table_ptr = self.method_table_by_name(name)?;
                 (None, opt_method_table_ptr)
             }
-            other @ (RuntimeType::Unknown
-            | RuntimeType::Rust(_)
-            | RuntimeType::Function(_)
-            | RuntimeType::Tuple(_)
-            | RuntimeType::Iterator(_)
-            | RuntimeType::ByteArray) => {
-                return Err(Error::UnexpectedTypeFoundInDotNetContext(
-                    other.clone(),
-                ));
+            RuntimeType::Unknown => {
+                return Ok(None);
             }
         };
         let is_string =

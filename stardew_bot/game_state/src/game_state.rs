@@ -1,8 +1,7 @@
 use std::collections::HashMap;
 
-use dotnet_debugger::{
-    CachedReader, RustNativeObject, SymbolicGraph, VirtualMachine,
-};
+use dotnet_debugger::CachedReader;
+use dsl::{RustNativeObject, SymbolicGraph, VirtualMachine};
 
 use crate::{Error, JunimoMenu, Menu};
 

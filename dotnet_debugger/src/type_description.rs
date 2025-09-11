@@ -5,9 +5,8 @@ use memory_reader::{
 };
 
 use crate::{
-    runtime_type::{DotNetType, FunctionType, IteratorType, TupleType},
-    unpack_fields, CachedReader, CorElementType, Error, MethodTable,
-    RuntimePrimType, RuntimeType,
+    runtime_type::DotNetType, unpack_fields, CachedReader, CorElementType,
+    Error, MethodTable, RuntimePrimType, RuntimeType,
 };
 
 pub struct TypeDescription {
@@ -272,20 +271,6 @@ impl<'a> TypeHandleRef<'a> {
         fmt: &mut std::fmt::Formatter<'_>,
         reader: CachedReader,
     ) -> Result<(), Error> {
-        let write_tuple = |fmt: &mut std::fmt::Formatter,
-                           tuple: &[RuntimeType]|
-         -> Result<(), Error> {
-            write!(fmt, "(")?;
-            tuple.iter().enumerate().try_for_each(|(i, element)| {
-                if i > 0 {
-                    write!(fmt, ", ")?;
-                }
-                Self::print_runtime_type(element, fmt, reader)
-            })?;
-            write!(fmt, ")")?;
-            Ok(())
-        };
-
         match runtime_type {
             RuntimeType::Unknown => {
                 write!(fmt, "(???)")?;
@@ -345,27 +330,6 @@ impl<'a> TypeHandleRef<'a> {
                 }
                 write!(fmt, ">")?;
             }
-            RuntimeType::Rust(rust_type) => write!(fmt, "{rust_type}")?,
-            RuntimeType::Function(FunctionType { params, output }) => {
-                write!(fmt, "Fn")?;
-                if let Some(params) = params {
-                    write_tuple(fmt, params)?;
-                } else {
-                    write!(fmt, "(...)")?;
-                }
-
-                write!(fmt, " -> ")?;
-                Self::print_runtime_type(output, fmt, reader)?;
-            }
-            RuntimeType::Tuple(TupleType(elements)) => {
-                write_tuple(fmt, elements)?;
-            }
-            RuntimeType::Iterator(IteratorType { item }) => {
-                write!(fmt, "Iterator<Item = ")?;
-                Self::print_runtime_type(item, fmt, reader)?;
-                write!(fmt, ">")?;
-            }
-            RuntimeType::ByteArray => write!(fmt, "ByteArray")?,
         }
         Ok(())
     }

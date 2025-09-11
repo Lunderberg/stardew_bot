@@ -5,8 +5,6 @@ pub use memory_reader::Pointer;
 
 pub(crate) mod macros;
 
-pub use bytecode_proc_macros::*;
-
 mod runtime_module;
 pub use runtime_module::*;
 
@@ -17,7 +15,7 @@ mod cor_element_type;
 pub use cor_element_type::CorElementType;
 
 mod runtime_type;
-pub use runtime_type::{DotNetType, RuntimePrimType, RuntimeType};
+pub use runtime_type::*;
 
 mod runtime_value;
 pub use runtime_value::{RuntimePrimValue, RuntimeValue};
@@ -47,10 +45,3 @@ mod static_value_cache;
 pub use static_value_cache::*;
 
 pub mod extensions;
-
-pub mod bytecode;
-pub use bytecode::{
-    ExprKind, Instruction, OpIndex, RustNativeObject, StackValue,
-    SymbolicGraph, SymbolicType, SymbolicValue, TypeInferenceError, VMArg,
-    VMExecutionError, VMResults, VirtualMachine,
-};

@@ -3,9 +3,7 @@ use std::{
     ops::{Deref, Range},
 };
 
-use dotnet_debugger::{
-    Pointer, RustNativeObject, SymbolicGraph, SymbolicValue,
-};
+use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 

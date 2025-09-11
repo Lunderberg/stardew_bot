@@ -1,0 +1,25 @@
+[package]
+name = "dsl"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+derive_more = "*"
+itertools = "*"
+arrayvec = "*"
+lru = "0.14.0"
+elsa = "*"
+
+iterator_extensions = { path = "../iterator_extensions" }
+dll_unpacker = { path = "../dll_unpacker" }
+dotnet_debugger = { path = "../dotnet_debugger" }
+env_var_flag = { path = "../env_var_flag" }
+memory_reader = { path = "../memory_reader" }
+format_utils = { path = "../format_utils" }
+
+dsl_proc_macros = { path = "../dsl_proc_macros" }
+
+[dev-dependencies]
+paste = "1.0.15"
+indoc = "2"
