@@ -3,7 +3,7 @@ members = [
   "dll_unpacker",
   "dotnet_debugger",
   "dsl",
-  "dsl_proc_macros",
+  "dsl/proc_macros",
   "env_var_flag",
   "format_utils",
   "iterator_extensions",
