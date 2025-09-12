@@ -4,6 +4,8 @@ use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
 pub struct ConvertFirstToReduce;
 
 impl GraphRewrite for ConvertFirstToReduce {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

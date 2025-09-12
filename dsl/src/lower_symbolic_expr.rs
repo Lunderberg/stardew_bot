@@ -20,6 +20,8 @@ static USE_PHYSICAL_DOWNCAST: std::sync::LazyLock<bool> =
 pub struct LowerSymbolicExpr<'a>(pub &'a Analysis<'a>);
 
 impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

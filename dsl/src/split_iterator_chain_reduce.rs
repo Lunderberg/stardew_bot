@@ -14,6 +14,8 @@ use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 pub struct SplitIteratorChainReduce;
 
 impl GraphRewrite for SplitIteratorChainReduce {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

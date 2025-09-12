@@ -3,6 +3,7 @@ pub use memory_reader::Pointer;
 
 pub use dsl_analysis as analysis;
 pub use dsl_ir as ir;
+pub use dsl_rewrite_utils as rewrite_utils;
 pub use dsl_vm as vm;
 
 pub use dsl_graph_comparison::GraphComparisonExt;
@@ -10,6 +11,7 @@ pub use ir::{
     DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
     SymbolicGraph, SymbolicType, SymbolicValue,
 };
+pub use rewrite_utils::GraphRewrite;
 pub use vm::VirtualMachine;
 
 mod error;
@@ -19,9 +21,6 @@ mod expr;
 pub use expr::*;
 
 pub use dsl_proc_macros::*;
-
-mod graph_rewrite;
-pub use graph_rewrite::*;
 
 mod identify_static_field;
 pub use identify_static_field::IdentifyStaticField;
@@ -34,15 +33,6 @@ pub use remove_unused_downcast::RemoveUnusedDowncast;
 
 mod remove_unused_primcast;
 pub use remove_unused_primcast::RemoveUnusedPrimcast;
-
-mod recursive_rewrite;
-pub use recursive_rewrite::RecursiveRewrite;
-
-mod single_rewrite;
-pub use single_rewrite::SingleRewrite;
-
-mod sequential_rewrite;
-pub use sequential_rewrite::SequentialRewrite;
 
 mod lower_symbolic_expr;
 pub use lower_symbolic_expr::LowerSymbolicExpr;

@@ -2,7 +2,7 @@ use std::cell::Cell;
 
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use crate::{Error, GraphRewrite};
+use crate::GraphRewrite;
 
 pub struct SingleRewrite<Inner> {
     inner: Inner,
@@ -22,6 +22,8 @@ impl<Inner> GraphRewrite for SingleRewrite<Inner>
 where
     Inner: GraphRewrite,
 {
+    type Error = <Inner as GraphRewrite>::Error;
+
     fn init(&self) {
         self.can_rewrite.set(true);
     }
@@ -31,7 +33,7 @@ where
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
         name: Option<&str>,
-    ) -> Result<Option<SymbolicValue>, Error> {
+    ) -> Result<Option<SymbolicValue>, Self::Error> {
         Ok((self.can_rewrite.get())
             .then(|| self.inner.rewrite_expr(graph, expr, name))
             .transpose()?

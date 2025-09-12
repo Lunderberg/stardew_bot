@@ -6,6 +6,8 @@ use crate::{Error, GraphRewrite};
 pub struct IdentifyStaticField<'a>(pub &'a Analysis<'a>);
 
 impl<'a> GraphRewrite for IdentifyStaticField<'a> {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

@@ -423,6 +423,7 @@ dependencies = [
  "dsl_graph_comparison",
  "dsl_ir",
  "dsl_proc_macros",
+ "dsl_rewrite_utils",
  "dsl_vm",
  "env_var_flag",
  "indoc",
@@ -472,6 +473,15 @@ version = "0.1.0"
 dependencies = [
  "quote",
  "syn 2.0.87",
+]
+
+[[package]]
+name = "dsl_rewrite_utils"
+version = "0.1.0"
+dependencies = [
+ "dsl_analysis",
+ "dsl_ir",
+ "thiserror",
 ]
 
 [[package]]

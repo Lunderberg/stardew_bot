@@ -4,6 +4,8 @@ use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
 pub struct ConvertFindMapToFilterFind;
 
 impl GraphRewrite for ConvertFindMapToFilterFind {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

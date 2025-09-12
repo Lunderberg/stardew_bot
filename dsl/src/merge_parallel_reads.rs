@@ -22,6 +22,8 @@ struct GroupedRead {
 }
 
 impl GraphRewrite for MergeParallelReads {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

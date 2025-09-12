@@ -4,6 +4,8 @@ use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 pub struct MergeRangeReduceToSimpleReduce;
 
 impl GraphRewrite for MergeRangeReduceToSimpleReduce {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

@@ -5,6 +5,8 @@ use crate::{Error, GraphRewrite};
 pub struct ConstantFold;
 
 impl GraphRewrite for ConstantFold {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

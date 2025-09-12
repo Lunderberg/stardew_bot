@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dsl_ir::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
-use crate::{Error, GraphRewrite};
+use crate::GraphRewrite;
 
 pub struct RecursiveRewrite<Inner> {
     inner: Inner,
@@ -18,12 +18,14 @@ impl<Inner> GraphRewrite for RecursiveRewrite<Inner>
 where
     Inner: GraphRewrite,
 {
+    type Error = <Inner as GraphRewrite>::Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
         name: Option<&str>,
-    ) -> Result<Option<SymbolicValue>, Error> {
+    ) -> Result<Option<SymbolicValue>, Self::Error> {
         // All nodes currently in the output graph have been fully
         // simplified.  If a rewrite produces a known node, then it
         // can be returned without any further simplification.

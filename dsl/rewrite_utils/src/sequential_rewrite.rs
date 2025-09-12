@@ -1,6 +1,6 @@
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use crate::{Error, GraphRewrite};
+use crate::GraphRewrite;
 
 pub struct SequentialRewrite<First, Second> {
     first: First,
@@ -13,17 +13,19 @@ impl<First, Second> SequentialRewrite<First, Second> {
     }
 }
 
-impl<First, Second> GraphRewrite for SequentialRewrite<First, Second>
+impl<First, Second, Error> GraphRewrite for SequentialRewrite<First, Second>
 where
-    First: GraphRewrite,
-    Second: GraphRewrite,
+    First: GraphRewrite<Error = Error>,
+    Second: GraphRewrite<Error = Error>,
 {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
         name: Option<&str>,
-    ) -> Result<Option<SymbolicValue>, Error> {
+    ) -> Result<Option<SymbolicValue>, Self::Error> {
         if let Some(new_value) = self.first.rewrite_expr(graph, expr, name)? {
             Ok(Some(new_value))
         } else {

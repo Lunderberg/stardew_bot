@@ -9,11 +9,11 @@ use dsl_ir::{
     DSLType, Expr, ExprKind, FunctionType, OpIndex, SymbolicGraph,
     SymbolicValue,
 };
+use dsl_rewrite_utils::GraphRewrite;
 use dsl_vm::VirtualMachine;
 
 use crate::{
     expr_to_virtual_machine::SymbolicGraphToVirtualMachine as _, Error,
-    GraphRewrite,
 };
 
 struct RewriteResults {
@@ -255,7 +255,10 @@ impl SymbolicGraphSimplify for SymbolicGraph {
 }
 
 pub trait SymbolicGraphRewrite: Sized {
-    fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error>;
+    fn rewrite(
+        &self,
+        rewriter: impl GraphRewrite<Error = Error>,
+    ) -> Result<Self, Error>;
 }
 trait SymbolicGraphRewriteVerbose {
     fn remap_extern_funcs(
@@ -266,7 +269,7 @@ trait SymbolicGraphRewriteVerbose {
 
     fn rewrite_verbose(
         &self,
-        rewriter: impl GraphRewrite,
+        rewriter: impl GraphRewrite<Error = Error>,
     ) -> Result<RewriteResults, Error>;
 }
 impl SymbolicGraphRewriteVerbose for SymbolicGraph {
@@ -287,7 +290,7 @@ impl SymbolicGraphRewriteVerbose for SymbolicGraph {
 
     fn rewrite_verbose(
         &self,
-        rewriter: impl GraphRewrite,
+        rewriter: impl GraphRewrite<Error = Error>,
     ) -> Result<RewriteResults, Error> {
         rewriter.init();
 
@@ -350,7 +353,10 @@ impl SymbolicGraphRewriteVerbose for SymbolicGraph {
     }
 }
 impl SymbolicGraphRewrite for SymbolicGraph {
-    fn rewrite(&self, rewriter: impl GraphRewrite) -> Result<Self, Error> {
+    fn rewrite(
+        &self,
+        rewriter: impl GraphRewrite<Error = Error>,
+    ) -> Result<Self, Error> {
         Ok(self.rewrite_verbose(rewriter)?.graph)
     }
 }
@@ -358,7 +364,7 @@ impl SymbolicGraphRewrite for SymbolicGraph {
 pub(crate) trait SymbolicGraphSubstitute {
     fn rewrite_subtree(
         &mut self,
-        rewriter: impl GraphRewrite,
+        rewriter: impl GraphRewrite<Error = Error>,
         indices: impl Iterator<Item = OpIndex>,
         rewrites_applied: &mut HashMap<OpIndex, SymbolicValue>,
     ) -> Result<(), Error>;
@@ -372,7 +378,7 @@ pub(crate) trait SymbolicGraphSubstitute {
 impl SymbolicGraphSubstitute for SymbolicGraph {
     fn rewrite_subtree(
         &mut self,
-        rewriter: impl GraphRewrite,
+        rewriter: impl GraphRewrite<Error = Error>,
         indices: impl Iterator<Item = OpIndex>,
         rewrites_applied: &mut HashMap<OpIndex, SymbolicValue>,
     ) -> Result<(), Error> {
@@ -486,6 +492,8 @@ impl SymbolicGraphSubstitute for SymbolicGraph {
         struct Substitute<'a>(&'a HashMap<OpIndex, SymbolicValue>);
 
         impl GraphRewrite for Substitute<'_> {
+            type Error = Error;
+
             fn rewrite_expr(
                 &self,
                 graph: &mut SymbolicGraph,
@@ -678,7 +686,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
     fn apply_rewrites(
         &self,
         mut expr: SymbolicGraph,
-        rewriter: impl GraphRewrite,
+        rewriter: impl GraphRewrite<Error = Error>,
     ) -> Result<SymbolicGraph, Error> {
         if self.interactive_substeps {
             let rewriter = rewriter.apply_once();

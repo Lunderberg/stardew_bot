@@ -66,6 +66,8 @@ impl LegalizeOperandTypes<'_> {
 }
 
 impl GraphRewrite for LegalizeOperandTypes<'_> {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

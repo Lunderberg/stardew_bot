@@ -4,6 +4,8 @@ use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 pub struct SeparateReadAndParseBytes;
 
 impl GraphRewrite for SeparateReadAndParseBytes {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

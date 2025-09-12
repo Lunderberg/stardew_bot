@@ -85,6 +85,8 @@ impl InferFunctionParameterTypes<'_> {
 }
 
 impl GraphRewrite for InferFunctionParameterTypes<'_> {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

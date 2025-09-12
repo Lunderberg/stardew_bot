@@ -155,6 +155,8 @@ fn collect_dummy_args(
 }
 
 impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,

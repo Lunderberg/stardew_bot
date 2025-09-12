@@ -6,6 +6,8 @@ use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 pub struct RemoveUnusedPointerCast;
 
 impl GraphRewrite for RemoveUnusedPointerCast {
+    type Error = Error;
+
     fn rewrite_expr(
         &self,
         graph: &mut SymbolicGraph,
