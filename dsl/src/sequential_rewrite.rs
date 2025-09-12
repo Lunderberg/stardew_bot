@@ -1,6 +1,6 @@
-use crate::Error;
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
 
 pub struct SequentialRewrite<First, Second> {
     first: First,

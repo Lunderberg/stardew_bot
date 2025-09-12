@@ -1,6 +1,6 @@
-use dotnet_debugger::RuntimePrimValue;
+use dsl_ir::{ExprKind, RuntimePrimValue, SymbolicGraph, SymbolicValue};
 
-use crate::{Error, ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
 
 pub struct ConstantFold;
 
@@ -71,7 +71,7 @@ impl GraphRewrite for ConstantFold {
             &ExprKind::Add {
                 lhs: SymbolicValue::Result(lhs),
                 rhs: SymbolicValue::Const(b),
-            } => match graph[lhs].as_ref() {
+            } => match &graph[lhs].kind {
                 &ExprKind::Add {
                     lhs,
                     rhs: SymbolicValue::Const(a),
@@ -86,7 +86,7 @@ impl GraphRewrite for ConstantFold {
             &ExprKind::Mul {
                 lhs: SymbolicValue::Result(lhs),
                 rhs: SymbolicValue::Const(b),
-            } => match graph[lhs].as_ref() {
+            } => match &graph[lhs].kind {
                 &ExprKind::Mul {
                     lhs,
                     rhs: SymbolicValue::Const(a),

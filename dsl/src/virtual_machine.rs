@@ -14,12 +14,12 @@ use lru::LruCache;
 use memory_reader::{OwnedBytes, Pointer, TypedPointer};
 use thiserror::Error;
 
-use crate::{DSLType, Error, RuntimePrimType, RuntimePrimValue, RustType};
+use crate::{Error, StackValue};
 use dotnet_debugger::{CachedReader, MethodTable, RuntimeString};
-
-use super::{
-    native_function::{NativeFunction, WrappedNativeFunction},
-    ExposedNativeFunction, ExposedNativeObject, RustNativeObject,
+use dsl_ir::{
+    DSLType, ExposedNativeFunction, ExposedNativeObject, NativeFunction,
+    RuntimePrimType, RuntimePrimValue, RustNativeObject, RustType,
+    WrappedNativeFunction,
 };
 
 pub struct VirtualMachineBuilder {
@@ -59,16 +59,6 @@ pub struct VMEvaluator<'a> {
     current_instruction: InstructionIndex,
     reader: Box<dyn VMReader + 'a>,
     values: VMResults,
-}
-
-const SMALL_BYTE_ARRAY_SIZE: usize = 8;
-
-#[derive(Debug, From)]
-pub enum StackValue {
-    Prim(RuntimePrimValue),
-    ByteArray(Vec<u8>),
-    SmallByteArray([u8; SMALL_BYTE_ARRAY_SIZE]),
-    Native(ExposedNativeObject),
 }
 
 pub struct VMResults {
@@ -479,13 +469,16 @@ impl VMResults {
         index: impl NormalizeStackIndex,
     ) -> Result<Option<T>, Error>
     where
-        &'a StackValue: TryInto<T, Error = Error>,
+        &'a StackValue: TryInto<T>,
+        Error: From<<&'a StackValue as TryInto<T>>::Error>,
     {
         let index = index.normalize_stack_index();
-        self[index]
+        let opt_value = self[index]
             .as_ref()
             .map(|value| value.try_into())
-            .transpose()
+            .transpose()?;
+
+        Ok(opt_value)
     }
 
     pub fn get_any(
@@ -626,66 +619,6 @@ impl VMResults {
 
     pub fn num_instructions_evaluated(&self) -> usize {
         self.num_instructions_evaluated
-    }
-}
-
-impl StackValue {
-    pub(crate) fn runtime_type(&self) -> DSLType {
-        match self {
-            StackValue::Prim(prim) => prim.runtime_type().into(),
-            StackValue::ByteArray(_) | StackValue::SmallByteArray(_) => {
-                DSLType::ByteArray
-            }
-            StackValue::Native(native) => native.ty.clone(),
-        }
-    }
-
-    pub fn as_prim(&self) -> Option<RuntimePrimValue> {
-        match self {
-            StackValue::Prim(prim) => Some(*prim),
-            StackValue::Native(_)
-            | StackValue::ByteArray(_)
-            | StackValue::SmallByteArray(_) => None,
-        }
-    }
-
-    pub fn as_native<T: RustNativeObject>(&self) -> Option<&T> {
-        match self {
-            StackValue::Native(native) => native.downcast_ref(),
-            StackValue::Prim(_)
-            | StackValue::ByteArray(_)
-            | StackValue::SmallByteArray(_) => None,
-        }
-    }
-
-    pub fn as_byte_array(&self) -> Option<&[u8]> {
-        match self {
-            StackValue::ByteArray(arr) => Some(arr),
-            StackValue::SmallByteArray(arr) => Some(arr),
-            StackValue::Prim(_) | StackValue::Native(_) => None,
-        }
-    }
-
-    pub fn as_mut_byte_array(&mut self) -> Option<&mut [u8]> {
-        match self {
-            StackValue::ByteArray(arr) => Some(arr),
-            StackValue::SmallByteArray(arr) => Some(arr),
-            StackValue::Prim(_) | StackValue::Native(_) => None,
-        }
-    }
-
-    pub fn read_string_ptr(
-        &self,
-        reader: &memory_reader::MemoryReader,
-    ) -> Result<String, Error> {
-        match self {
-            StackValue::Prim(prim) => {
-                prim.read_string_ptr(reader).map_err(Into::into)
-            }
-            other => {
-                Err(Error::InvalidOperandForDotnetString(other.runtime_type()))
-            }
-        }
     }
 }
 
@@ -1935,8 +1868,10 @@ impl<'a> VMEvaluator<'a> {
             num_bytes += region_bytes;
         }
 
-        let mut new_stack_value = if num_bytes <= SMALL_BYTE_ARRAY_SIZE {
-            StackValue::SmallByteArray([0u8; SMALL_BYTE_ARRAY_SIZE])
+        let mut new_stack_value = if num_bytes
+            <= StackValue::SMALL_BYTE_ARRAY_SIZE
+        {
+            StackValue::SmallByteArray([0u8; StackValue::SMALL_BYTE_ARRAY_SIZE])
         } else {
             StackValue::ByteArray(vec![0u8; num_bytes])
         };
@@ -2274,18 +2209,7 @@ impl Display for VirtualMachine {
         Ok(())
     }
 }
-impl Display for StackValue {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            StackValue::Prim(prim) => write!(f, "{prim}"),
-            StackValue::Native(any) => {
-                write!(f, "[rust-native object of type {:?}]", any.type_id())
-            }
-            StackValue::ByteArray(_) => write!(f, "ByteArray"),
-            StackValue::SmallByteArray(_) => write!(f, "SmallByteArray"),
-        }
-    }
-}
+
 impl Display for VMArg {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -2563,87 +2487,8 @@ impl std::ops::Sub for StackIndex {
     }
 }
 
-impl TryInto<RuntimePrimValue> for StackValue {
-    type Error = Error;
-
-    fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
-        match self {
-            StackValue::Prim(value) => Ok(value),
-            other => Err(Error::IllegalConversionToPrimitiveValue(
-                other.runtime_type(),
-            )),
-        }
-    }
-}
-impl TryInto<RuntimePrimValue> for &'_ StackValue {
-    type Error = Error;
-
-    fn try_into(self) -> Result<RuntimePrimValue, Self::Error> {
-        match self {
-            StackValue::Prim(value) => Ok(*value),
-            other => Err(Error::IllegalConversionToPrimitiveValue(
-                other.runtime_type(),
-            )),
-        }
-    }
-}
-impl<'a> TryInto<&'a dyn Any> for &'a StackValue {
-    type Error = Error;
-
-    fn try_into(self) -> Result<&'a dyn Any, Self::Error> {
-        match self {
-            StackValue::Native(native) => Ok(native.as_ref()),
-            other => Err(Error::IllegalConversionToNativeObject(
-                other.runtime_type(),
-            )),
-        }
-    }
-}
-impl TryInto<Box<dyn Any>> for StackValue {
-    type Error = Error;
-
-    fn try_into(self) -> Result<Box<dyn Any>, Self::Error> {
-        match self {
-            StackValue::Native(native) => Ok(native.into()),
-            other => Err(Error::IllegalConversionToNativeObject(
-                other.runtime_type(),
-            )),
-        }
-    }
-}
-
-macro_rules! stack_value_to_prim {
+macro_rules! vm_results_to_prim {
     ($prim:ty) => {
-        impl TryInto<$prim> for StackValue {
-            type Error = Error;
-
-            fn try_into(self) -> Result<$prim, Self::Error> {
-                match self {
-                    StackValue::Prim(value) => {
-                        value.try_into().map_err(Into::into)
-                    }
-                    other => Err(Error::IllegalConversionToPrimitiveValue(
-                        other.runtime_type(),
-                    )),
-                }
-            }
-        }
-
-        impl TryInto<$prim> for &'_ StackValue {
-            type Error = Error;
-
-            fn try_into(self) -> Result<$prim, Self::Error> {
-                match self {
-                    StackValue::Prim(value) => {
-                        (*value).try_into().map_err(Into::into)
-                    }
-                    other => Err(Error::IllegalConversionToPrimitiveValue(
-                        other.runtime_type(),
-                    )),
-                }
-            }
-        }
-
         impl TryInto<$prim> for VMResults {
             type Error = Error;
 
@@ -2654,6 +2499,7 @@ macro_rules! stack_value_to_prim {
                         .take()
                         .ok_or(Error::AttemptedConversionOfMissingValue)?
                         .try_into()
+                        .map_err(Into::into)
                 } else {
                     Err(Error::IncorrectNumberOfResults {
                         expected: 1,
@@ -2665,20 +2511,20 @@ macro_rules! stack_value_to_prim {
     };
 }
 
-stack_value_to_prim!(bool);
-stack_value_to_prim!(u8);
-stack_value_to_prim!(u16);
-stack_value_to_prim!(u32);
-stack_value_to_prim!(u64);
-stack_value_to_prim!(usize);
-stack_value_to_prim!(i8);
-stack_value_to_prim!(i16);
-stack_value_to_prim!(i32);
-stack_value_to_prim!(i64);
-stack_value_to_prim!(isize);
-stack_value_to_prim!(f32);
-stack_value_to_prim!(f64);
-stack_value_to_prim!(Pointer);
+vm_results_to_prim!(bool);
+vm_results_to_prim!(u8);
+vm_results_to_prim!(u16);
+vm_results_to_prim!(u32);
+vm_results_to_prim!(u64);
+vm_results_to_prim!(usize);
+vm_results_to_prim!(i8);
+vm_results_to_prim!(i16);
+vm_results_to_prim!(i32);
+vm_results_to_prim!(i64);
+vm_results_to_prim!(isize);
+vm_results_to_prim!(f32);
+vm_results_to_prim!(f64);
+vm_results_to_prim!(Pointer);
 
 impl TryInto<Box<dyn Any>> for VMResults {
     type Error = Error;
@@ -2690,6 +2536,7 @@ impl TryInto<Box<dyn Any>> for VMResults {
                 .take()
                 .ok_or(Error::AttemptedConversionOfMissingValue)?
                 .try_into()
+                .map_err(Into::into)
         } else {
             Err(Error::IncorrectNumberOfResults {
                 expected: 1,

@@ -1,4 +1,7 @@
-use dsl::{Error, SymbolicGraph, SymbolicValue};
+use dsl::{
+    Error, GraphComparisonExt as _, SymbolicGraph, SymbolicGraphCSE as _,
+    SymbolicValue,
+};
 
 fn compare_against_expected<Before, Expected>(
     build_before: Before,

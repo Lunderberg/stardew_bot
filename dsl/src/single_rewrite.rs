@@ -1,8 +1,8 @@
 use std::cell::Cell;
 
-use crate::Error;
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
 
 pub struct SingleRewrite<Inner> {
     inner: Inner,

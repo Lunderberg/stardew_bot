@@ -2,12 +2,9 @@
 
 use std::{any::Any, rc::Rc};
 
-use memory_reader::Pointer;
+use dotnet_debugger::{Pointer, RuntimePrimType, RuntimePrimValue};
 
-use crate::{
-    DSLType, Error, FunctionType, RuntimePrimType, RuntimePrimValue, RustType,
-    StackValue, TypeInferenceError, VMExecutionError,
-};
+use crate::{DSLType, Error, FunctionType, RustType, StackValue};
 use dotnet_debugger::RuntimeType;
 
 use super::ExposedNativeObject;
@@ -51,32 +48,31 @@ pub trait RustNativeObject: Any {
     {
         let vec = match vec {
             StackValue::Native(native) => Ok(native),
-            other => Err(VMExecutionError::IncorrectVectorType {
-                expected: RustType::new::<Vec<Self>>().into(),
-                actual: other.runtime_type(),
-            }),
-        }?
-        .downcast_mut::<Vec<Self>>()
-        .ok_or_else(|| VMExecutionError::ExpectedVectorToAccumulateInto)?;
+            other => Err(Error::InvalidVectorType(other.runtime_type())),
+        }?;
+        let vec = match vec.downcast_mut::<Vec<Self>>() {
+            Some(vec) => vec,
+            None => {
+                return Err(Error::InvalidVectorType(vec.runtime_type()));
+            }
+        };
         let item = item.take().ok_or_else(|| {
-            VMExecutionError::MissingElementTypeInVectorAccumulation {
+            Error::MissingElementInVectorAccumulation {
                 name: output_name.to_string(),
             }
         })?;
 
         let item = match item {
             StackValue::Native(native) => Ok(native),
-            other => Err(VMExecutionError::IncorrectVectorElementType {
-                element_type: RustType::new::<Self>().into(),
-                item_type: other.runtime_type(),
+            other => Err(Error::IncorrectVectorElementType {
+                expected: RustType::new::<Self>().into(),
+                actual: other.runtime_type(),
             }),
         }?
         .downcast::<Self>()
-        .map_err(|item| {
-            VMExecutionError::IncorrectVectorElementType {
-                element_type: RustType::new::<Self>().into(),
-                item_type: item.runtime_type(),
-            }
+        .map_err(|item| Error::IncorrectVectorElementType {
+            expected: RustType::new::<Self>().into(),
+            actual: item.runtime_type(),
         })?;
 
         vec.push(*item);
@@ -162,13 +158,13 @@ macro_rules! impl_prim_return {
                     Some(StackValue::Prim(prim)) => {
                         Ok(Some((*prim).try_into()?))
                     }
-                    Some(other) => Err(
-                        VMExecutionError::InvalidArgumentForNativeFunction {
+                    Some(other) => {
+                        Err(Error::InvalidArgumentForNativeFunction {
                             expected: DSLType::Prim(RuntimePrimType::$variant),
                             actual: other.runtime_type(),
                         }
-                        .into(),
-                    ),
+                        .into())
+                    }
                 }
             }
 
@@ -188,13 +184,13 @@ macro_rules! impl_prim_return {
                     Some(StackValue::Prim(RuntimePrimValue::$variant(
                         prim,
                     ))) => Ok(Some(prim)),
-                    Some(other) => Err(
-                        VMExecutionError::InvalidArgumentForNativeFunction {
+                    Some(other) => {
+                        Err(Error::InvalidArgumentForNativeFunction {
                             expected: DSLType::Prim(RuntimePrimType::$variant),
                             actual: other.runtime_type(),
                         }
-                        .into(),
-                    ),
+                        .into())
+                    }
                 }
             }
 
@@ -214,13 +210,13 @@ macro_rules! impl_prim_return {
                     Some(StackValue::Prim(RuntimePrimValue::$variant(
                         prim,
                     ))) => Ok(Some(prim)),
-                    Some(other) => Err(
-                        VMExecutionError::InvalidArgumentForNativeFunction {
+                    Some(other) => {
+                        Err(Error::InvalidArgumentForNativeFunction {
                             expected: DSLType::Prim(RuntimePrimType::$variant),
                             actual: other.runtime_type(),
                         }
-                        .into(),
-                    ),
+                        .into())
+                    }
                 }
             }
 
@@ -384,7 +380,7 @@ where
                 }
                 .and_then(|native| native.downcast_ref())
                 .ok_or_else(|| {
-                    VMExecutionError::InvalidArgumentForNativeFunction {
+                    Error::InvalidArgumentForNativeFunction {
                         expected: DSLType::Rust(RustType::new::<T>()),
                         actual: arg.runtime_type(),
                     }
@@ -411,12 +407,11 @@ where
         opt_arg
             .as_mut()
             .map(|arg| {
-                let err: Error =
-                    VMExecutionError::InvalidArgumentForNativeFunction {
-                        expected: DSLType::Rust(RustType::new::<T>()),
-                        actual: arg.runtime_type(),
-                    }
-                    .into();
+                let err: Error = Error::InvalidArgumentForNativeFunction {
+                    expected: DSLType::Rust(RustType::new::<T>()),
+                    actual: arg.runtime_type(),
+                }
+                .into();
                 match arg {
                     StackValue::Native(native) => {
                         native.downcast_mut().ok_or(err)
@@ -443,12 +438,11 @@ impl UnwrapArg for &str {
         opt_arg
             .as_ref()
             .map(|arg| {
-                let err: Error =
-                    VMExecutionError::InvalidArgumentForNativeFunction {
-                        expected: Self::arg_signature_type(),
-                        actual: arg.runtime_type(),
-                    }
-                    .into();
+                let err: Error = Error::InvalidArgumentForNativeFunction {
+                    expected: Self::arg_signature_type(),
+                    actual: arg.runtime_type(),
+                }
+                .into();
                 match arg {
                     StackValue::Native(native) => native
                         .downcast_ref()
@@ -490,7 +484,7 @@ pub struct WrappedNativeFunction<Func, ArgList> {
     _phantom: std::marker::PhantomData<ArgList>,
 }
 impl<Func, ArgList> WrappedNativeFunction<Func, ArgList> {
-    pub(crate) fn new(func: Func) -> Self {
+    pub fn new(func: Func) -> Self {
         Self {
             func,
             _phantom: std::marker::PhantomData,
@@ -530,7 +524,7 @@ macro_rules! impl_wrapped_native_function {
                 const NUM_ARGS: usize = count_args!( $($arg_type),* );
                 if args.len() != NUM_ARGS {
                     return Err(
-                        VMExecutionError::InvalidNumberOfOperandsForNativeFunction {
+                        Error::InvalidNumberOfOperandsForNativeFunction {
                             expected: NUM_ARGS,
                             provided: args.len(),
                         }
@@ -600,7 +594,7 @@ macro_rules! impl_wrapped_native_function {
                     let reason = format!(
                         "mutability is only supported for the first parameter \
                          but parameter {i_param} is accepted as a mutable reference");
-                    Err(TypeInferenceError::UnsupportedNativeFunction{
+                    Err(Error::UnsupportedNativeFunction{
                         sig,
                         reason,
                     })
@@ -625,7 +619,7 @@ macro_rules! impl_wrapped_native_function {
                                   the output type must be void,\
                                   so that the SymbolicGraph can represent \
                                   the mutated argument as the output".into();
-                    Err(TypeInferenceError::UnsupportedNativeFunction{
+                    Err(Error::UnsupportedNativeFunction{
                         sig,
                         reason,
                     })

@@ -1,8 +1,7 @@
 use dotnet_debugger::RuntimePrimType;
 
-use crate::Error;
-
-use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
 pub struct RemoveUnusedPointerCast;
 
@@ -17,7 +16,7 @@ impl GraphRewrite for RemoveUnusedPointerCast {
             ExprKind::PrimCast {
                 value: SymbolicValue::Result(op_index),
                 prim_type: RuntimePrimType::Ptr,
-            } => match graph[*op_index].as_ref() {
+            } => match &graph[*op_index].kind {
                 ExprKind::PointerCast { ptr, .. } => Some(*ptr),
                 _ => None,
             },

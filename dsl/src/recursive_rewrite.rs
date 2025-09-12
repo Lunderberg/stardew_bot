@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
-use crate::Error;
+use dsl_ir::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
-use super::{ExprKind, GraphRewrite, OpIndex, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
 
 pub struct RecursiveRewrite<Inner> {
     inner: Inner,

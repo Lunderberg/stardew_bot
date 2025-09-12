@@ -1,14 +1,14 @@
 use std::borrow::Cow;
 
 use derive_more::derive::From;
-use memory_reader::{Pointer, TypedPointer};
 
-use dotnet_debugger::{DotNetType, MethodTable, RuntimeType};
+use dotnet_debugger::{
+    DotNetType, Pointer, RuntimePrimType, RuntimePrimValue, RuntimeType,
+};
 
 use crate::{
-    Error, ExposedNativeObject, RuntimePrimType, RuntimePrimValue,
-    RustNativeObject, RustNativeTypeUtils, RustNativeUtilContainer, StackValue,
-    TypeInferenceError, VMExecutionError,
+    Error, ExposedNativeObject, RustNativeObject, RustNativeTypeUtils,
+    RustNativeUtilContainer, StackValue,
 };
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, From)]
@@ -60,7 +60,7 @@ pub struct RustType {
 }
 
 impl RustType {
-    pub(crate) fn new<T: RustNativeObject>() -> Self {
+    pub fn new<T: RustNativeObject>() -> Self {
         let type_id = std::any::TypeId::of::<T>();
         let utils = Box::new(RustNativeUtilContainer::<T>::new());
 
@@ -111,18 +111,18 @@ pub struct FunctionType {
     /// `None` for functions with unknown number of arguments.  For
     /// functions with known arity but unknown argument types, should
     /// be a vector with all elements being `DSLType::Unknown`.
-    pub(crate) params: Option<Vec<DSLType>>,
+    pub params: Option<Vec<DSLType>>,
 
     /// The return type of the function
-    pub(crate) output: Box<DSLType>,
+    pub output: Box<DSLType>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct TupleType(pub(crate) Vec<DSLType>);
+pub struct TupleType(pub Vec<DSLType>);
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct IteratorType {
-    pub(crate) item: Box<DSLType>,
+    pub item: Box<DSLType>,
 }
 
 impl DSLType {
@@ -171,46 +171,15 @@ impl DSLType {
         }
     }
 
-    pub(crate) fn method_table_for_field_access(
-        &self,
-        gen_name: impl FnOnce() -> String,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
-        match self {
-            DSLType::DotNet(DotNetType::ValueType { method_table, .. })
-            | DSLType::DotNet(DotNetType::Class { method_table }) => {
-                method_table
-                    .ok_or_else(|| Error::UnexpectedNullMethodTable(gen_name()))
-            }
-            _ => Err(Error::FieldAccessRequiresClassOrStruct(
-                gen_name(),
-                self.clone(),
-            )),
-        }
-    }
-
-    pub(crate) fn method_table_for_downcast(
-        &self,
-    ) -> Result<TypedPointer<MethodTable>, Error> {
-        match self {
-            DSLType::DotNet(DotNetType::Class { method_table }) => {
-                method_table.ok_or(Error::DowncastRequiresKnownBaseClass)
-            }
-            _ => Err(Error::DowncastRequiresClassInstance(self.clone())),
-        }
-    }
-
-    pub(crate) fn new_vector(&self) -> Result<ExposedNativeObject, Error> {
+    pub fn new_vector(&self) -> Result<ExposedNativeObject, Error> {
         match self {
             DSLType::Prim(prim_type) => Ok(prim_type.new_vector()),
             DSLType::Rust(rust_type) => rust_type.new_vector(),
-            other => {
-                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
-                    .into())
-            }
+            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
         }
     }
 
-    pub(crate) fn collect_into_vector(
+    pub fn collect_into_vector(
         &self,
         vec: &mut StackValue,
         item: &mut Option<StackValue>,
@@ -223,21 +192,15 @@ impl DSLType {
             DSLType::Rust(rust_type) => {
                 rust_type.collect_into_vector(vec, item, output_name)
             }
-            other => {
-                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
-                    .into())
-            }
+            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
         }
     }
 
-    pub(crate) fn vector_type(&self) -> Result<DSLType, Error> {
+    pub fn vector_type(&self) -> Result<DSLType, Error> {
         match self {
             DSLType::Prim(prim_type) => Ok(prim_type.vector_type()),
             DSLType::Rust(rust_type) => rust_type.vector_type(),
-            other => {
-                Err(TypeInferenceError::InvalidVectorElementType(other.clone())
-                    .into())
-            }
+            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
         }
     }
 }
@@ -463,30 +426,28 @@ impl RuntimePrimTypeExt for RuntimePrimType {
     ) -> Result<(), Error> {
         let native = match vec {
             StackValue::Native(native) => Ok(native),
-            other => Err(TypeInferenceError::InvalidVectorType(
-                other.runtime_type().into(),
-            )),
+            other => Err(Error::InvalidVectorType(other.runtime_type())),
         }?;
 
         let item = item.as_ref().ok_or_else(|| {
-            VMExecutionError::MissingElementTypeInVectorAccumulation {
+            Error::MissingElementInVectorAccumulation {
                 name: output_name.to_string(),
             }
         })?;
 
         let item = item.as_prim().ok_or_else(|| {
-            VMExecutionError::IncorrectVectorElementType {
-                element_type: (*self).into(),
-                item_type: item.runtime_type(),
+            Error::IncorrectVectorElementType {
+                expected: (*self).into(),
+                actual: item.runtime_type(),
             }
         })?;
 
         macro_rules! handle_prim {
             ($variant:ident,$prim:ty) => {{
                 let RuntimePrimValue::$variant(item) = item else {
-                    return Err(VMExecutionError::IncorrectVectorElementType {
-                        element_type: RuntimePrimType::$variant.into(),
-                        item_type: item.runtime_type().into(),
+                    return Err(Error::IncorrectVectorElementType {
+                        expected: RuntimePrimType::$variant.into(),
+                        actual: item.runtime_type().into(),
                     }
                     .into());
                 };
@@ -494,7 +455,7 @@ impl RuntimePrimTypeExt for RuntimePrimType {
                 if let Some(vec) = native.downcast_mut::<Vec<$prim>>() {
                     vec.push(item);
                 } else {
-                    return Err(VMExecutionError::IncorrectVectorType {
+                    return Err(Error::IncorrectVectorElementType {
                         expected: RustType::new::<Vec<$prim>>().into(),
                         actual: native.runtime_type(),
                     }
@@ -524,7 +485,7 @@ impl RuntimePrimTypeExt for RuntimePrimType {
     }
 }
 
-pub(crate) trait RuntimePrimValueExt {
+pub trait RuntimePrimValueExt {
     fn static_runtime_type_ref(&self) -> &'static DSLType;
 }
 impl RuntimePrimValueExt for RuntimePrimValue {

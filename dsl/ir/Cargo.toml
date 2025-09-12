@@ -1,0 +1,12 @@
+[package]
+name = "dsl_ir"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+derive_more = "*"
+itertools = "0.14"
+
+dotnet_debugger = { path = "../../dotnet_debugger" }
+format_utils = { path = "../../format_utils" }

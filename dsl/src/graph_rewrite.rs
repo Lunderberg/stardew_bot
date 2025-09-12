@@ -1,11 +1,9 @@
-use crate::{DSLType, Error};
-
 use dotnet_debugger::CachedReader;
 
-use super::{
-    ExprKind, RecursiveRewrite, SequentialRewrite, SingleRewrite,
-    SymbolicGraph, SymbolicValue, TypeInference,
+use crate::{
+    Error, RecursiveRewrite, SequentialRewrite, SingleRewrite, TypeInference,
 };
+use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
 
 pub trait GraphRewrite {
     fn rewrite_expr(

@@ -5,18 +5,13 @@ use std::{
 
 use itertools::{Either, Itertools, Position};
 
+use dotnet_debugger::MethodTable;
 use format_utils::Indent;
 
 use crate::{
-    DSLType, ExprKind, RuntimePrimType, RuntimePrimValue,
-    RuntimePrimValueExt as _, Scope,
-};
-use dotnet_debugger::MethodTable;
-use memory_reader::TypedPointer;
-
-use super::{
-    expr::StaticField, OpIndex, OpPrecedence, SymbolicGraph, SymbolicType,
-    SymbolicValue,
+    DSLType, ExprKind, OpIndex, OpPrecedence, RuntimePrimType,
+    RuntimePrimValue, RuntimePrimValueExt as _, Scope, StaticField,
+    SymbolicGraph, SymbolicType, SymbolicValue, TypedPointer,
 };
 
 impl SymbolicGraph {
@@ -93,13 +88,6 @@ pub struct GraphPrinter<'a> {
 struct TypePrinter<'a> {
     ty: &'a SymbolicType,
     insert_zero_width_space_at_breakpoint: bool,
-}
-
-#[derive(Clone, Copy)]
-pub(crate) struct IndexPrinter<'a> {
-    graph: &'a SymbolicGraph,
-    index: OpIndex,
-    requires_name_prefix: bool,
 }
 
 #[derive(Debug)]
@@ -354,10 +342,10 @@ impl<'a> GraphPrinter<'a> {
             };
         }
 
-        let make_index_printer = |index: OpIndex| IndexPrinter {
-            graph: self.graph,
-            index,
-            requires_name_prefix: requires_name_prefix[index.0],
+        let make_index_printer = |index: OpIndex| {
+            index
+                .pprint(self.graph)
+                .requires_name_prefix(requires_name_prefix[index.0])
         };
 
         let extern_func_lookup: HashSet<OpIndex> =
@@ -414,7 +402,7 @@ impl<'a> GraphPrinter<'a> {
 
                     let index_printer = make_index_printer(index);
 
-                    match op.as_ref() {
+                    match &op.kind {
                         ExprKind::FunctionArg(_) => {
                             // No action needed, handled as part of Function
                         }
@@ -1406,31 +1394,6 @@ impl Display for MaybeZeroWidthSpace {
             write!(f, "\u{200B}")
         } else {
             Ok(())
-        }
-    }
-}
-
-impl<'a> IndexPrinter<'a> {
-    pub(crate) fn new(index: OpIndex, graph: &'a SymbolicGraph) -> Self {
-        Self {
-            graph,
-            index,
-            requires_name_prefix: true,
-        }
-    }
-}
-
-impl<'a> Display for IndexPrinter<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let index = self.index.0;
-        if let Some(name) = self.graph[self.index].name.as_ref() {
-            if self.requires_name_prefix {
-                write!(f, "_{index}_{name}")
-            } else {
-                write!(f, "{name}")
-            }
-        } else {
-            write!(f, "_{index}")
         }
     }
 }

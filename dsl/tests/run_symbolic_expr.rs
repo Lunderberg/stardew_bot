@@ -1,4 +1,7 @@
-use dsl::{Error, RuntimePrimType, RustNativeObject, SymbolicGraph};
+use dsl::{
+    Error, RuntimePrimType, RustNativeObject, SymbolicGraph,
+    SymbolicGraphCompileExt as _,
+};
 
 #[test]
 fn eval_integer_literal() -> Result<(), Error> {

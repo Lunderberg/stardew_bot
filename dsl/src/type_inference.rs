@@ -4,14 +4,16 @@ use elsa::FrozenMap;
 use thiserror::Error;
 
 use crate::{
-    DSLType, Error, FunctionType, IteratorType, RuntimePrimType,
-    RuntimePrimValueExt as _, RustType, TupleType,
+    DSLTypeExt as _, Error, StaticFieldExt as _, SymbolicTypeExt as _,
 };
 use dotnet_debugger::{
     CachedReader, DotNetType, RuntimeType, TypeHandlePtrExt as _,
 };
-
-use super::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
+use dsl_ir::{
+    DSLType, ExprKind, FunctionType, IteratorType, OpIndex, RuntimePrimType,
+    RuntimePrimValueExt as _, RustType, SymbolicGraph, SymbolicValue,
+    TupleType,
+};
 
 pub struct TypeInference<'a> {
     opt_reader: Option<CachedReader<'a>>,
@@ -203,13 +205,10 @@ impl<'a> TypeInference<'a> {
                 if self.cache.get(&visiting).is_none() {
                     reverse_topologic_order.push(visiting);
                     let expr = &graph[visiting];
-                    expr.visit_reachable_nodes(|input_value| {
-                        if let SymbolicValue::Result(input_index) = input_value
-                        {
-                            if !seen.contains(&input_index) {
-                                to_visit.push(input_index);
-                                seen.insert(input_index);
-                            }
+                    expr.iter_input_nodes().for_each(|input_index| {
+                        if !seen.contains(&input_index) {
+                            to_visit.push(input_index);
+                            seen.insert(input_index);
                         }
                     });
                 }

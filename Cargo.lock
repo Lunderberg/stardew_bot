@@ -419,16 +419,27 @@ dependencies = [
  "derive_more",
  "dll_unpacker",
  "dotnet_debugger",
+ "dsl_ir",
  "dsl_proc_macros",
  "elsa",
  "env_var_flag",
- "format_utils",
  "indoc",
  "iterator_extensions",
  "itertools 0.14.0",
  "lru 0.14.0",
  "memory_reader",
  "paste",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl_ir"
+version = "0.1.0"
+dependencies = [
+ "derive_more",
+ "dotnet_debugger",
+ "format_utils",
+ "itertools 0.14.0",
  "thiserror",
 ]
 

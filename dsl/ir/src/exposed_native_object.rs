@@ -2,9 +2,7 @@ use std::{any::Any, borrow::Cow, marker::PhantomData};
 
 use itertools::Itertools as _;
 
-use crate::{DSLType, Error, RustType};
-
-use super::{RustNativeObject, StackValue};
+use crate::{DSLType, Error, RustNativeObject, RustType, StackValue};
 
 #[derive(Debug)]
 pub struct ExposedNativeObject {
@@ -13,7 +11,7 @@ pub struct ExposedNativeObject {
 }
 
 impl ExposedNativeObject {
-    pub(crate) fn new<T: RustNativeObject>(obj: T) -> Self {
+    pub fn new<T: RustNativeObject>(obj: T) -> Self {
         let obj = Box::new(obj);
         let ty: DSLType = RustType::new::<T>().into();
         Self { obj, ty }
@@ -35,7 +33,7 @@ impl ExposedNativeObject {
         self.obj.as_ref().type_id()
     }
 
-    pub(crate) fn runtime_type(&self) -> DSLType {
+    pub fn runtime_type(&self) -> DSLType {
         self.ty.clone()
     }
 }

@@ -1,5 +1,6 @@
 use dsl::{
-    DSLType, Error, RuntimePrimType, SymbolicGraph, SymbolicType, SymbolicValue,
+    DSLType, Error, GraphComparisonExt as _, RuntimePrimType, SymbolicGraph,
+    SymbolicType, SymbolicValue,
 };
 use indoc::indoc;
 use paste::paste;

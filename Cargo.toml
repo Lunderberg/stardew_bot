@@ -4,6 +4,7 @@ members = [
   "dotnet_debugger",
   "dsl",
   "dsl/proc_macros",
+  "dsl/ir",
   "env_var_flag",
   "format_utils",
   "iterator_extensions",

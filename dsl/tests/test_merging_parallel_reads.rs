@@ -1,5 +1,6 @@
 use dsl::{
-    ConstantFold, Error, GraphRewrite as _, MergeParallelReads, SymbolicGraph,
+    ir::Error, ConstantFold, GraphComparisonExt as _, GraphRewrite as _,
+    MergeParallelReads, SymbolicGraph, SymbolicGraphRewrite as _,
     SymbolicValue,
 };
 

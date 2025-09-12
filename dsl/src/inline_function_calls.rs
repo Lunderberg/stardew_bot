@@ -1,6 +1,5 @@
-use crate::Error;
-
-use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
 pub struct InlineFunctionCalls;
 
@@ -15,7 +14,7 @@ impl GraphRewrite for InlineFunctionCalls {
             ExprKind::FunctionCall {
                 func: SymbolicValue::Result(func_index),
                 args,
-            } => match graph[*func_index].as_ref() {
+            } => match &graph[*func_index].kind {
                 ExprKind::Function { params, output } => {
                     assert!(params.len() == args.len());
 

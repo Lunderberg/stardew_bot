@@ -1,6 +1,6 @@
-use crate::{Error, StaticField};
+use dsl_ir::{ExprKind, StaticField, SymbolicGraph, SymbolicValue};
 
-use super::{Analysis, ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Analysis, Error, GraphRewrite};
 
 pub struct IdentifyStaticField<'a>(pub &'a Analysis<'a>);
 
@@ -21,7 +21,7 @@ impl<'a> GraphRewrite for IdentifyStaticField<'a> {
         let ExprKind::StaticField(StaticField {
             class: symbolic_type,
             field_name,
-        }) = graph[*obj_index].as_ref()
+        }) = &graph[*obj_index].kind
         else {
             return Ok(None);
         };

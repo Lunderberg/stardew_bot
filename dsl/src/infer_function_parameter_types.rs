@@ -1,10 +1,8 @@
 use std::collections::HashMap;
 
-use crate::{DSLType, Error, IteratorType};
-use dotnet_debugger::RuntimePrimType;
-
-use super::{
-    graph_rewrite::Analysis, ExprKind, GraphRewrite, OpIndex, SymbolicGraph,
+use crate::{Analysis, Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use dsl_ir::{
+    DSLType, ExprKind, IteratorType, OpIndex, RuntimePrimType, SymbolicGraph,
     SymbolicValue,
 };
 

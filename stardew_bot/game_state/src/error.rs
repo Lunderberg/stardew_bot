@@ -10,6 +10,9 @@ pub enum Error {
     #[error("dsl::Error( {0} )")]
     DSL(#[from] dsl::Error),
 
+    #[error("dsl::ir::Error( {0} )")]
+    DslIr(#[from] dsl::ir::Error),
+
     #[error("Expected non-empty output from VirtualMachine")]
     ExpectedNonEmptyValue,
 

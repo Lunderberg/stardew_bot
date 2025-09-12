@@ -1,4 +1,5 @@
-use super::{ExprKind, GraphRewrite, SymbolicValue};
+use crate::{Error, GraphRewrite};
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
 /// Split up reduction of a chained iterator into sequential
 /// reductions.
@@ -15,10 +16,10 @@ pub struct SplitIteratorChainReduce;
 impl GraphRewrite for SplitIteratorChainReduce {
     fn rewrite_expr(
         &self,
-        graph: &mut super::SymbolicGraph,
-        expr: &super::ExprKind,
+        graph: &mut SymbolicGraph,
+        expr: &ExprKind,
         _name: Option<&str>,
-    ) -> Result<Option<SymbolicValue>, crate::Error> {
+    ) -> Result<Option<SymbolicValue>, Error> {
         Ok(match expr {
             &ExprKind::Reduce {
                 initial,

@@ -1,6 +1,5 @@
-use crate::Error;
-
-use super::{ExprKind, GraphRewrite, SymbolicGraph, SymbolicValue};
+use crate::{Error, GraphRewrite};
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
 pub struct ConvertFindToFilterFirst;
 

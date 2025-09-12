@@ -3,12 +3,10 @@ use std::{borrow::Cow, collections::HashMap, ops::Range};
 use itertools::Itertools as _;
 use thiserror::Error;
 
-use super::{
-    expr::{ByteRegion, SymbolicGraph, SymbolicType, SymbolicValue},
-    OpPrecedence,
+use crate::{
+    ByteRegion, DSLType, Error, OpPrecedence, RuntimePrimType,
+    RuntimePrimValue, SymbolicGraph, SymbolicType, SymbolicValue,
 };
-use crate::{DSLType, Error, RuntimePrimType};
-use dotnet_debugger::RuntimePrimValue;
 
 pub(crate) struct SymbolicParser<'a> {
     tokens: SymbolicTokenizer<'a>,

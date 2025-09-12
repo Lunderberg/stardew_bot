@@ -1,8 +1,7 @@
-use crate::{DSLType, Error};
+use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
 
-use super::{
-    graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
-    SymbolicValue,
+use crate::{
+    Analysis, DSLTypeExt as _, Error, GraphRewrite, SymbolicTypeExt as _,
 };
 
 pub struct RemoveUnusedDowncast<'a>(pub &'a Analysis<'a>);

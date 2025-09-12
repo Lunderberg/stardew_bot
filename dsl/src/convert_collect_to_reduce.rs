@@ -2,15 +2,12 @@ use std::collections::HashSet;
 
 use itertools::Itertools as _;
 
-use crate::{
-    DSLType, Error, ExposedNativeFunction, FunctionType, IteratorType, OpIndex,
-    TypeInferenceError,
+use dsl_ir::{
+    DSLType, ExposedNativeFunction, ExprKind, FunctionType, IteratorType,
+    NativeFunction, OpIndex, StackValue, SymbolicGraph, SymbolicValue,
 };
 
-use super::{
-    graph_rewrite::Analysis, ExprKind, GraphRewrite, NativeFunction,
-    SymbolicGraph, SymbolicValue,
-};
+use crate::{Analysis, Error, GraphRewrite, TypeInferenceError};
 
 pub struct ConvertCollectToReduce<'a>(pub &'a Analysis<'a>);
 
@@ -26,13 +23,13 @@ struct CollectIntoVector {
 impl NativeFunction for MakeVector {
     fn apply(
         &self,
-        _args: &mut [&mut Option<super::StackValue>],
-    ) -> Result<Option<super::StackValue>, Error> {
+        _args: &mut [&mut Option<StackValue>],
+    ) -> Result<Option<StackValue>, dsl_ir::Error> {
         let obj = self.element_type.new_vector()?;
         Ok(Some(obj.into()))
     }
 
-    fn signature(&self) -> Result<DSLType, Error> {
+    fn signature(&self) -> Result<DSLType, dsl_ir::Error> {
         let vector_type = self.element_type.vector_type()?;
         Ok(FunctionType {
             params: None,
@@ -50,7 +47,7 @@ impl NativeFunction for CollectIntoVector {
     fn apply(
         &self,
         args: &mut [&mut Option<super::StackValue>],
-    ) -> Result<Option<super::StackValue>, Error> {
+    ) -> Result<Option<StackValue>, dsl_ir::Error> {
         assert_eq!(args.len(), 2);
 
         let (vec, item) = args
@@ -68,7 +65,7 @@ impl NativeFunction for CollectIntoVector {
         Ok(None)
     }
 
-    fn signature(&self) -> Result<DSLType, Error> {
+    fn signature(&self) -> Result<DSLType, dsl_ir::Error> {
         let vector_type = self.element_type.vector_type()?;
         Ok(FunctionType {
             params: Some(vec![vector_type.clone(), self.element_type.clone()]),

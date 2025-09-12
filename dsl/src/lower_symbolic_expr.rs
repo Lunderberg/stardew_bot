@@ -7,9 +7,11 @@ use dotnet_debugger::{
     RuntimeType, TypeHandlePtrExt as _,
 };
 
+use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
+
 use crate::{
-    graph_rewrite::Analysis, DSLType, Error, ExprKind, GraphRewrite,
-    SymbolicGraph, SymbolicValue,
+    Analysis, DSLTypeExt as _, Error, GraphRewrite, StaticFieldExt as _,
+    SymbolicTypeExt as _,
 };
 
 static USE_PHYSICAL_DOWNCAST: std::sync::LazyLock<bool> =

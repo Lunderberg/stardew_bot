@@ -1,6 +1,6 @@
 use dsl::{
     virtual_machine::{FunctionIndex, InstructionIndex, StackIndex},
-    Error, Instruction, RuntimePrimValue, RustNativeObject, StackValue, VMArg,
+    Instruction, RuntimePrimValue, RustNativeObject, StackValue, VMArg,
     VirtualMachine,
 };
 
@@ -166,7 +166,7 @@ fn run_native_function() {
         .with_instructions(instructions)
         .with_raw_native_function(
             |args: &[&mut Option<StackValue>]|
-                         -> Result<Option<StackValue>,Error> {
+                         -> Result<Option<StackValue>,dsl_ir::Error> {
                 assert_eq!(args.len(), 2);
                 let lhs: usize = args[0].as_ref().unwrap().try_into()?;
                 let rhs: usize = args[1].as_ref().unwrap().try_into()?;

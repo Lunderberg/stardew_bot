@@ -16,8 +16,9 @@ dll_unpacker = { path = "../dll_unpacker" }
 dotnet_debugger = { path = "../dotnet_debugger" }
 env_var_flag = { path = "../env_var_flag" }
 memory_reader = { path = "../memory_reader" }
-format_utils = { path = "../format_utils" }
 
+
+dsl_ir = { path = "ir" }
 dsl_proc_macros = { path = "proc_macros" }
 
 [dev-dependencies]

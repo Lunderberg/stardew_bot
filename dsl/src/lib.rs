@@ -1,5 +1,11 @@
 pub use dotnet_debugger::{RuntimePrimType, RuntimePrimValue};
+pub use dsl_ir::{
+    DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
+    SymbolicGraph, SymbolicType, SymbolicValue,
+};
 pub use memory_reader::Pointer;
+
+pub use dsl_ir as ir;
 
 mod error;
 pub use error::Error;
@@ -7,13 +13,13 @@ pub use error::Error;
 mod expr;
 pub use expr::*;
 
-mod dsl_type;
-pub use dsl_type::*;
-
 pub use dsl_proc_macros::*;
 
 mod graph_rewrite;
 pub use graph_rewrite::*;
+
+mod dsl_type_ext;
+pub(crate) use dsl_type_ext::*;
 
 mod identify_static_field;
 pub use identify_static_field::IdentifyStaticField;
@@ -87,31 +93,9 @@ pub use legalize_operand_types::LegalizeOperandTypes;
 mod type_inference;
 pub use type_inference::{TypeInference, TypeInferenceError};
 
-mod op_precedence;
-pub(crate) use op_precedence::OpPrecedence;
-
-mod parser;
-pub(crate) use parser::*;
-
-mod printer;
-
-mod op_index;
-pub use op_index::OpIndex;
-
 mod expr_to_virtual_machine;
 
 pub mod virtual_machine;
 pub use virtual_machine::{
-    Instruction, StackValue, VMArg, VMExecutionError, VMResults, VirtualMachine,
-};
-
-pub mod native_function;
-pub use native_function::{NativeFunction, RustNativeObject};
-
-mod exposed_native_function;
-pub use exposed_native_function::ExposedNativeFunction;
-
-mod exposed_native_object;
-pub(crate) use exposed_native_object::{
-    ExposedNativeObject, RustNativeTypeUtils, RustNativeUtilContainer,
+    Instruction, VMArg, VMExecutionError, VMResults, VirtualMachine,
 };

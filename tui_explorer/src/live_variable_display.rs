@@ -1,6 +1,9 @@
 use itertools::Itertools;
 
-use dsl::{RuntimePrimValue, SymbolicGraph, VirtualMachine};
+use dsl::{
+    RuntimePrimValue, SymbolicGraph, SymbolicGraphCompileExt as _,
+    SymbolicGraphSimplify as _, VirtualMachine,
+};
 use ratatui::{
     layout::{Alignment, Constraint},
     style::{Modifier, Style},

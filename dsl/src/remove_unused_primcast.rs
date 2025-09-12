@@ -1,9 +1,6 @@
-use crate::Error;
+use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use super::{
-    graph_rewrite::Analysis, ExprKind, GraphRewrite, SymbolicGraph,
-    SymbolicValue,
-};
+use crate::{Analysis, Error, GraphRewrite};
 
 pub struct RemoveUnusedPrimcast<'a>(pub &'a Analysis<'a>);
 

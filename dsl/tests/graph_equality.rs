@@ -1,6 +1,6 @@
 use paste::paste;
 
-use dsl::SymbolicGraph;
+use dsl::{GraphComparisonExt as _, SymbolicGraph};
 
 macro_rules! verify_equivalent_graphs {
     ($( $test_name:ident: $builder:expr ),+ $(,)?) => {

@@ -2,10 +2,8 @@ use dotnet_debugger::RuntimePrimType;
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{
-    DSLType, ExprKind, OpIndex, ParseError, SymbolicValue, TypeInferenceError,
-    VMExecutionError,
-};
+use crate::{TypeInferenceError, VMExecutionError};
+use dsl_ir::{DSLType, ExprKind, OpIndex, SymbolicValue};
 
 #[derive(Error)]
 pub enum Error {
@@ -27,8 +25,11 @@ pub enum Error {
         err: dotnet_debugger::Error,
     },
 
-    #[error("dsl::ParseError( {0} )")]
-    ParseError(#[from] ParseError),
+    #[error("dsl::ir::Error{{ {err} }}")]
+    IR {
+        #[from]
+        err: dsl_ir::Error,
+    },
 
     #[error("dotnet_debugger::TypeInferenceError( {0} )")]
     TypeInferenceError(#[from] TypeInferenceError),
@@ -144,15 +145,6 @@ pub enum Error {
     )]
     AnalysisAttemptedToUseMissingRemoteProcess,
 
-    #[error(
-        "The mark_extern_func() function \
-         may only be called on a function definition"
-    )]
-    AttemptedToMarkNonFunctionAsExternFunc,
-
-    #[error("Functions marked as external must have an explicit name")]
-    ExternalFunctionMustBeNamed,
-
     #[error("Attempted use of an already consumed value.")]
     AttemptedUseOfConsumedValue,
 
@@ -191,12 +183,6 @@ pub enum Error {
 
     #[error("ReadValue requires pointer argument, but received {0}")]
     InvalidOperandForReadValue(DSLType),
-
-    #[error("Invalid conversion from {0:?} to primitive.")]
-    IllegalConversionToPrimitiveValue(DSLType),
-
-    #[error("Invalid conversion from {0:?} to rust-native object.")]
-    IllegalConversionToNativeObject(DSLType),
 
     #[error(
         "Attempted to convert primitive of type {0} \

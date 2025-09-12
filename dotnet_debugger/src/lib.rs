@@ -1,7 +1,7 @@
 mod error;
 pub use error::Error;
 
-pub use memory_reader::Pointer;
+pub use memory_reader::{Pointer, TypedPointer};
 
 pub(crate) mod macros;
 

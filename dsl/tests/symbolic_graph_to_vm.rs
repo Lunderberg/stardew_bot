@@ -1,4 +1,4 @@
-use dsl::{ExposedNativeFunction, SymbolicGraph};
+use dsl::{ExposedNativeFunction, SymbolicGraph, SymbolicGraphCompileExt as _};
 
 #[test]
 fn constant_folded_integers() {

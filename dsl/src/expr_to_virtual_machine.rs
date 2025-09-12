@@ -6,18 +6,13 @@ use std::{
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    expr::Scope, printer::IndexPrinter, virtual_machine::VMByteRange, DSLType,
-    Error, ExprKind, OpIndex, SymbolicValue,
-};
-
-use super::{
-    graph_rewrite::Analysis,
     virtual_machine::{
         AnnotationLocation, FunctionIndex, InstructionIndex, StackIndex,
-        VirtualMachineBuilder,
+        VMByteRange, VirtualMachineBuilder,
     },
-    Instruction, SymbolicGraph, TypeInferenceError, VMArg, VirtualMachine,
+    Analysis, Error, Instruction, TypeInferenceError, VMArg, VirtualMachine,
 };
+use dsl_ir::{DSLType, ExprKind, OpIndex, Scope, SymbolicGraph, SymbolicValue};
 
 /// The result of analyzing a function
 #[derive(Debug)]
@@ -99,8 +94,14 @@ struct IndexTracking {
     previously_consumed: HashMap<OpIndex, OpIndex>,
 }
 
-impl SymbolicGraph {
-    pub fn to_virtual_machine(
+pub trait SymbolicGraphToVirtualMachine {
+    fn to_virtual_machine(
+        &self,
+        show_steps: bool,
+    ) -> Result<VirtualMachine, Error>;
+}
+impl SymbolicGraphToVirtualMachine for SymbolicGraph {
+    fn to_virtual_machine(
         &self,
         show_steps: bool,
     ) -> Result<VirtualMachine, Error> {
@@ -129,7 +130,22 @@ impl SymbolicGraph {
 
         Ok(builder.build())
     }
+}
 
+trait LocalSymbolicGraphExt {
+    fn func_to_virtual_machine(
+        &self,
+        builder: &mut VirtualMachineBuilder,
+        main_func_index: OpIndex,
+        native_function_lookup: &HashMap<OpIndex, FunctionIndex>,
+        show_steps: bool,
+    ) -> Result<(), Error>;
+
+    fn analyze_scopes(&self, reachable: &[bool]) -> Vec<ScopeInfo>;
+
+    fn last_usage(&self, reachable: &[bool]) -> Vec<LastUsage>;
+}
+impl LocalSymbolicGraphExt for SymbolicGraph {
     fn func_to_virtual_machine(
         &self,
         builder: &mut VirtualMachineBuilder,
@@ -722,9 +738,9 @@ impl<'a> LastUsageCollector<'a> {
                     mark_value!(encountered, *reduction);
                 }
 
-                other => other.visit_reachable_nodes(|value| {
-                    mark_value!(encountered, value)
-                }),
+                other => other
+                    .iter_input_values()
+                    .for_each(|value| mark_value!(encountered, value)),
             }
         }
     }
@@ -751,8 +767,8 @@ impl ExpressionTranslator<'_> {
             .index_tracking
             .expr_to_location(op_index)?
             .unwrap_or_else(|| {
-                let current_name = IndexPrinter::new(usage, self.graph);
-                let previous_name = IndexPrinter::new(op_index, self.graph);
+                let current_name = usage.pprint(self.graph);
+                let previous_name = op_index.pprint(self.graph);
                 panic!(
                     "Internal error, \
                      expression {current_name} ({}) \
@@ -779,10 +795,7 @@ impl ExpressionTranslator<'_> {
 
     fn reserve_index(&mut self, op_index: OpIndex, stack_index: StackIndex) {
         self.annotate(|graph| {
-            format!(
-                "Reserving {stack_index} for {}",
-                IndexPrinter::new(op_index, graph)
-            )
+            format!("Reserving {stack_index} for {}", op_index.pprint(graph))
         });
         self.index_tracking.reserve_index(op_index, stack_index);
     }
@@ -793,7 +806,7 @@ impl ExpressionTranslator<'_> {
         self.annotate(|graph| {
             format!(
                 "Releasing reservation of {stack_index} for {}",
-                IndexPrinter::new(op_index, graph),
+                op_index.pprint(graph)
             )
         });
     }
@@ -833,7 +846,7 @@ impl ExpressionTranslator<'_> {
                 format!(
                     "For op {}, \
                      using reserved output {index}",
-                    IndexPrinter::new(op_index, graph),
+                    op_index.pprint(graph),
                 )
             });
             index
@@ -842,7 +855,7 @@ impl ExpressionTranslator<'_> {
             self.annotate(|graph| {
                 format!(
                     "For op {}, allocated output index {index}.",
-                    IndexPrinter::new(op_index, graph),
+                    op_index.pprint(graph),
                 )
             });
             index
@@ -875,8 +888,8 @@ impl ExpressionTranslator<'_> {
                     format!(
                         "After {}, {} is no longer needed.  \
                          Marking {stack_index} as dead.",
-                        IndexPrinter::new(op_index, graph),
-                        IndexPrinter::new(expr_used, graph),
+                        op_index.pprint(graph),
+                        expr_used.pprint(graph),
                     )
                 });
             });
@@ -904,7 +917,7 @@ impl ExpressionTranslator<'_> {
     ) -> Result<(), Error> {
         for op_index in instructions {
             let op = &self.graph[op_index];
-            let expr_name = IndexPrinter::new(op_index, self.graph);
+            let expr_name = op_index.pprint(self.graph);
 
             macro_rules! handle_binary_op {
                 ($variant:ident, $lhs:expr, $rhs:expr) => {{
@@ -924,7 +937,7 @@ impl ExpressionTranslator<'_> {
                 }};
             }
 
-            match op.as_ref() {
+            match &op.kind {
                 ExprKind::None => {
                     let op_output = self.get_output_index(op_index);
                     self.push_annotated(
@@ -1226,7 +1239,7 @@ impl ExpressionTranslator<'_> {
         out_stack_index: StackIndex,
         scope: Scope,
     ) -> Result<(), Error> {
-        let expr_name = IndexPrinter::new(op_index, self.graph);
+        let expr_name = op_index.pprint(self.graph);
 
         let scope_output = match value {
             SymbolicValue::Result(i) => i,
@@ -1345,7 +1358,7 @@ impl ExpressionTranslator<'_> {
         func: SymbolicValue,
         args: &[SymbolicValue],
     ) -> Result<(), Error> {
-        let expr_name = IndexPrinter::new(op_index, self.graph);
+        let expr_name = op_index.pprint(self.graph);
 
         let Some(func) = func.as_op_index() else {
             panic!("Internal error, callee must be function")
@@ -1467,7 +1480,7 @@ impl ExpressionTranslator<'_> {
         extent: SymbolicValue,
         reduction: SymbolicValue,
     ) -> Result<(), Error> {
-        let expr_name = IndexPrinter::new(op_index, self.graph);
+        let expr_name = op_index.pprint(self.graph);
 
         let initial = self.value_to_arg(op_index, &initial)?;
         let extent = self.value_to_arg(op_index, &extent)?;
@@ -1690,7 +1703,7 @@ impl ExpressionTranslator<'_> {
         if_branch: SymbolicValue,
         else_branch: SymbolicValue,
     ) -> Result<(), Error> {
-        let expr_name = IndexPrinter::new(op_index, self.graph);
+        let expr_name = op_index.pprint(self.graph);
 
         let condition = self.value_to_arg(op_index, &condition)?;
 

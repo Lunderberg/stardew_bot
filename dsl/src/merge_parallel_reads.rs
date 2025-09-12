@@ -2,10 +2,9 @@ use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools as _;
 
-use crate::{Error, RuntimePrimType};
-
-use super::{
-    expr::ByteRegion, ExprKind, GraphRewrite, OpIndex, SymbolicGraph,
+use crate::{Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use dsl_ir::{
+    ByteRegion, ExprKind, OpIndex, RuntimePrimType, SymbolicGraph,
     SymbolicValue,
 };
 
