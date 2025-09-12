@@ -5,6 +5,7 @@ pub use dsl_analysis as analysis;
 pub use dsl_ir as ir;
 pub use dsl_vm as vm;
 
+pub use dsl_graph_comparison::GraphComparisonExt;
 pub use ir::{
     DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
     SymbolicGraph, SymbolicType, SymbolicValue,

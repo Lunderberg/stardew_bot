@@ -420,6 +420,7 @@ dependencies = [
  "dll_unpacker",
  "dotnet_debugger",
  "dsl_analysis",
+ "dsl_graph_comparison",
  "dsl_ir",
  "dsl_proc_macros",
  "dsl_vm",
@@ -443,6 +444,14 @@ dependencies = [
  "iterator_extensions",
  "itertools 0.10.5",
  "lru 0.14.0",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl_graph_comparison"
+version = "0.1.0"
+dependencies = [
+ "dsl_ir",
  "thiserror",
 ]
 
