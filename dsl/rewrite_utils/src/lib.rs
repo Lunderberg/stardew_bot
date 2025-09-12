@@ -12,3 +12,6 @@ pub use sequential_rewrite::*;
 
 mod recursive_rewrite;
 pub use recursive_rewrite::*;
+
+mod substitute;
+pub use substitute::*;

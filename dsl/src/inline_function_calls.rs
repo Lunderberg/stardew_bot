@@ -1,5 +1,6 @@
-use crate::{Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use crate::{Error, GraphRewrite};
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::SymbolicGraphSubstitute as _;
 
 pub struct InlineFunctionCalls;
 

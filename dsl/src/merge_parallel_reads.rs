@@ -1,8 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
+use dsl_rewrite_utils::SymbolicGraphSubstitute as _;
 use itertools::Itertools as _;
 
-use crate::{Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use crate::{Error, GraphRewrite};
 use dsl_ir::{
     ByteRegion, ExprKind, OpIndex, RuntimePrimType, SymbolicGraph,
     SymbolicValue,
