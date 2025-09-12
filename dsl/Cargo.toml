@@ -19,6 +19,7 @@ memory_reader = { path = "../memory_reader" }
 
 dsl_analysis = { path = "analysis" }
 dsl_ir = { path = "ir" }
+dsl_vm = { path = "vm" }
 dsl_proc_macros = { path = "proc_macros" }
 
 [dev-dependencies]

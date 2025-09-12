@@ -34,6 +34,9 @@ pub enum Error {
     #[error("dsl::ir::Error( {0} )")]
     DslIr(#[from] dsl::ir::Error),
 
+    #[error("dsl::vm::Error( {0} )")]
+    DslVm(#[from] dsl::vm::Error),
+
     #[error("stardew_utils::Error{{ {err} }}")]
     StardewUtilError {
         #[from]

@@ -9,10 +9,11 @@ use dsl_ir::{
     DSLType, Expr, ExprKind, FunctionType, OpIndex, StaticField, SymbolicGraph,
     SymbolicValue,
 };
+use dsl_vm::VirtualMachine;
 
 use crate::{
     expr_to_virtual_machine::SymbolicGraphToVirtualMachine as _, Error,
-    GraphRewrite, VirtualMachine,
+    GraphRewrite,
 };
 
 struct RewriteResults {

@@ -1,12 +1,15 @@
 pub use dotnet_debugger::{RuntimePrimType, RuntimePrimValue};
-pub use dsl_ir::{
-    DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
-    SymbolicGraph, SymbolicType, SymbolicValue,
-};
 pub use memory_reader::Pointer;
 
 pub use dsl_analysis as analysis;
 pub use dsl_ir as ir;
+pub use dsl_vm as vm;
+
+pub use ir::{
+    DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
+    SymbolicGraph, SymbolicType, SymbolicValue,
+};
+pub use vm::VirtualMachine;
 
 mod error;
 pub use error::Error;
@@ -89,8 +92,3 @@ mod legalize_operand_types;
 pub use legalize_operand_types::LegalizeOperandTypes;
 
 mod expr_to_virtual_machine;
-
-pub mod virtual_machine;
-pub use virtual_machine::{
-    Instruction, VMArg, VMExecutionError, VMResults, VirtualMachine,
-};

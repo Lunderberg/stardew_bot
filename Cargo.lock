@@ -422,6 +422,7 @@ dependencies = [
  "dsl_analysis",
  "dsl_ir",
  "dsl_proc_macros",
+ "dsl_vm",
  "env_var_flag",
  "indoc",
  "iterator_extensions",
@@ -462,6 +463,20 @@ version = "0.1.0"
 dependencies = [
  "quote",
  "syn 2.0.87",
+]
+
+[[package]]
+name = "dsl_vm"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "derive_more",
+ "dotnet_debugger",
+ "dsl_ir",
+ "itertools 0.10.5",
+ "lru 0.14.0",
+ "memory_reader",
+ "thiserror",
 ]
 
 [[package]]

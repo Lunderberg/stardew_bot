@@ -1,0 +1,15 @@
+[package]
+name = "dsl_vm"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+derive_more = "*"
+arrayvec = "*"
+lru = "0.14.0"
+itertools = "*"
+
+dsl_ir = { path = "../ir" }
+dotnet_debugger = { path = "../../dotnet_debugger" }
+memory_reader = { path = "../../memory_reader" }

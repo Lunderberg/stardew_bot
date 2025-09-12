@@ -1,7 +1,6 @@
 use dsl::{
-    virtual_machine::{FunctionIndex, InstructionIndex, StackIndex},
-    Instruction, RuntimePrimValue, RustNativeObject, StackValue, VMArg,
-    VirtualMachine,
+    vm::{FunctionIndex, Instruction, InstructionIndex, StackIndex, VMArg},
+    RuntimePrimValue, RustNativeObject, StackValue, VirtualMachine,
 };
 
 #[test]

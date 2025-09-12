@@ -1,11 +1,8 @@
 use dotnet_debugger::RuntimePrimType;
-use memory_reader::Pointer;
 use thiserror::Error;
 
 use dsl_analysis::TypeInferenceError;
 use dsl_ir::{DSLType, ExprKind, OpIndex, SymbolicValue};
-
-use crate::VMExecutionError;
 
 #[derive(Error)]
 pub enum Error {
@@ -27,8 +24,8 @@ pub enum Error {
     #[error("dsl::analysis::TypeInferenceError( {0} )")]
     TypeInferenceError(#[from] TypeInferenceError),
 
-    #[error("dsl::VMExecutionError( {0} )")]
-    VMExecutionError(#[from] VMExecutionError),
+    #[error("dsl::vm::Error( {0} )")]
+    VMError(#[from] dsl_vm::Error),
 
     #[error("MethodTable pointer for {0} was NULL.")]
     UnexpectedNullMethodTable(String),
@@ -121,18 +118,6 @@ pub enum Error {
     AttemptedConversionOfNativeObject(std::any::TypeId),
 
     #[error(
-        "Attempted to convert StackValue to a scalar, \
-         but the VMResult contained `None` at that location."
-    )]
-    AttemptedConversionOfMissingValue,
-
-    #[error(
-        "Expected to VMResult to contain {expected} values, \
-         but instead found {actual} values."
-    )]
-    IncorrectNumberOfResults { expected: usize, actual: usize },
-
-    #[error(
         "Analysis routine attempted to inspect remote process, \
          but cannot do so when running in local mode."
     )]
@@ -146,18 +131,6 @@ pub enum Error {
          is not currently supported."
     )]
     CollectionIntoNestedVectorNotSupported,
-
-    #[error("Cannot apply operator '{op}' with operand type '{arg}'")]
-    InvalidOperandForUnaryOp { op: &'static str, arg: DSLType },
-
-    #[error(
-        "Cannot apply operator '{op}' with operand types '{lhs}' and '{rhs}'"
-    )]
-    InvalidOperandsForBinaryOp {
-        op: &'static str,
-        lhs: DSLType,
-        rhs: DSLType,
-    },
 
     #[error(
         "Cannot perform equality check \
@@ -188,9 +161,6 @@ pub enum Error {
          as a pointer to a .NET string."
     )]
     InvalidOperandForDotnetString(DSLType),
-
-    #[error("Pointer arithmetic of ({0} + {1})")]
-    InvalidPointerAddition(Pointer, usize),
 
     #[error(
         "The SymbolicOperation::IndexAccess(indices) operation \

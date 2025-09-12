@@ -11,16 +11,17 @@ use arrayvec::ArrayVec;
 use derive_more::derive::From;
 use itertools::{Either, Itertools};
 use lru::LruCache;
-use memory_reader::{OwnedBytes, Pointer, TypedPointer};
-use thiserror::Error;
 
-use crate::{Error, StackValue};
 use dotnet_debugger::{CachedReader, MethodTable, RuntimeString};
+use memory_reader::{OwnedBytes, Pointer, TypedPointer};
+
 use dsl_ir::{
-    DSLType, ExposedNativeFunction, ExposedNativeObject, NativeFunction,
-    RuntimePrimType, RuntimePrimValue, RustNativeObject, RustType,
+    ExposedNativeFunction, ExposedNativeObject, NativeFunction,
+    RuntimePrimType, RuntimePrimValue, RustNativeObject, RustType, StackValue,
     WrappedNativeFunction,
 };
+
+use crate::Error;
 
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
@@ -277,173 +278,6 @@ pub struct VMByteRange {
     pub num_bytes: VMArg,
 }
 
-#[derive(Error)]
-pub enum VMExecutionError {
-    #[error("Virtual machine did not contain a function named '{0}'")]
-    NoSuchFunction(String),
-
-    #[error("Cannot define function {0} multiple times")]
-    DuplicateFunctionName(String),
-
-    #[error(
-        "Offset must be applied to Ptr, \
-         but was instead applied to {0}."
-    )]
-    OffsetAppliedToNonPointer(RuntimePrimType),
-
-    #[error(
-        "DynamicOffset requires the index \
-         to have been previously computed, \
-         but location {0} was empty."
-    )]
-    DynamicOffsetWasEmpty(usize),
-
-    #[error(
-        "DynamicScale requires the index \
-         to have been previously computed, \
-         but location {0} was empty."
-    )]
-    DynamicScaleWasEmpty(usize),
-
-    #[error(
-        "DynamicOffset requires the index \
-         to be convertible to a usize, \
-         but index instead contained {0}."
-    )]
-    DynamicOffsetNotConvertibleToIndex(RuntimePrimValue),
-
-    #[error(
-        "IsSubclassOf requires the argument to be a Pointer, \
-         but instead received {0}."
-    )]
-    InvalidArgumentForSubclassCheck(RuntimePrimValue),
-
-    #[error(
-        "Downcast requires the register to contain a pointer, \
-         but instead register contained {0}."
-    )]
-    DowncastAppliedToNonPointer(RuntimePrimValue),
-
-    #[error(
-        "Downcast requires the register to contain a pointer, \
-         but instead register contained {0}."
-    )]
-    ReadAppliedToNonPointer(RuntimePrimValue),
-
-    #[error("Local evaluation of VM may not perform any reads.")]
-    ReadOccurredDuringLocalVMEvaluation,
-
-    #[error(
-        "ConditionalJump requires the register \
-         to contain a boolean value.  \
-         However, it contained an instance of type {0}."
-    )]
-    InvalidOperandForConditionalJump(RuntimePrimType),
-
-    #[error(
-        "Native function expecting {expected} arguments \
-         was provided with {provided} arguments."
-    )]
-    InvalidNumberOfOperandsForNativeFunction {
-        expected: usize,
-        provided: usize,
-    },
-
-    #[error(
-        "Operator {operator} in instruction {index} \
-         does not support operands \
-         of rust-native type {arg_type:?}"
-    )]
-    OperatorExpectsPrimitiveArgument {
-        operator: &'static str,
-        index: InstructionIndex,
-        arg_type: DSLType,
-    },
-
-    #[error(
-        "Operator {operator} in instruction {index} \
-         expected a byte array, \
-         but received argument of type {arg_type:?}"
-    )]
-    OperatorExpectsByteArray {
-        operator: &'static str,
-        index: InstructionIndex,
-        arg_type: DSLType,
-    },
-
-    #[error(
-        "Operator {operator} in instruction {index} \
-         attention to access byte {byte_index} \
-         in byte array of size {array_size}."
-    )]
-    OutOfBoundsByteIndex {
-        operator: &'static str,
-        index: InstructionIndex,
-        byte_index: usize,
-        array_size: usize,
-    },
-
-    #[error(
-        "Operator {operator} in instruction {index} \
-         attempted to use {value} as an integer number of bytes."
-    )]
-    ByteCountNotConvertibleToInt {
-        operator: &'static str,
-        index: InstructionIndex,
-        value: RuntimePrimValue,
-    },
-
-    #[error(
-        "Rust-native function expected argument of type {expected}, \
-         but received argument of type {actual}."
-    )]
-    InvalidArgumentForNativeFunction { expected: DSLType, actual: DSLType },
-
-    #[error("Cannot initialize vector with element type {0}")]
-    IllegalVectorElementType(DSLType),
-
-    #[error(
-        "Vector was expected to be type {expected}, \
-         but was instead {actual}."
-    )]
-    IncorrectVectorType { expected: DSLType, actual: DSLType },
-
-    #[error(
-        "Item of type {item_type} cannot be pushed \
-         into Vec<{element_type}>."
-    )]
-    IncorrectVectorElementType {
-        element_type: DSLType,
-        item_type: DSLType,
-    },
-
-    #[error(
-        "Expected vector into which to accumulate, \
-         but received None."
-    )]
-    ExpectedVectorToAccumulateInto,
-
-    #[error(
-        "When pushing into vector, \
-         pushed element must not be None.  \
-         However, attempted to push None \
-         into vector '{name}'."
-    )]
-    MissingElementTypeInVectorAccumulation { name: String },
-
-    #[error(
-        "Attempted to read output as {attempted}, \
-         but the output was of type {actual}."
-    )]
-    IncorrectOutputType { attempted: DSLType, actual: DSLType },
-
-    #[error(
-        "Reached the last instruction \
-         without encountering a Return."
-    )]
-    ReachedEndWithoutReturnInstruction,
-}
-
 pub trait NormalizeStackIndex {
     fn normalize_stack_index(self) -> usize;
 }
@@ -499,13 +333,13 @@ impl VMResults {
             .map(|value| match value {
                 StackValue::Native(native) => {
                     native.downcast::<T>().map_err(|native| {
-                        VMExecutionError::IncorrectOutputType {
+                        Error::IncorrectOutputType {
                             attempted: RustType::new::<T>().into(),
                             actual: native.runtime_type(),
                         }
                     })
                 }
-                other => Err(VMExecutionError::IncorrectOutputType {
+                other => Err(Error::IncorrectOutputType {
                     attempted: RustType::new::<T>().into(),
                     actual: other.runtime_type(),
                 }),
@@ -525,11 +359,11 @@ impl VMResults {
             .map(|value| match value {
                 StackValue::Native(native) => native
                     .downcast_ref::<T>()
-                    .ok_or_else(|| VMExecutionError::IncorrectOutputType {
+                    .ok_or_else(|| Error::IncorrectOutputType {
                         attempted: RustType::new::<T>().into(),
                         actual: native.runtime_type(),
                     }),
-                other => Err(VMExecutionError::IncorrectOutputType {
+                other => Err(Error::IncorrectOutputType {
                     attempted: RustType::new::<T>().into(),
                     actual: other.runtime_type(),
                 }),
@@ -623,38 +457,34 @@ impl VMResults {
 }
 
 impl VirtualMachineBuilder {
-    pub(crate) fn mark_entry_point(
+    pub fn mark_entry_point(
         &mut self,
         name: impl Into<String>,
     ) -> Result<(), Error> {
         let name = name.into();
         if self.entry_points.contains_key(&name) {
-            Err(VMExecutionError::DuplicateFunctionName(name).into())
+            Err(Error::DuplicateFunctionName(name).into())
         } else {
             self.entry_points.insert(name, self.current_index());
             Ok(())
         }
     }
 
-    pub(crate) fn push(&mut self, inst: Instruction) -> InstructionIndex {
+    pub fn push(&mut self, inst: Instruction) -> InstructionIndex {
         let index = InstructionIndex(self.instructions.len());
         self.instructions.push(inst);
         index
     }
 
-    pub(crate) fn update(
-        &mut self,
-        index: InstructionIndex,
-        inst: Instruction,
-    ) {
+    pub fn update(&mut self, index: InstructionIndex, inst: Instruction) {
         self.instructions[index.0] = inst;
     }
 
-    pub(crate) fn current_index(&self) -> InstructionIndex {
+    pub fn current_index(&self) -> InstructionIndex {
         InstructionIndex(self.instructions.len())
     }
 
-    pub(crate) fn annotate(
+    pub fn annotate(
         &mut self,
         inst: impl Into<AnnotationLocation>,
         annot: impl Display,
@@ -823,9 +653,7 @@ impl VMReader for DummyReader {
         _loc: Pointer,
         _output: &mut [u8],
     ) -> Result<(), Error> {
-        Err(Error::VMExecutionError(
-            VMExecutionError::ReadOccurredDuringLocalVMEvaluation,
-        ))
+        Err(Error::ReadOccurredDuringLocalVMEvaluation)
     }
 
     fn is_dotnet_base_class_of(
@@ -833,9 +661,7 @@ impl VMReader for DummyReader {
         _parent_class_ptr: TypedPointer<MethodTable>,
         _child_class_ptr: TypedPointer<MethodTable>,
     ) -> Result<bool, Error> {
-        Err(Error::VMExecutionError(
-            VMExecutionError::ReadOccurredDuringLocalVMEvaluation,
-        ))
+        Err(Error::ReadOccurredDuringLocalVMEvaluation)
     }
 }
 
@@ -1194,7 +1020,7 @@ impl VirtualMachine {
         let entry_point = *self
             .entry_points
             .get(name)
-            .ok_or_else(|| VMExecutionError::NoSuchFunction(name.into()))?;
+            .ok_or_else(|| Error::NoSuchFunction(name.into()))?;
 
         let values = {
             let stack = (0..self.stack_size).map(|_| None).collect();
@@ -1444,7 +1270,7 @@ impl<'a> VMEvaluator<'a> {
             self.current_instruction = next_instruction;
         }
 
-        Err(VMExecutionError::ReachedEndWithoutReturnInstruction.into())
+        Err(Error::ReachedEndWithoutReturnInstruction.into())
     }
 
     fn arg_to_prim(
@@ -1455,16 +1281,13 @@ impl<'a> VMEvaluator<'a> {
             VMArg::Const(value) => Ok(Some(value)),
             VMArg::SavedValue(index) => match &self.values[index] {
                 Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
-                Some(other) => {
-                    Err(VMExecutionError::OperatorExpectsPrimitiveArgument {
-                        operator: self.vm.instructions
-                            [self.current_instruction.0]
-                            .op_name(),
-                        index: self.current_instruction,
-                        arg_type: other.runtime_type(),
-                    }
-                    .into())
+                Some(other) => Err(Error::OperatorExpectsPrimitiveArgument {
+                    operator: self.vm.instructions[self.current_instruction.0]
+                        .op_name(),
+                    index: self.current_instruction,
+                    arg_type: other.runtime_type(),
                 }
+                .into()),
                 None => Ok(None),
             },
         }
@@ -1472,20 +1295,18 @@ impl<'a> VMEvaluator<'a> {
 
     fn arg_to_byte_array(&self, arg: VMArg) -> Result<Option<&[u8]>, Error> {
         match arg {
-            VMArg::Const(value) => {
-                Err(VMExecutionError::OperatorExpectsByteArray {
-                    operator: self.vm.instructions[self.current_instruction.0]
-                        .op_name(),
-                    index: self.current_instruction,
-                    arg_type: value.runtime_type().into(),
-                }
-                .into())
+            VMArg::Const(value) => Err(Error::OperatorExpectsByteArray {
+                operator: self.vm.instructions[self.current_instruction.0]
+                    .op_name(),
+                index: self.current_instruction,
+                arg_type: value.runtime_type().into(),
             }
+            .into()),
             VMArg::SavedValue(index) => match &self.values[index] {
                 Some(stack_value) => {
                     let bytes =
                         stack_value.as_byte_array().ok_or_else(|| {
-                            VMExecutionError::OperatorExpectsByteArray {
+                            Error::OperatorExpectsByteArray {
                                 operator: self.vm.instructions
                                     [self.current_instruction.0]
                                     .op_name(),
@@ -1547,11 +1368,9 @@ impl<'a> VMEvaluator<'a> {
         let should_jump = opt_cond
             .map(|val| match val {
                 RuntimePrimValue::Bool(val) => Ok(val),
-                other => {
-                    Err(VMExecutionError::InvalidOperandForConditionalJump(
-                        other.runtime_type(),
-                    ))
-                }
+                other => Err(Error::InvalidOperandForConditionalJump(
+                    other.runtime_type(),
+                )),
             })
             .transpose()?
             .unwrap_or(false);
@@ -1806,9 +1625,7 @@ impl<'a> VMEvaluator<'a> {
 
                 Ok(Some(RuntimePrimValue::Bool(is_subclass).into()))
             }
-            Some(other) => {
-                Err(VMExecutionError::InvalidArgumentForSubclassCheck(other))
-            }
+            Some(other) => Err(Error::InvalidArgumentForSubclassCheck(other)),
         }?;
 
         Ok(())
@@ -1836,9 +1653,7 @@ impl<'a> VMEvaluator<'a> {
 
                 Ok(is_valid_cast.then(|| RuntimePrimValue::Ptr(ptr).into()))
             }
-            Some(other) => {
-                Err(VMExecutionError::DowncastAppliedToNonPointer(other))
-            }
+            Some(other) => Err(Error::DowncastAppliedToNonPointer(other)),
         }?;
 
         Ok(())
@@ -1857,7 +1672,7 @@ impl<'a> VMEvaluator<'a> {
             };
             let region_bytes: usize =
                 region_bytes.try_into().map_err(|_| {
-                    VMExecutionError::ByteCountNotConvertibleToInt {
+                    Error::ByteCountNotConvertibleToInt {
                         operator: self.vm.instructions
                             [self.current_instruction.0]
                             .op_name(),
@@ -1950,7 +1765,7 @@ impl<'a> VMEvaluator<'a> {
                 let offset: usize = offset.try_into()?;
                 let (_, bytes) =
                     bytes.split_at_checked(offset).ok_or_else(|| {
-                        VMExecutionError::OutOfBoundsByteIndex {
+                        Error::OutOfBoundsByteIndex {
                             operator: self.vm.instructions
                                 [self.current_instruction.0]
                                 .op_name(),
@@ -2162,12 +1977,6 @@ impl From<usize> for VMArg {
 impl From<bool> for VMArg {
     fn from(value: bool) -> Self {
         VMArg::Const(RuntimePrimValue::Bool(value))
-    }
-}
-
-impl std::fmt::Debug for VMExecutionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{self}")
     }
 }
 

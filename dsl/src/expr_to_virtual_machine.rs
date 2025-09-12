@@ -7,14 +7,12 @@ use itertools::{Either, Itertools as _};
 
 use dsl_analysis::{Analysis, TypeInferenceError};
 use dsl_ir::{DSLType, ExprKind, OpIndex, Scope, SymbolicGraph, SymbolicValue};
-
-use crate::{
-    virtual_machine::{
-        AnnotationLocation, FunctionIndex, InstructionIndex, StackIndex,
-        VMByteRange, VirtualMachineBuilder,
-    },
-    Error, Instruction, VMArg, VirtualMachine,
+use dsl_vm::{
+    AnnotationLocation, FunctionIndex, Instruction, InstructionIndex,
+    StackIndex, VMArg, VMByteRange, VirtualMachine, VirtualMachineBuilder,
 };
+
+use crate::Error;
 
 /// The result of analyzing a function
 #[derive(Debug)]
