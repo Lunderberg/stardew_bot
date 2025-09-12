@@ -11,7 +11,7 @@ pub use ir::{
     DSLType, ExposedNativeFunction, RustNativeObject, StackValue,
     SymbolicGraph, SymbolicType, SymbolicValue,
 };
-pub use rewrite_utils::GraphRewrite;
+pub use rewrite_utils::{GraphRewrite, SymbolicGraphCSE, SymbolicGraphDCE};
 pub use vm::VirtualMachine;
 
 mod error;

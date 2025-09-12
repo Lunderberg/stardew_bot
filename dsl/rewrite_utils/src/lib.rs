@@ -15,3 +15,12 @@ pub use recursive_rewrite::*;
 
 mod substitute;
 pub use substitute::*;
+
+mod dead_code_elimination;
+pub use dead_code_elimination::*;
+
+mod remap_extern_funcs;
+pub(crate) use remap_extern_funcs::*;
+
+mod common_subexpression_elimination;
+pub use common_subexpression_elimination::*;
