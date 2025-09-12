@@ -2,12 +2,13 @@ use std::collections::HashSet;
 
 use itertools::Itertools as _;
 
+use dsl_analysis::{Analysis, TypeInferenceError};
 use dsl_ir::{
     DSLType, ExposedNativeFunction, ExprKind, FunctionType, IteratorType,
     NativeFunction, OpIndex, StackValue, SymbolicGraph, SymbolicValue,
 };
 
-use crate::{Analysis, Error, GraphRewrite, TypeInferenceError};
+use crate::{Error, GraphRewrite};
 
 pub struct ConvertCollectToReduce<'a>(pub &'a Analysis<'a>);
 

@@ -2,36 +2,29 @@ use dotnet_debugger::RuntimePrimType;
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{TypeInferenceError, VMExecutionError};
+use dsl_analysis::TypeInferenceError;
 use dsl_ir::{DSLType, ExprKind, OpIndex, SymbolicValue};
+
+use crate::VMExecutionError;
 
 #[derive(Error)]
 pub enum Error {
-    #[error("memory_reader::Error{{ {err} }}")]
-    MemoryReader {
-        #[from]
-        err: memory_reader::Error,
-    },
+    #[error("memory_reader::Error( {0} )")]
+    MemoryReader(#[from] memory_reader::Error),
 
-    #[error("dll_unpacker::Error{{ {err} }}")]
-    DllUnpacker {
-        #[from]
-        err: dll_unpacker::Error,
-    },
+    #[error("dll_unpacker::Error( {0} )")]
+    DllUnpacker(#[from] dll_unpacker::Error),
 
-    #[error("memory_reader::Error{{ {err} }}")]
-    DotnetDebugger {
-        #[from]
-        err: dotnet_debugger::Error,
-    },
+    #[error("dotnet_debugger::Error( {0} )")]
+    DotnetDebugger(#[from] dotnet_debugger::Error),
 
-    #[error("dsl::ir::Error{{ {err} }}")]
-    IR {
-        #[from]
-        err: dsl_ir::Error,
-    },
+    #[error("dsl::ir::Error( {0} )")]
+    DslIr(#[from] dsl_ir::Error),
 
-    #[error("dotnet_debugger::TypeInferenceError( {0} )")]
+    #[error("dsl::analysis::Error( {0} )")]
+    DslAnalysis(#[from] dsl_analysis::Error),
+
+    #[error("dsl::analysis::TypeInferenceError( {0} )")]
     TypeInferenceError(#[from] TypeInferenceError),
 
     #[error("dsl::VMExecutionError( {0} )")]

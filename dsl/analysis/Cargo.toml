@@ -1,0 +1,14 @@
+[package]
+name = "dsl_analysis"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+itertools = "*"
+lru = "0.14.0"
+elsa = "*"
+
+iterator_extensions = { path = "../../iterator_extensions" }
+dsl_ir = { path = "../ir" }
+dotnet_debugger = { path = "../../dotnet_debugger" }

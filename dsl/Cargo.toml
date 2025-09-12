@@ -9,7 +9,6 @@ derive_more = "*"
 itertools = "*"
 arrayvec = "*"
 lru = "0.14.0"
-elsa = "*"
 
 iterator_extensions = { path = "../iterator_extensions" }
 dll_unpacker = { path = "../dll_unpacker" }
@@ -18,6 +17,7 @@ env_var_flag = { path = "../env_var_flag" }
 memory_reader = { path = "../memory_reader" }
 
 
+dsl_analysis = { path = "analysis" }
 dsl_ir = { path = "ir" }
 dsl_proc_macros = { path = "proc_macros" }
 

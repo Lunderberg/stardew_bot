@@ -5,6 +5,7 @@ pub use dsl_ir::{
 };
 pub use memory_reader::Pointer;
 
+pub use dsl_analysis as analysis;
 pub use dsl_ir as ir;
 
 mod error;
@@ -17,9 +18,6 @@ pub use dsl_proc_macros::*;
 
 mod graph_rewrite;
 pub use graph_rewrite::*;
-
-mod dsl_type_ext;
-pub(crate) use dsl_type_ext::*;
 
 mod identify_static_field;
 pub use identify_static_field::IdentifyStaticField;
@@ -89,9 +87,6 @@ pub use infer_function_parameter_types::InferFunctionParameterTypes;
 
 mod legalize_operand_types;
 pub use legalize_operand_types::LegalizeOperandTypes;
-
-mod type_inference;
-pub use type_inference::{TypeInference, TypeInferenceError};
 
 mod expr_to_virtual_machine;
 

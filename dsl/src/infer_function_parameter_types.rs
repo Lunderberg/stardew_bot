@@ -1,10 +1,12 @@
 use std::collections::HashMap;
 
-use crate::{Analysis, Error, GraphRewrite, SymbolicGraphSubstitute as _};
+use dsl_analysis::Analysis;
 use dsl_ir::{
     DSLType, ExprKind, IteratorType, OpIndex, RuntimePrimType, SymbolicGraph,
     SymbolicValue,
 };
+
+use crate::{Error, GraphRewrite, SymbolicGraphSubstitute as _};
 
 pub struct InferFunctionParameterTypes<'a>(pub &'a Analysis<'a>);
 

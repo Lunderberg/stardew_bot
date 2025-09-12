@@ -3,9 +3,7 @@ use std::collections::HashSet;
 use elsa::FrozenMap;
 use thiserror::Error;
 
-use crate::{
-    DSLTypeExt as _, Error, StaticFieldExt as _, SymbolicTypeExt as _,
-};
+use crate::{DSLTypeExt as _, StaticFieldExt as _, SymbolicTypeExt as _};
 use dotnet_debugger::{
     CachedReader, DotNetType, RuntimeType, TypeHandlePtrExt as _,
 };
@@ -22,6 +20,12 @@ pub struct TypeInference<'a> {
 
 #[derive(Error)]
 pub enum TypeInferenceError {
+    #[error("dsl::ir::error( {0} )")]
+    DslIr(#[from] dsl_ir::Error),
+
+    #[error("dotnet_debugger::Error( {0} )")]
+    DotnetDebugger(#[from] dotnet_debugger::Error),
+
     #[error(
         "Within a local-only context, \
          attempted to infer the type of an .NET expression \
@@ -103,6 +107,75 @@ pub enum TypeInferenceError {
          with iterator of type '{1}'."
     )]
     ChainRequiresSameIteratorType(DSLType, DSLType),
+
+    #[error(
+        "The SymbolicOperation::IndexAccess(indices) operation \
+         requires one index for each rank of the array being accessed.  \
+         However, {num_provided} indices were provided \
+         to access an array of rank {num_expected}."
+    )]
+    IncorrectNumberOfIndices {
+        num_provided: usize,
+        num_expected: usize,
+    },
+
+    #[error("MethodTable pointer for {0} was NULL.")]
+    UnexpectedNullMethodTable(String),
+
+    #[error("Could not find method table for '{0}'")]
+    NoSuchMethodTableFound(String),
+
+    #[error(
+        "Could not find static field {field} within \
+         method table of {class}."
+    )]
+    NoSuchStaticField { class: String, field: String },
+
+    #[error(
+        "The SymbolicOperation::Field(name) operation \
+         accesses a field of a class or struct.  \
+         However, it was applied to object '{0}' of type '{1}'."
+    )]
+    FieldAccessRequiresClassOrStruct(String, DSLType),
+
+    #[error(
+        "The SymbolicOperation::Downcast operation \
+         casts an object to a subclass, \
+         and may only be applied to Class instances.  \
+         However, it was applied to an object of type {0}."
+    )]
+    DowncastRequiresClassInstance(DSLType),
+
+    #[error(
+        "Downcast requires the static type to be known, \
+         but could not find a loaded method table for base class."
+    )]
+    DowncastRequiresKnownBaseClass,
+
+    #[error("The method table of an array should contain the element type.")]
+    ArrayMissingElementType,
+
+    #[error(
+        "The SymbolicOperation::IndexAccess(indices) operation \
+         accesses an element of an array.  \
+         However, it was applied to an object of type {0}."
+    )]
+    IndexAccessRequiresArray(DSLType),
+
+    #[error("Downcast requires pointer argument, but received {0}")]
+    InvalidOperandForPhysicalDowncast(DSLType),
+
+    #[error("ReadValue requires pointer argument, but received {0}")]
+    InvalidOperandForReadValue(DSLType),
+
+    #[error(
+        "Cannot apply operator '{op}' with operand types '{lhs}' and '{rhs}'"
+    )]
+    InvalidOperandsForBinaryOp {
+        op: &'static str,
+        lhs: DSLType,
+        rhs: DSLType,
+    },
 }
 
 macro_rules! infer_binary_op {
@@ -119,7 +192,7 @@ macro_rules! infer_binary_op {
             expr_kind: &ExprKind,
             lhs: SymbolicValue,
             rhs: SymbolicValue,
-        ) -> Result<DSLType, Error> {
+        ) -> Result<DSLType, TypeInferenceError> {
             let lhs_type = self.expect_cache(lhs);
             let rhs_type = self.expect_cache(rhs);
             match (lhs_type, rhs_type) {
@@ -137,7 +210,7 @@ macro_rules! infer_binary_op {
                 )*
 
                 (other_lhs, other_rhs) => {
-                    Err(Error::InvalidOperandsForBinaryOp {
+                    Err(TypeInferenceError::InvalidOperandsForBinaryOp {
                         op: expr_kind.op_name(),
                         lhs: other_lhs.clone(),
                         rhs: other_rhs.clone(),
@@ -181,7 +254,7 @@ impl<'a> TypeInference<'a> {
         &'a self,
         graph: &SymbolicGraph,
         value: SymbolicValue,
-    ) -> Result<&'a DSLType, Error> {
+    ) -> Result<&'a DSLType, TypeInferenceError> {
         let op_index = match value {
             SymbolicValue::Const(prim) => {
                 return Ok(prim.static_runtime_type_ref());
@@ -450,7 +523,7 @@ impl<'a> TypeInference<'a> {
                         DSLType::DotNet(DotNetType::Array { .. })
                             if num_indices != 1 =>
                         {
-                            Err(Error::IncorrectNumberOfIndices {
+                            Err(TypeInferenceError::IncorrectNumberOfIndices {
                                 num_provided: num_indices,
                                 num_expected: 1,
                             })
@@ -459,10 +532,12 @@ impl<'a> TypeInference<'a> {
                             rank,
                             ..
                         }) if num_indices != *rank => {
-                            return Err(Error::IncorrectNumberOfIndices {
-                                num_provided: num_indices,
-                                num_expected: *rank,
-                            });
+                            return Err(
+                                TypeInferenceError::IncorrectNumberOfIndices {
+                                    num_provided: num_indices,
+                                    num_expected: *rank,
+                                },
+                            );
                         }
                         DSLType::DotNet(
                             DotNetType::MultiDimArray {
@@ -473,9 +548,11 @@ impl<'a> TypeInference<'a> {
                                 method_table: None, ..
                             },
                         ) => {
-                            return Err(Error::UnexpectedNullMethodTable(
-                                format!("{}", graph.print(*array)),
-                            ));
+                            return Err(
+                                TypeInferenceError::UnexpectedNullMethodTable(
+                                    format!("{}", graph.print(*array)),
+                                ),
+                            );
                         }
                         DSLType::DotNet(
                             DotNetType::MultiDimArray {
@@ -491,7 +568,9 @@ impl<'a> TypeInference<'a> {
                             let method_table = reader.method_table(*ptr)?;
                             let opt_element_type = method_table
                                 .array_element_type()
-                                .ok_or(Error::ArrayMissingElementType)?
+                                .ok_or(
+                                    TypeInferenceError::ArrayMissingElementType,
+                                )?
                                 .as_method_table()
                                 .map(|ptr| reader.runtime_type(ptr))
                                 .transpose()?;
@@ -502,7 +581,9 @@ impl<'a> TypeInference<'a> {
                         }
 
                         other => {
-                            Err(Error::IndexAccessRequiresArray(other.clone()))
+                            Err(TypeInferenceError::IndexAccessRequiresArray(
+                                other.clone(),
+                            ))
                         }
                     }?
                 }
@@ -563,7 +644,7 @@ impl<'a> TypeInference<'a> {
                     let obj_type = self.expect_cache(*obj);
                     match obj_type {
                         DSLType::Prim(RuntimePrimType::Ptr) => Ok(()),
-                        other => Err(Error::InvalidOperandForPhysicalDowncast(
+                        other => Err(TypeInferenceError::InvalidOperandForPhysicalDowncast(
                             other.clone(),
                         )),
                     }?;
@@ -574,9 +655,11 @@ impl<'a> TypeInference<'a> {
                     match ptr_type {
                         DSLType::Unknown => Ok(()),
                         DSLType::Prim(RuntimePrimType::Ptr) => Ok(()),
-                        other => Err(Error::InvalidOperandForReadValue(
-                            other.clone(),
-                        )),
+                        other => {
+                            Err(TypeInferenceError::InvalidOperandForReadValue(
+                                other.clone(),
+                            ))
+                        }
                     }?;
                     (*prim_type).into()
                 }

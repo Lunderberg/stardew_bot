@@ -1,7 +1,9 @@
-use crate::{Analysis, Error, GraphRewrite};
+use dsl_analysis::Analysis;
 use dsl_ir::{
     DSLType, ExprKind, RuntimePrimType, SymbolicGraph, SymbolicValue,
 };
+
+use crate::{Error, GraphRewrite};
 
 pub struct LegalizeOperandTypes<'a>(pub &'a Analysis<'a>);
 
