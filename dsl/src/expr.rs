@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
+use dsl_lowering::lowering_passes;
 use dsl_validation::SymbolicGraphValidation as _;
 use env_var_flag::env_var_flag;
 
 use dotnet_debugger::CachedReader;
 
 use dsl_analysis::Analysis;
-use dsl_ir::{
-    DSLType, ExprKind, FunctionType, OpIndex, SymbolicGraph, SymbolicValue,
-};
+use dsl_ir::{OpIndex, SymbolicGraph, SymbolicValue};
 use dsl_rewrite_utils::GraphRewrite;
 use dsl_vm::VirtualMachine;
 
@@ -35,73 +34,6 @@ pub struct SymbolicGraphCompiler<'a, 'b> {
     interactive_substeps: bool,
     reader: Option<CachedReader<'b>>,
     optimize_symbolic_graph: bool,
-}
-
-pub(crate) trait CopyFirstParamExt {
-    fn copy_first_param(&mut self, func: SymbolicValue) -> SymbolicValue;
-}
-impl CopyFirstParamExt for SymbolicGraph {
-    fn copy_first_param(&mut self, func: SymbolicValue) -> SymbolicValue {
-        let SymbolicValue::Result(func) = func else {
-            panic!(
-                "Internal error, \
-                 SymbolicValue should point to function \
-                 for copy_first_param"
-            )
-        };
-        let params = match &self[func].kind {
-            ExprKind::Function { params, .. } => params,
-            ExprKind::NativeFunction(func) => {
-                let sig = func.signature().unwrap();
-                match sig {
-                    DSLType::Function(FunctionType { params, .. }) => {
-                        let param_ty = params
-                            .map(|params| params[0].clone())
-                            .unwrap_or(DSLType::Unknown);
-                        return self.function_arg(param_ty);
-                    }
-                    _ => panic!(
-                        "Internal error, \
-                         NativeFunction should return TunctionType"
-                    ),
-                }
-            }
-            _ => panic!(
-                "Internal error, \
-                 SymbolicValue should point to function \
-                 for copy_first_param"
-            ),
-        };
-
-        let SymbolicValue::Result(first_param_index) = params[0] else {
-            panic!(
-                "Internal error, \
-                 All function parameters \
-                 should point to FunctionArg"
-            )
-        };
-
-        let first_param = &self[first_param_index];
-
-        let ExprKind::FunctionArg(param_ty) = &first_param.kind else {
-            panic!(
-                "Internal error, \
-                 All function parameters \
-                 should point to FunctionArg"
-            )
-        };
-
-        let opt_name = first_param.name.clone();
-        let new_param = self.function_arg(param_ty.clone());
-        if let Some(name) = opt_name {
-            self.name(new_param, name).expect(
-                "Internal error, \
-                 Existing name must already be valid",
-            );
-        }
-
-        new_param
-    }
 }
 
 pub trait SymbolicGraphSimplify: Sized {
@@ -399,20 +331,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             // .then(super::MergeParallelReads)
             ;
 
-        let mandatory_lowering = super::InferFunctionParameterTypes(&analysis)
-            .then(super::LegalizeOperandTypes(&analysis))
-            .then(super::InlineFunctionCalls)
-            .then(super::MergeRangeReduceToSimpleReduce)
-            .then(super::InlineIteratorMap)
-            .then(super::InlineIteratorFilter)
-            .then(super::SplitIteratorChainReduce)
-            .then(super::ConvertCollectToReduce(&analysis))
-            .then(super::ConvertFindToFilterFirst)
-            .then(super::ConvertFirstToReduce)
-            .then(super::ConvertFindMapToFilterFind)
-            .then(super::ConvertBooleanOperatorToConditional)
-            .then(super::LowerSymbolicExpr(&analysis))
-            .then(super::SeparateReadAndParseBytes);
+        let mandatory_lowering = lowering_passes(&analysis).map_err(Into::into);
 
         let expr = if self.optimize_symbolic_graph {
             self.apply_rewrites(

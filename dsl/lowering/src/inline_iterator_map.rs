@@ -1,5 +1,7 @@
-use crate::{CopyFirstParamExt as _, Error, GraphRewrite};
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
+
+use crate::{CopyFirstParamExt as _, Error};
 
 pub struct InlineIteratorMap;
 

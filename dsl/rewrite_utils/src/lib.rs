@@ -13,6 +13,9 @@ pub use sequential_rewrite::*;
 mod recursive_rewrite;
 pub use recursive_rewrite::*;
 
+mod map_err;
+pub(crate) use map_err::*;
+
 mod substitute;
 pub use substitute::*;
 

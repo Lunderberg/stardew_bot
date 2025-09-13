@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use dsl_rewrite_utils::GraphRewrite;
 use itertools::Itertools as _;
 
 use dsl_analysis::{Analysis, TypeInferenceError};
@@ -8,7 +9,7 @@ use dsl_ir::{
     NativeFunction, OpIndex, StackValue, SymbolicGraph, SymbolicValue,
 };
 
-use crate::{Error, GraphRewrite};
+use crate::Error;
 
 pub struct ConvertCollectToReduce<'a>(pub &'a Analysis<'a>);
 
@@ -47,7 +48,7 @@ impl NativeFunction for MakeVector {
 impl NativeFunction for CollectIntoVector {
     fn apply(
         &self,
-        args: &mut [&mut Option<super::StackValue>],
+        args: &mut [&mut Option<StackValue>],
     ) -> Result<Option<StackValue>, dsl_ir::Error> {
         assert_eq!(args.len(), 2);
 

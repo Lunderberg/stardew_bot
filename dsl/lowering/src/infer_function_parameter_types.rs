@@ -5,9 +5,9 @@ use dsl_ir::{
     DSLType, ExprKind, IteratorType, OpIndex, RuntimePrimType, SymbolicGraph,
     SymbolicValue,
 };
-use dsl_rewrite_utils::SymbolicGraphSubstitute as _;
+use dsl_rewrite_utils::{GraphRewrite, SymbolicGraphSubstitute as _};
 
-use crate::{Error, GraphRewrite};
+use crate::Error;
 
 pub struct InferFunctionParameterTypes<'a>(pub &'a Analysis<'a>);
 

@@ -20,10 +20,11 @@ memory_reader = { path = "../memory_reader" }
 dsl_analysis = { path = "analysis" }
 dsl_graph_comparison = { path = "graph_comparison" }
 dsl_ir = { path = "ir" }
-dsl_vm = { path = "vm" }
+dsl_lowering = { path = "lowering" }
 dsl_proc_macros = { path = "proc_macros" }
 dsl_rewrite_utils = { path = "rewrite_utils" }
 dsl_validation = { path = "validation" }
+dsl_vm = { path = "vm" }
 
 [dev-dependencies]
 paste = "1.0.15"

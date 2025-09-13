@@ -1,5 +1,7 @@
-use crate::{Error, GraphRewrite};
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
+
+use crate::Error;
 
 /// Split up reduction of a chained iterator into sequential
 /// reductions.

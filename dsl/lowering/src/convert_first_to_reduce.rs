@@ -1,5 +1,7 @@
-use crate::{Error, GraphRewrite};
 use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
+
+use crate::Error;
 
 pub struct ConvertFirstToReduce;
 

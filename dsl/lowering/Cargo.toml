@@ -1,0 +1,16 @@
+[package]
+name = "dsl_lowering"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+itertools = "*"
+
+env_var_flag = { path = "../../env_var_flag" }
+dll_unpacker = { path = "../../dll_unpacker" }
+dotnet_debugger = { path = "../../dotnet_debugger" }
+
+dsl_ir = { path = "../ir" }
+dsl_rewrite_utils = { path = "../rewrite_utils" }
+dsl_analysis = { path = "../analysis" }

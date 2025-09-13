@@ -24,6 +24,9 @@ pub enum Error {
     #[error("dsl::rewrite_utils::Error( {0} )")]
     DslRewriteUtils(#[from] dsl_rewrite_utils::Error),
 
+    #[error("dsl::lowering::Error( {0} )")]
+    DslLowering(#[from] dsl_lowering::Error),
+
     #[error("dsl::analysis::TypeInferenceError( {0} )")]
     TypeInferenceError(#[from] TypeInferenceError),
 

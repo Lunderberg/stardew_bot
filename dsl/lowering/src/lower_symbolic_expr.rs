@@ -1,18 +1,18 @@
 use dll_unpacker::RelativeVirtualAddress;
-use env_var_flag::env_var_flag;
-use memory_reader::Pointer;
-
 use dotnet_debugger::{
     DotNetType, RuntimeArray, RuntimeMultiDimArray, RuntimePrimType,
     RuntimeType, TypeHandlePtrExt as _,
 };
+use env_var_flag::env_var_flag;
 
 use dsl_analysis::{
     Analysis, DSLTypeExt as _, StaticFieldExt as _, SymbolicTypeExt as _,
 };
+use dsl_ir::Pointer;
 use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
 
-use crate::{Error, GraphRewrite};
+use crate::Error;
 
 static USE_PHYSICAL_DOWNCAST: std::sync::LazyLock<bool> =
     std::sync::LazyLock::new(|| env_var_flag("USE_PHYSICAL_DOWNCAST"));
