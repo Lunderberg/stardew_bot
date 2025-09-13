@@ -423,6 +423,7 @@ dependencies = [
  "dsl_graph_comparison",
  "dsl_ir",
  "dsl_lowering",
+ "dsl_optimize",
  "dsl_proc_macros",
  "dsl_rewrite_utils",
  "dsl_validation",
@@ -479,6 +480,18 @@ dependencies = [
  "dsl_ir",
  "dsl_rewrite_utils",
  "env_var_flag",
+ "itertools 0.10.5",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl_optimize"
+version = "0.1.0"
+dependencies = [
+ "dotnet_debugger",
+ "dsl_analysis",
+ "dsl_ir",
+ "dsl_rewrite_utils",
  "itertools 0.10.5",
  "thiserror",
 ]

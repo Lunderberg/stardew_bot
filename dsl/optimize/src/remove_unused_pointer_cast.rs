@@ -1,7 +1,7 @@
-use dotnet_debugger::RuntimePrimType;
+use dsl_ir::{ExprKind, RuntimePrimType, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
 
-use crate::{Error, GraphRewrite};
-use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
+use crate::Error;
 
 pub struct RemoveUnusedPointerCast;
 

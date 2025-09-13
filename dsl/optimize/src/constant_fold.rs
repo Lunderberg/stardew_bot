@@ -1,6 +1,7 @@
 use dsl_ir::{ExprKind, RuntimePrimValue, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
 
-use crate::{Error, GraphRewrite};
+use crate::Error;
 
 pub struct ConstantFold;
 

@@ -1,14 +1,13 @@
-use std::collections::HashMap;
-
 use dsl_lowering::lowering_passes;
+use dsl_optimize::optimization_passes;
 use dsl_validation::SymbolicGraphValidation as _;
 use env_var_flag::env_var_flag;
 
 use dotnet_debugger::CachedReader;
 
 use dsl_analysis::Analysis;
-use dsl_ir::{OpIndex, SymbolicGraph, SymbolicValue};
-use dsl_rewrite_utils::GraphRewrite;
+use dsl_ir::SymbolicGraph;
+use dsl_rewrite_utils::{GraphRewrite, SymbolicGraphRewrite as _};
 use dsl_vm::VirtualMachine;
 
 use crate::{
@@ -16,151 +15,12 @@ use crate::{
     SymbolicGraphCSE as _, SymbolicGraphDCE as _,
 };
 
-struct RewriteResults {
-    /// The resulting graph
-    graph: SymbolicGraph,
-
-    /// The number of terms rewritten by the GraphRewrite rule.
-    num_rewritten_terms: usize,
-
-    /// The number of terms which have been updated to reference a
-    /// rewritten term, directly or indirectly.
-    num_terms_with_new_inputs: usize,
-}
-
 pub struct SymbolicGraphCompiler<'a, 'b> {
     graph: &'a SymbolicGraph,
     show_steps: bool,
     interactive_substeps: bool,
     reader: Option<CachedReader<'b>>,
     optimize_symbolic_graph: bool,
-}
-
-pub trait SymbolicGraphSimplify: Sized {
-    fn simplify<'a>(
-        &self,
-        reader: impl Into<Option<CachedReader<'a>>>,
-    ) -> Result<Self, Error>;
-}
-impl SymbolicGraphSimplify for SymbolicGraph {
-    fn simplify<'a>(
-        &self,
-        reader: impl Into<Option<CachedReader<'a>>>,
-    ) -> Result<Self, Error> {
-        let analysis = Analysis::new(reader);
-        let rewriter = super::RemoveUnusedDowncast(&analysis)
-            .then(super::ConstantFold)
-            .then(super::RemoveUnusedPrimcast(&analysis))
-            .apply_recursively();
-        self.rewrite(rewriter)
-    }
-}
-
-pub trait SymbolicGraphRewrite: Sized {
-    fn rewrite(
-        &self,
-        rewriter: impl GraphRewrite<Error = Error>,
-    ) -> Result<Self, Error>;
-}
-trait SymbolicGraphRewriteVerbose {
-    fn remap_extern_funcs(
-        &self,
-        builder: &mut SymbolicGraph,
-        lookup: &HashMap<OpIndex, SymbolicValue>,
-    ) -> Result<(), Error>;
-
-    fn rewrite_verbose(
-        &self,
-        rewriter: impl GraphRewrite<Error = Error>,
-    ) -> Result<RewriteResults, Error>;
-}
-impl SymbolicGraphRewriteVerbose for SymbolicGraph {
-    fn remap_extern_funcs(
-        &self,
-        builder: &mut SymbolicGraph,
-        lookup: &HashMap<OpIndex, SymbolicValue>,
-    ) -> Result<(), Error> {
-        for old_index in self.iter_extern_funcs() {
-            let new_index = lookup
-                .get(&old_index)
-                .cloned()
-                .unwrap_or_else(|| old_index.into());
-            builder.mark_extern_func(new_index)?;
-        }
-        Ok(())
-    }
-
-    fn rewrite_verbose(
-        &self,
-        rewriter: impl GraphRewrite<Error = Error>,
-    ) -> Result<RewriteResults, Error> {
-        rewriter.init();
-
-        let mut num_rewritten_terms = 0;
-        let mut num_terms_with_new_inputs = 0;
-
-        let mut prev_index_lookup: HashMap<OpIndex, SymbolicValue> =
-            HashMap::new();
-        let mut builder = Self::new();
-
-        for (old_index, op) in self.iter_ops() {
-            let opt_remapped = op.kind.try_remap(&prev_index_lookup);
-            let kind = if let Some(remapped) = &opt_remapped {
-                num_terms_with_new_inputs += 1;
-                remapped
-            } else {
-                &op.kind
-            };
-
-            let opt_value = rewriter.rewrite_expr(
-                &mut builder,
-                kind,
-                op.name.as_deref(),
-            )?;
-            let value = if let Some(value) = opt_value {
-                num_rewritten_terms += 1;
-                value
-            } else if let Some(remapped) = opt_remapped {
-                builder.push(remapped)
-            } else {
-                builder.push(op.clone())
-            };
-
-            // If the pre-rewrite value had a name, then copy it to
-            // the post-rewrite value.  This should only be applied if
-            // the post-rewrite value does not already have a name.
-            // For example, in `let y = x+0`, both `x` and `y` are
-            // named values.  When `y` gets replaced with `x`, it
-            // should *NOT* cause `x` to be renamed in earlier parts
-            // of the function.
-            if let Some(name) = &op.name {
-                if let SymbolicValue::Result(new_index) = value {
-                    if builder[new_index].name.is_none() {
-                        builder.name(value, name)?;
-                    }
-                }
-            }
-            if value != SymbolicValue::Result(old_index) {
-                prev_index_lookup.insert(old_index, value);
-            }
-        }
-
-        self.remap_extern_funcs(&mut builder, &prev_index_lookup)?;
-
-        Ok(RewriteResults {
-            graph: builder,
-            num_rewritten_terms,
-            num_terms_with_new_inputs,
-        })
-    }
-}
-impl SymbolicGraphRewrite for SymbolicGraph {
-    fn rewrite(
-        &self,
-        rewriter: impl GraphRewrite<Error = Error>,
-    ) -> Result<Self, Error> {
-        Ok(self.rewrite_verbose(rewriter)?.graph)
-    }
 }
 
 pub trait SymbolicGraphCompileExt {
@@ -321,17 +181,10 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
 
         let analysis = Analysis::new(reader);
 
-        let optional_optimizations = super::ConstantFold
-            .then(super::RemoveUnusedDowncast(&analysis))
-            .then(super::RemoveUnusedPrimcast(&analysis))
-            .then(super::RemoveUnusedPointerCast)
-            // Currently, the MergeParallelReads pass works, but
-            // doesn't seem to provide a performance benefit.
-            //
-            // .then(super::MergeParallelReads)
-            ;
-
-        let mandatory_lowering = lowering_passes(&analysis).map_err(Into::into);
+        let optional_optimizations = optimization_passes(&analysis)
+            .map_err(|err| -> Error { err.into() });
+        let mandatory_lowering =
+            lowering_passes(&analysis).map_err(|err| -> Error { err.into() });
 
         let expr = if self.optimize_symbolic_graph {
             self.apply_rewrites(

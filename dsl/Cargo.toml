@@ -21,6 +21,7 @@ dsl_analysis = { path = "analysis" }
 dsl_graph_comparison = { path = "graph_comparison" }
 dsl_ir = { path = "ir" }
 dsl_lowering = { path = "lowering" }
+dsl_optimize = { path = "optimize" }
 dsl_proc_macros = { path = "proc_macros" }
 dsl_rewrite_utils = { path = "rewrite_utils" }
 dsl_validation = { path = "validation" }

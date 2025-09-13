@@ -27,3 +27,6 @@ pub(crate) use remap_extern_funcs::*;
 
 mod common_subexpression_elimination;
 pub use common_subexpression_elimination::*;
+
+mod symbolic_graph_rewrite;
+pub use symbolic_graph_rewrite::*;

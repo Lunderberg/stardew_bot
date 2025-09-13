@@ -1,7 +1,8 @@
 use dsl::{
-    ir::Error, ConstantFold, GraphComparisonExt as _, GraphRewrite as _,
-    MergeParallelReads, SymbolicGraph, SymbolicGraphRewrite as _,
-    SymbolicValue,
+    ir::Error,
+    optimize::{ConstantFold, MergeParallelReads},
+    GraphComparisonExt as _, GraphRewrite as _, SymbolicGraph,
+    SymbolicGraphRewrite as _, SymbolicValue,
 };
 
 trait NormalizeReturn {
@@ -62,9 +63,9 @@ fn check_before_expected<BuilderFunc1, Res1, BuilderFunc2, Res2>(
             .number_all_expressions()
     );
 
-    let after = before
-        .rewrite(MergeParallelReads.then(ConstantFold).apply_recursively())
-        .unwrap();
+    let rewriter = MergeParallelReads.then(ConstantFold).apply_recursively();
+
+    let after = before.rewrite(rewriter).unwrap();
 
     println!(
         "----------- After -------------\n{}",

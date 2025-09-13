@@ -1,0 +1,14 @@
+[package]
+name = "dsl_optimize"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+itertools = "*"
+
+dotnet_debugger = { path = "../../dotnet_debugger" }
+
+dsl_analysis = { path = "../analysis" }
+dsl_ir = { path = "../ir" }
+dsl_rewrite_utils = { path = "../rewrite_utils" }
