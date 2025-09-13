@@ -13,6 +13,9 @@ pub enum Error {
     #[error("dsl::ir::Error( {0} )")]
     DslIr(#[from] dsl::ir::Error),
 
+    #[error("dsl::compile::Error( {0} )")]
+    DslCompile(#[from] dsl::compile::Error),
+
     #[error("dsl::vm::Error( {0} )")]
     DslVm(#[from] dsl::vm::Error),
 

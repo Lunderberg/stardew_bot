@@ -1,0 +1,19 @@
+[package]
+name = "dsl_compile"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+thiserror = "*"
+itertools = "*"
+
+dotnet_debugger = { path = "../../dotnet_debugger" }
+env_var_flag = { path = "../../env_var_flag" }
+
+dsl_ir = { path = "../ir" }
+dsl_lowering = { path = "../lowering" }
+dsl_optimize = { path = "../optimize" }
+dsl_analysis = { path = "../analysis" }
+dsl_rewrite_utils = { path = "../rewrite_utils" }
+dsl_validation = { path = "../validation" }
+dsl_vm = { path = "../vm" }

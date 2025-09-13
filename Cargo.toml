@@ -4,6 +4,7 @@ members = [
   "dotnet_debugger",
   "dsl",
   "dsl/analysis",
+  "dsl/compile",
   "dsl/graph_comparison",
   "dsl/ir",
   "dsl/lowering",

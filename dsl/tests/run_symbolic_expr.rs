@@ -1,6 +1,6 @@
 use dsl::{
     Error, RuntimePrimType, RustNativeObject, SymbolicGraph,
-    SymbolicGraphCompileExt as _,
+    SymbolicGraphCompile as _,
 };
 
 #[test]

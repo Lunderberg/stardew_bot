@@ -18,6 +18,7 @@ memory_reader = { path = "../memory_reader" }
 
 
 dsl_analysis = { path = "analysis" }
+dsl_compile = { path = "compile" }
 dsl_graph_comparison = { path = "graph_comparison" }
 dsl_ir = { path = "ir" }
 dsl_lowering = { path = "lowering" }

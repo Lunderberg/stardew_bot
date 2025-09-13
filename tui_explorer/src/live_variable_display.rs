@@ -2,7 +2,7 @@ use itertools::Itertools;
 
 use dsl::{
     optimize::SymbolicGraphSimplify as _, RuntimePrimValue, SymbolicGraph,
-    SymbolicGraphCompileExt as _, VirtualMachine,
+    SymbolicGraphCompile as _, VirtualMachine,
 };
 use ratatui::{
     layout::{Alignment, Constraint},

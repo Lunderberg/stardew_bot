@@ -1,7 +1,8 @@
 use dsl_analysis::Analysis;
 use dsl_ir::{ExprKind, StaticField, SymbolicGraph, SymbolicValue};
+use dsl_rewrite_utils::GraphRewrite;
 
-use crate::{Error, GraphRewrite};
+use crate::Error;
 
 pub struct IdentifyStaticField<'a>(pub &'a Analysis<'a>);
 

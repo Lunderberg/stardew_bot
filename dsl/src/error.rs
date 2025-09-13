@@ -2,7 +2,7 @@ use dotnet_debugger::RuntimePrimType;
 use thiserror::Error;
 
 use dsl_analysis::TypeInferenceError;
-use dsl_ir::{DSLType, ExprKind, SymbolicValue};
+use dsl_ir::{DSLType, SymbolicValue};
 
 #[derive(Error)]
 pub enum Error {
@@ -35,6 +35,9 @@ pub enum Error {
 
     #[error("dsl::validation::Error( {0} )")]
     DslValidation(#[from] dsl_validation::Error),
+
+    #[error("dsl::compile::Error( {0} )")]
+    DslCompile(#[from] dsl_compile::Error),
 
     #[error("dsl::vm::Error( {0} )")]
     VMError(#[from] dsl_vm::Error),
@@ -69,28 +72,6 @@ pub enum Error {
     InferredTypeNotFound(SymbolicValue),
 
     #[error(
-        "Symbolic expression must be lowered \
-         prior to generating VM instruction, \
-         but encountered {0}."
-    )]
-    SymbolicExpressionRequiresLowering(ExprKind),
-
-    #[error(
-        "Short-circuit boolean operators must be lowered \
-         prior to generating VM instruction, \
-         but encountered {0}."
-    )]
-    BooleanOperatorRequiresLowering(ExprKind),
-
-    #[error(
-        "ReadPrim operators must be lowered \
-         to ReadBytes and CastBytes operators\
-         prior to generating VM instruction, \
-         but encountered {0}."
-    )]
-    ReadPrimOperatorRequiresLowering(ExprKind),
-
-    #[error(
         "Invalid node name: '{0}'.  \
          Node names beginning with underscore \
          followed by a digit are reserved for internal use."
@@ -114,9 +95,6 @@ pub enum Error {
          but cannot do so when running in local mode."
     )]
     AnalysisAttemptedToUseMissingRemoteProcess,
-
-    #[error("Attempted use of an already consumed value.")]
-    AttemptedUseOfConsumedValue,
 
     #[error(
         "Collection of iterators into nested vectors \

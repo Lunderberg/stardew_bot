@@ -37,6 +37,9 @@ pub enum Error {
     #[error("dsl::vm::Error( {0} )")]
     DslVm(#[from] dsl::vm::Error),
 
+    #[error("dsl::compile::Error( {0} )")]
+    DslCompile(#[from] dsl::compile::Error),
+
     #[error("dsl::optimize::Error( {0} )")]
     DslOptimize(#[from] dsl::optimize::Error),
 

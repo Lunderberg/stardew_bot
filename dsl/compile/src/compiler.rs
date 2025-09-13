@@ -1,18 +1,19 @@
+use dotnet_debugger::CachedReader;
+use dsl_analysis::Analysis;
 use dsl_lowering::lowering_passes;
 use dsl_optimize::optimization_passes;
+use dsl_rewrite_utils::{
+    GraphRewrite, SymbolicGraphCSE as _, SymbolicGraphDCE as _,
+    SymbolicGraphRewrite as _,
+};
 use dsl_validation::SymbolicGraphValidation as _;
+use dsl_vm::VirtualMachine;
 use env_var_flag::env_var_flag;
 
-use dotnet_debugger::CachedReader;
-
-use dsl_analysis::Analysis;
 use dsl_ir::SymbolicGraph;
-use dsl_rewrite_utils::{GraphRewrite, SymbolicGraphRewrite as _};
-use dsl_vm::VirtualMachine;
 
 use crate::{
     expr_to_virtual_machine::SymbolicGraphToVirtualMachine as _, Error,
-    SymbolicGraphCSE as _, SymbolicGraphDCE as _,
 };
 
 pub struct SymbolicGraphCompiler<'a, 'b> {
@@ -21,29 +22,6 @@ pub struct SymbolicGraphCompiler<'a, 'b> {
     interactive_substeps: bool,
     reader: Option<CachedReader<'b>>,
     optimize_symbolic_graph: bool,
-}
-
-pub trait SymbolicGraphCompileExt {
-    fn compiler<'a, 'b>(&'a self) -> SymbolicGraphCompiler<'a, 'b>;
-
-    fn compile<'a>(
-        &self,
-        reader: impl Into<Option<CachedReader<'a>>>,
-    ) -> Result<VirtualMachine, Error>;
-}
-impl SymbolicGraphCompileExt for SymbolicGraph {
-    fn compiler<'a, 'b>(&'a self) -> SymbolicGraphCompiler<'a, 'b> {
-        SymbolicGraphCompiler::from_graph(self)
-    }
-
-    fn compile<'a>(
-        &self,
-        reader: impl Into<Option<CachedReader<'a>>>,
-    ) -> Result<VirtualMachine, Error> {
-        SymbolicGraphCompiler::from_graph(self)
-            .with_reader(reader)
-            .compile()
-    }
 }
 
 impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
