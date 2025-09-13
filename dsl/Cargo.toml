@@ -23,6 +23,7 @@ dsl_ir = { path = "ir" }
 dsl_vm = { path = "vm" }
 dsl_proc_macros = { path = "proc_macros" }
 dsl_rewrite_utils = { path = "rewrite_utils" }
+dsl_validation = { path = "validation" }
 
 [dev-dependencies]
 paste = "1.0.15"

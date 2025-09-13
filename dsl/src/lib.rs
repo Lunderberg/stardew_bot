@@ -4,6 +4,7 @@ pub use memory_reader::Pointer;
 pub use dsl_analysis as analysis;
 pub use dsl_ir as ir;
 pub use dsl_rewrite_utils as rewrite_utils;
+pub use dsl_validation as validation;
 pub use dsl_vm as vm;
 
 pub use dsl_graph_comparison::GraphComparisonExt;

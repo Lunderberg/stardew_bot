@@ -424,6 +424,7 @@ dependencies = [
  "dsl_ir",
  "dsl_proc_macros",
  "dsl_rewrite_utils",
+ "dsl_validation",
  "dsl_vm",
  "env_var_flag",
  "indoc",
@@ -479,6 +480,16 @@ dependencies = [
 name = "dsl_rewrite_utils"
 version = "0.1.0"
 dependencies = [
+ "dsl_analysis",
+ "dsl_ir",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl_validation"
+version = "0.1.0"
+dependencies = [
+ "dotnet_debugger",
  "dsl_analysis",
  "dsl_ir",
  "thiserror",

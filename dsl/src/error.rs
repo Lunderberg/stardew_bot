@@ -2,7 +2,7 @@ use dotnet_debugger::RuntimePrimType;
 use thiserror::Error;
 
 use dsl_analysis::TypeInferenceError;
-use dsl_ir::{DSLType, ExprKind, OpIndex, SymbolicValue};
+use dsl_ir::{DSLType, ExprKind, SymbolicValue};
 
 #[derive(Error)]
 pub enum Error {
@@ -26,6 +26,9 @@ pub enum Error {
 
     #[error("dsl::analysis::TypeInferenceError( {0} )")]
     TypeInferenceError(#[from] TypeInferenceError),
+
+    #[error("dsl::validation::Error( {0} )")]
+    DslValidation(#[from] dsl_validation::Error),
 
     #[error("dsl::vm::Error( {0} )")]
     VMError(#[from] dsl_vm::Error),
@@ -58,26 +61,6 @@ pub enum Error {
 
     #[error("Unable to find inferred type for operation {0}")]
     InferredTypeNotFound(SymbolicValue),
-
-    #[error("Invalid reference from expression {from} to {to}")]
-    InvalidReference { from: OpIndex, to: OpIndex },
-
-    #[error(
-        "Parameters must have a unique owner, \
-             but the parameter at {param} is used by \
-             the functions at {first_owner} and {second_owner}."
-    )]
-    MultipleFunctionsOwnSameParam {
-        param: OpIndex,
-        first_owner: OpIndex,
-        second_owner: OpIndex,
-    },
-
-    #[error(
-        "The function parameter {param} was used, \
-         but did not have a definition."
-    )]
-    UseOfUndefinedParam { param: OpIndex },
 
     #[error(
         "Symbolic expression must be lowered \
