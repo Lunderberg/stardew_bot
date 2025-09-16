@@ -1,66 +1,144 @@
+use paste::paste;
+
 use dsl::{
+    runtime::{Runtime, RuntimeFunc},
     Error, RuntimePrimType, RustNativeObject, SymbolicGraph,
     SymbolicGraphCompile as _,
 };
 
-#[test]
-fn eval_integer_literal() -> Result<(), Error> {
+macro_rules! test_vm_and_interpreter {
+    ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        paste! {
+            $( #[ignore = $reason] )?
+            #[test]
+            fn [< $test_name _vm >]() -> Result<(),Error> {
+                let builder = |graph:&SymbolicGraph| {
+                    Ok(graph.compiler()
+                        .disable_optimizations()
+                        .compile()?)
+                };
+                $test_name(builder)
+            }
+
+            $( #[ignore = $reason] )?
+            #[test]
+            fn [< $test_name _interpreter >]() -> Result<(),Error> {
+                let builder = |graph:&SymbolicGraph| {
+                    Ok(graph.compiler()
+                        .disable_optimizations()
+                        .interpreter()?)
+                };
+                $test_name(builder)
+            }
+
+            $( #[ignore = $reason] )?
+            #[test]
+            fn [< $test_name _opt_vm >]() -> Result<(),Error> {
+                let builder = |graph:&SymbolicGraph| {
+                    Ok(graph.compiler().compile()?)
+                };
+                $test_name(builder)
+            }
+
+            $( #[ignore = $reason] )?
+            #[test]
+            fn [< $test_name _opt_interpreter >]() -> Result<(),Error> {
+                let builder = |graph:&SymbolicGraph| {
+                    Ok(graph.compiler().interpreter()?)
+                };
+                $test_name(builder)
+            }
+        }
+    };
+}
+
+trait Build: Sized {
+    type Output: Runtime<Error = Self::Error>;
+    type Error;
+    fn build(&self, graph: &SymbolicGraph) -> Result<Self::Output, Error>;
+}
+
+impl<Func, R, E> Build for Func
+where
+    Func: Fn(&SymbolicGraph) -> Result<R, Error>,
+    Error: From<E>,
+    R: Runtime<Error = E>,
+{
+    type Output = R;
+    type Error = E;
+    fn build(&self, graph: &SymbolicGraph) -> Result<Self::Output, Error> {
+        Ok(self(graph)?)
+    }
+}
+
+test_vm_and_interpreter! {eval_integer_literal}
+fn eval_integer_literal(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let func = graph.function_def(vec![], 42.into());
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     assert_eq!(result, 42);
     Ok(())
 }
 
-#[test]
-fn eval_integer_addition() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_integer_addition}
+fn eval_integer_addition(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let sum = graph.add(5, 7);
     let func = graph.function_def(vec![], sum);
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 5 + 7);
     Ok(())
 }
 
-#[test]
-fn eval_integer_subtraction() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_integer_subtraction}
+fn eval_integer_subtraction(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let sum = graph.sub(7, 5);
     let func = graph.function_def(vec![], sum);
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 7 - 5);
     Ok(())
 }
 
-#[test]
-fn eval_integer_multiplication() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_integer_multiplication}
+fn eval_integer_multiplication(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let prod = graph.mul(5usize, 7usize);
     let func = graph.function_def(vec![], prod);
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 5 * 7);
     Ok(())
 }
 
-#[test]
-fn eval_fp32_multiplication() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_fp32_multiplication}
+fn eval_fp32_multiplication(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let lhs = graph.prim_cast(5, RuntimePrimType::F32);
     let rhs = graph.prim_cast(7, RuntimePrimType::F32);
@@ -70,14 +148,16 @@ fn eval_fp32_multiplication() -> Result<(), Error> {
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: f32 = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: f32 = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, (5.0 * 7.0) / 2.0);
     Ok(())
 }
 
-#[test]
-fn eval_nested_integer_expression() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_nested_integer_expression}
+fn eval_nested_integer_expression(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     let lhs = graph.add(2usize, 3usize);
     let rhs = graph.add(5usize, 7usize);
@@ -86,14 +166,16 @@ fn eval_nested_integer_expression() -> Result<(), Error> {
     graph.name(func, "main")?;
     graph.mark_extern_func(func)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, (2 + 3) * (5 + 7));
     Ok(())
 }
 
-#[test]
-fn eval_function_call() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_function_call}
+fn eval_function_call(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let lhs = graph.function_arg(RuntimePrimType::NativeUInt);
@@ -112,14 +194,16 @@ fn eval_function_call() -> Result<(), Error> {
     graph.name(main, "main")?;
     graph.mark_extern_func(main)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, (3 + 5) * (7 + 11));
     Ok(())
 }
 
-#[test]
-fn eval_function_call_with_unused_parameters() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_function_call_with_unused_parameters}
+fn eval_function_call_with_unused_parameters(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -132,14 +216,16 @@ fn eval_function_call_with_unused_parameters() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 10);
     Ok(())
 }
 
-#[test]
-fn eval_native_function_call() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_native_function_call}
+fn eval_native_function_call(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize, b: usize| a * b);
@@ -153,14 +239,16 @@ fn eval_native_function_call() -> Result<(), Error> {
     graph.name(main, "main")?;
     graph.mark_extern_func(main)?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, (3 + 5) * (7 + 11) + 13);
     Ok(())
 }
 
-#[test]
-fn eval_nested_function_call() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_nested_function_call}
+fn eval_nested_function_call(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -179,16 +267,18 @@ fn eval_nested_function_call() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     let expected = (42 + 1000) * 10;
 
     assert_eq!(result, expected);
     Ok(())
 }
 
-#[test]
-fn parse_and_eval_native_function_call() -> Result<(), Error> {
+test_vm_and_interpreter! {parse_and_eval_native_function_call}
+fn parse_and_eval_native_function_call(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize, b: usize| a * b);
@@ -198,14 +288,16 @@ fn parse_and_eval_native_function_call() -> Result<(), Error> {
         pub fn main() { func(3+5, 7+11) + 13 }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, (3 + 5) * (7 + 11) + 13);
     Ok(())
 }
 
-#[test]
-fn native_function_call_accepting_prim_option() -> Result<(), Error> {
+test_vm_and_interpreter! {native_function_call_accepting_prim_option}
+fn native_function_call_accepting_prim_option(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|opt_value: Option<usize>| {
@@ -223,14 +315,16 @@ fn native_function_call_accepting_prim_option() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 109);
     Ok(())
 }
 
-#[test]
-fn native_function_call_accepting_native_option() -> Result<(), Error> {
+test_vm_and_interpreter! {native_function_call_accepting_native_option}
+fn native_function_call_accepting_native_option(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(RustNativeObject, PartialEq, Debug)]
@@ -250,8 +344,8 @@ fn native_function_call_accepting_native_option() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 42 + 5 + 10;
 
@@ -259,8 +353,10 @@ fn native_function_call_accepting_native_option() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn collecting_into_vector() -> Result<(), Error> {
+test_vm_and_interpreter! {collecting_into_vector}
+fn collecting_into_vector(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let init_vector = graph.native_function(Vec::<usize>::new);
@@ -282,8 +378,8 @@ fn collecting_into_vector() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     let vec = results
         .get_any(0)?
         .unwrap()
@@ -293,8 +389,10 @@ fn collecting_into_vector() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn sum_of_integers_in_vm_function() -> Result<(), Error> {
+test_vm_and_interpreter! {sum_of_integers_in_vm_function}
+fn sum_of_integers_in_vm_function(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     graph.parse(stringify! {
         pub fn main() {
@@ -303,14 +401,16 @@ fn sum_of_integers_in_vm_function() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 42 * 41 / 2);
     Ok(())
 }
 
-#[test]
-fn reduce_integers_into_constant_value() -> Result<(), Error> {
+test_vm_and_interpreter! {reduce_integers_into_constant_value}
+fn reduce_integers_into_constant_value(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
     graph.parse(stringify! {
         pub fn main() {
@@ -319,14 +419,16 @@ fn reduce_integers_into_constant_value() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 123);
     Ok(())
 }
 
-#[test]
-fn sum_of_integers_in_native_function() -> Result<(), Error> {
+test_vm_and_interpreter! {sum_of_integers_in_native_function_returning_value}
+fn sum_of_integers_in_native_function_returning_value(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let reduction = graph.native_function(|a: usize, b: usize| a + b);
@@ -338,14 +440,39 @@ fn sum_of_integers_in_native_function() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     assert_eq!(result, 42 * 41 / 2);
     Ok(())
 }
 
-#[test]
-fn collect_integers_into_vector() -> Result<(), Error> {
+test_vm_and_interpreter! {sum_of_integers_in_native_function_mutating_arg}
+fn sum_of_integers_in_native_function_mutating_arg(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    let reduction = graph.native_function(|a: &mut usize, b: usize| {
+        *a += b;
+    });
+    graph.name(reduction, "reduction")?;
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..42).reduce(0, reduction)
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+    assert_eq!(result, 42 * 41 / 2);
+    Ok(())
+}
+
+test_vm_and_interpreter! {collect_integers_into_vector}
+fn collect_integers_into_vector(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let init_vector = graph.native_function(Vec::<usize>::new);
@@ -366,8 +493,8 @@ fn collect_integers_into_vector() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     let vec = results
         .get_any(0)?
         .unwrap()
@@ -377,8 +504,10 @@ fn collect_integers_into_vector() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn collect_two_vectors_of_integers() -> Result<(), Error> {
+test_vm_and_interpreter! {collect_two_vectors_of_integers}
+fn collect_two_vectors_of_integers(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let init_vector = graph.native_function(Vec::<usize>::new);
@@ -404,8 +533,8 @@ fn collect_two_vectors_of_integers() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     assert_eq!(results.len(), 2);
     let vec_a = results
@@ -423,8 +552,10 @@ fn collect_two_vectors_of_integers() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn collect_vector_of_rust_native_objects() -> Result<(), Error> {
+test_vm_and_interpreter! {collect_vector_of_rust_native_objects}
+fn collect_vector_of_rust_native_objects(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(Debug, Clone, PartialEq, RustNativeObject)]
@@ -454,8 +585,8 @@ fn collect_vector_of_rust_native_objects() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     let vec = results
         .get_any(0)?
         .unwrap()
@@ -474,8 +605,10 @@ fn collect_vector_of_rust_native_objects() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_length_zero_reductions() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_length_zero_reductions}
+fn eval_length_zero_reductions(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -484,8 +617,8 @@ fn eval_length_zero_reductions() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 0;
 
@@ -493,8 +626,10 @@ fn eval_length_zero_reductions() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_nested_reductions() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_nested_reductions}
+fn eval_nested_reductions(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -509,8 +644,8 @@ fn eval_nested_reductions() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = {
         let mut outer_sum = 0;
@@ -528,8 +663,10 @@ fn eval_nested_reductions() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_nested_reductions_with_enclosed_variables() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_nested_reductions_with_enclosed_variables}
+fn eval_nested_reductions_with_enclosed_variables(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -556,8 +693,8 @@ fn eval_nested_reductions_with_enclosed_variables() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..10).fold(0, |a: usize, b: usize| {
         let b2 = b * 2;
@@ -581,8 +718,10 @@ fn eval_nested_reductions_with_enclosed_variables() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_nested_reductions_with_native_function() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_nested_reductions_with_native_function}
+fn eval_nested_reductions_with_native_function(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(RustNativeObject)]
@@ -621,8 +760,8 @@ fn eval_nested_reductions_with_native_function() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..10)
         .map(|i| {
@@ -636,8 +775,9 @@ fn eval_nested_reductions_with_native_function() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
+test_vm_and_interpreter! {eval_nested_reductions_with_native_function_as_last_expression}
 fn eval_nested_reductions_with_native_function_as_last_expression(
+    builder: impl Build<Error: Into<Error>>,
 ) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
@@ -679,8 +819,8 @@ fn eval_nested_reductions_with_native_function_as_last_expression(
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..10)
         .flat_map(|i| 0..i)
@@ -691,8 +831,10 @@ fn eval_nested_reductions_with_native_function_as_last_expression(
     Ok(())
 }
 
-#[test]
-fn eval_map_reduce() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_map_reduce}
+fn eval_map_reduce(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -703,8 +845,8 @@ fn eval_map_reduce() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..10).map(|i| i * i).sum();
 
@@ -712,8 +854,8 @@ fn eval_map_reduce() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_if_else() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_if_else}
+fn eval_if_else(builder: impl Build<Error: Into<Error>>) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -733,8 +875,8 @@ fn eval_if_else() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 23;
 
@@ -742,8 +884,10 @@ fn eval_if_else() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_comparisons() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_comparisons}
+fn eval_comparisons(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -759,8 +903,8 @@ fn eval_comparisons() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     assert_eq!(results.len(), 6);
     assert_eq!(results.get_as::<bool>(0)?, Some(5 == 10));
@@ -772,8 +916,10 @@ fn eval_comparisons() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_div_mul_mod() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_div_mul_mod}
+fn eval_div_mul_mod(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -791,8 +937,8 @@ fn eval_div_mul_mod() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     assert_eq!(results.len(), 3);
     assert_eq!(results.get_as::<usize>(0)?, Some(5usize.div_euclid(3)));
@@ -801,8 +947,10 @@ fn eval_div_mul_mod() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_conditional_reduction() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_conditional_reduction}
+fn eval_conditional_reduction(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -821,8 +969,8 @@ fn eval_conditional_reduction() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..100)
         .map(|b| {
@@ -839,9 +987,10 @@ fn eval_conditional_reduction() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_conditional_reduction_with_no_change_in_if_branch() -> Result<(), Error>
-{
+test_vm_and_interpreter! {eval_conditional_reduction_with_no_change_in_if_branch}
+fn eval_conditional_reduction_with_no_change_in_if_branch(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -859,8 +1008,8 @@ fn eval_conditional_reduction_with_no_change_in_if_branch() -> Result<(), Error>
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..100).filter(|b| b % 2 != 0).sum::<usize>();
 
@@ -868,8 +1017,9 @@ fn eval_conditional_reduction_with_no_change_in_if_branch() -> Result<(), Error>
     Ok(())
 }
 
-#[test]
+test_vm_and_interpreter! {eval_conditional_reduction_with_no_change_in_else_branch}
 fn eval_conditional_reduction_with_no_change_in_else_branch(
+    builder: impl Build<Error: Into<Error>>,
 ) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
@@ -888,8 +1038,8 @@ fn eval_conditional_reduction_with_no_change_in_else_branch(
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..100).filter(|b| b % 2 == 0).sum::<usize>();
 
@@ -897,8 +1047,10 @@ fn eval_conditional_reduction_with_no_change_in_else_branch(
     Ok(())
 }
 
-#[test]
-fn eval_iterator_filter() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_filter}
+fn eval_iterator_filter(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -910,8 +1062,8 @@ fn eval_iterator_filter() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..100)
         .filter(|i| i % 2 == 0)
@@ -922,8 +1074,10 @@ fn eval_iterator_filter() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_find() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_find}
+fn eval_iterator_find(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -933,8 +1087,8 @@ fn eval_iterator_find() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 52;
 
@@ -942,8 +1096,10 @@ fn eval_iterator_find() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_find_none() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_find_none}
+fn eval_iterator_find_none(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -953,15 +1109,17 @@ fn eval_iterator_find_none() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     assert!(results[0].is_none());
 
     Ok(())
 }
 
-#[test]
-fn eval_iterator_find_map() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_find_map}
+fn eval_iterator_find_map(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -978,8 +1136,8 @@ fn eval_iterator_find_map() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 64;
 
@@ -987,8 +1145,10 @@ fn eval_iterator_find_map() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_first() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_first}
+fn eval_iterator_first(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -999,8 +1159,8 @@ fn eval_iterator_first() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 52;
 
@@ -1008,8 +1168,10 @@ fn eval_iterator_first() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_collect() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_collect}
+fn eval_iterator_collect(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1019,8 +1181,8 @@ fn eval_iterator_collect() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     let vec = results
         .get_any(0)?
         .unwrap()
@@ -1033,8 +1195,10 @@ fn eval_iterator_collect() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_filter_collect() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_filter_collect}
+fn eval_iterator_filter_collect(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1045,8 +1209,8 @@ fn eval_iterator_filter_collect() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     let expected: Vec<usize> = (0..100).filter(|i| i % 2 == 0).collect();
 
@@ -1054,8 +1218,10 @@ fn eval_iterator_filter_collect() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_map_collect() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_map_collect}
+fn eval_iterator_map_collect(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1066,8 +1232,8 @@ fn eval_iterator_map_collect() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     let expected: Vec<usize> = (0..100).map(|i| i * i).collect();
 
@@ -1075,8 +1241,10 @@ fn eval_iterator_map_collect() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_chain_collect() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_chain_collect}
+fn eval_iterator_chain_collect(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1086,8 +1254,8 @@ fn eval_iterator_chain_collect() -> Result<(), Error> {
         pub fn main() { res_main }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
     let vec = results
         .get_any(0)?
         .unwrap()
@@ -1104,8 +1272,10 @@ fn eval_iterator_chain_collect() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn eval_iterator_map_collect_native_obj() -> Result<(), Error> {
+test_vm_and_interpreter! {eval_iterator_map_collect_native_obj}
+fn eval_iterator_map_collect_native_obj(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(Debug, PartialEq, RustNativeObject)]
@@ -1122,8 +1292,8 @@ fn eval_iterator_map_collect_native_obj() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     let expected: Vec<_> = (0..100).map(|i| MyObj(i, i * i)).collect();
 
@@ -1134,8 +1304,10 @@ fn eval_iterator_map_collect_native_obj() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn reduction_with_last_usage_of_var() -> Result<(), Error> {
+test_vm_and_interpreter! {reduction_with_last_usage_of_var}
+fn reduction_with_last_usage_of_var(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1153,8 +1325,8 @@ fn reduction_with_last_usage_of_var() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = (0..10)
         .map(|i| {
@@ -1173,9 +1345,10 @@ fn reduction_with_last_usage_of_var() -> Result<(), Error> {
 // re-initialized for each iteration of the outer loop.  Because it
 // does not depend on any function parameter, it is initialized as
 // part of the global scope.
-#[ignore = "Known failing test"]
-#[test]
-fn reduce_into_vec_of_vecs() -> Result<(), Error> {
+test_vm_and_interpreter! {reduce_into_vec_of_vecs, ignore = "Known failing test"}
+fn reduce_into_vec_of_vecs(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(Debug, Clone, PartialEq, RustNativeObject)]
@@ -1224,8 +1397,8 @@ fn reduce_into_vec_of_vecs() -> Result<(), Error> {
 
     println!("Graph: {graph}");
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     let expected: Vec<RustObj> =
         (0..3).map(|i| RustObj((0..i).collect())).collect();
@@ -1234,8 +1407,10 @@ fn reduce_into_vec_of_vecs() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn collect_into_vec_of_vecs() -> Result<(), Error> {
+test_vm_and_interpreter! {collect_into_vec_of_vecs}
+fn collect_into_vec_of_vecs(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     #[derive(RustNativeObject, Debug, Clone, PartialEq)]
@@ -1274,8 +1449,8 @@ fn collect_into_vec_of_vecs() -> Result<(), Error> {
 
     println!("Graph: {graph}");
 
-    let vm = graph.compile(None)?;
-    let results = vm.local_eval()?;
+    let vm = builder.build(&graph)?;
+    let results = vm.local_eval().map_err(Into::into)?;
 
     let expected: Vec<RustObj> =
         (0..3).map(|i| RustObj((0..i).collect())).collect();
@@ -1284,8 +1459,10 @@ fn collect_into_vec_of_vecs() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn reduce_with_extent_none() -> Result<(), Error> {
+test_vm_and_interpreter! {reduce_with_extent_none}
+fn reduce_with_extent_none(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|| -> Option<usize> { None });
@@ -1299,8 +1476,8 @@ fn reduce_with_extent_none() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = 42;
 
@@ -1308,8 +1485,10 @@ fn reduce_with_extent_none() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn reduction_with_numeric_conditional_in_map() -> Result<(), Error> {
+test_vm_and_interpreter! {reduction_with_numeric_conditional_in_map}
+fn reduction_with_numeric_conditional_in_map(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize| -> Option<usize> {
@@ -1333,8 +1512,8 @@ fn reduction_with_numeric_conditional_in_map() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = (0..10)
         .map(|i| i + 1)
@@ -1345,8 +1524,10 @@ fn reduction_with_numeric_conditional_in_map() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn reduction_with_none_check_in_map() -> Result<(), Error> {
+test_vm_and_interpreter! {reduction_with_none_check_in_map}
+fn reduction_with_none_check_in_map(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let func = graph.native_function(|a: usize| -> Option<usize> {
@@ -1369,8 +1550,8 @@ fn reduction_with_none_check_in_map() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize =
         (0..10).map(|i| if i % 2 == 0 { i } else { 42 }).sum();
@@ -1379,8 +1560,8 @@ fn reduction_with_none_check_in_map() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn boolean_and() -> Result<(), Error> {
+test_vm_and_interpreter! {boolean_and}
+fn boolean_and(builder: impl Build<Error: Into<Error>>) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1397,8 +1578,8 @@ fn boolean_and() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize =
         (0..10).map(|i| if 3 < i && i < 7 { 10 } else { 1 }).sum();
@@ -1407,8 +1588,8 @@ fn boolean_and() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn boolean_or() -> Result<(), Error> {
+test_vm_and_interpreter! {boolean_or}
+fn boolean_or(builder: impl Build<Error: Into<Error>>) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1425,8 +1606,8 @@ fn boolean_or() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize =
         (0..10).map(|i| if 3 < i || i < 7 { 10 } else { 1 }).sum();
@@ -1435,8 +1616,8 @@ fn boolean_or() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn boolean_not() -> Result<(), Error> {
+test_vm_and_interpreter! {boolean_not}
+fn boolean_not(builder: impl Build<Error: Into<Error>>) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1453,8 +1634,8 @@ fn boolean_not() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = (0..10).map(|i| if 3 >= i { 10 } else { 1 }).sum();
 
@@ -1462,8 +1643,10 @@ fn boolean_not() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn pass_string_object_to_native_function() -> Result<(), Error> {
+test_vm_and_interpreter! {pass_string_object_to_native_function}
+fn pass_string_object_to_native_function(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let format_int = graph.native_function(|value: usize| format!("{value}"));
@@ -1484,8 +1667,8 @@ fn pass_string_object_to_native_function() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result: usize = vm.local_eval()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = (0..10).map(|i| i * i).sum();
 
@@ -1493,8 +1676,10 @@ fn pass_string_object_to_native_function() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn pass_str_reference_to_native_function() -> Result<(), Error> {
+test_vm_and_interpreter! {pass_str_reference_to_native_function}
+fn pass_str_reference_to_native_function(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     let format_int = graph.native_function(|value: usize| format!("{value}"));
@@ -1515,9 +1700,9 @@ fn pass_str_reference_to_native_function() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result: usize = vm.local_eval()?.try_into()?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
     let expected: usize = (0..10).map(|i| i * i).sum();
 
     assert_eq!(result, expected);
@@ -1525,8 +1710,10 @@ fn pass_str_reference_to_native_function() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn multiple_functions_in_one_vm() -> Result<(), Error> {
+test_vm_and_interpreter! {multiple_functions_in_one_vm}
+fn multiple_functions_in_one_vm(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1539,9 +1726,19 @@ fn multiple_functions_in_one_vm() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
-    let result1: usize = vm.get_function("main1")?.evaluate()?.try_into()?;
-    let result2: usize = vm.get_function("main2")?.evaluate()?.try_into()?;
+    let vm = builder.build(&graph)?;
+    let result1: usize = vm
+        .get_function("main1")
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
+    let result2: usize = vm
+        .get_function("main2")
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
 
     assert_eq!(result1, 100);
     assert_eq!(result2, 200);
@@ -1549,8 +1746,10 @@ fn multiple_functions_in_one_vm() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn other_functions_do_not_impact_performance() -> Result<(), Error> {
+test_vm_and_interpreter! {other_functions_do_not_impact_performance}
+fn other_functions_do_not_impact_performance(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let with_slow_function = {
         let mut graph = SymbolicGraph::new();
 
@@ -1570,8 +1769,12 @@ fn other_functions_do_not_impact_performance() -> Result<(), Error> {
             }
         })?;
 
-        let vm = graph.compile(None)?;
-        let res = vm.get_function("fast")?.evaluate()?;
+        let vm = builder.build(&graph)?;
+        let res = vm
+            .get_function("fast")
+            .map_err(Into::into)?
+            .evaluate()
+            .map_err(Into::into)?;
         res.num_instructions_evaluated()
     };
 
@@ -1586,8 +1789,12 @@ fn other_functions_do_not_impact_performance() -> Result<(), Error> {
             }
         })?;
 
-        let vm = graph.compile(None)?;
-        let res = vm.get_function("fast")?.evaluate()?;
+        let vm = builder.build(&graph)?;
+        let res = vm
+            .get_function("fast")
+            .map_err(Into::into)?
+            .evaluate()
+            .map_err(Into::into)?;
         res.num_instructions_evaluated()
     };
 
@@ -1596,8 +1803,10 @@ fn other_functions_do_not_impact_performance() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn use_same_reduction_function_in_multiple_locations() -> Result<(), Error> {
+test_vm_and_interpreter! {use_same_reduction_function_in_multiple_locations}
+fn use_same_reduction_function_in_multiple_locations(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1618,9 +1827,9 @@ fn use_same_reduction_function_in_multiple_locations() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result: usize = vm.local_eval()?.try_into()?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = [5, 10].into_iter().flat_map(|i| 0..i * i).sum();
 
@@ -1629,9 +1838,10 @@ fn use_same_reduction_function_in_multiple_locations() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn reduction_with_enclosed_variable_from_inlined_function() -> Result<(), Error>
-{
+test_vm_and_interpreter! {reduction_with_enclosed_variable_from_inlined_function}
+fn reduction_with_enclosed_variable_from_inlined_function(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.parse(stringify! {
@@ -1647,9 +1857,9 @@ fn reduction_with_enclosed_variable_from_inlined_function() -> Result<(), Error>
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result: usize = vm.local_eval()?.try_into()?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = 3 * 5 + 3 * 10;
 
@@ -1658,8 +1868,9 @@ fn reduction_with_enclosed_variable_from_inlined_function() -> Result<(), Error>
     Ok(())
 }
 
-#[test]
+test_vm_and_interpreter! {reduction_with_identical_subexpr_in_condition_and_branch}
 fn reduction_with_identical_subexpr_in_condition_and_branch(
+    builder: impl Build<Error: Into<Error>>,
 ) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
@@ -1681,9 +1892,9 @@ fn reduction_with_identical_subexpr_in_condition_and_branch(
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result: usize = vm.local_eval()?.try_into()?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected: usize = (0..100)
         .filter(|n| {
@@ -1703,8 +1914,10 @@ fn reduction_with_identical_subexpr_in_condition_and_branch(
     Ok(())
 }
 
-#[test]
-fn use_global_var_from_multiple_public_functions() -> Result<(), Error> {
+test_vm_and_interpreter! {use_global_var_from_multiple_public_functions}
+fn use_global_var_from_multiple_public_functions(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     let mut graph = SymbolicGraph::new();
 
     graph.named_native_function("launder", |x: usize| x)?;
@@ -1728,13 +1941,23 @@ fn use_global_var_from_multiple_public_functions() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result1: usize = vm.get_function("main1")?.evaluate()?.try_into()?;
+    let result1: usize = vm
+        .get_function("main1")
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
     let expected1: usize = (0..10).map(|i| i + 20).sum();
     assert_eq!(result1, expected1);
 
-    let result2: usize = vm.get_function("main2")?.evaluate()?.try_into()?;
+    let result2: usize = vm
+        .get_function("main2")
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
     let expected2: usize =
         (0..10).filter(|&i| i < 50).fold(0, |a, b| a + b + 20);
     assert_eq!(result2, expected2);
@@ -1742,8 +1965,10 @@ fn use_global_var_from_multiple_public_functions() -> Result<(), Error> {
     Ok(())
 }
 
-#[test]
-fn conditional_with_unchanged_native_obj_in_else_branch() -> Result<(), Error> {
+test_vm_and_interpreter! {conditional_with_unchanged_native_obj_in_else_branch}
+fn conditional_with_unchanged_native_obj_in_else_branch(
+    builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
     #[derive(RustNativeObject)]
     struct RustObj(usize);
 
@@ -1768,9 +1993,14 @@ fn conditional_with_unchanged_native_obj_in_else_branch() -> Result<(), Error> {
         }
     })?;
 
-    let vm = graph.compile(None)?;
+    let vm = builder.build(&graph)?;
 
-    let result: usize = vm.local_eval()?.get_obj::<RustObj>(0)?.unwrap().0;
+    let result: usize = vm
+        .local_eval()
+        .map_err(Into::into)?
+        .get_obj::<RustObj>(0)?
+        .unwrap()
+        .0;
     let expected = 15usize;
     assert_eq!(result, expected);
 

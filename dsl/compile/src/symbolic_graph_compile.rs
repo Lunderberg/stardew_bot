@@ -1,4 +1,6 @@
 use dotnet_debugger::CachedReader;
+
+use dsl_interpreter::Interpreter;
 use dsl_ir::SymbolicGraph;
 use dsl_vm::VirtualMachine;
 
@@ -11,6 +13,11 @@ pub trait SymbolicGraphCompile {
         &self,
         reader: impl Into<Option<CachedReader<'a>>>,
     ) -> Result<VirtualMachine, Error>;
+
+    fn interpreter<'a>(
+        &self,
+        reader: impl Into<Option<CachedReader<'a>>>,
+    ) -> Result<Interpreter, Error>;
 }
 impl SymbolicGraphCompile for SymbolicGraph {
     fn compiler<'a, 'b>(&'a self) -> SymbolicGraphCompiler<'a, 'b> {
@@ -24,5 +31,14 @@ impl SymbolicGraphCompile for SymbolicGraph {
         SymbolicGraphCompiler::from_graph(self)
             .with_reader(reader)
             .compile()
+    }
+
+    fn interpreter<'a>(
+        &self,
+        reader: impl Into<Option<CachedReader<'a>>>,
+    ) -> Result<Interpreter, Error> {
+        SymbolicGraphCompiler::from_graph(self)
+            .with_reader(reader)
+            .interpreter()
     }
 }

@@ -63,6 +63,55 @@ pub enum RuntimePrimValue {
     Ptr(Pointer),
 }
 
+macro_rules! define_binary_op {
+    ($func_name:ident,
+     $err_variant:ident,
+     $(
+         ($lhs_ty:ident($lhs_var:ident) ,
+          $rhs_ty:ident($rhs_var:ident) $(,)?
+         ) => $result:expr
+     ),* $(,)?
+    ) => {
+        pub fn $func_name(
+            self,
+            other: Self,
+        ) -> Result<Self, Error> {
+            match (self, other) {
+                $(
+                    (
+                        Self::$lhs_ty($lhs_var),
+                        Self::$rhs_ty($rhs_var),
+                    ) => Ok($result.into()),
+                )*
+                    (lhs, rhs) => Err(
+                        Error::$err_variant { lhs, rhs},
+                    ),
+            }
+        }
+    };
+}
+
+macro_rules! define_comparison_op {
+    ($func_name:ident, $cmp:ident) => {
+        define_binary_op! {
+            $func_name, InvalidComparison,
+            ( NativeUInt(a), NativeUInt(b) ) => a.$cmp(&b),
+            ( I32(a), I32(b) ) => a.$cmp(&b),
+            ( F32(a), F32(b) ) => a.$cmp(&b),
+            ( F64(a), F64(b) ) => a.$cmp(&b),
+
+            ( NativeUInt(a), U32(b) ) => a.$cmp(&(b as usize)),
+            ( U32(a), NativeUInt(b) ) => (a as usize).$cmp(&b),
+
+            ( NativeUInt(a), F32(b) ) => (a as f32).$cmp(&b),
+            ( F32(a), NativeUInt(b) ) => a.$cmp(&(b as f32)),
+
+            ( NativeUInt(a), F64(b) ) => (a as f64).$cmp(&b),
+            ( F64(a), NativeUInt(b) ) => a.$cmp(&(b as f64)),
+        }
+    };
+}
+
 impl RuntimePrimValue {
     pub fn parse(kind: RuntimePrimType, bytes: &[u8]) -> Result<Self, Error> {
         let bytes = Self::truncate_to_length(kind, bytes)?;
@@ -310,6 +359,70 @@ impl RuntimePrimValue {
         let ptr: TypedPointer<RuntimeString> = ptr.into();
         let runtime_string = ptr.read(reader)?;
         Ok(runtime_string.into())
+    }
+
+    define_comparison_op! {try_eq, eq}
+    define_comparison_op! {try_gt, gt}
+    define_comparison_op! {try_lt, lt}
+    define_comparison_op! {try_ne, ne}
+    define_comparison_op! {try_ge, ge}
+    define_comparison_op! {try_le, le}
+
+    define_binary_op! {
+        try_add, InvalidBinaryOperands,
+        (NativeUInt(a), NativeUInt(b)) => a + b,
+        (Ptr(a), NativeUInt(b)) => a.try_add(b)?,
+        (NativeUInt(a), Ptr(b)) => b.try_add(a)?,
+        (I32(a), I32(b)) => a + b,
+        (F32(a), F32(b)) => a + b,
+        (F64(a), F64(b)) => a + b,
+    }
+
+    define_binary_op! {
+        try_sub, InvalidBinaryOperands,
+        (NativeUInt(a), NativeUInt(b)) => a - b,
+        (Ptr(a), NativeUInt(b)) => a - b,
+        (Ptr(a), Ptr(b)) => a - b,
+        (I32(a), I32(b)) => a - b,
+        (F32(a), F32(b)) => a - b,
+        (F64(a), F64(b)) => a - b,
+    }
+
+    define_binary_op! {
+        try_mul, InvalidBinaryOperands,
+        (NativeUInt(a), NativeUInt(b)) => a*b,
+        (F32(a), F32(b)) => a*b,
+        (F64(a), F64(b)) => a*b,
+    }
+
+    define_binary_op! {
+        try_div, InvalidBinaryOperands,
+        (NativeUInt(a),NativeUInt(b)) => a.div_euclid(b),
+        (I32(a),NativeUInt(b)) => a.div_euclid(b as i32),
+        (F32(a),NativeUInt(b)) => a / (b as f32),
+        (F64(a),NativeUInt(b)) => a / (b as f64),
+    }
+
+    define_binary_op! {
+        try_mod, InvalidBinaryOperands,
+        (NativeUInt(a),NativeUInt(b)) => a.rem_euclid(b),
+    }
+
+    define_binary_op! {
+        try_and, InvalidBinaryOperands,
+        (Bool(a),Bool(b)) => a && b,
+    }
+
+    define_binary_op! {
+        try_or, InvalidBinaryOperands,
+        (Bool(a),Bool(b)) => a || b,
+    }
+
+    pub fn try_not(self) -> Result<Self, Error> {
+        match self {
+            Self::Bool(b) => Ok((!b).into()),
+            other => Err(Error::InvalidUnaryOperand { arg: other }),
+        }
     }
 }
 

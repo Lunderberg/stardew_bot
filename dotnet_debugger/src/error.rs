@@ -202,6 +202,37 @@ pub enum Error {
 
     #[error("Value '{0}' of type {1} not convertible to an index")]
     ValueNotConvertibleToIndex(RuntimePrimValue, RuntimePrimType),
+
+    #[error(
+        "Value '{lhs}' of type {} \
+         cannot be compared against \
+         value '{rhs}' of type {}.",
+        lhs.runtime_type(),
+        rhs.runtime_type(),
+    )]
+    InvalidComparison {
+        lhs: RuntimePrimValue,
+        rhs: RuntimePrimValue,
+    },
+
+    #[error(
+        "Invalid binary operand values \
+         '{lhs}' of type {} \
+         with '{rhs}' of type {}.",
+        lhs.runtime_type(),
+        rhs.runtime_type(),
+    )]
+    InvalidBinaryOperands {
+        lhs: RuntimePrimValue,
+        rhs: RuntimePrimValue,
+    },
+
+    #[error(
+        "Invalid unary operand \
+         '{arg}' of type {}.",
+        arg.runtime_type(),
+    )]
+    InvalidUnaryOperand { arg: RuntimePrimValue },
 }
 
 impl std::fmt::Debug for Error {

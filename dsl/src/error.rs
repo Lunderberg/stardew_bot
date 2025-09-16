@@ -39,8 +39,14 @@ pub enum Error {
     #[error("dsl::compile::Error( {0} )")]
     DslCompile(#[from] dsl_compile::Error),
 
+    #[error("dsl::runtime::Error( {0} )")]
+    DslRuntime(#[from] dsl_runtime::Error),
+
     #[error("dsl::vm::Error( {0} )")]
-    VMError(#[from] dsl_vm::Error),
+    DslVm(#[from] dsl_vm::Error),
+
+    #[error("dsl::interpreter::Error( {0} )")]
+    DslInterpreter(#[from] dsl_interpreter::Error),
 
     #[error("MethodTable pointer for {0} was NULL.")]
     UnexpectedNullMethodTable(String),

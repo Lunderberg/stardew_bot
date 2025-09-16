@@ -129,6 +129,12 @@ impl TryInto<Box<dyn Any>> for StackValue {
 
 macro_rules! stack_value_to_prim {
     ($prim:ty) => {
+        impl From<$prim> for StackValue {
+            fn from(value: $prim) -> Self {
+                Self::Prim(value.into())
+            }
+        }
+
         impl TryInto<$prim> for StackValue {
             type Error = Error;
 

@@ -15,6 +15,9 @@ pub enum Error {
     #[error("dsl::ir::Error( {0} )")]
     DslIr(#[from] dsl_ir::Error),
 
+    #[error("dsl::runtime::Error( {0} )")]
+    DslRuntime(#[from] dsl_runtime::Error),
+
     #[error("Virtual machine did not contain a function named '{0}'")]
     NoSuchFunction(String),
 

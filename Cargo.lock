@@ -422,11 +422,13 @@ dependencies = [
  "dsl_analysis",
  "dsl_compile",
  "dsl_graph_comparison",
+ "dsl_interpreter",
  "dsl_ir",
  "dsl_lowering",
  "dsl_optimize",
  "dsl_proc_macros",
  "dsl_rewrite_utils",
+ "dsl_runtime",
  "dsl_validation",
  "dsl_vm",
  "env_var_flag",
@@ -447,7 +449,7 @@ dependencies = [
  "dsl_ir",
  "elsa",
  "iterator_extensions",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "lru 0.14.0",
  "thiserror",
 ]
@@ -458,6 +460,7 @@ version = "0.1.0"
 dependencies = [
  "dotnet_debugger",
  "dsl_analysis",
+ "dsl_interpreter",
  "dsl_ir",
  "dsl_lowering",
  "dsl_optimize",
@@ -465,7 +468,7 @@ dependencies = [
  "dsl_validation",
  "dsl_vm",
  "env_var_flag",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "thiserror",
 ]
 
@@ -474,6 +477,19 @@ name = "dsl_graph_comparison"
 version = "0.1.0"
 dependencies = [
  "dsl_ir",
+ "thiserror",
+]
+
+[[package]]
+name = "dsl_interpreter"
+version = "0.1.0"
+dependencies = [
+ "dotnet_debugger",
+ "dsl_ir",
+ "dsl_runtime",
+ "itertools 0.14.0",
+ "memory_reader",
+ "smallvec",
  "thiserror",
 ]
 
@@ -498,7 +514,7 @@ dependencies = [
  "dsl_ir",
  "dsl_rewrite_utils",
  "env_var_flag",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "thiserror",
 ]
 
@@ -510,7 +526,7 @@ dependencies = [
  "dsl_analysis",
  "dsl_ir",
  "dsl_rewrite_utils",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "thiserror",
 ]
 
@@ -532,6 +548,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "dsl_runtime"
+version = "0.1.0"
+dependencies = [
+ "arrayvec",
+ "dotnet_debugger",
+ "dsl_ir",
+ "itertools 0.10.5",
+ "lru 0.14.0",
+ "memory_reader",
+ "thiserror",
+]
+
+[[package]]
 name = "dsl_validation"
 version = "0.1.0"
 dependencies = [
@@ -549,8 +578,8 @@ dependencies = [
  "derive_more",
  "dotnet_debugger",
  "dsl_ir",
- "itertools 0.10.5",
- "lru 0.14.0",
+ "dsl_runtime",
+ "itertools 0.14.0",
  "memory_reader",
  "thiserror",
 ]

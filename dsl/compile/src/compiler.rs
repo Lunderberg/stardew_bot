@@ -1,5 +1,6 @@
 use dotnet_debugger::CachedReader;
 use dsl_analysis::Analysis;
+use dsl_interpreter::Interpreter;
 use dsl_lowering::lowering_passes;
 use dsl_optimize::optimization_passes;
 use dsl_rewrite_utils::{
@@ -104,8 +105,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         }
     }
 
-    pub fn compile(self) -> Result<VirtualMachine, Error> {
-        let reader = self.reader;
+    fn validate_inputs(&self) -> Result<&SymbolicGraph, Error> {
         let expr = self.graph;
 
         if self.show_steps {
@@ -115,6 +115,13 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         expr.validate_unique_parameter_owner_among_reachable_functions()?;
         expr.validate_all_parameters_defined()?;
 
+        Ok(expr)
+    }
+
+    fn legalization(
+        &self,
+        expr: &SymbolicGraph,
+    ) -> Result<SymbolicGraph, Error> {
         // The display of static fields is done similar to C#, which
         // uses the same syntax for specifying static fields, and for
         // specifying namespaces.
@@ -132,7 +139,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         // are required to produce some "namespace.name" of a valid
         // class.
         let expr = expr.rewrite(
-            super::IdentifyStaticField(&Analysis::new(reader))
+            super::IdentifyStaticField(&Analysis::new(self.reader))
                 .apply_recursively(),
         )?;
         expr.validate_only_back_references()?;
@@ -145,19 +152,27 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             );
         }
 
+        Ok(expr)
+    }
+
+    fn cleanup(&self, expr: SymbolicGraph) -> Result<SymbolicGraph, Error> {
         let expr = expr.dead_code_elimination()?;
-        expr.validate(reader)?;
+        expr.validate(self.reader)?;
 
         if self.show_steps {
             println!("----------- After DCE --------------\n{expr}");
         }
         let expr = expr.eliminate_common_subexpressions()?;
-        expr.validate(reader)?;
+        expr.validate(self.reader)?;
         if self.show_steps {
             println!("----------- After CSE --------------\n{expr}");
         }
 
-        let analysis = Analysis::new(reader);
+        Ok(expr)
+    }
+
+    fn lowering(&self, expr: SymbolicGraph) -> Result<SymbolicGraph, Error> {
+        let analysis = Analysis::new(self.reader);
 
         let optional_optimizations = optimization_passes(&analysis)
             .map_err(|err| -> Error { err.into() });
@@ -173,32 +188,19 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
             self.apply_rewrites(expr, mandatory_lowering)?
         };
 
-        expr.validate(reader)?;
+        expr.validate(self.reader)?;
 
         if self.show_steps {
             println!("----------- After Simplifcations --------------\n{expr}");
         }
 
-        let expr = expr.dead_code_elimination()?;
-        expr.validate(reader)?;
+        Ok(expr)
+    }
 
-        if self.show_steps {
-            println!("----------- After DCE --------------\n{expr}");
-        }
-
-        let expr = expr.eliminate_common_subexpressions()?;
-        expr.validate(reader)?;
-
-        if self.show_steps {
-            println!("----------- After CSE --------------\n{expr}");
-            println!(
-                "----------- Before VM Conversion --------------\n{}",
-                expr.printer()
-                    .expand_all_expressions()
-                    .number_all_expressions()
-            );
-        }
-
+    fn to_virtual_machine(
+        &self,
+        expr: SymbolicGraph,
+    ) -> Result<VirtualMachine, Error> {
         // Virtual machine, in terms of sequential operations.
         let vm = expr.to_virtual_machine(self.show_steps)?;
 
@@ -207,5 +209,23 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         }
 
         Ok(vm)
+    }
+
+    pub fn compile(self) -> Result<VirtualMachine, Error> {
+        let expr = self.validate_inputs()?;
+        let expr = self.legalization(expr)?;
+        let expr = self.cleanup(expr)?;
+        let expr = self.lowering(expr)?;
+        let expr = self.cleanup(expr)?;
+        self.to_virtual_machine(expr)
+    }
+
+    pub fn interpreter(self) -> Result<Interpreter, Error> {
+        let expr = self.validate_inputs()?;
+        let expr = self.legalization(expr)?;
+        let expr = self.cleanup(expr)?;
+        let expr = self.lowering(expr)?;
+        let expr = self.cleanup(expr)?;
+        Ok(Interpreter::new(expr))
     }
 }

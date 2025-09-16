@@ -10,6 +10,7 @@ itertools = "*"
 dotnet_debugger = { path = "../../dotnet_debugger" }
 env_var_flag = { path = "../../env_var_flag" }
 
+dsl_interpreter = { path = "../interpreter" }
 dsl_ir = { path = "../ir" }
 dsl_lowering = { path = "../lowering" }
 dsl_optimize = { path = "../optimize" }

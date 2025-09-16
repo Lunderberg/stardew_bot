@@ -15,15 +15,70 @@ impl GraphRewrite for ConstantFold {
         _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Error> {
         let opt_value = match expr {
+            &ExprKind::PrimCast {
+                value: SymbolicValue::Const(prim),
+                prim_type,
+            } => Some(prim.prim_cast(prim_type)?.into()),
+
             &ExprKind::Add {
-                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(a)),
-                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(b)),
-            } => Some((a + b).into()),
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_add(b)?.into()),
 
             &ExprKind::Mul {
-                lhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(a)),
-                rhs: SymbolicValue::Const(RuntimePrimValue::NativeUInt(b)),
-            } => Some((a * b).into()),
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_mul(b)?.into()),
+
+            &ExprKind::Div {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_div(b)?.into()),
+
+            &ExprKind::Mod {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_mod(b)?.into()),
+
+            &ExprKind::Equal {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_eq(b)?.into()),
+
+            &ExprKind::NotEqual {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_ne(b)?.into()),
+
+            &ExprKind::GreaterThan {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_gt(b)?.into()),
+
+            &ExprKind::LessThan {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_lt(b)?.into()),
+
+            &ExprKind::GreaterThanOrEqual {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_ge(b)?.into()),
+
+            &ExprKind::LessThanOrEqual {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_le(b)?.into()),
+
+            &ExprKind::And {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_and(b)?.into()),
+
+            &ExprKind::Or {
+                lhs: SymbolicValue::Const(a),
+                rhs: SymbolicValue::Const(b),
+            } => Some(a.try_or(b)?.into()),
 
             // lhs + 0 => lhs
             // 0 + rhs => rhs

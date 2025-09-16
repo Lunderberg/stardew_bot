@@ -1,27 +1,19 @@
-use std::{
-    any::Any,
-    collections::HashMap,
-    fmt::Display,
-    mem::MaybeUninit,
-    num::NonZeroUsize,
-    ops::{Range, RangeFrom},
-};
+use std::{collections::HashMap, fmt::Display, mem::MaybeUninit};
 
 use arrayvec::ArrayVec;
 use derive_more::derive::From;
-use itertools::{Either, Itertools};
-use lru::LruCache;
+use dsl_runtime::{Runtime, RuntimeFunc};
+use itertools::Either;
 
-use dotnet_debugger::{CachedReader, MethodTable, RuntimeString};
+use dotnet_debugger::{MethodTable, RuntimeString};
 use memory_reader::{OwnedBytes, Pointer, TypedPointer};
 
 use dsl_ir::{
     ExposedNativeFunction, ExposedNativeObject, NativeFunction,
-    RuntimePrimType, RuntimePrimValue, RustNativeObject, RustType, StackValue,
-    WrappedNativeFunction,
+    RuntimePrimType, RuntimePrimValue, StackValue, WrappedNativeFunction,
 };
 
-use crate::Error;
+use crate::{Error, StackIndex, VMResults};
 
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
@@ -58,13 +50,8 @@ pub struct VirtualMachine {
 pub struct VMEvaluator<'a> {
     vm: &'a VirtualMachine,
     current_instruction: InstructionIndex,
-    reader: Box<dyn VMReader + 'a>,
+    reader: Box<dyn dsl_runtime::Reader + 'a>,
     values: VMResults,
-}
-
-pub struct VMResults {
-    values: Vec<Option<StackValue>>,
-    num_instructions_evaluated: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, From)]
@@ -75,9 +62,6 @@ pub enum VMArg {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct InstructionIndex(pub usize);
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct StackIndex(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionIndex(pub usize);
@@ -292,87 +276,21 @@ impl NormalizeStackIndex for usize {
     }
 }
 
-impl VMResults {
-    pub fn get(&self, index: impl NormalizeStackIndex) -> Option<&StackValue> {
-        let index = index.normalize_stack_index();
-        self[index].as_ref()
-    }
+trait RuntimeOutputExt {
+    fn collect_native_function_args_impl<'a>(
+        &'a mut self,
+        vm_args: &[VMArg],
+        inline_consts: &'a mut [Option<StackValue>],
+        collected_args: &mut [MaybeUninit<&'a mut Option<StackValue>>],
+    );
 
-    pub fn get_as<'a, T>(
-        &'a self,
-        index: impl NormalizeStackIndex,
-    ) -> Result<Option<T>, Error>
-    where
-        &'a StackValue: TryInto<T>,
-        Error: From<<&'a StackValue as TryInto<T>>::Error>,
-    {
-        let index = index.normalize_stack_index();
-        let opt_value = self[index]
-            .as_ref()
-            .map(|value| value.try_into())
-            .transpose()?;
-
-        Ok(opt_value)
-    }
-
-    pub fn get_any(
-        &self,
-        index: impl NormalizeStackIndex,
-    ) -> Result<Option<&dyn Any>, Error> {
-        self.get_as(index)
-    }
-
-    pub fn take_obj<T: RustNativeObject>(
-        &mut self,
-        index: impl NormalizeStackIndex,
-    ) -> Result<Option<T>, Error> {
-        let index = index.normalize_stack_index();
-
-        Ok(self[index]
-            .take()
-            .map(|value| match value {
-                StackValue::Native(native) => {
-                    native.downcast::<T>().map_err(|native| {
-                        Error::IncorrectOutputType {
-                            attempted: RustType::new::<T>().into(),
-                            actual: native.runtime_type(),
-                        }
-                    })
-                }
-                other => Err(Error::IncorrectOutputType {
-                    attempted: RustType::new::<T>().into(),
-                    actual: other.runtime_type(),
-                }),
-            })
-            .transpose()?
-            .map(|boxed| *boxed))
-    }
-
-    pub fn get_obj<T: RustNativeObject>(
-        &self,
-        index: impl NormalizeStackIndex,
-    ) -> Result<Option<&T>, Error> {
-        let index = index.normalize_stack_index();
-        let opt_value = self[index].as_ref();
-
-        let opt_obj = opt_value
-            .map(|value| match value {
-                StackValue::Native(native) => native
-                    .downcast_ref::<T>()
-                    .ok_or_else(|| Error::IncorrectOutputType {
-                        attempted: RustType::new::<T>().into(),
-                        actual: native.runtime_type(),
-                    }),
-                other => Err(Error::IncorrectOutputType {
-                    attempted: RustType::new::<T>().into(),
-                    actual: other.runtime_type(),
-                }),
-            })
-            .transpose()?;
-
-        Ok(opt_obj)
-    }
-
+    fn collect_native_function_args<'a>(
+        &'a mut self,
+        args: &[VMArg],
+        inline_consts: &'a mut [Option<StackValue>],
+    ) -> Vec<&'a mut Option<StackValue>>;
+}
+impl RuntimeOutputExt for VMResults {
     fn collect_native_function_args_impl<'a>(
         &'a mut self,
         vm_args: &[VMArg],
@@ -419,7 +337,7 @@ impl VMResults {
         arg_info_array.sort_by_key(|info| info.stack_index);
 
         let mut prev_stack_index = None;
-        let mut remaining_values = &mut self.values[..];
+        let mut remaining_values = &mut self[..];
         for info in arg_info_array {
             let split_index = match prev_stack_index {
                 Some(prev) => info.stack_index - prev,
@@ -449,10 +367,6 @@ impl VMResults {
             references.set_len(args.len());
         }
         references
-    }
-
-    pub fn num_instructions_evaluated(&self) -> usize {
-        self.num_instructions_evaluated
     }
 }
 
@@ -578,423 +492,6 @@ impl VirtualMachineBuilder {
     }
 }
 
-pub trait VMReader {
-    fn read_bytes(
-        &mut self,
-        loc: Pointer,
-        output: &mut [u8],
-    ) -> Result<(), Error>;
-
-    fn read_byte_regions(
-        &mut self,
-        regions: &mut [(Pointer, &mut [u8])],
-    ) -> Result<(), Error> {
-        for (ptr, buf) in regions.iter_mut() {
-            self.read_bytes(*ptr, buf)?;
-        }
-        Ok(())
-    }
-
-    /// From the specified location, how many bytes are safe to read?
-    /// Used for caching, when reading more bytes than requested may
-    /// be beneficial, in case they can be returned for future
-    /// requests.
-    fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
-        loc..loc
-    }
-
-    // TODO: Remove the need for this method.  Would be better for
-    // everything to be implemented/implementable in terms of
-    // `read_bytes`.
-    fn is_dotnet_base_class_of(
-        &mut self,
-        parent_class_ptr: TypedPointer<MethodTable>,
-        child_class_ptr: TypedPointer<MethodTable>,
-    ) -> Result<bool, Error>;
-}
-
-impl VMReader for CachedReader<'_> {
-    fn read_bytes(
-        &mut self,
-        loc: Pointer,
-        output: &mut [u8],
-    ) -> Result<(), Error> {
-        let reader: &memory_reader::MemoryReader = self.as_ref();
-        Ok(reader.read_exact(loc, output)?)
-    }
-
-    fn read_byte_regions(
-        &mut self,
-        regions: &mut [(Pointer, &mut [u8])],
-    ) -> Result<(), Error> {
-        let reader: &memory_reader::MemoryReader = self.as_ref();
-        Ok(reader.read_regions(regions)?)
-    }
-
-    fn safe_read_extent(&self, loc: Pointer) -> Range<Pointer> {
-        let reader: &memory_reader::MemoryReader = self.as_ref();
-        reader.find_containing_region_range(loc).unwrap_or(loc..loc)
-    }
-
-    fn is_dotnet_base_class_of(
-        &mut self,
-        parent_class_ptr: TypedPointer<MethodTable>,
-        child_class_ptr: TypedPointer<MethodTable>,
-    ) -> Result<bool, Error> {
-        self.is_base_of(parent_class_ptr, child_class_ptr)
-            .map_err(Into::into)
-    }
-}
-
-struct DummyReader;
-impl VMReader for DummyReader {
-    fn read_bytes(
-        &mut self,
-        _loc: Pointer,
-        _output: &mut [u8],
-    ) -> Result<(), Error> {
-        Err(Error::ReadOccurredDuringLocalVMEvaluation)
-    }
-
-    fn is_dotnet_base_class_of(
-        &mut self,
-        _parent_class_ptr: TypedPointer<MethodTable>,
-        _child_class_ptr: TypedPointer<MethodTable>,
-    ) -> Result<bool, Error> {
-        Err(Error::ReadOccurredDuringLocalVMEvaluation)
-    }
-}
-
-const PAGE_SIZE: usize = 4096;
-const NUM_CACHE_PAGES: usize = 1024;
-
-struct CachedVMReader<Inner> {
-    inner: Inner,
-
-    /// The cached data
-    cache: Vec<u8>,
-
-    /// Lookup from remote address to index within the cache
-    lru_cache: LruCache<Pointer, usize>,
-}
-
-impl<Inner> CachedVMReader<Inner> {
-    fn new(inner: Inner) -> Self {
-        let cache = vec![0; NUM_CACHE_PAGES * PAGE_SIZE];
-
-        // Initialize the cache with dummy pointers, and valid indices.
-        let mut lru_cache =
-            LruCache::new(NonZeroUsize::new(NUM_CACHE_PAGES).unwrap());
-        for i in 0..NUM_CACHE_PAGES {
-            lru_cache.push(Pointer::null() + 1 + i, i * PAGE_SIZE);
-        }
-
-        Self {
-            inner,
-            cache,
-            lru_cache,
-        }
-    }
-
-    fn from_cache<'a>(
-        lru_cache: &mut LruCache<Pointer, usize>,
-        cache: &'a [u8],
-        range: Range<Pointer>,
-    ) -> Option<(&'a [u8], &'a [u8])> {
-        let page_start = range.start.prev_multiple_of(PAGE_SIZE);
-        let page_end = range.end.next_multiple_of(PAGE_SIZE);
-
-        let num_pages = (page_end - page_start) / PAGE_SIZE;
-
-        let empty_slice = &[0u8; 0];
-
-        match num_pages {
-            0 => Some((empty_slice, empty_slice)),
-            1 => {
-                let page_index = lru_cache.get(&page_start)?;
-                let cache_index = page_index + (range.start - page_start);
-                let num_bytes = range.end - range.start;
-                let from_cache = &cache[cache_index..cache_index + num_bytes];
-                Some((from_cache, empty_slice))
-            }
-            2 => {
-                let page_boundary = page_start + PAGE_SIZE;
-                let num_bytes_page_0 = page_boundary - range.start;
-                let num_bytes_page_1 = range.end - page_boundary;
-
-                let page_0_start_index = *lru_cache.get(&page_start)?;
-                let page_0_end_index = page_0_start_index + PAGE_SIZE;
-                let cache_range_0 =
-                    page_0_end_index - num_bytes_page_0..page_0_end_index;
-
-                let page_1_start_index = *lru_cache.get(&page_boundary)?;
-                let cache_range_1 =
-                    page_1_start_index..page_1_start_index + num_bytes_page_1;
-
-                let slice_0 = &cache[cache_range_0];
-                let slice_1 = &cache[cache_range_1];
-
-                Some((slice_0, slice_1))
-            }
-            _ => panic!(
-                "Region in cached read may cross at most one page boundary, \
-                 but pointer range from {} to {} consists of {} bytes, \
-                 and would require reading from {} cached pages.",
-                range.start,
-                range.end,
-                range.end - range.start,
-                num_pages,
-            ),
-        }
-    }
-
-    fn choose_cache_range(requested_range: Range<Pointer>) -> Range<Pointer> {
-        let page_start = requested_range.start.prev_multiple_of(PAGE_SIZE);
-        let page_end = requested_range.end.next_multiple_of(PAGE_SIZE);
-        page_start..page_end
-    }
-
-    fn iter_pages(region: Range<Pointer>) -> impl Iterator<Item = Pointer> {
-        let start = region.start.prev_multiple_of(PAGE_SIZE);
-        let end = region.end;
-        (0..)
-            .map(move |i| start.checked_add(i * PAGE_SIZE))
-            .take_while(|opt_ptr| opt_ptr.is_some())
-            .map(|opt_ptr| opt_ptr.unwrap())
-            .take_while(move |ptr| *ptr < end)
-    }
-}
-
-impl<Inner> VMReader for CachedVMReader<Inner>
-where
-    Inner: VMReader,
-{
-    fn read_byte_regions(
-        &mut self,
-        regions: &mut [(Pointer, &mut [u8])],
-    ) -> Result<(), Error> {
-        assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
-
-        const MAX_PAGES_PER_READ: usize = 16;
-        let mut to_read =
-            ArrayVec::<(Pointer, usize), MAX_PAGES_PER_READ>::new();
-        const MAX_DELAYED_UPDATES: usize = 64;
-        let mut update_after_read =
-            ArrayVec::<usize, MAX_DELAYED_UPDATES>::new();
-
-        const _: () = assert!(
-            MAX_PAGES_PER_READ < NUM_CACHE_PAGES,
-            "Cannot read more pages in a batched read \
-             than are contained in the cache.."
-        );
-
-        macro_rules! flush {
-            () => {{
-                to_read.sort_by_key(|(_, index)| *index);
-
-                {
-                    let mut subregions = ArrayVec::<
-                        (Pointer, &mut [u8]),
-                        MAX_PAGES_PER_READ,
-                    >::new();
-
-                    let mut prev_index = None;
-                    let mut remaining_slice = &mut self.cache[..];
-                    for (page, index) in to_read.iter().cloned() {
-                        let split = match prev_index {
-                            Some(prev_index) => index - prev_index,
-                            None => index + PAGE_SIZE,
-                        };
-                        assert!(split >= PAGE_SIZE);
-                        assert!(
-                            split <= remaining_slice.len(),
-                            "Split location {split}, \
-                             derived from index={index} and prev_index={prev_index:?}, \
-                             exceeds remaining length {}.  \
-                             Initial length {} has been consumed at indices [{}].",
-                            remaining_slice.len(),
-                            100usize*PAGE_SIZE,
-                            to_read.iter().map(|(_,index)| *index).format(", "),
-                        );
-                        let (left, right) = remaining_slice.split_at_mut(split);
-                        let page_slice = &mut left[split-PAGE_SIZE..];
-                        subregions.push((page, page_slice));
-                        remaining_slice = right;
-                        prev_index = Some(index);
-                    }
-
-                    self.inner.read_byte_regions(&mut subregions)?;
-                }
-
-                for (page, index) in to_read.iter().cloned() {
-                    let evicted = self.lru_cache.push(page, index);
-                    assert!(
-                        evicted.is_none(),
-                        "No evictions should be required, \
-                         since this only contains pages not in cache, \
-                         and LRU was already popped to decide the index.  \
-                         Pages in current batch = [{}].",
-                        to_read.iter().map(|(page,_)| *page)
-                            .counts()
-                            .into_iter()
-                            .sorted_by_key(|(page,counts)| (std::cmp::Reverse(*counts),*page))
-                            .map(|(page,counts)| format!("{page}: {counts}"))
-                            .format(", ")
-                    );
-                }
-
-                for i in update_after_read.iter().cloned() {
-                    let loc = regions[i].0;
-                    let output = &mut regions[i].1;
-                    let remote_range = loc..loc + output.len();
-                    let (cache_a, cache_b) = Self::from_cache(
-                        &mut self.lru_cache,
-                        &self.cache,
-                        remote_range.clone(),
-                    )
-                    .expect("Cache entry should be populated");
-                    output[..cache_a.len()].copy_from_slice(cache_a);
-                    output[cache_a.len()..].copy_from_slice(cache_b);
-                }
-
-                to_read.clear();
-                update_after_read.clear();
-            }};
-        }
-
-        for i in 0..regions.len() {
-            // Looping over indices rather than `regions.iter_mut()`,
-            // because ownership of `regions` needs to be dropped
-            // whenever flushing out the collected
-            // `update_after_read`.
-            let loc = regions[i].0;
-            let output = &mut regions[i].1;
-            let remote_range = loc..loc + output.len();
-            if let Some((cache_a, cache_b)) = Self::from_cache(
-                &mut self.lru_cache,
-                &self.cache,
-                remote_range.clone(),
-            ) {
-                output[..cache_a.len()].copy_from_slice(cache_a);
-                output[cache_a.len()..].copy_from_slice(cache_b);
-                continue;
-            }
-
-            for page in Self::iter_pages(remote_range.clone()) {
-                let already_in_next_batch =
-                    to_read.iter().any(|(queued_page, _)| *queued_page == page);
-                if !already_in_next_batch {
-                    let index = self
-                        .lru_cache
-                        .pop_lru()
-                        .map(|(_, index)| index)
-                        .expect("Cache should never be empty");
-                    to_read.push((page, index));
-                }
-            }
-            update_after_read.push(i);
-
-            if to_read.len() + 1 >= to_read.capacity()
-                || update_after_read.len() == update_after_read.capacity()
-            {
-                flush!();
-                assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
-            }
-        }
-
-        flush!();
-        assert_eq!(self.lru_cache.len(), NUM_CACHE_PAGES);
-
-        Ok(())
-    }
-
-    fn read_bytes(
-        &mut self,
-        loc: Pointer,
-        output: &mut [u8],
-    ) -> Result<(), Error> {
-        let range_end = loc
-            .checked_add(output.len())
-            .ok_or_else(|| Error::InvalidPointerAddition(loc, output.len()))?;
-        let remote_range = loc..range_end;
-        let cache_range = Self::choose_cache_range(remote_range.clone());
-        let num_pages = (cache_range.end - cache_range.start) / PAGE_SIZE;
-
-        if num_pages > self.lru_cache.len().min(2) {
-            // This single read would exceed the capacity of the
-            // entire cache (e.g. a large string), or would exceed the
-            // size of a single cached read.  For a read occupies
-            // several entire page, it probably wouldn't be shared by
-            // other objects, so we can just let it skip the cache
-            // altogether.
-            return self.inner.read_bytes(loc, output);
-        }
-
-        for page in Self::iter_pages(remote_range.clone()) {
-            self.lru_cache.promote(&page);
-        }
-
-        assert!(
-            num_pages <= self.lru_cache.len(),
-            "Read of {} bytes would use {num_pages} pages, \
-             more than are the {} pages in the cache.",
-            output.len(),
-            self.lru_cache.len(),
-        );
-
-        for page in Self::iter_pages(remote_range.clone()) {
-            if self.lru_cache.contains(&page) {
-                continue;
-            }
-
-            let index = self
-                .lru_cache
-                .pop_lru()
-                .map(|(_, index)| index)
-                .expect("Cache should never be empty");
-
-            let res = self
-                .inner
-                .read_bytes(page, &mut self.cache[index..index + PAGE_SIZE]);
-
-            if res.is_ok() {
-                self.lru_cache.push(page, index);
-            } else {
-                self.lru_cache.push(page + 1, index);
-                self.lru_cache.demote(&(page + 1));
-            }
-
-            res?;
-        }
-
-        let (cache_a, cache_b) = Self::from_cache(
-            &mut self.lru_cache,
-            &self.cache,
-            remote_range.clone(),
-        )
-        .unwrap_or_else(|| {
-            panic!(
-                "Cache should be populated at this point, \
-                     but doesn't contain {}-{}.",
-                remote_range.start, remote_range.end,
-            )
-        });
-
-        output[..cache_a.len()].copy_from_slice(cache_a);
-        output[cache_a.len()..].copy_from_slice(cache_b);
-        Ok(())
-    }
-
-    fn is_dotnet_base_class_of(
-        &mut self,
-        parent_class_ptr: TypedPointer<MethodTable>,
-        child_class_ptr: TypedPointer<MethodTable>,
-    ) -> Result<bool, Error> {
-        self.inner
-            .is_dotnet_base_class_of(parent_class_ptr, child_class_ptr)
-    }
-}
-
 impl VirtualMachine {
     pub fn builder() -> VirtualMachineBuilder {
         VirtualMachineBuilder {
@@ -1022,18 +519,12 @@ impl VirtualMachine {
             .get(name)
             .ok_or_else(|| Error::NoSuchFunction(name.into()))?;
 
-        let values = {
-            let stack = (0..self.stack_size).map(|_| None).collect();
-            VMResults {
-                values: stack,
-                num_instructions_evaluated: 0,
-            }
-        };
+        let values = VMResults::new(self.stack_size);
 
         Ok(VMEvaluator {
             vm: self,
             current_instruction: entry_point,
-            reader: Box::new(DummyReader),
+            reader: Box::new(dsl_runtime::DummyReader),
             values,
         })
     }
@@ -1046,8 +537,39 @@ impl VirtualMachine {
 
     /// Evaluate the virtual machine, reading from the remote process
     /// as necessary.
-    pub fn evaluate(&self, reader: impl VMReader) -> Result<VMResults, Error> {
+    pub fn evaluate(
+        &self,
+        reader: impl dsl_runtime::Reader,
+    ) -> Result<VMResults, Error> {
         self.get_function("main")?.with_reader(reader).evaluate()
+    }
+}
+
+impl Runtime for VirtualMachine {
+    type Error = Error;
+
+    type Func<'a>
+        = VMEvaluator<'a>
+    where
+        Self: 'a;
+
+    fn get_function<'a>(
+        &'a self,
+        name: &str,
+    ) -> Result<Self::Func<'a>, Self::Error> {
+        self.get_function(name)
+    }
+}
+
+impl<'a> RuntimeFunc<'a> for VMEvaluator<'a> {
+    type Error = Error;
+
+    fn with_reader(self, reader: impl dsl_runtime::Reader + 'a) -> Self {
+        self.with_reader(reader)
+    }
+
+    fn evaluate(self) -> Result<VMResults, Self::Error> {
+        self.evaluate()
     }
 }
 
@@ -1121,10 +643,12 @@ macro_rules! define_comparison_op {
 }
 
 impl<'a> VMEvaluator<'a> {
-    pub fn with_reader(self, reader: impl VMReader + 'a) -> VMEvaluator<'a> {
-        let reader = CachedVMReader::new(reader);
+    pub fn with_reader(
+        self,
+        reader: impl dsl_runtime::Reader + 'a,
+    ) -> VMEvaluator<'a> {
         VMEvaluator {
-            reader: Box::new(reader),
+            reader: Box::new(reader.with_cache()),
             ..self
         }
     }
@@ -1134,7 +658,7 @@ impl<'a> VMEvaluator<'a> {
             let instruction = &self.vm.instructions[self.current_instruction.0];
             let mut next_instruction =
                 InstructionIndex(self.current_instruction.0 + 1);
-            self.values.num_instructions_evaluated += 1;
+            self.values.increment_eval_counter();
 
             match instruction {
                 Instruction::NoOp => {}
@@ -1260,10 +784,7 @@ impl<'a> VMEvaluator<'a> {
                         .iter_mut()
                         .map(|opt_mut| opt_mut.take())
                         .collect();
-                    return Ok(VMResults {
-                        values: outputs,
-                        ..self.values
-                    });
+                    return Ok(self.values.replace(outputs));
                 }
             }
 
@@ -2032,11 +1553,6 @@ impl Display for InstructionIndex {
         write!(f, "op_{}", self.0)
     }
 }
-impl Display for StackIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "stack[pc + {}]", self.0)
-    }
-}
 impl Display for FunctionIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "native_functions[{}]", self.0)
@@ -2204,153 +1720,6 @@ impl Display for Instruction {
                     Ok(())
                 }
             },
-        }
-    }
-}
-
-impl IntoIterator for VMResults {
-    type Item = <Vec<Option<StackValue>> as IntoIterator>::Item;
-
-    type IntoIter = <Vec<Option<StackValue>> as IntoIterator>::IntoIter;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.values.into_iter()
-    }
-}
-
-impl std::ops::Deref for VMResults {
-    type Target = Vec<Option<StackValue>>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.values
-    }
-}
-impl std::ops::DerefMut for VMResults {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.values
-    }
-}
-
-impl std::ops::Index<usize> for VMResults {
-    type Output = Option<StackValue>;
-
-    fn index(&self, index: usize) -> &Self::Output {
-        &self.values[index]
-    }
-}
-impl std::ops::IndexMut<usize> for VMResults {
-    fn index_mut(&mut self, index: usize) -> &mut Self::Output {
-        &mut self.values[index]
-    }
-}
-
-impl std::ops::Index<StackIndex> for VMResults {
-    type Output = Option<StackValue>;
-
-    fn index(&self, index: StackIndex) -> &Self::Output {
-        &self.values[index.0]
-    }
-}
-impl std::ops::IndexMut<StackIndex> for VMResults {
-    fn index_mut(&mut self, index: StackIndex) -> &mut Self::Output {
-        &mut self.values[index.0]
-    }
-}
-impl std::ops::Index<Range<StackIndex>> for VMResults {
-    type Output = [Option<StackValue>];
-
-    fn index(&self, index: std::ops::Range<StackIndex>) -> &Self::Output {
-        &self.values[index.start.0..index.end.0]
-    }
-}
-impl std::ops::IndexMut<Range<StackIndex>> for VMResults {
-    fn index_mut(&mut self, index: Range<StackIndex>) -> &mut Self::Output {
-        &mut self.values[index.start.0..index.end.0]
-    }
-}
-impl std::ops::Index<RangeFrom<StackIndex>> for VMResults {
-    type Output = [Option<StackValue>];
-
-    fn index(&self, index: std::ops::RangeFrom<StackIndex>) -> &Self::Output {
-        &self.values[index.start.0..]
-    }
-}
-impl std::ops::IndexMut<RangeFrom<StackIndex>> for VMResults {
-    fn index_mut(&mut self, index: RangeFrom<StackIndex>) -> &mut Self::Output {
-        &mut self.values[index.start.0..]
-    }
-}
-
-impl std::ops::Add<usize> for StackIndex {
-    type Output = StackIndex;
-
-    fn add(self, rhs: usize) -> Self::Output {
-        StackIndex(self.0 + rhs)
-    }
-}
-impl std::ops::Sub for StackIndex {
-    type Output = usize;
-
-    fn sub(self, rhs: Self) -> Self::Output {
-        self.0 - rhs.0
-    }
-}
-
-macro_rules! vm_results_to_prim {
-    ($prim:ty) => {
-        impl TryInto<$prim> for VMResults {
-            type Error = Error;
-
-            fn try_into(mut self) -> Result<$prim, Self::Error> {
-                let num_elements = self.values.len();
-                if num_elements == 1 {
-                    self.values[0]
-                        .take()
-                        .ok_or(Error::AttemptedConversionOfMissingValue)?
-                        .try_into()
-                        .map_err(Into::into)
-                } else {
-                    Err(Error::IncorrectNumberOfResults {
-                        expected: 1,
-                        actual: num_elements,
-                    })
-                }
-            }
-        }
-    };
-}
-
-vm_results_to_prim!(bool);
-vm_results_to_prim!(u8);
-vm_results_to_prim!(u16);
-vm_results_to_prim!(u32);
-vm_results_to_prim!(u64);
-vm_results_to_prim!(usize);
-vm_results_to_prim!(i8);
-vm_results_to_prim!(i16);
-vm_results_to_prim!(i32);
-vm_results_to_prim!(i64);
-vm_results_to_prim!(isize);
-vm_results_to_prim!(f32);
-vm_results_to_prim!(f64);
-vm_results_to_prim!(Pointer);
-
-impl TryInto<Box<dyn Any>> for VMResults {
-    type Error = Error;
-
-    fn try_into(mut self) -> Result<Box<dyn Any>, Self::Error> {
-        let num_elements = self.values.len();
-        if num_elements == 1 {
-            self.values[0]
-                .take()
-                .ok_or(Error::AttemptedConversionOfMissingValue)?
-                .try_into()
-                .map_err(Into::into)
-        } else {
-            Err(Error::IncorrectNumberOfResults {
-                expected: 1,
-                actual: num_elements,
-            })
         }
     }
 }
