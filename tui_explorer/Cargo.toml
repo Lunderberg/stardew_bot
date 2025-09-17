@@ -37,4 +37,4 @@ name = "benchmarks"
 harness = false
 
 [dev-dependencies]
-criterion = {version = "0.3", features=['html_reports']}
+criterion = {version = "0.7", features=['html_reports']}

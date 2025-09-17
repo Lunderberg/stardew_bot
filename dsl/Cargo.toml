@@ -33,3 +33,8 @@ dsl_vm = { path = "vm" }
 [dev-dependencies]
 paste = "1.0.15"
 indoc = "2"
+criterion = {version = "0.7", features=['html_reports']}
+
+[[bench]]
+name = "benchmarks"
+harness = false
