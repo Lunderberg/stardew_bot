@@ -59,6 +59,7 @@ macro_rules! generate_tests {
         $generator! { reduction_with_enclosed_variable_from_inlined_function }
         $generator! { reduction_with_identical_subexpr_in_condition_and_branch }
         $generator! { reduction_with_last_usage_of_var }
+        $generator! { reduction_with_closure }
         $generator! { reduction_with_none_check_in_map }
         $generator! { reduction_with_numeric_conditional_in_map }
         $generator! { sum_of_integers_in_native_function_mutating_arg }
@@ -1292,11 +1293,49 @@ pub fn reduction_with_last_usage_of_var(
                 .reduce(0, |a:usize, b:usize| a+1);
             (0..10)
                 .map(|i:usize| {
-
                     let y = x+x;
                     let z = y+y;
                     i*z
                 })
+                .reduce(0, |a:usize, b:usize| a+b)
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected = (0..10)
+        .map(|i| {
+            let x = 5 + 5;
+            let y = x + x;
+            let z = y + y;
+            i * z
+        })
+        .sum::<usize>();
+
+    assert_eq!(result, expected);
+    Ok(())
+}
+
+pub fn reduction_with_closure(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            let gen_closure = |x: usize| {
+                |i:usize| {
+                    let y = x+x;
+                    let z = y+y;
+                    i*z
+                }
+            };
+            let x = (0..10)
+                .reduce(0, |a:usize, b:usize| a+1);
+            let closure = gen_closure(x);
+            (0..10)
+                .map(closure)
                 .reduce(0, |a:usize, b:usize| a+b)
         }
     })?;
