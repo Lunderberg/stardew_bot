@@ -1,5 +1,5 @@
 [package]
-name = "dsl_lowering"
+name = "dsl_passes"
 version = "0.1.0"
 edition = "2024"
 

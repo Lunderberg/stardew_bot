@@ -40,8 +40,8 @@ pub enum Error {
     #[error("dsl::compile::Error( {0} )")]
     DslCompile(#[from] dsl::compile::Error),
 
-    #[error("dsl::optimize::Error( {0} )")]
-    DslOptimize(#[from] dsl::optimize::Error),
+    #[error("dsl::passes::Error( {0} )")]
+    DslPasses(#[from] dsl::passes::Error),
 
     #[error("stardew_utils::Error{{ {err} }}")]
     StardewUtilError {

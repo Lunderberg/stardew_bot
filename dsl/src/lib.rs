@@ -6,8 +6,7 @@ pub use dsl_compile as compile;
 pub use dsl_graph_comparison as graph_comparison;
 pub use dsl_interpreter as interpreter;
 pub use dsl_ir as ir;
-pub use dsl_lowering as lowering;
-pub use dsl_optimize as optimize;
+pub use dsl_passes as passes;
 pub use dsl_rewrite_utils as rewrite_utils;
 
 pub use dsl_runtime as runtime;

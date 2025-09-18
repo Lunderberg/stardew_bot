@@ -1,8 +1,7 @@
 use dotnet_debugger::CachedReader;
 use dsl_analysis::Analysis;
 use dsl_interpreter::Interpreter;
-use dsl_lowering::lowering_passes;
-use dsl_optimize::optimization_passes;
+use dsl_passes::{lowering_passes, optimization_passes};
 use dsl_rewrite_utils::{
     GraphRewrite, SymbolicGraphCSE as _, SymbolicGraphDCE as _,
     SymbolicGraphRewrite as _,

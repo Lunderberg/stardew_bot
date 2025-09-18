@@ -1,7 +1,7 @@
 use itertools::Itertools;
 
 use dsl::{
-    optimize::SymbolicGraphSimplify as _, RuntimePrimValue, SymbolicGraph,
+    passes::SymbolicGraphSimplify as _, RuntimePrimValue, SymbolicGraph,
     SymbolicGraphCompile as _, VirtualMachine,
 };
 use ratatui::{

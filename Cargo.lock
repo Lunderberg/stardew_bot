@@ -471,8 +471,7 @@ dependencies = [
  "dsl_graph_comparison",
  "dsl_interpreter",
  "dsl_ir",
- "dsl_lowering",
- "dsl_optimize",
+ "dsl_passes",
  "dsl_proc_macros",
  "dsl_rewrite_utils",
  "dsl_runtime",
@@ -509,8 +508,7 @@ dependencies = [
  "dsl_analysis",
  "dsl_interpreter",
  "dsl_ir",
- "dsl_lowering",
- "dsl_optimize",
+ "dsl_passes",
  "dsl_rewrite_utils",
  "dsl_validation",
  "dsl_vm",
@@ -552,7 +550,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "dsl_lowering"
+name = "dsl_passes"
 version = "0.1.0"
 dependencies = [
  "dll_unpacker",
@@ -561,19 +559,7 @@ dependencies = [
  "dsl_ir",
  "dsl_rewrite_utils",
  "env_var_flag",
- "itertools 0.14.0",
- "thiserror",
-]
-
-[[package]]
-name = "dsl_optimize"
-version = "0.1.0"
-dependencies = [
- "dotnet_debugger",
- "dsl_analysis",
- "dsl_ir",
- "dsl_rewrite_utils",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "thiserror",
 ]
 

@@ -12,8 +12,7 @@ env_var_flag = { path = "../../env_var_flag" }
 
 dsl_interpreter = { path = "../interpreter" }
 dsl_ir = { path = "../ir" }
-dsl_lowering = { path = "../lowering" }
-dsl_optimize = { path = "../optimize" }
+dsl_passes = { path = "../passes" }
 dsl_analysis = { path = "../analysis" }
 dsl_rewrite_utils = { path = "../rewrite_utils" }
 dsl_validation = { path = "../validation" }

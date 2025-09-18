@@ -1,3 +1,4 @@
+
 [workspace]
 members = [
   "dll_unpacker",
@@ -7,8 +8,7 @@ members = [
   "dsl/compile",
   "dsl/graph_comparison",
   "dsl/ir",
-  "dsl/lowering",
-  "dsl/optimize",
+  "dsl/passes",
   "dsl/proc_macros",
   "dsl/rewrite_utils",
   "dsl/validation",

@@ -21,11 +21,8 @@ pub enum Error {
     #[error("dsl::validation::Error( {0} )")]
     DslValidation(#[from] dsl_validation::Error),
 
-    #[error("dsl::optimize::Error( {0} )")]
-    DslOptimize(#[from] dsl_optimize::Error),
-
-    #[error("dsl::lowering::Error( {0} )")]
-    DslLowering(#[from] dsl_lowering::Error),
+    #[error("dsl::passes::Error( {0} )")]
+    DslPasses(#[from] dsl_passes::Error),
 
     #[error("dsl::vm::Error( {0} )")]
     DslVm(#[from] dsl_vm::Error),
