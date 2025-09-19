@@ -1,7 +1,7 @@
 use dotnet_debugger::CachedReader;
 use dsl_analysis::Analysis;
 use dsl_interpreter::Interpreter;
-use dsl_passes::{lowering_passes, optimization_passes};
+use dsl_passes::{PassSelector, TargetRuntime};
 use dsl_rewrite_utils::{
     GraphRewrite, SymbolicGraphCSE as _, SymbolicGraphDCE as _,
     SymbolicGraphRewrite as _,
@@ -170,22 +170,18 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         Ok(expr)
     }
 
-    fn lowering(&self, expr: SymbolicGraph) -> Result<SymbolicGraph, Error> {
+    fn lowering(
+        &self,
+        expr: SymbolicGraph,
+        runtime: TargetRuntime,
+    ) -> Result<SymbolicGraph, Error> {
         let analysis = Analysis::new(self.reader);
 
-        let optional_optimizations = optimization_passes(&analysis)
+        let rewriter = PassSelector::new(runtime)
+            .optimize(self.optimize_symbolic_graph)
+            .passes(&analysis)
             .map_err(|err| -> Error { err.into() });
-        let mandatory_lowering =
-            lowering_passes(&analysis).map_err(|err| -> Error { err.into() });
-
-        let expr = if self.optimize_symbolic_graph {
-            self.apply_rewrites(
-                expr,
-                optional_optimizations.then(mandatory_lowering),
-            )?
-        } else {
-            self.apply_rewrites(expr, mandatory_lowering)?
-        };
+        let expr = self.apply_rewrites(expr, rewriter)?;
 
         expr.validate(self.reader)?;
 
@@ -214,7 +210,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         let expr = self.validate_inputs()?;
         let expr = self.legalization(expr)?;
         let expr = self.cleanup(expr)?;
-        let expr = self.lowering(expr)?;
+        let expr = self.lowering(expr, TargetRuntime::VirtualMachine)?;
         let expr = self.cleanup(expr)?;
         self.to_virtual_machine(expr)
     }
@@ -223,7 +219,7 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         let expr = self.validate_inputs()?;
         let expr = self.legalization(expr)?;
         let expr = self.cleanup(expr)?;
-        let expr = self.lowering(expr)?;
+        let expr = self.lowering(expr, TargetRuntime::Interpreter)?;
         let expr = self.cleanup(expr)?;
         Ok(Interpreter::new(expr))
     }

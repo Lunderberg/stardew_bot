@@ -1,6 +1,9 @@
 use dsl_ir::{ExprKind, SymbolicGraph, SymbolicValue};
 
-use crate::{MapErr, RecursiveRewrite, SequentialRewrite, SingleRewrite};
+use crate::{
+    ConditionalRewrite, MapErr, RecursiveRewrite, SequentialRewrite,
+    SingleRewrite,
+};
 
 pub trait GraphRewrite {
     type Error;
@@ -37,6 +40,13 @@ pub trait GraphRewrite {
         Self: Sized,
     {
         RecursiveRewrite::new(self)
+    }
+
+    fn enabled(self, enabled: bool) -> impl GraphRewrite<Error = Self::Error>
+    where
+        Self: Sized,
+    {
+        ConditionalRewrite::new(self, enabled)
     }
 
     fn then(

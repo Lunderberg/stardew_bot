@@ -7,6 +7,9 @@ pub use graph_rewrite::*;
 mod single_rewrite;
 pub use single_rewrite::*;
 
+mod conditional_rewrite;
+pub use conditional_rewrite::*;
+
 mod sequential_rewrite;
 pub use sequential_rewrite::*;
 

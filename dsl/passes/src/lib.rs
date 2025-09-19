@@ -1,11 +1,11 @@
 mod error;
 pub use error::*;
 
-mod optimize;
-pub use optimize::*;
+mod passes;
+pub use passes::*;
 
-mod lowering;
-pub use lowering::*;
+mod no_op_rewrite;
+pub use no_op_rewrite::*;
 
 mod constant_fold;
 pub use constant_fold::*;
