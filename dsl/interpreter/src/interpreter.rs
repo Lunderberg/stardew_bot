@@ -1,9 +1,8 @@
 use std::collections::HashMap;
 
 use dsl_ir::{
-    DSLType, ExposedNativeFunction, ExprKind, FunctionType, OpIndex,
-    RuntimePrimType, RuntimePrimValue, StackValue, SymbolicGraph,
-    SymbolicValue,
+    DSLType, ExposedNativeFunction, ExprKind, OpIndex, RuntimePrimType,
+    RuntimePrimValue, StackValue, SymbolicGraph, SymbolicValue,
 };
 use dsl_runtime::{Reader, Runtime, RuntimeFunc, RuntimeOutput, ValueIndex};
 use smallvec::SmallVec;
@@ -21,6 +20,19 @@ pub struct InterpretedFunc<'a> {
     current_op: OpIndex,
     values: RuntimeOutput,
     bindings: HashMap<OpIndex, Option<StackValue>>,
+}
+
+enum Callable<'a> {
+    Native(ExposedNativeFunction),
+    IR {
+        params: &'a [SymbolicValue],
+        output: SymbolicValue,
+        enclosed: Vec<(OpIndex, Option<StackValue>)>,
+    },
+}
+enum CallableArg {
+    Immediate(Option<StackValue>),
+    Delayed(SymbolicValue),
 }
 
 impl Interpreter {
@@ -131,7 +143,14 @@ impl<'a> InterpretedFunc<'a> {
         &mut self,
         var: OpIndex,
         value: Option<impl Into<StackValue>>,
-    ) -> Result<impl Fn(&mut Self) -> Result<(), Error> + 'static, Error> {
+    ) -> Result<
+        impl Fn(
+                &mut Self,
+            )
+                -> Result<(OpIndex, Option<Option<StackValue>>), Error>
+            + 'static,
+        Error,
+    > {
         if self.bindings.contains_key(&var) {
             return Err(Error::CannotRebindVariable { var });
         }
@@ -139,11 +158,13 @@ impl<'a> InterpretedFunc<'a> {
 
         self.bindings.insert(var, value);
 
-        let cleanup =
-            move |func: &mut InterpretedFunc<'a>| -> Result<(), Error> {
-                func.bindings.remove(&var);
-                Ok(())
-            };
+        let cleanup = move |func: &mut InterpretedFunc<'a>| -> Result<
+            (OpIndex, Option<Option<StackValue>>),
+            Error,
+        > {
+            let opt_value = func.bindings.remove(&var);
+            Ok((var, opt_value))
+        };
         Ok(cleanup)
     }
 
@@ -307,6 +328,94 @@ impl<'a> InterpretedFunc<'a> {
     define_binary_op! { eval_div, try_div }
     define_binary_op! { eval_mod, try_mod }
 
+    fn get_callable(
+        &mut self,
+        mut func: SymbolicValue,
+    ) -> Result<Callable<'a>, Error> {
+        let mut enclosed = Vec::<(OpIndex, Option<StackValue>)>::new();
+
+        loop {
+            let func_index = match func {
+                SymbolicValue::Result(index) => index,
+                SymbolicValue::Const(prim) => {
+                    return Err(Error::CannotCallPrimitiveAsFunction {
+                        parent_op: self.current_op,
+                        used_as_function: prim,
+                    });
+                }
+            };
+
+            match &self.graph[func_index].kind {
+                ExprKind::Function { params, output } => {
+                    return Ok(Callable::IR {
+                        params,
+                        output: *output,
+                        enclosed,
+                    });
+                }
+                ExprKind::NativeFunction(native) => {
+                    return Ok(Callable::Native(native.clone()));
+                }
+                ExprKind::FunctionCall {
+                    func: SymbolicValue::Result(closure_index),
+                    args,
+                } => {
+                    let (params, output) =
+                        match &self.graph[*closure_index].kind {
+                            ExprKind::Function { params, output } => {
+                                (params, output)
+                            }
+                            other => {
+                                return Err(Error::InvalidClosureExpression {
+                                    parent_op: self.current_op,
+                                    used_as_function: other.op_name(),
+                                });
+                            }
+                        };
+                    if args.len() != params.len() {
+                        return Err(Error::IncorrectNumberOfArguments {
+                            func: self.current_op,
+                            num_params: params.len(),
+                            num_args: args.len(),
+                        });
+                    }
+                    for (param, arg) in params.iter().zip(args) {
+                        let param = self.as_function_arg(*param)?;
+                        let arg = {
+                            self.eval(*arg)?;
+                            self.values.pop()?
+                        };
+                        enclosed.push((param, arg));
+                    }
+                    func = *output;
+                }
+                other => {
+                    return Err(Error::UnsupportedFunctionExpression {
+                        parent_op: self.current_op,
+                        used_as_function: other.op_name(),
+                    });
+                }
+            }
+        }
+    }
+
+    fn eval_callable(
+        &mut self,
+        callable: &mut Callable<'a>,
+        args: impl ExactSizeIterator<Item = CallableArg>,
+    ) -> Result<(), Error> {
+        match callable {
+            Callable::Native(func) => {
+                self.eval_native_function_call(func, args)
+            }
+            Callable::IR {
+                params,
+                output,
+                enclosed,
+            } => self.eval_ir_function_call(params, args, *output, enclosed),
+        }
+    }
+
     fn eval_simple_reduce(
         &mut self,
         initial: SymbolicValue,
@@ -322,70 +431,15 @@ impl<'a> InterpretedFunc<'a> {
             .transpose()?
             .unwrap_or(0usize);
 
-        let reduction_index = match reduction {
-            SymbolicValue::Result(index) => index,
-            SymbolicValue::Const(prim) => {
-                return Err(Error::CannotCallPrimitiveAsFunction {
-                    parent_op: self.current_op,
-                    used_as_function: prim,
-                });
-            }
-        };
-        match &self.graph[reduction_index].kind {
-            ExprKind::Function { params, output } => {
-                if params.len() != 2 {
-                    return Err(Error::InvalidReductionFunction {
-                        reduction: reduction_index,
-                        num_params: params.len(),
-                    });
-                }
-                let accumulator = self.as_function_arg(params[0])?;
-                let index = self.as_function_arg(params[1])?;
-
-                for i in 0..extent {
-                    let reduced = self.values.pop()?;
-
-                    let cleanup_acc = self.bind(accumulator, reduced)?;
-                    let cleanup_index = self.bind(index, Some(i))?;
-                    self.eval(*output)?;
-
-                    cleanup_acc(self)?;
-                    cleanup_index(self)?;
-                }
-            }
-
-            ExprKind::NativeFunction(func) => {
-                let sig = func.signature()?;
-                match sig {
-                    DSLType::Function(FunctionType {
-                        params: Some(params),
-                        ..
-                    }) if params.len() == 2 => Ok(()),
-                    other => Err(Error::InvalidNativeReductionFunction {
-                        reduction: reduction_index,
-                        signature: other,
-                    }),
-                }?;
-
-                let mut accumulator = self.values.pop()?;
-                for i in 0..extent {
-                    let mut index: Option<StackValue> = Some(i.into());
-                    let mut args = [&mut accumulator, &mut index];
-                    if func.mutates_first_argument() {
-                        func.apply(&mut args)?;
-                    } else {
-                        accumulator = func.apply(&mut args)?;
-                    }
-                }
-                self.push(accumulator);
-            }
-
-            other => {
-                return Err(Error::UnsupportedFunctionExpression {
-                    parent_op: self.current_op,
-                    used_as_function: other.op_name(),
-                });
-            }
+        let mut reduction = self.get_callable(reduction)?;
+        for i in 0..extent {
+            let reduced = self.values.pop()?;
+            let args = [
+                CallableArg::Immediate(reduced),
+                CallableArg::Immediate(Some(i.into())),
+            ]
+            .into_iter();
+            self.eval_callable(&mut reduction, args)?;
         }
 
         Ok(())
@@ -433,36 +487,17 @@ impl<'a> InterpretedFunc<'a> {
         func: SymbolicValue,
         args: &[SymbolicValue],
     ) -> Result<(), Error> {
-        let func_index = match func {
-            SymbolicValue::Result(index) => index,
-            SymbolicValue::Const(prim) => {
-                return Err(Error::CannotCallPrimitiveAsFunction {
-                    parent_op: self.current_op,
-                    used_as_function: prim,
-                });
-            }
-        };
-
-        match &self.graph[func_index].kind {
-            ExprKind::Function { params, output } => {
-                self.eval_ir_function_call(params, args, *output)
-            }
-            ExprKind::NativeFunction(func) => {
-                self.eval_native_function_call(func, args)
-            }
-
-            other => Err(Error::UnsupportedFunctionExpression {
-                parent_op: self.current_op,
-                used_as_function: other.op_name(),
-            }),
-        }
+        let mut callable = self.get_callable(func)?;
+        let args = args.iter().map(|arg| CallableArg::Delayed(*arg));
+        self.eval_callable(&mut callable, args)
     }
 
     fn eval_ir_function_call(
         &mut self,
         params: &[SymbolicValue],
-        args: &[SymbolicValue],
+        args: impl ExactSizeIterator<Item = CallableArg>,
         output: SymbolicValue,
+        enclosed: &mut Vec<(OpIndex, Option<StackValue>)>,
     ) -> Result<(), Error> {
         if params.len() != args.len() {
             return Err(Error::IncorrectNumberOfArguments {
@@ -472,17 +507,36 @@ impl<'a> InterpretedFunc<'a> {
             });
         }
 
-        let mut bindings = SmallVec::<[_; 32]>::with_capacity(params.len());
-        for (param, arg) in params.iter().cloned().zip(args.iter().cloned()) {
-            self.eval(arg)?;
-            let arg_val = self.values.pop()?;
+        let mut param_bindings =
+            SmallVec::<[_; 32]>::with_capacity(params.len());
+        for (param, arg) in params.iter().cloned().zip(args) {
+            let arg_val = match arg {
+                CallableArg::Immediate(value) => value,
+                CallableArg::Delayed(delayed) => {
+                    self.eval(delayed)?;
+                    self.values.pop()?
+                }
+            };
+
             let cleanup = self.bind(self.as_function_arg(param)?, arg_val)?;
-            bindings.push(cleanup);
+            param_bindings.push(cleanup);
+        }
+
+        let mut enclosed_bindings =
+            SmallVec::<[_; 32]>::with_capacity(enclosed.len());
+        for (var, value) in enclosed.drain(..) {
+            enclosed_bindings.push(self.bind(var, value)?);
         }
 
         self.eval(output)?;
 
-        for cleanup in bindings {
+        for binding in enclosed_bindings {
+            let (var, opt_value) = binding(self)?;
+            if let Some(value) = opt_value {
+                enclosed.push((var, value));
+            }
+        }
+        for cleanup in param_bindings {
             cleanup(self)?;
         }
 
@@ -492,17 +546,25 @@ impl<'a> InterpretedFunc<'a> {
     fn eval_native_function_call(
         &mut self,
         func: &ExposedNativeFunction,
-        args: &[SymbolicValue],
+        args: impl ExactSizeIterator<Item = CallableArg>,
     ) -> Result<(), Error> {
         let arg_start = self.values.len();
+        let num_args = args.len();
         for arg in args {
-            self.eval(*arg)?;
+            match arg {
+                CallableArg::Immediate(value) => {
+                    self.values.push(value);
+                }
+                CallableArg::Delayed(delayed) => {
+                    self.eval(delayed)?;
+                }
+            }
         }
         let opt_output = {
             let mut remaining = &mut self.values[ValueIndex(arg_start)..];
             let mut arg_refs =
                 SmallVec::<[&mut Option<StackValue>; 32]>::with_capacity(
-                    args.len(),
+                    num_args,
                 );
 
             while !remaining.is_empty() {

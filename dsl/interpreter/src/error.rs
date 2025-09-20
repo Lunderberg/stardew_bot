@@ -68,23 +68,12 @@ pub enum Error {
     },
 
     #[error(
-        "Expected reduction function to accept two parameters \
-         (the accumulator and an index), \
-         but {reduction} instead accepts {num_params} paramters."
+        "Expected callee in closure to be ExprKind::Function, \
+         but {parent_op} instead found {used_as_function}."
     )]
-    InvalidReductionFunction {
-        reduction: OpIndex,
-        num_params: usize,
-    },
-
-    #[error(
-        "Expected native reduction function \
-         to accept two parameters (the accumulator and an index), \
-         but {reduction} instead has signature {signature}."
-    )]
-    InvalidNativeReductionFunction {
-        reduction: OpIndex,
-        signature: DSLType,
+    InvalidClosureExpression {
+        parent_op: OpIndex,
+        used_as_function: &'static str,
     },
 
     #[error(

@@ -5,16 +5,44 @@ pub trait CopyFirstParamExt {
 }
 impl CopyFirstParamExt for SymbolicGraph {
     fn copy_first_param(&mut self, func: SymbolicValue) -> SymbolicValue {
-        let SymbolicValue::Result(func) = func else {
+        let mut func = func.as_op_index().unwrap_or_else(|| {
             panic!(
                 "Internal error, \
                  SymbolicValue should point to function \
                  for copy_first_param"
             )
-        };
+        });
+
+        // Unwrap any functions that return the function as an output.
+        while let ExprKind::FunctionCall {
+            func: SymbolicValue::Result(generator),
+            ..
+        } = &self[func].kind
+        {
+            match &self[*generator].kind {
+                ExprKind::Function {
+                    output: SymbolicValue::Result(output),
+                    ..
+                } => {
+                    func = *output;
+                }
+                _ => {
+                    break;
+                }
+            }
+        }
+
         let params = match &self[func].kind {
-            ExprKind::Function { params, .. } => params,
+            ExprKind::Function { params, .. } => {
+                // The function is defined within the IR, and may have
+                // a parameter name.  The new function parameter
+                // should re-use the same name of the variable.
+                params
+            }
             ExprKind::NativeFunction(func) => {
+                // The function is a NativeFunction, which doesn't
+                // have parameter names.  Generate a new function
+                // argument with the appropriate type.
                 let sig = func.signature().unwrap();
                 match sig {
                     DSLType::Function(FunctionType { params, .. }) => {
@@ -25,14 +53,16 @@ impl CopyFirstParamExt for SymbolicGraph {
                     }
                     _ => panic!(
                         "Internal error, \
-                         NativeFunction should return TunctionType"
+                         NativeFunction should return FunctionType"
                     ),
                 }
             }
-            _ => panic!(
+            other => panic!(
                 "Internal error, \
                  SymbolicValue should point to function \
-                 for copy_first_param"
+                 for copy_first_param, \
+                 but instead pointed to {}.",
+                other.op_name(),
             ),
         };
 

@@ -42,7 +42,7 @@ impl PassSelector {
         super::NoOpRewrite
             .then(super::InferFunctionParameterTypes(&analysis))
             .then(super::LegalizeOperandTypes(&analysis))
-            .then(super::InlineFunctionCalls)
+            .then(super::InlineFunctionCalls.enabled(optimize || vm))
             .then(super::MergeRangeReduceToSimpleReduce)
             .then(super::InlineIteratorMap)
             .then(super::InlineIteratorFilter)
