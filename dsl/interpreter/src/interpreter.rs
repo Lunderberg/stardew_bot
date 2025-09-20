@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use dsl_ir::{
     DSLType, ExposedNativeFunction, ExprKind, OpIndex, RuntimePrimType,
     RuntimePrimValue, StackValue, SymbolicGraph, SymbolicValue,
@@ -19,7 +17,7 @@ pub struct InterpretedFunc<'a> {
     reader: Box<dyn Reader + 'a>,
     current_op: OpIndex,
     values: RuntimeOutput,
-    bindings: HashMap<OpIndex, Option<StackValue>>,
+    bindings: Vec<(OpIndex, Option<StackValue>)>,
 }
 
 enum Callable<'a> {
@@ -70,7 +68,7 @@ impl Runtime for Interpreter {
             reader: Box::new(dsl_runtime::DummyReader),
             current_op: func,
             values: RuntimeOutput::new(0),
-            bindings: HashMap::new(),
+            bindings: Default::default(),
         })
     }
 }
@@ -143,29 +141,12 @@ impl<'a> InterpretedFunc<'a> {
         &mut self,
         var: OpIndex,
         value: Option<impl Into<StackValue>>,
-    ) -> Result<
-        impl Fn(
-                &mut Self,
-            )
-                -> Result<(OpIndex, Option<Option<StackValue>>), Error>
-            + 'static,
-        Error,
-    > {
-        if self.bindings.contains_key(&var) {
-            return Err(Error::CannotRebindVariable { var });
-        }
+    ) -> Result<(), Error> {
         let value = value.map(Into::into);
 
-        self.bindings.insert(var, value);
+        self.bindings.push((var, value));
 
-        let cleanup = move |func: &mut InterpretedFunc<'a>| -> Result<
-            (OpIndex, Option<Option<StackValue>>),
-            Error,
-        > {
-            let opt_value = func.bindings.remove(&var);
-            Ok((var, opt_value))
-        };
-        Ok(cleanup)
+        Ok(())
     }
 
     fn as_function_arg(&self, value: SymbolicValue) -> Result<OpIndex, Error> {
@@ -447,9 +428,12 @@ impl<'a> InterpretedFunc<'a> {
 
     fn eval_function_arg(&mut self, ty: &DSLType) -> Result<(), Error> {
         let var = self.current_op;
-        let opt_value_ref: &Option<StackValue> = self
+        let opt_value_ref: &mut Option<StackValue> = self
             .bindings
-            .get(&var)
+            .iter_mut()
+            .rev()
+            .find(|(bound_var, _)| var == *bound_var)
+            .map(|(_, value)| value)
             .ok_or_else(|| Error::UndefinedVariable { var })?;
 
         let opt_value: Option<StackValue> = match opt_value_ref {
@@ -461,10 +445,7 @@ impl<'a> InterpretedFunc<'a> {
             Some(StackValue::SmallByteArray(bytes)) => {
                 Some(StackValue::SmallByteArray(*bytes))
             }
-            Some(StackValue::Native(_)) => self
-                .bindings
-                .remove(&var)
-                .expect("Already checked that `var` is a bound variable."),
+            Some(StackValue::Native(_)) => opt_value_ref.take(),
         };
 
         if let Some(value) = opt_value.as_ref() {
@@ -507,6 +488,7 @@ impl<'a> InterpretedFunc<'a> {
             });
         }
 
+        let before_param_bindings = self.bindings.len();
         let mut param_bindings =
             SmallVec::<[_; 32]>::with_capacity(params.len());
         for (param, arg) in params.iter().cloned().zip(args) {
@@ -522,23 +504,15 @@ impl<'a> InterpretedFunc<'a> {
             param_bindings.push(cleanup);
         }
 
-        let mut enclosed_bindings =
-            SmallVec::<[_; 32]>::with_capacity(enclosed.len());
+        let before_enclosed_bindings = self.bindings.len();
         for (var, value) in enclosed.drain(..) {
-            enclosed_bindings.push(self.bind(var, value)?);
+            self.bind(var, value)?;
         }
 
         self.eval(output)?;
 
-        for binding in enclosed_bindings {
-            let (var, opt_value) = binding(self)?;
-            if let Some(value) = opt_value {
-                enclosed.push((var, value));
-            }
-        }
-        for cleanup in param_bindings {
-            cleanup(self)?;
-        }
+        enclosed.extend(self.bindings.drain(before_enclosed_bindings..));
+        self.bindings.truncate(before_param_bindings);
 
         Ok(())
     }
