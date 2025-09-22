@@ -11,4 +11,5 @@ elsa = "*"
 
 iterator_extensions = { path = "../../iterator_extensions" }
 dsl_ir = { path = "../ir" }
+dll_unpacker = { path = "../../dll_unpacker" }
 dotnet_debugger = { path = "../../dotnet_debugger" }

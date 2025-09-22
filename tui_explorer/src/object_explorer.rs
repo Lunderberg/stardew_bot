@@ -364,8 +364,11 @@ fn get_symbolic_type(
     let full_name =
         namespace.into_iter().chain(std::iter::once(name)).join(".");
 
-    let generics = if method_table.has_generics() {
-        method_table
+    let base =
+        SymbolicType::named(full_name, Some(metadata.name()?.to_string()));
+
+    let ty = if method_table.has_generics() {
+        let args = method_table
             .generic_types_excluding_base_class(&reader)?
             .map(|type_handle_ptr| {
                 if let Some(method_table_ptr) =
@@ -376,15 +379,13 @@ fn get_symbolic_type(
                     todo!()
                 }
             })
-            .collect::<Result<Vec<_>, _>>()?
+            .collect::<Result<Vec<_>, _>>()?;
+        base.with_type_args(args)
     } else {
-        Vec::new()
+        base
     };
 
-    Ok(SymbolicType {
-        full_name,
-        generics,
-    })
+    Ok(ty)
 }
 
 fn get_class_name(
@@ -714,14 +715,14 @@ impl ObjectExplorer {
                 panic!("Outermost node should be static field");
             };
 
-            let class = SymbolicType {
-                full_name: if let Some(namespace) = &class_name.namespace {
+            let class = SymbolicType::named(
+                if let Some(namespace) = &class_name.namespace {
                     format!("{namespace}.{}", class_name.name)
                 } else {
                     class_name.name.clone()
                 },
-                generics: Vec::new(),
-            };
+                None,
+            );
             let field_name = field_name.clone();
 
             graph.static_field(class, field_name)

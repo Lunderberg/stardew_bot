@@ -126,6 +126,14 @@ pub struct IteratorType {
 }
 
 impl DSLType {
+    pub fn validate(&self) -> Result<(), Error> {
+        match self {
+            DSLType::DotNet(dot_net_type) => dot_net_type.validate()?,
+            _ => {}
+        }
+        Ok(())
+    }
+
     pub fn size_bytes(&self) -> Result<usize, Error> {
         match self {
             DSLType::Prim(prim) => Ok(prim.size_bytes()),
@@ -210,50 +218,7 @@ impl std::fmt::Display for DSLType {
         match self {
             DSLType::Unknown => write!(f, "(???)"),
             DSLType::Prim(prim) => write!(f, "{prim}"),
-            DSLType::DotNet(DotNetType::ValueType {
-                method_table: Some(method_table),
-                size,
-            }) => {
-                write!(f, "struct({size} bytes, vtable {method_table})")
-            }
-            DSLType::DotNet(DotNetType::ValueType {
-                method_table: None,
-                size,
-            }) => {
-                write!(f, "struct({size} bytes, unknown vtable)")
-            }
-            DSLType::DotNet(DotNetType::Class {
-                method_table: Some(method_table),
-            }) => {
-                write!(f, "Object(vtable {method_table})")
-            }
-            DSLType::DotNet(DotNetType::Class { method_table: None }) => {
-                write!(f, "Object(unknown vtable)")
-            }
-            DSLType::DotNet(DotNetType::String) => write!(f, "String"),
-            DSLType::DotNet(DotNetType::Array {
-                method_table: None, ..
-            }) => {
-                write!(f, "array(unknown vtable)")
-            }
-            DSLType::DotNet(DotNetType::Array {
-                method_table: Some(method_table),
-                ..
-            }) => {
-                write!(f, "array(vtable {method_table})")
-            }
-            DSLType::DotNet(DotNetType::MultiDimArray {
-                method_table: None,
-                rank,
-            }) => {
-                write!(f, "array_nd({rank}, unknown vtable)")
-            }
-            DSLType::DotNet(DotNetType::MultiDimArray {
-                method_table: Some(method_table),
-                rank,
-            }) => {
-                write!(f, "array({rank}, vtable {method_table})")
-            }
+            DSLType::DotNet(dot_net) => write!(f, "{dot_net}"),
             DSLType::Rust(rust_type) => write!(f, "{rust_type}"),
             DSLType::Function(func_type) => write!(f, "{func_type}"),
             DSLType::Tuple(tuple_type) => write!(f, "{tuple_type}"),
@@ -491,25 +456,21 @@ pub trait RuntimePrimValueExt {
 impl RuntimePrimValueExt for RuntimePrimValue {
     fn static_runtime_type_ref(&self) -> &'static DSLType {
         match self {
-            RuntimePrimValue::Bool(_) => &DSLType::Prim(RuntimePrimType::Bool),
-            RuntimePrimValue::Char(_) => &DSLType::Prim(RuntimePrimType::Char),
-            RuntimePrimValue::U8(_) => &DSLType::Prim(RuntimePrimType::U8),
-            RuntimePrimValue::U16(_) => &DSLType::Prim(RuntimePrimType::U16),
-            RuntimePrimValue::U32(_) => &DSLType::Prim(RuntimePrimType::U32),
-            RuntimePrimValue::U64(_) => &DSLType::Prim(RuntimePrimType::U64),
-            RuntimePrimValue::NativeUInt(_) => {
-                &DSLType::Prim(RuntimePrimType::NativeUInt)
-            }
-            RuntimePrimValue::I8(_) => &DSLType::Prim(RuntimePrimType::I8),
-            RuntimePrimValue::I16(_) => &DSLType::Prim(RuntimePrimType::I16),
-            RuntimePrimValue::I32(_) => &DSLType::Prim(RuntimePrimType::I32),
-            RuntimePrimValue::I64(_) => &DSLType::Prim(RuntimePrimType::I64),
-            RuntimePrimValue::NativeInt(_) => {
-                &DSLType::Prim(RuntimePrimType::NativeInt)
-            }
-            RuntimePrimValue::F32(_) => &DSLType::Prim(RuntimePrimType::F32),
-            RuntimePrimValue::F64(_) => &DSLType::Prim(RuntimePrimType::F64),
-            RuntimePrimValue::Ptr(_) => &DSLType::Prim(RuntimePrimType::Ptr),
+            Self::Bool(_) => &DSLType::Prim(RuntimePrimType::Bool),
+            Self::Char(_) => &DSLType::Prim(RuntimePrimType::Char),
+            Self::U8(_) => &DSLType::Prim(RuntimePrimType::U8),
+            Self::U16(_) => &DSLType::Prim(RuntimePrimType::U16),
+            Self::U32(_) => &DSLType::Prim(RuntimePrimType::U32),
+            Self::U64(_) => &DSLType::Prim(RuntimePrimType::U64),
+            Self::NativeUInt(_) => &DSLType::Prim(RuntimePrimType::NativeUInt),
+            Self::I8(_) => &DSLType::Prim(RuntimePrimType::I8),
+            Self::I16(_) => &DSLType::Prim(RuntimePrimType::I16),
+            Self::I32(_) => &DSLType::Prim(RuntimePrimType::I32),
+            Self::I64(_) => &DSLType::Prim(RuntimePrimType::I64),
+            Self::NativeInt(_) => &DSLType::Prim(RuntimePrimType::NativeInt),
+            Self::F32(_) => &DSLType::Prim(RuntimePrimType::F32),
+            Self::F64(_) => &DSLType::Prim(RuntimePrimType::F64),
+            Self::Ptr(_) => &DSLType::Prim(RuntimePrimType::Ptr),
         }
     }
 }

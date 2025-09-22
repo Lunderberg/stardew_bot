@@ -961,6 +961,24 @@ impl<'a> SymbolicParser<'a> {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.object_method_table(obj))
                 }
+                "field_offset" => {
+                    self.expect_punct(
+                        || "left paren after .field_offset",
+                        Punctuation::LeftParen,
+                    )?;
+
+                    let field_name = self.expect_string_literal()?;
+
+                    self.expect_punct(
+                        || format!("right paren after .field {field_name}"),
+                        Punctuation::RightParen,
+                    )?;
+                    Ok(self.graph.field_offset(obj, field_name))
+                }
+                "array_stride" => {
+                    self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.array_stride(obj))
+                }
                 "len" => {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.num_array_elements(obj))
@@ -1168,6 +1186,24 @@ impl<'a> SymbolicParser<'a> {
         }
 
         let opt_value = match peek_token.text {
+            "method_table" => {
+                self.tokens.next()?;
+                let (type_args, _) = self.expect_function_arguments(1, 0)?;
+                let ty = type_args
+                    .into_iter()
+                    .next()
+                    .expect("Protected by length check");
+                let method_table = self.graph.type_to_method_table(ty);
+                Some(method_table)
+            }
+            "lazy_static" => {
+                self.tokens.next()?;
+                let (_, args) = self.expect_function_arguments(0, 1)?;
+                let init_func =
+                    args.into_iter().next().expect("Protected by length check");
+                let lazy_static = self.graph.lazy_static(init_func);
+                Some(lazy_static)
+            }
             "read_bytes" => {
                 self.tokens.next()?;
                 let args = self.try_function_arguments()?.ok_or_else(|| {
@@ -1348,25 +1384,48 @@ impl<'a> SymbolicParser<'a> {
             )?;
         }
 
-        let generics = self.try_generic_type_list()?;
+        let base = if full_name.contains("::") {
+            let (module, name) =
+                full_name.splitn(2, "::").collect_tuple().unwrap();
+            SymbolicType::named(name.to_string(), Some(module.to_string()))
+        } else {
+            SymbolicType::named(full_name, None)
+        };
 
-        Ok(SymbolicType {
-            full_name,
-            generics,
-        })
+        let ty = if let Some(args) = self.try_generic_type_list()? {
+            base.with_type_args(args)
+        } else {
+            base
+        };
+
+        let ty = if self
+            .tokens
+            .next_if(|token| {
+                token.kind.is_punct(Punctuation::LeftSquareBracket)
+            })?
+            .is_some()
+        {
+            self.expect_punct(
+                || "Closing ']' of array type",
+                Punctuation::RightSquareBracket,
+            )?;
+            ty.array_of()
+        } else {
+            ty
+        };
+
+        Ok(ty)
     }
 
-    fn try_generic_type_list(&mut self) -> Result<Vec<SymbolicType>, Error> {
-        if self
-            .tokens
+    fn try_generic_type_list(
+        &mut self,
+    ) -> Result<Option<Vec<SymbolicType>>, Error> {
+        self.tokens
             .peek()?
             .filter(|token| token.kind.is_punct(Punctuation::LeftAngleBracket))
             .is_some()
-        {
-            self.expect_generic_type_list()
-        } else {
-            Ok(Vec::new())
-        }
+            .then(|| self.expect_generic_type_list())
+            .transpose()
     }
 
     fn expect_generic_type_list(&mut self) -> Result<Vec<SymbolicType>, Error> {

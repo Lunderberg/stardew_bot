@@ -6,7 +6,7 @@ use lru::LruCache;
 
 use dotnet_debugger::{CachedReader, MethodTable};
 
-use dsl_ir::{Pointer, TypedPointer};
+use dsl_ir::{Pointer, SymbolicType, TypedPointer};
 
 use crate::Error;
 
@@ -50,6 +50,22 @@ pub trait Reader {
         parent_class_ptr: TypedPointer<MethodTable>,
         child_class_ptr: TypedPointer<MethodTable>,
     ) -> Result<bool, Error>;
+
+    fn type_to_method_table(
+        &mut self,
+        ty: &SymbolicType,
+    ) -> Result<TypedPointer<MethodTable>, Error>;
+
+    fn find_field_offset(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+        field: &str,
+    ) -> Result<usize, Error>;
+
+    fn find_array_stride(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<usize, Error>;
 }
 
 impl Reader for CachedReader<'_> {
@@ -83,6 +99,38 @@ impl Reader for CachedReader<'_> {
         self.is_base_of(parent_class_ptr, child_class_ptr)
             .map_err(Into::into)
     }
+
+    fn type_to_method_table(
+        &mut self,
+        ty: &SymbolicType,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        let sig = self.symbolic_to_signature(ty)?;
+        let ptr = self
+            .signature_to_method_table(&sig)?
+            .ok_or_else(|| Error::MissingMethodTable(ty.clone()))?;
+        Ok(ptr)
+    }
+
+    fn find_field_offset(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+        field: &str,
+    ) -> Result<usize, Error> {
+        let offset: usize = self.find_field_by_name(ptr, field)?.1.offset();
+        Ok(offset.into())
+    }
+
+    fn find_array_stride(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<usize, Error> {
+        let method_table = self.method_table(ptr)?;
+        let stride = method_table
+            .component_size()
+            .ok_or_else(|| Error::NoStrideInMethodTable)?;
+
+        Ok(stride)
+    }
 }
 
 pub struct DummyReader;
@@ -100,6 +148,28 @@ impl Reader for DummyReader {
         _parent_class_ptr: TypedPointer<MethodTable>,
         _child_class_ptr: TypedPointer<MethodTable>,
     ) -> Result<bool, Error> {
+        Err(Error::ReadOccurredDuringLocalEvaluation)
+    }
+
+    fn type_to_method_table(
+        &mut self,
+        _ty: &SymbolicType,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        Err(Error::ReadOccurredDuringLocalEvaluation)
+    }
+
+    fn find_field_offset(
+        &mut self,
+        _ptr: TypedPointer<MethodTable>,
+        _field: &str,
+    ) -> Result<usize, Error> {
+        Err(Error::ReadOccurredDuringLocalEvaluation)
+    }
+
+    fn find_array_stride(
+        &mut self,
+        _ptr: TypedPointer<MethodTable>,
+    ) -> Result<usize, Error> {
         Err(Error::ReadOccurredDuringLocalEvaluation)
     }
 }
@@ -436,5 +506,27 @@ where
     ) -> Result<bool, Error> {
         self.inner
             .is_dotnet_base_class_of(parent_class_ptr, child_class_ptr)
+    }
+
+    fn type_to_method_table(
+        &mut self,
+        ty: &SymbolicType,
+    ) -> Result<TypedPointer<MethodTable>, Error> {
+        self.inner.type_to_method_table(ty)
+    }
+
+    fn find_field_offset(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+        field: &str,
+    ) -> Result<usize, Error> {
+        self.inner.find_field_offset(ptr, field)
+    }
+
+    fn find_array_stride(
+        &mut self,
+        ptr: TypedPointer<MethodTable>,
+    ) -> Result<usize, Error> {
+        self.inner.find_array_stride(ptr)
     }
 }

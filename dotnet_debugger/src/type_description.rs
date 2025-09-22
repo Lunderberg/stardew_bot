@@ -6,7 +6,7 @@ use memory_reader::{
 
 use crate::{
     runtime_type::DotNetType, unpack_fields, CachedReader, CorElementType,
-    Error, MethodTable, RuntimePrimType, RuntimeType,
+    Error, MethodTable, RuntimePrimType, RuntimeType, SymbolicType,
 };
 
 pub struct TypeDescription {
@@ -157,6 +157,52 @@ impl TypeHandle {
             reader,
         }
     }
+
+    pub fn to_symbolic(
+        &self,
+        reader: CachedReader<'_>,
+    ) -> Result<SymbolicType, Error> {
+        match self {
+            TypeHandle::MethodTable(method_table) => {
+                let module_ptr = method_table.module();
+                let module = reader.runtime_module(module_ptr)?;
+                let module_name = module.name(reader)?;
+                let base = if let Some(index) = method_table.token() {
+                    SymbolicType::Metadata {
+                        module: module_name.to_string(),
+                        index: index.into(),
+                    }
+                } else {
+                    todo!("Convert {}", self.printable(reader))
+                };
+
+                let type_args: Vec<_> = method_table
+                    .generic_types_excluding_base_class(&reader)?
+                    .into_iter()
+                    .map(|arg_ptr| {
+                        let arg = reader.type_handle(arg_ptr)?;
+                        let arg_sym = arg.to_symbolic(reader)?;
+                        Ok(arg_sym)
+                    })
+                    .collect::<Result<_, Error>>()?;
+                let ty = if type_args.is_empty() {
+                    base
+                } else {
+                    base.with_type_args(type_args)
+                };
+
+                Ok(ty)
+            }
+            TypeHandle::TypeDescription(type_description) => {
+                if let CorElementType::Prim(prim) =
+                    type_description.element_type()
+                {
+                    return Ok(SymbolicType::named(format!("{prim}"), None));
+                }
+                todo!("Convert {}", self.printable(reader))
+            }
+        }
+    }
 }
 
 impl<'a> TypeHandleRef<'a> {
@@ -278,15 +324,6 @@ impl<'a> TypeHandleRef<'a> {
             RuntimeType::Prim(prim) => {
                 write!(fmt, "{prim}")?;
             }
-            RuntimeType::DotNet(DotNetType::ValueType {
-                method_table: None,
-                ..
-            }) => {
-                write!(fmt, "(delayed-load-struct)")?;
-            }
-            RuntimeType::DotNet(DotNetType::Class { method_table: None }) => {
-                write!(fmt, "(delayed-load-class)")?;
-            }
             RuntimeType::DotNet(
                 DotNetType::ValueType {
                     method_table: Some(ptr),
@@ -294,15 +331,44 @@ impl<'a> TypeHandleRef<'a> {
                 }
                 | DotNetType::Class {
                     method_table: Some(ptr),
+                    ..
                 },
             ) => {
                 let method_table = reader.method_table(*ptr)?;
                 Self::print_method_table(method_table, fmt, reader)?;
             }
+            RuntimeType::DotNet(
+                DotNetType::ValueType {
+                    symbolic: Some(sym),
+                    ..
+                }
+                | DotNetType::Class {
+                    symbolic: Some(sym),
+                    ..
+                },
+            ) => {
+                write!(fmt, "(unresolved {sym})")?;
+            }
+            RuntimeType::DotNet(DotNetType::ValueType {
+                method_table: None,
+                symbolic: None,
+                ..
+            }) => {
+                write!(fmt, "(unknown-struct)")?;
+            }
+            RuntimeType::DotNet(DotNetType::Class {
+                method_table: None,
+                symbolic: None,
+            }) => {
+                write!(fmt, "(unknown-class)")?;
+            }
             RuntimeType::DotNet(DotNetType::String) => {
                 write!(fmt, "String")?;
             }
-            RuntimeType::DotNet(DotNetType::Array { method_table, .. }) => {
+            RuntimeType::DotNet(DotNetType::Array {
+                method_table,
+                symbolic_element,
+            }) => {
                 write!(fmt, "Array<")?;
                 if let Some(ptr) = method_table {
                     let method_table = reader.method_table(*ptr)?;
@@ -311,12 +377,15 @@ impl<'a> TypeHandleRef<'a> {
                         .ok_or(Error::ArrayMissingElementType)?;
                     let element_type_desc = reader.type_handle(element_type)?;
                     write!(fmt, "{}", element_type_desc.printable(reader))?;
+                } else if let Some(sym) = symbolic_element {
+                    write!(fmt, "unresolved {sym}")?;
                 }
                 write!(fmt, ">")?;
             }
             RuntimeType::DotNet(DotNetType::MultiDimArray {
                 method_table,
                 rank,
+                symbolic_element,
             }) => {
                 write!(fmt, "MultiDimArray<{rank}")?;
                 if let Some(ptr) = method_table {
@@ -327,6 +396,8 @@ impl<'a> TypeHandleRef<'a> {
                         .ok_or(Error::ArrayMissingElementType)?;
                     let element_type_desc = reader.type_handle(element_type)?;
                     write!(fmt, "{}", element_type_desc.printable(reader))?;
+                } else if let Some(sym) = symbolic_element {
+                    write!(fmt, "unresolved {sym}")?;
                 }
                 write!(fmt, ">")?;
             }
@@ -385,7 +456,7 @@ impl std::fmt::Display for PrintableTypeHandle<'_> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.ty.print(fmt, self.reader) {
             Ok(_) => Ok(()),
-            Err(Error::FmtError { err }) => Err(err),
+            Err(Error::FmtError(err)) => Err(err),
             Err(err) => {
                 write!(fmt, "PrintErr: {err}")
             }

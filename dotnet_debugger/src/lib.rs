@@ -14,6 +14,14 @@ pub use memory_search::*;
 mod cor_element_type;
 pub use cor_element_type::CorElementType;
 
+mod symbolic_type;
+pub use symbolic_type::*;
+
+pub use dll_unpacker::{SignaturePrimType, SignatureType};
+
+mod signature_type_ext;
+pub use signature_type_ext::*;
+
 mod runtime_type;
 pub use runtime_type::*;
 

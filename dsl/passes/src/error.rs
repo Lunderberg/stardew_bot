@@ -1,4 +1,5 @@
-use dsl_ir::DSLType;
+use dotnet_debugger::MethodTable;
+use dsl_ir::{DSLType, RuntimePrimValue, TypedPointer};
 use thiserror::Error;
 
 #[derive(Error)]
@@ -74,6 +75,35 @@ pub enum Error {
          However, it was applied to an object of type {0}."
     )]
     ArrayExtentRequiresMultiDimensionalArray(DSLType),
+
+    #[error(
+        "Expected method table to be pointer, \
+         but instead found {0}, \
+         which is of type {}",
+        .0.runtime_type(),
+    )]
+    MethodTableShouldBePointer(RuntimePrimValue),
+
+    #[error("Method table {0} has no fields")]
+    MethodTableHasNoFields(TypedPointer<MethodTable>),
+
+    #[error("Method table {ptr} does not have field {field}")]
+    FieldNotFound {
+        ptr: TypedPointer<MethodTable>,
+        field: String,
+    },
+
+    #[error(
+        "ExprKind::LazyStatic must have initialization function, \
+         but instead had '{0}'."
+    )]
+    LazyStaticInitializationMustBeFunction(&'static str),
+
+    #[error(
+        "ExprKind::LazyStatic must have nullary initialization function, \
+         but instead had a function with {0} parameters."
+    )]
+    LazyStaticInitializationMayNotHaveParams(usize),
 }
 
 impl std::fmt::Debug for Error {

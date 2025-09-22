@@ -1,6 +1,6 @@
 use thiserror::Error;
 
-use dsl_ir::{DSLType, Pointer};
+use dsl_ir::{DSLType, Pointer, SymbolicType};
 
 #[derive(Error)]
 pub enum Error {
@@ -40,6 +40,12 @@ pub enum Error {
 
     #[error("Cannot pop from empty value stack")]
     CannotPopFromEmptyValueStack,
+
+    #[error("Could not find method table for '{0}'")]
+    MissingMethodTable(SymbolicType),
+
+    #[error("Method table used as array did not contain stride")]
+    NoStrideInMethodTable,
 }
 
 impl std::fmt::Debug for Error {

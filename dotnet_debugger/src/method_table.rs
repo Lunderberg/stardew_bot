@@ -127,6 +127,7 @@ impl MethodTable {
             Some(
                 DotNetType::Class {
                     method_table: Some(self.ptr()),
+                    symbolic: None,
                 }
                 .into(),
             )
@@ -143,6 +144,7 @@ impl MethodTable {
                 DotNetType::ValueType {
                     method_table: Some(self.ptr()),
                     size: self.base_size(),
+                    symbolic: None,
                 }
                 .into(),
             )
@@ -160,6 +162,7 @@ impl MethodTable {
                 DotNetType::ValueType {
                     method_table: Some(self.ptr()),
                     size: self.base_size(),
+                    symbolic: None,
                 }
                 .into(),
             )
@@ -171,6 +174,7 @@ impl MethodTable {
             Some(
                 DotNetType::Class {
                     method_table: Some(self.ptr()),
+                    symbolic: None,
                 }
                 .into(),
             )
@@ -252,6 +256,7 @@ impl MethodTable {
         } else if self.is_array() {
             Ok(DotNetType::Array {
                 method_table: Some(self.ptr()),
+                symbolic_element: None,
             }
             .into())
         } else if self.is_multi_dim_array() {
@@ -263,6 +268,7 @@ impl MethodTable {
             Ok(DotNetType::MultiDimArray {
                 method_table: Some(self.ptr()),
                 rank,
+                symbolic_element: None,
             }
             .into())
         } else if let Some(prim_ty) = self.runtime_prim_type(reader)? {

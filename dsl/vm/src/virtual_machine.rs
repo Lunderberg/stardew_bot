@@ -2,16 +2,17 @@ use std::{collections::HashMap, fmt::Display, mem::MaybeUninit};
 
 use arrayvec::ArrayVec;
 use derive_more::derive::From;
-use dsl_runtime::{Runtime, RuntimeFunc};
 use itertools::Either;
 
-use dotnet_debugger::{MethodTable, RuntimeString};
-use memory_reader::{OwnedBytes, Pointer, TypedPointer};
+use dotnet_debugger::RuntimeString;
+use memory_reader::{OwnedBytes, Pointer};
 
 use dsl_ir::{
     ExposedNativeFunction, ExposedNativeObject, NativeFunction,
-    RuntimePrimType, RuntimePrimValue, StackValue, WrappedNativeFunction,
+    RuntimePrimType, RuntimePrimValue, StackValue, SymbolicType,
+    WrappedNativeFunction,
 };
+use dsl_runtime::{Runtime, RuntimeFunc};
 
 use crate::{Error, StackIndex, VMResults};
 
@@ -213,8 +214,33 @@ pub enum Instruction {
     /// Check if an object's method table indicates that it is an
     /// instance of a given type, or a subclass of the given type.
     IsSubclassOf {
-        method_table_ptr: VMArg,
-        base_type: TypedPointer<MethodTable>,
+        child_method_table_ptr: VMArg,
+        parent_method_table_ptr: VMArg,
+        output: StackIndex,
+    },
+
+    /// Locate the method table for a given type.  Unlike during
+    /// compilation, raises an error if the method table can't be
+    /// found.  Produces a `RuntimePrimValue::Ptr`.
+    TypeToMethodTable {
+        ty: SymbolicType,
+        output: StackIndex,
+    },
+
+    /// Given a pointer to the method table, find the offset from the
+    /// start of an object to an instance field.  Produces a
+    /// `RuntimePrimValue::NativeUInt`.
+    FieldOffset {
+        method_table: VMArg,
+        field: String,
+        output: StackIndex,
+    },
+
+    /// Given a pointer to an array's method table, find the stride
+    /// between adjacent elements of the array.  Produces a
+    /// `RuntimePrimValue::NativeUInt`.
+    ArrayStride {
+        method_table: VMArg,
         output: StackIndex,
     },
 
@@ -588,6 +614,7 @@ macro_rules! define_binary_op {
                             ) => Ok($result.into()),
                         )*
                             (lhs, rhs) => Err(Error::InvalidOperandsForBinaryOp {
+                                index: self.current_instruction,
                                 op: op_name,
                                 lhs: lhs.runtime_type().into(),
                                 rhs: rhs.runtime_type().into(),
@@ -727,14 +754,29 @@ impl<'a> VMEvaluator<'a> {
                 }
 
                 &Instruction::IsSubclassOf {
-                    method_table_ptr,
-                    base_type,
+                    child_method_table_ptr,
+                    parent_method_table_ptr,
                     output,
                 } => self.eval_is_subclass_of(
-                    method_table_ptr,
-                    base_type,
+                    child_method_table_ptr,
+                    parent_method_table_ptr,
                     output,
                 )?,
+
+                Instruction::TypeToMethodTable { ty, output } => {
+                    self.eval_type_to_method_table(ty, *output)?
+                }
+
+                Instruction::FieldOffset {
+                    method_table,
+                    field,
+                    output,
+                } => self.eval_field_offset(*method_table, field, *output)?,
+
+                Instruction::ArrayStride {
+                    method_table,
+                    output,
+                } => self.eval_array_stride(*method_table, *output)?,
 
                 Instruction::ReadBytes { regions, output } => {
                     self.eval_read_bytes(regions, *output)?
@@ -1028,6 +1070,7 @@ impl<'a> VMEvaluator<'a> {
                         Ok(RuntimePrimValue::Bool(a && b))
                     }
                     _ => Err(Error::InvalidOperandsForBinaryOp {
+                        index: self.current_instruction,
                         op: op_name,
                         lhs: lhs.runtime_type().into(),
                         rhs: rhs.runtime_type().into(),
@@ -1064,6 +1107,7 @@ impl<'a> VMEvaluator<'a> {
                         Ok(RuntimePrimValue::Bool(a || b))
                     }
                     _ => Err(Error::InvalidOperandsForBinaryOp {
+                        index: self.current_instruction,
                         op: op_name,
                         lhs: lhs.runtime_type().into(),
                         rhs: rhs.runtime_type().into(),
@@ -1110,23 +1154,92 @@ impl<'a> VMEvaluator<'a> {
 
     fn eval_is_subclass_of(
         &mut self,
-        method_table_ptr: VMArg,
-        base_type: TypedPointer<MethodTable>,
+        child_method_table_ptr: VMArg,
+        parent_method_table_ptr: VMArg,
         output: StackIndex,
     ) -> Result<(), Error> {
-        let method_table_ptr = self.arg_to_prim(method_table_ptr)?;
+        let opt_child_method_table_ptr = self
+            .arg_to_prim(child_method_table_ptr)?
+            .map(|value| match value {
+                RuntimePrimValue::Ptr(ptr) => Ok(ptr),
+                other => Err(Error::InvalidArgumentForSubclassCheck(other)),
+            })
+            .transpose()?;
+        let opt_parent_method_table_ptr = self
+            .arg_to_prim(parent_method_table_ptr)?
+            .map(|value| match value {
+                RuntimePrimValue::Ptr(ptr) => Ok(ptr),
+                other => Err(Error::InvalidArgumentForSubclassCheck(other)),
+            })
+            .transpose()?;
 
-        self.values[output] = match method_table_ptr {
-            None => Ok(None),
-            Some(RuntimePrimValue::Ptr(ptr)) => {
-                let is_subclass = self
-                    .reader
-                    .is_dotnet_base_class_of(base_type, ptr.into())?;
+        self.values[output] =
+            match (opt_child_method_table_ptr, opt_parent_method_table_ptr) {
+                (Some(child), Some(parent)) => {
+                    let is_subclass = self
+                        .reader
+                        .is_dotnet_base_class_of(parent.into(), child.into())?;
 
-                Ok(Some(RuntimePrimValue::Bool(is_subclass).into()))
-            }
-            Some(other) => Err(Error::InvalidArgumentForSubclassCheck(other)),
-        }?;
+                    Some(RuntimePrimValue::Bool(is_subclass).into())
+                }
+                _ => None,
+            };
+
+        Ok(())
+    }
+
+    fn eval_type_to_method_table(
+        &mut self,
+        ty: &SymbolicType,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let method_table_ptr = self.reader.type_to_method_table(ty)?;
+        let ptr: Pointer = method_table_ptr.into();
+
+        self.values[output] = Some(ptr.into());
+
+        Ok(())
+    }
+
+    fn eval_field_offset(
+        &mut self,
+        method_table_ptr: VMArg,
+        field: &str,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let method_table_ptr: Pointer = self
+            .arg_to_prim(method_table_ptr)?
+            .ok_or_else(|| {
+                Error::DotNetOffsetRequiresNonNullMethodTable(
+                    self.current_instruction,
+                )
+            })?
+            .try_into()?;
+
+        let offset = self
+            .reader
+            .find_field_offset(method_table_ptr.into(), field)?;
+        self.values[output] = Some(offset.into());
+
+        Ok(())
+    }
+
+    fn eval_array_stride(
+        &mut self,
+        method_table_ptr: VMArg,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let method_table_ptr: Pointer = self
+            .arg_to_prim(method_table_ptr)?
+            .ok_or_else(|| {
+                Error::DotNetOffsetRequiresNonNullMethodTable(
+                    self.current_instruction,
+                )
+            })?
+            .try_into()?;
+
+        let stride = self.reader.find_array_stride(method_table_ptr.into())?;
+        self.values[output] = Some(stride.into());
 
         Ok(())
     }
@@ -1292,19 +1405,27 @@ impl Instruction {
     fn input_indices(&self) -> impl Iterator<Item = StackIndex> + '_ {
         let (lhs, rhs, dyn_args) = match self {
             // Nullary instructions
-            Instruction::NoOp | Instruction::Clear { .. } => (None, None, None),
+            Instruction::NoOp
+            | Instruction::Clear { .. }
+            | Instruction::TypeToMethodTable { .. } => (None, None, None),
 
             // Unary instructions
             Instruction::Copy { value: arg, .. }
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
             | Instruction::IsSubclassOf {
-                method_table_ptr: arg,
+                child_method_table_ptr: arg,
                 ..
             }
             | Instruction::ReadString { ptr: arg, .. }
             | Instruction::IsSome { value: arg, .. }
-            | Instruction::Not { arg, .. } => (Some(*arg), None, None),
+            | Instruction::Not { arg, .. }
+            | Instruction::FieldOffset {
+                method_table: arg, ..
+            }
+            | Instruction::ArrayStride {
+                method_table: arg, ..
+            } => (Some(*arg), None, None),
 
             // Binary instructions
             Instruction::And { lhs, rhs, .. }
@@ -1388,6 +1509,9 @@ impl Instruction {
             | Instruction::Div { output, .. }
             | Instruction::Mod { output, .. }
             | Instruction::IsSubclassOf { output, .. }
+            | Instruction::TypeToMethodTable { output, .. }
+            | Instruction::FieldOffset { output, .. }
+            | Instruction::ArrayStride { output, .. }
             | Instruction::ReadBytes { output, .. }
             | Instruction::CastBytes { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1424,6 +1548,9 @@ impl Instruction {
             Instruction::Div { .. } => "Div",
             Instruction::Mod { .. } => "Mod",
             Instruction::IsSubclassOf { .. } => "IsSubclassOf",
+            Instruction::TypeToMethodTable { .. } => "TypeToMethodTable",
+            Instruction::FieldOffset { .. } => "FieldOffset",
+            Instruction::ArrayStride { .. } => "ArrayStride",
             Instruction::ReadBytes { .. } => "ReadBytes",
             Instruction::CastBytes { .. } => "CastBytes",
             Instruction::ReadString { .. } => "ReadString",
@@ -1602,13 +1729,25 @@ impl Display for Instruction {
             }
 
             Instruction::IsSubclassOf {
-                method_table_ptr,
-                base_type,
+                child_method_table_ptr: child,
+                parent_method_table_ptr: parent,
                 output,
-            } => write!(
-                f,
-                "{output} = {method_table_ptr}.is_subclass_of::<{base_type}>()"
-            ),
+            } => write!(f, "{output} = {child}.is_subclass_of({parent})"),
+
+            Instruction::TypeToMethodTable { ty, output } => {
+                write!(f, "{output} = method_table::<{ty}>()")
+            }
+
+            Instruction::FieldOffset {
+                method_table,
+                field,
+                output,
+            } => write!(f, "{output} = {method_table}.field_offset({field})"),
+
+            Instruction::ArrayStride {
+                method_table,
+                output,
+            } => write!(f, "{output} = {method_table}.array_stride()"),
 
             Instruction::ReadBytes { regions, output }
                 if regions.len() == 1 =>

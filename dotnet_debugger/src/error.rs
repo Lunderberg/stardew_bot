@@ -1,27 +1,27 @@
 use memory_reader::Pointer;
 use thiserror::Error;
 
-use crate::{CorElementType, RuntimePrimType, RuntimePrimValue, RuntimeType};
+use crate::{
+    CorElementType, DotNetTypeError, RuntimePrimType, RuntimePrimValue,
+    RuntimeType, SymbolicTypeError,
+};
 
 #[derive(Error)]
 pub enum Error {
-    #[error("dll_unpacker::Error{{ {err} }}")]
-    DLLUnpacker {
-        #[from]
-        err: dll_unpacker::Error,
-    },
+    #[error("dll_unpacker::Error( {0} )")]
+    DLLUnpacker(#[from] dll_unpacker::Error),
 
-    #[error("memory_reader::Error{{ {err} }}")]
-    MemoryReader {
-        #[from]
-        err: memory_reader::Error,
-    },
+    #[error("memory_reader::Error( {0} )")]
+    MemoryReader(#[from] memory_reader::Error),
 
-    #[error("std::fmt::Error{{ {err} }}")]
-    FmtError {
-        #[from]
-        err: std::fmt::Error,
-    },
+    #[error("std::fmt::Error( {0} )")]
+    FmtError(#[from] std::fmt::Error),
+
+    #[error("SymbolicTypeError( {0} )")]
+    SymbolicTypeError(#[from] SymbolicTypeError),
+
+    #[error("DotNetTypeError( {0} )")]
+    DotNetTypeError(#[from] DotNetTypeError),
 
     #[error("Could not find pointer to .NET Module '{0}'")]
     ModulePointerNotFound(String),
@@ -165,6 +165,29 @@ pub enum Error {
 
     #[error("Could not find method table for '{0}'")]
     NoSuchMethodTableFound(String),
+
+    #[error("Could not find metadata TypeDef for '{0}'")]
+    MissingTypeDef(String),
+
+    #[error("Could not find metadata TypeDef for '{type_def}' in '{module}'")]
+    MissingTypeDefInModule { type_def: String, module: String },
+
+    #[error(
+        "TypeDef '{0}' derives from System.Enum, \
+         and does not follow requirement \
+         to have exactly one non-static field."
+    )]
+    EnumMustHaveExactlyOneField(String),
+
+    #[error(
+        "TypeDef '{enum_name}' derives from System.Enum, \
+         and must have a primitive backing type.  \
+         However, backing field has type '{field_type}'."
+    )]
+    EnumMustBeBackedByPrimitive {
+        enum_name: String,
+        field_type: String,
+    },
 
     #[error(
         "Could not find instance field '{field_name}' within \

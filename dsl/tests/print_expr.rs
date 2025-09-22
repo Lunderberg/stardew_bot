@@ -33,10 +33,8 @@ fn print_downcast_with_zwsp() {
         let field = graph.access_field(obj, "subfield");
         graph.downcast(
             field,
-            SymbolicType {
-                full_name: "other_class".into(),
-                generics: vec!["arg1".into(), "arg2".into()],
-            },
+            SymbolicType::named("other_class".into(), None)
+                .with_type_args(["arg1".into(), "arg2".into()]),
         )
     };
     let printed = format!(

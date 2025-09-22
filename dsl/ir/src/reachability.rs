@@ -13,6 +13,7 @@ impl ExprKind {
             ExprKind::None
             | ExprKind::NativeFunction(_)
             | ExprKind::FunctionArg(_)
+            | ExprKind::TypeToMethodTable { .. }
             | ExprKind::StaticField(_) => ([None, None, None], None, None),
 
             // Dynamic number of upstream inputs
@@ -48,10 +49,14 @@ impl ExprKind {
             | ExprKind::Not { arg: value }
             | ExprKind::PrimCast { value, .. }
             | ExprKind::ObjectMethodTable { obj: value }
-            | ExprKind::IsSubclassOf {
+            | ExprKind::FieldOffset {
                 method_table_ptr: value,
                 ..
             }
+            | ExprKind::ArrayStride {
+                method_table_ptr: value,
+            }
+            | ExprKind::LazyStatic { init_func: value }
             | ExprKind::ReadPrim { ptr: value, .. }
             | ExprKind::ReadString { ptr: value } => {
                 ([Some(*value), None, None], None, None)
@@ -74,6 +79,7 @@ impl ExprKind {
                 iterator,
                 condition: func,
             } => ([Some(*iterator), Some(*func), None], None, None),
+
             &ExprKind::Chain(iter_a, iter_b) => {
                 ([Some(iter_a), Some(iter_b), None], None, None)
             }
@@ -83,6 +89,18 @@ impl ExprKind {
             &ExprKind::CastBytes { bytes, offset, .. } => {
                 ([Some(bytes), Some(offset), None], None, None)
             }
+            &ExprKind::IsSubclassOf {
+                child_method_table_ptr,
+                parent_method_table_ptr,
+            } => (
+                [
+                    Some(child_method_table_ptr),
+                    Some(parent_method_table_ptr),
+                    None,
+                ],
+                None,
+                None,
+            ),
 
             // Binary operators
             &ExprKind::And { lhs, rhs }

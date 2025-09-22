@@ -1,6 +1,9 @@
 mod error;
 pub use error::*;
 
+mod copy_symbolic_name;
+pub(crate) use copy_symbolic_name::*;
+
 mod graph_rewrite;
 pub use graph_rewrite::*;
 

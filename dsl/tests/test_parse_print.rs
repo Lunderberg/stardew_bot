@@ -192,10 +192,8 @@ test_print_and_parse! {
         let obj = graph.static_field("class_name", "field_name");
         graph.downcast(
             obj,
-            SymbolicType {
-                full_name: "other_class".into(),
-                generics: vec!["arg1".into(), "arg2".into()],
-            },
+            SymbolicType::named("other_class".into(), None)
+                .with_type_args(["arg1".into(), "arg2".into()]),
         )
     },
 }
@@ -228,13 +226,77 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
-    get_method_table,
+    object_method_table,
     indoc!{"
         class_name.field_name.method_table()
     "},
     |graph| {
         let obj = graph.static_field("class_name", "field_name");
         graph.object_method_table(obj)
+    },
+}
+
+test_print_and_parse! {
+    class_method_table,
+    indoc!{"
+        let mt = method_table::<class_namespace.class_name>();
+        mt.field_offset(\"field_name\")
+    "},
+    |graph| {
+        let mt = graph.type_to_method_table("class_namespace.class_name");
+        graph.name(mt, "mt")?;
+        Ok(graph.field_offset(mt, "field_name"))
+    },
+}
+
+test_print_and_parse! {
+    field_offset,
+    indoc!{"
+        let mt = class_name.field_name.method_table();
+        mt.field_offset(\"field_name\")
+    "},
+    |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        let mt = graph.object_method_table(obj);
+        graph.name(mt, "mt")?;
+        Ok(graph.field_offset(mt, "field_name"))
+    },
+}
+
+test_print_and_parse! {
+    lazy_static,
+    indoc!{"
+        lazy_static(|| {
+            let mt = class_name.field_name.method_table();
+            mt.field_offset(\"field_name\")
+        })
+    "},
+    |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        let mt = graph.object_method_table(obj);
+        graph.name(mt, "mt")?;
+
+        let offset = graph.field_offset(mt, "field_name");
+        let init_func = graph.function_def(vec![], offset);
+        let lazy_offset = graph.lazy_static(init_func);
+
+        Ok(lazy_offset)
+    },
+}
+
+test_print_and_parse! {
+    array_stride,
+    indoc!{"
+        let mt = method_table::<class_namespace.class_name[]>();
+        mt.array_stride()
+    "},
+    |graph| {
+        let element = SymbolicType::named("class_namespace.class_name".into(), None);
+        let array = element.array_of();
+        let mt = graph.type_to_method_table(array);
+        graph.name(mt, "mt")?;
+
+        Ok(graph.array_stride(mt))
     },
 }
 

@@ -228,14 +228,13 @@ impl SymbolicGraph {
                                     .rev()
                                 };
 
-                                let joint_scope = iter_parent_scopes(prev_scope)
-                                    .zip(iter_parent_scopes(new_scope))
-                                    .take_while(|(a, b)| a == b)
-                                    .map(|(a, _)| a)
-                                    .last()
-                                    .expect(
-                                        "All expressions are within the Global scope",
-                                    );
+                                let joint_scope =
+                                    iter_parent_scopes(prev_scope)
+                                        .zip(iter_parent_scopes(new_scope))
+                                        .take_while(|(a, b)| a == b)
+                                        .map(|(a, _)| a)
+                                        .last()
+                                        .unwrap_or(Scope::Global);
 
                                 Some(joint_scope)
                             }
@@ -278,6 +277,15 @@ impl SymbolicGraph {
         // branching expressions, prefer to have as many expressions
         // as possible within the body of conditional branches.
 
+        let lazy_init: HashSet<OpIndex> = self
+            .iter_ops()
+            .filter(|(OpIndex(i), _)| reachable[*i])
+            .filter_map(|(_, expr)| match &expr.kind {
+                ExprKind::LazyStatic { init_func } => init_func.as_op_index(),
+                _ => None,
+            })
+            .collect();
+
         let scope: Vec<Scope> = innermost_legal_scope
             .iter()
             .cloned()
@@ -291,6 +299,9 @@ impl SymbolicGraph {
                                 break;
                             }
                             if let Scope::Function(func_index) = scope {
+                                if lazy_init.contains(&func_index) {
+                                    break;
+                                }
                                 let parent_scope = innermost_legal_scope
                                     [func_index.0]
                                     .unwrap_or(

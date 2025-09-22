@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use elsa::FrozenMap;
 use thiserror::Error;
 
-use crate::{DSLTypeExt as _, StaticFieldExt as _, SymbolicTypeExt as _};
+use crate::StaticFieldExt as _;
 use dotnet_debugger::{
     CachedReader, DotNetType, RuntimeType, TypeHandlePtrExt as _,
 };
@@ -173,6 +173,12 @@ pub enum TypeInferenceError {
         lhs: DSLType,
         rhs: DSLType,
     },
+
+    #[error(
+        "ExprKind::LazyStatic requires an initiatialization function, \
+             but instead received type '{0}'"
+    )]
+    LazyStaticRequiresInitFunc(DSLType),
 }
 
 macro_rules! infer_binary_op {
@@ -247,11 +253,11 @@ impl<'a> TypeInference<'a> {
         }
     }
 
-    pub fn infer_type(
-        &'a self,
+    pub fn infer_type<'b>(
+        &'b self,
         graph: &SymbolicGraph,
         value: SymbolicValue,
-    ) -> Result<&'a DSLType, TypeInferenceError> {
+    ) -> Result<&'b DSLType, TypeInferenceError> {
         let op_index = match value {
             SymbolicValue::Const(prim) => {
                 return Ok(prim.static_runtime_type_ref());
@@ -485,29 +491,65 @@ impl<'a> TypeInference<'a> {
 
                     match obj_type {
                         DSLType::Unknown => DSLType::Unknown,
-                        other => {
-                            let method_table_ptr = other
-                                .method_table_for_field_access(|| {
-                                    format!("{}", graph.print(*obj))
-                                })?;
+                        DSLType::DotNet(DotNetType::ValueType {
+                            method_table,
+                            symbolic,
+                            ..
+                        })
+                        | DSLType::DotNet(DotNetType::Class {
+                            method_table,
+                            symbolic,
+                            ..
+                        }) => {
                             let field_type =
-                                self.reader()?.field_by_name_to_runtime_type(
-                                    method_table_ptr,
+                                self.reader()?.field_type_by_parent_and_name(
+                                    *method_table,
+                                    symbolic.as_ref(),
                                     field.as_str(),
                                 )?;
                             field_type.into()
                         }
+                        _ => {
+                            return Err(TypeInferenceError::FieldAccessRequiresClassOrStruct(
+                                format!("{}", graph.print(*obj)),
+                                obj_type.clone(),
+                            ));
+                        }
                     }
                 }
 
-                ExprKind::ObjectMethodTable { .. } => {
+                ExprKind::FieldOffset { .. } | ExprKind::ArrayStride { .. } => {
+                    RuntimePrimType::NativeUInt.into()
+                }
+
+                ExprKind::TypeToMethodTable { .. }
+                | ExprKind::ObjectMethodTable { .. } => {
                     RuntimePrimType::Ptr.into()
                 }
+
+                ExprKind::LazyStatic { init_func } => {
+                    let func_type = self.expect_cache(*init_func);
+                    match func_type {
+                        DSLType::Unknown => Ok(DSLType::Unknown),
+
+                        DSLType::Function(func_type) => {
+                            Ok(func_type.output.as_ref().clone())
+                        }
+                        other => {
+                            Err(TypeInferenceError::LazyStaticRequiresInitFunc(
+                                other.clone(),
+                            ))
+                        }
+                    }?
+                }
+
                 ExprKind::SymbolicDowncast { ty, .. } => {
                     let reader = self.reader()?;
-                    let method_table = ty.method_table(reader)?;
+                    let method_table =
+                        reader.symbolic_type_to_method_table(ty)?;
                     DotNetType::Class {
-                        method_table: Some(method_table),
+                        method_table,
+                        symbolic: Some(ty.clone()),
                     }
                     .into()
                 }
@@ -533,35 +575,20 @@ impl<'a> TypeInference<'a> {
                             rank,
                             ..
                         }) if num_indices != *rank => {
-                            return Err(
-                                TypeInferenceError::IncorrectNumberOfIndices {
-                                    num_provided: num_indices,
-                                    num_expected: *rank,
-                                },
-                            );
-                        }
-                        DSLType::DotNet(
-                            DotNetType::MultiDimArray {
-                                method_table: None,
-                                ..
-                            }
-                            | DotNetType::Array {
-                                method_table: None, ..
-                            },
-                        ) => {
-                            return Err(
-                                TypeInferenceError::UnexpectedNullMethodTable(
-                                    format!("{}", graph.print(*array)),
-                                ),
-                            );
+                            Err(TypeInferenceError::IncorrectNumberOfIndices {
+                                num_provided: num_indices,
+                                num_expected: *rank,
+                            })
                         }
                         DSLType::DotNet(
                             DotNetType::MultiDimArray {
                                 method_table: Some(ptr),
+                                symbolic_element,
                                 ..
                             }
                             | DotNetType::Array {
                                 method_table: Some(ptr),
+                                symbolic_element,
                                 ..
                             },
                         ) => {
@@ -576,10 +603,43 @@ impl<'a> TypeInference<'a> {
                                 .map(|ptr| reader.runtime_type(ptr))
                                 .transpose()?;
 
-                            Ok(opt_element_type
-                                .unwrap_or(RuntimeType::Unknown)
-                                .into())
+                            let mut element_type = opt_element_type
+                                .unwrap_or(RuntimeType::Unknown);
+
+                            if let RuntimeType::DotNet(
+                                DotNetType::Class {
+                                    symbolic: sym @ None,
+                                    ..
+                                }
+                                | DotNetType::ValueType {
+                                    symbolic: sym @ None,
+                                    ..
+                                },
+                            ) = &mut element_type
+                            {
+                                *sym = symbolic_element.clone();
+                            }
+
+                            Ok(element_type.into())
                         }
+                        // DSLType::DotNet(
+                        //     DotNetType::MultiDimArray {
+                        //         symbolic_element: Some(symbolic),
+                        //         ..
+                        //     }
+                        //     | DotNetType::Array {
+                        //         symbolic_element: Some(symbolic),
+                        //         ..
+                        //     },
+                        // ) => {
+                        //     let type_def =
+                        //         self.reader()?.find_type_def(symbolic);
+                        //     todo!()
+                        // }
+                        DSLType::DotNet(
+                            DotNetType::MultiDimArray { .. }
+                            | DotNetType::Array { .. },
+                        ) => Ok(DSLType::Unknown),
 
                         other => {
                             Err(TypeInferenceError::IndexAccessRequiresArray(
@@ -659,6 +719,8 @@ impl<'a> TypeInference<'a> {
                 ExprKind::CastBytes { prim_type, .. } => (*prim_type).into(),
                 ExprKind::ReadString { .. } => RustType::new::<String>().into(),
             };
+
+            inferred_type.validate().unwrap();
 
             self.cache.insert(index_to_infer, Box::new(inferred_type));
         }

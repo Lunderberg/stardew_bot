@@ -1,7 +1,7 @@
 use dotnet_debugger::{CachedReader, FieldDescription, MethodTable};
 use dsl_ir::{DSLType, StaticField, TypedPointer};
 
-use crate::{SymbolicTypeExt as _, TypeInferenceError};
+use crate::TypeInferenceError;
 
 pub trait StaticFieldExt {
     fn method_table_and_field<'a>(
@@ -24,7 +24,14 @@ impl StaticFieldExt for StaticField {
         (TypedPointer<MethodTable>, FieldDescription<'a>),
         TypeInferenceError,
     > {
-        let base_method_table_ptr = self.class.method_table(reader)?;
+        let base_method_table_ptr = reader
+            .symbolic_type_to_method_table(&self.class)?
+            .ok_or_else(|| {
+                TypeInferenceError::NoSuchMethodTableFound(format!(
+                    "{}",
+                    self.class
+                ))
+            })?;
 
         let field = reader
             .iter_static_fields(base_method_table_ptr)?

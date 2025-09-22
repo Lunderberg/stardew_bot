@@ -450,6 +450,7 @@ dependencies = [
  "dll_unpacker",
  "elsa",
  "env_var_flag",
+ "format_utils",
  "iterator_extensions",
  "itertools 0.14.0",
  "memory_reader",
@@ -491,6 +492,7 @@ dependencies = [
 name = "dsl_analysis"
 version = "0.1.0"
 dependencies = [
+ "dll_unpacker",
  "dotnet_debugger",
  "dsl_ir",
  "elsa",
@@ -556,8 +558,11 @@ dependencies = [
  "dll_unpacker",
  "dotnet_debugger",
  "dsl_analysis",
+ "dsl_graph_comparison",
  "dsl_ir",
  "dsl_rewrite_utils",
+ "env_var_flag",
+ "iterator_extensions",
  "itertools 0.13.0",
  "thiserror",
 ]

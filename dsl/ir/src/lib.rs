@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 pub use dotnet_debugger::{
-    Pointer, RuntimePrimType, RuntimePrimValue, TypedPointer,
+    Pointer, RuntimePrimType, RuntimePrimValue, SymbolicType, TypedPointer,
 };
 
 mod error;
@@ -18,9 +18,6 @@ pub use node::*;
 
 mod dsl_type;
 pub use dsl_type::*;
-
-mod symbolic_type;
-pub use symbolic_type::*;
 
 mod symbolic_value;
 pub use symbolic_value::*;

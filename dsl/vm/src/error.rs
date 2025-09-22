@@ -31,6 +31,12 @@ pub enum Error {
     OffsetAppliedToNonPointer(RuntimePrimType),
 
     #[error(
+        "Instruction {0} attempted to look up a .NET property, \
+         but the MethodTable for that object could not be found."
+    )]
+    DotNetOffsetRequiresNonNullMethodTable(InstructionIndex),
+
+    #[error(
         "DynamicOffset requires the index \
          to have been previously computed, \
          but location {0} was empty."
@@ -53,7 +59,8 @@ pub enum Error {
 
     #[error(
         "IsSubclassOf requires the argument to be a Pointer, \
-         but instead received {0}."
+         but instead received {0} of type {}.",
+        .0.runtime_type(),
     )]
     InvalidArgumentForSubclassCheck(RuntimePrimValue),
 
@@ -186,9 +193,12 @@ pub enum Error {
     InvalidPointerAddition(Pointer, usize),
 
     #[error(
-        "Cannot apply operator '{op}' with operand types '{lhs}' and '{rhs}'"
+        "In instruction {index}, \
+         cannot apply operator '{op}' \
+         with operand types '{lhs}' and '{rhs}'"
     )]
     InvalidOperandsForBinaryOp {
+        index: InstructionIndex,
         op: &'static str,
         lhs: DSLType,
         rhs: DSLType,

@@ -6,7 +6,7 @@ use std::{
 use itertools::{Either, Itertools, Position};
 
 use dotnet_debugger::MethodTable;
-use format_utils::Indent;
+use format_utils::{Indent, MaybeZeroWidthSpace};
 
 use crate::{
     DSLType, ExprKind, OpIndex, OpPrecedence, RuntimePrimType,
@@ -82,12 +82,6 @@ pub struct GraphPrinter<'a> {
 
     /// The number of spaces to indent for the body of functions.
     indent_width: usize,
-}
-
-#[derive(Clone, Copy)]
-struct TypePrinter<'a> {
-    ty: &'a SymbolicType,
-    insert_zero_width_space_at_breakpoint: bool,
 }
 
 #[derive(Debug)]
@@ -364,12 +358,11 @@ impl<'a> GraphPrinter<'a> {
                     write!(fmt, "{text}")?;
                 }
                 PrintItem::SymbolicType(ty) => {
-                    let ty = TypePrinter {
-                        ty,
-                        insert_zero_width_space_at_breakpoint: self
-                            .insert_zero_width_space_at_breakpoint,
-                    };
-                    write!(fmt, "{ty}")?;
+                    write!(
+                        fmt,
+                        "{}",
+                        ty.printer(self.insert_zero_width_space_at_breakpoint)
+                    )?;
                 }
                 PrintItem::ParenOpen => write!(fmt, "(")?,
                 PrintItem::ParenClose => write!(fmt, ")")?,
@@ -906,6 +899,17 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
 
+                        ExprKind::TypeToMethodTable { ty } => {
+                            [
+                                PrintItem::Str("method_table::<"),
+                                PrintItem::SymbolicType(ty),
+                                PrintItem::Str(">()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
                         ExprKind::ObjectMethodTable { obj } => {
                             [
                                 PrintItem::Expr(
@@ -933,6 +937,56 @@ impl<'a> GraphPrinter<'a> {
                                 *obj,
                                 OpPrecedence::MaxPrecedence,
                             ));
+                        }
+                        ExprKind::FieldOffset {
+                            method_table_ptr,
+                            field,
+                        } => {
+                            [
+                                PrintItem::Expr(
+                                    *method_table_ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("field_offset"),
+                                PrintItem::ParenOpen,
+                                PrintItem::DoubleQuote,
+                                PrintItem::Str(field),
+                                PrintItem::DoubleQuote,
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::ArrayStride { method_table_ptr } => {
+                            [
+                                PrintItem::Expr(
+                                    *method_table_ptr,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("array_stride"),
+                                PrintItem::ParenOpen,
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+                        ExprKind::LazyStatic { init_func } => {
+                            [
+                                PrintItem::Str("lazy_static"),
+                                PrintItem::ParenOpen,
+                                PrintItem::Expr(
+                                    *init_func,
+                                    OpPrecedence::RangeExtent,
+                                ),
+                                PrintItem::ParenClose,
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
                         }
                         ExprKind::SymbolicDowncast { obj, ty } => {
                             [
@@ -1244,18 +1298,21 @@ impl<'a> GraphPrinter<'a> {
                         }
 
                         ExprKind::IsSubclassOf {
-                            method_table_ptr,
-                            ty,
+                            child_method_table_ptr: child,
+                            parent_method_table_ptr: parent,
                         } => {
                             [
                                 PrintItem::Expr(
-                                    *method_table_ptr,
+                                    *child,
                                     OpPrecedence::MaxPrecedence,
                                 ),
                                 PrintItem::MemberAccess,
-                                PrintItem::Str("is_subclass_of::<"),
-                                PrintItem::MethodTablePointer(*ty),
-                                PrintItem::Str(">()"),
+                                PrintItem::Str("is_subclass_of("),
+                                PrintItem::Expr(
+                                    *parent,
+                                    OpPrecedence::MinPrecedence,
+                                ),
+                                PrintItem::Str(")"),
                             ]
                             .into_iter()
                             .rev()
@@ -1364,7 +1421,7 @@ impl<'a> GraphPrinter<'a> {
                                     OpPrecedence::MaxPrecedence,
                                 ),
                                 PrintItem::MemberAccess,
-                                PrintItem::Str(".read_string()"),
+                                PrintItem::Str("read_string()"),
                             ]
                             .into_iter()
                             .rev()
@@ -1383,57 +1440,6 @@ impl<'a> GraphPrinter<'a> {
 impl<'a> Display for GraphPrinter<'a> {
     fn fmt(&self, fmt: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         self.display(fmt)
-    }
-}
-
-struct MaybeZeroWidthSpace(bool);
-impl Display for MaybeZeroWidthSpace {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.0 {
-            write!(f, "\u{200B}")
-        } else {
-            Ok(())
-        }
-    }
-}
-
-impl<'a> Display for TypePrinter<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let SymbolicType {
-            full_name,
-            generics,
-        } = &self.ty;
-        let sep =
-            MaybeZeroWidthSpace(self.insert_zero_width_space_at_breakpoint);
-
-        if full_name.contains('`') {
-            write!(f, "\"{full_name}\"")?;
-        } else {
-            write!(f, "{full_name}")?;
-        }
-
-        if !generics.is_empty() {
-            write!(f, "<{sep}")?;
-            for (i, generic) in generics.iter().enumerate() {
-                if i > 0 {
-                    write!(f, ", {sep}")?;
-                }
-                write!(f, "{generic}")?;
-            }
-            write!(f, ">")?;
-        }
-
-        Ok(())
-    }
-}
-
-impl Display for SymbolicType {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let printer = TypePrinter {
-            ty: self,
-            insert_zero_width_space_at_breakpoint: false,
-        };
-        write!(f, "{printer}")
     }
 }
 

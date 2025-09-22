@@ -13,7 +13,7 @@ use crate::portable_executable::DataDirectoryKind;
 use crate::relative_virtual_address::{
     RelativeVirtualAddress, VirtualAddressRelocation, VirtualRange,
 };
-use crate::{Error, Signature, UnpackedBlob};
+use crate::{Error, Signature, SignatureType, UnpackedBlob};
 
 /// Convenience function for unpacking DLL metadata.
 ///
@@ -307,7 +307,7 @@ pub struct MetadataRow<'a, TableTag> {
     pub(crate) metadata: Metadata<'a>,
 }
 
-pub trait MetadataTableTag: Copy {
+pub trait MetadataTableTag: Copy + 'static {
     const KIND: MetadataTableKind;
 
     const COLUMNS: &'static [MetadataColumnType];
@@ -390,6 +390,9 @@ impl MetadataColumnValue for u16 {
     const SIZE: usize = 2;
 }
 impl MetadataColumnValue for u32 {
+    const SIZE: usize = 4;
+}
+impl MetadataColumnValue for TypeDefFlags {
     const SIZE: usize = 4;
 }
 impl MetadataColumnValue for FieldFlags {
@@ -773,8 +776,8 @@ macro_rules! decl_metadata_table {
                     index_range.end - index_range.start
                 }
 
-                pub fn [< iter_ $plural_field_name >]<'b>(&'b self) -> Result<
-                    impl DoubleEndedIterator<Item=MetadataRow<'b, $field_type>>,
+                pub fn [< iter_ $plural_field_name >](&self) -> Result<
+                    impl DoubleEndedIterator<Item=MetadataRow<'a, $field_type>> + 'a,
                     Error,
                 > {
                     let indices = self. [< $field_name _indices >] ();
@@ -802,7 +805,7 @@ decl_metadata_table! {
     },
 
     TypeDef: {
-        flags: {value u32},
+        flags: {value TypeDefFlags},
         name: {heap String},
         namespace: {heap String},
         extends: {coded_index Option<TypeDefOrRef>},
@@ -1138,6 +1141,24 @@ macro_rules! decl_core_coded_index_type {
                         }
                     }
 
+                impl TryFrom<MetadataCodedIndex<$tag>>
+                    for MetadataTableIndex<$table_type> {
+                        type Error = Error;
+                        fn try_from(value: MetadataCodedIndex<$tag>)
+                            -> Result<Self,Self::Error> {
+                            const EXPECTED: MetadataTableKind
+                                = <$table_type as MetadataTableTag>::KIND;
+                            if value.kind == EXPECTED {
+                                Ok(MetadataTableIndex::new(value.index))
+                            } else {
+                                Err(Error::UnexpectedMetadataIndexKind {
+                                    expected: EXPECTED,
+                                    actual: value.kind,
+                                })
+                            }
+                        }
+                }
+
                 impl std::cmp::PartialEq<MetadataTableIndex<$table_type>>
                     for MetadataCodedIndex<$tag> {
                         fn eq(&self, other: &MetadataTableIndex<$table_type>) -> bool {
@@ -1263,6 +1284,9 @@ impl CodedIndex for CustomAttributeType {
 }
 
 #[derive(Clone, Copy)]
+pub struct TypeDefFlags(u32);
+
+#[derive(Clone, Copy)]
 pub struct FieldFlags(u16);
 
 #[derive(Clone, Copy)]
@@ -1274,24 +1298,22 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
     }
 }
 
+fn full_name<'a>(namespace: &str, name: &str) -> String {
+    if namespace.is_empty() {
+        name.to_string()
+    } else {
+        format!("{namespace}.{name}").into()
+    }
+}
+
 impl<'a> MetadataTypeDefOrRef<'a> {
     pub fn full_name(&self) -> Result<String, Error> {
-        let (namespace, name) = match self {
-            MetadataTypeDefOrRef::TypeDef(row) => {
-                (row.namespace()?, row.name()?.to_string())
-            }
-            MetadataTypeDefOrRef::TypeRef(row) => {
-                (row.namespace()?, row.name()?.to_string())
-            }
+        match self {
+            MetadataTypeDefOrRef::TypeDef(row) => row.full_name(),
+            MetadataTypeDefOrRef::TypeRef(row) => row.full_name(),
             MetadataTypeDefOrRef::TypeSpec(spec) => {
-                ("", format!("{}", spec.signature()?))
+                Ok(format!("{}", spec.signature()?).into())
             }
-        };
-
-        if namespace.is_empty() {
-            Ok(name)
-        } else {
-            Ok(format!("{namespace}.{name}"))
         }
     }
 
@@ -2062,6 +2084,10 @@ impl<'a> MetadataTableHeader<'a> {
 }
 
 impl<'a> Metadata<'a> {
+    pub fn name(&self) -> Result<&'a str, Error> {
+        Ok(self.get(MetadataTableIndex::<Module>::new(0))?.name()?)
+    }
+
     pub fn ptr_range(&self) -> Range<Pointer> {
         self.layout.tables_location.clone()
     }
@@ -2253,7 +2279,10 @@ impl<'a> Metadata<'a> {
     fn iter_range<TableTag>(
         &self,
         indices: impl Borrow<MetadataTableIndexRange<TableTag>>,
-    ) -> Result<impl DoubleEndedIterator<Item = MetadataRow<TableTag>>, Error>
+    ) -> Result<
+        impl DoubleEndedIterator<Item = MetadataRow<'a, TableTag>> + 'a,
+        Error,
+    >
     where
         TableTag: MetadataTableTag,
     {
@@ -3086,6 +3115,23 @@ where
                 _phantom: PhantomData,
             })
     }
+
+    pub fn metadata(&self) -> Metadata<'a> {
+        self.metadata
+    }
+}
+
+impl<'a> UnpackBytes<'a> for TypeDefFlags {
+    type Error = Error;
+    fn unpack(bytes: ByteRange<'a>) -> Result<Self, Self::Error> {
+        Ok(Self(bytes.unpack()?))
+    }
+}
+
+impl std::fmt::Display for TypeDefFlags {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
 }
 
 impl FieldFlags {
@@ -3112,6 +3158,12 @@ impl std::fmt::Display for FieldFlags {
 }
 
 impl<'a> MetadataRow<'a, TypeRef> {
+    pub fn full_name(&self) -> Result<String, Error> {
+        let namespace = self.namespace()?;
+        let name = self.name()?;
+        Ok(full_name(namespace, name))
+    }
+
     pub fn target_dll_name(&self) -> Result<&'a str, Error> {
         let mut resolution_scope = self.resolution_scope()?;
         while let MetadataResolutionScope::TypeRef(indirect) = resolution_scope
@@ -3128,6 +3180,39 @@ impl<'a> MetadataRow<'a, TypeRef> {
                 panic!("Unreachable due to while let loop above.")
             }
         }
+    }
+}
+
+impl<'a> MetadataRow<'a, TypeDef> {
+    pub fn full_name(&self) -> Result<String, Error> {
+        let namespace = self.namespace()?;
+        let name = self.name()?;
+        Ok(full_name(namespace, name))
+    }
+
+    pub fn is_value_type(&self) -> Result<bool, Error> {
+        let Some(parent) = self.extends()? else {
+            return Ok(false);
+        };
+
+        if parent.namespace()? != "System" {
+            return Ok(false);
+        }
+
+        let name = parent.name()?;
+        Ok(name == "ValueType" || name == "Enum")
+    }
+
+    pub fn signature(&self) -> Result<SignatureType<'a>, Error> {
+        let metadata = self.metadata();
+        let index: MetadataCodedIndex<TypeDefOrRef> = self.index().into();
+        let sig = if self.is_value_type()? {
+            SignatureType::ValueType { index, metadata }
+        } else {
+            SignatureType::Class { index, metadata }
+        };
+
+        Ok(sig)
     }
 }
 
@@ -3268,5 +3353,11 @@ impl<'a> MetadataRow<'a, ExportedType> {
             MetadataImplementation::AssemblyRef(row) => row.name(),
             MetadataImplementation::ExportedType(row) => row.target_dll_name(),
         }
+    }
+
+    pub fn full_name(&self) -> Result<String, Error> {
+        let namespace = self.namespace()?;
+        let name = self.name()?;
+        Ok(full_name(namespace, name))
     }
 }

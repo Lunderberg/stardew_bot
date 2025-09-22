@@ -477,7 +477,7 @@ impl StaticState {
                                     .prim_cast::<usize>();
                                 (0..num_seasons)
                                     .map(|i| list._items[i])
-                                    .map(|season| new_season(season.value__))
+                                    .map(new_season)
                                     .collect()
                             };
 

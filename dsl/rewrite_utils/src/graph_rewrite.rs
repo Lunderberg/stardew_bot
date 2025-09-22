@@ -38,6 +38,7 @@ pub trait GraphRewrite {
     fn apply_recursively(self) -> impl GraphRewrite<Error = Self::Error>
     where
         Self: Sized,
+        Self::Error: From<dsl_ir::Error>,
     {
         RecursiveRewrite::new(self)
     }

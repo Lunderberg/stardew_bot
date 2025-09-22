@@ -1,5 +1,3 @@
-use std::collections::HashSet;
-
 use dsl_rewrite_utils::GraphRewrite;
 use itertools::Itertools as _;
 
@@ -11,7 +9,7 @@ use dsl_ir::{
 
 use crate::Error;
 
-pub struct ConvertCollectToReduce<'a>(pub &'a Analysis<'a>);
+pub struct ConvertCollectToReduce<'a: 'b, 'b>(pub &'b Analysis<'a>);
 
 struct MakeVector {
     element_type: DSLType,
@@ -96,66 +94,77 @@ fn collect_dummy_args(
 
     let mut to_visit = vec![VisitItem::PreVisit(initial)];
 
-    let mut used_without_definition = HashSet::<OpIndex>::new();
-    let mut used_as_function = HashSet::<OpIndex>::new();
-    let mut currently_defined = HashSet::<OpIndex>::new();
+    let num_op = graph.num_operations();
+    let mut seen = vec![false; num_op];
+    let mut used_without_definition = vec![false; num_op];
+    let mut used_as_function = vec![false; num_op];
+    let mut currently_defined = vec![false; num_op];
+
+    macro_rules! mark {
+        ($op_index:expr) => {
+            let op_index: OpIndex = $op_index;
+            if !seen[op_index.0] {
+                seen[op_index.0] = true;
+                to_visit.push(VisitItem::PreVisit(op_index));
+            }
+        };
+    }
 
     while let Some(visiting) = to_visit.pop() {
         match visiting {
             VisitItem::PreVisit(op_index) => match &graph[op_index].kind {
                 ExprKind::FunctionArg(_) => {
-                    if !currently_defined.contains(&op_index) {
-                        used_without_definition.insert(op_index);
+                    if !currently_defined[op_index.0] {
+                        used_without_definition[op_index.0] = true;
                     }
                 }
                 ExprKind::Function { params, output } => {
                     params.iter().filter_map(|p| p.as_op_index()).for_each(
                         |param_index| {
-                            assert!(!currently_defined.contains(&param_index));
-                            currently_defined.insert(param_index);
+                            assert!(!currently_defined[param_index.0]);
+                            currently_defined[param_index.0] = true;
                             to_visit
                                 .push(VisitItem::RemoveDefinition(param_index));
                         },
                     );
                     if let Some(out_index) = output.as_op_index() {
-                        to_visit.push(VisitItem::PreVisit(out_index));
+                        mark!(out_index);
                     }
                 }
                 ExprKind::FunctionCall { func, args } => {
                     if let Some(func_index) = func.as_op_index() {
-                        used_as_function.insert(func_index);
+                        used_as_function[func_index.0] = true;
                     }
                     args.iter()
                         .chain([func])
                         .filter_map(|value| value.as_op_index())
-                        .map(VisitItem::PreVisit)
                         .for_each(|item| {
-                            to_visit.push(item);
+                            mark!(item);
                         });
                 }
                 other => {
-                    other.iter_input_nodes().map(VisitItem::PreVisit).for_each(
-                        |item| {
-                            to_visit.push(item);
-                        },
-                    );
+                    other.iter_input_nodes().for_each(|item| {
+                        mark!(item);
+                    });
                 }
             },
             VisitItem::RemoveDefinition(op_index) => {
-                currently_defined.remove(&op_index);
+                currently_defined[op_index.0] = false;
             }
         }
     }
 
     used_without_definition
         .into_iter()
-        .sorted()
-        .filter(|index| !used_as_function.contains(index))
+        .enumerate()
+        .filter(|(_, val)| *val)
+        .map(|(i, _)| OpIndex(i))
+        .filter(|index| !used_as_function[index.0])
         .map(Into::into)
         .collect()
 }
 
-impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
+impl GraphRewrite for ConvertCollectToReduce<'_, '_> {
     type Error = Error;
 
     fn rewrite_expr(
@@ -180,12 +189,15 @@ impl<'a> GraphRewrite for ConvertCollectToReduce<'a> {
             graph.raw_native_function(ExposedNativeFunction::new(MakeVector {
                 element_type: *item_type.clone(),
             }));
+        graph.name(make_vector, "make_vector")?;
+
         let collect_into_vector = graph.raw_native_function(
             ExposedNativeFunction::new(CollectIntoVector {
                 element_type: *item_type.clone(),
                 output_name: name.unwrap_or("(anon)").to_string(),
             }),
         );
+        graph.name(collect_into_vector, "collect_into_vector")?;
 
         let dummy_initial_args = collect_dummy_args(graph, iterator);
 

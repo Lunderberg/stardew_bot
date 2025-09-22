@@ -114,6 +114,18 @@ pub enum Error {
         num_params: usize,
         num_args: usize,
     },
+
+    #[error(
+        "ExprKind::LazyStatic must have initialization function, \
+         but instead had '{0}'."
+    )]
+    LazyStaticInitializationMustBeFunction(String),
+
+    #[error(
+        "ExprKind::LazyStatic must have nullary initialization function, \
+         but instead had a function with {0} parameters."
+    )]
+    LazyStaticInitializationMayNotHaveParams(usize),
 }
 
 impl std::fmt::Debug for Error {

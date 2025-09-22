@@ -1,9 +1,7 @@
-use dotnet_debugger::MethodTable;
-
 use crate::{
     ByteRegion, DSLType, Error, ExposedNativeFunction, Expr, ExprKind,
     NativeFunction, OpIndex, RuntimePrimType, StaticField, SymbolicType,
-    SymbolicValue, TypedPointer, WrappedNativeFunction,
+    SymbolicValue, WrappedNativeFunction,
 };
 
 #[derive(Default, Clone)]
@@ -327,6 +325,30 @@ impl SymbolicGraph {
         ty: DSLType,
     ) -> SymbolicValue {
         let ptr = ptr.into();
+
+        match &ty {
+            DSLType::DotNet(
+                dotnet_debugger::DotNetType::Class {
+                    method_table: Some(_),
+                    symbolic,
+                    ..
+                }
+                | dotnet_debugger::DotNetType::ValueType {
+                    method_table: Some(_),
+                    symbolic,
+                    ..
+                },
+            ) => {
+                assert!(
+                    symbolic.is_some(),
+                    "Attempting to perform pointer-cast of {}, \
+                     but the type {ty} has no symbolic type",
+                    self.print(ptr),
+                );
+            }
+            _ => {}
+        }
+
         self.push(ExprKind::PointerCast { ptr, ty })
     }
 
@@ -423,6 +445,14 @@ impl SymbolicGraph {
         self.push(ExprKind::PrimCast { value, prim_type })
     }
 
+    pub fn type_to_method_table(
+        &mut self,
+        ty: impl Into<SymbolicType>,
+    ) -> SymbolicValue {
+        let ty = ty.into();
+        self.push(ExprKind::TypeToMethodTable { ty })
+    }
+
     pub fn object_method_table(
         &mut self,
         obj: impl Into<SymbolicValue>,
@@ -431,15 +461,45 @@ impl SymbolicGraph {
         self.push(ExprKind::ObjectMethodTable { obj })
     }
 
-    pub fn is_subclass_of(
+    pub fn field_offset(
+        &mut self,
+        method_table: impl Into<SymbolicValue>,
+        field: impl Into<String>,
+    ) -> SymbolicValue {
+        let method_table = method_table.into();
+        let field = field.into();
+        self.push(ExprKind::FieldOffset {
+            method_table_ptr: method_table,
+            field,
+        })
+    }
+
+    pub fn array_stride(
         &mut self,
         method_table_ptr: impl Into<SymbolicValue>,
-        base_type: TypedPointer<MethodTable>,
     ) -> SymbolicValue {
         let method_table_ptr = method_table_ptr.into();
+        self.push(ExprKind::ArrayStride { method_table_ptr })
+    }
+
+    pub fn lazy_static(
+        &mut self,
+        init_func: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let init_func = init_func.into();
+        self.push(ExprKind::LazyStatic { init_func })
+    }
+
+    pub fn is_subclass_of(
+        &mut self,
+        child_method_table_ptr: impl Into<SymbolicValue>,
+        parent_method_table_ptr: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let child_method_table_ptr = child_method_table_ptr.into();
+        let parent_method_table_ptr = parent_method_table_ptr.into();
         self.push(ExprKind::IsSubclassOf {
-            method_table_ptr,
-            ty: base_type,
+            child_method_table_ptr,
+            parent_method_table_ptr,
         })
     }
 

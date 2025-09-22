@@ -1,5 +1,7 @@
 use dsl_analysis::Analysis;
-use dsl_ir::{ExprKind, StaticField, SymbolicGraph, SymbolicValue};
+use dsl_ir::{
+    ExprKind, StaticField, SymbolicGraph, SymbolicType, SymbolicValue,
+};
 use dsl_rewrite_utils::GraphRewrite;
 
 use crate::Error;
@@ -30,17 +32,18 @@ impl<'a> GraphRewrite for IdentifyStaticField<'a> {
             return Ok(None);
         };
 
-        if !symbolic_type.generics.is_empty() {
+        let name = match symbolic_type {
+            SymbolicType::Named { name, .. } => name,
+            _ => {
+                return Ok(None);
+            }
+        };
+
+        if self.0.reader()?.class_exists(name)? {
             return Ok(None);
         }
 
-        let class = symbolic_type.full_name.as_ref();
-
-        if self.0.reader()?.class_exists(class)? {
-            return Ok(None);
-        }
-
-        let full_name = format!("{class}.{field_name}");
+        let full_name = format!("{name}.{field_name}");
         let static_field = graph.static_field(full_name, subfield_name);
 
         Ok(Some(static_field))

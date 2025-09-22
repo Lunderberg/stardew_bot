@@ -139,3 +139,181 @@ impl GraphRewrite for MergeParallelReads {
         Ok(None)
     }
 }
+
+#[cfg(test)]
+mod test {
+    use dsl_graph_comparison::GraphComparisonExt as _;
+    use dsl_rewrite_utils::SymbolicGraphRewrite as _;
+
+    use super::*;
+
+    fn check_before_expected(
+        before: &str,
+        expected: &str,
+    ) -> Result<(), Error> {
+        let before = {
+            let mut graph = SymbolicGraph::new();
+            graph.parse(before)?;
+            graph
+        };
+
+        let expected = {
+            let mut graph = SymbolicGraph::new();
+            graph.parse(expected)?;
+            graph
+        };
+
+        println!(
+            "----------- Before -------------\n{}",
+            before
+                .printer()
+                .expand_all_expressions()
+                .number_all_expressions()
+        );
+
+        let rewriter = MergeParallelReads
+            .then(crate::ConstantFold)
+            .apply_recursively();
+
+        let after = before.rewrite(rewriter)?;
+
+        println!(
+            "----------- After -------------\n{}",
+            after
+                .printer()
+                .expand_all_expressions()
+                .number_all_expressions()
+        );
+
+        println!(
+            "----------- Expected -------------\n{}",
+            expected
+                .printer()
+                .expand_all_expressions()
+                .number_all_expressions()
+        );
+
+        assert!(after.graph_comparison(&expected).apply());
+
+        Ok(())
+    }
+
+    #[test]
+    fn merge_two_reads() -> Result<(), Error> {
+        check_before_expected(
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr) {
+                    let a_bytes = a_ptr.read_bytes(8);
+                    let a_value = a_bytes.cast_bytes::<usize>(0);
+
+                    let b_bytes = b_ptr.read_bytes(8);
+                    let b_value = b_bytes.cast_bytes::<usize>(0);
+
+                    a_value + b_value
+                }
+            },
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr) {
+                    let bytes = read_bytes(a_ptr, 8, b_ptr, 8);
+                    let a_value = bytes.cast_bytes::<usize>(0);
+                    let b_value = bytes.cast_bytes::<usize>(8);
+
+                    a_value + b_value
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn merge_three_reads() -> Result<(), Error> {
+        check_before_expected(
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr, c_ptr: Ptr) {
+                    let a_bytes = a_ptr.read_bytes(8);
+                    let a_value = a_bytes.cast_bytes::<usize>(0);
+
+                    let b_bytes = b_ptr.read_bytes(8);
+                    let b_value = b_bytes.cast_bytes::<usize>(0);
+
+                    let c_bytes = c_ptr.read_bytes(8);
+                    let c_value = c_bytes.cast_bytes::<usize>(0);
+
+                    a_value + b_value + c_value
+                }
+            },
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr, c_ptr: Ptr) {
+                    let bytes = read_bytes(a_ptr, 8, b_ptr, 8, c_ptr, 8);
+                    let a_value = bytes.cast_bytes::<usize>(0);
+                    let b_value = bytes.cast_bytes::<usize>(8);
+                    let c_value = bytes.cast_bytes::<usize>(16);
+
+                    a_value + b_value + c_value
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn merge_two_reads_with_already_merged_read() -> Result<(), Error> {
+        check_before_expected(
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr, c_ptr: Ptr) {
+                    let ab_bytes = read_bytes(a_ptr, 8, b_ptr, 8);
+                    let a_value = ab_bytes.cast_bytes::<usize>(0);
+                    let b_value = ab_bytes.cast_bytes::<usize>(8);
+
+                    let c_bytes = c_ptr.read_bytes(8);
+                    let c_value = c_bytes.cast_bytes::<usize>(0);
+
+                    a_value + b_value + c_value
+                }
+            },
+            stringify! {
+                pub fn main(a_ptr: Ptr, b_ptr: Ptr, c_ptr: Ptr) {
+                    let bytes = read_bytes(a_ptr, 8, b_ptr, 8, c_ptr, 8);
+                    let a_value = bytes.cast_bytes::<usize>(0);
+                    let b_value = bytes.cast_bytes::<usize>(8);
+                    let c_value = bytes.cast_bytes::<usize>(16);
+
+                    a_value + b_value + c_value
+                }
+            },
+        )
+    }
+
+    #[test]
+    fn merge_sequential_steps() -> Result<(), Error> {
+        check_before_expected(
+            stringify! {
+                pub fn main(a: Ptr, b: Ptr) {
+                    let a = a.read_bytes(8).cast_bytes::<Ptr>(0);
+                    let a = a + 16;
+                    let a = a.read_bytes(8).cast_bytes::<usize>(0);
+
+                    let b = b.read_bytes(8).cast_bytes::<Ptr>(0);
+                    let b = b + 16;
+                    let b = b.read_bytes(8).cast_bytes::<usize>(0);
+
+                    a + b
+                }
+            },
+            stringify! {
+                pub fn main(a: Ptr, b: Ptr) {
+                    let bytes = read_bytes(a, 8, b, 8);
+                    let a = bytes.cast_bytes::<Ptr>(0);
+                    let b = bytes.cast_bytes::<Ptr>(8);
+
+                    let a = a + 16;
+                    let b = b + 16;
+
+                    let bytes = read_bytes(a, 8, b, 8);
+                    let a = bytes.cast_bytes::<usize>(0);
+                    let b = bytes.cast_bytes::<usize>(8);
+
+                    a + b
+                }
+            },
+        )
+    }
+}

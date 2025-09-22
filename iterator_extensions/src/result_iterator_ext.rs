@@ -6,16 +6,17 @@ pub trait ResultIteratorExt: Iterator + Sized {
     /// * Before: Iterator of `Result<T,E>`
     /// * Func: Map from `T` to `Result<U,E>`
     /// * After: Iterator of `Result<U,E>`
-    fn and_map_ok<Func, T, U, E>(
+    fn and_map_ok<Func, T, U, Eiter, Efunc>(
         self,
         mut func: Func,
-    ) -> impl Iterator<Item = Result<U, E>>
+    ) -> impl Iterator<Item = Result<U, Eiter>>
     where
         Self: Sized,
-        Self: Iterator<Item = Result<T, E>>,
-        Func: FnMut(T) -> Result<U, E>,
+        Self: Iterator<Item = Result<T, Eiter>>,
+        Func: FnMut(T) -> Result<U, Efunc>,
+        Efunc: Into<Eiter>,
     {
-        self.map(move |res| res.and_then(&mut func))
+        self.map(move |res| res.and_then(|item| func(item).map_err(Into::into)))
     }
 
     /// Apply a fallible filter function to an iterator of results.

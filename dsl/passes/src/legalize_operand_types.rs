@@ -6,9 +6,9 @@ use dsl_rewrite_utils::GraphRewrite;
 
 use crate::Error;
 
-pub struct LegalizeOperandTypes<'a>(pub &'a Analysis<'a>);
+pub struct LegalizeOperandTypes<'a: 'b, 'b>(pub &'b Analysis<'a>);
 
-impl LegalizeOperandTypes<'_> {
+impl LegalizeOperandTypes<'_, '_> {
     fn get_type(
         &self,
         graph: &SymbolicGraph,
@@ -66,7 +66,7 @@ impl LegalizeOperandTypes<'_> {
     }
 }
 
-impl GraphRewrite for LegalizeOperandTypes<'_> {
+impl GraphRewrite for LegalizeOperandTypes<'_, '_> {
     type Error = Error;
 
     fn rewrite_expr(

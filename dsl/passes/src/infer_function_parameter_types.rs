@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use dotnet_debugger::DotNetType;
 use dsl_analysis::Analysis;
 use dsl_ir::{
     DSLType, ExprKind, IteratorType, OpIndex, RuntimePrimType, SymbolicGraph,
@@ -9,15 +10,34 @@ use dsl_rewrite_utils::{GraphRewrite, SymbolicGraphSubstitute as _};
 
 use crate::Error;
 
-pub struct InferFunctionParameterTypes<'a>(pub &'a Analysis<'a>);
+pub struct InferFunctionParameterTypes<'a: 'b, 'b>(pub &'b Analysis<'a>);
 
-impl InferFunctionParameterTypes<'_> {
+impl InferFunctionParameterTypes<'_, '_> {
     fn get_type(
         &self,
         graph: &SymbolicGraph,
         value: SymbolicValue,
     ) -> Result<Option<DSLType>, Error> {
         let value_type = self.0.infer_type(graph, value)?;
+        match &value_type {
+            DSLType::DotNet(
+                DotNetType::Class {
+                    method_table: Some(_),
+                    symbolic,
+                    ..
+                }
+                | DotNetType::ValueType {
+                    method_table: Some(_),
+                    symbolic,
+                    ..
+                },
+            ) => assert!(
+                symbolic.is_some(),
+                "Value {} has inferred type {value_type}, without symbolic",
+                graph.print(value)
+            ),
+            _ => {}
+        }
         Ok(match value_type {
             DSLType::Unknown => None,
             other => Some(other.clone()),
@@ -33,7 +53,29 @@ impl InferFunctionParameterTypes<'_> {
         Ok(match iter_type {
             DSLType::Iterator(IteratorType { item }) => match item.as_ref() {
                 DSLType::Unknown => None,
-                other => Some(other.clone()),
+                other => {
+                    match other {
+                        DSLType::DotNet(
+                            DotNetType::Class {
+                                method_table: Some(_),
+                                symbolic,
+                                ..
+                            }
+                            | DotNetType::ValueType {
+                                method_table: Some(_),
+                                symbolic,
+                                ..
+                            },
+                        ) => assert!(
+                            symbolic.is_some(),
+                            "Iterator {} has inferred item type {other}, \
+                             without symbolic",
+                            graph.print(iterator)
+                        ),
+                        _ => {}
+                    }
+                    Some(other.clone())
+                }
             },
             _ => None,
         })
@@ -85,7 +127,7 @@ impl InferFunctionParameterTypes<'_> {
     }
 }
 
-impl GraphRewrite for InferFunctionParameterTypes<'_> {
+impl GraphRewrite for InferFunctionParameterTypes<'_, '_> {
     type Error = Error;
 
     fn rewrite_expr(

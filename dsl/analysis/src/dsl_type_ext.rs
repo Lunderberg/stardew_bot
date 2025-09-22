@@ -7,7 +7,7 @@ pub trait DSLTypeExt {
     fn method_table_for_field_access(
         &self,
         gen_name: impl FnOnce() -> String,
-    ) -> Result<TypedPointer<MethodTable>, TypeInferenceError>;
+    ) -> Result<Option<TypedPointer<MethodTable>>, TypeInferenceError>;
 
     fn method_table_for_downcast(
         &self,
@@ -18,13 +18,12 @@ impl DSLTypeExt for DSLType {
     fn method_table_for_field_access(
         &self,
         gen_name: impl FnOnce() -> String,
-    ) -> Result<TypedPointer<MethodTable>, TypeInferenceError> {
+    ) -> Result<Option<TypedPointer<MethodTable>>, TypeInferenceError> {
         match self {
+            DSLType::Unknown => Ok(None),
             DSLType::DotNet(DotNetType::ValueType { method_table, .. })
-            | DSLType::DotNet(DotNetType::Class { method_table }) => {
-                method_table.ok_or_else(|| {
-                    TypeInferenceError::UnexpectedNullMethodTable(gen_name())
-                })
+            | DSLType::DotNet(DotNetType::Class { method_table, .. }) => {
+                Ok(*method_table)
             }
             _ => Err(TypeInferenceError::FieldAccessRequiresClassOrStruct(
                 gen_name(),
@@ -37,8 +36,10 @@ impl DSLTypeExt for DSLType {
         &self,
     ) -> Result<TypedPointer<MethodTable>, TypeInferenceError> {
         match self {
-            DSLType::DotNet(DotNetType::Class { method_table }) => method_table
-                .ok_or(TypeInferenceError::DowncastRequiresKnownBaseClass),
+            DSLType::DotNet(DotNetType::Class { method_table, .. }) => {
+                method_table
+                    .ok_or(TypeInferenceError::DowncastRequiresKnownBaseClass)
+            }
             _ => Err(TypeInferenceError::DowncastRequiresClassInstance(
                 self.clone(),
             )),

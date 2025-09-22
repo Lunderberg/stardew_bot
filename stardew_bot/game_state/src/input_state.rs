@@ -64,7 +64,7 @@ impl InputState {
 
                 let num_keys = keys._size.prim_cast::<usize>();
                 let keys_pressed = (0..num_keys)
-                    .map(|i| keys._items[i].value__)
+                    .map(|i| keys._items[i])
                     .collect();
 
                 let mouse = StardewValley.Game1

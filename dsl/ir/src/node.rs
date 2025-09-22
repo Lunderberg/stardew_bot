@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use dotnet_debugger::{MethodTable, RuntimePrimType, TypedPointer};
+use dotnet_debugger::RuntimePrimType;
 
 use crate::{
     DSLType, ExposedNativeFunction, OpIndex, SymbolicType, SymbolicValue,
@@ -130,6 +130,10 @@ pub enum ExprKind {
         reduction: SymbolicValue,
     },
 
+    /// Lazily compute a static value, caching it for all future uses.
+    /// The value is defined as a zero-parameter function.
+    LazyStatic { init_func: SymbolicValue },
+
     /// A static member of a class.  These are specified in terms of
     /// the class's name, and the name of the field.
     ///
@@ -137,15 +141,33 @@ pub enum ExprKind {
     /// field.
     StaticField(StaticField),
 
+    /// Determine the method table of a type.  This may be done at
+    /// compile-time, or may be delayed until runtime (e.g. to handle
+    /// generic types whose method table hadn't been instantiated in
+    /// the remote process at compile-time).
+    TypeToMethodTable { ty: SymbolicType },
+
     /// Given an object, determine its method table.  The object must
     /// be an `DotNetType::Class{..}`, or a `RuntimePrimType::Ptr`.
     ObjectMethodTable { obj: SymbolicValue },
+
+    /// Given a method table, determine the offset of a field within
+    /// the structure.
+    FieldOffset {
+        method_table_ptr: SymbolicValue,
+        field: String,
+    },
 
     /// Access of an non-static member of a class or struct.
     ///
     /// These are lowered to pointer arithmetic, performed relative to
     /// the location of the class or struct.
     FieldAccess { obj: SymbolicValue, field: String },
+
+    /// Given an array type, return the offset between adjacent
+    /// elements in the array.  This may be larger than the array
+    /// elements's size, in order to meet alignment requirements.
+    ArrayStride { method_table_ptr: SymbolicValue },
 
     /// Downcast an object to a subclass.  After downcasting, fields
     /// of the subclass may be accessed.  If the field is not an
@@ -308,12 +330,17 @@ pub enum ExprKind {
 
     /// Check if a .NET type is a subclass of another .NET type
     IsSubclassOf {
-        /// The pointer to a method table, as read out from the
-        /// Object's header.
-        method_table_ptr: SymbolicValue,
+        /// The pointer to a method table, specifying the parent class
+        /// in the comparison.  Often the output of a
+        /// `TypeToMethodTable` node, to determine the method table of
+        /// a statically-specified type.
+        parent_method_table_ptr: SymbolicValue,
 
-        /// A pointer to the type being checked against.
-        ty: TypedPointer<MethodTable>,
+        /// The pointer to a method table, specifying the child calss
+        /// in the comparison.  Often the output of a
+        /// `ObjectMethodTable` node, to determine the method table of
+        /// an object.
+        child_method_table_ptr: SymbolicValue,
     },
 
     /// Read a value from memory
@@ -383,6 +410,10 @@ impl ExprKind {
             ExprKind::SimpleReduce { .. } => "SimpleReduce",
             ExprKind::StaticField { .. } => "StaticField",
             ExprKind::FieldAccess { .. } => "FieldAccess",
+            ExprKind::FieldOffset { .. } => "FieldOffset",
+            ExprKind::ArrayStride { .. } => "ComponentSize",
+            ExprKind::LazyStatic { .. } => "LazyStatic",
+            ExprKind::TypeToMethodTable { .. } => "TypeToMethodTable",
             ExprKind::ObjectMethodTable { .. } => "ObjectMethodTable",
             ExprKind::SymbolicDowncast { .. } => "SymbolicDowncast",
             ExprKind::IndexAccess { .. } => "IndexAccess",
@@ -460,6 +491,7 @@ impl ExprKind {
             ExprKind::None
             | ExprKind::NativeFunction(_)
             | ExprKind::FunctionArg(_)
+            | ExprKind::TypeToMethodTable { .. }
             | ExprKind::StaticField(_) => None,
             ExprKind::Function { params, output } => {
                 let opt_params = remap_vec(params);
@@ -622,6 +654,22 @@ impl ExprKind {
                     prim_type: *prim_type,
                 })
             }
+            ExprKind::FieldOffset {
+                method_table_ptr,
+                field,
+            } => remap(method_table_ptr).map(|method_table_ptr| {
+                ExprKind::FieldOffset {
+                    method_table_ptr,
+                    field: field.clone(),
+                }
+            }),
+            ExprKind::ArrayStride { method_table_ptr } => {
+                remap(method_table_ptr).map(|method_table_ptr| {
+                    ExprKind::ArrayStride { method_table_ptr }
+                })
+            }
+            ExprKind::LazyStatic { init_func } => remap(init_func)
+                .map(|init_func| ExprKind::LazyStatic { init_func }),
             ExprKind::ObjectMethodTable { obj } => {
                 remap(obj).map(|obj| ExprKind::ObjectMethodTable { obj })
             }
@@ -706,14 +754,22 @@ impl ExprKind {
             ExprKind::Mod { lhs, rhs } => handle_binary_op!(Mod, lhs, rhs),
 
             ExprKind::IsSubclassOf {
-                method_table_ptr,
-                ty,
-            } => remap(method_table_ptr).map(|method_table_ptr| {
-                ExprKind::IsSubclassOf {
-                    method_table_ptr,
-                    ty: *ty,
-                }
-            }),
+                child_method_table_ptr: child,
+                parent_method_table_ptr: parent,
+            } => {
+                let opt_child = remap(child);
+                let opt_parent = remap(parent);
+                let requires_remap =
+                    opt_child.is_some() || opt_parent.is_some();
+                requires_remap.then(|| {
+                    let child = opt_child.unwrap_or(*child);
+                    let parent = opt_parent.unwrap_or(*parent);
+                    ExprKind::IsSubclassOf {
+                        child_method_table_ptr: child,
+                        parent_method_table_ptr: parent,
+                    }
+                })
+            }
 
             ExprKind::ReadPrim { ptr, prim_type } => {
                 remap(ptr).map(|ptr| ExprKind::ReadPrim {
@@ -871,6 +927,18 @@ impl std::fmt::Display for ExprKind {
             ExprKind::FieldAccess { obj, field } => {
                 write!(f, "{obj}\u{200B}.{field}")
             }
+            ExprKind::FieldOffset {
+                method_table_ptr,
+                field,
+            } => {
+                write!(f, "{method_table_ptr}.field_offset(\"{field}\")")
+            }
+            ExprKind::ArrayStride { method_table_ptr } => {
+                write!(f, "{method_table_ptr}.component_size()")
+            }
+            ExprKind::LazyStatic { init_func } => {
+                write!(f, "lazy_static({init_func})")
+            }
             ExprKind::IndexAccess { obj, indices } => {
                 write!(f, "{obj}[\u{200B}")?;
 
@@ -882,6 +950,9 @@ impl std::fmt::Display for ExprKind {
                 }
 
                 write!(f, "\u{200B}]")
+            }
+            ExprKind::TypeToMethodTable { ty } => {
+                write!(f, "method_table::<{ty}>()")
             }
             ExprKind::ObjectMethodTable { obj } => {
                 write!(f, "{obj}.method_table()")
@@ -939,10 +1010,10 @@ impl std::fmt::Display for ExprKind {
             ExprKind::Div { lhs, rhs } => write!(f, "{lhs}/{rhs}"),
             ExprKind::Mod { lhs, rhs } => write!(f, "{lhs}%{rhs}"),
             ExprKind::IsSubclassOf {
-                method_table_ptr,
-                ty,
+                child_method_table_ptr: child,
+                parent_method_table_ptr: parent,
             } => {
-                write!(f, "{method_table_ptr}.is_subclass_of({ty})")
+                write!(f, "{child}.is_subclass_of({parent})")
             }
             ExprKind::PrimCast { value, prim_type } => {
                 write!(f, "{value}.prim_cast::<{prim_type}>()")

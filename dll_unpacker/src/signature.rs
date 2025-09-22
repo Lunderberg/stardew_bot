@@ -84,11 +84,14 @@ pub enum SignatureType<'a> {
     GenericInst {
         is_value_type: bool,
         index: MetadataCodedIndex<TypeDefOrRef>,
-        type_args: Vec<Box<SignatureType<'a>>>,
+        type_args: Vec<SignatureType<'a>>,
         metadata: Metadata<'a>,
     },
     Object,
     String,
+
+    Void,
+    Ptr(Box<SignatureType<'a>>),
 }
 
 #[derive(Clone, Copy)]
@@ -174,7 +177,11 @@ impl<'a> Signature<'a> {
         SignatureFlags(self.bytes[0])
     }
 
-    pub fn first_type(&self) -> Result<SignatureType<'a>, Error> {
+    // TODO: Call this by default from `MetadataTableRow<Field>`,
+    // since this is pretty much the only thing that would be called
+    // next, and avoids accidentally using `type_spec_type`.
+    /// Unpacks and returns a Field signature.
+    pub fn field_type(&self) -> Result<SignatureType<'a>, Error> {
         let mut unpacker = self.unpacker();
         let flags = unpacker.next_flags()?;
         flags.check_field()?;
@@ -184,44 +191,15 @@ impl<'a> Signature<'a> {
         Ok(ty)
     }
 
-    pub fn is_value_type(&self) -> Result<bool, Error> {
-        let ty = self.first_type()?;
-        Ok(matches!(
-            ty,
-            SignatureType::ValueType { .. }
-                | SignatureType::GenericInst {
-                    is_value_type: true,
-                    ..
-                }
-        ))
-    }
+    // TODO: Call this by default from `MetadataTableRow<TypeSpec>`,
+    // since this is pretty much the only thing that would be called
+    // next, and avoids accidentally using `field_type`.
+    /// Unpacks and returns a TypeSpec signature
+    pub fn type_spec_type(&self) -> Result<SignatureType<'a>, Error> {
+        let mut unpacker = self.unpacker();
+        let ty = unpacker.next_type()?;
 
-    pub fn as_coded_index(
-        &self,
-    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
-        let ty = self.first_type()?;
-
-        Ok(match ty {
-            SignatureType::ValueType { index, .. }
-            | SignatureType::GenericInst { index, .. } => Some(index),
-            _ => None,
-        })
-    }
-
-    pub fn as_value_type(
-        &self,
-    ) -> Result<Option<MetadataCodedIndex<TypeDefOrRef>>, Error> {
-        let ty = self.first_type()?;
-
-        match ty {
-            SignatureType::ValueType { index, .. }
-            | SignatureType::GenericInst {
-                index,
-                is_value_type: true,
-                ..
-            } => Ok(Some(index)),
-            _ => Ok(None),
-        }
+        Ok(ty)
     }
 
     fn unpacker(&self) -> SignatureDecompressor<'a> {
@@ -502,8 +480,9 @@ impl<'a> SignatureDecompressor<'a> {
                 let index = self.next_type_def_or_ref()?;
 
                 let num_type_args = self.next_unsigned()?;
+                assert!(num_type_args > 0);
                 let type_args = (0..num_type_args)
-                    .map(|_| self.next_type().map(Box::new))
+                    .map(|_| self.next_type())
                     .collect::<Result<_, _>>()?;
 
                 SignatureType::GenericInst {
@@ -540,6 +519,13 @@ impl<'a> SignatureDecompressor<'a> {
                     lower_bounds,
                 }
             }
+
+            ElementType::Ptr => {
+                let pointee = Box::new(self.next_type()?);
+                SignatureType::Ptr(pointee)
+            }
+
+            ElementType::Void => SignatureType::Void,
 
             other => todo!("Map element type {other:?} to signature type"),
         };
@@ -644,6 +630,12 @@ impl<'a> std::fmt::Display for Signature<'a> {
     }
 }
 
+impl From<SignaturePrimType> for SignatureType<'_> {
+    fn from(prim: SignaturePrimType) -> Self {
+        SignatureType::Prim(prim)
+    }
+}
+
 impl std::fmt::Debug for SignatureType<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -688,23 +680,232 @@ impl std::fmt::Debug for SignatureType<'_> {
                 .finish(),
             Self::Object => write!(f, "Object"),
             Self::String => write!(f, "String"),
+            Self::Void => write!(f, "Void"),
+            Self::Ptr(pointee) => f.debug_tuple("Ptr").field(pointee).finish(),
         }
     }
 }
 
-impl std::fmt::Display for SignatureType<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SignatureType::Prim(prim) => write!(f, "{prim}"),
-            SignatureType::GenericVarFromType(index) => write!(f, "_T{index}"),
-            SignatureType::GenericVarFromMethod(index) => {
-                write!(f, "_M{index}")
+impl<'a> SignatureType<'a> {
+    pub fn substitute<E>(
+        self,
+        generic: impl Fn(usize) -> Result<SignatureType<'a>, E>,
+    ) -> Result<SignatureType<'a>, E> {
+        self.substitute_impl(&generic)
+    }
+
+    fn substitute_impl<E, Func>(
+        self,
+        generic: &Func,
+    ) -> Result<SignatureType<'a>, E>
+    where
+        Func: Fn(usize) -> Result<SignatureType<'a>, E>,
+    {
+        Ok(match self {
+            SignatureType::MultiDimArray {
+                element_type,
+                rank,
+                fixed_sizes,
+                lower_bounds,
+            } => {
+                let element_type =
+                    Box::new(element_type.substitute_impl(generic)?);
+                SignatureType::MultiDimArray {
+                    element_type,
+                    rank,
+                    fixed_sizes,
+                    lower_bounds,
+                }
             }
-            SignatureType::SizeArray(ty) => write!(f, "{ty}[]"),
+            SignatureType::SizeArray(element_type) => {
+                let element_type =
+                    Box::new(element_type.substitute_impl(generic)?);
+                SignatureType::SizeArray(element_type)
+            }
+            SignatureType::GenericVarFromType(index) => {
+                generic(index as usize)?
+            }
+            SignatureType::GenericInst {
+                is_value_type,
+                index,
+                type_args,
+                metadata,
+            } => {
+                let type_args = type_args
+                    .into_iter()
+                    .map(|arg| arg.substitute_impl(generic))
+                    .collect::<Result<Vec<_>, _>>()?;
+                SignatureType::GenericInst {
+                    is_value_type,
+                    index,
+                    type_args,
+                    metadata,
+                }
+            }
+            SignatureType::Ptr(pointee) => {
+                let pointee = Box::new(pointee.substitute_impl(generic)?);
+                SignatureType::Ptr(pointee)
+            }
+            other => other,
+        })
+    }
+
+    pub fn with_type_args(
+        self,
+        args: impl IntoIterator<Item = SignatureType<'a>>,
+    ) -> Result<SignatureType<'a>, Error> {
+        let type_args: Vec<_> = args.into_iter().collect();
+
+        if type_args.is_empty() {
+            return Err(Error::EmptyTypeArgs);
+        }
+
+        match self {
+            SignatureType::ValueType { index, metadata } => {
+                Ok(SignatureType::GenericInst {
+                    metadata,
+                    index,
+                    type_args,
+                    is_value_type: true,
+                })
+            }
+            SignatureType::Class { index, metadata } => {
+                Ok(SignatureType::GenericInst {
+                    metadata,
+                    index,
+                    type_args,
+                    is_value_type: false,
+                })
+            }
+            other => Err(Error::InvalidBaseSignatureTypeOfGeneric(format!(
+                "Cannot use {other} as non-instantiated generic type"
+            ))),
+        }
+    }
+
+    pub fn printer<'b>(
+        &'b self,
+    ) -> SignatureTypePrinter<'a, 'b, DummyTypePrinter, DummyMethodPrinter>
+    {
+        SignatureTypePrinter {
+            ty: self,
+            generic_var_from_type: DummyTypePrinter,
+            generic_var_from_method: DummyMethodPrinter,
+        }
+    }
+}
+
+use sealed_printer::*;
+mod sealed_printer {
+    pub struct DummyTypePrinter;
+    pub struct DummyMethodPrinter;
+
+    pub trait GenericTypePrinter {
+        fn print_generic(
+            &self,
+            f: &mut std::fmt::Formatter,
+            index: u32,
+        ) -> std::fmt::Result;
+    }
+    impl GenericTypePrinter for DummyTypePrinter {
+        fn print_generic(
+            &self,
+            f: &mut std::fmt::Formatter,
+            index: u32,
+        ) -> std::fmt::Result {
+            write!(f, "_T{index}")
+        }
+    }
+    impl GenericTypePrinter for DummyMethodPrinter {
+        fn print_generic(
+            &self,
+            f: &mut std::fmt::Formatter,
+            index: u32,
+        ) -> std::fmt::Result {
+            write!(f, "_T{index}")
+        }
+    }
+    impl<Func, TDisplay> GenericTypePrinter for Func
+    where
+        Func: Fn(usize) -> TDisplay,
+        TDisplay: std::fmt::Display,
+    {
+        fn print_generic(
+            &self,
+            f: &mut std::fmt::Formatter,
+            index: u32,
+        ) -> std::fmt::Result {
+            let printable = self(index as usize);
+            write!(f, "{printable}")
+        }
+    }
+}
+
+pub struct SignatureTypePrinter<'a, 'b, TPrinter, MPrinter> {
+    ty: &'b SignatureType<'a>,
+    generic_var_from_type: TPrinter,
+    generic_var_from_method: MPrinter,
+}
+
+impl<'a, 'b, TPrinter, MPrinter>
+    SignatureTypePrinter<'a, 'b, TPrinter, MPrinter>
+{
+    pub fn generic_var_from_type<Func, Out>(
+        self,
+        func: Func,
+    ) -> SignatureTypePrinter<'a, 'b, Func, MPrinter>
+    where
+        Func: Fn(usize) -> Out,
+        Out: std::fmt::Display,
+    {
+        SignatureTypePrinter {
+            ty: self.ty,
+            generic_var_from_type: func,
+            generic_var_from_method: self.generic_var_from_method,
+        }
+    }
+
+    pub fn generic_var_from_method<Func, Out>(
+        self,
+        func: Func,
+    ) -> SignatureTypePrinter<'a, 'b, TPrinter, Func>
+    where
+        Func: Fn(usize) -> Out,
+        Out: std::fmt::Display,
+    {
+        SignatureTypePrinter {
+            ty: self.ty,
+            generic_var_from_type: self.generic_var_from_type,
+            generic_var_from_method: func,
+        }
+    }
+
+    fn print(
+        &self,
+        f: &mut std::fmt::Formatter<'_>,
+        ty: &SignatureType,
+    ) -> std::fmt::Result
+    where
+        TPrinter: GenericTypePrinter,
+        MPrinter: GenericTypePrinter,
+    {
+        match ty {
+            SignatureType::Prim(prim) => write!(f, "{prim}"),
+            SignatureType::GenericVarFromType(index) => {
+                self.generic_var_from_type.print_generic(f, *index)
+            }
+            SignatureType::GenericVarFromMethod(index) => {
+                self.generic_var_from_method.print_generic(f, *index)
+            }
+            SignatureType::SizeArray(ty) => {
+                self.print(f, ty)?;
+                write!(f, "[]")
+            }
             SignatureType::MultiDimArray {
                 element_type, rank, ..
             } => {
-                write!(f, "{element_type}[")?;
+                self.print(f, element_type)?;
+                write!(f, "[")?;
                 for _ in 0..rank.saturating_sub(1) {
                     write!(f, ",")?;
                 }
@@ -731,18 +932,40 @@ impl std::fmt::Display for SignatureType<'_> {
                     metadata.get(*index).unwrap().name().unwrap()
                 )?;
                 type_args.iter().with_position().try_for_each(
-                    |(position, arg)| match position {
-                        itertools::Position::First
-                        | itertools::Position::Only => write!(f, "{arg}"),
-                        itertools::Position::Middle
-                        | itertools::Position::Last => write!(f, ", {arg}"),
+                    |(position, arg)| {
+                        match position {
+                            itertools::Position::Middle
+                            | itertools::Position::Last => write!(f, ", ")?,
+                            _ => (),
+                        }
+                        self.print(f, arg)
                     },
                 )?;
                 write!(f, ">")
             }
             SignatureType::Object => write!(f, "Object"),
             SignatureType::String => write!(f, "String"),
+            SignatureType::Void => write!(f, "Void"),
+            SignatureType::Ptr(pointee) => {
+                write!(f, "Ptr<")?;
+                self.print(f, pointee)?;
+                write!(f, ">")
+            }
         }
+    }
+}
+
+impl<'a, 'b, TPrinter: GenericTypePrinter, MPrinter: GenericTypePrinter>
+    std::fmt::Display for SignatureTypePrinter<'a, 'b, TPrinter, MPrinter>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.print(f, self.ty)
+    }
+}
+
+impl std::fmt::Display for SignatureType<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.printer())
     }
 }
 

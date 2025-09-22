@@ -1,5 +1,5 @@
 use std::{
-    collections::{BTreeMap, HashMap, HashSet},
+    collections::{HashMap, HashSet},
     fmt::Display,
 };
 
@@ -12,7 +12,9 @@ use dsl_vm::{
     StackIndex, VMArg, VMByteRange, VirtualMachine, VirtualMachineBuilder,
 };
 
-use crate::Error;
+use crate::{
+    index_tracking::AllocIndexDebug, Error, GetOutputDebug, IndexTracking,
+};
 
 /// The result of analyzing a function
 #[derive(Debug)]
@@ -35,6 +37,16 @@ struct ScopeInfo {
     /// The enclosing scope that contains this function.  Note: For
     /// Scope::Global, this field contains Scope::Global.
     parent_scope: Scope,
+}
+
+#[derive(Debug)]
+struct LastUsageLookup {
+    elements: Vec<LastUsage>,
+}
+
+struct LastUsageLookupPrinter<'a> {
+    lookup: &'a LastUsageLookup,
+    graph: &'a SymbolicGraph,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -62,36 +74,25 @@ struct ExpressionTranslator<'a> {
     operations_by_scope: &'a HashMap<Scope, Vec<OpIndex>>,
 
     /// Indicates the last time that an expression is used.
-    last_usage: &'a [LastUsage],
+    last_usage: &'a LastUsageLookup,
 
     native_function_lookup: &'a HashMap<OpIndex, FunctionIndex>,
 
     index_tracking: IndexTracking,
+
+    lazy_static_tracking: HashMap<OpIndex, LazyStaticTracking>,
 
     analysis: Analysis<'a>,
 
     show_steps: bool,
 }
 
-#[derive(Clone, Default)]
-struct IndexTracking {
-    /// The next index to allocate, if there are no dead indices that
-    /// can be re-used.
-    next_free_index: usize,
-
-    /// Indices that used to contain a value, but the value is no
-    /// longer required.  These indices may be re-used.
-    ///
-    /// The `OpIndex` stored in the map is the most recent value
-    /// stored at this location, used for error messages.
-    dead_indices: BTreeMap<StackIndex, Option<OpIndex>>,
-
-    expr_to_reserved_location: HashMap<OpIndex, StackIndex>,
-
-    current_location: HashMap<OpIndex, StackIndex>,
-    num_aliasing: HashMap<StackIndex, usize>,
-
-    previously_consumed: HashMap<OpIndex, OpIndex>,
+#[derive(Clone)]
+struct LazyStaticTracking {
+    lazy_static: OpIndex,
+    func: OpIndex,
+    value: SymbolicValue,
+    loc: StackIndex,
 }
 
 pub trait SymbolicGraphToVirtualMachine {
@@ -154,7 +155,13 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
         show_steps: bool,
     ) -> Result<(), Error> {
         let reachable = self.reachable(Some(main_func_index));
-        let last_usage = self.last_usage(&reachable);
+        let last_usage = LastUsageLookup {
+            elements: self.last_usage(&reachable),
+        };
+        if show_steps {
+            println!("{}", last_usage.print(self));
+        }
+
         let scope = self.operation_scope(&reachable);
 
         let operations_by_scope = scope
@@ -207,10 +214,14 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
             show_steps,
             analysis: Analysis::new(None),
             index_tracking: IndexTracking::default(),
+            lazy_static_tracking: HashMap::default(),
         };
+        translator
+            .annotate(|_| format!("Start of function '{main_func_name}'"));
+
         translator.translate(iter_op_indices)?;
 
-        let outputs = match output_value {
+        let iter_outputs = || match output_value {
             SymbolicValue::Result(op_index) => match &self[op_index].kind {
                 ExprKind::Tuple(elements) => {
                     Either::Left(elements.iter().cloned())
@@ -218,32 +229,44 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
                 _ => Either::Right(Some(output_value).into_iter()),
             },
             _ => Either::Right(Some(output_value).into_iter()),
-        }
-        .map(|output_value| -> Result<VMArg, Error> {
-            Ok(match output_value {
-                SymbolicValue::Result(output_index) => translator
-                    .index_tracking
-                    .expr_to_location(output_index)?
-                    .unwrap_or_else(|| {
-                        panic!(
-                            "All outputs should be produced by now, \
-                             but {output_index} was not in the index tracker."
-                        )
-                    })
-                    .into(),
+        };
 
-                other => other
-                    .as_prim_value()
-                    .expect("Should be result or constant")
-                    .into(),
+        let outputs = iter_outputs()
+            .map(|output_value| -> Result<VMArg, Error> {
+                Ok(match output_value {
+                    SymbolicValue::Result(output_index) => translator
+                        .index_tracking
+                        .expr_to_location(output_index)?
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "All outputs should be produced by now, \
+                             but {output_index} was not in the index tracker."
+                            )
+                        })
+                        .into(),
+
+                    other => other
+                        .as_prim_value()
+                        .expect("Should be result or constant")
+                        .into(),
+                })
             })
-        })
-        .collect::<Result<_, _>>()?;
+            .collect::<Result<_, _>>()?;
 
         let return_instruction = Instruction::Return { outputs };
         translator.push_annotated(return_instruction, || {
             "return from top-level function".to_string()
         });
+
+        iter_outputs()
+            .filter_map(|output| output.as_op_index())
+            .for_each(|output| {
+                translator.index_tracking.release_expr(output);
+            });
+
+        translator.index_tracking.assert_empty();
+
+        translator.annotate(|_| format!("End of function '{main_func_name}'"));
 
         Ok(())
     }
@@ -437,174 +460,32 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
     }
 }
 
-impl IndexTracking {
-    fn expr_to_location(
+impl LastUsageLookup {
+    fn iter_dead_indices(
         &self,
         op_index: OpIndex,
-    ) -> Result<Option<StackIndex>, Error> {
-        if self.previously_consumed.contains_key(&op_index) {
-            return Err(Error::AttemptedUseOfConsumedValue);
-        }
-
-        Ok(self.current_location.get(&op_index).cloned())
+    ) -> impl Iterator<Item = OpIndex> + '_ {
+        let first_index = self.elements.partition_point(|last_usage| {
+            last_usage.usage_point.0 < op_index.0
+        });
+        self.elements[first_index..]
+            .iter()
+            .take_while(move |last_usage| last_usage.usage_point == op_index)
+            .map(|last_usage| last_usage.expr_used)
     }
 
-    fn reserve_index(&mut self, op_index: OpIndex, stack_index: StackIndex) {
-        {
-            let previous_reserved_location =
-                self.expr_to_reserved_location.get(&op_index);
-            assert!(
-                previous_reserved_location.is_none(),
-                "Attempted to reserve {stack_index} to store {op_index}, \
-                 but {} is already reserved for {op_index}",
-                previous_reserved_location.unwrap(),
-            );
-        }
-
-        self.expr_to_reserved_location.insert(op_index, stack_index);
-        self.dead_indices.remove(&stack_index);
-        *self.num_aliasing.entry(stack_index).or_insert(0) += 1;
+    fn contains(&self, op_index: OpIndex, usage: OpIndex) -> bool {
+        self.iter_dead_indices(op_index).contains(&usage)
     }
 
-    fn release_reservation(&mut self, op_index: OpIndex) -> StackIndex {
-        let Some(stack_index) =
-            self.expr_to_reserved_location.remove(&op_index)
-        else {
-            unreachable!(
-                "Internal error: \
-                 Attempted to release reservation for {op_index}, \
-                 but no such reservation existed."
-            )
-        };
-
-        assert!(
-            self.current_location.contains_key(&op_index),
-            "Releasing reservation of {stack_index} for {op_index}, \
-             but the reservation had never been used."
-        );
-
-        let Some(num_aliasing) = self.num_aliasing.get_mut(&stack_index) else {
-            panic!(
-                "Internal inconsistency: \
-                 When releasing reservation of {stack_index} for {op_index}, \
-                 num_aliasing map had no entry for {stack_index}."
-            );
-        };
-        assert!(
-            *num_aliasing >= 2,
-            "Internal inconsistency: \
-                 When releasing reservation of {stack_index} for {op_index}, \
-                 the alias count should be at least two.  \
-                 (One for the reservation, \
-                 and one for the value stored at the reserved index.)"
-        );
-        *num_aliasing -= 1;
-
-        stack_index
-    }
-
-    fn define_contents(&mut self, expr: OpIndex, loc: StackIndex) {
-        {
-            let previous_contents = self.dead_indices.get(&loc);
-            assert!(
-                previous_contents.is_none(),
-                "Attempted to define {loc} as containing {expr}, \
-                 but {loc} is currently listed as a dead index \
-                 that previously contained {}.  \
-                 Before defining the contents of a location, \
-                 that location must be allocated \
-                 using `ExpressionTranslater::alloc_index`.",
-                previous_contents
-                    .unwrap()
-                    .map(|prev_expr| format!("{prev_expr}"))
-                    .unwrap_or_else(|| {
-                        "a value that doesn't correspond to an OpIndex".into()
-                    }),
-            );
+    fn print<'a>(
+        &'a self,
+        graph: &'a SymbolicGraph,
+    ) -> LastUsageLookupPrinter<'a> {
+        LastUsageLookupPrinter {
+            lookup: self,
+            graph,
         }
-        {
-            let current_loc = self.current_location.get(&expr);
-            assert!(
-                current_loc.is_none(),
-                "Attempted to define {loc} as containing {expr}, \
-                 but {expr} is already stored in {}.",
-                current_loc.unwrap(),
-            );
-        }
-
-        self.current_location.insert(expr, loc);
-        *self.num_aliasing.entry(loc).or_insert(0) += 1;
-    }
-
-    fn release_expr(&mut self, expr: OpIndex) -> StackIndex {
-        let Some(stack_index) = self.current_location.remove(&expr) else {
-            panic!(
-                "Internal error: \
-                 Attempted to release expr {expr}, \
-                 but it wasn't actually stored anywhere."
-            )
-        };
-
-        let Some(num_aliasing) = self.num_aliasing.get_mut(&stack_index) else {
-            panic!(
-                "Internal inconsistency: \
-                 When removing {expr} from {stack_index}, \
-                 num_aliasing map had no entry for {stack_index}."
-            );
-        };
-
-        assert!(*num_aliasing > 0);
-
-        *num_aliasing -= 1;
-
-        if *num_aliasing == 0 {
-            // The location-to-expr map points to the current
-            // expression.  The current expression owns the stack
-            // location, and so the stack location can be reused.
-            self.num_aliasing.remove(&stack_index);
-            self.dead_indices.insert(stack_index, Some(expr));
-        } else {
-            // The location-to-expr map points to a different
-            // expression.  The current expression is an alias,
-            // and the original expression may still use the stack
-            // location.
-        }
-
-        stack_index
-    }
-
-    fn merge_conditional_branches(&mut self, mut other: Self) {
-        self.next_free_index = self.next_free_index.max(other.next_free_index);
-
-        // After the conditional, dead indices marked as dead
-        // while following either branch are considered
-        // dead.
-        self.dead_indices.append(&mut other.dead_indices);
-
-        // Likewise, only values that are currently stored
-        // at the end of both branches have a known
-        // storage location after the conditional.
-        self.current_location = other
-            .current_location
-            .into_iter()
-            .filter(|(op_index, _)| {
-                self.current_location.contains_key(op_index)
-            })
-            .collect();
-
-        // A value is considered consumed if either branch consumed
-        // it.
-        for (consumed, consumed_by) in other.previously_consumed {
-            self.previously_consumed.insert(consumed, consumed_by);
-        }
-
-        // All reservations should expire after the instruction that
-        // produced them.  Both branches of a conditional should
-        // conclude with the same set of reserved output locations.
-        assert_eq!(
-            self.expr_to_reserved_location,
-            other.expr_to_reserved_location
-        );
     }
 }
 
@@ -748,7 +629,7 @@ impl<'a> LastUsageCollector<'a> {
 
 impl ExpressionTranslator<'_> {
     fn value_to_arg(
-        &self,
+        &mut self,
         usage: OpIndex,
         value: &SymbolicValue,
     ) -> Result<VMArg, Error> {
@@ -763,7 +644,43 @@ impl ExpressionTranslator<'_> {
             }
         };
 
-        Ok(self
+        if let Some(lazy_static) = self.lazy_static_tracking.get(&op_index) {
+            let lazy_static = lazy_static.clone();
+            let name = lazy_static.lazy_static.pprint(self.graph);
+            let condition = self.alloc_index();
+            self.push_annotated(
+                Instruction::IsSome {
+                    value: lazy_static.loc.into(),
+                    output: condition,
+                },
+                || format!("check if {name} is initialized"),
+            );
+
+            let jump_if_initialized_index = self
+                .push_annotated(Instruction::NoOp, || {
+                    format!("skip re-initialization of {name}")
+                });
+
+            self.free_index(condition);
+
+            self.translate_scope(
+                lazy_static.lazy_static,
+                lazy_static.value,
+                lazy_static.loc,
+                Scope::Function(lazy_static.func),
+            )?;
+            let after_init = self.builder.current_index();
+            self.builder.update(
+                jump_if_initialized_index,
+                Instruction::ConditionalJump {
+                    cond: condition.into(),
+                    dest: after_init,
+                },
+            );
+            return Ok(lazy_static.loc.into());
+        }
+
+        let stack_index = self
             .index_tracking
             .expr_to_location(op_index)?
             .unwrap_or_else(|| {
@@ -777,8 +694,9 @@ impl ExpressionTranslator<'_> {
                      but {previous_name} was not previously translated.",
                     self.graph[usage].kind, self.graph[op_index].kind,
                 )
-            })
-            .into())
+            });
+
+        Ok(stack_index.into())
     }
 
     fn annotate<Func, Annot>(&mut self, generate_annotation: Func)
@@ -812,54 +730,51 @@ impl ExpressionTranslator<'_> {
     }
 
     fn alloc_index(&mut self) -> StackIndex {
-        if let Some((index, opt_prev_expr)) =
-            self.index_tracking.dead_indices.pop_first()
-        {
-            self.annotate(|_| {
-                format!(
-                    "Reusing dead index {index}, \
-                     which previously held {}.",
-                    opt_prev_expr
-                        .map(|prev_expr| format!("{prev_expr}"))
-                        .unwrap_or_else(|| {
-                            "a value that doesn't correspond to an OpIndex"
-                                .into()
-                        })
-                )
-            });
-            index
-        } else {
-            let index = StackIndex(self.index_tracking.next_free_index);
-            self.index_tracking.next_free_index += 1;
-            self.annotate(|_| {
+        let (index, alloc_debug) = self.index_tracking.alloc_index();
+        self.annotate(|_| match alloc_debug {
+            AllocIndexDebug::NewIndex => {
                 format!("No dead indices, using new index {index}")
-            });
-            index
-        }
+            }
+            AllocIndexDebug::PreviouslyUsedForUnknown => {
+                "Reusing dead index {index}, \
+                 which previously held a value \
+                 that doesn't correspond to an OpIndex."
+                    .to_string()
+            }
+            AllocIndexDebug::PreviouslyUsedFor(prev_index) => format!(
+                "Reusing dead index {index}, \
+                 which previously held {prev_index}.",
+            ),
+        });
+        index
     }
 
     fn get_output_index(&mut self, op_index: OpIndex) -> StackIndex {
-        if let Some(&index) =
-            self.index_tracking.expr_to_reserved_location.get(&op_index)
-        {
-            self.annotate(|graph| {
-                format!(
-                    "For op {}, \
-                     using reserved output {index}",
-                    op_index.pprint(graph),
-                )
-            });
-            index
-        } else {
-            let index = self.alloc_index();
-            self.annotate(|graph| {
-                format!(
-                    "For op {}, allocated output index {index}.",
-                    op_index.pprint(graph),
-                )
-            });
-            index
-        }
+        let (index, debug) = self.index_tracking.get_output_index(op_index);
+        self.annotate(|graph| {
+            let expr = op_index.pprint(graph);
+            match debug {
+                GetOutputDebug::FromReserved => {
+                    format!("For op {expr}, using reserved output {index}")
+                }
+                GetOutputDebug::FromAlloc(AllocIndexDebug::NewIndex) => {
+                    format!("For op {expr}, allocated new output {index}")
+                }
+                GetOutputDebug::FromAlloc(
+                    AllocIndexDebug::PreviouslyUsedForUnknown,
+                ) => format!(
+                    "For op {expr}, re-using dead index {index}, \
+                              which previously held an unknown value"
+                ),
+                GetOutputDebug::FromAlloc(
+                    AllocIndexDebug::PreviouslyUsedFor(prev_index),
+                ) => format!(
+                    "For op {expr}, re-using dead index {index}, \
+                              which previously held {prev_index}"
+                ),
+            }
+        });
+        index
     }
 
     fn free_index(&mut self, stack_index: StackIndex) {
@@ -869,29 +784,26 @@ impl ExpressionTranslator<'_> {
                  marking as dead."
             )
         });
-        self.index_tracking.dead_indices.insert(stack_index, None);
+        self.index_tracking.free_index(stack_index);
     }
 
     fn free_dead_indices(&mut self, op_index: OpIndex) {
-        let first_index = self.last_usage.partition_point(|last_usage| {
-            last_usage.usage_point.0 < op_index.0
-        });
-        self.last_usage[first_index..]
-            .iter()
-            .take_while(|last_usage| last_usage.usage_point == op_index)
-            .for_each(|last_usage| {
-                let expr_used = last_usage.expr_used;
+        self.last_usage
+            .iter_dead_indices(op_index)
+            .for_each(|expr_used| {
+                let opt_stack_index =
+                    self.index_tracking.release_expr(expr_used);
 
-                let stack_index = self.index_tracking.release_expr(expr_used);
-
-                self.annotate(|graph| {
-                    format!(
-                        "After {}, {} is no longer needed.  \
-                         Marking {stack_index} as dead.",
-                        op_index.pprint(graph),
-                        expr_used.pprint(graph),
-                    )
-                });
+                if let Some(stack_index) = opt_stack_index {
+                    self.annotate(|graph| {
+                        format!(
+                            "After {}, {} is no longer needed.  \
+                             Marking {stack_index} as dead.",
+                            op_index.pprint(graph),
+                            expr_used.pprint(graph),
+                        )
+                    });
+                }
             });
     }
 
@@ -958,8 +870,8 @@ impl ExpressionTranslator<'_> {
                 ExprKind::FunctionArg(_) => {
                     assert!(self
                         .index_tracking
-                        .current_location
-                        .contains_key(&op_index));
+                        .expr_to_location(op_index)?
+                        .is_some());
                 }
                 ExprKind::Tuple(_) => {
                     // Eventually I should put something here, but I
@@ -1092,17 +1004,17 @@ impl ExpressionTranslator<'_> {
                     self.index_tracking.define_contents(op_index, op_output);
                 }
                 ExprKind::IsSubclassOf {
-                    method_table_ptr,
-                    ty,
+                    child_method_table_ptr: child,
+                    parent_method_table_ptr: parent,
                 } => {
-                    let method_table_ptr =
-                        self.value_to_arg(op_index, method_table_ptr)?;
+                    let child = self.value_to_arg(op_index, child)?;
+                    let parent = self.value_to_arg(op_index, parent)?;
                     self.free_dead_indices(op_index);
                     let op_output = self.get_output_index(op_index);
                     self.push_annotated(
                         Instruction::IsSubclassOf {
-                            method_table_ptr,
-                            base_type: *ty,
+                            child_method_table_ptr: child,
+                            parent_method_table_ptr: parent,
                             output: op_output,
                         },
                         || format!("eval {expr_name}"),
@@ -1179,27 +1091,147 @@ impl ExpressionTranslator<'_> {
                     self.index_tracking.define_contents(op_index, op_output);
                 }
 
-                read_prim @ ExprKind::ReadPrim { .. } => {
-                    return Err(Error::ReadPrimOperatorRequiresLowering(
-                        read_prim.clone(),
-                    ));
+                ExprKind::TypeToMethodTable { ty } => {
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::TypeToMethodTable {
+                            ty: ty.clone(),
+                            output: op_output,
+                        },
+                        || format!("find method table for '{ty}'"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
                 }
 
+                ExprKind::FieldOffset {
+                    method_table_ptr,
+                    field,
+                } => {
+                    let method_table_ptr =
+                        self.value_to_arg(op_index, method_table_ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::FieldOffset {
+                            method_table: method_table_ptr,
+                            field: field.clone(),
+                            output: op_output,
+                        },
+                        || format!("offset of field '{field}'"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                ExprKind::ArrayStride { method_table_ptr } => {
+                    let method_table_ptr =
+                        self.value_to_arg(op_index, method_table_ptr)?;
+                    self.free_dead_indices(op_index);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::ArrayStride {
+                            method_table: method_table_ptr,
+                            output: op_output,
+                        },
+                        || format!("array stride"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                ExprKind::LazyStatic { init_func } => {
+                    let init_func = match init_func {
+                        SymbolicValue::Result(index) => Ok(*index),
+                        SymbolicValue::Const(prim) => {
+                            Err(Error::LazyStaticInitializationMustBeFunction(
+                                format!("{}", prim.runtime_type()),
+                            ))
+                        }
+                    }?;
+
+                    let output = match &self.graph[init_func].kind {
+                        ExprKind::Function { params, .. }
+                            if !params.is_empty() =>
+                        {
+                            Err(
+                                Error::LazyStaticInitializationMayNotHaveParams(
+                                    params.len(),
+                                ),
+                            )
+                        }
+                        ExprKind::Function { output, .. } => Ok(*output),
+                        other => {
+                            Err(Error::LazyStaticInitializationMustBeFunction(
+                                other.op_name().to_string(),
+                            ))
+                        }
+                    }?;
+
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::Clear { loc: op_output },
+                        || format!("clear space for {expr_name}"),
+                    );
+                    self.lazy_static_tracking.insert(
+                        op_index,
+                        LazyStaticTracking {
+                            lazy_static: op_index,
+                            func: init_func,
+                            value: output,
+                            loc: op_output,
+                        },
+                    );
+                }
+
+                ExprKind::ReadPrim { ptr, prim_type } => {
+                    let ptr = self.value_to_arg(op_index, ptr)?;
+                    self.free_dead_indices(op_index);
+                    let bytes = self.alloc_index();
+                    let region = VMByteRange {
+                        ptr,
+                        num_bytes: prim_type.size_bytes().into(),
+                    };
+                    self.push_annotated(
+                        Instruction::ReadBytes {
+                            regions: vec![region],
+                            output: bytes,
+                        },
+                        || format!("read bytes for {prim_type}"),
+                    );
+
+                    self.free_index(bytes);
+                    let op_output = self.get_output_index(op_index);
+                    self.push_annotated(
+                        Instruction::CastBytes {
+                            bytes: bytes.into(),
+                            offset: 0usize.into(),
+                            prim_type: *prim_type,
+                            output: op_output,
+                        },
+                        || format!("cast bytes to {prim_type}"),
+                    );
+                    self.index_tracking.define_contents(op_index, op_output);
+                }
+
+                // read_prim @ ExprKind::ReadPrim { .. } => {
+                //     return Err(Error::ReadPrimOperatorRequiresLowering(
+                //         read_prim.clone(),
+                //     ));
+                // }
                 boolean @ (ExprKind::And { .. } | ExprKind::Or { .. }) => {
                     return Err(Error::BooleanOperatorRequiresLowering(
                         boolean.clone(),
                     ));
                 }
 
-                symbolic @ (ExprKind::StaticField(_)
+                ExprKind::StaticField(_)
                 | ExprKind::FieldAccess { .. }
                 | ExprKind::ObjectMethodTable { .. }
                 | ExprKind::SymbolicDowncast { .. }
                 | ExprKind::IndexAccess { .. }
                 | ExprKind::NumArrayElements { .. }
-                | ExprKind::ArrayExtent { .. }) => {
+                | ExprKind::ArrayExtent { .. } => {
                     return Err(Error::SymbolicExpressionRequiresLowering(
-                        symbolic.clone(),
+                        format!("{}", self.graph.print(op_index.into())),
                     ));
                 }
             }
@@ -1245,8 +1277,8 @@ impl ExpressionTranslator<'_> {
             }
         };
 
-        if let Some(&currently_at) =
-            self.index_tracking.current_location.get(&scope_output)
+        if let Some(currently_at) =
+            self.index_tracking.expr_to_location(scope_output)?
         {
             if currently_at == out_stack_index {
                 // Already in the desired location, no action needed
@@ -1263,13 +1295,7 @@ impl ExpressionTranslator<'_> {
                     },
                     || format!("copy value to output of {expr_name}"),
                 );
-            } else if self
-                .last_usage
-                .binary_search_by_key(&(op_index, scope_output), |last_usage| {
-                    (last_usage.usage_point, last_usage.expr_used)
-                })
-                .is_ok()
-            {
+            } else if self.last_usage.contains(op_index, scope_output) {
                 // A rust-native object may be moved to the output
                 // location, if this is the last usage of the
                 // rust-native object in its current state.
@@ -1324,11 +1350,10 @@ impl ExpressionTranslator<'_> {
 
             // In case the output was stored somewhere other than the
             // reserved address, move it to the correct location.
-            let body_output = self
-                .index_tracking
-                .current_location
-                .remove(&scope_output)
-                .expect("Output of scope should now be generated");
+            let Some(body_output) = self.index_tracking.drop_expr(scope_output)
+            else {
+                panic!("Output of {scope:?} was not produced")
+            };
             if body_output != out_stack_index {
                 self.push_annotated(
                     Instruction::Swap(body_output, out_stack_index),
@@ -1401,14 +1426,10 @@ impl ExpressionTranslator<'_> {
 
                     // self.index_tracking.current_location.remove(&first_arg_op);
                     // self.index_tracking.release_expr(first_arg_op);
-                    self.index_tracking
-                        .previously_consumed
-                        .insert(first_arg_op, op_index);
+                    self.index_tracking.consume_expr(first_arg_op, op_index);
 
-                    if let Some(&required_output) = self
-                        .index_tracking
-                        .expr_to_reserved_location
-                        .get(&op_index)
+                    if let Some(required_output) =
+                        self.index_tracking.expr_to_reserved_location(op_index)
                     {
                         if first_arg_loc != required_output {
                             self.push_annotated(
@@ -1606,7 +1627,9 @@ impl ExpressionTranslator<'_> {
                 )?;
 
                 // self.index_tracking.current_location.remove(&accumulator);
-                self.index_tracking.current_location.remove(&index);
+                //self.index_tracking.current_location.remove(&index);
+                self.index_tracking.drop_expr(accumulator);
+                self.index_tracking.drop_expr(index);
                 // self.index_tracking.release_expr(accumulator);
                 // self.index_tracking.release_expr(index);
             }
@@ -1667,6 +1690,7 @@ impl ExpressionTranslator<'_> {
             || format!("jump to beginning of {expr_name}"),
         );
         self.free_index(loop_condition);
+        self.free_index(loop_iter);
 
         let after_loop = self.builder.current_index();
         self.builder.update(
@@ -1746,8 +1770,27 @@ impl ExpressionTranslator<'_> {
 
         self.index_tracking.merge_conditional_branches(cached);
 
+        self.free_dead_indices(op_index);
         self.index_tracking.define_contents(op_index, op_output);
 
+        Ok(())
+    }
+}
+
+impl Display for LastUsageLookupPrinter<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut usage_point = None;
+        for last_usage in &self.lookup.elements {
+            if usage_point != Some(last_usage.usage_point) {
+                write!(
+                    f,
+                    "\nPoint of use: {}",
+                    last_usage.usage_point.pprint(self.graph)
+                )?;
+                usage_point = Some(last_usage.usage_point);
+            }
+            write!(f, "\n\tUsed: {}", last_usage.expr_used.pprint(self.graph))?;
+        }
         Ok(())
     }
 }

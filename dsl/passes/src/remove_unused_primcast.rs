@@ -4,9 +4,9 @@ use dsl_rewrite_utils::GraphRewrite;
 
 use crate::Error;
 
-pub struct RemoveUnusedPrimcast<'a>(pub &'a Analysis<'a>);
+pub struct RemoveUnusedPrimcast<'a: 'b, 'b>(pub &'b Analysis<'a>);
 
-impl<'a> GraphRewrite for RemoveUnusedPrimcast<'a> {
+impl GraphRewrite for RemoveUnusedPrimcast<'_, '_> {
     type Error = Error;
 
     fn rewrite_expr(

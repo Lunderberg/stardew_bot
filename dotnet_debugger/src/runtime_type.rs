@@ -1,8 +1,11 @@
 use derive_more::derive::From;
+use dll_unpacker::{SignaturePrimType, SignatureType};
 use memory_reader::{Pointer, TypedPointer};
+use thiserror::Error;
 
 use crate::{
     runtime_value::RuntimePrimValue, Error, MethodTable, RuntimeValue,
+    SymbolicType, SymbolicTypeError,
 };
 
 /// The runtime representation of the static type of a field.
@@ -75,6 +78,12 @@ pub enum DotNetType {
         /// exist.
         method_table: Option<TypedPointer<MethodTable>>,
 
+        /// The symbolic path to the class.  For classes that have not
+        /// yet been loaded by the .NET runtime, this may be
+        /// determined and used even though the MethodTable hasn't yet
+        /// been instantiated.
+        symbolic: Option<SymbolicType>,
+
         /// The size of the struct, in bytes.
         size: usize,
     },
@@ -88,6 +97,12 @@ pub enum DotNetType {
         /// of a class have been loaded, the MethodTable pointer may
         /// not yet exist
         method_table: Option<TypedPointer<MethodTable>>,
+
+        /// The symbolic path to the class.  For classes that have not
+        /// yet been loaded by the .NET runtime, this may be
+        /// determined and used even though the MethodTable hasn't yet
+        /// been instantiated.
+        symbolic: Option<SymbolicType>,
     },
 
     /// A `System.String` instance.
@@ -105,7 +120,11 @@ pub enum DotNetType {
     /// table as having the is-array bit set, along with the
     /// if-array-then-sz-array bit.
     Array {
+        /// The method table of the array itself (not the element)
         method_table: Option<TypedPointer<MethodTable>>,
+
+        /// The symbolic type of the element (not the array itself)
+        symbolic_element: Option<SymbolicType>,
     },
 
     /// A multi-dimensional array
@@ -123,12 +142,36 @@ pub enum DotNetType {
     /// additional 4-byte size of its only dimension and a 4-byte
     /// lower bound of that dimension.
     MultiDimArray {
+        /// The method table of the array itself (not the element)
         method_table: Option<TypedPointer<MethodTable>>,
+        /// The rank of the array
         rank: usize,
+        /// The symbolic type of the element (not the array itself)
+        symbolic_element: Option<SymbolicType>,
     },
 }
 
+#[derive(Error)]
+pub enum DotNetTypeError {
+    #[error("SymbolicTypeError( {0} )")]
+    SymbolicTypeError(#[from] SymbolicTypeError),
+
+    #[error(
+        "SymbolicType::Array may only be used for DotNetType::Array, \
+         but was used for '{0}'"
+    )]
+    SymbolicArrayUsedForNonArray(DotNetType),
+}
+
 impl RuntimeType {
+    pub fn validate(&self) -> Result<(), Error> {
+        match self {
+            RuntimeType::Unknown => Ok(()),
+            RuntimeType::Prim(_) => Ok(()),
+            RuntimeType::DotNet(dot_net_type) => dot_net_type.validate(),
+        }
+    }
+
     pub fn parse(&self, bytes: &[u8]) -> Result<RuntimeValue, Error> {
         match self {
             RuntimeType::Prim(prim) => {
@@ -254,11 +297,25 @@ impl RuntimeType {
             }
 
             RuntimeType::DotNet(
-                DotNetType::Class { method_table }
-                | DotNetType::ValueType { method_table, .. }
-                | DotNetType::Array { method_table, .. }
-                | DotNetType::MultiDimArray { method_table, .. },
-            ) => method_table.is_some(),
+                DotNetType::Class {
+                    method_table,
+                    symbolic,
+                }
+                | DotNetType::ValueType {
+                    method_table,
+                    symbolic,
+                    ..
+                }
+                | DotNetType::Array {
+                    method_table,
+                    symbolic_element: symbolic,
+                }
+                | DotNetType::MultiDimArray {
+                    method_table,
+                    symbolic_element: symbolic,
+                    ..
+                },
+            ) => method_table.is_some() && symbolic.is_some(),
         }
     }
 }
@@ -403,55 +460,122 @@ impl RuntimePrimType {
     }
 }
 
+impl DotNetType {
+    pub fn validate(&self) -> Result<(), Error> {
+        match self {
+            Self::Class {
+                symbolic: Some(symbolic),
+                ..
+            }
+            | Self::ValueType {
+                symbolic: Some(symbolic),
+                ..
+            }
+            | Self::Array {
+                symbolic_element: Some(symbolic),
+                ..
+            }
+            | Self::MultiDimArray {
+                symbolic_element: Some(symbolic),
+                ..
+            } => symbolic.validate()?,
+            _ => {}
+        }
+
+        match self {
+            Self::ValueType {
+                symbolic: Some(SymbolicType::Array(_)),
+                ..
+            } => {
+                Err(DotNetTypeError::SymbolicArrayUsedForNonArray(self.clone()))
+            }
+
+            Self::Class {
+                symbolic: Some(SymbolicType::Array(_)),
+                ..
+            } => {
+                Err(DotNetTypeError::SymbolicArrayUsedForNonArray(self.clone()))
+            }
+
+            _ => Ok(()),
+        }
+        .map_err(Into::into)
+    }
+}
+
 impl std::fmt::Display for RuntimeType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             RuntimeType::Unknown => write!(f, "(???)"),
             RuntimeType::Prim(prim) => write!(f, "{prim}"),
-            RuntimeType::DotNet(DotNetType::ValueType {
-                method_table: Some(method_table),
+            RuntimeType::DotNet(dot_net) => write!(f, "{dot_net}"),
+        }
+    }
+}
+
+impl std::fmt::Display for DotNetType {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DotNetType::ValueType {
+                method_table,
                 size,
-            }) => {
-                write!(f, "struct({size} bytes, vtable {method_table})")
+                symbolic,
+            } => {
+                write!(f, "struct({size} bytes")?;
+                if let Some(mt) = method_table {
+                    write!(f, ", vtable {mt}")?;
+                }
+                if let Some(symbolic) = symbolic {
+                    write!(f, ", {symbolic}")?;
+                }
+                write!(f, ")")
             }
-            RuntimeType::DotNet(DotNetType::ValueType {
-                method_table: None,
-                size,
-            }) => {
-                write!(f, "struct({size} bytes, unknown vtable)")
+            DotNetType::Class {
+                method_table,
+                symbolic,
+            } => {
+                write!(f, "class(")?;
+                if let Some(mt) = method_table {
+                    write!(f, "vtable {mt}")?;
+                } else {
+                    write!(f, "unknown vtable")?;
+                }
+                if let Some(symbolic) = symbolic {
+                    write!(f, ", {symbolic}")?;
+                } else {
+                    write!(f, ", unknown symbolic")?;
+                }
+                write!(f, ")")
             }
-            RuntimeType::DotNet(DotNetType::Class {
-                method_table: Some(method_table),
-            }) => {
-                write!(f, "Object(vtable {method_table})")
+            DotNetType::String => write!(f, "String"),
+            DotNetType::Array {
+                method_table,
+                symbolic_element,
+            } => {
+                write!(f, "array(")?;
+                if let Some(mt) = method_table {
+                    write!(f, "vtable {mt}")?;
+                } else {
+                    write!(f, "unknown vtable")?;
+                }
+                if let Some(symbolic) = symbolic_element {
+                    write!(f, ", element {symbolic}")?;
+                }
+                write!(f, ")")
             }
-            RuntimeType::DotNet(DotNetType::Class { method_table: None }) => {
-                write!(f, "Object(unknown vtable)")
-            }
-            RuntimeType::DotNet(DotNetType::String) => write!(f, "String"),
-            RuntimeType::DotNet(DotNetType::Array {
-                method_table: None,
-                ..
-            }) => {
-                write!(f, "array(unknown vtable)")
-            }
-            RuntimeType::DotNet(DotNetType::Array {
-                method_table: Some(method_table),
-                ..
-            }) => {
-                write!(f, "array(vtable {method_table})")
-            }
-            RuntimeType::DotNet(DotNetType::MultiDimArray {
-                method_table: None,
+            DotNetType::MultiDimArray {
+                method_table,
                 rank,
-            }) => {
-                write!(f, "array_nd({rank}, unknown vtable)")
-            }
-            RuntimeType::DotNet(DotNetType::MultiDimArray {
-                method_table: Some(method_table),
-                rank,
-            }) => {
-                write!(f, "array({rank}, vtable {method_table})")
+                symbolic_element,
+            } => {
+                write!(f, "array(rank {rank}")?;
+                if let Some(mt) = method_table {
+                    write!(f, ", vtable {mt}")?;
+                }
+                if let Some(symbolic) = symbolic_element {
+                    write!(f, ", element {symbolic}")?;
+                }
+                write!(f, ")")
             }
         }
     }
@@ -488,23 +612,55 @@ impl std::fmt::Display for RuntimePrimType {
 // wouldn't make sense to combine the entire hierarchy of
 // signature/runtime types, keeping them entirely separate for now,
 // even though that duplicates the signature/runtime prim type.
-impl From<dll_unpacker::SignaturePrimType> for RuntimePrimType {
-    fn from(value: dll_unpacker::SignaturePrimType) -> Self {
+impl From<SignaturePrimType> for RuntimePrimType {
+    fn from(value: SignaturePrimType) -> Self {
         match value {
-            dll_unpacker::SignaturePrimType::Bool => Self::Bool,
-            dll_unpacker::SignaturePrimType::Char => Self::Char,
-            dll_unpacker::SignaturePrimType::I8 => Self::I8,
-            dll_unpacker::SignaturePrimType::U8 => Self::U8,
-            dll_unpacker::SignaturePrimType::I16 => Self::I16,
-            dll_unpacker::SignaturePrimType::U16 => Self::U16,
-            dll_unpacker::SignaturePrimType::I32 => Self::I32,
-            dll_unpacker::SignaturePrimType::U32 => Self::U32,
-            dll_unpacker::SignaturePrimType::I64 => Self::I64,
-            dll_unpacker::SignaturePrimType::U64 => Self::U64,
-            dll_unpacker::SignaturePrimType::F32 => Self::F32,
-            dll_unpacker::SignaturePrimType::F64 => Self::F64,
-            dll_unpacker::SignaturePrimType::NativeInt => Self::NativeInt,
-            dll_unpacker::SignaturePrimType::NativeUInt => Self::NativeUInt,
+            SignaturePrimType::Bool => Self::Bool,
+            SignaturePrimType::Char => Self::Char,
+            SignaturePrimType::I8 => Self::I8,
+            SignaturePrimType::U8 => Self::U8,
+            SignaturePrimType::I16 => Self::I16,
+            SignaturePrimType::U16 => Self::U16,
+            SignaturePrimType::I32 => Self::I32,
+            SignaturePrimType::U32 => Self::U32,
+            SignaturePrimType::I64 => Self::I64,
+            SignaturePrimType::U64 => Self::U64,
+            SignaturePrimType::F32 => Self::F32,
+            SignaturePrimType::F64 => Self::F64,
+            SignaturePrimType::NativeInt => Self::NativeInt,
+            SignaturePrimType::NativeUInt => Self::NativeUInt,
+        }
+    }
+}
+
+impl<'a> From<RuntimePrimType> for SignatureType<'a> {
+    fn from(value: RuntimePrimType) -> Self {
+        match value {
+            RuntimePrimType::Bool => {
+                SignatureType::Prim(SignaturePrimType::Bool)
+            }
+            RuntimePrimType::Char => {
+                SignatureType::Prim(SignaturePrimType::Char)
+            }
+            RuntimePrimType::I8 => SignatureType::Prim(SignaturePrimType::I8),
+            RuntimePrimType::U8 => SignatureType::Prim(SignaturePrimType::U8),
+            RuntimePrimType::I16 => SignatureType::Prim(SignaturePrimType::I16),
+            RuntimePrimType::U16 => SignatureType::Prim(SignaturePrimType::U16),
+            RuntimePrimType::I32 => SignatureType::Prim(SignaturePrimType::I32),
+            RuntimePrimType::U32 => SignatureType::Prim(SignaturePrimType::U32),
+            RuntimePrimType::I64 => SignatureType::Prim(SignaturePrimType::I64),
+            RuntimePrimType::U64 => SignatureType::Prim(SignaturePrimType::U64),
+            RuntimePrimType::F32 => SignatureType::Prim(SignaturePrimType::F32),
+            RuntimePrimType::F64 => SignatureType::Prim(SignaturePrimType::F64),
+            RuntimePrimType::NativeInt => {
+                SignatureType::Prim(SignaturePrimType::NativeInt)
+            }
+            RuntimePrimType::NativeUInt => {
+                SignatureType::Prim(SignaturePrimType::NativeUInt)
+            }
+            RuntimePrimType::Ptr => {
+                SignatureType::Ptr(Box::new(SignatureType::Void))
+            }
         }
     }
 }
@@ -524,15 +680,21 @@ impl std::cmp::PartialEq<RuntimePrimType> for RuntimeType {
     }
 }
 
-impl std::cmp::PartialEq<dll_unpacker::SignaturePrimType> for RuntimePrimType {
-    fn eq(&self, other: &dll_unpacker::SignaturePrimType) -> bool {
+impl std::cmp::PartialEq<SignaturePrimType> for RuntimePrimType {
+    fn eq(&self, other: &SignaturePrimType) -> bool {
         let other: Self = (*other).into();
         *self == other
     }
 }
 
-impl std::cmp::PartialEq<RuntimePrimType> for dll_unpacker::SignaturePrimType {
+impl std::cmp::PartialEq<RuntimePrimType> for SignaturePrimType {
     fn eq(&self, other: &RuntimePrimType) -> bool {
         other == self
+    }
+}
+
+impl std::fmt::Debug for DotNetTypeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{self}")
     }
 }

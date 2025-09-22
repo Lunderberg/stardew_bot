@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dsl_ir::{ExprKind, OpIndex, SymbolicGraph, SymbolicValue};
 
-use crate::GraphRewrite;
+use crate::{CopySymbolicName as _, GraphRewrite};
 
 pub struct RecursiveRewrite<Inner> {
     inner: Inner,
@@ -17,6 +17,7 @@ impl<Inner> RecursiveRewrite<Inner> {
 impl<Inner> GraphRewrite for RecursiveRewrite<Inner>
 where
     Inner: GraphRewrite,
+    <Inner as GraphRewrite>::Error: From<dsl_ir::Error>,
 {
     type Error = <Inner as GraphRewrite>::Error;
 
@@ -53,15 +54,17 @@ where
                 expr
             };
 
+            let op_name = graph[index].name.clone();
             let opt_simplified = self
                 .inner
-                .rewrite_expr(graph, &intermediate_expr, name)?
+                .rewrite_expr(graph, &intermediate_expr, op_name.as_deref())?
                 .or_else(|| {
                     (intermediate_expr != graph[index].kind)
                         .then(|| graph.push(intermediate_expr))
                 });
 
             if let Some(simplified) = opt_simplified {
+                graph.copy_name(index, simplified)?;
                 lookup_simplified.insert(index, simplified);
             }
 

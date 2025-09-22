@@ -19,7 +19,12 @@ fn bench_compilation(c: &mut Criterion) {
         .measurement_time(std::time::Duration::from_millis(1000));
 
     macro_rules! generator {
-        ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        ($test_name:ident
+         $(, ignore = $reason:literal)?
+         $(, ignore_vm = $reason_vm:literal)?
+         $(, ignore_int = $reason_int:literal)?
+         $(,)?
+        ) => {
             group.bench_function(
                 stringify! {$test_name},
                 |bench: &mut Bencher| {
@@ -107,7 +112,12 @@ fn bench_execution_vm(c: &mut Criterion) {
         .measurement_time(std::time::Duration::from_millis(1000));
 
     macro_rules! generator {
-        ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        ($test_name:ident
+         $(, ignore = $reason:literal)?
+         $(, ignore_int = $reason_int:literal)?
+         $(, ignore_vm = $reason_vm:literal)?
+         $(,)?
+        ) => {
             group.bench_function(
                 stringify! {$test_name},
                 |bench: &mut Bencher| {
@@ -142,7 +152,12 @@ fn bench_execution_opt_vm(c: &mut Criterion) {
         .measurement_time(std::time::Duration::from_millis(1000));
 
     macro_rules! generator {
-        ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        ($test_name:ident
+         $(, ignore = $reason:literal)?
+         $(, ignore_int = $reason_int:literal)?
+         $(, ignore_vm = $reason_vm:literal)?
+         $(,)?
+        ) => {
             group.bench_function(
                 stringify! {$test_name},
                 |bench: &mut Bencher| {
@@ -174,7 +189,12 @@ fn bench_execution_interpreter(c: &mut Criterion) {
         .measurement_time(std::time::Duration::from_millis(1000));
 
     macro_rules! generator {
-        ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        ($test_name:ident
+         $(, ignore = $reason:literal)?
+         $(, ignore_int = $reason_int:literal)?
+         $(, ignore_vm = $reason_vm:literal)?
+         $(,)?
+        ) => {
             group.bench_function(
                 stringify! {$test_name},
                 |bench: &mut Bencher| {
@@ -209,7 +229,12 @@ fn bench_execution_opt_interpreter(c: &mut Criterion) {
         .measurement_time(std::time::Duration::from_millis(1000));
 
     macro_rules! generator {
-        ($test_name:ident $(, ignore = $reason:literal)? $(,)?) => {
+        ($test_name:ident
+         $(, ignore = $reason:literal)?
+         $(, ignore_int = $reason_int:literal)?
+         $(, ignore_vm = $reason_vm:literal)?
+         $(,)?
+        ) => {
             group.bench_function(
                 stringify! {$test_name},
                 |bench: &mut Bencher| {

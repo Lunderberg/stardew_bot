@@ -8,20 +8,20 @@ use elsa::FrozenMap;
 
 use dll_unpacker::{
     Field, MetadataCodedIndex, MetadataRow, MetadataTableIndex,
-    MetadataTypeDefOrRef, SignatureType, TypeDef, TypeDefOrRef, TypeRef,
+    MetadataTypeDefOrRef, SignaturePrimType, SignatureType, TypeDef,
+    TypeDefOrRef, TypeRef,
 };
 use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools};
 use memory_reader::{MemoryMapRegion, MemoryReader, Pointer, TypedPointer};
 
-use crate::runtime_type::{DotNetType, RuntimePrimType};
 use crate::{
-    extensions::*, CorElementType, FieldContainer, RuntimeModuleLayout,
-    TypeHandle, TypeHandlePtrExt as _,
-};
-use crate::{
-    Error, FieldDescription, FieldDescriptions, MethodTable, RuntimeModule,
-    RuntimeObject, RuntimeType, RuntimeValue,
+    extensions::*,
+    runtime_type::{DotNetType, RuntimePrimType},
+    CorElementType, Error, FieldContainer, FieldDescription, FieldDescriptions,
+    MethodTable, RuntimeModule, RuntimeModuleLayout, RuntimeObject,
+    RuntimeType, RuntimeValue, SignatureTypeExt as _, SymbolicType, TypeHandle,
+    TypeHandlePtrExt as _,
 };
 
 type CachedTypeDef = (TypedPointer<RuntimeModule>, MetadataTableIndex<TypeDef>);
@@ -166,7 +166,10 @@ impl<'a> CachedReader<'a> {
             .runtime_type
             .try_insert(ptr, || {
                 let method_table = self.method_table(ptr)?;
-                method_table.runtime_type(self)
+                let runtime_type = method_table.runtime_type(self)?;
+                //runtime_type.validate()?;
+                runtime_type.validate().unwrap();
+                Ok(runtime_type)
             })
             .cloned()
     }
@@ -174,7 +177,7 @@ impl<'a> CachedReader<'a> {
     pub fn runtime_module(
         &self,
         ptr: TypedPointer<RuntimeModule>,
-    ) -> Result<&RuntimeModule, Error> {
+    ) -> Result<&'a RuntimeModule, Error> {
         self.state.runtime_modules.try_insert(ptr, || {
             let runtime_module = RuntimeModule::new(
                 ptr.into(),
@@ -315,6 +318,8 @@ impl<'a> CachedReader<'a> {
         &self,
         name: &str,
     ) -> Result<TypedPointer<RuntimeModule>, Error> {
+        let name = name.strip_suffix(".dll").unwrap_or(name);
+
         if let Some(value) = self.state.runtime_module_by_name.get(name) {
             Ok(*value)
         } else {
@@ -323,6 +328,17 @@ impl<'a> CachedReader<'a> {
                 .runtime_module_by_name
                 .get(name)
                 .ok_or_else(|| {
+                    // panic!(
+                    //     "Could not find {name}.\n\
+                    //      Known DLLs:\n\t{}",
+                    //     self.state
+                    //         .runtime_module_by_name
+                    //         .clone()
+                    //         .into_tuple_vec()
+                    //         .iter()
+                    //         .map(|(name, _)| name)
+                    //         .format("\n\t")
+                    // );
                     Error::RegionForDLLNotFoundFromName(name.to_string())
                 })
                 .copied()
@@ -349,16 +365,179 @@ impl<'a> CachedReader<'a> {
             })
     }
 
-    pub fn field_by_name_to_runtime_type(
+    pub fn unwrap_type_ref(
         &self,
-        method_table_ptr: TypedPointer<MethodTable>,
+        row: MetadataTypeDefOrRef<'a>,
+    ) -> Result<MetadataTypeDefOrRef<'a>, Error> {
+        let type_ref = match &row {
+            MetadataTypeDefOrRef::TypeRef(tr) => tr,
+            _ => {
+                return Ok(row);
+            }
+        };
+        let mut module_name = type_ref.target_dll_name()?;
+        let namespace = type_ref.namespace()?;
+        let name = type_ref.name()?;
+
+        'main_loop: loop {
+            let module_ptr = self.runtime_module_by_name(module_name)?;
+            let module = self.runtime_module(module_ptr)?;
+            let metadata = module.metadata(self)?;
+
+            for type_def in metadata.type_def_table().iter_rows() {
+                if type_def.namespace()? == namespace
+                    && type_def.name()? == name
+                {
+                    return Ok(MetadataTypeDefOrRef::TypeDef(type_def));
+                }
+            }
+
+            for type_ref in metadata.type_ref_table().iter_rows() {
+                if type_ref.namespace()? == namespace
+                    && type_ref.name()? == name
+                {
+                    module_name = type_ref.target_dll_name()?;
+                    continue 'main_loop;
+                }
+            }
+
+            for exported_type in metadata.exported_type_table().iter_rows() {
+                if exported_type.namespace()? == namespace
+                    && exported_type.name()? == name
+                {
+                    module_name = exported_type.target_dll_name()?;
+                    continue 'main_loop;
+                }
+            }
+
+            return Err(Error::MissingTypeDefInModule {
+                type_def: type_ref.full_name()?,
+                module: module_name.to_string(),
+            });
+        }
+    }
+
+    pub fn find_type_def_in_module(
+        &self,
+        full_name: &str,
+        module_name: &str,
+    ) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        // println!("Looking for {full_name} within {module_name}");
+
+        let module_ptr = self.runtime_module_by_name(module_name)?;
+        let module = self.runtime_module(module_ptr)?;
+        let metadata = module.metadata(self)?;
+
+        // println!(
+        //     "Searching through {} TypeDef entries",
+        //     metadata.type_def_table().num_rows()
+        // );
+        for type_def in metadata.type_def_table().iter_rows() {
+            // println!("\tTypeDef '{}'", type_def.full_name()?);
+            if type_def.full_name()? == full_name {
+                // println!("\tFound '{full_name}', returning");
+                return Ok(type_def);
+            }
+        }
+
+        // println!(
+        //     "Searching through {} TypeRef entries",
+        //     metadata.type_ref_table().num_rows()
+        // );
+        for type_ref in metadata.type_ref_table().iter_rows() {
+            // println!("\tTypeRef '{}'", type_ref.full_name()?);
+            if type_ref.full_name()? == full_name {
+                let target_dll_name = type_ref.target_dll_name()?;
+                // println!("\tFound '{full_name}', delegating to search in {target_dll_name}");
+                assert!(target_dll_name != module_name);
+                return self
+                    .find_type_def_in_module(full_name, target_dll_name);
+            }
+        }
+
+        // println!(
+        //     "Searching through {} ExportedType entries",
+        //     metadata.exported_type_table().num_rows()
+        // );
+        for exported_type in metadata.exported_type_table().iter_rows() {
+            // println!("\tExportedType '{}'", exported_type.full_name()?);
+            if exported_type.full_name()? == full_name {
+                let target_dll_name = exported_type.target_dll_name()?;
+                // println!("\tFound '{full_name}', delegating to search in {target_dll_name}");
+                assert!(target_dll_name != module_name);
+                return self
+                    .find_type_def_in_module(full_name, target_dll_name);
+            }
+        }
+
+        Err(Error::MissingTypeDefInModule {
+            type_def: full_name.to_string(),
+            module: module_name.to_string(),
+        })
+    }
+
+    pub fn find_type_def_anywhere(
+        &self,
+        full_name: &str,
+    ) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        assert!(
+            !full_name.contains('<'),
+            "Treating '{full_name}' as a type def won't find anything, \
+             since the generic types will cause a mismatch.",
+        );
+        let type_def = self
+            .iter_known_modules()?
+            .map(Ok)
+            .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
+            .and_map_ok(|module| module.metadata(self))
+            .flat_map_ok(|metadata| -> Result<_, Error> {
+                Ok(metadata.type_def_table().iter_rows())
+            })
+            .and_find_ok(|type_def| -> Result<bool, Error> {
+                Ok(type_def.full_name()? == full_name)
+            })?
+            .ok_or_else(|| Error::MissingTypeDef(full_name.to_string()))?;
+
+        Ok(type_def)
+    }
+
+    pub fn find_type_def(
+        &self,
+        full_name: &str,
+        module_name: Option<&str>,
+    ) -> Result<MetadataRow<'a, TypeDef>, Error> {
+        if let Some(module_name) = module_name {
+            self.find_type_def_in_module(full_name, module_name)
+        } else {
+            self.find_type_def_anywhere(full_name)
+        }
+    }
+
+    pub fn field_type_by_parent_and_name(
+        &self,
+        parent_mt: Option<TypedPointer<MethodTable>>,
+        _symbolic_parent: Option<&SymbolicType>,
         field_name: &str,
     ) -> Result<RuntimeType, Error> {
-        let (parent_of_field, field_desc) =
-            self.find_field_by_name(method_table_ptr, field_name)?;
-        let runtime_type =
-            self.field_to_runtime_type(parent_of_field, &field_desc)?;
-        Ok(runtime_type)
+        // let opt_type_def = symbolic_parent
+        //     .map(|ty| self.find_type_def(ty))
+        //     .transpose()?;
+
+        if let Some(parent_mt) = parent_mt {
+            // The owning object may be a subclass, accessing a field
+            // defined within its parent class.  In that case, we need to
+            // find the method table of the parent class.
+            let (parent_of_field, field_desc) =
+                self.find_field_by_name(parent_mt, field_name)?;
+
+            // The runtime type of that field can then be inspected,
+            // relative to the class in which it is defined.
+            let runtime_type =
+                self.field_to_runtime_type(parent_of_field, &field_desc)?;
+            Ok(runtime_type)
+        } else {
+            Ok(RuntimeType::Unknown)
+        }
     }
 
     pub fn field_to_runtime_type(
@@ -394,20 +573,26 @@ impl<'a> CachedReader<'a> {
             let field_metadata = metadata.get(desc.token())?;
             let signature = field_metadata.signature()?;
 
-            let sig_type = signature.first_type()?;
+            let sig_type = signature.field_type()?;
+
+            // if let CorElementType::Prim(prim) = desc.cor_element_type()? {
+            //     println!(
+            //         "Within {}, field {} has signature {sig_type}, \
+            //          and primitive type {prim}",
+            //         parent.printable(*self),
+            //         field_metadata.name()?,
+            //     );
+            //     break 'runtime_type prim.into();
+            // }
+
+            let parent_generic_types = self
+                .method_table(ptr_mtable_of_parent)?
+                .generic_types(self)?;
 
             self.signature_type_to_runtime_type(
-                module_ptr,
-                ptr_mtable_of_parent,
-                sig_type,
-                false,
+                &sig_type,
+                &parent_generic_types,
             )?
-            .ok_or_else(|| {
-                Error::UnexpectedNullMethodTable(format!(
-                    "{}",
-                    signature.first_type().unwrap()
-                ))
-            })?
         };
 
         if runtime_type.is_complete() {
@@ -421,7 +606,6 @@ impl<'a> CachedReader<'a> {
 
     fn signature_type_matches_type_handle(
         &self,
-        module_ptr: TypedPointer<RuntimeModule>,
         sig_arg: &SignatureType<'_>,
         type_handle_ptr: TypedPointer<TypeHandle>,
         parent_generic_types: &[TypedPointer<TypeHandle>],
@@ -429,9 +613,15 @@ impl<'a> CachedReader<'a> {
         let type_handle = self.type_handle(type_handle_ptr)?;
 
         let arg_matches = match sig_arg {
-            SignatureType::Class { index, .. }
-            | SignatureType::ValueType { index, .. } => match type_handle {
+            SignatureType::Class {
+                index, metadata, ..
+            }
+            | SignatureType::ValueType {
+                index, metadata, ..
+            } => match type_handle {
                 TypeHandle::MethodTable(arg_method_table) => {
+                    let module_ptr =
+                        self.runtime_module_by_name(metadata.name()?)?;
                     let (expected_module, expected_token) =
                         self.module_defining_type(module_ptr, *index)?;
 
@@ -478,9 +668,14 @@ impl<'a> CachedReader<'a> {
                     == Some(object_method_table_ptr)
             }
             SignatureType::GenericInst {
-                index, type_args, ..
+                index,
+                metadata,
+                type_args,
+                ..
             } => match type_handle {
                 TypeHandle::MethodTable(method_table) => {
+                    let module_ptr =
+                        self.runtime_module_by_name(metadata.name()?)?;
                     let (_ptr_to_defining_module, type_def_index) =
                         self.module_defining_type(module_ptr, *index)?;
 
@@ -496,8 +691,7 @@ impl<'a> CachedReader<'a> {
                                 .zip(type_args.iter().cloned())
                                 .and_all(|(type_handle_ptr, sig_arg)| {
                                     self.signature_type_matches_type_handle(
-                                        module_ptr,
-                                        sig_arg.as_ref(),
+                                        &sig_arg,
                                         type_handle_ptr,
                                         parent_generic_types,
                                     )
@@ -527,7 +721,6 @@ impl<'a> CachedReader<'a> {
                         let element_ptr: TypedPointer<TypeHandle> =
                             element_ptr.into();
                         self.signature_type_matches_type_handle(
-                            module_ptr,
                             sig_element_type,
                             element_ptr,
                             parent_generic_types,
@@ -548,7 +741,6 @@ impl<'a> CachedReader<'a> {
 
     fn ptr_to_loader_module(
         &self,
-        module_ptr: TypedPointer<RuntimeModule>,
         sig_type: &SignatureType<'_>,
     ) -> Result<Option<TypedPointer<RuntimeModule>>, Error> {
         Ok(match sig_type {
@@ -558,40 +750,231 @@ impl<'a> CachedReader<'a> {
                 Some(self.runtime_module_by_name("System.Private.CoreLib")?)
             }
 
-            SignatureType::ValueType { index, .. }
-            | SignatureType::Class { index, .. }
-            | SignatureType::GenericInst { index, .. } => Some(
-                self.module_defining_type(module_ptr, *index)
-                    .map(|(ptr, _)| ptr)?,
-            ),
+            SignatureType::ValueType {
+                index, metadata, ..
+            }
+            | SignatureType::Class { index, metadata }
+            | SignatureType::GenericInst {
+                index, metadata, ..
+            } => {
+                let module_ptr =
+                    self.runtime_module_by_name(metadata.name()?)?;
+                Some(
+                    self.module_defining_type(module_ptr, *index)
+                        .map(|(ptr, _)| ptr)?,
+                )
+            }
 
             SignatureType::SizeArray(element_type)
             | SignatureType::MultiDimArray { element_type, .. } => {
-                self.ptr_to_loader_module(module_ptr, element_type.as_ref())?
+                self.ptr_to_loader_module(element_type.as_ref())?
             }
 
             SignatureType::GenericVarFromType(_) => None,
             SignatureType::GenericVarFromMethod(_) => None,
+
+            SignatureType::Void => None,
+            SignatureType::Ptr(pointee) => {
+                self.ptr_to_loader_module(pointee.as_ref())?
+            }
         })
     }
 
-    fn signature_type_to_runtime_type(
+    pub fn symbolic_type_to_method_table(
         &self,
-        module_ptr: TypedPointer<RuntimeModule>,
-        ptr_mtable_of_parent: TypedPointer<MethodTable>,
-        sig_type: SignatureType<'_>,
-        allow_missing: bool,
-    ) -> Result<Option<RuntimeType>, Error> {
+        symbolic: &SymbolicType,
+    ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
+        let opt_method_table_ptr = match symbolic {
+            SymbolicType::Named { name, .. } => {
+                self.method_table_by_name(name)?
+            }
+            SymbolicType::Metadata { module, index } => {
+                let module_ptr = self.runtime_module_by_name(module)?;
+                self.method_table_by_metadata(module_ptr, (*index).into())?
+            }
+            SymbolicType::GenericInst { base, args } => {
+                let Some(base_ptr) =
+                    self.symbolic_type_to_method_table(base)?
+                else {
+                    return Ok(None);
+                };
+                let base = self.method_table(base_ptr)?;
+                let expected_type_def = base.token();
+
+                let mut generics = Vec::new();
+                for arg in args.iter() {
+                    if let Some(arg_mt) =
+                        self.symbolic_type_to_method_table(arg)?
+                    {
+                        generics.push(arg_mt);
+                    } else {
+                        return Ok(None);
+                    }
+                }
+
+                let first_generic = 'first_generic: {
+                    for arg in args {
+                        if let Some(ptr) =
+                            self.symbolic_type_to_method_table(arg)?
+                        {
+                            break 'first_generic Some(ptr);
+                        }
+                    }
+                    None
+                };
+
+                [Some(base_ptr), first_generic]
+                    .into_iter()
+                    .flatten()
+                    .map(|method_table_ptr| self.method_table(method_table_ptr))
+                    .map_ok(|method_table| method_table.module())
+                    .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
+                    .and_map_ok(|module| module.loaded_types(self))
+                    .flatten_ok()
+                    .and_flat_map_ok(|instantiated_generics| {
+                        instantiated_generics.iter_method_tables(self)
+                    })
+                    .filter_map_ok(|type_handle_ptr| {
+                        type_handle_ptr.as_method_table()
+                    })
+                    .and_map_ok(|method_table_ptr| {
+                        self.method_table(method_table_ptr)
+                    })
+                    .and_find_ok(|method_table| -> Result<_, Error> {
+                        if method_table.token() != expected_type_def {
+                            return Ok(false);
+                        }
+                        if !method_table.has_generics() {
+                            return Ok(false);
+                        }
+
+                        let mut iter_candidate_generics = method_table
+                            .generic_types_excluding_base_class(self)?;
+                        for generic in generics.iter().cloned() {
+                            let Some(candidate_generic) =
+                                iter_candidate_generics.next()
+                            else {
+                                return Ok(false);
+                            };
+
+                            let Some(candidate_generic) =
+                                candidate_generic.as_method_table()
+                            else {
+                                return Ok(false);
+                            };
+
+                            if candidate_generic != generic {
+                                return Ok(false);
+                            }
+                        }
+
+                        if iter_candidate_generics.next().is_some() {
+                            return Ok(false);
+                        }
+
+                        Ok(true)
+                    })?
+                    .map(|method_table| method_table.ptr())
+            }
+            SymbolicType::Array(element) => {
+                if let Some(prim_type) = element.try_prim_type() {
+                    self.find_array_method_table(&prim_type.into(), None)?
+                } else {
+                    todo!("Find method table for array of type {element}")
+                }
+            }
+            SymbolicType::MultiDimArray { element_type, rank } => {
+                if let Some(prim_type) = element_type.try_prim_type() {
+                    self.find_array_method_table(
+                        &prim_type.into(),
+                        Some(*rank),
+                    )?
+                } else {
+                    todo!(
+                        "Find method table for multi-dim array \
+                           of type {element_type}"
+                    )
+                }
+            }
+        };
+
+        Ok(opt_method_table_ptr)
+    }
+
+    fn backing_type_of_enum(
+        &self,
+        type_metadata: MetadataTypeDefOrRef<'_>,
+    ) -> Result<Option<RuntimePrimType>, Error> {
+        let type_metadata = self.unwrap_type_ref(type_metadata)?;
+        let MetadataTypeDefOrRef::TypeDef(type_def) = type_metadata else {
+            return Ok(None);
+        };
+
+        let Some(parent) = type_def.extends()? else {
+            return Ok(None);
+        };
+        let is_enum =
+            parent.namespace()? == "System" && parent.name()? == "Enum";
+        if !is_enum {
+            return Ok(None);
+        }
+
+        // Enums are required to have exactly one
+        // field, with the name "value__" (ECMA-335,
+        // Section I.8.5.2, CLS Rule 7).
+        let field = type_def
+            .iter_fields()?
+            .filter(|field| !field.is_static().unwrap_or(true))
+            .exactly_one()
+            .map_err(|_| {
+                Error::EnumMustHaveExactlyOneField(
+                    type_def.full_name().unwrap(),
+                )
+            })?;
+        let prim: RuntimePrimType = match field.signature()?.field_type()? {
+            SignatureType::Prim(prim) => Ok(prim.into()),
+            other => Err(Error::EnumMustBeBackedByPrimitive {
+                enum_name: type_def.full_name()?,
+                field_type: format!("{other}"),
+            }),
+        }?;
+
+        return Ok(prim.into());
+    }
+
+    pub fn signature_type_to_runtime_type(
+        &self,
+        sig_type: &SignatureType<'_>,
+        parent_generic_types: &[TypedPointer<TypeHandle>],
+    ) -> Result<RuntimeType, Error> {
+        let type_formatter = |index: usize| -> SymbolicType {
+            let ptr = parent_generic_types[index];
+            let type_handle = self.type_handle(ptr).unwrap();
+            type_handle.to_symbolic(*self).unwrap()
+        };
+
         // TODO: Match by reference to avoid the clone.
-        let runtime_type = match sig_type.clone() {
+        let runtime_type: RuntimeType = match sig_type.clone() {
             SignatureType::Prim(prim) => {
-                // This case should already have been handled
-                // by checking the field description.
                 let prim: RuntimePrimType = prim.into();
                 prim.into()
             }
 
-            SignatureType::ValueType { index, .. } => {
+            SignatureType::ValueType {
+                metadata, index, ..
+            } => 'ty: {
+                // Enums require special handling.  While they are
+                // derived from `System.Enum`, and are ValueTypes,
+                // they also should be treated as their underlying
+                // type.
+                if let Some(backing_enum_type) =
+                    self.backing_type_of_enum(metadata.get(index)?)?
+                {
+                    break 'ty backing_enum_type.into();
+                }
+
+                let module_ptr =
+                    self.runtime_module_by_name(metadata.name()?)?;
                 let method_table =
                     self.method_table_by_metadata(module_ptr, index)?;
 
@@ -615,38 +998,43 @@ impl<'a> CachedReader<'a> {
                     })
                     .transpose()?
                     .unwrap_or(0);
-                DotNetType::ValueType { method_table, size }.into()
+                DotNetType::ValueType {
+                    method_table,
+                    size,
+                    symbolic: Some(sig_type.to_symbolic(&type_formatter)),
+                }
+                .into()
             }
-            SignatureType::Class { index, .. } => {
+            SignatureType::Class {
+                metadata, index, ..
+            } => {
+                let module_ptr =
+                    self.runtime_module_by_name(metadata.name()?)?;
                 let method_table =
                     self.method_table_by_metadata(module_ptr, index)?;
-                DotNetType::Class { method_table }.into()
+                DotNetType::Class {
+                    method_table,
+                    symbolic: Some(sig_type.to_symbolic(&type_formatter)),
+                }
+                .into()
             }
 
             SignatureType::GenericInst {
+                metadata,
                 index,
                 type_args,
                 is_value_type,
-                ..
             } => {
+                let module_ptr =
+                    self.runtime_module_by_name(metadata.name()?)?;
                 let generic_method_table_ptr =
                     self.method_table_by_metadata(module_ptr, index)?;
 
-                if generic_method_table_ptr.is_none()
-                    && is_value_type
-                    && !allow_missing
-                {
-                    return Err(Error::GenericMethodTableNotFound(format!(
-                        "{sig_type}"
-                    )));
-                }
-
-                let ptr_to_loader_module = type_args
-                    .first()
-                    .map(|arg| -> Result<_, Error> {
-                        self.ptr_to_loader_module(module_ptr, arg.deref())
-                    })
-                    .expect("Expect at least one arg for GenericInst")?;
+                let ptr_to_loader_module = self.ptr_to_loader_module(
+                    type_args
+                        .first()
+                        .expect("Expect at least one arg for GenericInst"),
+                )?;
 
                 let (ptr_to_defining_module, type_def_index) =
                     self.module_defining_type(module_ptr, index)?;
@@ -673,115 +1061,83 @@ impl<'a> CachedReader<'a> {
                             }
                         });
 
-                let parent_generic_types = self
-                    .method_table(ptr_mtable_of_parent)?
-                    .generic_types(self)?;
-
-                generic_method_table_ptr
-                        .into_iter()
-                        .map(|ptr| -> Result<TypedPointer<TypeHandle>, Error> {
-                            let ptr: Pointer = ptr.into();
-                            Ok(ptr.into())
-                        })
-                        .chain(iter_loaded_types)
-                        .and_find(
-                            |res_method_table_ptr| -> Result<bool, Error> {
-                                let type_handle_ptr =
-                                    match res_method_table_ptr.as_ref() {
-                                        Ok(ptr) => ptr,
-                                        Err(_) => {
-                                            return Ok(true);
-                                        }
-                                    };
-
-                                let type_handle = self.type_handle(*type_handle_ptr)?;
-                                let method_table = match &type_handle {
-                                    TypeHandle::MethodTable(mt) => mt,
-                                    TypeHandle::TypeDescription(_) => {
-                                        return Ok(false);
-                                    }
-                                };
-
-                                if method_table.token() != Some(type_def_index)
-                                {
-                                    return Ok(false);
+                let opt_method_table_ptr = generic_method_table_ptr
+                    .into_iter()
+                    .map(|ptr| -> Result<TypedPointer<TypeHandle>, Error> {
+                        let ptr: Pointer = ptr.into();
+                        Ok(ptr.into())
+                    })
+                    .chain(iter_loaded_types)
+                    .and_find(|res_method_table_ptr| -> Result<bool, Error> {
+                        let type_handle_ptr =
+                            match res_method_table_ptr.as_ref() {
+                                Ok(ptr) => ptr,
+                                Err(_) => {
+                                    return Ok(true);
                                 }
+                            };
 
-                                let generic_types: Vec<_> =
-                                    method_table.generic_types_excluding_base_class(self)?.collect();
+                        let type_handle = self.type_handle(*type_handle_ptr)?;
+                        let Some(method_table) = type_handle.as_method_table()
+                        else {
+                            return Ok(false);
+                        };
 
-                                if generic_types.len() != type_args.len() {
-                                    return Ok(false);
-                                }
+                        if method_table.token() != Some(type_def_index) {
+                            return Ok(false);
+                        }
 
-                                for (sig_arg, type_handle_ptr) in
-                                    type_args.iter().zip(generic_types.iter())
-                                {
-                                    let arg_matches = self
-                                        .signature_type_matches_type_handle(
-                                            module_ptr,
-                                            sig_arg,
-                                            *type_handle_ptr,
-                                            &parent_generic_types,
-                                        )?;
-                                    if !arg_matches {
-                                        return Ok(false);
-                                    }
-                                }
+                        let generic_types: Vec<_> = method_table
+                            .generic_types_excluding_base_class(self)?
+                            .collect();
 
-                                Ok(true)
-                            },
-                        )?
-                        .transpose()?
-                        .map(|ptr| {
-                            ptr.as_method_table().ok_or(
-                                Error::GenericInstShouldNotBeTypeDescription,
-                            )
-                        })
-                        .transpose()?
-                        .map_or_else(
-                            || {
-                               if is_value_type && !allow_missing {
-                                   Err(Error::InstantiatedGenericMethodTableNotFound(
-                                       format!("{sig_type}"),
-                                       parent_generic_types.iter()
-                                           .map(|type_handle_ptr| {
-                                               let Ok(type_handle) = self.type_handle(*type_handle_ptr)
-                                               else {
-                                                   return "err".to_string();
-                                               };
-                                               format!("{}", type_handle.printable(*self))
-                                           }).join(", ")
-                                   ))
-                               } else if is_value_type && allow_missing {
-                                   Ok(DotNetType::ValueType {
-                                       method_table: None,
-                                       size: 0,
-                                   }.into())
-                               } else {
-                                   Ok(DotNetType::Class {
-                                        method_table: None,
-                                    }.into())
-                               }
-                            },
-                            |method_table_ptr: TypedPointer<MethodTable>|
-                             -> Result<_, Error> {
-                                let runtime_type = if is_value_type {
-                                    let size = self
-                                        .method_table(method_table_ptr)?
-                                        .base_size();
-                                    DotNetType::ValueType {
-                                        method_table: Some(method_table_ptr),
-                                        size,
-                                    }.into()
-                                } else {
-                                    DotNetType::Class {
-                                        method_table: Some(method_table_ptr),
-                                    }.into()
-                                };
-                                Ok(runtime_type)
-                            },
-                        )?
+                        if generic_types.len() != type_args.len() {
+                            return Ok(false);
+                        }
+
+                        for (sig_arg, type_handle_ptr) in
+                            type_args.iter().zip(generic_types.iter())
+                        {
+                            let arg_matches = self
+                                .signature_type_matches_type_handle(
+                                    sig_arg,
+                                    *type_handle_ptr,
+                                    parent_generic_types,
+                                )?;
+                            if !arg_matches {
+                                return Ok(false);
+                            }
+                        }
+
+                        Ok(true)
+                    })?
+                    .transpose()?
+                    .map(|ptr| {
+                        ptr.as_method_table()
+                            .ok_or(Error::GenericInstShouldNotBeTypeDescription)
+                    })
+                    .transpose()?;
+                let symbolic = Some(sig_type.to_symbolic(&type_formatter));
+                if is_value_type {
+                    let size =
+                        if let Some(method_table_ptr) = opt_method_table_ptr {
+                            self.method_table(method_table_ptr)?.base_size()
+                        } else {
+                            0
+                        };
+                    DotNetType::ValueType {
+                        method_table: opt_method_table_ptr,
+                        size,
+                        symbolic,
+                    }
+                    .into()
+                } else {
+                    DotNetType::Class {
+                        method_table: opt_method_table_ptr,
+                        symbolic,
+                    }
+                    .into()
+                }
             }
             SignatureType::String => {
                 // The String type appears as `Runtime::Class`
@@ -795,22 +1151,34 @@ impl<'a> CachedReader<'a> {
                 DotNetType::String.into()
             }
             SignatureType::GenericVarFromType(var_index) => {
-                let generic_types = self
-                    .method_table(ptr_mtable_of_parent)?
-                    .generic_types(self)?;
-
                 let var_index = var_index as usize;
-                let ptr_type_handle = *generic_types
+                let ptr_type_handle = parent_generic_types
                     .get(var_index)
+                    .cloned()
                     .ok_or_else(|| Error::InvalidGenericTypeVar {
                         index: var_index,
-                        num_vars: generic_types.len(),
+                        num_vars: parent_generic_types.len(),
                     })?;
 
                 let type_handle = self.type_handle(ptr_type_handle)?;
 
                 let runtime_type = match type_handle {
-                    TypeHandle::MethodTable(method_table) => {
+                    TypeHandle::MethodTable(method_table) => 'ty: {
+                        let module_ptr = method_table.module();
+                        let module = self.runtime_module(module_ptr)?;
+                        let metadata = module.metadata(self)?;
+                        if let Some(token) = method_table.token() {
+                            if let Some(backing_enum_type) = self
+                                .backing_type_of_enum(
+                                    MetadataTypeDefOrRef::TypeDef(
+                                        metadata.get(token)?,
+                                    ),
+                                )?
+                            {
+                                break 'ty backing_enum_type.into();
+                            }
+                        }
+
                         method_table.runtime_type(self.reader)?
                     }
                     TypeHandle::TypeDescription(type_desc) => {
@@ -818,13 +1186,9 @@ impl<'a> CachedReader<'a> {
                             CorElementType::Prim(prim) => prim.into(),
                             CorElementType::Var => {
                                 todo!(
-                                    "Signature type {sig_type}, \
-                                     contained withing type {} \
+                                    "Signature type {sig_type} \
                                      is a generic type index {var_index} \
                                      points to generic type index {}",
-                                    self.method_table_to_name(
-                                        ptr_mtable_of_parent
-                                    )?,
                                     type_desc.index().unwrap()
                                 )
                             }
@@ -837,21 +1201,19 @@ impl<'a> CachedReader<'a> {
             }
 
             SignatureType::SizeArray(element_type) => {
+                let symbolic_element =
+                    element_type.to_symbolic(&type_formatter);
                 let element_type = self.signature_type_to_runtime_type(
-                    module_ptr,
-                    ptr_mtable_of_parent,
-                    *element_type,
-                    true,
+                    element_type.as_ref(),
+                    parent_generic_types,
                 )?;
 
-                let array_method_table = element_type
-                    .as_ref()
-                    .map(|ty| self.find_array_method_table(ty, None))
-                    .transpose()?
-                    .flatten();
+                let array_method_table =
+                    self.find_array_method_table(&element_type, None)?;
 
                 DotNetType::Array {
                     method_table: array_method_table,
+                    symbolic_element: Some(symbolic_element),
                 }
                 .into()
             }
@@ -859,29 +1221,31 @@ impl<'a> CachedReader<'a> {
             SignatureType::MultiDimArray {
                 element_type, rank, ..
             } => {
+                let symbolic_element =
+                    element_type.to_symbolic(&type_formatter);
                 let element_type = self.signature_type_to_runtime_type(
-                    module_ptr,
-                    ptr_mtable_of_parent,
-                    *element_type,
-                    true,
+                    element_type.as_ref(),
+                    parent_generic_types,
                 )?;
 
-                let array_method_table = element_type
-                    .as_ref()
-                    .map(|ty| self.find_array_method_table(ty, Some(rank)))
-                    .transpose()?
-                    .flatten();
+                let array_method_table =
+                    self.find_array_method_table(&element_type, Some(rank))?;
 
                 DotNetType::MultiDimArray {
                     method_table: array_method_table,
                     rank,
+                    symbolic_element: Some(symbolic_element),
                 }
                 .into()
             }
             SignatureType::Object => {
                 let method_table =
                     self.method_table_by_name("System.Object")?;
-                DotNetType::Class { method_table }.into()
+                DotNetType::Class {
+                    method_table,
+                    symbolic: Some("System.Object".into()),
+                }
+                .into()
             }
 
             other => {
@@ -889,7 +1253,53 @@ impl<'a> CachedReader<'a> {
             }
         };
 
-        Ok(Some(runtime_type))
+        runtime_type.validate().unwrap();
+
+        Ok(runtime_type)
+    }
+
+    fn array_element_signature_to_method_table(
+        &self,
+        search_element: &SignatureType<'_>,
+        rank: Option<usize>,
+    ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
+        let opt_module_ptr = self.ptr_to_loader_module(search_element)?;
+        let Some(module_ptr) = opt_module_ptr else {
+            return Ok(None);
+        };
+        let module = self.runtime_module(module_ptr)?;
+        let Some(loaded_types) = module.loaded_types(self)? else {
+            return Ok(None);
+        };
+
+        for res_type_handle_ptr in loaded_types.iter_method_tables(self)? {
+            let type_handle_ptr = res_type_handle_ptr?;
+            let type_handle = self.type_handle(type_handle_ptr)?;
+
+            let TypeHandle::MethodTable(loaded_type) = type_handle else {
+                continue;
+            };
+
+            let Some(loaded_element_type_ptr) =
+                loaded_type.array_element_type()
+            else {
+                continue;
+            };
+
+            let is_correct_element = self.signature_type_matches_type_handle(
+                search_element,
+                loaded_element_type_ptr,
+                &[],
+            )?;
+
+            let is_correct_rank = rank == loaded_type.multi_dim_rank(self)?;
+
+            if is_correct_element && is_correct_rank {
+                return Ok(Some(loaded_type.ptr()));
+            }
+        }
+
+        Ok(None)
     }
 
     fn find_array_method_table(
@@ -904,7 +1314,7 @@ impl<'a> CachedReader<'a> {
             RuntimeType::Prim(prim) => (Some(*prim), None),
             RuntimeType::DotNet(
                 DotNetType::ValueType { method_table, .. }
-                | DotNetType::Class { method_table }
+                | DotNetType::Class { method_table, .. }
                 | DotNetType::Array { method_table, .. }
                 | DotNetType::MultiDimArray { method_table, .. },
             ) => (None, *method_table),
@@ -1119,7 +1529,7 @@ impl<'a> CachedReader<'a> {
         Ok(class_exists)
     }
 
-    fn method_table_by_metadata(
+    pub fn method_table_by_metadata(
         &self,
         module_ptr: TypedPointer<RuntimeModule>,
         coded_index: MetadataCodedIndex<TypeDefOrRef>,
@@ -1152,6 +1562,188 @@ impl<'a> CachedReader<'a> {
                 },
             )
             .map(|opt| opt.copied())
+    }
+
+    pub fn symbolic_to_signature(
+        &self,
+        symbolic: &SymbolicType,
+    ) -> Result<SignatureType<'a>, Error> {
+        let sig = match symbolic {
+            SymbolicType::Named { module, name } => match name.as_str() {
+                "Object" => SignatureType::Object,
+                "String" => SignatureType::String,
+                "Void" => SignatureType::Void,
+                "Pointer" | "ptr" | "Ptr" => {
+                    SignatureType::Ptr(Box::new(SignatureType::Void))
+                }
+                "bool" => SignaturePrimType::Bool.into(),
+                "char" => SignaturePrimType::Char.into(),
+                "u8" => SignaturePrimType::U8.into(),
+                "u16" => SignaturePrimType::U16.into(),
+                "u32" => SignaturePrimType::U32.into(),
+                "u64" => SignaturePrimType::U64.into(),
+                "usize" => SignaturePrimType::NativeUInt.into(),
+                "i8" => SignaturePrimType::I8.into(),
+                "i16" => SignaturePrimType::I16.into(),
+                "i32" => SignaturePrimType::I32.into(),
+                "i64" => SignaturePrimType::I64.into(),
+                "isize" => SignaturePrimType::NativeInt.into(),
+                "f32" => SignaturePrimType::F32.into(),
+                "f64" => SignaturePrimType::F64.into(),
+                _ => {
+                    let type_def = self.find_type_def(
+                        &name,
+                        module.as_ref().map(|s| s.as_str()),
+                    )?;
+                    type_def.signature()?
+                }
+            },
+
+            SymbolicType::Metadata {
+                module: module_name,
+                index,
+            } => {
+                let module_ptr = self.runtime_module_by_name(module_name)?;
+                let module = self.runtime_module(module_ptr)?;
+                let metadata = module.metadata(self)?;
+                let type_def = metadata.get(*index)?;
+                match type_def {
+                    MetadataTypeDefOrRef::TypeDef(row) => row.signature()?,
+                    MetadataTypeDefOrRef::TypeRef(row) => {
+                        let type_def = self.find_type_def(
+                            row.full_name()?.as_str(),
+                            Some(row.target_dll_name()?),
+                        )?;
+                        type_def.signature()?
+                    }
+                    MetadataTypeDefOrRef::TypeSpec(_) => todo!(),
+                }
+            }
+
+            SymbolicType::GenericInst { base, args } => {
+                let base = self.symbolic_to_signature(base)?;
+                let type_args: Vec<_> = args
+                    .iter()
+                    .map(|arg| self.symbolic_to_signature(arg))
+                    .collect::<Result<_, _>>()?;
+                base.with_type_args(type_args)?
+            }
+
+            SymbolicType::Array(element) => {
+                let element = self.symbolic_to_signature(element)?;
+                SignatureType::SizeArray(Box::new(element))
+            }
+            SymbolicType::MultiDimArray { element_type, rank } => {
+                let element_type = self.symbolic_to_signature(element_type)?;
+                SignatureType::MultiDimArray {
+                    element_type: Box::new(element_type),
+                    rank: *rank,
+                    fixed_sizes: Vec::new(),
+                    lower_bounds: Vec::new(),
+                }
+            }
+        };
+
+        Ok(sig)
+    }
+
+    pub fn signature_to_method_table(
+        &self,
+        sig: &SignatureType<'_>,
+    ) -> Result<Option<TypedPointer<MethodTable>>, Error> {
+        let opt_method_table_ptr: Option<TypedPointer<MethodTable>> = match sig
+        {
+            SignatureType::ValueType { index, metadata }
+            | SignatureType::Class { index, metadata } => {
+                let module = self.runtime_module_by_name(metadata.name()?)?;
+                self.method_table_by_metadata(module, *index)?
+            }
+            SignatureType::GenericInst {
+                index,
+                metadata,
+                type_args,
+                ..
+            } => {
+                let base_type_def = match self.unwrap_type_ref(metadata.get(*index)?)? {
+                    MetadataTypeDefOrRef::TypeDef(row) => row,
+                    MetadataTypeDefOrRef::TypeRef(_) => unreachable!("Handled by unwrap_type_ref"),
+                    MetadataTypeDefOrRef::TypeSpec(_) => panic!("Uninstantiated generic should be TypeDef or TypeRef, not TypeSpec"),
+                };
+
+                let defining_module = self.ptr_to_loader_module(sig)?;
+                let loader_module =
+                    self.ptr_to_loader_module(type_args.first().unwrap())?;
+                let iter_loaded_types = [defining_module, loader_module]
+                    .into_iter()
+                    .flatten()
+                    .unique()
+                    .map(Ok::<_, Error>)
+                    .and_map_ok(|module_ptr| self.runtime_module(module_ptr))
+                    .filter_map_ok(|module| {
+                        module.loaded_types(self).transpose()
+                    })
+                    .flatten()
+                    .flat_map_ok(|loaded_types| {
+                        loaded_types.iter_method_tables(self)
+                    })
+                    .flatten();
+
+                let opt_method_table = iter_loaded_types
+                    .and_map_ok(|type_handle_ptr| {
+                        self.type_handle(type_handle_ptr)
+                    })
+                    .filter_map_ok(|type_handle| match type_handle {
+                        TypeHandle::MethodTable(method_table) => {
+                            Some(method_table)
+                        }
+                        TypeHandle::TypeDescription(_) => None,
+                    })
+                    .filter_ok(|method_table| {
+                        method_table.token() == Some(base_type_def.index())
+                    })
+                    .and_find_ok(|method_table| -> Result<bool, Error> {
+                        let generic_types: Vec<_> = method_table
+                            .generic_types_excluding_base_class(self)?
+                            .collect();
+                        if generic_types.len() != type_args.len() {
+                            return Ok(false);
+                        }
+                        for (sig_arg, type_handle_ptr) in
+                            type_args.iter().zip(generic_types)
+                        {
+                            let arg_matches = self
+                                .signature_type_matches_type_handle(
+                                    sig_arg,
+                                    type_handle_ptr,
+                                    &[],
+                                )?;
+                            if !arg_matches {
+                                return Ok(false);
+                            }
+                        }
+                        Ok(true)
+                    })?;
+
+                opt_method_table.map(|method_table| method_table.ptr())
+            }
+
+            SignatureType::SizeArray(element_type) => self
+                .array_element_signature_to_method_table(
+                    element_type.as_ref(),
+                    None,
+                )?,
+
+            SignatureType::MultiDimArray {
+                element_type, rank, ..
+            } => self.array_element_signature_to_method_table(
+                element_type.as_ref(),
+                Some(*rank),
+            )?,
+
+            other => todo!("Find method table for {other}"),
+        };
+
+        Ok(opt_method_table_ptr)
     }
 
     pub fn method_table_to_name(

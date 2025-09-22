@@ -1,5 +1,5 @@
 use derive_more::derive::From;
-use dotnet_debugger::RuntimePrimValue;
+use dotnet_debugger::{MethodTable, RuntimePrimValue, TypedPointer};
 
 use crate::{OpIndex, Pointer};
 
@@ -59,6 +59,21 @@ impl std::cmp::PartialEq for SymbolicValue {
             (Self::Result(lhs), Self::Result(rhs)) => lhs == rhs,
             _ => false,
         }
+    }
+}
+
+impl std::cmp::PartialEq<OpIndex> for SymbolicValue {
+    fn eq(&self, other_index: &OpIndex) -> bool {
+        match self {
+            SymbolicValue::Result(this_index) => this_index == other_index,
+            _ => false,
+        }
+    }
+}
+
+impl std::cmp::PartialEq<SymbolicValue> for OpIndex {
+    fn eq(&self, other: &SymbolicValue) -> bool {
+        other == self
     }
 }
 
@@ -137,3 +152,9 @@ symbolic_value_from_prim!(isize);
 symbolic_value_from_prim!(f32);
 symbolic_value_from_prim!(f64);
 symbolic_value_from_prim!(Pointer);
+
+impl From<TypedPointer<MethodTable>> for SymbolicValue {
+    fn from(value: TypedPointer<MethodTable>) -> Self {
+        value.as_untyped_ptr().into()
+    }
+}

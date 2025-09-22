@@ -164,7 +164,12 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         let expr = expr.eliminate_common_subexpressions()?;
         expr.validate(self.reader)?;
         if self.show_steps {
-            println!("----------- After CSE --------------\n{expr}");
+            println!(
+                "----------- After CSE --------------\n{}",
+                expr.printer()
+                    .expand_all_expressions()
+                    .number_all_expressions()
+            );
         }
 
         Ok(expr)
@@ -186,7 +191,9 @@ impl<'a, 'b> SymbolicGraphCompiler<'a, 'b> {
         expr.validate(self.reader)?;
 
         if self.show_steps {
-            println!("----------- After Simplifcations --------------\n{expr}");
+            println!(
+                "----------- After Simplifications --------------\n{expr}"
+            );
         }
 
         Ok(expr)

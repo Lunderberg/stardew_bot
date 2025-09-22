@@ -19,7 +19,28 @@ impl GraphRewrite for RemoveUnusedPointerCast {
                 value: SymbolicValue::Result(op_index),
                 prim_type: RuntimePrimType::Ptr,
             } => match &graph[*op_index].kind {
-                ExprKind::PointerCast { ptr, .. } => Some(*ptr),
+                ExprKind::PointerCast { ptr, .. } => {
+                    Some(graph.prim_cast(*ptr, RuntimePrimType::Ptr))
+                }
+                _ => None,
+            },
+
+            ExprKind::PointerCast {
+                ptr: SymbolicValue::Result(op_index),
+                ty,
+            } => match &graph[*op_index].kind {
+                ExprKind::PointerCast { ptr, .. } => {
+                    Some(graph.pointer_cast(*ptr, ty.clone()))
+                }
+                _ => None,
+            },
+
+            ExprKind::ReadString {
+                ptr: SymbolicValue::Result(op_index),
+            } => match &graph[*op_index].kind {
+                ExprKind::PointerCast { ptr, .. } => {
+                    Some(graph.read_string(*ptr))
+                }
                 _ => None,
             },
 

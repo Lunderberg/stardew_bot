@@ -326,6 +326,48 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+
+                ExprKind::FieldOffset {
+                    method_table_ptr: lhs_ptr,
+                    field: lhs_field,
+                } => match rhs_kind {
+                    ExprKind::FieldOffset {
+                        method_table_ptr: rhs_ptr,
+                        field: rhs_field,
+                    } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr)
+                            && lhs_field == rhs_field
+                    }
+                    _ => false,
+                },
+
+                ExprKind::ArrayStride {
+                    method_table_ptr: lhs_ptr,
+                } => match rhs_kind {
+                    ExprKind::ArrayStride {
+                        method_table_ptr: rhs_ptr,
+                    } => {
+                        equivalent_value!(lhs_ptr, rhs_ptr)
+                    }
+                    _ => false,
+                },
+
+                ExprKind::LazyStatic {
+                    init_func: lhs_init,
+                } => match rhs_kind {
+                    ExprKind::LazyStatic {
+                        init_func: rhs_init,
+                    } => equivalent_value!(lhs_init, rhs_init),
+                    _ => false,
+                },
+
+                ExprKind::TypeToMethodTable { ty: lhs_ty } => match rhs_kind {
+                    ExprKind::TypeToMethodTable { ty: rhs_ty } => {
+                        lhs_ty == rhs_ty
+                    }
+                    _ => false,
+                },
+
                 ExprKind::ObjectMethodTable { obj: lhs_obj } => {
                     match rhs_kind {
                         ExprKind::ObjectMethodTable { obj: rhs_obj } => {
@@ -477,17 +519,15 @@ impl<'a> GraphComparison<'a> {
                 },
 
                 ExprKind::IsSubclassOf {
-                    method_table_ptr: lhs_method_table_ptr,
-                    ty: lhs_ty,
+                    child_method_table_ptr: lhs_child,
+                    parent_method_table_ptr: lhs_parent,
                 } => match rhs_kind {
                     ExprKind::IsSubclassOf {
-                        method_table_ptr: rhs_method_table_ptr,
-                        ty: rhs_ty,
+                        child_method_table_ptr: rhs_child,
+                        parent_method_table_ptr: rhs_parent,
                     } => {
-                        equivalent_value!(
-                            lhs_method_table_ptr,
-                            rhs_method_table_ptr
-                        ) && lhs_ty == rhs_ty
+                        equivalent_value!(lhs_child, rhs_child)
+                            && equivalent_value!(lhs_parent, rhs_parent)
                     }
                     _ => false,
                 },

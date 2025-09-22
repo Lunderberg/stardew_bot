@@ -1,3 +1,5 @@
+use std::{cell::RefCell, rc::Rc};
+
 use dsl::{
     runtime::{Runtime, RuntimeFunc},
     Error, RuntimePrimType, RustNativeObject, SymbolicGraph,
@@ -23,6 +25,7 @@ macro_rules! generate_tests {
         $generator! { eval_function_call }
         $generator! { eval_function_call_with_unused_parameters }
         $generator! { eval_if_else }
+        $generator! { eval_if_else_with_condition_as_body }
         $generator! { eval_integer_addition }
         $generator! { eval_integer_literal }
         $generator! { eval_integer_multiplication }
@@ -67,6 +70,14 @@ macro_rules! generate_tests {
         $generator! { sum_of_integers_in_vm_function }
         $generator! { use_global_var_from_multiple_public_functions }
         $generator! { use_same_reduction_function_in_multiple_locations }
+        $generator! {
+            lazy_static_evaluated_at_most_once,
+            ignore_int="Not implemented",
+        }
+        $generator! {
+            lazy_static_only_evaluated_when_used,
+            ignore_int="Not implemented",
+        }
     };
 }
 pub(crate) use generate_tests;
@@ -872,6 +883,32 @@ pub fn eval_if_else(
     let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
 
     let expected = 23;
+
+    assert_eq!(result, expected);
+    Ok(())
+}
+
+pub fn eval_if_else_with_condition_as_body(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            let cond = 5 == 5;
+            let a = if cond {
+                cond
+            } else {
+                !cond
+            };
+            a
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+    let result: bool = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected = true;
 
     assert_eq!(result, expected);
     Ok(())
@@ -2004,6 +2041,75 @@ pub fn conditional_with_unchanged_native_obj_in_else_branch(
         .0;
     let expected = 15usize;
     assert_eq!(result, expected);
+
+    Ok(())
+}
+
+pub fn lazy_static_evaluated_at_most_once(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    let counter = Rc::new(RefCell::new(0usize));
+
+    let func_counter = counter.clone();
+    graph.named_native_function("func", move || {
+        let mut counter_mut = func_counter.borrow_mut();
+        *counter_mut += 1;
+        *counter_mut
+    })?;
+
+    graph.parse(stringify! {
+        pub fn main() {
+            (0..10)
+                .map(|i| lazy_static(|| func()))
+                .reduce(0usize, |a,b| a+b)
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected: usize = 10;
+    assert_eq!(result, expected);
+
+    assert_eq!(*counter.borrow(), 1usize);
+
+    Ok(())
+}
+
+pub fn lazy_static_only_evaluated_when_used(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    let counter = Rc::new(RefCell::new(0usize));
+
+    let func_counter = counter.clone();
+    graph.named_native_function("func", move || {
+        let mut counter_mut = func_counter.borrow_mut();
+        *counter_mut += 1;
+        *counter_mut
+    })?;
+
+    graph.parse(stringify! {
+        pub fn main() {
+            let num_iter = 10-10;
+            (0..num_iter)
+                .map(|i| lazy_static(|| func()))
+                .reduce(0usize, |a,b| a+b)
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected: usize = 0;
+    assert_eq!(result, expected);
+
+    assert_eq!(*counter.borrow(), 0usize);
 
     Ok(())
 }
