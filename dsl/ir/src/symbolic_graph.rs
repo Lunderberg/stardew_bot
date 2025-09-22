@@ -435,15 +435,6 @@ impl SymbolicGraph {
         })
     }
 
-    pub fn physical_downcast(
-        &mut self,
-        obj: impl Into<SymbolicValue>,
-        ty: TypedPointer<MethodTable>,
-    ) -> SymbolicValue {
-        let obj = obj.into();
-        self.push(ExprKind::PhysicalDowncast { obj, ty })
-    }
-
     pub fn read_value(
         &mut self,
         ptr: impl Into<SymbolicValue>,

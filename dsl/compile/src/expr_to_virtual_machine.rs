@@ -1109,20 +1109,7 @@ impl ExpressionTranslator<'_> {
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
-                ExprKind::PhysicalDowncast { obj, ty } => {
-                    let obj = self.value_to_arg(op_index, obj)?;
-                    self.free_dead_indices(op_index);
-                    let op_output = self.get_output_index(op_index);
-                    self.push_annotated(
-                        Instruction::Downcast {
-                            obj,
-                            subtype: *ty,
-                            output: op_output,
-                        },
-                        || format!("eval {expr_name}"),
-                    );
-                    self.index_tracking.define_contents(op_index, op_output);
-                }
+
                 ExprKind::ReadBytes(regions) => {
                     let regions = regions
                         .iter()

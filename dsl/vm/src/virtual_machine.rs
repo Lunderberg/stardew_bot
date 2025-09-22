@@ -218,21 +218,6 @@ pub enum Instruction {
         output: StackIndex,
     },
 
-    /// Downcast a type.  Assumes the register contains a pointer to an
-    /// object.  If the object is of type `ty`, then the register is
-    /// unchanged.  If the object is not of type `ty`, then the
-    /// register is replaced with `None`.
-    ///
-    /// TODO: If/when conditionals are implemented, express this as a
-    /// Read(RuntimeType::Ptr), followed by a boolean check IsBaseOf.
-    /// That way, multiple type checks on the same object can share the
-    /// same Read of the method table pointer.
-    Downcast {
-        obj: VMArg,
-        subtype: TypedPointer<MethodTable>,
-        output: StackIndex,
-    },
-
     /// Read an array of bytes
     ReadBytes {
         regions: Vec<VMByteRange>,
@@ -751,12 +736,6 @@ impl<'a> VMEvaluator<'a> {
                     output,
                 )?,
 
-                &Instruction::Downcast {
-                    obj,
-                    subtype,
-                    output,
-                } => self.eval_downcast(obj, subtype, output)?,
-
                 Instruction::ReadBytes { regions, output } => {
                     self.eval_read_bytes(regions, *output)?
                 }
@@ -1152,34 +1131,6 @@ impl<'a> VMEvaluator<'a> {
         Ok(())
     }
 
-    fn eval_downcast(
-        &mut self,
-        obj: VMArg,
-        subtype: TypedPointer<MethodTable>,
-        output: StackIndex,
-    ) -> Result<(), Error> {
-        let obj = self.arg_to_prim(obj)?;
-
-        self.values[output] = match obj {
-            None => Ok(None),
-            Some(RuntimePrimValue::Ptr(ptr)) => {
-                let actual_type_ptr: Pointer = {
-                    let mut arr = [0; Pointer::SIZE];
-                    self.reader.read_bytes(ptr, &mut arr)?;
-                    arr.into()
-                };
-                let is_valid_cast = self
-                    .reader
-                    .is_dotnet_base_class_of(subtype, actual_type_ptr.into())?;
-
-                Ok(is_valid_cast.then(|| RuntimePrimValue::Ptr(ptr).into()))
-            }
-            Some(other) => Err(Error::DowncastAppliedToNonPointer(other)),
-        }?;
-
-        Ok(())
-    }
-
     fn eval_read_bytes(
         &mut self,
         regions: &[VMByteRange],
@@ -1347,7 +1298,6 @@ impl Instruction {
             Instruction::Copy { value: arg, .. }
             | Instruction::ConditionalJump { cond: arg, .. }
             | Instruction::PrimCast { value: arg, .. }
-            | Instruction::Downcast { obj: arg, .. }
             | Instruction::IsSubclassOf {
                 method_table_ptr: arg,
                 ..
@@ -1438,7 +1388,6 @@ impl Instruction {
             | Instruction::Div { output, .. }
             | Instruction::Mod { output, .. }
             | Instruction::IsSubclassOf { output, .. }
-            | Instruction::Downcast { output, .. }
             | Instruction::ReadBytes { output, .. }
             | Instruction::CastBytes { output, .. }
             | Instruction::ReadString { output, .. }
@@ -1475,7 +1424,6 @@ impl Instruction {
             Instruction::Div { .. } => "Div",
             Instruction::Mod { .. } => "Mod",
             Instruction::IsSubclassOf { .. } => "IsSubclassOf",
-            Instruction::Downcast { .. } => "Downcast",
             Instruction::ReadBytes { .. } => "ReadBytes",
             Instruction::CastBytes { .. } => "CastBytes",
             Instruction::ReadString { .. } => "ReadString",
@@ -1661,12 +1609,6 @@ impl Display for Instruction {
                 f,
                 "{output} = {method_table_ptr}.is_subclass_of::<{base_type}>()"
             ),
-
-            Instruction::Downcast {
-                obj,
-                subtype,
-                output,
-            } => write!(f, "{output} = {obj}.downcast::<{subtype}>()"),
 
             Instruction::ReadBytes { regions, output }
                 if regions.len() == 1 =>

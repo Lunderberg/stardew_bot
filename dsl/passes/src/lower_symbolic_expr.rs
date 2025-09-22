@@ -3,8 +3,6 @@ use dotnet_debugger::{
     DotNetType, RuntimeArray, RuntimeMultiDimArray, RuntimePrimType,
     RuntimeType, TypeHandlePtrExt as _,
 };
-use env_var_flag::env_var_flag;
-
 use dsl_analysis::{
     Analysis, DSLTypeExt as _, StaticFieldExt as _, SymbolicTypeExt as _,
 };
@@ -13,9 +11,6 @@ use dsl_ir::{DSLType, ExprKind, SymbolicGraph, SymbolicValue};
 use dsl_rewrite_utils::GraphRewrite;
 
 use crate::Error;
-
-static USE_PHYSICAL_DOWNCAST: std::sync::LazyLock<bool> =
-    std::sync::LazyLock::new(|| env_var_flag("USE_PHYSICAL_DOWNCAST"));
 
 pub struct LowerSymbolicExpr<'a>(pub &'a Analysis<'a>);
 
@@ -340,23 +335,23 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 }
 
                 let target_method_table_ptr = ty.method_table(reader)?;
-                let ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
 
-                let ptr = if *USE_PHYSICAL_DOWNCAST {
-                    graph.physical_downcast(ptr, target_method_table_ptr)
-                } else {
+                let subclass_ptr = {
+                    let obj_ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
+
                     let method_table_ptr =
-                        graph.read_value(ptr, RuntimePrimType::Ptr);
+                        graph.read_value(obj_ptr, RuntimePrimType::Ptr);
                     let is_target_type = graph.is_subclass_of(
                         method_table_ptr,
                         target_method_table_ptr,
                     );
+
                     let none = graph.none();
-                    graph.if_else(is_target_type, ptr, none)
+                    graph.if_else(is_target_type, obj_ptr, none)
                 };
 
                 let expr = graph.pointer_cast(
-                    ptr,
+                    subclass_ptr,
                     DotNetType::Class {
                         method_table: Some(target_method_table_ptr),
                     }

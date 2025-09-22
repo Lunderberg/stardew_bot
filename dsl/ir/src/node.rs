@@ -144,11 +144,12 @@ pub enum ExprKind {
     FieldAccess { obj: SymbolicValue, field: String },
 
     /// Downcast an object to a subclass.  After downcasting, fields
-    /// of the subclass may be accessed.
+    /// of the subclass may be accessed.  If the field is not an
+    /// instance of the subclass, `SymbolicDowncast` will produce
+    /// `None`, which will be propagated to all field accesses.
     ///
-    /// This is currently lowered to PhysicalDowncast, which has
-    /// explicitly implemented in the VM.  In the future, this may
-    /// instead be lowered into conditional statements.
+    /// This is lowered into `IsSubclassOf`, followed by a conditional
+    /// statement.
     SymbolicDowncast {
         obj: SymbolicValue,
         ty: SymbolicType,
@@ -311,16 +312,6 @@ pub enum ExprKind {
         ty: TypedPointer<MethodTable>,
     },
 
-    /// Downcast into a subclass.
-    ///
-    /// If the downcast is successful, the result is the same pointer
-    /// as was provided as input.  if the downcast is not successful,
-    /// the result is None.
-    PhysicalDowncast {
-        obj: SymbolicValue,
-        ty: TypedPointer<MethodTable>,
-    },
-
     /// Read a value from memory
     ///
     /// Given a pointer to a location in the remote process, read a
@@ -411,7 +402,6 @@ impl ExprKind {
             ExprKind::Mod { .. } => "Mod",
             ExprKind::PrimCast { .. } => "PrimCast",
             ExprKind::IsSubclassOf { .. } => "IsSubclassOf",
-            ExprKind::PhysicalDowncast { .. } => "PhysicalDowncast",
             ExprKind::ReadPrim { .. } => "ReadValue",
             ExprKind::ReadBytes { .. } => "ReadBytes",
             ExprKind::CastBytes { .. } => "CastBytes",
@@ -717,8 +707,6 @@ impl ExprKind {
                 }
             }),
 
-            ExprKind::PhysicalDowncast { obj, ty } => remap(obj)
-                .map(|obj| ExprKind::PhysicalDowncast { obj, ty: *ty }),
             ExprKind::ReadPrim { ptr, prim_type } => {
                 remap(ptr).map(|ptr| ExprKind::ReadPrim {
                     ptr,
@@ -923,8 +911,6 @@ impl std::fmt::Display for ExprKind {
             ExprKind::Or { lhs, rhs } => write!(f, "{lhs} || {rhs}"),
             ExprKind::Not { arg } => write!(f, "!{arg}"),
 
-            // TODO: Support Add/Mul/PhysicalDowncast/ReadValue in the
-            // parser.
             ExprKind::Equal { lhs, rhs } => write!(f, "{lhs} == {rhs}"),
             ExprKind::NotEqual { lhs, rhs } => write!(f, "{lhs} != {rhs}"),
             ExprKind::LessThan { lhs, rhs } => write!(f, "{lhs} < {rhs}"),
@@ -946,9 +932,6 @@ impl std::fmt::Display for ExprKind {
                 ty,
             } => {
                 write!(f, "{method_table_ptr}.is_subclass_of({ty})")
-            }
-            ExprKind::PhysicalDowncast { obj, ty } => {
-                write!(f, "{obj}.downcast({ty})")
             }
             ExprKind::PrimCast { value, prim_type } => {
                 write!(f, "{value}.prim_cast::<{prim_type}>()")

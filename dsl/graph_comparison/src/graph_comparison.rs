@@ -466,18 +466,7 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
-                ExprKind::PhysicalDowncast {
-                    obj: lhs_obj,
-                    ty: lhs_ty,
-                } => match rhs_kind {
-                    ExprKind::PhysicalDowncast {
-                        obj: rhs_obj,
-                        ty: rhs_ty,
-                    } => {
-                        equivalent_value!(lhs_obj, rhs_obj) && lhs_ty == rhs_ty
-                    }
-                    _ => false,
-                },
+
                 ExprKind::IsSubclassOf {
                     method_table_ptr: lhs_method_table_ptr,
                     ty: lhs_ty,

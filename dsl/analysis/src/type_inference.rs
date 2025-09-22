@@ -162,9 +162,6 @@ pub enum TypeInferenceError {
     )]
     IndexAccessRequiresArray(DSLType),
 
-    #[error("Downcast requires pointer argument, but received {0}")]
-    InvalidOperandForPhysicalDowncast(DSLType),
-
     #[error("ReadValue requires pointer argument, but received {0}")]
     InvalidOperandForReadValue(DSLType),
 
@@ -640,16 +637,7 @@ impl<'a> TypeInference<'a> {
 
                 ExprKind::PrimCast { prim_type, .. } => (*prim_type).into(),
                 ExprKind::IsSubclassOf { .. } => RuntimePrimType::Bool.into(),
-                ExprKind::PhysicalDowncast { obj, .. } => {
-                    let obj_type = self.expect_cache(*obj);
-                    match obj_type {
-                        DSLType::Prim(RuntimePrimType::Ptr) => Ok(()),
-                        other => Err(TypeInferenceError::InvalidOperandForPhysicalDowncast(
-                            other.clone(),
-                        )),
-                    }?;
-                    RuntimePrimType::Ptr.into()
-                }
+
                 ExprKind::ReadPrim { ptr, prim_type } => {
                     let ptr_type = self.expect_cache(*ptr);
                     match ptr_type {

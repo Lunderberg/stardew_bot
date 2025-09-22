@@ -237,7 +237,6 @@ impl<'a> InterpretedFunc<'a> {
                 self.eval_prim_cast(value, prim_type)?
             }
             ExprKind::IsSubclassOf { .. } => todo!(),
-            ExprKind::PhysicalDowncast { .. } => todo!(),
             ExprKind::ReadPrim { .. } => todo!(),
             ExprKind::ReadBytes(_) => todo!(),
             ExprKind::CastBytes { .. } => todo!(),

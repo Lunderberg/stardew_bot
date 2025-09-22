@@ -1248,21 +1248,6 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
 
-                        ExprKind::PhysicalDowncast { obj, ty } => {
-                            [
-                                PrintItem::Expr(
-                                    *obj,
-                                    OpPrecedence::MaxPrecedence,
-                                ),
-                                PrintItem::MemberAccess,
-                                PrintItem::Str("downcast::<"),
-                                PrintItem::MethodTablePointer(*ty),
-                                PrintItem::Str(">()"),
-                            ]
-                            .into_iter()
-                            .rev()
-                            .for_each(|print_item| to_print.push(print_item));
-                        }
                         ExprKind::ReadPrim { ptr, prim_type } => {
                             [
                                 PrintItem::Expr(

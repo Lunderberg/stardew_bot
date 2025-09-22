@@ -117,9 +117,6 @@ pub enum Error {
     )]
     InvalidOperandsForNumericComparison { lhs: DSLType, rhs: DSLType },
 
-    #[error("Downcast requires pointer argument, but received {0}")]
-    InvalidOperandForPhysicalDowncast(DSLType),
-
     #[error("ReadValue requires pointer argument, but received {0}")]
     InvalidOperandForReadValue(DSLType),
 
