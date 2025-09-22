@@ -1193,6 +1193,7 @@ impl ExpressionTranslator<'_> {
 
                 symbolic @ (ExprKind::StaticField(_)
                 | ExprKind::FieldAccess { .. }
+                | ExprKind::ObjectMethodTable { .. }
                 | ExprKind::SymbolicDowncast { .. }
                 | ExprKind::IndexAccess { .. }
                 | ExprKind::NumArrayElements { .. }

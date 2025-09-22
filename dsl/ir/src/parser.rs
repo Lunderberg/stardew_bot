@@ -957,6 +957,10 @@ impl<'a> SymbolicParser<'a> {
                     };
                     Ok(expr)
                 }
+                "method_table" => {
+                    self.expect_function_arguments(0, 0)?;
+                    Ok(self.graph.object_method_table(obj))
+                }
                 "len" => {
                     self.expect_function_arguments(0, 0)?;
                     Ok(self.graph.num_array_elements(obj))

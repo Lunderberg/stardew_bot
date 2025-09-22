@@ -137,6 +137,10 @@ pub enum ExprKind {
     /// field.
     StaticField(StaticField),
 
+    /// Given an object, determine its method table.  The object must
+    /// be an `DotNetType::Class{..}`, or a `RuntimePrimType::Ptr`.
+    ObjectMethodTable { obj: SymbolicValue },
+
     /// Access of an non-static member of a class or struct.
     ///
     /// These are lowered to pointer arithmetic, performed relative to
@@ -379,6 +383,7 @@ impl ExprKind {
             ExprKind::SimpleReduce { .. } => "SimpleReduce",
             ExprKind::StaticField { .. } => "StaticField",
             ExprKind::FieldAccess { .. } => "FieldAccess",
+            ExprKind::ObjectMethodTable { .. } => "ObjectMethodTable",
             ExprKind::SymbolicDowncast { .. } => "SymbolicDowncast",
             ExprKind::IndexAccess { .. } => "IndexAccess",
             ExprKind::NumArrayElements { .. } => "NumArrayElements",
@@ -616,6 +621,9 @@ impl ExprKind {
                     value,
                     prim_type: *prim_type,
                 })
+            }
+            ExprKind::ObjectMethodTable { obj } => {
+                remap(obj).map(|obj| ExprKind::ObjectMethodTable { obj })
             }
             ExprKind::SymbolicDowncast { obj, ty } => {
                 remap(obj).map(|obj| ExprKind::SymbolicDowncast {
@@ -874,6 +882,9 @@ impl std::fmt::Display for ExprKind {
                 }
 
                 write!(f, "\u{200B}]")
+            }
+            ExprKind::ObjectMethodTable { obj } => {
+                write!(f, "{obj}.method_table()")
             }
             ExprKind::SymbolicDowncast { obj, ty } => {
                 write!(f, "{obj}.as::<\u{200B}{ty}\u{200B}>()")

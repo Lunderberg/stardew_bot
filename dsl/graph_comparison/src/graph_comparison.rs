@@ -326,6 +326,15 @@ impl<'a> GraphComparison<'a> {
                     }
                     _ => false,
                 },
+                ExprKind::ObjectMethodTable { obj: lhs_obj } => {
+                    match rhs_kind {
+                        ExprKind::ObjectMethodTable { obj: rhs_obj } => {
+                            equivalent_value!(lhs_obj, rhs_obj)
+                        }
+                        _ => false,
+                    }
+                }
+
                 ExprKind::SymbolicDowncast {
                     obj: lhs_obj,
                     ty: lhs_ty,

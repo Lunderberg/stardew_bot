@@ -47,6 +47,7 @@ impl ExprKind {
             | ExprKind::IsSome(value)
             | ExprKind::Not { arg: value }
             | ExprKind::PrimCast { value, .. }
+            | ExprKind::ObjectMethodTable { obj: value }
             | ExprKind::IsSubclassOf {
                 method_table_ptr: value,
                 ..

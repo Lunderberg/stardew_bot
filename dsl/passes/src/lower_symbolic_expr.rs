@@ -120,6 +120,37 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
 
                 Some(expr)
             }
+
+            ExprKind::ObjectMethodTable { obj } => {
+                let obj = *obj;
+                let obj_type = self.0.infer_type(graph, obj)?;
+
+                match obj_type {
+                    // A ValueType doesn't contain a method table
+                    // pointer, so its method table pointer may be
+                    // determined at compile-time.
+                    DSLType::DotNet(DotNetType::ValueType {
+                        method_table: Some(ptr),
+                        ..
+                    }) => Some(ptr.as_untyped_ptr().into()),
+
+                    // For types that hold a pointer to their method
+                    // table, must read that pointer at runtime.
+                    // Using the statically-known method table pointer would
+                    DSLType::DotNet(
+                        DotNetType::Class { .. }
+                        | DotNetType::Array { .. }
+                        | DotNetType::MultiDimArray { .. }
+                        | DotNetType::String,
+                    ) => {
+                        let ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
+                        let method_table =
+                            graph.read_value(ptr, RuntimePrimType::Ptr);
+                        Some(method_table)
+                    }
+                    _ => None,
+                }
+            }
             ExprKind::FieldAccess { obj, field } => {
                 let obj = *obj;
                 let obj_type = self.0.infer_type(graph, obj)?;
@@ -337,15 +368,13 @@ impl<'a> GraphRewrite for LowerSymbolicExpr<'a> {
                 let target_method_table_ptr = ty.method_table(reader)?;
 
                 let subclass_ptr = {
-                    let obj_ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
-
-                    let method_table_ptr =
-                        graph.read_value(obj_ptr, RuntimePrimType::Ptr);
+                    let method_table_ptr = graph.object_method_table(obj);
                     let is_target_type = graph.is_subclass_of(
                         method_table_ptr,
                         target_method_table_ptr,
                     );
 
+                    let obj_ptr = graph.prim_cast(obj, RuntimePrimType::Ptr);
                     let none = graph.none();
                     graph.if_else(is_target_type, obj_ptr, none)
                 };

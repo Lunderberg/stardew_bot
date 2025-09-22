@@ -906,6 +906,20 @@ impl<'a> GraphPrinter<'a> {
                             .for_each(|print_item| to_print.push(print_item));
                         }
 
+                        ExprKind::ObjectMethodTable { obj } => {
+                            [
+                                PrintItem::Expr(
+                                    *obj,
+                                    OpPrecedence::MaxPrecedence,
+                                ),
+                                PrintItem::MemberAccess,
+                                PrintItem::Str("method_table()"),
+                            ]
+                            .into_iter()
+                            .rev()
+                            .for_each(|print_item| to_print.push(print_item));
+                        }
+
                         ExprKind::StaticField(StaticField {
                             class,
                             field_name,

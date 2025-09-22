@@ -423,6 +423,14 @@ impl SymbolicGraph {
         self.push(ExprKind::PrimCast { value, prim_type })
     }
 
+    pub fn object_method_table(
+        &mut self,
+        obj: impl Into<SymbolicValue>,
+    ) -> SymbolicValue {
+        let obj = obj.into();
+        self.push(ExprKind::ObjectMethodTable { obj })
+    }
+
     pub fn is_subclass_of(
         &mut self,
         method_table_ptr: impl Into<SymbolicValue>,

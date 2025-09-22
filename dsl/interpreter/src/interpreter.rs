@@ -204,6 +204,7 @@ impl<'a> InterpretedFunc<'a> {
             } => self.eval_simple_reduce(initial, extent, reduction)?,
             ExprKind::StaticField(_) => todo!(),
             ExprKind::FieldAccess { .. } => todo!(),
+            ExprKind::ObjectMethodTable { .. } => todo!(),
             ExprKind::SymbolicDowncast { .. } => todo!(),
             ExprKind::IndexAccess { .. } => todo!(),
             ExprKind::NumArrayElements { .. } => todo!(),

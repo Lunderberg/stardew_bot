@@ -499,6 +499,10 @@ impl<'a> TypeInference<'a> {
                         }
                     }
                 }
+
+                ExprKind::ObjectMethodTable { .. } => {
+                    RuntimePrimType::Ptr.into()
+                }
                 ExprKind::SymbolicDowncast { ty, .. } => {
                     let reader = self.reader()?;
                     let method_table = ty.method_table(reader)?;

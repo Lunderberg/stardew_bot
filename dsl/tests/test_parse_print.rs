@@ -228,6 +228,17 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    get_method_table,
+    indoc!{"
+        class_name.field_name.method_table()
+    "},
+    |graph| {
+        let obj = graph.static_field("class_name", "field_name");
+        graph.object_method_table(obj)
+    },
+}
+
+test_print_and_parse! {
     static_index_access,
     "class_name.static_field[123]",
     |graph| {
