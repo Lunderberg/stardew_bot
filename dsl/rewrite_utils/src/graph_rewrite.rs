@@ -15,10 +15,7 @@ pub trait GraphRewrite {
         _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, Self::Error>;
 
-    fn map_err<OutError, Func>(
-        self,
-        func: Func,
-    ) -> impl GraphRewrite<Error = OutError>
+    fn map_err<OutError, Func>(self, func: Func) -> MapErr<Self, Func>
     where
         Self: Sized,
         Func: Fn(Self::Error) -> OutError,
@@ -28,14 +25,14 @@ pub trait GraphRewrite {
 
     fn init(&self) {}
 
-    fn apply_once(self) -> impl GraphRewrite<Error = Self::Error>
+    fn apply_once(self) -> SingleRewrite<Self>
     where
         Self: Sized,
     {
         SingleRewrite::new(self)
     }
 
-    fn apply_recursively(self) -> impl GraphRewrite<Error = Self::Error>
+    fn apply_recursively(self) -> RecursiveRewrite<Self>
     where
         Self: Sized,
         Self::Error: From<dsl_ir::Error>,
@@ -43,19 +40,17 @@ pub trait GraphRewrite {
         RecursiveRewrite::new(self)
     }
 
-    fn enabled(self, enabled: bool) -> impl GraphRewrite<Error = Self::Error>
+    fn enabled(self, enabled: bool) -> ConditionalRewrite<Self>
     where
         Self: Sized,
     {
         ConditionalRewrite::new(self, enabled)
     }
 
-    fn then(
-        self,
-        second: impl GraphRewrite<Error = Self::Error>,
-    ) -> impl GraphRewrite<Error = Self::Error>
+    fn then<Second>(self, second: Second) -> SequentialRewrite<Self, Second>
     where
         Self: Sized,
+        Second: GraphRewrite<Error = Self::Error>,
     {
         SequentialRewrite::new(self, second)
     }
