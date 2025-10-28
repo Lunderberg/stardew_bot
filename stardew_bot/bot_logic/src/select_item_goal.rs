@@ -128,6 +128,10 @@ impl BotGoal for SelectItemGoal {
             opt_current_slot.expect("Would hit early return for None");
 
         if current_slot < 12 {
+            let cleanup = MenuCloser::new();
+            if !cleanup.is_completed(game_state) {
+                return Ok(cleanup.into());
+            }
             // The item is currently in the hotbar, so we just need to
             // select it.
             actions.do_action(GameAction::SelectHotbar(current_slot));
