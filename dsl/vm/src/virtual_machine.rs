@@ -1,4 +1,6 @@
-use std::{collections::HashMap, fmt::Display, mem::MaybeUninit};
+use std::{
+    cell::RefCell, collections::HashMap, fmt::Display, mem::MaybeUninit,
+};
 
 use arrayvec::ArrayVec;
 use derive_more::derive::From;
@@ -46,6 +48,8 @@ pub struct VirtualMachine {
 
     /// Annotations of each instruction
     annotations: HashMap<AnnotationLocation, String>,
+
+    statics: RefCell<Vec<Option<RuntimePrimValue>>>,
 }
 
 pub struct VMEvaluator<'a> {
@@ -66,6 +70,9 @@ pub struct InstructionIndex(pub usize);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct FunctionIndex(pub usize);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct StaticIndex(pub usize);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Instruction {
@@ -265,6 +272,16 @@ pub enum Instruction {
 
     /// End execution of the VM, and return to the parent scope.
     Return { outputs: Vec<VMArg> },
+
+    /// Store a value from the stack to the static values.  Static
+    /// values are persisted across vM calls.
+    StackToStatic { value: VMArg, saved: StaticIndex },
+
+    /// Restore a value from the statics to the stack.
+    StaticToStack {
+        saved: StaticIndex,
+        output: StackIndex,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -499,6 +516,7 @@ impl VirtualMachineBuilder {
             entry_points: self.entry_points,
             stack_size: num_values,
             annotations: self.annotations,
+            statics: RefCell::new(Vec::new()),
         }
     }
 }
@@ -806,6 +824,14 @@ impl<'a> VMEvaluator<'a> {
                         .map(|opt_mut| opt_mut.take())
                         .collect();
                     return Ok(self.values.replace(outputs));
+                }
+
+                &Instruction::StackToStatic { value, saved } => {
+                    self.eval_stack_to_static(value, saved)?
+                }
+
+                &Instruction::StaticToStack { saved, output } => {
+                    self.eval_static_to_stack(saved, output)?
                 }
             }
 
@@ -1399,6 +1425,37 @@ impl<'a> VMEvaluator<'a> {
 
         Ok(())
     }
+
+    fn eval_stack_to_static(
+        &mut self,
+        value: VMArg,
+        saved: StaticIndex,
+    ) -> Result<(), Error> {
+        let value = self.arg_to_prim(value)?;
+
+        let index = saved.0;
+        let mut statics = self.vm.statics.borrow_mut();
+
+        if index >= statics.len() {
+            statics.resize_with(index + 1, Default::default);
+        }
+
+        statics[index] = value;
+
+        Ok(())
+    }
+
+    fn eval_static_to_stack(
+        &mut self,
+        saved: StaticIndex,
+        output: StackIndex,
+    ) -> Result<(), Error> {
+        let statics = self.vm.statics.borrow();
+        let value = statics.get(saved.0).cloned().flatten().map(Into::into);
+
+        self.values[output] = value;
+        Ok(())
+    }
 }
 
 impl Instruction {
@@ -1407,7 +1464,8 @@ impl Instruction {
             // Nullary instructions
             Instruction::NoOp
             | Instruction::Clear { .. }
-            | Instruction::TypeToMethodTable { .. } => (None, None, None),
+            | Instruction::TypeToMethodTable { .. }
+            | Instruction::StaticToStack { .. } => (None, None, None),
 
             // Unary instructions
             Instruction::Copy { value: arg, .. }
@@ -1425,7 +1483,10 @@ impl Instruction {
             }
             | Instruction::ArrayStride {
                 method_table: arg, ..
-            } => (Some(*arg), None, None),
+            }
+            | Instruction::StackToStatic { value: arg, .. } => {
+                (Some(*arg), None, None)
+            }
 
             // Binary instructions
             Instruction::And { lhs, rhs, .. }
@@ -1485,7 +1546,8 @@ impl Instruction {
             Instruction::NoOp
             | Instruction::NativeFunctionCall { output: None, .. }
             | Instruction::ConditionalJump { .. }
-            | Instruction::Return { .. } => (None, None),
+            | Instruction::Return { .. }
+            | Instruction::StackToStatic { .. } => (None, None),
 
             Instruction::Clear { loc: output }
             | Instruction::Copy { output, .. }
@@ -1515,7 +1577,10 @@ impl Instruction {
             | Instruction::ReadBytes { output, .. }
             | Instruction::CastBytes { output, .. }
             | Instruction::ReadString { output, .. }
-            | Instruction::IsSome { output, .. } => (Some(*output), None),
+            | Instruction::IsSome { output, .. }
+            | Instruction::StaticToStack { output, .. } => {
+                (Some(*output), None)
+            }
 
             Instruction::Swap(lhs, rhs) => (Some(*lhs), Some(*rhs)),
         };
@@ -1555,6 +1620,8 @@ impl Instruction {
             Instruction::CastBytes { .. } => "CastBytes",
             Instruction::ReadString { .. } => "ReadString",
             Instruction::Return { .. } => "Return",
+            Instruction::StackToStatic { .. } => "StackToStatic",
+            Instruction::StaticToStack { .. } => "StaticToStack",
         }
     }
 }
@@ -1631,6 +1698,11 @@ impl Display for InstructionIndex {
 impl Display for FunctionIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "native_functions[{}]", self.0)
+    }
+}
+impl Display for StaticIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "statics[{}]", self.0)
     }
 }
 
@@ -1801,6 +1873,14 @@ impl Display for Instruction {
                     Ok(())
                 }
             },
+
+            Instruction::StackToStatic { value, saved } => {
+                write!(f, "{saved} = {value}")
+            }
+
+            Instruction::StaticToStack { saved, output } => {
+                write!(f, "{output} = {saved}")
+            }
         }
     }
 }

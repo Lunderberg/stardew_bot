@@ -9,7 +9,8 @@ use dsl_analysis::{Analysis, TypeInferenceError};
 use dsl_ir::{DSLType, ExprKind, OpIndex, Scope, SymbolicGraph, SymbolicValue};
 use dsl_vm::{
     AnnotationLocation, FunctionIndex, Instruction, InstructionIndex,
-    StackIndex, VMArg, VMByteRange, VirtualMachine, VirtualMachineBuilder,
+    StackIndex, StaticIndex, VMArg, VMByteRange, VirtualMachine,
+    VirtualMachineBuilder,
 };
 
 use crate::{
@@ -93,6 +94,7 @@ struct LazyStaticTracking {
     func: OpIndex,
     value: SymbolicValue,
     loc: StackIndex,
+    static_loc: StaticIndex,
 }
 
 pub trait SymbolicGraphToVirtualMachine {
@@ -669,6 +671,13 @@ impl ExpressionTranslator<'_> {
                 lazy_static.loc,
                 Scope::Function(lazy_static.func),
             )?;
+            self.push_annotated(
+                Instruction::StackToStatic {
+                    value: lazy_static.loc.into(),
+                    saved: lazy_static.static_loc,
+                },
+                || format!("save {name} for next execution"),
+            );
             let after_init = self.builder.current_index();
             self.builder.update(
                 jump_if_initialized_index,
@@ -1167,9 +1176,12 @@ impl ExpressionTranslator<'_> {
                     }?;
 
                     let op_output = self.get_output_index(op_index);
+                    let static_loc =
+                        StaticIndex(self.lazy_static_tracking.len());
+
                     self.push_annotated(
-                        Instruction::Clear { loc: op_output },
-                        || format!("clear space for {expr_name}"),
+                        Instruction::StaticToStack { saved: static_loc, output: op_output  },
+                        || format!("load previous execution's value of {expr_name}"),
                     );
                     self.lazy_static_tracking.insert(
                         op_index,
@@ -1178,6 +1190,7 @@ impl ExpressionTranslator<'_> {
                             func: init_func,
                             value: output,
                             loc: op_output,
+                            static_loc,
                         },
                     );
                 }
