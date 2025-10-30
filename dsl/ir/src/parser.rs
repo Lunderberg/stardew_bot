@@ -1633,6 +1633,30 @@ impl<'a> SymbolicTokenizer<'a> {
             '/' => TokenKind::Punct(Punctuation::Slash),
             '%' => TokenKind::Punct(Punctuation::Percent),
             '"' => TokenKind::Punct(Punctuation::DoubleQuote),
+            '0' if opt_char2 == Some('x') => {
+                let mut value: usize = 0;
+                let mut index = None;
+
+                for (i, c) in self.text[start..].char_indices().skip(2) {
+                    match c {
+                        '0'..='9' => {
+                            let digit = (c as usize) - ('0' as usize);
+                            value = value * 16 + digit;
+                        }
+                        'a'..='f' => {
+                            let digit = (c as usize) - ('a' as usize) + 10;
+                            value = value * 16 + digit;
+                        }
+                        _ => {
+                            index = Some(i);
+                            break;
+                        }
+                    }
+                }
+                num_bytes = index.unwrap_or_else(|| self.text.len() - start);
+
+                TokenKind::Const(RuntimePrimValue::NativeUInt(value))
+            }
             '0'..='9' => {
                 let mut value: usize = 0;
                 let mut index = None;

@@ -848,6 +848,14 @@ test_print_and_parse! {
     },
 }
 
+test_parse! {
+    hexadecimal_integers,
+    "0x400 & 0x1",
+    |graph| {
+        graph.bitwise_and(0x400usize, 0x1usize)
+    },
+}
+
 test_print_and_parse! {
     function_call,
     indoc!{"
