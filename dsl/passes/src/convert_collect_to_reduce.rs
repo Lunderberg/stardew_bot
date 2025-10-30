@@ -23,10 +23,10 @@ struct CollectIntoVector {
 impl NativeFunction for MakeVector {
     fn apply(
         &self,
-        _args: &mut [&mut Option<StackValue>],
-    ) -> Result<Option<StackValue>, dsl_ir::Error> {
+        _args: &mut [&mut StackValue],
+    ) -> Result<StackValue, dsl_ir::Error> {
         let obj = self.element_type.new_vector()?;
-        Ok(Some(obj.into()))
+        Ok(obj.into())
     }
 
     fn signature(&self) -> Result<DSLType, dsl_ir::Error> {
@@ -46,8 +46,8 @@ impl NativeFunction for MakeVector {
 impl NativeFunction for CollectIntoVector {
     fn apply(
         &self,
-        args: &mut [&mut Option<StackValue>],
-    ) -> Result<Option<StackValue>, dsl_ir::Error> {
+        args: &mut [&mut StackValue],
+    ) -> Result<StackValue, dsl_ir::Error> {
         assert_eq!(args.len(), 2);
 
         let (vec, item) = args
@@ -55,14 +55,14 @@ impl NativeFunction for CollectIntoVector {
             .collect_tuple()
             .expect("Exactly two arguments");
 
-        let Some(vec) = vec.as_mut() else {
-            return Ok(None);
-        };
+        if vec.is_none() {
+            return Ok(StackValue::None);
+        }
 
         self.element_type
             .collect_into_vector(vec, item, &self.output_name)?;
 
-        Ok(None)
+        Ok(StackValue::None)
     }
 
     fn signature(&self) -> Result<DSLType, dsl_ir::Error> {

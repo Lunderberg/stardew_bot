@@ -10,10 +10,7 @@ use dotnet_debugger::RuntimeType;
 use super::ExposedNativeObject;
 
 pub trait NativeFunction {
-    fn apply(
-        &self,
-        args: &mut [&mut Option<StackValue>],
-    ) -> Result<Option<StackValue>, Error>;
+    fn apply(&self, args: &mut [&mut StackValue]) -> Result<StackValue, Error>;
 
     fn signature(&self) -> Result<DSLType, Error>;
 
@@ -40,7 +37,7 @@ pub trait RustNativeObject: Any {
 
     fn collect_into_vector(
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error>
     where
@@ -50,20 +47,17 @@ pub trait RustNativeObject: Any {
             StackValue::Native(native) => Ok(native),
             other => Err(Error::InvalidVectorType(other.runtime_type())),
         }?;
-        let vec = match vec.downcast_mut::<Vec<Self>>() {
-            Some(vec) => vec,
-            None => {
-                return Err(Error::InvalidVectorType(vec.runtime_type()));
-            }
-        };
-        let item = item.take().ok_or_else(|| {
-            Error::MissingElementInVectorAccumulation {
-                name: output_name.to_string(),
-            }
-        })?;
+        let vec = vec
+            .downcast_mut::<Vec<Self>>()
+            .map_err(|other| Error::InvalidVectorType(other.runtime_type()))?;
 
-        let item = match item {
+        let item = match item.take() {
             StackValue::Native(native) => Ok(native),
+            StackValue::None => {
+                Err(Error::MissingElementInVectorAccumulation {
+                    name: output_name.to_string(),
+                })
+            }
             other => Err(Error::IncorrectVectorElementType {
                 expected: RustType::new::<Self>().into(),
                 actual: other.runtime_type(),
@@ -89,12 +83,9 @@ pub trait RustNativeObject: Any {
 
 impl<Func> NativeFunction for Func
 where
-    Func: Fn(&[&mut Option<StackValue>]) -> Result<Option<StackValue>, Error>,
+    Func: Fn(&[&mut StackValue]) -> Result<StackValue, Error>,
 {
-    fn apply(
-        &self,
-        args: &mut [&mut Option<StackValue>],
-    ) -> Result<Option<StackValue>, Error> {
+    fn apply(&self, args: &mut [&mut StackValue]) -> Result<StackValue, Error> {
         self(args)
     }
 
@@ -112,7 +103,7 @@ where
 }
 
 trait WrapReturn {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error>;
+    fn wrap_return(self) -> Result<StackValue, Error>;
 
     fn return_signature_type() -> DSLType;
 
@@ -122,7 +113,7 @@ trait WrapReturn {
 trait UnwrapArg: Sized {
     type Unwrapped<'t>: 't;
     fn unwrap_arg<'t>(
-        opt_arg: &'t mut Option<StackValue>,
+        opt_arg: &'t mut StackValue,
     ) -> Result<Option<Self::Unwrapped<'t>>, Error>;
 
     fn arg_signature_type() -> DSLType;
@@ -133,9 +124,9 @@ trait UnwrapArg: Sized {
 macro_rules! impl_prim_return {
     ($variant:ident, $prim:ty) => {
         impl WrapReturn for $prim {
-            fn wrap_return(self) -> Result<Option<StackValue>, Error> {
+            fn wrap_return(self) -> Result<StackValue, Error> {
                 let prim: RuntimePrimValue = self.into();
-                Ok(Some(prim.into()))
+                Ok(prim.into())
             }
 
             fn return_signature_type() -> DSLType {
@@ -146,25 +137,21 @@ macro_rules! impl_prim_return {
         impl UnwrapArg for $prim {
             type Unwrapped<'t> = $prim;
             fn unwrap_arg<'t>(
-                arg: &'t mut Option<StackValue>,
+                arg: &'t mut StackValue,
             ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
-                    None => Ok(None),
+                    StackValue::None => Ok(None),
                     // Some primitive types may have automatic type
                     // conversions applied.  Therefore, when passing a
                     // primitive by value, use TryInto to apply these
                     // conversions rather than explicitly unwrapping
                     // the RuntimePrimValue.
-                    Some(StackValue::Prim(prim)) => {
-                        Ok(Some((*prim).try_into()?))
+                    StackValue::Prim(prim) => Ok(Some((*prim).try_into()?)),
+                    other => Err(Error::InvalidArgumentForNativeFunction {
+                        expected: DSLType::Prim(RuntimePrimType::$variant),
+                        actual: other.runtime_type(),
                     }
-                    Some(other) => {
-                        Err(Error::InvalidArgumentForNativeFunction {
-                            expected: DSLType::Prim(RuntimePrimType::$variant),
-                            actual: other.runtime_type(),
-                        }
-                        .into())
-                    }
+                    .into()),
                 }
             }
 
@@ -177,20 +164,18 @@ macro_rules! impl_prim_return {
             type Unwrapped<'t> = &'t $prim;
 
             fn unwrap_arg<'t>(
-                arg: &'t mut Option<StackValue>,
+                arg: &'t mut StackValue,
             ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
-                    None => Ok(None),
-                    Some(StackValue::Prim(RuntimePrimValue::$variant(
-                        prim,
-                    ))) => Ok(Some(prim)),
-                    Some(other) => {
-                        Err(Error::InvalidArgumentForNativeFunction {
-                            expected: DSLType::Prim(RuntimePrimType::$variant),
-                            actual: other.runtime_type(),
-                        }
-                        .into())
+                    StackValue::None => Ok(None),
+                    StackValue::Prim(RuntimePrimValue::$variant(prim)) => {
+                        Ok(Some(prim))
                     }
+                    other => Err(Error::InvalidArgumentForNativeFunction {
+                        expected: DSLType::Prim(RuntimePrimType::$variant),
+                        actual: other.runtime_type(),
+                    }
+                    .into()),
                 }
             }
 
@@ -203,20 +188,18 @@ macro_rules! impl_prim_return {
             type Unwrapped<'t> = &'t mut $prim;
 
             fn unwrap_arg<'t>(
-                arg: &'t mut Option<StackValue>,
+                arg: &'t mut StackValue,
             ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
                 match arg {
-                    None => Ok(None),
-                    Some(StackValue::Prim(RuntimePrimValue::$variant(
-                        prim,
-                    ))) => Ok(Some(prim)),
-                    Some(other) => {
-                        Err(Error::InvalidArgumentForNativeFunction {
-                            expected: DSLType::Prim(RuntimePrimType::$variant),
-                            actual: other.runtime_type(),
-                        }
-                        .into())
+                    StackValue::None => Ok(None),
+                    StackValue::Prim(RuntimePrimValue::$variant(prim)) => {
+                        Ok(Some(prim))
                     }
+                    other => Err(Error::InvalidArgumentForNativeFunction {
+                        expected: DSLType::Prim(RuntimePrimType::$variant),
+                        actual: other.runtime_type(),
+                    }
+                    .into()),
                 }
             }
 
@@ -267,7 +250,7 @@ impl<T: 'static> RustNativeObject for Vec<T> {
 
     fn collect_into_vector(
         _: &mut StackValue,
-        _: &mut Option<StackValue>,
+        _: &mut StackValue,
         _output_name: &str,
     ) -> Result<(), Error>
     where
@@ -288,8 +271,8 @@ impl<T> WrapReturn for T
 where
     T: RustNativeObject,
 {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
-        Ok(Some(StackValue::Native(ExposedNativeObject::new(self))))
+    fn wrap_return(self) -> Result<StackValue, Error> {
+        Ok(StackValue::Native(ExposedNativeObject::new(self)))
     }
 
     fn return_signature_type() -> DSLType {
@@ -298,7 +281,7 @@ where
 }
 
 impl WrapReturn for ExposedNativeObject {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
+    fn wrap_return(self) -> Result<StackValue, Error> {
         todo!()
     }
 
@@ -308,8 +291,8 @@ impl WrapReturn for ExposedNativeObject {
 }
 
 impl WrapReturn for StackValue {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
-        Ok(Some(self))
+    fn wrap_return(self) -> Result<StackValue, Error> {
+        Ok(self)
     }
 
     fn return_signature_type() -> DSLType {
@@ -321,10 +304,10 @@ impl<T> WrapReturn for Option<T>
 where
     T: WrapReturn,
 {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
+    fn wrap_return(self) -> Result<StackValue, Error> {
         match self {
             Some(value) => value.wrap_return(),
-            None => Ok(None),
+            None => Ok(StackValue::None),
         }
     }
 
@@ -338,7 +321,7 @@ where
     T: WrapReturn,
     E: Into<Error>,
 {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
+    fn wrap_return(self) -> Result<StackValue, Error> {
         match self {
             Ok(value) => value.wrap_return(),
             Err(err) => Err(err.into()),
@@ -351,8 +334,8 @@ where
 }
 
 impl WrapReturn for () {
-    fn wrap_return(self) -> Result<Option<StackValue>, Error> {
-        Ok(None)
+    fn wrap_return(self) -> Result<StackValue, Error> {
+        Ok(StackValue::None)
     }
 
     fn return_signature_type() -> DSLType {
@@ -369,25 +352,24 @@ where
     type Unwrapped<'a> = &'a T;
 
     fn unwrap_arg<'a>(
-        opt_arg: &'a mut Option<StackValue>,
+        arg: &'a mut StackValue,
     ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
-        opt_arg
-            .as_ref()
-            .map(|arg| {
-                match arg {
-                    StackValue::Native(native) => Some(native),
-                    _ => None,
-                }
-                .and_then(|native| native.downcast_ref())
-                .ok_or_else(|| {
+        match arg {
+            StackValue::None => Ok(None),
+            StackValue::Native(native) => {
+                let native = native.downcast_ref().ok_or_else(|| {
                     Error::InvalidArgumentForNativeFunction {
                         expected: DSLType::Rust(RustType::new::<T>()),
-                        actual: arg.runtime_type(),
+                        actual: native.runtime_type(),
                     }
-                })
-            })
-            .transpose()
-            .map_err(Into::into)
+                })?;
+                Ok(Some(native))
+            }
+            other => Err(Error::InvalidArgumentForNativeFunction {
+                expected: DSLType::Rust(RustType::new::<T>()),
+                actual: other.runtime_type(),
+            }),
+        }
     }
 
     fn arg_signature_type() -> DSLType {
@@ -402,24 +384,24 @@ where
     type Unwrapped<'a> = &'a mut T;
 
     fn unwrap_arg<'a>(
-        opt_arg: &'a mut Option<StackValue>,
+        arg: &'a mut StackValue,
     ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
-        opt_arg
-            .as_mut()
-            .map(|arg| {
-                let err: Error = Error::InvalidArgumentForNativeFunction {
-                    expected: DSLType::Rust(RustType::new::<T>()),
-                    actual: arg.runtime_type(),
-                }
-                .into();
-                match arg {
-                    StackValue::Native(native) => {
-                        native.downcast_mut().ok_or(err)
+        match arg {
+            StackValue::None => Ok(None),
+            StackValue::Native(native) => {
+                let native = native.downcast_mut().map_err(|other| {
+                    Error::InvalidArgumentForNativeFunction {
+                        expected: DSLType::Rust(RustType::new::<T>()),
+                        actual: other.runtime_type(),
                     }
-                    _ => Err(err),
-                }
-            })
-            .transpose()
+                })?;
+                Ok(Some(native))
+            }
+            other => Err(Error::InvalidArgumentForNativeFunction {
+                expected: DSLType::Rust(RustType::new::<T>()),
+                actual: other.runtime_type(),
+            }),
+        }
     }
 
     fn arg_signature_type() -> DSLType {
@@ -433,25 +415,25 @@ impl UnwrapArg for &str {
     type Unwrapped<'t> = &'t str;
 
     fn unwrap_arg<'t>(
-        opt_arg: &'t mut Option<StackValue>,
+        arg: &'t mut StackValue,
     ) -> Result<Option<Self::Unwrapped<'t>>, Error> {
-        opt_arg
-            .as_ref()
-            .map(|arg| {
-                let err: Error = Error::InvalidArgumentForNativeFunction {
-                    expected: Self::arg_signature_type(),
-                    actual: arg.runtime_type(),
-                }
-                .into();
-                match arg {
-                    StackValue::Native(native) => native
-                        .downcast_ref()
-                        .map(|string: &String| string.as_str())
-                        .ok_or(err),
-                    _ => Err(err),
-                }
-            })
-            .transpose()
+        match arg {
+            StackValue::None => Ok(None),
+            StackValue::Native(native) => {
+                let string: &String =
+                    native.downcast_ref().ok_or_else(|| {
+                        Error::InvalidArgumentForNativeFunction {
+                            expected: Self::arg_signature_type(),
+                            actual: native.runtime_type(),
+                        }
+                    })?;
+                Ok(Some(string.as_str()))
+            }
+            other => Err(Error::InvalidArgumentForNativeFunction {
+                expected: Self::arg_signature_type(),
+                actual: other.runtime_type(),
+            }),
+        }
     }
 
     fn arg_signature_type() -> DSLType {
@@ -466,11 +448,11 @@ where
     type Unwrapped<'a> = Option<T::Unwrapped<'a>>;
 
     fn unwrap_arg<'a>(
-        opt_arg: &'a mut Option<StackValue>,
+        arg: &'a mut StackValue,
     ) -> Result<Option<Self::Unwrapped<'a>>, Error> {
-        match opt_arg {
-            None => Ok(Some(None)),
-            some => Ok(Some(<T as UnwrapArg>::unwrap_arg(some)?)),
+        match arg {
+            StackValue::None => Ok(Some(None)),
+            other => Ok(Some(<T as UnwrapArg>::unwrap_arg(other)?)),
         }
     }
 
@@ -517,8 +499,8 @@ macro_rules! impl_wrapped_native_function {
             ) -> Return,
 
         {
-            fn apply(&self, args: &mut [&mut Option<StackValue>])
-                     -> Result<Option<StackValue>,Error>
+            fn apply(&self, args: &mut [&mut StackValue])
+                     -> Result<StackValue,Error>
             {
 
                 const NUM_ARGS: usize = count_args!( $($arg_type),* );
@@ -547,7 +529,7 @@ macro_rules! impl_wrapped_native_function {
                         let opt_unwrapped = $arg_type::unwrap_arg(opt_arg)?;
 
                         let Some(unwrapped) = opt_unwrapped else {
-                            return Ok(None);
+                            return Ok(StackValue::None);
                         };
                         unwrapped
                     }),*

@@ -17,7 +17,7 @@ pub struct InterpretedFunc<'a> {
     reader: Box<dyn Reader + 'a>,
     current_op: OpIndex,
     values: RuntimeOutput,
-    bindings: Vec<(OpIndex, Option<StackValue>)>,
+    bindings: Vec<(OpIndex, StackValue)>,
 }
 
 enum Callable<'a> {
@@ -25,11 +25,11 @@ enum Callable<'a> {
     IR {
         params: &'a [SymbolicValue],
         output: SymbolicValue,
-        enclosed: Vec<(OpIndex, Option<StackValue>)>,
+        enclosed: Vec<(OpIndex, StackValue)>,
     },
 }
 enum CallableArg {
-    Immediate(Option<StackValue>),
+    Immediate(StackValue),
     Delayed(SymbolicValue),
 }
 
@@ -118,33 +118,31 @@ impl<'a> InterpretedFunc<'a> {
         Ok(self.values)
     }
 
-    fn push(&mut self, value: Option<impl Into<StackValue>>) {
-        self.values.push(value.map(Into::into))
+    fn push(&mut self, value: impl Into<StackValue>) {
+        self.values.push(value.into())
     }
 
     fn pop_prim(&mut self) -> Result<Option<RuntimePrimValue>, Error> {
-        self.values
-            .pop()?
-            .map(|value| {
-                value.as_prim().ok_or_else(|| {
-                    Error::OperatorExpectsPrimitiveArgument {
-                        operator: self.graph[self.current_op].op_name(),
-                        index: self.current_op,
-                        arg_type: value.runtime_type(),
-                    }
-                })
-            })
-            .transpose()
+        let opt_prim = match self.values.pop()? {
+            StackValue::None => None,
+            other => Some(other.as_prim().ok_or_else(|| {
+                Error::OperatorExpectsPrimitiveArgument {
+                    operator: self.graph[self.current_op].op_name(),
+                    index: self.current_op,
+                    arg_type: other.runtime_type(),
+                }
+            })?),
+        };
+
+        Ok(opt_prim)
     }
 
     fn bind(
         &mut self,
         var: OpIndex,
-        value: Option<impl Into<StackValue>>,
+        value: impl Into<StackValue>,
     ) -> Result<(), Error> {
-        let value = value.map(Into::into);
-
-        self.bindings.push((var, value));
+        self.bindings.push((var, value.into()));
 
         Ok(())
     }
@@ -171,7 +169,7 @@ impl<'a> InterpretedFunc<'a> {
         let index = match value {
             SymbolicValue::Result(index) => index,
             SymbolicValue::Const(prim) => {
-                self.values.push(Some(prim.into()));
+                self.values.push(prim);
                 return Ok(());
             }
         };
@@ -254,14 +252,14 @@ impl<'a> InterpretedFunc<'a> {
     }
 
     fn eval_none(&mut self) -> Result<(), Error> {
-        self.push(None::<StackValue>);
+        self.push(StackValue::None);
         Ok(())
     }
 
     fn eval_is_some(&mut self, value: SymbolicValue) -> Result<(), Error> {
         self.eval(value)?;
         let value = self.values.pop()?.is_some();
-        self.push(Some(value));
+        self.push(value);
         Ok(())
     }
 
@@ -317,7 +315,7 @@ impl<'a> InterpretedFunc<'a> {
         &mut self,
         mut func: SymbolicValue,
     ) -> Result<Callable<'a>, Error> {
-        let mut enclosed = Vec::<(OpIndex, Option<StackValue>)>::new();
+        let mut enclosed = Vec::<(OpIndex, StackValue)>::new();
 
         loop {
             let func_index = match func {
@@ -421,7 +419,7 @@ impl<'a> InterpretedFunc<'a> {
             let reduced = self.values.pop()?;
             let args = [
                 CallableArg::Immediate(reduced),
-                CallableArg::Immediate(Some(i.into())),
+                CallableArg::Immediate(i.into()),
             ]
             .into_iter();
             self.eval_callable(&mut reduction, args)?;
@@ -432,7 +430,7 @@ impl<'a> InterpretedFunc<'a> {
 
     fn eval_function_arg(&mut self, ty: &DSLType) -> Result<(), Error> {
         let var = self.current_op;
-        let opt_value_ref: &mut Option<StackValue> = self
+        let value_ref: &mut StackValue = self
             .bindings
             .iter_mut()
             .rev()
@@ -440,29 +438,32 @@ impl<'a> InterpretedFunc<'a> {
             .map(|(_, value)| value)
             .ok_or_else(|| Error::UndefinedVariable { var })?;
 
-        let opt_value: Option<StackValue> = match opt_value_ref {
-            None => None,
-            Some(StackValue::Prim(prim)) => Some(StackValue::Prim(*prim)),
-            Some(StackValue::ByteArray(bytes)) => {
-                Some(StackValue::ByteArray(bytes.clone()))
+        // Clone the value if possible, consuming it only if
+        // necessary.
+        let value = match value_ref {
+            StackValue::None => StackValue::None,
+            StackValue::Prim(prim) => StackValue::Prim(*prim),
+            StackValue::ByteArray(bytes) => {
+                StackValue::ByteArray(bytes.clone())
             }
-            Some(StackValue::SmallByteArray(bytes)) => {
-                Some(StackValue::SmallByteArray(*bytes))
+            StackValue::SmallByteArray(bytes) => {
+                StackValue::SmallByteArray(*bytes)
             }
-            Some(StackValue::Native(_)) => opt_value_ref.take(),
+            StackValue::Native(_) => value_ref.take(),
         };
 
-        if let Some(value) = opt_value.as_ref() {
-            if ty != &DSLType::Unknown && &value.runtime_type() != ty {
-                return Err(Error::IncorrectVariableType {
-                    var,
-                    expected: ty.clone(),
-                    actual: opt_value.unwrap(),
-                });
-            }
+        if value.is_some()
+            && ty != &DSLType::Unknown
+            && &value.runtime_type() != ty
+        {
+            return Err(Error::IncorrectVariableType {
+                var,
+                expected: ty.clone(),
+                actual: value,
+            });
         }
 
-        self.push(opt_value);
+        self.push(value);
 
         Ok(())
     }
@@ -482,7 +483,7 @@ impl<'a> InterpretedFunc<'a> {
         params: &[SymbolicValue],
         args: impl ExactSizeIterator<Item = CallableArg>,
         output: SymbolicValue,
-        enclosed: &mut Vec<(OpIndex, Option<StackValue>)>,
+        enclosed: &mut Vec<(OpIndex, StackValue)>,
     ) -> Result<(), Error> {
         if params.len() != args.len() {
             return Err(Error::IncorrectNumberOfArguments {
@@ -541,9 +542,7 @@ impl<'a> InterpretedFunc<'a> {
         let opt_output = {
             let mut remaining = &mut self.values[ValueIndex(arg_start)..];
             let mut arg_refs =
-                SmallVec::<[&mut Option<StackValue>; 32]>::with_capacity(
-                    num_args,
-                );
+                SmallVec::<[&mut StackValue; 32]>::with_capacity(num_args);
 
             while !remaining.is_empty() {
                 let (first, rest) = remaining.split_at_mut(1);

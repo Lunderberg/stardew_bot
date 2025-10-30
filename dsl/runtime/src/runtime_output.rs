@@ -5,7 +5,7 @@ use dsl_ir::{Pointer, RustNativeObject, RustType, StackValue};
 use crate::{Error, ValueIndex};
 
 pub struct RuntimeOutput {
-    values: Vec<Option<StackValue>>,
+    values: Vec<StackValue>,
     num_instructions_evaluated: usize,
 }
 
@@ -27,23 +27,20 @@ mod detail {
 
 impl RuntimeOutput {
     pub fn new(size: usize) -> Self {
-        let values = (0..size).map(|_| None).collect();
+        let values = (0..size).map(|_| StackValue::None).collect();
         Self {
             values,
             num_instructions_evaluated: 0,
         }
     }
 
-    pub fn replace(self, values: Vec<Option<StackValue>>) -> Self {
+    pub fn replace(self, values: Vec<StackValue>) -> Self {
         Self { values, ..self }
     }
 
-    pub fn get(
-        &self,
-        index: impl detail::NormalizeStackIndex,
-    ) -> Option<&StackValue> {
+    pub fn get(&self, index: impl detail::NormalizeStackIndex) -> &StackValue {
         let index = index.normalize_stack_index();
-        self[index].as_ref()
+        &self[index]
     }
 
     pub fn get_as<'a, T>(
@@ -55,10 +52,10 @@ impl RuntimeOutput {
         Error: From<<&'a StackValue as TryInto<T>>::Error>,
     {
         let index = index.normalize_stack_index();
-        let opt_value = self[index]
-            .as_ref()
-            .map(|value| value.try_into())
-            .transpose()?;
+        let opt_value = match &self[index] {
+            StackValue::None => None,
+            other => Some(other.try_into()?),
+        };
 
         Ok(opt_value)
     }
@@ -75,25 +72,24 @@ impl RuntimeOutput {
         index: impl detail::NormalizeStackIndex,
     ) -> Result<Option<T>, Error> {
         let index = index.normalize_stack_index();
+        let value = self[index].take();
 
-        Ok(self[index]
-            .take()
-            .map(|value| match value {
-                StackValue::Native(native) => {
-                    native.downcast::<T>().map_err(|native| {
-                        Error::IncorrectOutputType {
-                            attempted: RustType::new::<T>().into(),
-                            actual: native.runtime_type(),
-                        }
-                    })
-                }
-                other => Err(Error::IncorrectOutputType {
-                    attempted: RustType::new::<T>().into(),
-                    actual: other.runtime_type(),
-                }),
-            })
-            .transpose()?
-            .map(|boxed| *boxed))
+        match value {
+            StackValue::None => Ok(None),
+            StackValue::Native(native) => {
+                let native = native.downcast::<T>().map_err(|native| {
+                    Error::IncorrectOutputType {
+                        attempted: RustType::new::<T>().into(),
+                        actual: native.runtime_type(),
+                    }
+                })?;
+                Ok(Some(*native))
+            }
+            other => Err(Error::IncorrectOutputType {
+                attempted: RustType::new::<T>().into(),
+                actual: other.runtime_type(),
+            }),
+        }
     }
 
     pub fn get_obj<T: RustNativeObject>(
@@ -101,22 +97,25 @@ impl RuntimeOutput {
         index: impl detail::NormalizeStackIndex,
     ) -> Result<Option<&T>, Error> {
         let index = index.normalize_stack_index();
-        let opt_value = self[index].as_ref();
+        let value = &self[index];
 
-        let opt_obj = opt_value
-            .map(|value| match value {
-                StackValue::Native(native) => native
-                    .downcast_ref::<T>()
-                    .ok_or_else(|| Error::IncorrectOutputType {
+        let opt_obj = match value {
+            StackValue::None => None,
+            StackValue::Native(native) => {
+                Some(native.downcast_ref::<T>().ok_or_else(|| {
+                    Error::IncorrectOutputType {
                         attempted: RustType::new::<T>().into(),
                         actual: native.runtime_type(),
-                    }),
-                other => Err(Error::IncorrectOutputType {
+                    }
+                })?)
+            }
+            other => {
+                return Err(Error::IncorrectOutputType {
                     attempted: RustType::new::<T>().into(),
                     actual: other.runtime_type(),
-                }),
-            })
-            .transpose()?;
+                });
+            }
+        };
 
         Ok(opt_obj)
     }
@@ -129,19 +128,19 @@ impl RuntimeOutput {
         self.num_instructions_evaluated += 1;
     }
 
-    pub fn push(&mut self, value: Option<StackValue>) {
-        self.values.push(value);
+    pub fn push(&mut self, value: impl Into<StackValue>) {
+        self.values.push(value.into());
     }
 
-    pub fn pop(&mut self) -> Result<Option<StackValue>, Error> {
+    pub fn pop(&mut self) -> Result<StackValue, Error> {
         self.values.pop().ok_or(Error::CannotPopFromEmptyValueStack)
     }
 }
 
 impl IntoIterator for RuntimeOutput {
-    type Item = <Vec<Option<StackValue>> as IntoIterator>::Item;
+    type Item = <Vec<StackValue> as IntoIterator>::Item;
 
-    type IntoIter = <Vec<Option<StackValue>> as IntoIterator>::IntoIter;
+    type IntoIter = <Vec<StackValue> as IntoIterator>::IntoIter;
 
     fn into_iter(self) -> Self::IntoIter {
         self.values.into_iter()
@@ -149,7 +148,7 @@ impl IntoIterator for RuntimeOutput {
 }
 
 impl std::ops::Deref for RuntimeOutput {
-    type Target = Vec<Option<StackValue>>;
+    type Target = Vec<StackValue>;
 
     fn deref(&self) -> &Self::Target {
         &self.values
@@ -162,7 +161,7 @@ impl std::ops::DerefMut for RuntimeOutput {
 }
 
 impl std::ops::Index<usize> for RuntimeOutput {
-    type Output = Option<StackValue>;
+    type Output = StackValue;
 
     fn index(&self, index: usize) -> &Self::Output {
         &self.values[index]
@@ -175,7 +174,7 @@ impl std::ops::IndexMut<usize> for RuntimeOutput {
 }
 
 impl std::ops::Index<ValueIndex> for RuntimeOutput {
-    type Output = Option<StackValue>;
+    type Output = StackValue;
 
     fn index(&self, index: ValueIndex) -> &Self::Output {
         &self.values[index.0]
@@ -187,7 +186,7 @@ impl std::ops::IndexMut<ValueIndex> for RuntimeOutput {
     }
 }
 impl std::ops::Index<std::ops::Range<ValueIndex>> for RuntimeOutput {
-    type Output = [Option<StackValue>];
+    type Output = [StackValue];
 
     fn index(&self, index: std::ops::Range<ValueIndex>) -> &Self::Output {
         &self.values[index.start.0..index.end.0]
@@ -202,7 +201,7 @@ impl std::ops::IndexMut<std::ops::Range<ValueIndex>> for RuntimeOutput {
     }
 }
 impl std::ops::Index<std::ops::RangeFrom<ValueIndex>> for RuntimeOutput {
-    type Output = [Option<StackValue>];
+    type Output = [StackValue];
 
     fn index(&self, index: std::ops::RangeFrom<ValueIndex>) -> &Self::Output {
         &self.values[index.start.0..]
@@ -217,7 +216,7 @@ impl std::ops::IndexMut<std::ops::RangeFrom<ValueIndex>> for RuntimeOutput {
     }
 }
 impl std::ops::Index<std::ops::RangeFull> for RuntimeOutput {
-    type Output = [Option<StackValue>];
+    type Output = [StackValue];
 
     fn index(&self, _: std::ops::RangeFull) -> &Self::Output {
         &self.values[..]
@@ -252,11 +251,12 @@ macro_rules! values_to_single_prim {
             fn try_into(mut self) -> Result<$prim, Self::Error> {
                 let num_elements = self.values.len();
                 if num_elements == 1 {
-                    self.values[0]
-                        .take()
-                        .ok_or(Error::AttemptedConversionOfMissingValue)?
-                        .try_into()
-                        .map_err(Into::into)
+                    match self.values[0].take() {
+                        StackValue::None => {
+                            Err(Error::AttemptedConversionOfMissingValue)
+                        }
+                        other => other.try_into().map_err(Into::into),
+                    }
                 } else {
                     Err(Error::IncorrectNumberOfValues {
                         expected: 1,
@@ -289,11 +289,12 @@ impl TryInto<Box<dyn Any>> for RuntimeOutput {
     fn try_into(mut self) -> Result<Box<dyn Any>, Self::Error> {
         let num_elements = self.values.len();
         if num_elements == 1 {
-            self.values[0]
-                .take()
-                .ok_or(Error::AttemptedConversionOfMissingValue)?
-                .try_into()
-                .map_err(Into::into)
+            match self.values[0].take() {
+                StackValue::None => {
+                    Err(Error::AttemptedConversionOfMissingValue)
+                }
+                other => other.try_into().map_err(Into::into),
+            }
         } else {
             Err(Error::IncorrectNumberOfValues {
                 expected: 1,

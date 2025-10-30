@@ -308,22 +308,22 @@ trait RuntimeOutputExt {
     fn collect_native_function_args_impl<'a>(
         &'a mut self,
         vm_args: &[VMArg],
-        inline_consts: &'a mut [Option<StackValue>],
-        collected_args: &mut [MaybeUninit<&'a mut Option<StackValue>>],
+        inline_consts: &'a mut [StackValue],
+        collected_args: &mut [MaybeUninit<&'a mut StackValue>],
     );
 
     fn collect_native_function_args<'a>(
         &'a mut self,
         args: &[VMArg],
-        inline_consts: &'a mut [Option<StackValue>],
-    ) -> Vec<&'a mut Option<StackValue>>;
+        inline_consts: &'a mut [StackValue],
+    ) -> Vec<&'a mut StackValue>;
 }
 impl RuntimeOutputExt for VMResults {
     fn collect_native_function_args_impl<'a>(
         &'a mut self,
         vm_args: &[VMArg],
-        inline_consts: &'a mut [Option<StackValue>],
-        collected_args: &mut [MaybeUninit<&'a mut Option<StackValue>>],
+        inline_consts: &'a mut [StackValue],
+        collected_args: &mut [MaybeUninit<&'a mut StackValue>],
     ) {
         assert_eq!(vm_args.len(), inline_consts.len());
         assert_eq!(vm_args.len(), collected_args.len());
@@ -336,7 +336,7 @@ impl RuntimeOutputExt for VMResults {
                 _ => None,
             })
             .for_each(|(prim, inline_const)| {
-                *inline_const = Some(StackValue::Prim(prim));
+                *inline_const = StackValue::Prim(prim);
             });
 
         inline_consts
@@ -382,9 +382,9 @@ impl RuntimeOutputExt for VMResults {
     fn collect_native_function_args<'a>(
         &'a mut self,
         args: &[VMArg],
-        inline_consts: &'a mut [Option<StackValue>],
-    ) -> Vec<&'a mut Option<StackValue>> {
-        let mut references: Vec<&mut Option<StackValue>> =
+        inline_consts: &'a mut [StackValue],
+    ) -> Vec<&'a mut StackValue> {
+        let mut references: Vec<&mut StackValue> =
             Vec::with_capacity(args.len());
         self.collect_native_function_args_impl(
             args,
@@ -639,12 +639,10 @@ macro_rules! define_binary_op {
                             }),
                     }?;
 
-                    let res: StackValue = res.into();
-
                     Some(res)
                 }
                 _ => None,
-            };
+            }.into();
 
             Ok(())
         }
@@ -848,15 +846,15 @@ impl<'a> VMEvaluator<'a> {
         match arg {
             VMArg::Const(value) => Ok(Some(value)),
             VMArg::SavedValue(index) => match &self.values[index] {
-                Some(StackValue::Prim(prim)) => Ok(Some(*prim)),
-                Some(other) => Err(Error::OperatorExpectsPrimitiveArgument {
+                StackValue::None => Ok(None),
+                StackValue::Prim(prim) => Ok(Some(*prim)),
+                other => Err(Error::OperatorExpectsPrimitiveArgument {
                     operator: self.vm.instructions[self.current_instruction.0]
                         .op_name(),
                     index: self.current_instruction,
                     arg_type: other.runtime_type(),
                 }
                 .into()),
-                None => Ok(None),
             },
         }
     }
@@ -871,7 +869,8 @@ impl<'a> VMEvaluator<'a> {
             }
             .into()),
             VMArg::SavedValue(index) => match &self.values[index] {
-                Some(stack_value) => {
+                StackValue::None => Ok(None),
+                stack_value => {
                     let bytes =
                         stack_value.as_byte_array().ok_or_else(|| {
                             Error::OperatorExpectsByteArray {
@@ -884,13 +883,12 @@ impl<'a> VMEvaluator<'a> {
                         })?;
                     Ok(Some(bytes))
                 }
-                None => Ok(None),
             },
         }
     }
 
     fn eval_clear(&mut self, loc: StackIndex) -> Result<(), Error> {
-        self.values[loc] = None;
+        self.values[loc] = StackValue::None;
         Ok(())
     }
 
@@ -901,7 +899,7 @@ impl<'a> VMEvaluator<'a> {
     ) -> Result<(), Error> {
         let opt_value = self.arg_to_prim(value)?;
 
-        self.values[output] = opt_value.map(Into::into);
+        self.values[output] = opt_value.into();
         Ok(())
     }
 
@@ -958,12 +956,12 @@ impl<'a> VMEvaluator<'a> {
     ) -> Result<(), Error> {
         const MAX_STACK_ARGS: usize = 16;
         let result = if vm_args.len() <= MAX_STACK_ARGS {
-            let mut inline_consts: [Option<StackValue>; MAX_STACK_ARGS] =
+            let mut inline_consts: [StackValue; MAX_STACK_ARGS] =
                 Default::default();
             let inline_consts = &mut inline_consts[..vm_args.len()];
 
             let mut collected_args =
-                [const { MaybeUninit::<&mut Option<StackValue>>::uninit() };
+                [const { MaybeUninit::<&mut StackValue>::uninit() };
                     MAX_STACK_ARGS];
             let arg_slice = &mut collected_args[..vm_args.len()];
 
@@ -974,8 +972,8 @@ impl<'a> VMEvaluator<'a> {
             );
             let arg_slice = unsafe {
                 std::mem::transmute::<
-                    &mut [MaybeUninit<&mut Option<StackValue>>],
-                    &mut [&mut Option<StackValue>],
+                    &mut [MaybeUninit<&mut StackValue>],
+                    &mut [&mut StackValue],
                 >(arg_slice)
             };
 
@@ -984,7 +982,7 @@ impl<'a> VMEvaluator<'a> {
             let mut inline_consts = Vec::with_capacity(vm_args.len());
             inline_consts.resize_with(vm_args.len(), Default::default);
 
-            let mut collected_args: Vec<&mut Option<StackValue>> =
+            let mut collected_args: Vec<&mut StackValue> =
                 Vec::with_capacity(vm_args.len());
             self.values.collect_native_function_args_impl(
                 vm_args,
@@ -1014,7 +1012,7 @@ impl<'a> VMEvaluator<'a> {
         self.values[output] = opt_value
             .map(|val| val.prim_cast(prim_type))
             .transpose()?
-            .map(Into::into);
+            .into();
         Ok(())
     }
 
@@ -1029,7 +1027,7 @@ impl<'a> VMEvaluator<'a> {
                 self.values[stack_index].is_some()
             }
         };
-        self.values[output] = Some(RuntimePrimValue::Bool(is_some).into());
+        self.values[output] = RuntimePrimValue::Bool(is_some).into();
         Ok(())
     }
 
@@ -1087,13 +1085,12 @@ impl<'a> VMEvaluator<'a> {
 
         self.values[output] = match (opt_lhs, opt_rhs) {
             (None, Some(RuntimePrimValue::Bool(false)))
-            | (Some(RuntimePrimValue::Bool(false)), None) => {
-                Some(RuntimePrimValue::Bool(false).into())
-            }
+            | (Some(RuntimePrimValue::Bool(false)), None) => Some(false),
+
             (Some(lhs), Some(rhs)) => {
                 let res = match (lhs, rhs) {
                     (RuntimePrimValue::Bool(a), RuntimePrimValue::Bool(b)) => {
-                        Ok(RuntimePrimValue::Bool(a && b))
+                        Ok(a && b)
                     }
                     _ => Err(Error::InvalidOperandsForBinaryOp {
                         index: self.current_instruction,
@@ -1102,10 +1099,11 @@ impl<'a> VMEvaluator<'a> {
                         rhs: rhs.runtime_type().into(),
                     }),
                 }?;
-                Some(res.into())
+                Some(res)
             }
             _ => None,
-        };
+        }
+        .into();
 
         Ok(())
     }
@@ -1124,13 +1122,12 @@ impl<'a> VMEvaluator<'a> {
 
         self.values[output] = match (opt_lhs, opt_rhs) {
             (None, Some(RuntimePrimValue::Bool(true)))
-            | (Some(RuntimePrimValue::Bool(true)), None) => {
-                Some(RuntimePrimValue::Bool(true).into())
-            }
+            | (Some(RuntimePrimValue::Bool(true)), None) => Some(true),
+
             (Some(lhs), Some(rhs)) => {
                 let res = match (lhs, rhs) {
                     (RuntimePrimValue::Bool(a), RuntimePrimValue::Bool(b)) => {
-                        Ok(RuntimePrimValue::Bool(a || b))
+                        Ok(a || b)
                     }
                     _ => Err(Error::InvalidOperandsForBinaryOp {
                         index: self.current_instruction,
@@ -1139,10 +1136,11 @@ impl<'a> VMEvaluator<'a> {
                         rhs: rhs.runtime_type().into(),
                     }),
                 }?;
-                Some(res.into())
+                Some(res)
             }
             _ => None,
-        };
+        }
+        .into();
 
         Ok(())
     }
@@ -1158,15 +1156,14 @@ impl<'a> VMEvaluator<'a> {
         let opt_arg = self.arg_to_prim(arg)?;
 
         self.values[output] = match opt_arg {
-            Some(RuntimePrimValue::Bool(b)) => {
-                Ok(Some(RuntimePrimValue::Bool(!b).into()))
-            }
+            Some(RuntimePrimValue::Bool(b)) => Ok(Some(!b)),
             Some(other) => Err(Error::InvalidOperandForUnaryOp {
                 op: op_name,
                 arg: other.runtime_type().into(),
             }),
             None => Ok(None),
-        }?;
+        }?
+        .into();
 
         Ok(())
     }
@@ -1206,10 +1203,11 @@ impl<'a> VMEvaluator<'a> {
                         .reader
                         .is_dotnet_base_class_of(parent.into(), child.into())?;
 
-                    Some(RuntimePrimValue::Bool(is_subclass).into())
+                    Some(is_subclass)
                 }
                 _ => None,
-            };
+            }
+            .into();
 
         Ok(())
     }
@@ -1222,7 +1220,7 @@ impl<'a> VMEvaluator<'a> {
         let method_table_ptr = self.reader.type_to_method_table(ty)?;
         let ptr: Pointer = method_table_ptr.into();
 
-        self.values[output] = Some(ptr.into());
+        self.values[output] = ptr.into();
 
         Ok(())
     }
@@ -1245,7 +1243,7 @@ impl<'a> VMEvaluator<'a> {
         let offset = self
             .reader
             .find_field_offset(method_table_ptr.into(), field)?;
-        self.values[output] = Some(offset.into());
+        self.values[output] = offset.into();
 
         Ok(())
     }
@@ -1265,7 +1263,7 @@ impl<'a> VMEvaluator<'a> {
             .try_into()?;
 
         let stride = self.reader.find_array_stride(method_table_ptr.into())?;
-        self.values[output] = Some(stride.into());
+        self.values[output] = stride.into();
 
         Ok(())
     }
@@ -1278,7 +1276,7 @@ impl<'a> VMEvaluator<'a> {
         let mut num_bytes = 0usize;
         for region in regions.iter() {
             let Some(region_bytes) = self.arg_to_prim(region.num_bytes)? else {
-                self.values[output] = None;
+                self.values[output] = StackValue::None;
                 return Ok(());
             };
             let region_bytes: usize =
@@ -1355,7 +1353,7 @@ impl<'a> VMEvaluator<'a> {
             flush!();
         }
 
-        self.values[output] = Some(new_stack_value);
+        self.values[output] = new_stack_value;
 
         Ok(())
     }
@@ -1390,10 +1388,11 @@ impl<'a> VMEvaluator<'a> {
 
                 match prim_value {
                     RuntimePrimValue::Ptr(ptr) if ptr.is_null() => None,
-                    other => Some(other.into()),
+                    other => Some(other),
                 }
             }
-        };
+        }
+        .into();
 
         Ok(())
     }
@@ -1419,9 +1418,10 @@ impl<'a> VMEvaluator<'a> {
                     },
                 )?;
                 let string: String = runtime_string.into();
-                Ok(ExposedNativeObject::new(string).into())
+                Ok(ExposedNativeObject::new(string))
             })
-            .transpose()?;
+            .transpose()?
+            .into();
 
         Ok(())
     }
@@ -1451,7 +1451,7 @@ impl<'a> VMEvaluator<'a> {
         output: StackIndex,
     ) -> Result<(), Error> {
         let statics = self.vm.statics.borrow();
-        let value = statics.get(saved.0).cloned().flatten().map(Into::into);
+        let value = statics.get(saved.0).cloned().flatten().into();
 
         self.values[output] = value;
         Ok(())

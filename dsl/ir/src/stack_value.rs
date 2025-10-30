@@ -11,6 +11,7 @@ use crate::{DSLType, Error, ExposedNativeObject, RustNativeObject};
 
 #[derive(Debug, From)]
 pub enum StackValue {
+    None,
     Prim(RuntimePrimValue),
     ByteArray(Vec<u8>),
     SmallByteArray([u8; StackValue::SMALL_BYTE_ARRAY_SIZE]),
@@ -20,8 +21,23 @@ pub enum StackValue {
 impl StackValue {
     pub const SMALL_BYTE_ARRAY_SIZE: usize = 8;
 
+    pub fn take(&mut self) -> Self {
+        let mut output = StackValue::None;
+        std::mem::swap(self, &mut output);
+        output
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, StackValue::None)
+    }
+
+    pub fn is_some(&self) -> bool {
+        !self.is_none()
+    }
+
     pub fn runtime_type(&self) -> DSLType {
         match self {
+            StackValue::None => DSLType::Unknown,
             StackValue::Prim(prim) => prim.runtime_type().into(),
             StackValue::ByteArray(_) | StackValue::SmallByteArray(_) => {
                 DSLType::ByteArray
@@ -33,7 +49,8 @@ impl StackValue {
     pub fn as_prim(&self) -> Option<RuntimePrimValue> {
         match self {
             StackValue::Prim(prim) => Some(*prim),
-            StackValue::Native(_)
+            StackValue::None
+            | StackValue::Native(_)
             | StackValue::ByteArray(_)
             | StackValue::SmallByteArray(_) => None,
         }
@@ -42,7 +59,8 @@ impl StackValue {
     pub fn as_native<T: RustNativeObject>(&self) -> Option<&T> {
         match self {
             StackValue::Native(native) => native.downcast_ref(),
-            StackValue::Prim(_)
+            StackValue::None
+            | StackValue::Prim(_)
             | StackValue::ByteArray(_)
             | StackValue::SmallByteArray(_) => None,
         }
@@ -52,7 +70,9 @@ impl StackValue {
         match self {
             StackValue::ByteArray(arr) => Some(arr),
             StackValue::SmallByteArray(arr) => Some(arr),
-            StackValue::Prim(_) | StackValue::Native(_) => None,
+            StackValue::None | StackValue::Prim(_) | StackValue::Native(_) => {
+                None
+            }
         }
     }
 
@@ -60,7 +80,9 @@ impl StackValue {
         match self {
             StackValue::ByteArray(arr) => Some(arr),
             StackValue::SmallByteArray(arr) => Some(arr),
-            StackValue::Prim(_) | StackValue::Native(_) => None,
+            StackValue::None | StackValue::Prim(_) | StackValue::Native(_) => {
+                None
+            }
         }
     }
 }
@@ -68,6 +90,7 @@ impl StackValue {
 impl std::fmt::Display for StackValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
+            StackValue::None => write!(f, "None"),
             StackValue::Prim(prim) => write!(f, "{prim}"),
             StackValue::Native(any) => {
                 write!(f, "[rust-native object of type {:?}]", any.type_id())
@@ -181,3 +204,21 @@ stack_value_to_prim!(isize);
 stack_value_to_prim!(f32);
 stack_value_to_prim!(f64);
 stack_value_to_prim!(Pointer);
+
+impl<T> From<Option<T>> for StackValue
+where
+    T: Into<StackValue>,
+{
+    fn from(opt_value: Option<T>) -> Self {
+        match opt_value {
+            None => StackValue::None,
+            Some(value) => value.into(),
+        }
+    }
+}
+
+impl Default for StackValue {
+    fn default() -> Self {
+        StackValue::None
+    }
+}

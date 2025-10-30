@@ -68,8 +68,7 @@ impl WidgetWindow<Error> for LiveVariableDisplay {
         for live_var in self.live_variables.iter_mut() {
             let values =
                 live_var.virtual_machine.evaluate(globals.cached_reader())?;
-            live_var.most_recent_value =
-                values.get(0).and_then(|val| val.as_prim());
+            live_var.most_recent_value = values.get(0).as_prim()
         }
 
         Ok(())

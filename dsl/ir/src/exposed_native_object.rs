@@ -21,8 +21,17 @@ impl ExposedNativeObject {
         self.obj.downcast_ref()
     }
 
-    pub fn downcast_mut<T: RustNativeObject>(&mut self) -> Option<&mut T> {
-        self.obj.downcast_mut()
+    pub fn downcast_mut<T: RustNativeObject>(
+        &mut self,
+    ) -> Result<&mut T, &mut Self> {
+        if self.obj.is::<T>() {
+            Ok(self
+                .obj
+                .downcast_mut()
+                .expect("Just passed the type check with is::<T>()"))
+        } else {
+            Err(self)
+        }
     }
 
     pub fn downcast<T: RustNativeObject>(self) -> Result<Box<T>, Self> {
@@ -64,7 +73,7 @@ pub(crate) trait RustNativeTypeUtils {
     fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error>;
 
@@ -90,7 +99,7 @@ impl<T: RustNativeObject> RustNativeTypeUtils for RustNativeUtilContainer<T> {
     fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error> {
         T::collect_into_vector(vec, item, output_name)

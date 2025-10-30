@@ -74,7 +74,7 @@ impl RustType {
     pub(crate) fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error> {
         self.utils.collect_into_vector(vec, item, output_name)
@@ -190,7 +190,7 @@ impl DSLType {
     pub fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error> {
         match self {
@@ -328,7 +328,7 @@ pub(crate) trait RuntimePrimTypeExt {
     fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error>;
 }
@@ -386,7 +386,7 @@ impl RuntimePrimTypeExt for RuntimePrimType {
     fn collect_into_vector(
         &self,
         vec: &mut StackValue,
-        item: &mut Option<StackValue>,
+        item: &mut StackValue,
         output_name: &str,
     ) -> Result<(), Error> {
         let native = match vec {
@@ -394,18 +394,19 @@ impl RuntimePrimTypeExt for RuntimePrimType {
             other => Err(Error::InvalidVectorType(other.runtime_type())),
         }?;
 
-        let item = item.as_ref().ok_or_else(|| {
-            Error::MissingElementInVectorAccumulation {
-                name: output_name.to_string(),
+        let item = match item {
+            StackValue::None => {
+                Err(Error::MissingElementInVectorAccumulation {
+                    name: output_name.to_string(),
+                })
             }
-        })?;
-
-        let item = item.as_prim().ok_or_else(|| {
-            Error::IncorrectVectorElementType {
-                expected: (*self).into(),
-                actual: item.runtime_type(),
-            }
-        })?;
+            other => other.as_prim().ok_or_else(|| {
+                Error::IncorrectVectorElementType {
+                    expected: (*self).into(),
+                    actual: other.runtime_type(),
+                }
+            }),
+        }?;
 
         macro_rules! handle_prim {
             ($variant:ident,$prim:ty) => {{
@@ -417,15 +418,15 @@ impl RuntimePrimTypeExt for RuntimePrimType {
                     .into());
                 };
 
-                if let Some(vec) = native.downcast_mut::<Vec<$prim>>() {
-                    vec.push(item);
-                } else {
-                    return Err(Error::IncorrectVectorElementType {
-                        expected: RustType::new::<Vec<$prim>>().into(),
-                        actual: native.runtime_type(),
-                    }
-                    .into());
-                }
+                let vec =
+                    native.downcast_mut::<Vec<$prim>>().map_err(|other| {
+                        Error::IncorrectVectorElementType {
+                            expected: RustType::new::<Vec<$prim>>().into(),
+                            actual: other.runtime_type(),
+                        }
+                    })?;
+
+                vec.push(item);
             }};
         }
 

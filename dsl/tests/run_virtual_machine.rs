@@ -25,7 +25,7 @@ fn addition() {
 
     assert_eq!(results.len(), 1);
     assert_eq!(
-        results.get(0).and_then(|val| val.as_prim()),
+        results.get(0).as_prim(),
         Some(RuntimePrimValue::NativeUInt(3))
     );
 }
@@ -164,13 +164,13 @@ fn run_native_function() {
         .unwrap()
         .with_instructions(instructions)
         .with_raw_native_function(
-            |args: &[&mut Option<StackValue>]|
-                         -> Result<Option<StackValue>,dsl_ir::Error> {
+            |args: &[&mut StackValue]| -> Result<StackValue, dsl_ir::Error> {
                 assert_eq!(args.len(), 2);
-                let lhs: usize = args[0].as_ref().unwrap().try_into()?;
-                let rhs: usize = args[1].as_ref().unwrap().try_into()?;
-                Ok(Some(StackValue::Prim(RuntimePrimValue::NativeUInt(lhs+rhs))))
-        })
+                let lhs: usize = (&*args[0]).try_into()?;
+                let rhs: usize = (&*args[1]).try_into()?;
+                Ok(StackValue::Prim(RuntimePrimValue::NativeUInt(lhs + rhs)))
+            },
+        )
         .build();
 
     let results = vm.local_eval().unwrap();
@@ -324,7 +324,7 @@ fn rust_function_returning_rust_object() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Native(native) = results.get(0).unwrap() else {
+    let StackValue::Native(native) = results.get(0) else {
         panic!("Should produce rust-native output")
     };
     assert_eq!(native.type_id(), std::any::TypeId::of::<RustObj>());
@@ -437,7 +437,7 @@ fn rust_function_accepting_mutable_rust_object() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Native(obj) = results.get(0).unwrap() else {
+    let StackValue::Native(obj) = results.get(0) else {
         panic!("Should produce rust-native output")
     };
     assert_eq!(obj.type_id(), std::any::TypeId::of::<RustObj>());
@@ -519,7 +519,7 @@ fn rust_function_collecting_triangular_numbers() {
     let results = vm.local_eval().unwrap();
 
     assert_eq!(results.len(), 1);
-    let StackValue::Native(obj) = results.get(0).unwrap() else {
+    let StackValue::Native(obj) = results.get(0) else {
         panic!("Should produce rust-native output")
     };
     assert_eq!(obj.type_id(), std::any::TypeId::of::<Vec<usize>>());
