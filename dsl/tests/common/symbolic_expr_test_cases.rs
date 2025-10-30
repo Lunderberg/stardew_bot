@@ -78,6 +78,8 @@ macro_rules! generate_tests {
             lazy_static_only_evaluated_when_used,
             ignore_int="Not implemented",
         }
+        $generator! { prim_argument, ignore_int="Not implemented" }
+        $generator! { native_argument, ignore_int="Not implemented" }
     };
 }
 pub(crate) use generate_tests;
@@ -2110,6 +2112,67 @@ pub fn lazy_static_only_evaluated_when_used(
     assert_eq!(result, expected);
 
     assert_eq!(*counter.borrow(), 0usize);
+
+    Ok(())
+}
+
+pub fn prim_argument(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main(num: usize) {
+            num + 10usize
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm
+        .get_function("main")
+        .map_err(Into::into)?
+        .with_args([5usize])
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
+
+    let expected: usize = 15;
+    assert_eq!(result, expected);
+
+    Ok(())
+}
+
+pub fn native_argument(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    #[derive(RustNativeObject, PartialEq, Debug)]
+    struct RustObj(usize, usize);
+
+    graph.named_native_function("func", |obj: &RustObj| obj.0 + obj.1)?;
+
+    graph.parse(stringify! {
+        pub fn main(obj) {
+            func(obj)
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm
+        .get_function("main")
+        .map_err(Into::into)?
+        .with_args([RustObj(5, 10)])
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
+
+    let expected: usize = 15;
+    assert_eq!(result, expected);
 
     Ok(())
 }

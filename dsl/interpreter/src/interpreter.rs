@@ -592,6 +592,17 @@ impl<'a> RuntimeFunc<'a> for InterpretedFunc<'a> {
     fn evaluate(self) -> Result<RuntimeOutput, Self::Error> {
         self.evaluate()
     }
+
+    fn with_args<Arg>(
+        self,
+        _args: impl IntoIterator<Item = Arg>,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+        Arg: Into<StackValue>,
+    {
+        todo!()
+    }
 }
 
 impl Into<SymbolicGraph> for Interpreter {

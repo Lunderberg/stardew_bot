@@ -1,6 +1,5 @@
 use std::any::Any;
 
-use derive_more::derive::From;
 use dotnet_debugger::{Pointer, RuntimePrimValue};
 
 use crate::{DSLType, Error, ExposedNativeObject, RustNativeObject};
@@ -9,7 +8,7 @@ use crate::{DSLType, Error, ExposedNativeObject, RustNativeObject};
 // since it is used as the common interface at runtime, and the
 // bytecode interpreter doesn't really have a stack anymore.
 
-#[derive(Debug, From)]
+#[derive(Debug)]
 pub enum StackValue {
     None,
     Prim(RuntimePrimValue),
@@ -214,6 +213,24 @@ where
             None => StackValue::None,
             Some(value) => value.into(),
         }
+    }
+}
+
+impl From<RuntimePrimValue> for StackValue {
+    fn from(prim: RuntimePrimValue) -> Self {
+        StackValue::Prim(prim)
+    }
+}
+
+impl From<ExposedNativeObject> for StackValue {
+    fn from(obj: ExposedNativeObject) -> Self {
+        StackValue::Native(obj)
+    }
+}
+
+impl<T: RustNativeObject> From<T> for StackValue {
+    fn from(obj: T) -> Self {
+        ExposedNativeObject::new(obj).into()
     }
 }
 

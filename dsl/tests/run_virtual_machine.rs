@@ -17,7 +17,7 @@ fn addition() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .build();
@@ -75,7 +75,7 @@ fn triangular_number() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .build();
@@ -112,7 +112,7 @@ fn swap_values() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .build();
@@ -160,7 +160,7 @@ fn run_native_function() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_raw_native_function(
@@ -196,7 +196,7 @@ fn run_wrapped_nullary_native_function() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|| -> usize { 42 })
@@ -229,7 +229,7 @@ fn run_wrapped_unary_native_function() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|&val: &usize| -> usize { val * val })
@@ -268,7 +268,7 @@ fn run_wrapped_binary_native_function() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|&lhs: &usize, &rhs: &usize| -> usize {
@@ -315,7 +315,7 @@ fn rust_function_returning_rust_object() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
@@ -369,7 +369,7 @@ fn rust_function_accepting_rust_object() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
@@ -425,7 +425,7 @@ fn rust_function_accepting_mutable_rust_object() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|&a: &usize, &b: &usize| RustObj { a, b })
@@ -503,7 +503,7 @@ fn rust_function_collecting_triangular_numbers() {
     ];
 
     let vm = VirtualMachine::builder()
-        .with_entry_point("main")
+        .with_entry_point("main", 0)
         .unwrap()
         .with_instructions(instructions)
         .with_native_function(|| -> Vec<usize> {

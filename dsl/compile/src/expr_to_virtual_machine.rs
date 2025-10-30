@@ -182,8 +182,6 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
             )
         };
 
-        builder.mark_entry_point(main_func_name)?;
-
         let ExprKind::Function {
             params,
             output: output_value,
@@ -196,15 +194,26 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
         };
         let output_value = *output_value;
 
-        if !params.is_empty() {
-            todo!("Handle extern functions with parameters");
+        builder.mark_entry_point(main_func_name, params.len())?;
+
+        let mut index_tracking = IndexTracking::default();
+        for (i, param) in params.iter().enumerate() {
+            let param = param.as_op_index().unwrap();
+
+            let (index, _) = index_tracking.alloc_index();
+            assert_eq!(index.0, i);
+            index_tracking.define_contents(param, index);
         }
 
         let iter_op_indices = self
             .iter_ops()
             .filter(|(_, expr)| !matches!(expr.kind, ExprKind::Function { .. }))
             .filter(|(OpIndex(i), _)| reachable[*i])
-            .filter(|(OpIndex(i), _)| scope[*i] == Scope::Global)
+            .filter(|(OpIndex(i), _)| match scope[*i] {
+                Scope::Global => true,
+                Scope::Function(func_index) => func_index == main_func_index,
+                _ => false,
+            })
             .map(|(op_index, _)| op_index);
 
         let mut translator = ExpressionTranslator {
@@ -215,7 +224,7 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
             native_function_lookup,
             show_steps,
             analysis: Analysis::new(None),
-            index_tracking: IndexTracking::default(),
+            index_tracking,
             lazy_static_tracking: HashMap::default(),
         };
         translator
@@ -260,10 +269,13 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
             "return from top-level function".to_string()
         });
 
-        iter_outputs()
-            .filter_map(|output| output.as_op_index())
-            .for_each(|output| {
-                translator.index_tracking.release_expr(output);
+        params
+            .iter()
+            .cloned()
+            .chain(iter_outputs())
+            .filter_map(|value| value.as_op_index())
+            .for_each(|index| {
+                translator.index_tracking.release_expr(index);
             });
 
         translator.index_tracking.assert_empty();

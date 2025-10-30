@@ -21,7 +21,7 @@ use crate::{Error, StackIndex, VMResults};
 pub struct VirtualMachineBuilder {
     instructions: Vec<Instruction>,
     native_functions: Vec<ExposedNativeFunction>,
-    entry_points: HashMap<String, InstructionIndex>,
+    entry_points: HashMap<String, EntryPoint>,
     annotations: HashMap<AnnotationLocation, String>,
 }
 
@@ -30,6 +30,12 @@ pub enum AnnotationLocation {
     Before(InstructionIndex),
     At(InstructionIndex),
     After(InstructionIndex),
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EntryPoint {
+    first_instruction: InstructionIndex,
+    num_arguments: usize,
 }
 
 #[derive(Debug)]
@@ -41,7 +47,7 @@ pub struct VirtualMachine {
     native_functions: Vec<ExposedNativeFunction>,
 
     /// A lookup table from the name of a function to its entry point.
-    entry_points: HashMap<String, InstructionIndex>,
+    entry_points: HashMap<String, EntryPoint>,
 
     /// The stack size required to execute the VM
     stack_size: usize,
@@ -56,6 +62,7 @@ pub struct VMEvaluator<'a> {
     vm: &'a VirtualMachine,
     current_instruction: InstructionIndex,
     reader: Box<dyn dsl_runtime::Reader + 'a>,
+    num_arguments: usize,
     values: VMResults,
 }
 
@@ -402,12 +409,19 @@ impl VirtualMachineBuilder {
     pub fn mark_entry_point(
         &mut self,
         name: impl Into<String>,
+        num_arguments: usize,
     ) -> Result<(), Error> {
         let name = name.into();
         if self.entry_points.contains_key(&name) {
             Err(Error::DuplicateFunctionName(name).into())
         } else {
-            self.entry_points.insert(name, self.current_index());
+            self.entry_points.insert(
+                name,
+                EntryPoint {
+                    first_instruction: self.current_index(),
+                    num_arguments,
+                },
+            );
             Ok(())
         }
     }
@@ -466,8 +480,9 @@ impl VirtualMachineBuilder {
     pub fn with_entry_point(
         mut self,
         name: impl Into<String>,
+        num_arguments: usize,
     ) -> Result<Self, Error> {
-        self.mark_entry_point(name)?;
+        self.mark_entry_point(name, num_arguments)?;
         Ok(self)
     }
 
@@ -552,7 +567,8 @@ impl VirtualMachine {
 
         Ok(VMEvaluator {
             vm: self,
-            current_instruction: entry_point,
+            current_instruction: entry_point.first_instruction,
+            num_arguments: entry_point.num_arguments,
             reader: Box::new(dsl_runtime::DummyReader),
             values,
         })
@@ -595,6 +611,30 @@ impl<'a> RuntimeFunc<'a> for VMEvaluator<'a> {
 
     fn with_reader(self, reader: impl dsl_runtime::Reader + 'a) -> Self {
         self.with_reader(reader)
+    }
+
+    fn with_args<Arg>(
+        mut self,
+        args: impl IntoIterator<Item = Arg>,
+    ) -> Result<Self, Self::Error>
+    where
+        Arg: Into<StackValue>,
+    {
+        let mut i_arg = 0usize;
+        for arg in args.into_iter() {
+            if i_arg < self.num_arguments {
+                self.values[i_arg] = arg.into();
+            }
+            i_arg += 1;
+        }
+        if i_arg == self.num_arguments {
+            Ok(self)
+        } else {
+            Err(Error::InvalidNumberOfArgumentsForTopLevelFunction {
+                expected: self.num_arguments,
+                provided: i_arg,
+            })
+        }
     }
 
     fn evaluate(self) -> Result<VMResults, Self::Error> {

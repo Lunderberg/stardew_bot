@@ -100,6 +100,17 @@ where
 
         run_once()
     }
+
+    fn with_args<Arg>(
+        self,
+        _args: impl IntoIterator<Item = Arg>,
+    ) -> Result<Self, Self::Error>
+    where
+        Self: Sized,
+        Arg: Into<dsl::StackValue>,
+    {
+        todo!()
+    }
 }
 
 fn bench_execution_vm(c: &mut Criterion) {

@@ -96,6 +96,15 @@ pub enum Error {
     },
 
     #[error(
+        "Top-level function expected {expected} arguments, \
+         but was called with {provided} arguments."
+    )]
+    InvalidNumberOfArgumentsForTopLevelFunction {
+        expected: usize,
+        provided: usize,
+    },
+
+    #[error(
         "Operator {operator} in instruction {index} \
          does not support operands \
          of rust-native type {arg_type:?}"
