@@ -479,6 +479,13 @@ impl<'a> GraphComparison<'a> {
                     _ => false,
                 },
 
+                ExprKind::BitwiseAnd { lhs, rhs } => {
+                    handle_binary_op!(BitwiseAnd, lhs, rhs)
+                }
+                ExprKind::BitwiseOr { lhs, rhs } => {
+                    handle_binary_op!(BitwiseOr, lhs, rhs)
+                }
+
                 ExprKind::Equal { lhs, rhs } => {
                     handle_binary_op!(Equal, lhs, rhs)
                 }

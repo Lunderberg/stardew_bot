@@ -185,6 +185,22 @@ pub enum Instruction {
         output: StackIndex,
     },
 
+    /// Take the bitwise AND of the two operands together, storing the
+    /// result to the output index.
+    BitwiseAnd {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
+    /// Take the bitwise OR of the two operands together, storing the
+    /// result to the output index.
+    BitwiseOr {
+        lhs: VMArg,
+        rhs: VMArg,
+        output: StackIndex,
+    },
+
     /// Add the two operands together, storing the result to the
     /// output index.
     Add {
@@ -790,6 +806,14 @@ impl<'a> VMEvaluator<'a> {
                     self.eval_not(arg, output)?
                 }
 
+                &Instruction::BitwiseAnd { lhs, rhs, output } => {
+                    self.eval_bitwise_and(lhs, rhs, output)?
+                }
+
+                &Instruction::BitwiseOr { lhs, rhs, output } => {
+                    self.eval_bitwise_or(lhs, rhs, output)?
+                }
+
                 &Instruction::Equal { lhs, rhs, output } => {
                     self.eval_eq(lhs, rhs, output)?
                 }
@@ -1109,6 +1133,24 @@ impl<'a> VMEvaluator<'a> {
     define_binary_op! {
         eval_mod,
         (NativeUInt(a),NativeUInt(b)) => a.rem_euclid(b)
+    }
+
+    define_binary_op! {
+        eval_bitwise_and,
+        (NativeUInt(a),NativeUInt(b)) => a & b,
+        (U8(a),U8(b)) => a & b,
+        (U16(a),U16(b)) => a & b,
+        (U32(a),U32(b)) => a & b,
+        (U64(a),U64(b)) => a & b,
+    }
+
+    define_binary_op! {
+        eval_bitwise_or,
+        (NativeUInt(a),NativeUInt(b)) => a | b,
+        (U8(a),U8(b)) => a | b,
+        (U16(a),U16(b)) => a | b,
+        (U32(a),U32(b)) => a | b,
+        (U64(a),U64(b)) => a | b,
     }
 
     fn eval_and(
@@ -1531,6 +1573,8 @@ impl Instruction {
             // Binary instructions
             Instruction::And { lhs, rhs, .. }
             | Instruction::Or { lhs, rhs, .. }
+            | Instruction::BitwiseAnd { lhs, rhs, .. }
+            | Instruction::BitwiseOr { lhs, rhs, .. }
             | Instruction::Equal { lhs, rhs, .. }
             | Instruction::NotEqual { lhs, rhs, .. }
             | Instruction::LessThan { lhs, rhs, .. }
@@ -1598,6 +1642,8 @@ impl Instruction {
             | Instruction::PrimCast { output, .. }
             | Instruction::And { output, .. }
             | Instruction::Or { output, .. }
+            | Instruction::BitwiseAnd { output, .. }
+            | Instruction::BitwiseOr { output, .. }
             | Instruction::Not { output, .. }
             | Instruction::Equal { output, .. }
             | Instruction::NotEqual { output, .. }
@@ -1640,6 +1686,8 @@ impl Instruction {
             Instruction::IsSome { .. } => "IsSome",
             Instruction::And { .. } => "And",
             Instruction::Or { .. } => "Or",
+            Instruction::BitwiseAnd { .. } => "BitwiseAnd",
+            Instruction::BitwiseOr { .. } => "BitwiseOr",
             Instruction::Not { .. } => "Not",
             Instruction::Equal { .. } => "Equal ",
             Instruction::NotEqual { .. } => "NotEqual",
@@ -1799,6 +1847,14 @@ impl Display for Instruction {
 
             Instruction::Or { lhs, rhs, output } => {
                 write!(f, "{output} = {lhs} || {rhs}")
+            }
+
+            Instruction::BitwiseAnd { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} & {rhs}")
+            }
+
+            Instruction::BitwiseOr { lhs, rhs, output } => {
+                write!(f, "{output} = {lhs} | {rhs}")
             }
 
             Instruction::Not { arg, output } => {

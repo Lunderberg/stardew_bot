@@ -393,6 +393,36 @@ impl<'a> SymbolicParser<'a> {
             }
         }
 
+        if precedence < OpPrecedence::BitwiseAnd
+            && OpPrecedence::BitwiseAnd < upper_bound
+        {
+            while self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Ampersand))?
+                .is_some()
+            {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::BitwiseAnd)?;
+                expr = self.graph.bitwise_and(expr, rhs);
+                upper_bound = OpPrecedence::BitwiseAnd;
+            }
+        }
+
+        if precedence < OpPrecedence::BitwiseOr
+            && OpPrecedence::BitwiseOr < upper_bound
+        {
+            while self
+                .tokens
+                .next_if(|token| token.kind.is_punct(Punctuation::Pipe))?
+                .is_some()
+            {
+                let rhs =
+                    self.expect_expr_op_precedence(OpPrecedence::BitwiseOr)?;
+                expr = self.graph.bitwise_or(expr, rhs);
+                upper_bound = OpPrecedence::BitwiseOr;
+            }
+        }
+
         if precedence < OpPrecedence::ComparisonOperator
             && OpPrecedence::ComparisonOperator < upper_bound
         {

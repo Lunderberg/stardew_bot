@@ -418,6 +418,24 @@ impl RuntimePrimValue {
         (Bool(a),Bool(b)) => a || b,
     }
 
+    define_binary_op! {
+        try_bitwise_and, InvalidBinaryOperands,
+        (NativeUInt(a),NativeUInt(b)) => a & b,
+        (U8(a),U8(b)) => a & b,
+        (U16(a),U16(b)) => a & b,
+        (U32(a),U32(b)) => a & b,
+        (U64(a),U64(b)) => a & b,
+    }
+
+    define_binary_op! {
+        try_bitwise_or, InvalidBinaryOperands,
+        (NativeUInt(a),NativeUInt(b)) => a | b,
+        (U8(a),U8(b)) => a | b,
+        (U16(a),U16(b)) => a | b,
+        (U32(a),U32(b)) => a | b,
+        (U64(a),U64(b)) => a | b,
+    }
+
     pub fn try_not(self) -> Result<Self, Error> {
         match self {
             Self::Bool(b) => Ok((!b).into()),

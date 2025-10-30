@@ -220,6 +220,12 @@ impl<'a> InterpretedFunc<'a> {
             &ExprKind::And { lhs, rhs } => self.eval_and(lhs, rhs)?,
             &ExprKind::Or { lhs, rhs } => self.eval_or(lhs, rhs)?,
             &ExprKind::Not { arg } => self.eval_not(arg)?,
+            &ExprKind::BitwiseAnd { lhs, rhs } => {
+                self.eval_bitwise_and(lhs, rhs)?
+            }
+            &ExprKind::BitwiseOr { lhs, rhs } => {
+                self.eval_bitwise_or(lhs, rhs)?
+            }
             &ExprKind::IsSome(value) => self.eval_is_some(value)?,
             &ExprKind::Equal { lhs, rhs } => self.eval_eq(lhs, rhs)?,
             &ExprKind::NotEqual { lhs, rhs } => self.eval_ne(lhs, rhs)?,
@@ -304,6 +310,9 @@ impl<'a> InterpretedFunc<'a> {
         self.push(opt_value);
         Ok(())
     }
+
+    define_binary_op! { eval_bitwise_and, try_bitwise_and }
+    define_binary_op! { eval_bitwise_or, try_bitwise_or }
 
     define_binary_op! { eval_add, try_add }
     define_binary_op! { eval_sub, try_sub }

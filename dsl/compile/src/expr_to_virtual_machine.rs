@@ -1004,6 +1004,13 @@ impl ExpressionTranslator<'_> {
                     handle_binary_op!(LessThanOrEqual, lhs, rhs)
                 }
 
+                ExprKind::BitwiseAnd { lhs, rhs } => {
+                    handle_binary_op!(BitwiseAnd, lhs, rhs)
+                }
+                ExprKind::BitwiseOr { lhs, rhs } => {
+                    handle_binary_op!(BitwiseOr, lhs, rhs)
+                }
+
                 ExprKind::Add { lhs, rhs } => handle_binary_op!(Add, lhs, rhs),
                 ExprKind::Sub { lhs, rhs } => handle_binary_op!(Sub, lhs, rhs),
                 ExprKind::Mul { lhs, rhs } => handle_binary_op!(Mul, lhs, rhs),

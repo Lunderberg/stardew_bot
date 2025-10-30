@@ -1184,6 +1184,22 @@ impl<'a> GraphPrinter<'a> {
                                 rhs
                             )
                         }
+                        ExprKind::BitwiseAnd { lhs, rhs } => {
+                            handle_binary_op!(
+                                " & ",
+                                OpPrecedence::BitwiseAnd,
+                                lhs,
+                                rhs
+                            )
+                        }
+                        ExprKind::BitwiseOr { lhs, rhs } => {
+                            handle_binary_op!(
+                                " | ",
+                                OpPrecedence::BitwiseOr,
+                                lhs,
+                                rhs
+                            )
+                        }
                         ExprKind::Not { arg } => {
                             write!(fmt, "!")?;
                             to_print.push(PrintItem::Expr(

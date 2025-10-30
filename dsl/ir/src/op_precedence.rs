@@ -7,6 +7,8 @@ pub(crate) enum OpPrecedence {
     BooleanOr,
     ComparisonOperator,
     RangeExtent,
+    BitwiseAnd,
+    BitwiseOr,
     AddSub,
     MulDiv,
     BooleanNot,
@@ -28,6 +30,8 @@ impl PartialOrd for OpPrecedence {
                     | Self::BooleanOr
                     | Self::ComparisonOperator
                     | Self::RangeExtent
+                    | Self::BitwiseAnd
+                    | Self::BitwiseOr
                     | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
@@ -38,6 +42,8 @@ impl PartialOrd for OpPrecedence {
                     | Self::BooleanOr
                     | Self::ComparisonOperator
                     | Self::RangeExtent
+                    | Self::BitwiseAnd
+                    | Self::BitwiseOr
                     | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
@@ -173,6 +179,8 @@ impl PartialOrd for OpPrecedence {
                     Self::BooleanAnd | Self::BooleanOr,
                     Self::ComparisonOperator
                     | Self::RangeExtent
+                    | Self::BitwiseAnd
+                    | Self::BitwiseOr
                     | Self::AddSub
                     | Self::MulDiv
                     | Self::BooleanNot,
@@ -180,10 +188,28 @@ impl PartialOrd for OpPrecedence {
 
                 (
                     Self::ComparisonOperator,
-                    Self::RangeExtent | Self::MulDiv | Self::AddSub,
+                    Self::RangeExtent
+                    | Self::BitwiseAnd
+                    | Self::BitwiseOr
+                    | Self::MulDiv
+                    | Self::AddSub,
                 ) => true,
 
-                (Self::RangeExtent, Self::MulDiv | Self::AddSub) => true,
+                (
+                    Self::RangeExtent,
+                    Self::BitwiseAnd
+                    | Self::BitwiseOr
+                    | Self::MulDiv
+                    | Self::AddSub,
+                ) => true,
+
+                (Self::BitwiseAnd, Self::BitwiseOr) => false,
+                (Self::BitwiseOr, Self::BitwiseAnd) => false,
+
+                (
+                    Self::BitwiseAnd | Self::BitwiseOr,
+                    Self::AddSub | Self::MulDiv,
+                ) => true,
 
                 (Self::AddSub, Self::MulDiv) => true,
                 _ => false,

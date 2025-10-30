@@ -823,6 +823,32 @@ test_print_and_parse! {
 }
 
 test_print_and_parse! {
+    bitwise_and,
+    "pub fn main(x: usize) { x & 1024 }",
+    |graph| {
+        let x = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(x, "x").unwrap();
+        let sum = graph.bitwise_and(x, 1024usize);
+        let func = graph.function_def(vec![x], sum);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}
+
+test_print_and_parse! {
+    bitwise_or,
+    "pub fn main(x: usize) { x | 1024 }",
+    |graph| {
+        let x = graph.function_arg(RuntimePrimType::NativeUInt);
+        graph.name(x, "x").unwrap();
+        let sum = graph.bitwise_or(x, 1024usize);
+        let func = graph.function_def(vec![x], sum);
+        graph.name(func, "main").unwrap();
+        graph.mark_extern_func(func).unwrap();
+    },
+}
+
+test_print_and_parse! {
     function_call,
     indoc!{"
         fn multiply(lhs: usize, rhs: usize) { lhs*rhs }

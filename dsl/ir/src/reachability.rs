@@ -105,6 +105,8 @@ impl ExprKind {
             // Binary operators
             &ExprKind::And { lhs, rhs }
             | &ExprKind::Or { lhs, rhs }
+            | &ExprKind::BitwiseAnd { lhs, rhs }
+            | &ExprKind::BitwiseOr { lhs, rhs }
             | &ExprKind::Equal { lhs, rhs }
             | &ExprKind::NotEqual { lhs, rhs }
             | &ExprKind::LessThan { lhs, rhs }

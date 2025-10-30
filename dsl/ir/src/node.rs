@@ -233,6 +233,18 @@ pub enum ExprKind {
         rhs: SymbolicValue,
     },
 
+    /// Take the bitwise AND of two values
+    BitwiseAnd {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
+    /// Take the bitwise OR of two values
+    BitwiseOr {
+        lhs: SymbolicValue,
+        rhs: SymbolicValue,
+    },
+
     /// Flip a boolean value
     Not { arg: SymbolicValue },
 
@@ -424,6 +436,8 @@ impl ExprKind {
             ExprKind::IfElse { .. } => "IfElse",
             ExprKind::And { .. } => "And",
             ExprKind::Or { .. } => "Or",
+            ExprKind::BitwiseAnd { .. } => "BitwiseAnd",
+            ExprKind::BitwiseOr { .. } => "BitwiseOr",
             ExprKind::Not { .. } => "Not",
             ExprKind::Equal { .. } => "Equal",
             ExprKind::NotEqual { .. } => "NotEqual",
@@ -730,6 +744,13 @@ impl ExprKind {
             ExprKind::And { lhs, rhs } => handle_binary_op!(And, lhs, rhs),
             ExprKind::Or { lhs, rhs } => handle_binary_op!(Or, lhs, rhs),
 
+            ExprKind::BitwiseAnd { lhs, rhs } => {
+                handle_binary_op!(BitwiseAnd, lhs, rhs)
+            }
+            ExprKind::BitwiseOr { lhs, rhs } => {
+                handle_binary_op!(BitwiseOr, lhs, rhs)
+            }
+
             ExprKind::Equal { lhs, rhs } => handle_binary_op!(Equal, lhs, rhs),
             ExprKind::NotEqual { lhs, rhs } => {
                 handle_binary_op!(NotEqual, lhs, rhs)
@@ -992,6 +1013,9 @@ impl std::fmt::Display for ExprKind {
             ExprKind::And { lhs, rhs } => write!(f, "{lhs} && {rhs}"),
             ExprKind::Or { lhs, rhs } => write!(f, "{lhs} || {rhs}"),
             ExprKind::Not { arg } => write!(f, "!{arg}"),
+
+            ExprKind::BitwiseAnd { lhs, rhs } => write!(f, "{lhs} & {rhs}"),
+            ExprKind::BitwiseOr { lhs, rhs } => write!(f, "{lhs} | {rhs}"),
 
             ExprKind::Equal { lhs, rhs } => write!(f, "{lhs} == {rhs}"),
             ExprKind::NotEqual { lhs, rhs } => write!(f, "{lhs} != {rhs}"),

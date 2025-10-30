@@ -683,6 +683,11 @@ impl<'a> TypeInference<'a> {
                     DSLType::Prim(RuntimePrimType::Bool)
                 }
 
+                ExprKind::BitwiseAnd { lhs, rhs }
+                | ExprKind::BitwiseOr { lhs, rhs } => {
+                    self.infer_bitwise_op(expr_kind, *lhs, *rhs)?
+                }
+
                 ExprKind::Add { lhs, rhs } => {
                     self.infer_add(expr_kind, *lhs, *rhs)?
                 }
@@ -730,6 +735,15 @@ impl<'a> TypeInference<'a> {
              Topologic sort should ensure that \
              all input expressions have their type inferred.",
         ))
+    }
+
+    infer_binary_op! {
+        infer_bitwise_op,
+        (NativeUInt,NativeUInt) => NativeUInt,
+        (U8,U8) => U8,
+        (U16,U16) => U16,
+        (U32,U32) => U32,
+        (U64,U64) => U64,
     }
 
     infer_binary_op! {

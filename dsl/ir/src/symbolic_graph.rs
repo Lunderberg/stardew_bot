@@ -423,6 +423,9 @@ impl SymbolicGraph {
         self.push(ExprKind::Not { arg })
     }
 
+    binary_op! {bitwise_and, BitwiseAnd}
+    binary_op! {bitwise_or, BitwiseOr}
+
     binary_op! {equal, Equal}
     binary_op! {not_equal, NotEqual}
     binary_op! {less_than, LessThan}
