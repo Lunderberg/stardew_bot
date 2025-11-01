@@ -127,6 +127,13 @@ impl BotGoal for FirstDay {
                 .with_interrupt(ScytheNearby);
             return Ok(stack.into());
         }
+        if game_state.player.room_name == "Blacksmith" {
+            let sell_copper =
+                SellToMerchantGoal::new("Blacksmith", ItemId::COPPER_ORE);
+            if !sell_copper.is_completed(game_state) {
+                return Ok(sell_copper.into());
+            }
+        }
 
         let gift_pam = GiveGiftGoal::new("Pam", ItemId::DAFFODIL);
         if !gift_pam.is_completed(game_state)? {
