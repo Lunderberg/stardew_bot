@@ -728,7 +728,8 @@ impl ExpressionTranslator<'_> {
         if self.show_steps {
             let index = self.builder.current_index();
             let loc = AnnotationLocation::Before(index);
-            self.builder.annotate(loc, generate_annotation(self.graph));
+            let annotation = generate_annotation(self.graph);
+            self.builder.annotate(loc, annotation);
         }
     }
 
