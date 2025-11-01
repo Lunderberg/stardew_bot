@@ -319,13 +319,16 @@ impl BotGoal for FishingGoal {
                 // as much bait as available.
                 let fish_selling = FishSelling::new(game_state);
                 let total_cash = fish_selling.available_money() as usize;
-                let goal = fish_selling.sell_all_fish().then(
-                    BuyFromMerchantGoal::new(
-                        "Buy Fish",
-                        ItemId::BAIT.with_count(total_cash / 5),
-                    ),
-                );
-                return Ok(goal.into());
+                let num_to_buy = total_cash / 5;
+                if num_to_buy > 0 {
+                    let goal = fish_selling.sell_all_fish().then(
+                        BuyFromMerchantGoal::new(
+                            "Buy Fish",
+                            ItemId::BAIT.with_count(num_to_buy),
+                        ),
+                    );
+                    return Ok(goal.into());
+                }
             }
         }
 
