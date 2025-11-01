@@ -4,6 +4,7 @@ use dotnet_debugger::CachedReader;
 use dsl::{
     RustNativeObject, SymbolicGraph, SymbolicGraphCompile as _, VirtualMachine,
 };
+use env_var_flag::env_var_flag;
 
 use crate::{Error, JunimoMenu, Menu};
 
@@ -37,14 +38,14 @@ pub struct GameStateReader {
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GameStateDelta {
     global_game_state: GlobalGameState,
-    location_delta: LocationDelta,
+    location_delta: Option<LocationDelta>,
     nonlocal_location_deltas: HashMap<String, LocationDelta>,
     player: PlayerState,
     fishing: FishingState,
     daily: DailyState,
     inputs: InputState,
     display: DisplayState,
-    current_rng_state: SeededRng,
+    current_rng_state: Option<SeededRng>,
 
     num_mine_levels: usize,
 
@@ -102,14 +103,14 @@ impl GameState {
         graph.named_native_function(
             "new_game_state_delta",
             |global_game_state: &GlobalGameState,
-             location_delta: &LocationDelta,
+             location_delta: Option<&LocationDelta>,
              nonlocal_location_deltas: &Vec<LocationDelta>,
              player: &PlayerState,
              fishing: &FishingState,
              daily: &DailyState,
              inputs: &InputState,
              display: &DisplayState,
-             rng_state: &SeededRng,
+             rng_state: Option<&SeededRng>,
              num_mine_levels: usize,
              menu: Option<&Menu>| {
                 let nonlocal_location_deltas = nonlocal_location_deltas
@@ -118,14 +119,14 @@ impl GameState {
                     .collect();
                 GameStateDelta {
                     global_game_state: global_game_state.clone(),
-                    location_delta: location_delta.clone(),
+                    location_delta: location_delta.cloned(),
                     nonlocal_location_deltas,
                     player: player.clone(),
                     fishing: fishing.clone(),
                     daily: daily.clone(),
                     inputs: inputs.clone(),
                     display: display.clone(),
-                    current_rng_state: rng_state.clone(),
+                    current_rng_state: rng_state.cloned(),
 
                     num_mine_levels,
 
@@ -177,9 +178,14 @@ impl GameState {
                 )
             }
 
-            pub fn read_delta_state() {
+            pub fn read_delta_state(read_flags: u64) {
                 let global_game_state = read_global_game_state();
-                let location_delta = read_location_delta();
+
+                let location_delta = if read_flags & 0x2u64 > 0u64 {
+                    read_location_delta(read_flags)
+                } else {
+                    None
+                };
 
                 let nonlocal_location_deltas = iter_locations(
                         |i| {
@@ -193,12 +199,20 @@ impl GameState {
                     .map(read_nonlocal_location_delta)
                     .collect();
 
-                let player = read_player();
+                let player = if read_flags & 0x4u64 > 0u64 {
+                    read_player()
+                } else {
+                    None
+                };
                 let fishing = read_fishing();
                 let daily = read_daily();
                 let inputs = read_input_state();
                 let display = read_display_state();
-                let rng_state = read_rng_state();
+                let rng_state = if read_flags & 0x1u64 > 0u64 {
+                    read_rng_state()
+                } else {
+                    None
+                };
 
                 let num_mine_levels = StardewValley
                     .Locations
@@ -242,18 +256,21 @@ impl GameState {
     }
 
     pub fn requires_new_location_read(&self, delta: &GameStateDelta) -> bool {
-        self.locations
-            .iter()
-            .all(|loc| loc.name != delta.location_delta.name)
+        match &delta.location_delta {
+            Some(delta) => {
+                self.locations.iter().all(|loc| loc.name != delta.name)
+            }
+            None => false,
+        }
     }
 
     pub fn apply_delta(&mut self, mut delta: GameStateDelta) {
         let player_pos = delta.player.position;
 
-        self.rng_state.apply_delta(
-            delta.current_rng_state,
-            delta.global_game_state.game_mode_tick,
-        );
+        if let Some(rng_delta) = delta.current_rng_state {
+            self.rng_state
+                .apply_delta(rng_delta, delta.global_game_state.game_mode_tick);
+        }
         self.globals = delta.global_game_state;
         self.player = delta.player;
         self.fishing = delta.fishing;
@@ -267,12 +284,14 @@ impl GameState {
             self.locations.retain(|loc| loc.mineshaft_details.is_none());
         }
 
-        if let Some(loc) = self
-            .locations
-            .iter_mut()
-            .find(|loc| loc.name == delta.location_delta.name)
-        {
-            loc.apply_delta(delta.location_delta, player_pos);
+        if let Some(location_delta) = delta.location_delta {
+            if let Some(loc) = self
+                .locations
+                .iter_mut()
+                .find(|loc| loc.name == location_delta.name)
+            {
+                loc.apply_delta(location_delta, player_pos);
+            }
         }
 
         for loc in &mut self.locations {
@@ -382,9 +401,28 @@ impl GameStateReader {
         &self,
         cache: CachedReader,
     ) -> Result<GameStateDelta, Error> {
+        let read_rng_state = !env_var_flag("SKIP_RNG_STATE");
+        let read_location_delta = !env_var_flag("SKIP_LOCATION_DELTA");
+        let read_player = !env_var_flag("SKIP_PLAYER");
+        let read_resource_clumps = !env_var_flag("SKIP_RESOURCE_CLUMPS");
+        let read_objects = !env_var_flag("SKIP_OBJECTS");
+        let read_items = !env_var_flag("SKIP_ITEMS");
+        let read_characters = !env_var_flag("SKIP_CHARACTERS");
+        let read_bombs = !env_var_flag("SKIP_BOMBS");
+
+        let read_flags: u64 = 0x01 * (read_rng_state as u64)
+            + 0x02 * (read_location_delta as u64)
+            + 0x04 * (read_player as u64)
+            + 0x08 * (read_resource_clumps as u64)
+            + 0x10 * (read_objects as u64)
+            + 0x20 * (read_items as u64)
+            + 0x40 * (read_characters as u64)
+            + 0x80 * (read_bombs as u64);
+
         self.vm
             .get_function("read_delta_state")?
             .with_reader(cache)
+            .with_args([read_flags])?
             .evaluate()?
             .take_obj(0)?
             .ok_or(Error::ExpectedNonEmptyValue)

@@ -8,6 +8,7 @@ itertools = "*"
 thiserror = "*"
 xxhash-rust = {version = "0.8.15", features = ["xxh32"]}
 
+env_var_flag = { path = "../../env_var_flag" }
 dotnet_debugger = { path = "../../dotnet_debugger" }
 dsl = { path = "../../dsl" }
 geometry = { path = "../geometry" }

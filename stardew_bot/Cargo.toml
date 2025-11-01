@@ -21,6 +21,7 @@ regex = "*"
 
 x11rb = {version = "*", features = ["xtest"]}
 
+env_var_flag = {path = "../env_var_flag"}
 memory_reader = {path = "../memory_reader"}
 tui_utils = { path = "../tui_utils" }
 stardew_utils = {path = "../stardew_utils"}

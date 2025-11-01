@@ -678,6 +678,7 @@ version = "0.1.0"
 dependencies = [
  "dotnet_debugger",
  "dsl",
+ "env_var_flag",
  "geometry",
  "itertools 0.14.0",
  "thiserror",
@@ -1432,6 +1433,7 @@ dependencies = [
  "crossterm",
  "derive_more",
  "dotnet_debugger",
+ "env_var_flag",
  "game_state",
  "geometry",
  "itertools 0.14.0",

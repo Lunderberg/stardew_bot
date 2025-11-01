@@ -9,8 +9,7 @@ use bot_logic::{
 };
 use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
 
-use crossterm::event::Event;
-use itertools::{Either, Itertools as _};
+use env_var_flag::env_var_flag;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -18,6 +17,9 @@ use tui_utils::{
     widgets::DynamicLayout,
     TerminalContext, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
+
+use crossterm::event::Event;
+use itertools::{Either, Itertools as _};
 
 use ratatui::Frame;
 
@@ -534,8 +536,11 @@ impl StardewBot {
             let main_loop_becomes_inactive = std::time::Instant::now();
             let main_loop_active = main_loop_becomes_inactive - main_loop_start;
 
-            let sleep_requested =
-                target_time_per_frame.saturating_sub(main_loop_active);
+            let sleep_requested = if env_var_flag("UNCAP_FPS") {
+                std::time::Duration::ZERO
+            } else {
+                target_time_per_frame.saturating_sub(main_loop_active)
+            };
             event_poll_result = event::poll(sleep_requested)?;
             let finished_sleep = std::time::Instant::now();
 

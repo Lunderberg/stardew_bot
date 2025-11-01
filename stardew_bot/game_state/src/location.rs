@@ -93,11 +93,11 @@ pub struct MineshaftDetails {
 pub struct LocationDelta {
     pub(crate) name: String,
     near_player: bool,
-    resource_clumps: Vec<ResourceClump>,
-    objects: Vec<Object>,
-    items: Vec<FloatingItem>,
-    characters: Vec<Character>,
-    bombs: Vec<Bomb>,
+    resource_clumps: Option<Vec<ResourceClump>>,
+    objects: Option<Vec<Object>>,
+    items: Option<Vec<FloatingItem>>,
+    characters: Option<Vec<Character>>,
+    bombs: Option<Vec<Bomb>>,
     current_event: Option<EventState>,
 }
 
@@ -1248,20 +1248,20 @@ impl Location {
         graph.named_native_function(
             "new_location_delta",
             |name: &str,
-             resource_clumps: &Vec<ResourceClump>,
-             objects: &Vec<Object>,
-             items: &Vec<FloatingItem>,
-             characters: &Vec<Character>,
-             bombs: &Vec<Bomb>,
+             resource_clumps: Option<&Vec<ResourceClump>>,
+             objects: Option<&Vec<Object>>,
+             items: Option<&Vec<FloatingItem>>,
+             characters: Option<&Vec<Character>>,
+             bombs: Option<&Vec<Bomb>>,
              current_event: Option<&EventState>| {
                 LocationDelta {
                     name: name.into(),
                     near_player: true,
-                    resource_clumps: resource_clumps.clone(),
-                    objects: objects.clone(),
-                    items: items.clone(),
-                    characters: characters.clone(),
-                    bombs: bombs.clone(),
+                    resource_clumps: resource_clumps.cloned(),
+                    objects: objects.cloned(),
+                    items: items.cloned(),
+                    characters: characters.cloned(),
+                    bombs: bombs.cloned(),
                     current_event: current_event.cloned(),
                 }
             },
@@ -1272,7 +1272,7 @@ impl Location {
             |name: &str, characters: &Vec<Character>| LocationDelta {
                 name: name.into(),
                 near_player: false,
-                characters: characters.clone(),
+                characters: Some(characters.clone()),
                 resource_clumps: Default::default(),
                 objects: Default::default(),
                 items: Default::default(),
@@ -1395,15 +1395,16 @@ impl Location {
                             .dict
                             ._entries[i_feat]
                     })
-                    .filter(|feature| filter.is_none() || filter(feature))
-                    .map(|feature| {
+                    .filter(|entry| entry.value.is_some())
+                    .filter(|entry| filter.is_none() || filter(entry))
+                    .map(|entry| {
                         let tile = {
-                            let right = feature.key.X;
-                            let down = feature.key.Y;
+                            let right = entry.key.X;
+                            let down = entry.key.Y;
                             new_vector_isize(right,down)
                         };
 
-                        let feature_value = feature
+                        let feature_value = entry
                             .value
                             .value;
 
@@ -1510,10 +1511,11 @@ impl Location {
                             .objects
                             .compositeDict
                             ._entries[i]
-                            .value
                     })
-                    .filter(|obj| filter.is_none() || filter(obj))
-                    .map(|obj| {
+                    .filter(|entry| entry.value.is_some())
+                    .filter(|entry| filter.is_none() || filter(entry))
+                    .map(|entry| {
+                        let obj = entry.value;
                         let tile = {
                             let right = obj.tileLocation.value.X;
                             let down = obj.tileLocation.value.Y;
@@ -1575,10 +1577,7 @@ impl Location {
                             )
                         };
 
-                        new_object(
-                            tile,
-                            kind,
-                        )
+                        new_object(tile, kind)
                     })
                     .filter(|obj| obj.is_some())
             }
@@ -2295,7 +2294,7 @@ impl Location {
                 )
             }
 
-            fn read_location_delta() {
+            fn read_location_delta(read_flags: u64) {
                 let player = StardewValley.Game1._player;
                 let location = player
                     .currentLocationRef
@@ -2317,39 +2316,59 @@ impl Location {
                     dist2.is_some() && dist2 < 49
                 }
 
-                let resource_clumps = read_location_resource_clumps(
-                    location,
-                    |clump| {
-                        let pos = clump.netTile.value;
-                        is_close_to_player(pos.X, pos.Y)
-                    }
-                );
+                let resource_clumps = if read_flags & 0x08u64 > 0u64 {
+                    read_location_resource_clumps(
+                        location,
+                        |clump| {
+                            let pos = clump.netTile.value;
+                            is_close_to_player(pos.X, pos.Y)
+                        }
+                    )
+                } else {
+                    None
+                };
                 let iter_objects = iter_location_objects(
                     location,
-                    |obj| {
-                        let pos = obj.tileLocation.value;
+                    |entry| {
+                        let pos = entry.value.tileLocation.value;
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
                 let iter_features = iter_location_terrain_features(
                     location,
-                    |feature| {
-                        let pos = feature.key;
+                    |entry| {
+                        let pos = entry.key;
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
                 let iter_mineshaft_tiles = iter_location_mineshaft_tiles(
                     location
                 );
-                let objects = iter_objects
-                    .chain(iter_features)
-                    .chain(iter_mineshaft_tiles)
-                    .collect();
+                let objects = if read_flags & 0x10u64 > 0u64 {
+                    iter_objects
+                        .chain(iter_features)
+                        .chain(iter_mineshaft_tiles)
+                        .collect()
+                } else {
+                    None
+                };
 
-                let items = read_location_items(location, None);
+                let items = if read_flags & 0x20u64 > 0u64 {
+                    read_location_items(location, None)
+                } else {
+                    None
+                };
 
-                let characters = read_location_characters(location);
-                let bombs = read_location_bombs(location);
+                let characters = if read_flags & 0x40u64 > 0u64 {
+                    read_location_characters(location)
+                } else {
+                    None
+                };
+                let bombs = if read_flags & 0x80u64 > 0u64 {
+                    read_location_bombs(location)
+                } else {
+                    None
+                };
 
                 let current_event = read_location_current_event(location);
 
@@ -2710,40 +2729,49 @@ impl Location {
             dist2 >= 25.0
         };
 
-        self.resource_clumps = delta
-            .resource_clumps
-            .into_iter()
-            .chain(
-                self.resource_clumps
-                    .drain(..)
-                    .filter(|clump| is_far_from_player(clump.shape.center())),
-            )
-            .unique_by(|clump| clump.shape.center())
-            .collect();
+        if let Some(resource_clumps) = delta.resource_clumps {
+            self.resource_clumps =
+                resource_clumps
+                    .into_iter()
+                    .chain(self.resource_clumps.drain(..).filter(|clump| {
+                        is_far_from_player(clump.shape.center())
+                    }))
+                    .unique_by(|clump| clump.shape.center())
+                    .collect();
+        }
 
-        self.objects = delta
-            .objects
-            .into_iter()
-            .chain(
-                self.objects
-                    .drain(..)
-                    .filter(|obj| is_far_from_player(obj.tile)),
-            )
-            .unique_by(|obj| obj.tile)
-            .collect();
+        if let Some(objects) = delta.objects {
+            self.objects = objects
+                .into_iter()
+                .chain(
+                    self.objects
+                        .drain(..)
+                        .filter(|obj| is_far_from_player(obj.tile)),
+                )
+                .unique_by(|obj| obj.tile)
+                .collect();
+        }
 
-        // Can't de-duplicate the items by their position, because
-        // more than one item may be on a given tile.  So for now,
-        // just reading all of them.
-        self.items = delta.items;
+        if let Some(items) = delta.items {
+            // Can't de-duplicate the items by their position, because
+            // more than one item may be on a given tile.  So for now,
+            // just reading all of them.
+            self.items = items;
+        }
 
-        self.characters = delta.characters;
-        self.bombs = delta.bombs;
+        if let Some(characters) = delta.characters {
+            self.characters = characters;
+        }
+        if let Some(bombs) = delta.bombs {
+            self.bombs = bombs;
+        }
         self.current_event = delta.current_event;
     }
 
     fn apply_nonlocal_delta(&mut self, delta: LocationDelta) {
-        self.characters = delta.characters;
+        if let Some(characters) = delta.characters {
+            self.characters = characters;
+        }
     }
 }
 
