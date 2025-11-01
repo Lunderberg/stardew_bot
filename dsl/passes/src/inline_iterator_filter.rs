@@ -5,6 +5,25 @@ use crate::{CopyFirstParamExt as _, Error};
 
 pub struct InlineIteratorFilter;
 
+// Before:
+//
+//    iter
+//      .filter(filter_func)
+//      .reduce(initial, reduction_func)
+//
+// After:
+//
+//    iter
+//      .reduce(
+//          initial,
+//          |acc, value| {
+//              if filter_func(value) {
+//                  reduction_func(acc, value)
+//              } else {
+//                  acc
+//              }
+//          }
+//      )
 impl GraphRewrite for InlineIteratorFilter {
     type Error = Error;
 
