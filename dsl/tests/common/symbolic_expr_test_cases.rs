@@ -80,6 +80,12 @@ macro_rules! generate_tests {
         }
         $generator! { prim_argument, ignore_int="Not implemented" }
         $generator! { native_argument, ignore_int="Not implemented" }
+        $generator! { bitwise_and }
+        $generator! { bitwise_or }
+        $generator! {
+            conditional_using_bitwise_and,
+            ignore_int="Not implemented",
+        }
     };
 }
 pub(crate) use generate_tests;
@@ -2172,6 +2178,92 @@ pub fn native_argument(
         .try_into()?;
 
     let expected: usize = 15;
+    assert_eq!(result, expected);
+
+    Ok(())
+}
+
+pub fn bitwise_and(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            7 & 0xabcd1234
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected: usize = 7usize & 0xabcd1234usize;
+    assert_eq!(result, expected);
+
+    Ok(())
+}
+
+pub fn bitwise_or(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main() {
+            7 | 0xabcd1230
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm.local_eval().map_err(Into::into)?.try_into()?;
+
+    let expected: usize = 7usize | 0xabcd1230usize;
+    assert_eq!(result, expected);
+
+    Ok(())
+}
+
+pub fn conditional_using_bitwise_and(
+    mut builder: impl Build<Error: Into<Error>>,
+) -> Result<(), Error> {
+    let mut graph = SymbolicGraph::new();
+
+    graph.parse(stringify! {
+        pub fn main(flags: u64) {
+            if flags & 0x2u64 > 0u64 {
+                100
+            } else {
+                200
+            }
+        }
+    })?;
+
+    let vm = builder.build(&graph)?;
+
+    let result: usize = vm
+        .get_function("main")
+        .map_err(Into::into)?
+        .with_args([0x143u64])
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
+
+    let expected: usize = 100;
+    assert_eq!(result, expected);
+
+    let result: usize = vm
+        .get_function("main")
+        .map_err(Into::into)?
+        .with_args([0x141u64])
+        .map_err(Into::into)?
+        .evaluate()
+        .map_err(Into::into)?
+        .try_into()?;
+
+    let expected: usize = 200;
     assert_eq!(result, expected);
 
     Ok(())
