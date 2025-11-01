@@ -93,7 +93,7 @@ impl GraphRewrite for LowerSymbolicExpr<'_, '_> {
         &self,
         graph: &mut SymbolicGraph,
         expr: &ExprKind,
-        name: Option<&str>,
+        _name: Option<&str>,
     ) -> Result<Option<SymbolicValue>, crate::Error> {
         let opt_value = match expr {
             ExprKind::StaticField(static_field) => {
@@ -342,7 +342,10 @@ impl GraphRewrite for LowerSymbolicExpr<'_, '_> {
                 }
 
                 let ptr = graph.add(ptr, offset);
-                if let Some(name) = name {
+                if let Some(name) = obj
+                    .as_op_index()
+                    .and_then(|index| graph[index].name.as_ref())
+                {
                     graph.name(ptr, format!("member_ptr_{field}_of_{name}"))?;
                 } else {
                     graph.name(ptr, format!("member_ptr_{field}"))?;
@@ -359,7 +362,10 @@ impl GraphRewrite for LowerSymbolicExpr<'_, '_> {
 
                 graph.name(
                     value,
-                    if let Some(name) = name {
+                    if let Some(name) = obj
+                        .as_op_index()
+                        .and_then(|index| graph[index].name.as_ref())
+                    {
                         format!("member_{field}_of_{name}")
                     } else {
                         format!("member_{field}")
