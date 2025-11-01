@@ -2330,7 +2330,7 @@ impl Location {
                 let iter_objects = iter_location_objects(
                     location,
                     |entry| {
-                        let pos = entry.value.tileLocation.value;
+                        let pos = entry.key;
                         is_close_to_player(pos.X, pos.Y)
                     }
                 );
