@@ -99,8 +99,6 @@ impl BotGoal for GiveGiftGoal {
             return Ok(stack.into());
         }
 
-        actions.do_action(GameAction::MouseOverTile(tile));
-
         let opt_to_select = self
             .can_talk(game_state)
             .then(|| {
@@ -123,7 +121,11 @@ impl BotGoal for GiveGiftGoal {
             return Ok(select.into());
         }
 
-        actions.do_action(GameAction::RightClick);
+        actions.do_action(GameAction::MouseOverTile(tile));
+        if game_state.inputs.mouse_tile_location == tile {
+            actions.do_action(GameAction::RightClick);
+        }
+
         Ok(BotGoalResult::InProgress)
     }
 }
