@@ -68,12 +68,6 @@ impl SymbolicGraphCSE for SymbolicGraph {
                         !functions_returning_rust_native.contains(func)
                     }
 
-                    ExprKind::None => {
-                        // Keeping the `None` values separate produces
-                        // easier-to-read printouts.
-                        false
-                    }
-
                     _ => true,
                 };
 
