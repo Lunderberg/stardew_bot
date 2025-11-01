@@ -630,27 +630,13 @@ impl<'a> RuntimeFunc<'a> for VMEvaluator<'a> {
     }
 
     fn with_args<Arg>(
-        mut self,
+        self,
         args: impl IntoIterator<Item = Arg>,
     ) -> Result<Self, Self::Error>
     where
         Arg: Into<StackValue>,
     {
-        let mut i_arg = 0usize;
-        for arg in args.into_iter() {
-            if i_arg < self.num_arguments {
-                self.values[i_arg] = arg.into();
-            }
-            i_arg += 1;
-        }
-        if i_arg == self.num_arguments {
-            Ok(self)
-        } else {
-            Err(Error::InvalidNumberOfArgumentsForTopLevelFunction {
-                expected: self.num_arguments,
-                provided: i_arg,
-            })
-        }
+        self.with_args(args)
     }
 
     fn evaluate(self) -> Result<VMResults, Self::Error> {
@@ -734,6 +720,30 @@ impl<'a> VMEvaluator<'a> {
         VMEvaluator {
             reader: Box::new(reader.with_cache()),
             ..self
+        }
+    }
+
+    pub fn with_args<Arg>(
+        mut self,
+        args: impl IntoIterator<Item = Arg>,
+    ) -> Result<Self, Error>
+    where
+        Arg: Into<StackValue>,
+    {
+        let mut i_arg = 0usize;
+        for arg in args.into_iter() {
+            if i_arg < self.num_arguments {
+                self.values[i_arg] = arg.into();
+            }
+            i_arg += 1;
+        }
+        if i_arg == self.num_arguments {
+            Ok(self)
+        } else {
+            Err(Error::InvalidNumberOfArgumentsForTopLevelFunction {
+                expected: self.num_arguments,
+                provided: i_arg,
+            })
         }
     }
 
