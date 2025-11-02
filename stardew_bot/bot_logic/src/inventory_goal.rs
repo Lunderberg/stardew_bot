@@ -411,10 +411,7 @@ impl InventoryGoal {
                 })
                 .unwrap_or(false);
 
-            let num_reserved = reserved_items.item_count(&item.id);
-            let exceeds_num_reserved = item.count > num_reserved;
-
-            is_correct_category && exceeds_num_reserved && !explicitly_stored
+            is_correct_category && !explicitly_stored
         };
 
         // Items that should be transferred from the player to a
@@ -474,9 +471,26 @@ impl InventoryGoal {
                         .with_count(*count);
 
                     if is_desired_category(&full_item) {
-                        // This item is from a desired category, so keep
-                        // it.
-                        break 'opt_new_count None;
+                        let stored = chest_contents.item_count(item);
+                        let reserved = reserved_items.item_count(item);
+                        let opt_new_count = if stored >= reserved {
+                            // This item is from a desired category, so keep
+                            // it.
+                            None
+                        } else {
+                            // This item is from a desired category,
+                            // but it is also a reserved item.  Since
+                            // not explicitly mentioned, it should be
+                            // stored in the chests, in order to meet
+                            // the reserved count.  Any excess above
+                            // the reserved count should remain in the
+                            // player inventory.
+                            let remaining =
+                                count.saturating_sub(reserved - stored);
+                            Some(remaining)
+                        };
+
+                        break 'opt_new_count opt_new_count;
                     }
 
                     if let Some(keep_if) = &self.keep_if {
@@ -683,14 +697,12 @@ impl InventoryGoal {
                         .iter_filled_slots()
                         .filter(|(_, item)| is_desired_category(item))
                         .find_map(|(slot, item)| {
-                            let goal_number = reserved_items
-                                .get(&item.id)
-                                .cloned()
-                                .unwrap_or(0);
-                            (goal_number < item.count).then(|| {
+                            let num_reserved =
+                                reserved_items.item_count(&item.id);
+                            (num_reserved < item.count).then(|| {
                                 let transfer_size = TransferSize::select(
                                     item.count,
-                                    goal_number,
+                                    item.count - num_reserved,
                                 );
                                 Transfer {
                                     chest: tile,
@@ -788,15 +800,20 @@ impl InventoryGoal {
         let opt_retrieve_category = (!self.with_categories.is_empty()
             && player_has_empty_slot)
             .then(|| {
-                iter_chest_items().map(|mut iter| {
-                    iter.find(|(_, _, item)| is_desired_category(item)).map(
-                        |(tile, slot, _)| Transfer {
-                            chest: tile,
-                            direction: TransferDirection::ChestToPlayer,
-                            slot,
-                            size: TransferSize::All,
-                        },
-                    )
+                iter_chest_items().map(|iter| {
+                    iter.filter(|(_, _, item)| is_desired_category(item))
+                        .find_map(|(tile, slot, item)| {
+                            let goal_number = reserved_items
+                                .get(&item.id)
+                                .cloned()
+                                .unwrap_or(0);
+                            (goal_number < item.count).then(|| Transfer {
+                                chest: tile,
+                                direction: TransferDirection::ChestToPlayer,
+                                slot,
+                                size: TransferSize::All,
+                            })
+                        })
                 })
             })
             .transpose()?
