@@ -1646,9 +1646,10 @@ impl BotInterrupt for MineNearbyOre {
             .characters
             .iter()
             .filter(|character| {
-                character.item_drops.iter().any(|drop| {
-                    missing_items.contains(drop) || drop == &ItemId::COAL
-                })
+                character.name != "Ghost"
+                    && character.item_drops.iter().any(|drop| {
+                        missing_items.contains(drop) || drop == &ItemId::COAL
+                    })
             })
             .map(|character| character.tile())
             .filter_map(|tile| {
