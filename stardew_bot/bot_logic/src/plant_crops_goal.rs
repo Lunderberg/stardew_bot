@@ -89,6 +89,9 @@ struct CropPlantingPlan {
     /// After planting, what should be located at each tile.
     final_state: HashMap<Vector<isize>, ItemId>,
 
+    /// The subset of `final_state` that contain seeds.
+    seed_tiles: HashSet<Vector<isize>>,
+
     /// Spaces surrounding the farm that should be cleared.
     empty_spaces: HashSet<Vector<isize>>,
 }
@@ -483,9 +486,14 @@ impl PlantCropsGoal {
                 iter_sprinklers.chain(iter_scarecrows)
             });
 
+        let mut seed_tiles = HashSet::<Vector<isize>>::new();
+
         let iter_seeds = seed_assignment
             .into_iter()
-            .filter_map(|(tile, opt_seed)| opt_seed.map(|seed| (tile, seed)));
+            .filter_map(|(tile, opt_seed)| opt_seed.map(|seed| (tile, seed)))
+            .inspect(|(tile, _)| {
+                seed_tiles.insert(*tile);
+            });
 
         let final_state: HashMap<_, _> =
             iter_seeds.chain(iter_craftables).collect();
@@ -518,6 +526,7 @@ impl PlantCropsGoal {
 
         self.plan = Some(CropPlantingPlan {
             final_state,
+            seed_tiles,
             empty_spaces,
         });
 
@@ -658,10 +667,27 @@ impl BotGoal for PlantCropsGoal {
             game_state.closest_entrance("Farm")?
         };
         let farm = game_state.get_room("Farm")?;
+        let plan = self.plan.as_ref().expect("Populated by self.fill_plan()");
+        let current_hoe_dirt: HashSet<_> = farm
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
+            .map(|obj| obj.tile)
+            .collect();
+
         let distances = farm
             .pathfinding(&game_state.statics)
             .include_border(true)
             .distances(initial_tile);
+
+        let clear_distances = farm
+            .pathfinding(&game_state.statics)
+            .include_border(true)
+            .stone_clearing_cost(0)
+            .wood_clearing_cost(0)
+            .breakable_clearing_cost(0)
+            .distances(initial_tile);
+
         let obstructed_pathfinding = farm
             .pathfinding(&game_state.statics)
             .stone_clearing_cost(1000)
@@ -693,7 +719,7 @@ impl BotGoal for PlantCropsGoal {
             };
 
             let is_within_clay_range = |tile: &Vector<isize>| {
-                distances
+                clear_distances
                     .get_opt(*tile)
                     .map(|&dist| dist <= max_clay_dist)
                     .unwrap_or(false)
@@ -703,13 +729,16 @@ impl BotGoal for PlantCropsGoal {
             // preparation for planting, and are within the allowed
             // distance for opportunistic clay farming.
             let iter_potential_clay_tiles = || {
-                iter_tiles_to_hoe()
-                    .map(|iter| iter.filter(is_within_clay_range))
+                plan.seed_tiles
+                    .iter()
+                    .cloned()
+                    .filter(|tile| !current_hoe_dirt.contains(tile))
+                    .filter(is_within_clay_range)
             };
 
             let clay_predictor = ClayPredictor::new(game_state);
             let clay_tiles: HashSet<Vector<isize>> =
-                iter_potential_clay_tiles()?
+                iter_potential_clay_tiles()
                     .filter(|tile| clay_predictor.will_produce_clay(*tile))
                     .collect();
 
@@ -741,9 +770,8 @@ impl BotGoal for PlantCropsGoal {
                     .count()
             };
             let longest_until_clay =
-                iter_potential_clay_tiles()?.map(&uses_until_clay).max();
-
-            iter_potential_clay_tiles()?
+                iter_potential_clay_tiles().map(&uses_until_clay).max();
+            iter_potential_clay_tiles()
                 .filter(|tile| {
                     Some(uses_until_clay(*tile)) == longest_until_clay
                 })
