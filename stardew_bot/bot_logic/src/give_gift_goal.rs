@@ -88,7 +88,7 @@ impl BotGoal for GiveGiftGoal {
             .ok_or_else(|| Error::VillagerNotFound(self.recipient.clone()))?;
 
         if room != &game_state.player.room_name
-            || game_state.player.tile().manhattan_dist(tile) > 1
+            || game_state.player.tile().chessboard_dist(tile) > 1
         {
             let game_tick = game_state.globals.game_tick;
             let stack = LogicStack::new()

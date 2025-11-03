@@ -174,7 +174,7 @@ impl MovementGoal {
         let player = &game_state.player;
 
         let goal_dist =
-            self.target_position.manhattan_dist(player.center_pos());
+            self.target_position.chessboard_dist(player.center_pos());
 
         let is_correct_room = player.room_name == self.target_room;
         let is_correct_location_within_room = goal_dist < self.tolerance;
@@ -329,7 +329,7 @@ impl MovementGoal {
         .filter(|_| self.target_room == player.room_name)
         .filter(|_| {
             let goal_dist =
-                self.target_position.manhattan_dist(player.center_pos());
+                self.target_position.chessboard_dist(player.center_pos());
             goal_dist >= self.tolerance
         })
     }
@@ -410,7 +410,7 @@ impl LocalMovementGoal {
             // Check completion by seeing how far we are from the
             // target position.
             let goal_dist =
-                self.target_position.manhattan_dist(player.center_pos());
+                self.target_position.chessboard_dist(player.center_pos());
             goal_dist < self.tolerance
         }
     }
@@ -634,7 +634,7 @@ impl BotGoal for LocalMovementGoal {
         actions.do_action(GameAction::MouseOverTile(target_tile));
 
         let must_open_door = self.activate_endpoint()
-            && player_position.manhattan_dist(self.target_position) < 1.5;
+            && player_position.chessboard_dist(self.target_position) < 1.5;
 
         if must_open_door
             && game_state.inputs.mouse_tile_location == target_tile

@@ -310,7 +310,7 @@ impl BotInterrupt for ScytheNearby {
                 matches!(obj.kind, ObjectKind::Fiber | ObjectKind::Grass)
             })
             .map(|obj| obj.tile)
-            .find(|&tile| player_tile.manhattan_dist(tile) == 1)
+            .find(|&tile| player_tile.chessboard_dist(tile) == 1)
         else {
             return Ok(None);
         };
@@ -324,7 +324,7 @@ impl BotInterrupt for ScytheNearby {
             ))
             .cancel_if(move |game_state| {
                 game_state.player.room_name != current_room
-                    || game_state.player.tile().manhattan_dist(tile) != 1
+                    || game_state.player.tile().chessboard_dist(tile) != 1
             });
 
         Ok(Some(stack))

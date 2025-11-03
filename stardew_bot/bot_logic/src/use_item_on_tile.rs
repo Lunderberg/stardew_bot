@@ -73,7 +73,7 @@ impl BotGoal for UseItemOnTile {
         let is_within_range = move |game_state: &GameState| -> bool {
             !refilling_watering_can
                 && !is_scythe
-                && game_state.player.tile().manhattan_dist(target_tile) <= 1
+                && game_state.player.tile().chessboard_dist(target_tile) <= 1
         };
 
         let threshold = if refilling_watering_can {
@@ -134,7 +134,7 @@ impl BotGoal for UseItemOnTile {
         let player_pos = player.center_pos();
         if (requires_adjacent_tile && player_tile == self.tile)
             || (requires_noncolliding_tile
-                && player_pos.manhattan_dist(self.tile.into()) < 1.0)
+                && player_pos.chessboard_dist(self.tile.into()) < 1.0)
         {
             // This tool requires the player to be standing adjacent
             // to the targeted tile, and cannot be used when standing

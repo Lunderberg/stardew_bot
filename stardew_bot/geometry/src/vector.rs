@@ -66,7 +66,7 @@ impl<T> Vector<T> {
         self.mag2().sqrt()
     }
 
-    pub fn manhattan_dist(self, other: Self) -> T
+    pub fn chessboard_dist(self, other: Self) -> T
     where
         T: PartialOrd,
         T: std::ops::Sub<Output = T>,

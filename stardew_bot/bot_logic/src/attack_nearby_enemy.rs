@@ -59,7 +59,7 @@ impl BotInterrupt for AttackNearbyEnemy {
             .filter(|monster| {
                 !monster.is_invisible_duggy && !monster.is_waiting_rock_crab
             })
-            .find(|monster| player_tile.manhattan_dist(monster.tile()) <= 1);
+            .find(|monster| player_tile.chessboard_dist(monster.tile()) <= 1);
 
         let Some(nearby_monster) = opt_nearby_monster else {
             return Ok(None);

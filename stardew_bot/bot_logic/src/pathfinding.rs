@@ -538,7 +538,7 @@ impl<'a> Pathfinding<'a> {
 
             let tolerance = if visiting.should_propagate { 1 } else { 0 };
             if goal.iter().any(|goal_tile| {
-                visiting.tile.manhattan_dist(goal_tile) <= tolerance
+                visiting.tile.chessboard_dist(goal_tile) <= tolerance
             }) {
                 opt_final_tile = Some(visiting.tile);
                 break;
@@ -571,10 +571,8 @@ impl<'a> Pathfinding<'a> {
                 }
 
                 let tile_dist = if dir.is_cardinal() { 1000 } else { 1414 };
-                let additional_cost = cost_map
-                    .get(new_tile).copied()
-                    .flatten()
-                    .unwrap_or(0);
+                let additional_cost =
+                    cost_map.get(new_tile).copied().flatten().unwrap_or(0);
 
                 let new_dist = visiting.dist + tile_dist + additional_cost;
                 let new_heuristic = get_heuristic(new_tile);

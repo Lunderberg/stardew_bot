@@ -40,7 +40,7 @@ impl BotGoal for ActivateTile {
         }
 
         let is_within_range =
-            game_state.player.tile().manhattan_dist(self.tile) <= 1;
+            game_state.player.tile().chessboard_dist(self.tile) <= 1;
         if is_within_range {
             actions.do_action(GameAction::MouseOverTile(self.tile));
             if game_state.inputs.mouse_tile_location == self.tile

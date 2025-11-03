@@ -1022,7 +1022,7 @@ impl BotGoal for MineSingleLevel {
                 .objects
                 .iter()
                 .filter(|obj| matches!(obj.kind, ObjectKind::MineLadderUp))
-                .map(|obj| obj.tile.manhattan_dist(player_tile))
+                .map(|obj| obj.tile.chessboard_dist(player_tile))
                 .min()
                 .unwrap_or(100);
             if dist_from_ladder > 3 {
