@@ -235,6 +235,9 @@ impl ItemId {
     pub const SOLAR_ESSENCE: Self = Self::new_const("(O)768");
     pub const VOID_ESSENCE: Self = Self::new_const("(O)769");
 
+    pub const CONCH: Self =
+        Self::new_const("(O)FlashShifter.StardewValleyExpandedCP_Big_Conch");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),

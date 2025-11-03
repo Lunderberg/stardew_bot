@@ -264,7 +264,11 @@ impl BotGoal for FirstDay {
         };
 
         if should_ship_clay(game_state) {
-            let goal = ShipItemGoal::new([ItemId::CLAY.with_count(0)]);
+            let goal = ShipItemGoal::new(
+                [ItemId::CLAY, ItemId::DAFFODIL, ItemId::CONCH]
+                    .into_iter()
+                    .map(|id| id.with_count(0)),
+            );
             if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
