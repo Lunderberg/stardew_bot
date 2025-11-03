@@ -550,8 +550,19 @@ impl BotGoal for LocalMovementGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
+        // Many items (e.g. geodes/artifacts) trigger a dialogue menu
+        // when first picked up.  Close these menus when they occur.
+        //
+        // TODO: Distinguish between a fully-loaded menu that has no
+        // responses (the popups) and a partially-loaded menu that
+        // doesn't yet have a response (minecart menu).  Currently,
+        // this code may prematurely close minecart menus while they
+        // are in the process of opening.
         let cleanup = MenuCloser::new();
-        if game_state.dialogue_menu().is_none()
+        if game_state
+            .dialogue_menu()
+            .map(|menu| menu.responses.is_empty())
+            .unwrap_or(true)
             && !cleanup.is_completed(game_state)
         {
             return Ok(cleanup.into());
