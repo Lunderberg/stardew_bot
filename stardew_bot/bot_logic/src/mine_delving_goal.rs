@@ -545,9 +545,6 @@ impl MineDelvingGoal {
                 }
             })
             .min();
-        if let Some(region_for_bundle) = opt_region_for_bundle {
-            return Ok(region_for_bundle);
-        }
 
         let copper_ore = get_count(&ItemId::COPPER_ORE);
         let copper_bar = get_count(&ItemId::COPPER_BAR);
@@ -555,8 +552,12 @@ impl MineDelvingGoal {
         let iron_bar = get_count(&ItemId::IRON_BAR);
         let coal = get_count(&ItemId::COAL);
 
+        // Reserve copper ore/coal for cherry bombs
         let copper_ore = copper_ore.saturating_sub(CRAFTABLE_CHERRY_BOMBS * 4);
         let coal = coal.saturating_sub(CRAFTABLE_CHERRY_BOMBS);
+
+        let effective_copper_bars = copper_bar + copper_ore / 5;
+        let effective_iron_bars = iron_bar + iron_ore / 5;
 
         let enough_ore_to_smelt = copper_ore >= 5 || iron_ore >= 5;
         let num_furnaces = game_state
@@ -565,7 +566,15 @@ impl MineDelvingGoal {
             .iter()
             .filter(|obj| matches!(obj.kind, ObjectKind::CraftingMachine(_)))
             .count();
-        let preferred_region = if coal == 0 {
+        let preferred_region = if let Some(region_for_bundle) =
+            opt_region_for_bundle
+            && effective_copper_bars >= 5
+        {
+            // If we have enough copper bars for a tool upgrade, and a
+            // bundle requires items from a region, collect items for
+            // the bundle.
+            region_for_bundle
+        } else if coal == 0 {
             MiningRegion::Iron
         } else if enough_ore_to_smelt
             && num_furnaces < OFFSETS_ELEVATOR_TO_FURNACE.len()
@@ -575,17 +584,12 @@ impl MineDelvingGoal {
             // have enough smelters.  Mine more copper to make more
             // smelters.
             MiningRegion::Copper
-        } else {
+        } else if effective_copper_bars <= effective_iron_bars {
             // If there are more iron bars than copper bars, mine more
             // copper.
-            let effective_copper_bars = copper_bar + copper_ore / 5;
-            let effective_iron_bars = iron_bar + iron_ore / 5;
-
-            if effective_copper_bars <= effective_iron_bars {
-                MiningRegion::Copper
-            } else {
-                MiningRegion::Iron
-            }
+            MiningRegion::Copper
+        } else {
+            MiningRegion::Iron
         };
 
         Ok(preferred_region)
