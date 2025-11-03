@@ -647,20 +647,23 @@ impl BotLogic {
                 println!("Running top goal '{}'", current_goal.description());
             }
 
-            assert!(
-                !self.recursed_during_current_update.contains(&i_goal),
-                "Infinite loop detected: \
+            if self.recursed_during_current_update.contains(&i_goal) {
+                return Err(Error::InfiniteLoop {
+                    msg: format!(
+                        "Infinite loop detected: \
                  Current goal '{}' has already executed on this frame, \
                  and previously produced subgoals.  \
                  If it runs again, it will produce those same subgoals, \
                  in an infinite loop.\n\
                  Current stack:\n\t{}",
-                current_goal.description(),
-                self.stack
-                    .iter()
-                    .map(|item| item.description())
-                    .format("\n\t")
-            );
+                        current_goal.description(),
+                        self.stack
+                            .iter()
+                            .map(|item| item.description())
+                            .format("\n\t")
+                    ),
+                });
+            }
 
             let num_actions_before = actions.actions.len();
             let goal_result = current_goal.apply(game_state, &mut actions)?;
@@ -673,58 +676,59 @@ impl BotLogic {
                     }
 
                     if let Some(prev) = previously_produced_subgoals {
-                        assert!(
-                            self.stack.len() > prev + 2,
-                            "Infinite loop detected.  \
-                             Current goal '{0}' has completed, \
-                             but this returns control \
-                             to the preceding goal '{1}'.  \
-                             Since this preceding goal '{1}' \
-                             has already been run, \
-                             and chose to delegate to '{0}', \
-                             executing it again would enter an infinite loop.",
-                            self.current_goal().unwrap().description(),
-                            match self.stack.get(prev) {
-                                Some(LogicStackItem::Goal(prev_goal)) => {
-                                    prev_goal.description()
-                                }
-                                Some(LogicStackItem::PreventInterrupt) =>
-                                    format!(
-                                        "Should be unreachable, \
-                                     since {prev} contained a BotGoal \
-                                     the first time around, \
-                                     but now contains PreventInterrupt"
-                                    )
-                                    .into(),
-                                Some(LogicStackItem::CancelIf(_)) => format!(
-                                    "Should be unreachable, \
-                                     since {prev} contained a BotGoal \
-                                     the first time around, \
-                                     but now contains CancelIf."
-                                )
-                                .into(),
-                                Some(LogicStackItem::Interrupt {
-                                    interrupt,
-                                    ..
-                                }) => {
-                                    format!(
+                        if self.stack.len() <= prev + 2 {
+                            return Err(Error::InfiniteLoop{msg:format!(
+                                "Infinite loop detected.  \
+                                 Current goal '{0}' has completed, \
+                                 but this returns control \
+                                 to the preceding goal '{1}'.  \
+                                 Since this preceding goal '{1}' \
+                                 has already been run, \
+                                 and chose to delegate to '{0}', \
+                                 executing it again would enter an infinite loop.",
+                                self.current_goal().unwrap().description(),
+                                match self.stack.get(prev) {
+                                    Some(LogicStackItem::Goal(prev_goal)) => {
+                                        prev_goal.description()
+                                    }
+                                    Some(LogicStackItem::PreventInterrupt) =>
+                                        format!(
+                                            "Should be unreachable, \
+                                             since {prev} contained a BotGoal \
+                                             the first time around, \
+                                             but now contains PreventInterrupt"
+                                        )
+                                        .into(),
+                                    Some(LogicStackItem::CancelIf(_)) => format!(
                                         "Should be unreachable, \
                                          since {prev} contained a BotGoal \
                                          the first time around, \
-                                         but now contains interrupt '{}'",
-                                        interrupt.description(),
+                                         but now contains CancelIf."
                                     )
-                                    .into()
+                                        .into(),
+                                    Some(LogicStackItem::Interrupt {
+                                        interrupt,
+                                        ..
+                                    }) => {
+                                        format!(
+                                            "Should be unreachable, \
+                                             since {prev} contained a BotGoal \
+                                             the first time around, \
+                                             but now contains interrupt '{}'",
+                                            interrupt.description(),
+                                        )
+                                            .into()
+                                    }
+                                    None => format!(
+                                        "Should be unreachable, \
+                                         since {prev} contained a BotGoal \
+                                         the first time around, \
+                                         but is now empty."
+                                    )
+                                        .into(),
                                 }
-                                None => format!(
-                                    "Should be unreachable, \
-                                     since {prev} contained a BotGoal \
-                                     the first time around, \
-                                     but is now empty."
-                                )
-                                .into(),
-                            }
-                        );
+                            )});
+                        }
                     }
 
                     self.pop_from_logic_stack();
@@ -851,19 +855,22 @@ impl BotLogic {
                 println!("Interrupt '{}' triggered", interrupt.description());
             }
 
-            assert!(
-                !self.recursed_during_current_update.contains(&i_item),
-                "Infinite loop detected.  \
+            if self.recursed_during_current_update.contains(&i_item) {
+                return Err(Error::InfiniteLoop {
+                    msg: format!(
+                        "Infinite loop detected.  \
                  Interrupt '{}' fired multiple times \
                  during a single update.  \
                  The second time, it produced goals [{}].",
-                interrupt.description(),
-                interrupt_stack
-                    .0
-                    .iter()
-                    .map(|item| format!("'{}'", item.description()))
-                    .format(", ")
-            );
+                        interrupt.description(),
+                        interrupt_stack
+                            .0
+                            .iter()
+                            .map(|item| format!("'{}'", item.description()))
+                            .format(", ")
+                    ),
+                });
+            }
 
             self.recursed_during_current_update.insert(i_item);
             *active_goal = Some(current_stack_size);

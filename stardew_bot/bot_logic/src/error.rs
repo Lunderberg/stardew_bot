@@ -95,6 +95,9 @@ pub enum Error {
          but not event data was found."
     )]
     MissingEventDataDuringEggFestival,
+
+    #[error("Infinite loop detected.  {msg}")]
+    InfiniteLoop { msg: String },
 }
 
 impl std::fmt::Debug for Error {
