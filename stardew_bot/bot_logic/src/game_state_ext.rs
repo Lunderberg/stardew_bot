@@ -9,8 +9,8 @@ use game_state::{
 };
 
 use crate::{
-    best_weapon, bot_logic::ActionCollector, Error, GameAction, MovementGoal,
-    Pathfinding,
+    Error, GameAction, MovementGoal, Pathfinding, best_weapon,
+    bot_logic::ActionCollector,
 };
 
 pub trait GameStateExt {

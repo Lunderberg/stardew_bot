@@ -188,7 +188,7 @@ impl<'a> Widget for DrawableMemoryTable<'a> {
 }
 
 impl WidgetWindow<Error> for MemoryTable {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         self.view_stack.first().title().into()
     }
 

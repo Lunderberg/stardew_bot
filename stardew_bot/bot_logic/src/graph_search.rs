@@ -34,7 +34,7 @@ pub trait GraphSearch<T: Eq + Hash> {
     fn dijkstra_search(
         &self,
         initial: T,
-    ) -> SearchIter<T, Self, DijkstraHeuristic>
+    ) -> SearchIter<'_, T, Self, DijkstraHeuristic>
     where
         T: Clone,
     {
@@ -57,7 +57,7 @@ pub trait GraphSearch<T: Eq + Hash> {
         &self,
         initial: T,
         target: T,
-    ) -> SearchIter<T, Self, GoalNodeHeuristic<T, Self>>
+    ) -> SearchIter<'_, T, Self, GoalNodeHeuristic<'_, T, Self>>
     where
         T: Clone,
     {
@@ -135,7 +135,7 @@ pub trait GraphSearch<T: Eq + Hash> {
         &self,
         initial: T,
         heuristic: H,
-    ) -> SearchIter<T, Self, H>
+    ) -> SearchIter<'_, T, Self, H>
     where
         T: Clone,
         H: Heuristic<T>,
@@ -253,12 +253,8 @@ pub struct SearchIter<
     heuristic: H,
 }
 
-impl<
-        'a,
-        T: Eq + Hash + Clone,
-        Graph: GraphSearch<T> + ?Sized,
-        H: Heuristic<T>,
-    > Iterator for SearchIter<'a, T, Graph, H>
+impl<'a, T: Eq + Hash + Clone, Graph: GraphSearch<T> + ?Sized, H: Heuristic<T>>
+    Iterator for SearchIter<'a, T, Graph, H>
 {
     type Item = (T, SearchNodeMetadata);
 

@@ -283,7 +283,7 @@ impl TuiExplorerBuilder {
             .map(|p| p.location)
             .next();
         let x86_64_tag = stack_memory.rfind_pattern(
-            &"x86_64".chars().map(|c| (c as u8)).collect::<Vec<_>>(),
+            &"x86_64".chars().map(|c| c as u8).collect::<Vec<_>>(),
         );
         let stack_entry_point = bottom_stack_frame
             .or(x86_64_tag)

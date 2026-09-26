@@ -64,7 +64,7 @@ impl<'a> CILMethod<'a> {
 
     fn iter_data_sections(
         &self,
-    ) -> Result<impl Iterator<Item = ByteRange> + '_, Error> {
+    ) -> Result<impl Iterator<Item = ByteRange<'_>> + '_, Error> {
         let header = self.header()?.value();
 
         let iter = header

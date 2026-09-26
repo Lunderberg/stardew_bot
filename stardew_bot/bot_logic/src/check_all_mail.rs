@@ -4,8 +4,8 @@ use geometry::Vector;
 use crate::{ActivateTile, Error, GameStateExt as _};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     InventoryGoal, MenuCloser,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct CheckAllMail;

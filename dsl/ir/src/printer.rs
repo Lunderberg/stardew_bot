@@ -1391,9 +1391,8 @@ impl<'a> GraphPrinter<'a> {
                                             Some(ptr),
                                             Some(PrintItem::Comma),
                                             Some(num_bytes),
-                                            Some(PrintItem::Comma).filter(
-                                                |_| (i + 1) < regions.len(),
-                                            ),
+                                            (i + 1 < regions.len())
+                                                .then_some(PrintItem::Comma),
                                         ]
                                         .into_iter()
                                         .flatten()

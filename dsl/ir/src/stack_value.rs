@@ -8,8 +8,9 @@ use crate::{DSLType, Error, ExposedNativeObject, RustNativeObject};
 // since it is used as the common interface at runtime, and the
 // bytecode interpreter doesn't really have a stack anymore.
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum StackValue {
+    #[default]
     None,
     Prim(RuntimePrimValue),
     ByteArray(Vec<u8>),
@@ -231,11 +232,5 @@ impl From<ExposedNativeObject> for StackValue {
 impl<T: RustNativeObject> From<T> for StackValue {
     fn from(obj: T) -> Self {
         ExposedNativeObject::new(obj).into()
-    }
-}
-
-impl Default for StackValue {
-    fn default() -> Self {
-        StackValue::None
     }
 }

@@ -7,16 +7,16 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::LogicStack, Error, GameAction, ItemIterExt as _,
-    ItemLookupExt as _, MenuCloser,
+    Error, GameAction, ItemIterExt as _, ItemLookupExt as _, MenuCloser,
+    bot_logic::LogicStack,
 };
 use game_state::{
     GameState, Item, ItemCategory, ItemId, ItemSet, Location, WeaponKind,
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
     ActivateTile, CraftItemGoal, GameStateExt as _, LocationExt as _,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
 };
 
 const MAX_GP_PER_STAMINA: f32 = 2.5;
@@ -493,19 +493,19 @@ impl InventoryGoal {
                         break 'opt_new_count opt_new_count;
                     }
 
-                    if let Some(keep_if) = &self.keep_if {
-                        if keep_if(&full_item) {
-                            // This item passes the check to be kept
-                            // in the inventory.
-                            break 'opt_new_count None;
-                        }
+                    if let Some(keep_if) = &self.keep_if
+                        && keep_if(&full_item)
+                    {
+                        // This item passes the check to be kept
+                        // in the inventory.
+                        break 'opt_new_count None;
                     }
-                    if let Some(take_if) = &self.take_if {
-                        if take_if(&full_item) {
-                            // This item passes the check to be taken
-                            // from the storage chests.
-                            break 'opt_new_count None;
-                        }
+                    if let Some(take_if) = &self.take_if
+                        && take_if(&full_item)
+                    {
+                        // This item passes the check to be taken
+                        // from the storage chests.
+                        break 'opt_new_count None;
                     }
 
                     // No exceptions would keep the item in the
@@ -807,7 +807,7 @@ impl InventoryGoal {
                                 .get(&item.id)
                                 .cloned()
                                 .unwrap_or(0);
-                            (goal_number < item.count).then(|| Transfer {
+                            (goal_number < item.count).then_some(Transfer {
                                 chest: tile,
                                 direction: TransferDirection::ChestToPlayer,
                                 slot,

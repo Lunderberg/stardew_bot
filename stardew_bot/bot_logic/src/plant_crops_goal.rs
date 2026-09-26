@@ -13,10 +13,10 @@ use game_state::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     ActivateTile, BuyFromMerchantGoal, ClayPredictor, FarmPlan,
     FillWateringCan, GameStateExt as _, InventoryGoal, LocationExt as _,
     OrganizeInventoryGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 #[derive(Clone)]
@@ -272,7 +272,7 @@ impl PlantCropsGoal {
             .iter()
             .filter_map(move |(tile, goal)| {
                 let opt_next_step =
-                    to_clear_clumps.get(&tile).cloned().or_else(|| {
+                    to_clear_clumps.get(tile).cloned().or_else(|| {
                         let opt_current = current_state.get(tile).copied();
                         Self::next_step_of_tile(
                             &game_state.statics,
@@ -519,7 +519,7 @@ impl PlantCropsGoal {
                     .flat_map(|region| region.map.iter_true())
                     .filter(|&tile| reachable.is_set(tile)),
             )
-            .chain(final_state.iter().flat_map(|(tile, _)| tile.iter_nearby()))
+            .chain(final_state.keys().flat_map(|tile| tile.iter_nearby()))
             .filter(|adj| !final_state.contains_key(adj))
             .filter(|adj| !avoid_clearing.contains(adj))
             .collect();

@@ -11,6 +11,10 @@ impl<T> NonEmptyVec<T> {
         }
     }
 
+    pub fn is_empty(&self) -> bool {
+        false
+    }
+
     pub fn len(&self) -> usize {
         self.rest.len() + 1
     }

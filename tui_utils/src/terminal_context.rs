@@ -29,7 +29,7 @@ fn make_panic_hook() -> (
         // available for use.  Therefore, replicating the output of
         // the default hook (`std/src/panicking.rs::default_hook`).
         let payload = None
-            .or_else(|| payload.downcast_ref::<&'static str>().map(|s| *s))
+            .or_else(|| payload.downcast_ref::<&'static str>().copied())
             .or_else(|| payload.downcast_ref::<String>().map(|s| &s[..]))
             .unwrap_or("Box<dyn Any>");
 
@@ -103,7 +103,7 @@ fn make_panic_hook() -> (
         let _ = message_arc.lock().unwrap().insert(message);
     };
 
-    return (message_output, callback);
+    (message_output, callback)
 }
 
 impl TerminalContext {

@@ -98,7 +98,7 @@ impl ModuleContents {
 }
 
 impl WidgetWindow<Error> for RuntimeModuleView {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Runtime Modules".into()
     }
 

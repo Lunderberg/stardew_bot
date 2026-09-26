@@ -46,7 +46,7 @@ impl<'a> SignatureTypeExt for SignatureType<'a> {
             | SignatureType::Class { index, metadata } => {
                 SymbolicType::Metadata {
                     module: metadata.name().unwrap().to_string(),
-                    index: (*index).try_into().unwrap(),
+                    index: *index,
                 }
             }
             SignatureType::MultiDimArray {

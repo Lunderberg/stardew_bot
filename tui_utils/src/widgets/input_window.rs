@@ -40,7 +40,7 @@ impl InputWindow {
     }
 }
 
-impl<'a> ratatui::widgets::Widget for &'a InputWindow {
+impl ratatui::widgets::Widget for &InputWindow {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

@@ -13,7 +13,7 @@ use crate::{Error, GameState};
 pub struct PredictedLuckDisplay;
 
 impl WidgetWindow<Error> for PredictedLuckDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Step Count RNG".into()
     }
 

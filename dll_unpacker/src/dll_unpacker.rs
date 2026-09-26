@@ -1298,11 +1298,11 @@ impl<CodedIndexType> std::fmt::Display for MetadataCodedIndex<CodedIndexType> {
     }
 }
 
-fn full_name<'a>(namespace: &str, name: &str) -> String {
+fn full_name(namespace: &str, name: &str) -> String {
     if namespace.is_empty() {
         name.to_string()
     } else {
-        format!("{namespace}.{name}").into()
+        format!("{namespace}.{name}")
     }
 }
 
@@ -1312,7 +1312,7 @@ impl<'a> MetadataTypeDefOrRef<'a> {
             MetadataTypeDefOrRef::TypeDef(row) => row.full_name(),
             MetadataTypeDefOrRef::TypeRef(row) => row.full_name(),
             MetadataTypeDefOrRef::TypeSpec(spec) => {
-                Ok(format!("{}", spec.signature()?).into())
+                Ok(format!("{}", spec.signature()?))
             }
         }
     }
@@ -1648,7 +1648,7 @@ impl<'a> DLLUnpacker<'a> {
         }
     }
 
-    pub fn clr_runtime_header(&self) -> Result<ClrRuntimeHeader, Error> {
+    pub fn clr_runtime_header(&self) -> Result<ClrRuntimeHeader<'_>, Error> {
         let optional_header = self.optional_header()?;
         let data_dir = optional_header
             .data_directory(DataDirectoryKind::ClrRuntimeHeader)?
@@ -1943,9 +1943,8 @@ impl<'a> MetadataTableHeader<'a> {
     pub fn iter_num_rows(
         &self,
     ) -> Result<
-        impl Iterator<
-                Item = Result<(UnpackedValue<u32>, MetadataTableKind), Error>,
-            > + '_,
+        impl Iterator<Item = Result<(UnpackedValue<u32>, MetadataTableKind), Error>>
+        + '_,
         Error,
     > {
         let bitfield = self.valid_table_bitfield()?.value();
@@ -2085,7 +2084,7 @@ impl<'a> MetadataTableHeader<'a> {
 
 impl<'a> Metadata<'a> {
     pub fn name(&self) -> Result<&'a str, Error> {
-        Ok(self.get(MetadataTableIndex::<Module>::new(0))?.name()?)
+        self.get(MetadataTableIndex::<Module>::new(0))?.name()
     }
 
     pub fn ptr_range(&self) -> Range<Pointer> {
@@ -2245,7 +2244,7 @@ impl<'a> Metadata<'a> {
         &self,
         kind: MetadataTableKind,
         index: usize,
-    ) -> Result<Option<Cow<str>>, Error> {
+    ) -> Result<Option<Cow<'_, str>>, Error> {
         let Some(name) = self.get_name(kind, index)? else {
             return Ok(None);
         };

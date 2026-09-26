@@ -4,8 +4,8 @@ use crate::Error;
 use game_state::{GameState, ItemCategory};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     InventoryGoal, ShipItemGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ShipMostFishGoal;

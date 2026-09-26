@@ -9,10 +9,10 @@ use env_var_flag::env_var_flag;
 use crate::{Error, JunimoMenu, Menu};
 
 use super::{
-    define_utility_functions, rng_state::RngState, ChestMenu, DailyState,
-    DialogueMenu, DisplayState, FishingState, GeodeMenu, GlobalGameState,
-    InputState, Inventory, Location, LocationDelta, MailMenu, MineElevatorMenu,
-    PauseMenu, PlayerState, SeededRng, ShopMenu, StaticState,
+    ChestMenu, DailyState, DialogueMenu, DisplayState, FishingState, GeodeMenu,
+    GlobalGameState, InputState, Inventory, Location, LocationDelta, MailMenu,
+    MineElevatorMenu, PauseMenu, PlayerState, SeededRng, ShopMenu, StaticState,
+    define_utility_functions, rng_state::RngState,
 };
 
 #[derive(RustNativeObject, Debug, Clone)]
@@ -284,14 +284,13 @@ impl GameState {
             self.locations.retain(|loc| loc.mineshaft_details.is_none());
         }
 
-        if let Some(location_delta) = delta.location_delta {
-            if let Some(loc) = self
+        if let Some(location_delta) = delta.location_delta
+            && let Some(loc) = self
                 .locations
                 .iter_mut()
                 .find(|loc| loc.name == location_delta.name)
-            {
-                loc.apply_delta(location_delta, player_pos);
-            }
+        {
+            loc.apply_delta(location_delta, player_pos);
         }
 
         for loc in &mut self.locations {
@@ -410,7 +409,7 @@ impl GameStateReader {
         let read_characters = !env_var_flag("SKIP_CHARACTERS");
         let read_bombs = !env_var_flag("SKIP_BOMBS");
 
-        let read_flags: u64 = 0x01 * (read_rng_state as u64)
+        let read_flags: u64 = (read_rng_state as u64)
             + 0x02 * (read_location_delta as u64)
             + 0x04 * (read_player as u64)
             + 0x08 * (read_resource_clumps as u64)

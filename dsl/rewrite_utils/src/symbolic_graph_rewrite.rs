@@ -93,12 +93,11 @@ impl SymbolicGraphRewrite for SymbolicGraph {
             // named values.  When `y` gets replaced with `x`, it
             // should *NOT* cause `x` to be renamed in earlier parts
             // of the function.
-            if let Some(name) = &op.name {
-                if let SymbolicValue::Result(new_index) = value {
-                    if builder[new_index].name.is_none() {
-                        builder.name(value, name)?;
-                    }
-                }
+            if let Some(name) = &op.name
+                && let SymbolicValue::Result(new_index) = value
+                && builder[new_index].name.is_none()
+            {
+                builder.name(value, name)?;
             }
             if value != SymbolicValue::Result(old_index) {
                 prev_index_lookup.insert(old_index, value);

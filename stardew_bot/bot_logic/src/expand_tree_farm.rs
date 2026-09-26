@@ -2,13 +2,13 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::LogicStack, ActivateTile, Error, InventoryGoal, UseItemOnTile,
+    ActivateTile, Error, InventoryGoal, UseItemOnTile, bot_logic::LogicStack,
 };
 use game_state::{GameState, ItemId, ObjectKind, TileMap};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     FarmPlan, GameStateExt as _, LocationExt as _, MaintainStaminaGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ExpandTreeFarm;
@@ -98,7 +98,7 @@ impl ExpandTreeFarm {
                 // If a seed is already planted in a location that
                 // will become the tree farm, let it remain where it
                 // is.
-                
+
                 opt_tool.is_none() || !is_tree_farm_tile
             });
 

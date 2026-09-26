@@ -5,8 +5,8 @@ use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 use crate::Error;
 
 use super::{
-    item::{ItemKind, WateringCan},
     FishingRod, Item, ItemId, Quality, Weapon, WeaponKind,
+    item::{ItemKind, WateringCan},
 };
 
 #[derive(RustNativeObject, Debug, Clone)]

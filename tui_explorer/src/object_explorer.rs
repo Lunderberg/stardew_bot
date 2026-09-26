@@ -909,8 +909,11 @@ impl ObjectTreeNode {
         display_options: &DisplayOptions,
         prefetch: &[OwnedBytes],
     ) -> Result<ObjectTreeNode, Error> {
-        assert!(mtable_of_parent.as_usize() % Pointer::SIZE == 0);
-        assert!(field.method_table().as_usize() % Pointer::SIZE == 0);
+        assert!(mtable_of_parent.as_usize().is_multiple_of(Pointer::SIZE));
+        assert!(field
+            .method_table()
+            .as_usize()
+            .is_multiple_of(Pointer::SIZE));
 
         let method_table = reader.method_table(field.method_table())?;
         let module = reader.runtime_module(method_table.module())?;
@@ -1707,7 +1710,7 @@ impl TreeVisitorExtension for &mut LineCollector {
 }
 
 impl WidgetWindow<Error> for ObjectExplorer {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "ObjectExplorer".into()
     }
 
@@ -1750,7 +1753,7 @@ impl WidgetWindow<Error> for ObjectExplorer {
                                                 CollapseNonExpandedNodes,
                                             )
                                             .with_extension(&mut collector)
-                                            .visit(&mut self.object_tree);
+                                            .visit(&self.object_tree);
 
                                         collector
                                             .lines
@@ -1866,7 +1869,7 @@ impl WidgetWindow<Error> for ObjectExplorer {
                 ))
                 .with_extension(CollapseNonExpandedNodes)
                 .with_extension(&mut collector)
-                .visit(&mut self.object_tree);
+                .visit(&self.object_tree);
             collector.lines
         };
         let lines = lines.into_iter().map(|line| {

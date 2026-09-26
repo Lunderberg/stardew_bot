@@ -13,7 +13,7 @@ use env_var_flag::env_var_flag;
 use dsl_ir::SymbolicGraph;
 
 use crate::{
-    expr_to_virtual_machine::SymbolicGraphToVirtualMachine as _, Error,
+    Error, expr_to_virtual_machine::SymbolicGraphToVirtualMachine as _,
 };
 
 pub struct SymbolicGraphCompiler<'a, 'b> {

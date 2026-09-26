@@ -9,8 +9,8 @@ use game_state::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     SellToMerchantGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct GeodeCrackingGoal {
@@ -91,10 +91,10 @@ impl GeodeCrackingGoal {
     }
 
     fn held_item(game_state: &GameState) -> Option<&Item> {
-        if let Some(menu) = game_state.geode_menu() {
-            if let Some(held_item) = &menu.held_item {
-                return Some(held_item);
-            }
+        if let Some(menu) = game_state.geode_menu()
+            && let Some(held_item) = &menu.held_item
+        {
+            return Some(held_item);
         }
         None
     }

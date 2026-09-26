@@ -7,9 +7,9 @@ use crate::{Error, GameStateExt as _};
 use game_state::{CropPhase, GameState, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, CropQualityPredictor, InventoryGoal, LocationExt as _,
     MovementGoal, UseItemOnTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct HarvestCropsGoal {}

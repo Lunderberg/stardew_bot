@@ -27,7 +27,7 @@ impl PlayerStats {
 }
 
 impl WidgetWindow<Error> for PlayerStats {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Player Stats".into()
     }
 

@@ -4,8 +4,8 @@ use crate::{Error, GameAction, MovementGoal};
 use game_state::{GameState, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, InventoryGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 /// Repair the beach bridge

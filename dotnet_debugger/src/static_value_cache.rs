@@ -136,7 +136,7 @@ impl<'a> CachedReader<'a> {
         // lookup table for MethodTable and a lookup table for
         // TypeHandle, this function unpacks a TypeHandle, then
         // unwraps to a MethodTable.
-        if ptr.as_usize() % Pointer::SIZE != 0 {
+        if !ptr.as_usize().is_multiple_of(Pointer::SIZE) {
             return Err(Error::MisalignedMethodTable(ptr));
         }
 
@@ -547,7 +547,9 @@ impl<'a> CachedReader<'a> {
     ) -> Result<RuntimeType, Error> {
         let field_name = self.field_to_name(desc)?;
         assert!(
-            ptr_mtable_of_parent.as_usize() % Pointer::SIZE == 0,
+            ptr_mtable_of_parent
+                .as_usize()
+                .is_multiple_of(Pointer::SIZE),
             "Attempted to find field '{field_name}' \
              with misaligned parent mtable {ptr_mtable_of_parent}"
         );
@@ -706,7 +708,7 @@ impl<'a> CachedReader<'a> {
                 let sig_index = *sig_index as usize;
                 let expected_type_handle = *parent_generic_types
                     .get(sig_index)
-                    .ok_or_else(|| Error::InvalidGenericTypeVar {
+                    .ok_or(Error::InvalidGenericTypeVar {
                         index: sig_index,
                         num_vars: parent_generic_types.len(),
                     })?;
@@ -790,7 +792,7 @@ impl<'a> CachedReader<'a> {
             }
             SymbolicType::Metadata { module, index } => {
                 let module_ptr = self.runtime_module_by_name(module)?;
-                self.method_table_by_metadata(module_ptr, (*index).into())?
+                self.method_table_by_metadata(module_ptr, *index)?
             }
             SymbolicType::GenericInst { base, args } => {
                 let Some(base_ptr) =
@@ -939,7 +941,7 @@ impl<'a> CachedReader<'a> {
             }),
         }?;
 
-        return Ok(prim.into());
+        Ok(prim.into())
     }
 
     pub fn signature_type_to_runtime_type(
@@ -1155,7 +1157,7 @@ impl<'a> CachedReader<'a> {
                 let ptr_type_handle = parent_generic_types
                     .get(var_index)
                     .cloned()
-                    .ok_or_else(|| Error::InvalidGenericTypeVar {
+                    .ok_or(Error::InvalidGenericTypeVar {
                         index: var_index,
                         num_vars: parent_generic_types.len(),
                     })?;
@@ -1592,7 +1594,7 @@ impl<'a> CachedReader<'a> {
                 "f64" => SignaturePrimType::F64.into(),
                 _ => {
                     let type_def = self.find_type_def(
-                        &name,
+                        name,
                         module.as_ref().map(|s| s.as_str()),
                     )?;
                     type_def.signature()?
@@ -1664,10 +1666,16 @@ impl<'a> CachedReader<'a> {
                 type_args,
                 ..
             } => {
-                let base_type_def = match self.unwrap_type_ref(metadata.get(*index)?)? {
+                let base_type_def = match self
+                    .unwrap_type_ref(metadata.get(*index)?)?
+                {
                     MetadataTypeDefOrRef::TypeDef(row) => row,
-                    MetadataTypeDefOrRef::TypeRef(_) => unreachable!("Handled by unwrap_type_ref"),
-                    MetadataTypeDefOrRef::TypeSpec(_) => panic!("Uninstantiated generic should be TypeDef or TypeRef, not TypeSpec"),
+                    MetadataTypeDefOrRef::TypeRef(_) => {
+                        unreachable!("Handled by unwrap_type_ref")
+                    }
+                    MetadataTypeDefOrRef::TypeSpec(_) => panic!(
+                        "Uninstantiated generic should be TypeDef or TypeRef, not TypeSpec"
+                    ),
                 };
 
                 let defining_module = self.ptr_to_loader_module(sig)?;

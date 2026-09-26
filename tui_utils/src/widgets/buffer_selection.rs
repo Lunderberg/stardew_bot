@@ -60,7 +60,7 @@ impl BufferSelection {
 }
 
 impl<'a, 'b, E> WidgetWindow<E> for DrawableBufferSelection<'a, 'b, E> {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Select buffer".into()
     }
 

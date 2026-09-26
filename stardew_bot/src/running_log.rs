@@ -10,10 +10,10 @@ use ratatui::{
 };
 
 use tui_utils::{
+    LogMessage, TuiGlobals, WidgetSideEffects, WidgetWindow,
     extensions::HighlightLine as _,
     inputs::{KeyBindingMatch, KeySequence},
     widgets::{ScrollableState as _, SearchDirection, SearchWindow},
-    LogMessage, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
 use crate::Error;
@@ -153,7 +153,7 @@ impl Widget for &mut RunningLog {
 }
 
 impl WidgetWindow<Error> for RunningLog {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Log".into()
     }
 

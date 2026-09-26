@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use super::{native_function::WrappedNativeFunction, NativeFunction};
+use super::{NativeFunction, native_function::WrappedNativeFunction};
 
 /// Wrapper trait, solely so that it can be used within structs that
 /// derive Debug.

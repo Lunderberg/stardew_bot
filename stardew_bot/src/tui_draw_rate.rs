@@ -7,7 +7,7 @@ use ratatui::{
     text::Text,
     widgets::{Cell, Row, Table, Widget as _},
 };
-use tui_utils::{extensions::SplitRect as _, WidgetWindow};
+use tui_utils::{WidgetWindow, extensions::SplitRect as _};
 
 use crate::{
     Error, FrameTimingStatistics, RateCounter, WidgetTimingStatistics,
@@ -38,7 +38,7 @@ impl TuiDrawRate {
 }
 
 impl WidgetWindow<Error> for TuiDrawRate {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "TUI Draw FPS".into()
     }
 

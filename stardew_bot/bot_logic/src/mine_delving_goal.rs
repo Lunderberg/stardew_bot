@@ -4,9 +4,9 @@ use geometry::{Direction, Vector};
 use itertools::{Either, Itertools as _};
 
 use crate::{
-    bot_logic::LogicStackItem, ActivateTile, CraftItemGoal, Error, GameAction,
-    GameStateExt as _, InventoryGoal, ItemIterExt as _, MaintainStaminaGoal,
-    MovementGoal, UseItemOnTile,
+    ActivateTile, CraftItemGoal, Error, GameAction, GameStateExt as _,
+    InventoryGoal, ItemIterExt as _, MaintainStaminaGoal, MovementGoal,
+    UseItemOnTile, bot_logic::LogicStackItem,
 };
 use game_state::{
     GameState, ItemCategory, ItemId, MineralKind, ObjectKind, SeededRng,
@@ -14,11 +14,11 @@ use game_state::{
 };
 
 use super::{
+    AttackNearbyEnemy, LocationExt as _, MenuCloser, OrganizeInventoryGoal,
     best_weapon,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    AttackNearbyEnemy, LocationExt as _, MenuCloser, OrganizeInventoryGoal,
 };
 
 pub struct MineDelvingGoal {
@@ -1592,7 +1592,7 @@ impl MineNearbyOre {
 }
 
 impl BotInterrupt for MineNearbyOre {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Mine nearby ore".into()
     }
 
@@ -1812,7 +1812,7 @@ impl WaitNearBomb {
 }
 
 impl BotInterrupt for WaitNearBomb {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Wait near bomb".into()
     }
 

@@ -5,14 +5,14 @@ use ratatui::{
     symbols::Marker,
     text::Text,
     widgets::{
+        Block, Widget as _,
         canvas::{
             Canvas, Context as CanvasContext, Points,
             Rectangle as CanvasRectangle,
         },
-        Block, Widget as _,
     },
 };
-use tui_utils::{extensions::SplitRect as _, WidgetWindow};
+use tui_utils::{WidgetWindow, extensions::SplitRect as _};
 
 use crate::{Error, GameState};
 use game_state::{
@@ -326,7 +326,7 @@ impl<'a> DrawableGameLocation<'a> {
 }
 
 impl WidgetWindow<Error> for LocationDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Pathfinding".into()
     }
 

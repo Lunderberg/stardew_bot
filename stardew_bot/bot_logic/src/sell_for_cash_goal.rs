@@ -2,9 +2,9 @@ use game_state::{GameState, Item, ItemCategory, Quality};
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     Error, GameStateExt as _, InventoryGoal, ItemIterExt as _,
     ItemLookupExt as _, MenuCloser, ShipItemGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct SellForCashGoal {

@@ -33,12 +33,12 @@ impl<'a: 'b, 'b> LowerSymbolicExpr<'a, 'b> {
             // then.
             ptr
         };
-        let ptr = if matches!(runtime_type, RuntimeType::Prim(_)) {
+
+        if matches!(runtime_type, RuntimeType::Prim(_)) {
             ptr
         } else {
             graph.pointer_cast(ptr, runtime_type.into())
-        };
-        ptr
+        }
     }
 
     fn access_field_value(
@@ -50,7 +50,7 @@ impl<'a: 'b, 'b> LowerSymbolicExpr<'a, 'b> {
         let field_dsl_type: DSLType = self
             .0
             .reader()?
-            .signature_type_to_runtime_type(&sig, &[])?
+            .signature_type_to_runtime_type(sig, &[])?
             .into();
         field_dsl_type.validate().unwrap();
 
@@ -65,7 +65,7 @@ impl<'a: 'b, 'b> LowerSymbolicExpr<'a, 'b> {
                     DSLType::Prim(prim) => {
                         // A System.Enum gets automatically
                         // unwrapped into its backing type.
-                        graph.read_value(ptr, prim.into())
+                        graph.read_value(ptr, prim)
                     }
                     other => {
                         // Everything else gets exposed as a
@@ -79,7 +79,7 @@ impl<'a: 'b, 'b> LowerSymbolicExpr<'a, 'b> {
             }
             _ => {
                 let member = graph.read_value(ptr, RuntimePrimType::Ptr);
-                graph.pointer_cast(member, field_dsl_type.into())
+                graph.pointer_cast(member, field_dsl_type)
             }
         };
         Ok(value)
@@ -199,11 +199,10 @@ impl GraphRewrite for LowerSymbolicExpr<'_, '_> {
                 method_table_ptr: SymbolicValue::Const(value),
                 field: field_name,
             } => {
-                let ptr: TypedPointer<MethodTable> = match value {
+                let ptr: TypedPointer<MethodTable> = (*match value {
                     RuntimePrimValue::Ptr(ptr) => Ok(ptr),
                     other => Err(Error::MethodTableShouldBePointer(*other)),
-                }?
-                .clone()
+                }?)
                 .into();
 
                 let offset: usize = self
@@ -292,7 +291,7 @@ impl GraphRewrite for LowerSymbolicExpr<'_, '_> {
                         SymbolicType::Metadata { module, index } => {
                             let reader = self.0.reader()?;
                             let module_ptr =
-                                reader.runtime_module_by_name(&module)?;
+                                reader.runtime_module_by_name(module)?;
                             let name = reader
                                 .runtime_module(module_ptr)?
                                 .metadata(reader)?

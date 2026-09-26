@@ -326,27 +326,25 @@ impl SymbolicGraph {
     ) -> SymbolicValue {
         let ptr = ptr.into();
 
-        match &ty {
-            DSLType::DotNet(
-                dotnet_debugger::DotNetType::Class {
-                    method_table: Some(_),
-                    symbolic,
-                    ..
-                }
-                | dotnet_debugger::DotNetType::ValueType {
-                    method_table: Some(_),
-                    symbolic,
-                    ..
-                },
-            ) => {
-                assert!(
-                    symbolic.is_some(),
-                    "Attempting to perform pointer-cast of {}, \
-                     but the type {ty} has no symbolic type",
-                    self.print(ptr),
-                );
+        if let DSLType::DotNet(
+            dotnet_debugger::DotNetType::Class {
+                method_table: Some(_),
+                symbolic,
+                ..
             }
-            _ => {}
+            | dotnet_debugger::DotNetType::ValueType {
+                method_table: Some(_),
+                symbolic,
+                ..
+            },
+        ) = &ty
+        {
+            assert!(
+                symbolic.is_some(),
+                "Attempting to perform pointer-cast of {}, \
+                 but the type {ty} has no symbolic type",
+                self.print(ptr),
+            );
         }
 
         self.push(ExprKind::PointerCast { ptr, ty })

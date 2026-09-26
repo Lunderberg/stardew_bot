@@ -25,7 +25,7 @@ impl SkipCutscenes {
 }
 
 impl BotInterrupt for SkipCutscenes {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Skip Cutscenes".into()
     }
 

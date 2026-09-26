@@ -9,9 +9,9 @@ use game_state::{
 };
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     GameStateExt as _, InventoryGoal, LocationExt as _, MaintainStaminaGoal,
     ObjectKindExt as _, Pathfinding, UseItemOnTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ClearFarmGoal {
@@ -152,7 +152,7 @@ impl ClearFarmGoal {
         Ok(!reachable_clutter)
     }
 
-    fn pathfinding(game_state: &GameState) -> Result<Pathfinding, Error> {
+    fn pathfinding(game_state: &GameState) -> Result<Pathfinding<'_>, Error> {
         let farm = game_state.get_room("Farm")?;
 
         let pathfinding = farm

@@ -6,7 +6,7 @@ use crate::{Error, GameState};
 pub struct InputDisplay;
 
 impl WidgetWindow<Error> for InputDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Mouse/Keyboard".into()
     }
 

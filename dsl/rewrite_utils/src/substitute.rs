@@ -124,12 +124,11 @@ impl RewriteSubtree for SymbolicGraph {
             let opt_new_value = if let Some(rewritten) =
                 rewriter.rewrite_expr(self, kind, op.name.as_deref())?
             {
-                if let Some(name) = &op.name {
-                    if let SymbolicValue::Result(new_index) = rewritten {
-                        if self[new_index].name.is_none() {
-                            self.name(rewritten, name)?;
-                        }
-                    }
+                if let Some(name) = &op.name
+                    && let SymbolicValue::Result(new_index) = rewritten
+                    && self[new_index].name.is_none()
+                {
+                    self.name(rewritten, name)?;
                 }
                 Some(rewritten)
             } else if let Some(remapped) = opt_remapped {

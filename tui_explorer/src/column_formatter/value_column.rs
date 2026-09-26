@@ -121,7 +121,7 @@ impl ColumnFormatter for HexColumn {
         _region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
-    ) -> Line {
+    ) -> Line<'_> {
         let pointer_at_cursor = selected_row.value.into();
 
         formatted_cell::<Self>(
@@ -153,7 +153,7 @@ impl ColumnFormatter for AsciiColumn {
         _region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
-    ) -> Line {
+    ) -> Line<'_> {
         let pointer_at_cursor = selected_row.value.into();
 
         formatted_cell::<Self>(

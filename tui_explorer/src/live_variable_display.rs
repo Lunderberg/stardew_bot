@@ -41,7 +41,7 @@ impl LiveVariableDisplay {
 }
 
 impl WidgetWindow<Error> for LiveVariableDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "LiveVariableDisplay".into()
     }
 

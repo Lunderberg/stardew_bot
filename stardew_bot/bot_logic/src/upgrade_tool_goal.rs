@@ -1,9 +1,9 @@
 use game_state::{GameState, Item, ItemId};
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     Error, GameAction, GameStateExt as _, GoToActionTile, InventoryGoal,
     MenuCloser, ShopMenuExt as _,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct UpgradeToolGoal {

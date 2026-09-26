@@ -117,7 +117,7 @@ impl Reader for CachedReader<'_> {
         field: &str,
     ) -> Result<usize, Error> {
         let offset: usize = self.find_field_by_name(ptr, field)?.1.offset();
-        Ok(offset.into())
+        Ok(offset)
     }
 
     fn find_array_stride(

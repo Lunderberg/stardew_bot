@@ -98,7 +98,7 @@ impl<'a> Widget for DrawableStackFrameTable<'a> {
 }
 
 impl WidgetWindow<Error> for StackFrameTable {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Stack Frames".into()
     }
 

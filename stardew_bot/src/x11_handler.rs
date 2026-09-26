@@ -4,10 +4,10 @@ use x11rb::{
     connection::Connection as _,
     protocol::{
         xproto::{
-            AtomEnum, ButtonIndex, ConfigureWindowAux, ConnectionExt as _,
-            EventMask as X11EventMask, KeyPressEvent, Keycode as X11KeyCode,
-            Window, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, KEY_PRESS_EVENT,
-            KEY_RELEASE_EVENT, MOTION_NOTIFY_EVENT,
+            AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ButtonIndex,
+            ConfigureWindowAux, ConnectionExt as _, EventMask as X11EventMask,
+            KEY_PRESS_EVENT, KEY_RELEASE_EVENT, KeyPressEvent,
+            Keycode as X11KeyCode, MOTION_NOTIFY_EVENT, Window,
         },
         xtest::ConnectionExt as _,
     },
@@ -86,7 +86,8 @@ impl X11Handler {
 
         let root = conn
             .setup()
-            .roots.first()
+            .roots
+            .first()
             .ok_or(Error::MissingRootWindow)?
             .root;
 

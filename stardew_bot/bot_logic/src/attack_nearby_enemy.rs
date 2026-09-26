@@ -4,12 +4,11 @@ use crate::{Error, GameAction, UseItemOnTile};
 use game_state::{GameState, Item, TileMap, WeaponKind};
 
 use super::{
-    best_weapon,
+    LocationExt as _, SelectItemGoal, best_weapon,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
         LogicStackItem,
     },
-    LocationExt as _, SelectItemGoal,
 };
 
 pub struct AttackNearbyEnemy {}
@@ -29,7 +28,7 @@ impl AttackNearbyEnemy {
 }
 
 impl BotInterrupt for AttackNearbyEnemy {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Attack Nearby Enemies".into()
     }
 

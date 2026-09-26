@@ -5,10 +5,10 @@ use crate::{Error, GameAction};
 use game_state::{GameState, Item, ItemCategory, ItemId};
 
 use super::{
+    MovementGoal, SelectItemGoal,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, LogicStack, LogicStackItem,
     },
-    MovementGoal, SelectItemGoal,
 };
 
 pub struct UseItemOnTile {

@@ -4,9 +4,9 @@ use crate::{
 use game_state::{GameState, ItemCategory, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
     BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, MenuCloser,
     MovementGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
 };
 
 pub struct UpgradeFishingRodGoal {

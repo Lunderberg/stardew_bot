@@ -97,6 +97,12 @@ enum NestedWindowKind {
     BufferSelection(BufferSelection),
 }
 
+impl Default for DynamicLayout {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DynamicLayout {
     pub fn new() -> Self {
         Self {
@@ -240,12 +246,12 @@ impl DynamicLayout {
 
                 inner
                     .contains(pos)
-                    .then(|| ClickLocation::WithinWindow(win.window_index))
+                    .then_some(ClickLocation::WithinWindow(win.window_index))
             } else {
                 let divider = win.divider_area.unwrap();
                 divider
                     .contains(pos)
-                    .then(|| ClickLocation::WindowBorder(win.window_index))
+                    .then_some(ClickLocation::WindowBorder(win.window_index))
             }
         })
     }
@@ -441,12 +447,12 @@ impl DynamicLayout {
         }
     }
 
-    pub fn apply_key_binding<'a, 'b, E>(
+    pub fn apply_key_binding<'a, E>(
         &'a mut self,
         keystrokes: &KeySequence,
         globals: &TuiGlobals,
         side_effects: &mut WidgetSideEffects,
-        buffers: &'a mut [Box<&'b mut dyn WidgetWindow<E>>],
+        buffers: &'a mut [Box<&mut dyn WidgetWindow<E>>],
     ) -> KeyBindingMatch {
         KeyBindingMatch::Mismatch
             .or_try_bindings(["C-x b", "C-x C-b"], keystrokes, || {
@@ -502,11 +508,7 @@ impl<'a, 'b, B> DrawableDynamicLayout<'a, 'b, B> {
 }
 
 impl<'a, 'b, 'c, 'd, E> Widget
-    for &'d mut DrawableDynamicLayout<
-        'a,
-        'b,
-        Box<&'c mut (dyn WidgetWindow<E>)>,
-    >
+    for &'d mut DrawableDynamicLayout<'a, 'b, Box<&'c mut dyn WidgetWindow<E>>>
 {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where

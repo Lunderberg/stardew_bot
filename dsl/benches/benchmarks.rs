@@ -1,6 +1,6 @@
 use std::cell::Cell;
 
-use criterion::{criterion_group, criterion_main, Bencher, Criterion};
+use criterion::{Bencher, Criterion, criterion_group, criterion_main};
 
 use dsl::{SymbolicGraph, SymbolicGraphCompile as _};
 

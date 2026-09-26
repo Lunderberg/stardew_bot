@@ -4,10 +4,10 @@ use geometry::Vector;
 use crate::{Error, GameAction};
 
 use super::{
+    LocationExt as _, MovementGoal,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    LocationExt as _, MovementGoal,
 };
 
 pub struct CollectNearbyItems {
@@ -131,7 +131,7 @@ impl CollectNearbyItems {
 }
 
 impl BotInterrupt for CollectNearbyItems {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         format!("Collect items within {} tiles", self.search_radius).into()
     }
 

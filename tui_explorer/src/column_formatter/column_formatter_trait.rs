@@ -20,7 +20,7 @@ pub(crate) trait ColumnFormatter {
         region: &MemoryRegion,
         selected_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
         printed_row: &MemoryValue<[u8; MemoryRegion::POINTER_SIZE]>,
-    ) -> Line {
+    ) -> Line<'_> {
         self.cell_text(globals, region, selected_row, printed_row)
             .into()
     }

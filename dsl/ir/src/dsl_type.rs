@@ -127,9 +127,8 @@ pub struct IteratorType {
 
 impl DSLType {
     pub fn validate(&self) -> Result<(), Error> {
-        match self {
-            DSLType::DotNet(dot_net_type) => dot_net_type.validate()?,
-            _ => {}
+        if let DSLType::DotNet(dot_net_type) = self {
+            dot_net_type.validate()?;
         }
         Ok(())
     }
@@ -183,7 +182,7 @@ impl DSLType {
         match self {
             DSLType::Prim(prim_type) => Ok(prim_type.new_vector()),
             DSLType::Rust(rust_type) => rust_type.new_vector(),
-            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
+            other => Err(Error::InvalidVectorElementType(other.clone())),
         }
     }
 
@@ -200,7 +199,7 @@ impl DSLType {
             DSLType::Rust(rust_type) => {
                 rust_type.collect_into_vector(vec, item, output_name)
             }
-            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
+            other => Err(Error::InvalidVectorElementType(other.clone())),
         }
     }
 
@@ -208,7 +207,7 @@ impl DSLType {
         match self {
             DSLType::Prim(prim_type) => Ok(prim_type.vector_type()),
             DSLType::Rust(rust_type) => rust_type.vector_type(),
-            other => Err(Error::InvalidVectorElementType(other.clone()).into()),
+            other => Err(Error::InvalidVectorElementType(other.clone())),
         }
     }
 }

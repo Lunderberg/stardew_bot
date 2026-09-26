@@ -99,7 +99,7 @@ impl KeyBindingMatch {
         keystrokes: &KeySequence,
         mut callback: impl FnMut(),
     ) -> Self {
-        self.or_else(|| Self::try_binding(binding, keystrokes, || callback()))
+        self.or_else(|| Self::try_binding(binding, keystrokes, &mut callback))
     }
 
     pub fn try_binding(
@@ -121,7 +121,7 @@ impl KeyBindingMatch {
         mut callback: impl FnMut(),
     ) -> Self {
         bindings.into_iter().fold(self, |before, binding| {
-            before.or_try_binding(binding, keystrokes, || callback())
+            before.or_try_binding(binding, keystrokes, &mut callback)
         })
     }
 }
@@ -157,7 +157,7 @@ impl FromStr for KeySequence {
                 }
 
                 let mut chars =
-                    [first, second].into_iter().filter_map(|c| c).chain(chars);
+                    [first, second].into_iter().flatten().chain(chars);
 
                 chars
                     .next()
@@ -182,7 +182,7 @@ impl FromStr for KeySequence {
                                 _ => None,
                             }
                         }
-                        c => chars.next().is_none().then(|| KeyCode::Char(c)),
+                        c => chars.next().is_none().then_some(KeyCode::Char(c)),
                     })
                     .map(|code| KeyEvent::new(code, modifiers))
                     .ok_or_else(|| Error::InvalidKeyBinding(s.to_string()))

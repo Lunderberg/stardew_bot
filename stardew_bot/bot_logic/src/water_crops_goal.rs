@@ -6,8 +6,8 @@ use crate::{Error, MaintainStaminaGoal, MovementGoal, UseItemOnTile};
 use game_state::{GameState, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     FillWateringCan, GameStateExt as _, InventoryGoal, LocationExt as _,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct WaterCropsGoal {}

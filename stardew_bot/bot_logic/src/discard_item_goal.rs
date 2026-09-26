@@ -30,20 +30,19 @@ impl BotGoal for DiscardItemGoal {
         if let Some(page) = game_state
             .pause_menu()
             .and_then(|pause| pause.inventory_page())
+            && let Some(held_item) = &page.held_item
         {
-            if let Some(held_item) = &page.held_item {
-                let pixel = if held_item.is_same_item(&self.item) {
-                    page.trash_can
-                } else {
-                    let slot = game_state.player.inventory.empty_slot().expect(
-                        "TODO: Handle case where held item has nowhere to go",
-                    );
-                    page.player_item_locations[slot]
-                };
-                actions.do_action(GameAction::MouseOverPixel(pixel));
-                actions.do_action(GameAction::LeftClick);
-                return Ok(BotGoalResult::InProgress);
-            }
+            let pixel = if held_item.is_same_item(&self.item) {
+                page.trash_can
+            } else {
+                let slot = game_state.player.inventory.empty_slot().expect(
+                    "TODO: Handle case where held item has nowhere to go",
+                );
+                page.player_item_locations[slot]
+            };
+            actions.do_action(GameAction::MouseOverPixel(pixel));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
         }
 
         let Some(slot) = game_state.player.inventory.current_slot(&self.item)

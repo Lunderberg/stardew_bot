@@ -25,7 +25,7 @@ pub trait WidgetWindow<E> {
     /// The title of the widget.  This is used for the title in the
     /// border, and for the widget's name when selecting which widget
     /// to display.
-    fn title(&self) -> Cow<str>;
+    fn title(&self) -> Cow<'_, str>;
 
     /// Check whether window-specific key bindings should have an
     /// effect.
@@ -77,7 +77,7 @@ impl TuiGlobals {
         &self.reader
     }
 
-    pub fn cached_reader(&self) -> CachedReader {
+    pub fn cached_reader(&self) -> CachedReader<'_> {
         self.static_value_cache.cached_reader(&self.reader)
     }
 

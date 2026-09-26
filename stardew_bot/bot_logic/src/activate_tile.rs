@@ -4,8 +4,8 @@ use geometry::Vector;
 use crate::{Error, GameAction};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MovementGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ActivateTile {

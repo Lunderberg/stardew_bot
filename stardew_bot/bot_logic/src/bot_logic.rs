@@ -156,7 +156,7 @@ pub enum BotGoalResult {
 }
 
 pub trait BotInterrupt: Any {
-    fn description(&self) -> Cow<str>;
+    fn description(&self) -> Cow<'_, str>;
 
     fn check(
         &mut self,
@@ -675,9 +675,11 @@ impl BotLogic {
                         println!("\tGoal completed, removing from stack");
                     }
 
-                    if let Some(prev) = previously_produced_subgoals {
-                        if self.stack.len() <= prev + 2 {
-                            return Err(Error::InfiniteLoop{msg:format!(
+                    if let Some(prev) = previously_produced_subgoals
+                        && self.stack.len() <= prev + 2
+                    {
+                        return Err(Error::InfiniteLoop {
+                            msg: format!(
                                 "Infinite loop detected.  \
                                  Current goal '{0}' has completed, \
                                  but this returns control \
@@ -699,12 +701,13 @@ impl BotLogic {
                                              but now contains PreventInterrupt"
                                         )
                                         .into(),
-                                    Some(LogicStackItem::CancelIf(_)) => format!(
-                                        "Should be unreachable, \
+                                    Some(LogicStackItem::CancelIf(_)) =>
+                                        format!(
+                                            "Should be unreachable, \
                                          since {prev} contained a BotGoal \
                                          the first time around, \
                                          but now contains CancelIf."
-                                    )
+                                        )
                                         .into(),
                                     Some(LogicStackItem::Interrupt {
                                         interrupt,
@@ -717,7 +720,7 @@ impl BotLogic {
                                              but now contains interrupt '{}'",
                                             interrupt.description(),
                                         )
-                                            .into()
+                                        .into()
                                     }
                                     None => format!(
                                         "Should be unreachable, \
@@ -725,10 +728,10 @@ impl BotLogic {
                                          the first time around, \
                                          but is now empty."
                                     )
-                                        .into(),
+                                    .into(),
                                 }
-                            )});
-                        }
+                            ),
+                        });
                     }
 
                     self.pop_from_logic_stack();
@@ -956,11 +959,7 @@ impl LogicStack {
         goal: impl BotGoal + 'static,
         condition: bool,
     ) -> Self {
-        if condition {
-            self.then(goal)
-        } else {
-            self
-        }
+        if condition { self.then(goal) } else { self }
     }
 
     pub fn then_iter<Iter, Goal>(mut self, iter_goal: Iter) -> Self
@@ -992,7 +991,7 @@ impl LogicStack {
 }
 
 impl LogicStackItem {
-    pub fn description(&self) -> Cow<str> {
+    pub fn description(&self) -> Cow<'_, str> {
         match self {
             LogicStackItem::Goal(goal) => goal.description(),
             LogicStackItem::CancelIf(_) => "CancelIf".into(),

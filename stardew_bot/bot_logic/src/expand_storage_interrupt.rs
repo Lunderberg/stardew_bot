@@ -6,8 +6,8 @@ use crate::{
 use game_state::{GameState, ItemId};
 
 use super::{
-    bot_logic::{BotInterrupt, LogicStack},
     LocationExt as _,
+    bot_logic::{BotInterrupt, LogicStack},
 };
 
 pub struct ExpandStorageInterrupt;
@@ -43,7 +43,7 @@ impl ExpandStorageInterrupt {
 }
 
 impl BotInterrupt for ExpandStorageInterrupt {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Expand storage".into()
     }
 

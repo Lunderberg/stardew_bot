@@ -1,8 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 
 use dsl::{
-    runtime::{Runtime, RuntimeFunc},
     Error, RuntimePrimType, RustNativeObject, SymbolicGraph,
+    runtime::{Runtime, RuntimeFunc},
 };
 
 macro_rules! generate_tests {
@@ -1010,11 +1010,7 @@ pub fn eval_conditional_reduction(
     let expected = (0..100)
         .map(|b| {
             let c = b * 10;
-            if b % 2 == 0 {
-                2 * c
-            } else {
-                3 * c
-            }
+            if b % 2 == 0 { 2 * c } else { 3 * c }
         })
         .sum::<usize>();
 

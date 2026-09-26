@@ -2,8 +2,8 @@ use crate::{Error, GameAction};
 use game_state::{GameState, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     SelectItemGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct UseItem {

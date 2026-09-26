@@ -3,10 +3,10 @@ use game_state::{FacingDirection, GameState, Item};
 use itertools::Itertools as _;
 
 use super::{
+    FaceDirectionGoal, GameStateExt as _,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
     },
-    FaceDirectionGoal, GameStateExt as _,
 };
 
 #[derive(Clone)]
@@ -158,7 +158,7 @@ impl BotGoal for MaintainStaminaGoal {
 }
 
 impl BotInterrupt for MaintainStaminaGoal {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Recover health/stamina".into()
     }
 

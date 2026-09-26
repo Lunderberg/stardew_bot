@@ -9,13 +9,6 @@ pub struct Vector<T> {
 }
 impl<T: 'static> RustNativeObject for Vector<T> {}
 
-#[derive(Debug, Clone, Copy)]
-pub struct Rectangle<T> {
-    pub top_left: Vector<T>,
-    pub shape: Vector<T>,
-}
-impl<T: 'static> RustNativeObject for Rectangle<T> {}
-
 impl<T> Vector<T> {
     pub fn zero() -> Self
     where
@@ -82,11 +75,7 @@ impl<T> Vector<T> {
             self.down - other.down
         };
 
-        if diff_x < diff_y {
-            diff_y
-        } else {
-            diff_x
-        }
+        if diff_x < diff_y { diff_y } else { diff_x }
     }
 
     pub fn map<Func, U>(self, func: Func) -> Vector<U>
@@ -114,11 +103,7 @@ impl<T> Vector<T> {
         let dx = self.right.abs();
         let dy = self.down.abs();
 
-        if dx < dy {
-            dy
-        } else {
-            dx
-        }
+        if dx < dy { dy } else { dx }
     }
 }
 
@@ -254,24 +239,5 @@ impl From<Vector<isize>> for Vector<f32> {
 impl From<&Vector<isize>> for Vector<isize> {
     fn from(value: &Vector<isize>) -> Self {
         *value
-    }
-}
-
-impl<T> std::fmt::Display for Rectangle<T>
-where
-    T: std::fmt::Display,
-    T: std::ops::Add<Output = T>,
-    T: Copy,
-{
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let bottom_right = self.top_left + self.shape;
-        write!(
-            f,
-            "({}..{}, {}..{})",
-            self.top_left.right,
-            bottom_right.right,
-            self.top_left.down,
-            bottom_right.down,
-        )
     }
 }

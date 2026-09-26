@@ -10,7 +10,7 @@ use ratatui::{
         TableState, Widget,
     },
 };
-use tui_utils::{extensions::SplitRect as _, WidgetWindow};
+use tui_utils::{WidgetWindow, extensions::SplitRect as _};
 
 use crate::{Error, GameState};
 
@@ -67,7 +67,7 @@ impl FishingUI {
 }
 
 impl WidgetWindow<Error> for FishingUI {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Fishing".into()
     }
 

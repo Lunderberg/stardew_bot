@@ -19,24 +19,24 @@ impl InferFunctionParameterTypes<'_, '_> {
         value: SymbolicValue,
     ) -> Result<Option<DSLType>, Error> {
         let value_type = self.0.infer_type(graph, value)?;
-        match &value_type {
-            DSLType::DotNet(
-                DotNetType::Class {
-                    method_table: Some(_),
-                    symbolic,
-                    ..
-                }
-                | DotNetType::ValueType {
-                    method_table: Some(_),
-                    symbolic,
-                    ..
-                },
-            ) => assert!(
+        if let DSLType::DotNet(
+            DotNetType::Class {
+                method_table: Some(_),
+                symbolic,
+                ..
+            }
+            | DotNetType::ValueType {
+                method_table: Some(_),
+                symbolic,
+                ..
+            },
+        ) = &value_type
+        {
+            assert!(
                 symbolic.is_some(),
                 "Value {} has inferred type {value_type}, without symbolic",
                 graph.print(value)
-            ),
-            _ => {}
+            )
         }
         Ok(match value_type {
             DSLType::Unknown => None,
@@ -54,25 +54,25 @@ impl InferFunctionParameterTypes<'_, '_> {
             DSLType::Iterator(IteratorType { item }) => match item.as_ref() {
                 DSLType::Unknown => None,
                 other => {
-                    match other {
-                        DSLType::DotNet(
-                            DotNetType::Class {
-                                method_table: Some(_),
-                                symbolic,
-                                ..
-                            }
-                            | DotNetType::ValueType {
-                                method_table: Some(_),
-                                symbolic,
-                                ..
-                            },
-                        ) => assert!(
+                    if let DSLType::DotNet(
+                        DotNetType::Class {
+                            method_table: Some(_),
+                            symbolic,
+                            ..
+                        }
+                        | DotNetType::ValueType {
+                            method_table: Some(_),
+                            symbolic,
+                            ..
+                        },
+                    ) = other
+                    {
+                        assert!(
                             symbolic.is_some(),
                             "Iterator {} has inferred item type {other}, \
-                             without symbolic",
+                         without symbolic",
                             graph.print(iterator)
-                        ),
-                        _ => {}
+                        )
                     }
                     Some(other.clone())
                 }

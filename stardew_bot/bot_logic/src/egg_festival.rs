@@ -3,12 +3,18 @@ use std::collections::HashSet;
 use game_state::{GameState, ItemId};
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     ActivateTile, BuyFromMerchantGoal, Error, GameAction, GoToRoomGoal,
     LocationExt as _, MenuCloser,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 pub struct EggFestival;
+
+impl Default for EggFestival {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl EggFestival {
     pub fn new() -> Self {

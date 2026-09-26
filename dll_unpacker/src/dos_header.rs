@@ -8,7 +8,7 @@ use crate::{Annotator, DLLUnpacker, Error};
 /// Top-level methods for the DLLUnpacker, related to the unwrapping
 /// of the DOS headers.
 impl<'a> DLLUnpacker<'a> {
-    pub(crate) fn dos_header(&self) -> Result<DosHeader, Error> {
+    pub(crate) fn dos_header(&self) -> Result<DosHeader<'_>, Error> {
         let bytes = self.bytes.subrange(0..DosHeader::SIZE);
         Ok(DosHeader::new(bytes))
     }

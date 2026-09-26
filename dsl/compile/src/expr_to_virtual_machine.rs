@@ -14,7 +14,7 @@ use dsl_vm::{
 };
 
 use crate::{
-    index_tracking::AllocIndexDebug, Error, GetOutputDebug, IndexTracking,
+    Error, GetOutputDebug, IndexTracking, index_tracking::AllocIndexDebug,
 };
 
 /// The result of analyzing a function
@@ -337,7 +337,7 @@ impl LocalSymbolicGraphExt for SymbolicGraph {
             });
 
         // Step 2: Collect the parent of each scope.
-        for (_, scope_info) in scope_lookup.iter_mut() {
+        for scope_info in scope_lookup.values_mut() {
             if let Some(OpIndex(i)) = scope_info.scope.op_index() {
                 scope_info.parent_scope = operation_to_scope[i];
             }
@@ -890,10 +890,11 @@ impl ExpressionTranslator<'_> {
                     )
                 }
                 ExprKind::FunctionArg(_) => {
-                    assert!(self
-                        .index_tracking
-                        .expr_to_location(op_index)?
-                        .is_some());
+                    assert!(
+                        self.index_tracking
+                            .expr_to_location(op_index)?
+                            .is_some()
+                    );
                 }
                 ExprKind::Tuple(_) => {
                     // Eventually I should put something here, but I
@@ -1162,7 +1163,7 @@ impl ExpressionTranslator<'_> {
                             method_table: method_table_ptr,
                             output: op_output,
                         },
-                        || format!("array stride"),
+                        || "array stride".to_string(),
                     );
                     self.index_tracking.define_contents(op_index, op_output);
                 }
@@ -1200,8 +1201,15 @@ impl ExpressionTranslator<'_> {
                         StaticIndex(self.lazy_static_tracking.len());
 
                     self.push_annotated(
-                        Instruction::StaticToStack { saved: static_loc, output: op_output  },
-                        || format!("load previous execution's value of {expr_name}"),
+                        Instruction::StaticToStack {
+                            saved: static_loc,
+                            output: op_output,
+                        },
+                        || {
+                            format!(
+                                "load previous execution's value of {expr_name}"
+                            )
+                        },
                     );
                     self.lazy_static_tracking.insert(
                         op_index,

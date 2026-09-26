@@ -168,7 +168,7 @@ impl Widget for &mut RunningLog {
 }
 
 impl WidgetWindow<Error> for RunningLog {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Log".into()
     }
 

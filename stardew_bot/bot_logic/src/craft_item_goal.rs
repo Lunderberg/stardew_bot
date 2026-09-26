@@ -2,8 +2,8 @@ use crate::{Error, GameAction};
 use game_state::{GameState, Item, ItemId};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MenuCloser,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct CraftItemGoal {
@@ -103,23 +103,22 @@ impl BotGoal for CraftItemGoal {
         }
 
         let num_in_inventory = self.item_count(game_state);
-        if let Some(held_item) = &crafting_page.held_item {
-            if !held_item.is_same_item(&self.item)
-                || num_in_inventory + held_item.count >= self.item.count
-            {
-                let inventory = &game_state.player.inventory;
-                let inventory_slot = inventory
-                    .preferred_slot(&self.item)
-                    .or_else(|| inventory.empty_slot())
-                    .expect("TODO: Handle full inventory");
-                let inventory_pixel =
-                    crafting_page.player_item_locations[inventory_slot];
+        if let Some(held_item) = &crafting_page.held_item
+            && (!held_item.is_same_item(&self.item)
+                || num_in_inventory + held_item.count >= self.item.count)
+        {
+            let inventory = &game_state.player.inventory;
+            let inventory_slot = inventory
+                .preferred_slot(&self.item)
+                .or_else(|| inventory.empty_slot())
+                .expect("TODO: Handle full inventory");
+            let inventory_pixel =
+                crafting_page.player_item_locations[inventory_slot];
 
-                actions.do_action(GameAction::MouseOverPixel(inventory_pixel));
-                actions.do_action(GameAction::LeftClick);
+            actions.do_action(GameAction::MouseOverPixel(inventory_pixel));
+            actions.do_action(GameAction::LeftClick);
 
-                return Ok(BotGoalResult::InProgress);
-            }
+            return Ok(BotGoalResult::InProgress);
         }
 
         actions.do_action(GameAction::MouseOverPixel(recipe.pixel_location));

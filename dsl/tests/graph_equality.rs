@@ -212,11 +212,12 @@ fn comparison_may_be_order_and_name_dependent() {
         graph
     };
 
-    assert!(!lhs
-        .graph_comparison(&rhs)
-        .order_dependent(true)
-        .compare_names(true)
-        .apply());
+    assert!(
+        !lhs.graph_comparison(&rhs)
+            .order_dependent(true)
+            .compare_names(true)
+            .apply()
+    );
 }
 
 #[test]

@@ -6,8 +6,8 @@ use crate::{Error, GameAction, LocationExt as _, MovementGoal};
 use game_state::{GameState, ItemId, ObjectKind, SeededRng};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     InventoryGoal, MaintainStaminaGoal, UseItemOnTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ClayFarmingGoal {
@@ -283,7 +283,8 @@ impl BotGoal for ClayFarmingGoal {
                 let next_dist = next_clay_tiles
                     .iter()
                     .map(|next| {
-                        let offset = (*tile - *next).map(|x| x.unsigned_abs() as u64);
+                        let offset =
+                            (*tile - *next).map(|x| x.unsigned_abs() as u64);
                         let pickaxe_penalty = if next == tile
                             || current_hoe_dirt.contains(next)
                         {

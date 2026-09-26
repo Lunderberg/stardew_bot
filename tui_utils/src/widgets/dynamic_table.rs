@@ -24,7 +24,7 @@ pub struct Cell<'a> {
 }
 
 impl<'a> Cell<'a> {
-    pub fn new<T>(content: impl Into<Text<'a>>) -> Self {
+    pub fn new(content: impl Into<Text<'a>>) -> Self {
         Self {
             content: content.into(),
             style: Style::default(),
@@ -44,7 +44,7 @@ where
     T: Into<Text<'a>>,
 {
     fn from(content: T) -> Self {
-        Self::new::<T>(content)
+        Self::new(content)
     }
 }
 
@@ -194,9 +194,7 @@ where
         }
 
         if let Some(header) = self.header {
-            for ((x, width), cell) in
-                column_widths.iter().zip(header.into_iter())
-            {
+            for ((x, width), cell) in column_widths.iter().zip(header) {
                 cell.render(
                     Rect::new(
                         header_area.x + x,

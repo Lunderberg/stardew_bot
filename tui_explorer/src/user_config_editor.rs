@@ -420,7 +420,7 @@ impl UserConfigEditor {
         Either::Right(iter)
     }
 
-    fn iter_lines(&self) -> impl Iterator<Item = Line> + '_ {
+    fn iter_lines(&self) -> impl Iterator<Item = Line<'_>> + '_ {
         std::iter::empty::<Line>()
             .chain(self.iter_lines_list(
                 "// Items to sort to the top of ObjectExplorer",
@@ -445,7 +445,7 @@ impl UserConfigEditor {
 }
 
 impl WidgetWindow<Error> for UserConfigEditor {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         if self.is_modified {
             "User Config Editor (unsaved modifications)".into()
         } else {

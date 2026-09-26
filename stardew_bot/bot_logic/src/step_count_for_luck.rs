@@ -1,17 +1,17 @@
 use geometry::Direction;
 
 use crate::{
-    predictors::StepCountPredictor, Error, GameAction, GameStateExt as _,
-    ItemIterExt as _, StopMovingGoal,
+    Error, GameAction, GameStateExt as _, ItemIterExt as _, StopMovingGoal,
+    predictors::StepCountPredictor,
 };
 use game_state::{GameState, ItemId};
 
 use super::{
+    LocationExt as _,
     bot_logic::{
         ActionCollector, BotGoal, BotGoalResult, BotInterrupt, LogicStack,
         LogicStackItem,
     },
-    LocationExt as _,
 };
 
 #[derive(Clone)]
@@ -134,7 +134,8 @@ impl StepCountForLuck {
                 game_state.player.friendships.iter().enumerate().find_map(
                     |(index, friendship)| {
                         let current_hearts = friendship.points / 250;
-                        (friendship.name == name && current_hearts > 0).then_some(PreferredGifter {
+                        (friendship.name == name && current_hearts > 0)
+                            .then_some(PreferredGifter {
                                 index,
                                 current_hearts,
                             })
@@ -225,7 +226,7 @@ impl StepCountForLuck {
 }
 
 impl BotInterrupt for StepCountForLuck {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         if let Some(steps) = self.target_steps {
             format!("Stop at {steps} steps").into()
         } else {

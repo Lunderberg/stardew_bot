@@ -9,10 +9,10 @@ use game_state::{
 };
 
 use super::{
+    GameStateExt as _, LocationExt as _, WaitUntilTimeOfDay,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     graph_search::{GraphSearch, SearchNodeMetadata},
     impl_tile_map_graph_search::point_to_point_lower_bound,
-    GameStateExt as _, LocationExt as _, WaitUntilTimeOfDay,
 };
 
 /// Epsilon distance (in tiles) to consider a target reached

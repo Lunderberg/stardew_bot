@@ -475,9 +475,7 @@ impl ExprKind {
                 for (i, old_value) in values.iter().enumerate() {
                     if let Some(new_value) = remap(old_value) {
                         output
-                            .get_or_insert_with(|| {
-                                values[..i].iter().cloned().collect()
-                            })
+                            .get_or_insert_with(|| values[..i].to_vec())
                             .push(new_value);
                     } else if let Some(output) = output.as_mut() {
                         output.push(*old_value);
@@ -643,7 +641,7 @@ impl ExprKind {
                 })
             }
             ExprKind::Tuple(elements) => {
-                remap_vec(elements).map(|elements| ExprKind::Tuple(elements))
+                remap_vec(elements).map(ExprKind::Tuple)
             }
             ExprKind::FieldAccess { obj, field } => {
                 remap(obj).map(|obj| ExprKind::FieldAccess {

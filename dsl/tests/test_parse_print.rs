@@ -69,10 +69,12 @@ where
             .number_all_expressions()
     );
 
-    assert!(parsed
-        .graph_comparison(&expected)
-        .compare_names(true)
-        .apply());
+    assert!(
+        parsed
+            .graph_comparison(&expected)
+            .compare_names(true)
+            .apply()
+    );
 
     Ok(())
 }

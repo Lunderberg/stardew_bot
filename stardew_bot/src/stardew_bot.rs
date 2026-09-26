@@ -1,7 +1,8 @@
 use crate::{
-    game_action_to_x11::apply_game_action, BotActionDisplay, BotGoalDisplay,
-    Error, FishingUI, GameState, InputDisplay, LocationDisplay, PlayerStats,
-    PredictedLuckDisplay, RngDisplay, RunningLog, TuiDrawRate, X11Handler,
+    BotActionDisplay, BotGoalDisplay, Error, FishingUI, GameState,
+    InputDisplay, LocationDisplay, PlayerStats, PredictedLuckDisplay,
+    RngDisplay, RunningLog, TuiDrawRate, X11Handler,
+    game_action_to_x11::apply_game_action,
 };
 
 use bot_logic::{
@@ -13,9 +14,9 @@ use env_var_flag::env_var_flag;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
+    TerminalContext, TuiGlobals, WidgetSideEffects, WidgetWindow,
     inputs::{KeyBindingMatch, KeySequence, SigintHandler},
     widgets::DynamicLayout,
-    TerminalContext, TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
 use crossterm::event::Event;

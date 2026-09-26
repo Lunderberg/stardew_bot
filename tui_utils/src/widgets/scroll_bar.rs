@@ -125,10 +125,10 @@ impl<Inner> WithScrollbar<Inner> {
                     / (self.num_rows as f64),
             )
         };
-        let bar = VerticalBar::default()
+
+        VerticalBar::default()
             .bar_top_ratio(top_ratio)
-            .bar_bottom_ratio(bottom_ratio);
-        bar
+            .bar_bottom_ratio(bottom_ratio)
     }
 }
 

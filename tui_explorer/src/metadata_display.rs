@@ -110,13 +110,13 @@ impl MetadataDisplay {
         self.dll_metadata.iter().map(|dll| dll.num_lines()).sum()
     }
 
-    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem> + '_ {
+    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem<'_>> + '_ {
         Self::iter_lines_impl(&self.dll_metadata)
     }
 
     fn iter_lines_impl(
         dll_metadata: &[DllMetadata],
-    ) -> impl Iterator<Item = TreeIteratorItem> {
+    ) -> impl Iterator<Item = TreeIteratorItem<'_>> {
         dll_metadata.iter().flat_map(|dll| dll.iter_lines())
     }
 
@@ -225,7 +225,7 @@ impl DllMetadata {
         child_lines + 1
     }
 
-    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem> + '_ {
+    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem<'_>> + '_ {
         let header = TreeIteratorItem {
             tree_depth: 0,
             is_leaf: false,
@@ -255,7 +255,7 @@ impl DisplayTable {
         child_lines + 1
     }
 
-    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem> + '_ {
+    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem<'_>> + '_ {
         let header = TreeIteratorItem {
             tree_depth: 1,
             is_leaf: false,
@@ -287,7 +287,7 @@ impl DisplayRow {
         child_lines + 1
     }
 
-    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem> + '_ {
+    fn iter_lines(&self) -> impl Iterator<Item = TreeIteratorItem<'_>> + '_ {
         let header = TreeIteratorItem {
             tree_depth: 2,
             is_leaf: false,
@@ -414,7 +414,7 @@ impl<'a> TreeIteratorItem<'a> {
 }
 
 impl WidgetWindow<Error> for MetadataDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "DLL Metadata".into()
     }
 

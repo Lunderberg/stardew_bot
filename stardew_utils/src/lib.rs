@@ -4,7 +4,8 @@ pub use error::Error;
 pub fn stardew_valley_pid() -> Result<u32, Error> {
     let mut sys = sysinfo::System::new_all();
     sys.refresh_all();
-    sys.processes().values()
+    sys.processes()
+        .values()
         .find(|proc| {
             let correct_name = proc.name() == "Stardew Valley"
                 || proc.name() == "StardewValley";

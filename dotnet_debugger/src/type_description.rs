@@ -178,7 +178,6 @@ impl TypeHandle {
 
                 let type_args: Vec<_> = method_table
                     .generic_types_excluding_base_class(&reader)?
-                    .into_iter()
                     .map(|arg_ptr| {
                         let arg = reader.type_handle(arg_ptr)?;
                         let arg_sym = arg.to_symbolic(reader)?;

@@ -4,9 +4,9 @@ use game_state::{GameState, ObjectKind};
 use geometry::{Direction, Vector};
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     Error, GameStateExt as _, LocationExt as _, MaintainStaminaGoal,
     MovementGoal, UseItemOnTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 pub struct ClearTreeGoal {

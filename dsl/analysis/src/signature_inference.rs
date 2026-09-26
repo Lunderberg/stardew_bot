@@ -193,7 +193,7 @@ impl<'a> SignatureInference<'a> {
 
         let mut generics: Option<Vec<SignatureType>> = match container {
             SignatureType::GenericInst { type_args, .. } => {
-                Some(type_args.iter().cloned().collect())
+                Some(type_args.to_vec())
             }
             _ => None,
         };
@@ -291,13 +291,17 @@ impl<'a> SignatureInference<'a> {
                             type_def = match type_def_or_ref {
                                 MetadataTypeDefOrRef::TypeDef(td) => td,
                                 MetadataTypeDefOrRef::TypeRef(_) => {
-                                    unreachable!("Should be unwrapped by unwrap_type_ref")
+                                    unreachable!(
+                                        "Should be unwrapped by unwrap_type_ref"
+                                    )
                                 }
-                                MetadataTypeDefOrRef::TypeSpec(type_spec) => panic!(
-                                    "Base class '{full_signature}' contained that TypeSpec \
+                                MetadataTypeDefOrRef::TypeSpec(type_spec) => {
+                                    panic!(
+                                        "Base class '{full_signature}' contained that TypeSpec \
                                      that itself referenced a TypeSpec '{}'",
-                                    type_spec.signature()?
-                                ),
+                                        type_spec.signature()?
+                                    )
+                                }
                             };
                             generics = Some(type_args);
                         }
@@ -327,7 +331,7 @@ impl<'a> SignatureInference<'a> {
         let op_index = match value {
             SymbolicValue::Result(index) => index,
             SymbolicValue::Const(prim) => {
-                return Ok(Some(prim_type_to_signature(prim.runtime_type())))
+                return Ok(Some(prim_type_to_signature(prim.runtime_type())));
             }
         };
 
@@ -352,7 +356,7 @@ impl<'a> SignatureInference<'a> {
             ExprKind::StaticField(static_field) => match &static_field.class {
                 SymbolicType::Named { module, name } => {
                     let type_def = self.reader()?.find_type_def(
-                        &name,
+                        name,
                         module.as_ref().map(|s| s.as_str()),
                     )?;
                     let (_container, field_sig) = self.lookup_field(
@@ -504,7 +508,7 @@ impl<'a> SignatureInference<'a> {
                     return Err(SigErr::UnexpectedPointerType(format!(
                         "{other}"
                     ))
-                    .into())
+                    .into());
                 }
             },
 

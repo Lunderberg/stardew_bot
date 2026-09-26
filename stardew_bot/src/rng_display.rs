@@ -11,7 +11,7 @@ use crate::{Error, GameState};
 pub struct RngDisplay;
 
 impl WidgetWindow<Error> for RngDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Global RNG".into()
     }
 

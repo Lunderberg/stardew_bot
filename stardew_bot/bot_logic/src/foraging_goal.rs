@@ -9,9 +9,9 @@ use crate::{ActivateTile, Error, MovementGoal};
 use game_state::{GameState, ObjectKind, TileMap};
 
 use super::{
+    GameStateExt as _, LocationExt as _, RepairBeachBridgeGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     graph_search::GraphSearch,
-    GameStateExt as _, LocationExt as _, RepairBeachBridgeGoal,
 };
 
 pub struct ForagingGoal {
@@ -150,7 +150,8 @@ impl ForagingGoal {
         let opt_fruit = farm
             .items
             .iter()
-            .map(|item| item.tile_pos()).find(|item_pos| item_pos.dist(player_pos) < 5.0);
+            .map(|item| item.tile_pos())
+            .find(|item_pos| item_pos.dist(player_pos) < 5.0);
         if let Some(pos) = opt_fruit {
             if pos.dist(player_pos) < 2.0 {
                 return Ok(Some(BotGoalResult::InProgress));
@@ -243,10 +244,10 @@ impl BotGoal for ForagingGoal {
         let opt_room: Option<&str> =
             self.location.as_ref().map(|loc| loc.as_ref());
 
-        if matches!(opt_room, None | Some("Farm")) {
-            if let Some(farm_forage) = Self::next_farm_forageable(game_state)? {
-                return Ok(farm_forage);
-            }
+        if matches!(opt_room, None | Some("Farm"))
+            && let Some(farm_forage) = Self::next_farm_forageable(game_state)?
+        {
+            return Ok(farm_forage);
         }
 
         if matches!(opt_room, Some("Beach")) {

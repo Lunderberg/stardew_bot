@@ -3,8 +3,8 @@ use game_state::{GameState, Menu};
 use crate::Error;
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 #[derive(Clone)]

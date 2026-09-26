@@ -12,7 +12,7 @@ pub struct Pointer {
 impl std::cmp::PartialOrd for Pointer {
     #[inline]
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.address.cmp(&other.address))
+        Some(self.cmp(other))
     }
 }
 
@@ -38,11 +38,7 @@ impl Pointer {
 
     #[inline]
     pub fn as_non_null(self) -> Option<Self> {
-        if self.is_null() {
-            None
-        } else {
-            Some(self)
-        }
+        if self.is_null() { None } else { Some(self) }
     }
 
     #[inline]
@@ -57,7 +53,7 @@ impl Pointer {
 
     #[inline]
     pub fn is_aligned(&self, alignment: usize) -> bool {
-        self.address % alignment == 0
+        self.address.is_multiple_of(alignment)
     }
 
     #[inline]

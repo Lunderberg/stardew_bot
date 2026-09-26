@@ -425,8 +425,7 @@ impl<'a> SymbolicParser<'a> {
 
         if precedence < OpPrecedence::ComparisonOperator
             && OpPrecedence::ComparisonOperator < upper_bound
-        {
-            if let Some(token) = self.tokens.next_if(|token| {
+            && let Some(token) = self.tokens.next_if(|token| {
                 matches!(
                     token.kind,
                     TokenKind::Punct(
@@ -438,33 +437,32 @@ impl<'a> SymbolicParser<'a> {
                             | Punctuation::RightAngleBracketEquals
                     )
                 )
-            })? {
-                let rhs = self.expect_expr_op_precedence(
-                    OpPrecedence::ComparisonOperator,
-                )?;
-                expr = match token.kind {
-                    TokenKind::Punct(Punctuation::DoubleEquals) => {
-                        self.graph.equal(expr, rhs)
-                    }
-                    TokenKind::Punct(Punctuation::BangEquals) => {
-                        self.graph.not_equal(expr, rhs)
-                    }
-                    TokenKind::Punct(Punctuation::LeftAngleBracket) => {
-                        self.graph.less_than(expr, rhs)
-                    }
-                    TokenKind::Punct(Punctuation::RightAngleBracket) => {
-                        self.graph.greater_than(expr, rhs)
-                    }
-                    TokenKind::Punct(Punctuation::LeftAngleBracketEquals) => {
-                        self.graph.less_than_or_equal(expr, rhs)
-                    }
-                    TokenKind::Punct(Punctuation::RightAngleBracketEquals) => {
-                        self.graph.greater_than_or_equal(expr, rhs)
-                    }
-                    _ => unreachable!("Due to earlier check"),
-                };
-                upper_bound = OpPrecedence::ComparisonOperator;
-            }
+            })?
+        {
+            let rhs = self
+                .expect_expr_op_precedence(OpPrecedence::ComparisonOperator)?;
+            expr = match token.kind {
+                TokenKind::Punct(Punctuation::DoubleEquals) => {
+                    self.graph.equal(expr, rhs)
+                }
+                TokenKind::Punct(Punctuation::BangEquals) => {
+                    self.graph.not_equal(expr, rhs)
+                }
+                TokenKind::Punct(Punctuation::LeftAngleBracket) => {
+                    self.graph.less_than(expr, rhs)
+                }
+                TokenKind::Punct(Punctuation::RightAngleBracket) => {
+                    self.graph.greater_than(expr, rhs)
+                }
+                TokenKind::Punct(Punctuation::LeftAngleBracketEquals) => {
+                    self.graph.less_than_or_equal(expr, rhs)
+                }
+                TokenKind::Punct(Punctuation::RightAngleBracketEquals) => {
+                    self.graph.greater_than_or_equal(expr, rhs)
+                }
+                _ => unreachable!("Due to earlier check"),
+            };
+            upper_bound = OpPrecedence::ComparisonOperator;
         }
 
         if precedence < OpPrecedence::BooleanAnd

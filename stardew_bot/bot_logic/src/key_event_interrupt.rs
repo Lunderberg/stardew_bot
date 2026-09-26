@@ -4,8 +4,8 @@ use geometry::Vector;
 use crate::Error;
 
 use super::{
-    bot_logic::{BotInterrupt, LogicStack},
     ActivateTile, GoToRoomGoal, MenuCloser,
+    bot_logic::{BotInterrupt, LogicStack},
 };
 
 pub struct KeyEventInterrupt;
@@ -23,7 +23,7 @@ impl KeyEventInterrupt {
 }
 
 impl BotInterrupt for KeyEventInterrupt {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Trigger key events".into()
     }
 

@@ -8,7 +8,7 @@ use crate::Error;
 pub struct BotGoalDisplay;
 
 impl WidgetWindow<Error> for BotGoalDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Bot Goals".into()
     }
 

@@ -4,10 +4,10 @@ use ratatui::{
     widgets::{List, ListState, StatefulWidget, Widget},
 };
 use tui_utils::{
+    TuiGlobals, WidgetSideEffects, WidgetWindow,
     extensions::{SplitRect as _, WidgetWithScrollbar as _},
     inputs::{KeyBindingMatch, KeySequence},
     widgets::{ScrollableState as _, SearchDirection, SearchWindow},
-    TuiGlobals, WidgetSideEffects, WidgetWindow,
 };
 
 use bot_logic::BotLogic;
@@ -49,7 +49,8 @@ impl BotActionDisplay {
         move |row: usize| -> Vec<String> {
             bot_logic
                 .iter_recent_actions()
-                .rev().nth(row)
+                .rev()
+                .nth(row)
                 .map(|action| format!("{action}"))
                 .into_iter()
                 .collect()
@@ -58,7 +59,7 @@ impl BotActionDisplay {
 }
 
 impl WidgetWindow<Error> for BotActionDisplay {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Bot Actions".into()
     }
 

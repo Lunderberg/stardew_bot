@@ -12,7 +12,7 @@ use crate::{Annotator, Error};
 /// Top-level methods for the DLLUnpacker, related to the unwrapping
 /// of the PE format.
 impl<'a> DLLUnpacker<'a> {
-    pub(crate) fn pe_header(&self) -> Result<PEHeaderUnpacker, Error> {
+    pub(crate) fn pe_header(&self) -> Result<PEHeaderUnpacker<'_>, Error> {
         let dos_header = self.dos_header()?;
         let bytes = self.bytes.subrange(dos_header.pe_header_range()?);
         Ok(PEHeaderUnpacker::new(bytes))
@@ -20,7 +20,7 @@ impl<'a> DLLUnpacker<'a> {
 
     pub(crate) fn optional_header(
         &self,
-    ) -> Result<OptionalHeaderUnpacker, Error> {
+    ) -> Result<OptionalHeaderUnpacker<'_>, Error> {
         let pe_header = self.pe_header()?;
         let bytes = self.bytes.subrange(pe_header.optional_header_range()?);
         OptionalHeaderUnpacker::new(bytes)
@@ -28,7 +28,7 @@ impl<'a> DLLUnpacker<'a> {
 
     pub(crate) fn iter_section_header(
         &self,
-    ) -> Result<impl Iterator<Item = SectionHeaderUnpacker>, Error> {
+    ) -> Result<impl Iterator<Item = SectionHeaderUnpacker<'_>>, Error> {
         let pe_header = self.pe_header()?;
         let num_sections = pe_header.num_sections()?.value() as usize;
 

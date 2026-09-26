@@ -4,8 +4,8 @@ use crate::{ActivateTile, Error, GameAction};
 use game_state::{GameState, Item};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     MenuCloser, TransferSize,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct ShipItemGoal {

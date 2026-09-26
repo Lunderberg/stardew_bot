@@ -1,8 +1,8 @@
 use game_state::{Friendship, GameState, ItemId};
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     Error, GameAction, MenuCloser, MovementGoal, SelectItemGoal,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 pub struct GiveGiftGoal {

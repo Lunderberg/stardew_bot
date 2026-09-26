@@ -3,8 +3,8 @@ use game_state::{GameState, ItemId, ObjectKind, TileMap};
 use geometry::Vector;
 
 use super::{
-    bot_logic::{BotInterrupt, LogicStack},
     LocationExt as _,
+    bot_logic::{BotInterrupt, LogicStack},
 };
 
 pub struct OpportunisticForaging {
@@ -31,7 +31,7 @@ impl OpportunisticForaging {
 }
 
 impl BotInterrupt for OpportunisticForaging {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         format!("Forage within {} tiles", self.radius).into()
     }
 
@@ -108,7 +108,7 @@ impl BotInterrupt for OpportunisticForaging {
                 };
                 Some((obj.tile, opt_tool))
             })
-            .filter(|(tile, _)| {
+            .find(|(tile, _)| {
                 if distances.is_none() {
                     distances = Some(
                         loc.pathfinding(&game_state.statics)
@@ -121,8 +121,7 @@ impl BotInterrupt for OpportunisticForaging {
                 map.get_opt(*tile)
                     .map(|dist| (*dist as f32) < self.radius)
                     .unwrap_or(false)
-            })
-            .next();
+            });
 
         let Some((tile, opt_tool)) = opt_forageable else {
             return Ok(None);

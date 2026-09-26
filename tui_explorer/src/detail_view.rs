@@ -103,7 +103,7 @@ impl Widget for &DetailView {
 }
 
 impl WidgetWindow<Error> for DetailView {
-    fn title(&self) -> std::borrow::Cow<str> {
+    fn title(&self) -> std::borrow::Cow<'_, str> {
         "Detail View".into()
     }
 

@@ -429,7 +429,7 @@ impl VirtualMachineBuilder {
     ) -> Result<(), Error> {
         let name = name.into();
         if self.entry_points.contains_key(&name) {
-            Err(Error::DuplicateFunctionName(name).into())
+            Err(Error::DuplicateFunctionName(name))
         } else {
             self.entry_points.insert(
                 name,
@@ -918,7 +918,7 @@ impl<'a> VMEvaluator<'a> {
             self.current_instruction = next_instruction;
         }
 
-        Err(Error::ReachedEndWithoutReturnInstruction.into())
+        Err(Error::ReachedEndWithoutReturnInstruction)
     }
 
     fn arg_to_prim(
@@ -935,8 +935,7 @@ impl<'a> VMEvaluator<'a> {
                         .op_name(),
                     index: self.current_instruction,
                     arg_type: other.runtime_type(),
-                }
-                .into()),
+                }),
             },
         }
     }
@@ -948,8 +947,7 @@ impl<'a> VMEvaluator<'a> {
                     .op_name(),
                 index: self.current_instruction,
                 arg_type: value.runtime_type().into(),
-            }
-            .into()),
+            }),
             VMArg::SavedValue(index) => match &self.values[index] {
                 StackValue::None => Ok(None),
                 stack_value => {

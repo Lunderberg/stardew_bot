@@ -2,9 +2,9 @@ use game_state::{Bundle, GameState, Item, ItemId, Menu};
 use itertools::Itertools as _;
 
 use crate::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
     ActivateTile, Error, GameAction, GameStateExt as _, InventoryGoal,
     ItemIterExt as _, ItemLookupExt as _, MenuCloser,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
 pub struct TurnInBundlesGoal {
@@ -42,14 +42,13 @@ impl TurnInBundlesGoal {
                 bait.id == ItemId::TARGETED_BAIT.with_subtype(ItemId::CATFISH)
             })
             .is_some();
-        if !has_catfish_bait {
-            if let Some(worst_quality) = available
+        if !has_catfish_bait
+            && let Some(worst_quality) = available
                 .iter_items_with_quality(&ItemId::CATFISH.with_count(1))
                 .map(|(id, _)| id)
                 .next()
-            {
-                available.remove_item(&worst_quality, 1);
-            }
+        {
+            available.remove_item(&worst_quality, 1);
         }
 
         let num_inventory_slots = game_state.player.inventory.num_slots();

@@ -503,8 +503,6 @@ impl<'a> InterpretedFunc<'a> {
         }
 
         let before_param_bindings = self.bindings.len();
-        let mut param_bindings =
-            SmallVec::<[_; 32]>::with_capacity(params.len());
         for (param, arg) in params.iter().cloned().zip(args) {
             let arg_val = match arg {
                 CallableArg::Immediate(value) => value,
@@ -514,8 +512,7 @@ impl<'a> InterpretedFunc<'a> {
                 }
             };
 
-            let cleanup = self.bind(self.as_function_arg(param)?, arg_val)?;
-            param_bindings.push(cleanup);
+            self.bind(self.as_function_arg(param)?, arg_val)?;
         }
 
         let before_enclosed_bindings = self.bindings.len();
@@ -614,8 +611,8 @@ impl<'a> RuntimeFunc<'a> for InterpretedFunc<'a> {
     }
 }
 
-impl Into<SymbolicGraph> for Interpreter {
-    fn into(self) -> SymbolicGraph {
-        self.graph
+impl From<Interpreter> for SymbolicGraph {
+    fn from(val: Interpreter) -> Self {
+        val.graph
     }
 }

@@ -116,14 +116,14 @@ impl<T> SearchWindow<T> {
                 self.apply_command(
                     SearchCommand::NextResult(SearchDirection::Forward),
                     table_size,
-                    |i| row_generator(i),
+                    &mut row_generator,
                 )
             })
             .or_try_binding("C-r", keystrokes, || {
                 self.apply_command(
                     SearchCommand::NextResult(SearchDirection::Reverse),
                     table_size,
-                    |i| row_generator(i),
+                    &mut row_generator,
                 )
             })
             .or_else(|| {
@@ -131,7 +131,7 @@ impl<T> SearchWindow<T> {
                     self.apply_command(
                         SearchCommand::AddChar(c),
                         table_size,
-                        |i| row_generator(i),
+                        &mut row_generator,
                     );
                     KeyBindingMatch::Full
                 } else {
@@ -293,7 +293,7 @@ impl<T> SearchWindow<T> {
     }
 }
 
-impl<'a, T> ratatui::widgets::Widget for &'a SearchWindow<T> {
+impl<T> ratatui::widgets::Widget for &SearchWindow<T> {
     fn render(self, area: Rect, buf: &mut ratatui::prelude::Buffer)
     where
         Self: Sized,

@@ -4,15 +4,15 @@ use env_var_flag::env_var_flag;
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{bot_logic::BotInterrupt, Error, GameAction, GiveGiftGoal};
+use crate::{Error, GameAction, GiveGiftGoal, bot_logic::BotInterrupt};
 use game_state::{GameState, ItemCategory, ItemId, ObjectKind, Season};
 
 use super::{
-    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
     ExpandStorageInterrupt, ForagingGoal, GameStateExt as _, GoToActionTile,
     MaintainStaminaGoal, MenuCloser, MovementGoal, PlantCropsGoal,
     SellToMerchantGoal, ShipItemGoal, UseItemOnTile,
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 pub struct FirstDay;
@@ -175,11 +175,11 @@ impl BotGoal for FirstDay {
                 return Ok(goal.into());
             }
         }
-        if let Some(menu) = game_state.dialogue_menu() {
-            if menu.responses.is_empty() {
-                actions.do_action(GameAction::ExitMenu);
-                return Ok(BotGoalResult::InProgress);
-            }
+        if let Some(menu) = game_state.dialogue_menu()
+            && menu.responses.is_empty()
+        {
+            actions.do_action(GameAction::ExitMenu);
+            return Ok(BotGoalResult::InProgress);
         }
 
         // Includes buying seeds as necessary.  Which, given that
@@ -288,7 +288,7 @@ impl BotGoal for FirstDay {
 }
 
 impl BotInterrupt for ScytheNearby {
-    fn description(&self) -> std::borrow::Cow<str> {
+    fn description(&self) -> std::borrow::Cow<'_, str> {
         "Scythe nearby".into()
     }
 
