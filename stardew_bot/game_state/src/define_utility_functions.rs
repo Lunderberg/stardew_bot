@@ -73,11 +73,6 @@ pub fn define_utility_functions(
                 .game1
                 ._locations
                 .as::<
-                "System.Collections.ObjectModel.Collection`1"
-                <StardewValley.GameLocation>
-                >()
-                .items
-                .as::<
                 "System.Collections.Generic.List`1"
                 <StardewValley.GameLocation>
                 >();
