@@ -2530,10 +2530,8 @@ impl Location {
             return;
         };
 
-        let get_tile = |name: &str| -> Vector<isize> {
-            let value = farm.properties.get(name).unwrap_or_else(|| {
-                panic!("Farm is missing property named {name}")
-            });
+        let get_tile = |name: &str| -> Option<Vector<isize>> {
+            let value = farm.properties.get(name)?;
             let (right, down) =
                 value.split(' ').collect_tuple().unwrap_or_else(|| {
                     panic!(
@@ -2543,7 +2541,7 @@ impl Location {
                 });
             let right = right.parse().unwrap();
             let down = down.parse().unwrap();
-            Vector::new(right, down)
+            Some(Vector::new(right, down))
         };
 
         let backwoods_entry = get_tile("BackwoodsEntry");
@@ -2559,20 +2557,26 @@ impl Location {
             })
             .filter(|(_, warp)| warp.target_room == "Farm")
             .for_each(|(from_loc, warp)| {
-                if from_loc == "FarmCave" && warp.target == Vector::new(34, 6) {
-                    warp.target = farm_cave_entry;
+                if from_loc == "FarmCave"
+                    && warp.target == Vector::new(34, 6)
+                    && let Some(entry) = farm_cave_entry
+                {
+                    warp.target = entry;
                 } else if from_loc == "Forest"
                     && warp.target == Vector::new(41, 64)
+                    && let Some(entry) = forest_entry
                 {
-                    warp.target = forest_entry;
+                    warp.target = entry;
                 } else if from_loc == "BusStop"
                     && warp.target == Vector::new(79, 17)
+                    && let Some(entry) = bus_stop_entry
                 {
-                    warp.target = bus_stop_entry;
+                    warp.target = entry;
                 } else if from_loc == "Backwoods"
                     && warp.target == Vector::new(40, 0)
+                    && let Some(entry) = backwoods_entry
                 {
-                    warp.target = backwoods_entry;
+                    warp.target = entry;
                 }
             });
     }
