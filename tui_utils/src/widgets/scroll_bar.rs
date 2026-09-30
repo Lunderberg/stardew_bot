@@ -38,14 +38,14 @@ pub trait ScrollableState {
             .or_try_bindings(["<up>", "C-p"], keystrokes, || {
                 self.move_selection_relative(num_rows, -1)
             })
-            .or_try_bindings(["<pageup>", "C-v"], keystrokes, || {
+            .or_try_bindings(["<pagedown>", "C-v"], keystrokes, || {
+                self.move_selection_relative(num_rows, page_up_down_size as i64)
+            })
+            .or_try_bindings(["<pageup>", "M-v"], keystrokes, || {
                 self.move_selection_relative(
                     num_rows,
                     -(page_up_down_size as i64),
                 )
-            })
-            .or_try_bindings(["<pagedown>", "M-v"], keystrokes, || {
-                self.move_selection_relative(num_rows, page_up_down_size as i64)
             })
             .or_try_bindings(["C-<home>", "M-<"], keystrokes, || {
                 self.select_row(Some(0))
