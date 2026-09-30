@@ -163,6 +163,18 @@ impl TypeHandle {
         reader: CachedReader<'_>,
     ) -> Result<SymbolicType, Error> {
         match self {
+            TypeHandle::MethodTable(method_table)
+                if method_table.is_array() =>
+            {
+                let element_type_ptr = method_table
+                    .array_element_type()
+                    .expect("Guarded by is_array() check");
+                let ty = reader
+                    .type_handle(element_type_ptr)?
+                    .to_symbolic(reader)?
+                    .array_of();
+                Ok(ty)
+            }
             TypeHandle::MethodTable(method_table) => {
                 let module_ptr = method_table.module();
                 let module = reader.runtime_module(module_ptr)?;
