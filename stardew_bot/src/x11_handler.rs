@@ -62,6 +62,7 @@ pub struct X11Handler {
     pid_atom: x11rb::protocol::xproto::Atom,
     active_window_atom: x11rb::protocol::xproto::Atom,
     root: Window,
+    root_shape: Vector<isize>,
     main_window: Option<Window>,
     main_window_pos: Option<Rectangle<isize>>,
     border_width: isize,
@@ -91,12 +92,18 @@ impl X11Handler {
             .ok_or(Error::MissingRootWindow)?
             .root;
 
+        let root_shape = {
+            let geom = conn.get_geometry(root)?.reply()?;
+            Vector::new(geom.width as isize, geom.height as isize)
+        };
+
         let handler = Self {
             conn,
             name_atoms,
             pid_atom,
             active_window_atom,
             root,
+            root_shape,
             main_window: None,
             main_window_pos: None,
             border_width: 0,
@@ -186,6 +193,10 @@ impl X11Handler {
         }
 
         Err(Error::NoSuchWindow(title.to_string()))
+    }
+
+    pub fn root_shape(&self) -> Vector<isize> {
+        self.root_shape
     }
 
     pub fn set_main_window(&mut self, window: Window) {

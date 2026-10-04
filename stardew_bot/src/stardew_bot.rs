@@ -11,6 +11,7 @@ use bot_logic::{
 use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
 
 use env_var_flag::env_var_flag;
+use geometry::Vector;
 use memory_reader::MemoryReader;
 use stardew_utils::stardew_valley_pid;
 use tui_utils::{
@@ -202,7 +203,18 @@ impl StardewBot {
             x11_handler.find_window_blocking("Stardew Valley")?;
 
         x11_handler.set_main_window(stardew_window);
-        x11_handler.move_and_resize_window(30, 68, 1100, 700)?;
+        match x11_handler.root_shape() {
+            Vector {
+                right: 3072,
+                down: 1920,
+            } => {
+                x11_handler.move_and_resize_window(650, 530, 1700, 1000)?;
+            }
+            _ => {
+                x11_handler.move_and_resize_window(30, 68, 1100, 700)?;
+            }
+        }
+
         x11_handler.query_window_location()?;
 
         let mut buffers = TuiBuffers::new();
