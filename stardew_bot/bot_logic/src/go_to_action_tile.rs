@@ -39,7 +39,7 @@ impl BotGoal for GoToActionTile {
             return Ok(BotGoalResult::Completed);
         }
 
-        let (target_room, target_position) = game_state
+        let (target_room, _num_tiles, ave_position) = game_state
             .locations
             .iter()
             .flat_map(|loc| {
@@ -48,18 +48,45 @@ impl BotGoal for GoToActionTile {
                     .map(move |(tile, action)| (loc, tile, action))
             })
             .filter(|(_, _, action)| action.as_str() == self.action.as_str())
-            .map(|(loc, tile, _)| (loc.name.clone(), tile.map(|x| x as f32)))
-            .reduce(|(lhs_loc, lhs_tile), (rhs_loc, rhs_tile)| {
-                if lhs_loc == rhs_loc {
-                    (lhs_loc, (lhs_tile + rhs_tile) / 2.0)
-                } else {
-                    (lhs_loc, lhs_tile)
-                }
-            })
+            .map(|(loc, tile, _)| (loc.name.clone(), 1, tile.map(|x| x as f32)))
+            .reduce(
+                |(lhs_loc, lhs_count, lhs_tile),
+                 (rhs_loc, rhs_count, rhs_tile)| {
+                    if lhs_loc == rhs_loc {
+                        let new_count = lhs_count + rhs_count;
+                        (
+                            lhs_loc,
+                            new_count,
+                            (lhs_tile * (lhs_count as f32)
+                                + rhs_tile * (rhs_count as f32))
+                                / (new_count as f32),
+                        )
+                    } else {
+                        (lhs_loc, lhs_count, lhs_tile)
+                    }
+                },
+            )
             .ok_or_else(|| Error::NoTileWithAction(self.action.clone()))?;
-        let target_position = target_position.map(|x| x.round() as isize);
 
-        let goal = ActivateTile::new(target_room, target_position);
+        let target_position = game_state
+            .locations
+            .iter()
+            .filter(|loc| loc.name == target_room)
+            .flat_map(|loc| {
+                loc.action_tiles
+                    .iter()
+                    .map(move |(tile, action)| (tile, action))
+            })
+            .filter(|(_, action)| action.as_str() == self.action.as_str())
+            .map(|(tile, _)| tile)
+            .min_by(|tile_a, tile_b| {
+                let dist2_a = tile_a.map(|x| x as f32).dist2(ave_position);
+                let dist2_b = tile_b.map(|x| x as f32).dist2(ave_position);
+                dist2_a.total_cmp(&dist2_b)
+            })
+            .expect("Already found at least one candidate tile");
+
+        let goal = ActivateTile::new(target_room, *target_position);
         Ok(goal.into())
     }
 }
