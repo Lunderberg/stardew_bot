@@ -252,6 +252,14 @@ impl X11Handler {
             },
         )?;
 
+        // Make sure the window size actually takes place.  Even with
+        // the flush, a query that occurs just after the configure
+        // window will get the old window position rather than the new
+        // one.  Probably means there's some other synchronization
+        // that I should be doing here.
+        self.flush()?;
+        std::thread::sleep(std::time::Duration::from_millis(100));
+
         Ok(())
     }
 
@@ -353,7 +361,6 @@ impl X11Handler {
         Ok(())
     }
 
-    #[allow(dead_code)]
     pub fn flush(&self) -> Result<(), Error> {
         self.conn.flush()?;
 
