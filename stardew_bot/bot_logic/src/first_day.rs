@@ -135,9 +135,26 @@ impl BotGoal for FirstDay {
             }
         }
 
-        let gift_pam = GiveGiftGoal::new("Pam", ItemId::DAFFODIL);
-        if !gift_pam.is_completed(game_state)? {
-            return Ok(gift_pam.into());
+        let need_early_battery = game_state
+            .statics
+            .bundles
+            .iter()
+            .filter_map(|bundle| {
+                let flags =
+                    game_state.globals.bundles.get(&bundle.bundle_index)?;
+                Some((bundle, flags))
+            })
+            .any(|(bundle, flags)| {
+                bundle
+                    .iter_items()
+                    .zip(flags)
+                    .any(|(item, done)| item.id == ItemId::BATTERY && !done)
+            });
+        if need_early_battery {
+            let gift_pam = GiveGiftGoal::new("Pam", ItemId::DAFFODIL);
+            if !gift_pam.is_completed(game_state)? {
+                return Ok(gift_pam.into());
+            }
         }
 
         let goal =
