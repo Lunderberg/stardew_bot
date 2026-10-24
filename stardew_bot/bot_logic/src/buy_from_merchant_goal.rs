@@ -67,30 +67,11 @@ impl BuyFromMerchantGoal {
         Ok(item_count)
     }
 
-    fn buy_price(&self, _game_state: &GameState) -> i32 {
-        // TODO: Read these from memory, rather than hard-coding them.
-        if self.item == ItemId::SALAD {
-            220
-        } else if self.item == ItemId::PARSNIP_SEEDS {
-            20
-        } else if self.item == ItemId::KALE_SEEDS {
-            70
-        } else if self.item == ItemId::COPPER_ORE {
-            75
-        } else if self.item == ItemId::WOOD {
-            10
-        } else if self.item == ItemId::COAL {
-            150
-        } else {
-            0
-        }
-    }
-
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         let num_in_inventory = self.item_count(game_state)?;
         let has_desired_amount = num_in_inventory >= self.item.count;
-        let can_buy_another =
-            game_state.player.current_money >= self.buy_price(game_state);
+        let can_buy_another = game_state.player.current_money
+            >= self.item.id.buy_price(game_state);
 
         Ok(has_desired_amount || !can_buy_another)
     }
@@ -126,7 +107,7 @@ impl BotGoal for BuyFromMerchantGoal {
 
                     let has_desired_amount = num_remaining_to_buy == 0;
                     let can_buy_another = game_state.player.current_money
-                        >= self.buy_price(game_state);
+                        >= self.item.id.buy_price(game_state);
                     !is_correct_item || has_desired_amount || !can_buy_another
                 };
 

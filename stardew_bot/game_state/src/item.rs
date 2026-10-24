@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use dsl::RustNativeObject;
 
-use crate::Error;
+use crate::{Error, GameState};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
@@ -175,7 +175,9 @@ impl ItemId {
     pub const SALAD: Self = Self::new_const("(O)196");
     pub const PARSNIP_SEEDS: Self = Self::new_const("(O)472");
     pub const PARSNIP: Self = Self::new_const("(O)24");
+    pub const BEAN_STARTER: Self = Self::new_const("(O)473");
     pub const CAULIFLOWER_SEEDS: Self = Self::new_const("(O)474");
+    pub const POTATO_SEEDS: Self = Self::new_const("(O)475");
     pub const CARROT_SEEDS: Self = Self::new_const("(O)CarrotSeeds");
     pub const KALE_SEEDS: Self = Self::new_const("(O)477");
     pub const MIXED_SEEDS: Self = Self::new_const("(O)770");
@@ -342,6 +344,31 @@ impl ItemId {
 
         let iter = items.into_iter().flatten();
         Some(iter)
+    }
+
+    pub fn buy_price(&self, _game_state: &GameState) -> i32 {
+        // TODO: Read these from memory, rather than hard-coding them.
+        if *self == ItemId::SALAD {
+            220
+        } else if *self == ItemId::PARSNIP_SEEDS {
+            20
+        } else if *self == ItemId::BEAN_STARTER {
+            60
+        } else if *self == ItemId::CAULIFLOWER_SEEDS {
+            80
+        } else if *self == ItemId::POTATO_SEEDS {
+            50
+        } else if *self == ItemId::KALE_SEEDS {
+            70
+        } else if *self == ItemId::COPPER_ORE {
+            75
+        } else if *self == ItemId::WOOD {
+            10
+        } else if *self == ItemId::COAL {
+            150
+        } else {
+            todo!("Handle buy price for item {self}")
+        }
     }
 }
 
