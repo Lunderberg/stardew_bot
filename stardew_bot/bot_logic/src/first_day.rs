@@ -9,7 +9,7 @@ use game_state::{GameState, ItemCategory, ItemId, ObjectKind, Season};
 
 use super::{
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
-    ExpandStorageInterrupt, ForagingGoal, GameStateExt as _, GoToActionTile,
+    ExpandStorageInterrupt, GameStateExt as _, GoToActionTile,
     MaintainStaminaGoal, MenuCloser, MovementGoal, PlantCropsGoal,
     SellToMerchantGoal, ShipItemGoal, UseItemOnTile,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
@@ -34,13 +34,15 @@ impl BotGoal for FirstDay {
             return Ok(BotGoalResult::Completed);
         }
 
-        let foraging =
-            ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
-        if !foraging.is_completed(game_state) {
-            return Ok(foraging
-                .with_interrupt(CollectNearbyItems::new())
-                .into());
-        }
+        // TODO: Include a maximum travel distance for the foraging.
+        //
+        // let foraging =
+        //     ForagingGoal::new().stop_at_time(700).stop_with_stamina(30);
+        // if !foraging.is_completed(game_state) {
+        //     return Ok(foraging
+        //         .with_interrupt(CollectNearbyItems::new())
+        //         .into());
+        // }
 
         let farm = game_state.get_room("Farm")?;
         let goal = ClearFarmGoal::new()
