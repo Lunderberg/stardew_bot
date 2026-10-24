@@ -1,5 +1,6 @@
 use crate::{Error, GameAction, GoToActionTile, ShopMenuExt as _};
-use game_state::{GameState, Item, ItemId};
+use game_state::{GameState, Item};
+use itertools::Itertools as _;
 
 use super::{
     LocationExt as _, MenuCloser,
@@ -10,7 +11,7 @@ pub struct BuyFromMerchantGoal {
     merchant: String,
     item: Item,
     movement_goal: GoToActionTile,
-    include_stored_items: Option<String>,
+    include_stored_items: Vec<String>,
 }
 
 impl BuyFromMerchantGoal {
@@ -21,50 +22,46 @@ impl BuyFromMerchantGoal {
             item,
             movement_goal: GoToActionTile::new(merchant.clone()),
             merchant,
-            include_stored_items: None,
+            include_stored_items: Vec::new(),
         }
     }
 
     pub fn include_stored_items(
-        self,
+        mut self,
         storage_location: impl Into<String>,
     ) -> Self {
-        Self {
-            include_stored_items: Some(storage_location.into()),
-            ..self
-        }
+        self.include_stored_items.push(storage_location.into());
+        self
     }
 
     pub fn item_count(&self, game_state: &GameState) -> Result<usize, Error> {
-        let iter_inventory = game_state.player.inventory.iter_items();
+        let iter_inventory = game_state.player.inventory.iter_items().map(Ok);
 
         let iter_stored = self
             .include_stored_items
-            .as_ref()
+            .iter()
             .map(|storage_location| -> Result<_, Error> {
                 let iter_stored =
                     game_state.get_room(storage_location)?.iter_stored_items();
                 Ok(iter_stored)
             })
-            .transpose()?
-            .into_iter()
-            .flatten();
+            .flatten_ok()
+            .into_iter();
 
         let iter_held_item = game_state
             .shop_menu()
-            .and_then(|menu| menu.held_item.as_ref());
+            .and_then(|menu| menu.held_item.as_ref())
+            .map(Ok);
 
         let iter_items = std::iter::empty()
             .chain(iter_inventory)
             .chain(iter_stored)
             .chain(iter_held_item);
 
-        let item_count = iter_items
-            .filter(|item| item.is_same_item(&self.item))
-            .map(|item| item.count)
-            .sum();
-
-        Ok(item_count)
+        iter_items
+            .filter_ok(|item| item.is_same_item(&self.item))
+            .map_ok(|item| item.count)
+            .sum()
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
