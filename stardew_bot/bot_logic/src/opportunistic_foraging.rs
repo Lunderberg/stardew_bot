@@ -11,6 +11,7 @@ pub struct OpportunisticForaging {
     radius: f32,
     min_empty_slots: usize,
     plan: Option<FarmPlan>,
+    use_stamina: bool,
 }
 
 impl OpportunisticForaging {
@@ -19,12 +20,20 @@ impl OpportunisticForaging {
             radius,
             min_empty_slots: 2,
             plan: None,
+            use_stamina: true,
         }
     }
 
     pub fn min_empty_slots(self, min_empty_slots: usize) -> Self {
         Self {
             min_empty_slots,
+            ..self
+        }
+    }
+
+    pub fn use_stamina(self, use_stamina: bool) -> Self {
+        Self {
+            use_stamina,
             ..self
         }
     }
@@ -107,6 +116,12 @@ impl BotInterrupt for OpportunisticForaging {
                     }
                 };
                 Some((obj.tile, opt_tool))
+            })
+            .filter(|(_, opt_tool)| {
+                opt_tool
+                    .as_ref()
+                    .map(|tool| tool == &ItemId::SCYTHE || self.use_stamina)
+                    .unwrap_or(true)
             })
             .find(|(tile, _)| {
                 if distances.is_none() {

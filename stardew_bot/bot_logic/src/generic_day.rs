@@ -31,7 +31,9 @@ impl BotGoal for GenericDay {
             let goal = LogicStack::new()
                 .then(FirstDay)
                 .with_interrupt(
-                    OpportunisticForaging::new(10.0).min_empty_slots(1),
+                    OpportunisticForaging::new(10.0)
+                        .min_empty_slots(1)
+                        .use_stamina(false),
                 )
                 .cancel_if(|game_state| {
                     game_state.globals.get_stat("daysPlayed").unwrap_or(0) != 1
