@@ -594,6 +594,7 @@ impl PlantCropsGoal {
             .map(|item| {
                 BuyFromMerchantGoal::new("Buy General", item)
                     .include_stored_items("Farm")
+                    .include_stored_items("FarmHouse")
             });
 
         let mut buy_items = LogicStack::new();
@@ -842,6 +843,19 @@ impl BotGoal for PlantCropsGoal {
             } else {
                 (tile, opt_item)
             };
+
+        // For day 1, the seeds from Pierre are in a chest in the
+        // farmhouse.  If the plan requires those seeds, we should
+        // grab them.
+        let get_free_seeds = InventoryGoal::current()
+            .with(
+                self.iter_required_items(game_state)?
+                    .map(|(id, count)| id.clone().with_count(count)),
+            )
+            .room("FarmHouse");
+        if !get_free_seeds.is_completed(game_state)? {
+            return Ok(get_free_seeds.into());
+        }
 
         let get_tools = InventoryGoal::current()
             .with(
