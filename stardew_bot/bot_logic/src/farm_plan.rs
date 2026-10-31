@@ -1,9 +1,9 @@
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 
 use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 
-use crate::{Error, GameStateExt as _};
+use crate::{Error, GameStateExt as _, pathfinding::MovementCost};
 use game_state::{GameState, ItemId, ObjectKind, ResourceClumpKind, TileMap};
 
 use super::LocationExt as _;
@@ -34,7 +34,8 @@ impl FarmPlan {
         let farm = game_state.get_room("Farm")?;
         let farm_door = game_state.get_farm_door()?;
 
-        let regions = Self::segmented_regions(game_state)?;
+        let regions = Self::size_limited_regions(game_state, 200)?;
+
         let distance_to_water = farm
             .pathfinding(&game_state.statics)
             .ignoring_obstacles()
@@ -215,6 +216,149 @@ impl FarmPlan {
         iter_fruit_trees.chain(iter_clumps).for_each(|tile| {
             regions[tile] = None;
         });
+
+        Ok(regions)
+    }
+
+    fn size_limited_regions(
+        game_state: &GameState,
+        max_size: usize,
+    ) -> Result<TileMap<Option<usize>>, Error> {
+        let mut regions = Self::segmented_regions(game_state)?;
+
+        let farm = game_state.get_room("Farm")?;
+
+        let num_regions = regions
+            .iter()
+            .filter_map(|(_, opt_region)| opt_region.clone())
+            .map(|i_region| i_region + 1)
+            .max()
+            .unwrap_or(0);
+
+        let mut i_next_subregion = num_regions;
+
+        for i_region in 0..num_regions {
+            let region =
+                regions.map(|opt_region| *opt_region == Some(i_region));
+
+            let num_tiles = region.iter_true().count();
+            let num_subregions = num_tiles.div_ceil(max_size);
+            if num_subregions == 1 {
+                continue;
+            }
+
+            let mut seeds = Vec::<Vector<isize>>::new();
+            for i in 0..num_subregions {
+                let opt_next_seed: Option<Vector<isize>> = if i == 0 {
+                    // For seed of first region, pick the tile that is
+                    // closest to the farmhouse.
+                    let door = game_state.get_farm_door()?;
+                    farm.pathfinding(&game_state.statics)
+                        .iter_dijkstra(door)
+                        .map(|(tile, _)| tile)
+                        .find(|tile| region[*tile])
+                } else {
+                    // After the first seed, pick the tile that is the
+                    // furthest from all previous seeds.
+                    MovementCost {
+                        map: region.map(|b| if *b { Some(0) } else { None }),
+                        allow_diagonal: false,
+                        include_border: false,
+                    }
+                    .iter_dijkstra(&seeds)
+                    .map(|(tile, _)| tile)
+                    .last()
+                };
+
+                // Fallback, in case there's no route to the region,
+                // just pick an arbitrary tile.
+                let next_seed = opt_next_seed.unwrap_or_else(|| {
+                    region
+                        .iter_true()
+                        .find(|tile| seeds.iter().all(|seed| tile != seed))
+                        .expect(
+                            "For N subregions, there must be at least N tiles",
+                        )
+                });
+                seeds.push(next_seed);
+            }
+
+            // Start a subregion for each seed tile.  Iterate over
+            // subregions, expanding each subregion by one tile.
+            struct Subregion {
+                i_subregion: usize,
+                frontier: VecDeque<Vector<isize>>,
+                seen: TileMap<bool>,
+            }
+            let mut subregion_map: TileMap<Option<usize>> =
+                region.map(|_| None);
+            let mut subregion_queue = VecDeque::<Subregion>::new();
+            for (i_subregion, seed) in seeds.into_iter().enumerate() {
+                subregion_queue.push_back(Subregion {
+                    i_subregion,
+                    frontier: std::iter::once(seed).collect(),
+                    seen: region.map(|_| false),
+                })
+            }
+
+            while let Some(mut subregion) = subregion_queue.pop_front() {
+                while let Some(point) = subregion.frontier.pop_front() {
+                    if subregion_map[point].is_none() {
+                        // No other subregion has claimed this point,
+                        // so it can be added to this subregion.
+                        subregion_map[point] = Some(subregion.i_subregion);
+                        point
+                            //.iter_cardinal()
+                            .iter_adjacent()
+                            .filter(|adj| {
+                                matches!(subregion_map.get(*adj), Some(None))
+                            })
+                            .filter(|adj| {
+                                matches!(region.get(*adj), Some(true))
+                            })
+                            .for_each(|adj| {
+                                if !subregion.seen[adj] {
+                                    subregion.seen[adj] = true;
+                                    subregion.frontier.push_back(adj);
+                                }
+                            });
+
+                        subregion_queue.push_back(subregion);
+                        break;
+                    }
+                }
+            }
+
+            subregion_map
+                .iter()
+                .filter_map(|(tile, opt_subregion)| {
+                    opt_subregion.map(|subregion| (tile, subregion))
+                })
+                .map(|(tile, subregion)| {
+                    let new_region = if subregion == 0 {
+                        // The first subregion just keeps the same id
+                        // as it started with.
+                        i_region
+                    } else {
+                        // All other subregions are mapped to new
+                        // global region indices.
+                        i_next_subregion + (subregion - 1)
+                    };
+                    (tile, new_region)
+                })
+                .for_each(|(tile, new_region)| {
+                    assert!(
+                        regions[tile] == Some(i_region),
+                        "Internal error.  \
+                         Splitting region into subregions \
+                         should only update the value of tiles \
+                         that are within the region being split."
+                    );
+                    regions[tile] = Some(new_region);
+                });
+
+            i_next_subregion += num_subregions - 1;
+        }
 
         Ok(regions)
     }
