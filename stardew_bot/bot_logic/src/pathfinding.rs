@@ -10,7 +10,19 @@ pub struct Pathfinding<'a> {
     statics: &'a StaticState,
     location: &'a Location,
 
+    /// If true, select paths that include movement along diagonals.
+    /// If false, only allow movement along cardinal directions.
     allow_diagonal: bool,
+
+    /// If true, results will allow the final tile of a path to be on
+    /// an unreachable tile.  If false, the final tile of a path must
+    /// not be blocked.
+    ///
+    /// Including the border is useful when identifying tiles on which
+    /// a tool may be used, where the player only needs to stand next
+    /// to the final tile.  Excluding the border is useful when
+    /// identifying tiles on which the player may stand.
+    include_border: bool,
 
     /// If `Some(cost)`, allow walking through tiles that contain
     /// small stone debris, with an additional penalty as specified.
@@ -79,6 +91,21 @@ pub struct Pathfinding<'a> {
     /// walking through tiles that contain craftable objects.
     clear_craftables: Option<u64>,
 
+    /// If true, treat NPCs as obstacles to be avoided.  If false,
+    /// ignore NPCs while pathfinding.
+    avoid_npcs: bool,
+}
+
+#[derive(Debug, Clone)]
+pub struct MovementCost {
+    /// The traversal costs for each tile, or `None` for impassable
+    /// tiles.
+    pub map: TileMap<Option<u64>>,
+
+    /// If true, select paths that include movement along diagonals.
+    /// If false, only allow movement along cardinal directions.
+    pub allow_diagonal: bool,
+
     /// If true, results will allow the final tile of a path to be on
     /// an unreachable tile.  If false, the final tile of a path must
     /// not be blocked.
@@ -87,11 +114,7 @@ pub struct Pathfinding<'a> {
     /// a tool may be used, where the player only needs to stand next
     /// to the final tile.  Excluding the border is useful when
     /// identifying tiles on which the player may stand.
-    include_border: bool,
-
-    /// If true, treat NPCs as obstacles to be avoided.  If false,
-    /// ignore NPCs while pathfinding.
-    avoid_npcs: bool,
+    pub include_border: bool,
 }
 
 /// Tracking for points during A* search.
@@ -358,7 +381,16 @@ impl<'a> Pathfinding<'a> {
             .chain(iter_obj)
     }
 
-    fn movement_cost(&self) -> TileMap<Option<u64>> {
+    fn movement_cost(&self) -> MovementCost {
+        let map = self.raw_movement_cost();
+        MovementCost {
+            map,
+            allow_diagonal: self.allow_diagonal,
+            include_border: self.include_border,
+        }
+    }
+
+    fn raw_movement_cost(&self) -> TileMap<Option<u64>> {
         // Collect all the tile costs into a single TileMap
         let mut map = self.location.blocked.map(|_| Some(0));
 
@@ -391,40 +423,15 @@ impl<'a> Pathfinding<'a> {
     }
 
     pub fn walkable(&self) -> TileMap<bool> {
-        self.movement_cost().map(|opt_cost| opt_cost.is_some())
+        self.movement_cost().walkable()
     }
 
     pub fn clear(&self) -> TileMap<bool> {
-        self.movement_cost().map(|opt_cost| opt_cost == &Some(0))
+        self.movement_cost().clear()
     }
 
     pub fn reachable(&self, initial: Vector<isize>) -> TileMap<bool> {
-        let walkable = self.walkable();
-
-        let mut reachable = walkable.map(|_| false);
-        if reachable.in_bounds(initial) {
-            reachable[initial] = true;
-        }
-
-        let mut to_visit = vec![initial];
-        while let Some(tile) = to_visit.pop() {
-            for dir in Direction::iter_cardinal() {
-                let adj = tile + dir.offset();
-                if reachable.in_bounds(adj) && !reachable[adj] {
-                    if walkable[adj] {
-                        // The player may walk through this tile.
-                        reachable[adj] = true;
-                        to_visit.push(adj);
-                    } else if self.include_border {
-                        // The player may interact with this tile, but
-                        // may not walk through it.
-                        reachable[adj] = true;
-                    }
-                }
-            }
-        }
-
-        reachable
+        self.movement_cost().reachable(initial)
     }
 
     pub fn distances(&self, initial: impl TileSet) -> TileMap<Option<u64>> {
@@ -490,7 +497,70 @@ impl<'a> Pathfinding<'a> {
         initial: Vector<isize>,
         goal: impl TileSet,
     ) -> Result<Vec<Vector<isize>>, Error> {
-        let cost_map = self.movement_cost();
+        self.movement_cost()
+            .path_between(initial, goal, &self.location.name)
+    }
+
+    fn iter_dijkstra_entries(
+        &self,
+        initial: impl TileSet,
+    ) -> impl Iterator<Item = DijkstraEntry> {
+        self.movement_cost().iter_dijkstra_entries(initial)
+    }
+
+    pub fn iter_dijkstra<'b, 'c, 'd>(
+        &'b self,
+        initial: impl TileSet,
+    ) -> impl Iterator<Item = (Vector<isize>, u64)> {
+        self.movement_cost().iter_dijkstra(initial)
+    }
+}
+
+impl MovementCost {
+    pub fn walkable(&self) -> TileMap<bool> {
+        self.map.map(|opt_cost| opt_cost.is_some())
+    }
+
+    pub fn clear(&self) -> TileMap<bool> {
+        self.map.map(|opt_cost| opt_cost == &Some(0))
+    }
+
+    pub fn reachable(&self, initial: Vector<isize>) -> TileMap<bool> {
+        let walkable = self.walkable();
+
+        let mut reachable = walkable.map(|_| false);
+        if reachable.in_bounds(initial) {
+            reachable[initial] = true;
+        }
+
+        let mut to_visit = vec![initial];
+        while let Some(tile) = to_visit.pop() {
+            for dir in Direction::iter_cardinal() {
+                let adj = tile + dir.offset();
+                if reachable.in_bounds(adj) && !reachable[adj] {
+                    if walkable[adj] {
+                        // The player may walk through this tile.
+                        reachable[adj] = true;
+                        to_visit.push(adj);
+                    } else if self.include_border {
+                        // The player may interact with this tile, but
+                        // may not walk through it.
+                        reachable[adj] = true;
+                    }
+                }
+            }
+        }
+
+        reachable
+    }
+
+    fn path_between(
+        &self,
+        initial: Vector<isize>,
+        goal: impl TileSet,
+        room_name: &str,
+    ) -> Result<Vec<Vector<isize>>, Error> {
+        let cost_map = &self.map;
 
         let mut best: TileMap<Option<(u64, Option<Direction>)>> =
             TileMap::empty(cost_map.width() + 2, cost_map.height() + 2);
@@ -523,7 +593,7 @@ impl<'a> Pathfinding<'a> {
                 best.in_bounds(visiting.tile + best_tile_offset),
                 "Tile {} is out of bounds for location '{}'",
                 visiting.tile,
-                self.location.name,
+                room_name,
             );
             let is_best = best[visiting.tile + best_tile_offset]
                 .map(|(prev, _)| visiting.dist_plus_heuristic <= prev)
@@ -600,7 +670,7 @@ impl<'a> Pathfinding<'a> {
 
         let final_tile =
             opt_final_tile.ok_or_else(|| Error::NoRouteToTargets {
-                room: self.location.name.clone(),
+                room: room_name.to_string(),
                 start: initial,
                 goals: goal.iter().collect(),
             })?;
@@ -618,10 +688,10 @@ impl<'a> Pathfinding<'a> {
     }
 
     fn iter_dijkstra_entries(
-        &self,
+        self,
         initial: impl TileSet,
-    ) -> impl Iterator<Item = DijkstraEntry> + '_ {
-        let cost_map = self.movement_cost();
+    ) -> impl Iterator<Item = DijkstraEntry> {
+        let cost_map = self.map;
 
         let mut finished: TileMap<bool> = cost_map.map(|_| false);
 
@@ -698,9 +768,9 @@ impl<'a> Pathfinding<'a> {
     }
 
     pub fn iter_dijkstra(
-        &self,
+        self,
         initial: impl TileSet,
-    ) -> impl Iterator<Item = (Vector<isize>, u64)> + '_ {
+    ) -> impl Iterator<Item = (Vector<isize>, u64)> {
         self.iter_dijkstra_entries(initial)
             .map(|entry| (entry.tile, entry.dist / 1000))
     }
