@@ -140,7 +140,21 @@ impl FarmPlan {
                                 })
                             }),
                     )
-                    .chain(farm.diggable.iter_false()),
+                    .chain(farm.diggable.iter_false())
+                    .chain(
+                        // Two rows below the farmhouse
+                        (-5..=4).flat_map(|di| {
+                            (3..=4)
+                                .map(move |dj| farm_door + Vector::new(di, dj))
+                        }),
+                    )
+                    .chain(
+                        // Two columns to the right of the farmhouse
+                        (4..=5).flat_map(|di| {
+                            (-1..=1)
+                                .map(move |dj| farm_door + Vector::new(di, dj))
+                        }),
+                    ),
             );
 
             blocked
