@@ -5,7 +5,9 @@ use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{Error, GameAction, GiveGiftGoal, bot_logic::BotInterrupt};
-use game_state::{GameState, ItemCategory, ItemId, ObjectKind, Season};
+use game_state::{
+    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season,
+};
 
 use super::{
     BuyFromMerchantGoal, ClayFarmingGoal, ClearFarmGoal, CollectNearbyItems,
@@ -45,6 +47,7 @@ impl BotGoal for FirstDay {
         // }
 
         let farm = game_state.get_room("Farm")?;
+        let farmhouse = game_state.get_room("FarmHouse")?;
         let goal = ClearFarmGoal::new()
             .use_priority_tiles(false)
             .use_stamina(false)
@@ -206,19 +209,36 @@ impl BotGoal for FirstDay {
         let iter_seeds = {
             let mut seeds: HashMap<ItemId, usize> = HashMap::new();
 
-            game_state
-                .player
-                .inventory
-                .iter_items()
+            let iter_stored_items = [farm, farmhouse]
+                .into_iter()
+                .flat_map(|loc| {
+                    loc.objects.iter().filter_map(|obj| obj.kind.as_chest())
+                })
+                .flat_map(|chest| {
+                    chest.iter_filled_slots().map(|(_, item)| item)
+                });
+
+            let iter_held_items = game_state.player.inventory.iter_items();
+
+            let iter_already_planted = farm.objects.iter().filter_map(|obj| {
+                let crop = obj.kind.as_hoe_dirt()?.crop.as_ref()?;
+                matches!(crop.phase, CropPhase::Seed).then(|| &crop.seed)
+            });
+
+            iter_stored_items
+                .chain(iter_held_items)
                 .filter(|item| {
                     matches!(item.category, Some(ItemCategory::Seed))
                         && !item.id.is_tree_seed()
                 })
-                .for_each(|item| {
-                    if let Some(count) = seeds.get_mut(&item.id) {
-                        *count += item.count;
+                .map(|item| (&item.id, item.count))
+                .chain(iter_already_planted.map(|id| (id, 1)))
+                .filter(|(id, _)| *id != &ItemId::MIXED_SEEDS)
+                .for_each(|(id, count)| {
+                    if let Some(total) = seeds.get_mut(id) {
+                        *total += count;
                     } else {
-                        seeds.insert(item.id.clone(), item.count);
+                        seeds.insert(id.clone(), count);
                     }
                 });
 
@@ -253,14 +273,29 @@ impl BotGoal for FirstDay {
                     crop_to_seed.get(id).map(|seed| (*seed, 2))
                 });
 
+            let mut remaining_gp = game_state.player.current_money;
             std::iter::empty::<(&ItemId, usize)>()
-                .chain([(&ItemId::PARSNIP_SEEDS, 60)])
                 .chain(iter_bundle_seeds)
+                .chain([(&ItemId::PARSNIP_SEEDS, 60)])
                 .for_each(|(seed, count)| {
-                    if let Some(to_plant) = seeds.get_mut(seed) {
-                        *to_plant = (*to_plant).max(count);
-                    } else {
-                        seeds.insert(seed.clone(), count);
+                    // TODO: Filter on purchasable items.  This will
+                    // handle carrot seeds, which can appear in the
+                    // spring remixed bundle, but cannot be purchased.
+                    let previously_planned =
+                        seeds.get(seed).cloned().unwrap_or(0);
+                    let additional =
+                        count.max(previously_planned) - previously_planned;
+                    let unit_price = seed.buy_price(game_state);
+                    let num_to_buy =
+                        additional.min((remaining_gp / unit_price) as usize);
+                    remaining_gp -= (num_to_buy as i32) * unit_price;
+
+                    if num_to_buy > 0 {
+                        if let Some(to_plant) = seeds.get_mut(seed) {
+                            *to_plant = (*to_plant).max(num_to_buy);
+                        } else {
+                            seeds.insert(seed.clone(), num_to_buy);
+                        }
                     }
                 });
 
