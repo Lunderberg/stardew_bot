@@ -173,6 +173,8 @@ impl ItemId {
     pub const EEL: Self = Self::new_const("(O)148");
 
     pub const SALAD: Self = Self::new_const("(O)196");
+    pub const COOKIES: Self = Self::new_const("(O)223");
+
     pub const PARSNIP_SEEDS: Self = Self::new_const("(O)472");
     pub const PARSNIP: Self = Self::new_const("(O)24");
     pub const BEAN_STARTER: Self = Self::new_const("(O)473");

@@ -480,6 +480,61 @@ impl StardewBot {
         Ok(())
     }
 
+    pub fn show_garbage_can_prediction(
+        &self,
+        num_days: usize,
+    ) -> Result<(), Error> {
+        use bot_logic::predictors::{GarbageCan, GarbageCanPredictor};
+
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        let days_played =
+            game_state.globals.get_stat("daysPlayed").unwrap_or(1) as usize;
+
+        for day_offset in 0..num_days {
+            let day = days_played + day_offset;
+            let predictor =
+                GarbageCanPredictor::new(&game_state).days_played(day as u32);
+            let cans = [
+                GarbageCan::Blacksmith,
+                GarbageCan::EmilyAndHaley,
+                GarbageCan::Evelyn,
+                GarbageCan::JodiAndKent,
+                GarbageCan::JojaMart,
+                GarbageCan::Mayor,
+                GarbageCan::Museum,
+                GarbageCan::Saloon,
+            ];
+            println!("Day {day}");
+
+            for can in cans {
+                let predictions = predictor.predict(can);
+                if !predictions.is_empty() {
+                    println!("Garbage can: {can:?}");
+                    for prediction in predictions {
+                        let item = game_state
+                            .statics
+                            .object_data
+                            .get(&prediction.item)
+                            .map(|data| data.name.as_str())
+                            .unwrap_or_else(|| &prediction.item.item_id);
+                        if let Some(min_luck) = prediction.required_luck {
+                            println!("\tif luck > {min_luck:.3}: {item}");
+                        } else {
+                            println!("\t{item}");
+                        }
+                    }
+                }
+            }
+            println!("");
+        }
+
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         use crossterm::event;
 

@@ -247,10 +247,18 @@ impl SeededRng {
         sample
     }
 
+    /// Return a random float between 0.0 and 1.0.
+    ///
+    /// A call to `rng.rand_float()` is equivalent to a call to
+    /// `random.NextDouble()` in C#.
     pub fn rand_float(&mut self) -> f32 {
         (self.rand_i32() as f32) / (i32::MAX as f32)
     }
 
+    /// Return a random integer within the specified range
+    ///
+    /// A call to `rng.rand_in_range(a..b)` is equivalent to a C# call
+    /// to `random.Next(a, b)`.
     pub fn rand_in_range(&mut self, range: Range<i32>) -> i32 {
         let float = self.rand_float();
         let delta = range.end - range.start;
@@ -292,11 +300,18 @@ impl SeededRng {
             }
         }
 
+        Self::hash(&bytes)
+    }
+
+    /// Apply the hashing function used by Stardew Valley.  Most RNG
+    /// predictions only need this indirectly, as part of the
+    /// `from_stardew_seed` implementation.  However, some RNG
+    /// predictions need to hash a string in order to generate te
+    /// inputs to `from_stardew_seed`.
+    pub fn hash(bytes: &[u8]) -> i32 {
         let seed: u32 = xxhash_rust::xxh32::xxh32(&bytes, 0);
 
-        let seed: i32 = i32::from_ne_bytes(seed.to_ne_bytes());
-
-        seed
+        i32::from_ne_bytes(seed.to_ne_bytes())
     }
 
     pub fn legacy_stardew_seed<const N: usize>(values: [f64; N]) -> i32 {
