@@ -445,6 +445,20 @@ impl<'a> Pathfinding<'a> {
         distances
     }
 
+    pub fn scaled_distances(
+        &self,
+        initial: impl TileSet,
+    ) -> TileMap<Option<u64>> {
+        let mut distances = self.location.blocked.map(|_| None);
+
+        self.iter_dijkstra_entries(initial).for_each(|entry| {
+            assert!(distances[entry.tile].is_none());
+            distances[entry.tile] = Some(entry.dist);
+        });
+
+        distances
+    }
+
     /// Given a target location, return the direction to travel from
     ///
     /// Interrupts are often location-dependent, such as triggering

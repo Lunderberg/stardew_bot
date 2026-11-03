@@ -19,6 +19,13 @@ pub struct ClayFarmingGoal {
     stop_at_stamina: f32,
     stop_at_time: Option<i32>,
     hard_stop: bool,
+
+    /// The path to be followed in order to pick up the remaining
+    /// clay.  If `None`, the path should be populated.  If `Some`,
+    /// then the points on the path should be popped off one by one
+    /// and followed.  If the vector is empty, the cleanup has been
+    /// completed and the bot should be near the exit of the beach.
+    cleanup_path: Option<Vec<Vector<isize>>>,
 }
 
 pub struct ClayPredictor {
@@ -89,6 +96,7 @@ impl ClayFarmingGoal {
             stop_at_stamina: 2.0,
             stop_at_time: None,
             hard_stop: false,
+            cleanup_path: None,
         }
     }
 
@@ -125,57 +133,137 @@ impl ClayFarmingGoal {
     }
 
     pub fn clay_to_pick_up(
-        &self,
+        &mut self,
         game_state: &GameState,
     ) -> Option<Vector<f32>> {
         if self.hard_stop || game_state.player.room_name != "Beach" {
             return None;
         }
+        if self.cleanup_path.is_none() {
+            let beach = game_state.get_room("Beach").ok()?;
+            let pathfinding = beach.pathfinding(&game_state.statics);
 
-        let beach = game_state.get_room("Beach").ok()?;
-        let pathfinding = beach.pathfinding(&game_state.statics);
+            let player_tile = game_state.player.tile();
+            let player_distance = pathfinding.distances(player_tile);
+            let exit_tile = beach
+                .warps
+                .iter()
+                .map(|warp| warp.location)
+                .map(|tile| Vector::new(tile.right, tile.down.max(0)))
+                .filter(|tile| player_distance.is_some(*tile))
+                .min_by_key(|tile| (tile.down, tile.right))
+                .expect("Exit tile not reachable");
+            let exit_distance = pathfinding.distances(exit_tile);
 
-        let player_tile = game_state.player.tile();
-        let player_distance = pathfinding.distances(player_tile);
+            let points: Vec<Vector<isize>> = std::iter::empty()
+                .chain([player_tile])
+                .chain(
+                    beach
+                        .items
+                        .iter()
+                        .filter(|floating_item| {
+                            floating_item.id == ItemId::CLAY
+                        })
+                        .map(|item| {
+                            (item.position / 64.0).map(|x| x.round() as isize)
+                        })
+                        .filter(|&tile| {
+                            player_distance.get_opt(tile).is_some()
+                                && exit_distance.get_opt(tile).is_some()
+                        }),
+                )
+                .chain([exit_tile])
+                .collect();
 
-        let exit_tile = beach
-            .warps
-            .iter()
-            .map(|warp| warp.location)
-            .map(|tile| {
-                let offset = if tile.down == -1 {
-                    Vector::new(1, 0)
-                } else {
-                    Vector::zero()
-                };
-                tile + offset
-            })
-            .filter(|tile| player_distance.is_some(*tile))
-            .min_by_key(|tile| (tile.down, tile.right));
-        let exit_distance = pathfinding.distances(exit_tile);
+            let distance_matrix: Vec<u64> = points
+                .iter()
+                .flat_map(|from| {
+                    let dist_map = pathfinding.scaled_distances(*from);
+                    points.iter().map(move |to| {
+                        dist_map
+                            .get_opt(*to)
+                            .cloned()
+                            .expect("All points should be reachable")
+                    })
+                })
+                .collect();
+            let n = points.len();
+            let get_dist =
+                |i: usize, j: usize| -> u64 { distance_matrix[j * n + i] };
 
-        beach
-            .items
-            .iter()
-            .filter(|floating_item| floating_item.id == ItemId::CLAY)
-            .min_by_key(|item| {
-                let tile = (item.position / 64.0).map(|x| x.round() as isize);
-                match (
-                    player_distance.get_opt(tile),
-                    exit_distance.get_opt(tile),
-                ) {
-                    (Some(from_player), Some(from_exit)) => {
-                        (*from_player as i64) - (*from_exit as i64)
+            let mut path: Vec<usize> = (0..n).rev().collect();
+            // Initial greedy path
+            for i in 1..(n - 1) {
+                let prev = path[i - 1];
+                let j = (i..(n - 1))
+                    .min_by_key(|j| get_dist(prev, path[*j]))
+                    .expect("At least one point exists");
+                path.swap(i, j);
+            }
+
+            for _ in 0..3 {
+                // Check pairs of edges, and see whether reversing the
+                // path between those edges would be beneficial.  (N^2
+                // for number of edges, typically 30-ish pieces of
+                // clay to pick up.)
+                //
+                // Technically, I'd then repeat the pairwise checks
+                // until converged, but I want an upper bound on the
+                // compute time, so I limit it to 3 passes.  In
+                // practice, it seems to finish after 1-2 passes
+                // anyways.
+                //
+                // This takes longer to plan than just walking toward
+                // the closest piece of clay, but only for the first
+                // frame of the bot.  Spending the extra 20-25 ms to
+                // plan the route does miss a few frames, but makes
+                // the overall collection be much consistently faster.
+                let mut made_swap = false;
+
+                for i in 1..(n - 2) {
+                    for j in (i + 1)..(n - 1) {
+                        // Before: A - B - (mid) - C - D
+                        // After: A - C - (mid reversed) - B - D
+
+                        let a = path[i - 1];
+                        let b = path[i];
+                        let c = path[j];
+                        let d = path[j + 1];
+                        let before = get_dist(a, b) + get_dist(c, d);
+                        let after = get_dist(a, c) + get_dist(b, d);
+                        if after < before {
+                            path[i..=j].reverse();
+                            made_swap = true;
+                        }
                     }
-                    _ => i64::MAX,
                 }
-            })
-            .map(|item| item.position)
+
+                if !made_swap {
+                    break;
+                }
+            }
+
+            self.cleanup_path =
+                Some(path.into_iter().map(|i| points[i]).collect());
+        }
+
+        self.cleanup_path
+            .as_mut()
+            .expect("Just populated cleanup_path")
+            .pop()
+            .map(|tile| Vector::new(tile.right as f32, tile.down as f32) * 64.0)
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         self.done_digging(game_state)
-            && self.clay_to_pick_up(game_state).is_none()
+            && (self.hard_stop
+                || game_state.player.room_name != "Beach"
+                || game_state
+                    .get_room("Beach")
+                    .ok()
+                    .into_iter()
+                    .flat_map(|loc| loc.items.iter())
+                    .all(|floating_item| floating_item.id != ItemId::CLAY))
     }
 }
 
