@@ -695,9 +695,10 @@ impl Location {
             "new_hoe_dirt",
             |is_watered: bool,
              crop_phase: Option<usize>,
-             crop_seed: Option<&str>| {
-                let crop = if crop_phase.is_some() && crop_seed.is_some() {
-                    let phase = match crop_phase.unwrap() {
+             crop_seed: Option<&str>,
+             forage_seed: Option<&str>| {
+                let crop = if let Some(crop_phase) = crop_phase {
+                    let phase = match crop_phase {
                         0 => CropPhase::Seed,
                         1 => CropPhase::Growing,
                         2 => CropPhase::Harvestable,
@@ -706,8 +707,19 @@ impl Location {
                             unreachable!("Value {other} should not be produced")
                         }
                     };
-                    let seed =
-                        ItemId::new(format!("(O){}", crop_seed.unwrap()));
+                    let seed = if let Some(seed) = crop_seed {
+                        ItemId::new(format!("(O){seed}"))
+                    } else if matches!(forage_seed, Some("1")) {
+                        ItemId::SPRING_ONION
+                    } else if matches!(forage_seed, Some("2")) {
+                        ItemId::GINGER
+                    } else {
+                        panic!(
+                            "HoeDirt has phase {phase:?}, \
+                             but no known seed planted in it.  \
+                             (Forage = {forage_seed:?})"
+                        )
+                    };
                     Some(Crop { phase, seed })
                 } else {
                     None
@@ -1466,7 +1478,8 @@ impl Location {
 
                                 let is_growing = phase < num_phases - 1;
                                 let is_regrowing = is_fully_grown && day_of_current_phase > 0i32;
-                                let can_harvest = !is_growing && !is_regrowing;
+                                let has_forage = crop.whichForageCrop.is_some();
+                                let can_harvest = (!is_growing && !is_regrowing) || has_forage;
 
                                 if phase==0 {
                                     0
@@ -1484,10 +1497,16 @@ impl Location {
                                 .value
                                 .read_string();
 
+                            let forage_crop = crop
+                                .whichForageCrop
+                                .value
+                                .read_string();
+
                             new_hoe_dirt(
                                 is_watered,
                                 crop_phase,
                                 crop_seed,
+                                forage_crop,
                             )
                         } else {
                             new_unknown_object_kind(feature_value)
