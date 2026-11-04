@@ -171,6 +171,14 @@ impl BotGoal for FirstDay {
             }
         }
 
+        let clay_farming = ClayFarmingGoal::new().stop_at_time(1440);
+        if game_state.player.room_name == "Beach"
+            && game_state.globals.in_game_time >= 1230
+            && !clay_farming.is_completed(game_state)
+        {
+            return Ok(clay_farming.into());
+        }
+
         let goal =
             SellToMerchantGoal::new("Carpenter", [ItemId::CLAY, ItemId::FIBER])
                 .min_to_sell(100);
@@ -186,7 +194,6 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        let clay_farming = ClayFarmingGoal::new().stop_at_time(1450);
         if !clay_farming.is_completed(game_state) {
             return Ok(clay_farming.into());
         }
