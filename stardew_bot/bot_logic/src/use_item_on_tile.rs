@@ -6,9 +6,7 @@ use game_state::{GameState, Item, ItemCategory, ItemId};
 
 use super::{
     MovementGoal, SelectItemGoal,
-    bot_logic::{
-        ActionCollector, BotGoal, BotGoalResult, LogicStack, LogicStackItem,
-    },
+    bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStack},
 };
 
 pub struct UseItemOnTile {
@@ -18,7 +16,7 @@ pub struct UseItemOnTile {
     item_used: bool,
 }
 
-struct SwingWithAnimationCancel {
+pub struct SwingWithAnimationCancel {
     tool_used: bool,
 }
 
@@ -177,13 +175,9 @@ impl BotGoal for UseItemOnTile {
                 id.starts_with("(T)") || id.starts_with("(W)")
             };
             if wait_for_animation_cancel {
-                let stack: LogicStack = [
-                    LogicStackItem::PreventInterrupt,
-                    SwingWithAnimationCancel::new().into(),
-                ]
-                .into_iter()
-                .collect();
-                return Ok(stack.into());
+                return Ok(SwingWithAnimationCancel::new()
+                    .prevent_interrupts()
+                    .into());
             } else {
                 actions.do_action(GameAction::LeftClick);
             }
@@ -213,11 +207,12 @@ impl BotGoal for SwingWithAnimationCancel {
         // the tool selected, and with the mouse in the appropriate
         // location to use the tool.
         //
-        // This is an implementation detail of `UseItemOnTile`,
-        // separated into a distinct `BotGoal` because this portion
-        // should not be interrupted.  (e.g. While a tool is swinging,
-        // if an enemy comes within range, the tool usage should be
-        // animation-cancelled prior to the interrupt triggering.)
+        // This is separated into a distinct `BotGoal`, because it is
+        // an uninterruptible step within interruptible high-level
+        // goals.  (e.g. While a tool is swinging, if an enemy comes
+        // within range, the animation canceling of the tool usage
+        // should be completed prior to triggering the interrupt to
+        // hit the enemy.)
 
         let player = &game_state.player;
         let using_tool = player.using_tool;

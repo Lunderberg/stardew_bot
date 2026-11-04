@@ -217,7 +217,7 @@ impl GameStateExt for GameState {
         {
             return self.get_farm_door();
         }
-        MovementGoal::closest_entrance(self, target_room)
+        MovementGoal::closest_entrance(self, target_room, false)
     }
 
     fn collect_clearable_tiles(

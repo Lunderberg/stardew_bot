@@ -3,9 +3,12 @@ use std::{borrow::Cow, collections::HashSet};
 use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction, MenuCloser};
+use crate::{
+    Error, GameAction, MenuCloser, SelectItemGoal, SwingWithAnimationCancel,
+};
 use game_state::{
-    FacingDirection, GameState, Location, StaticState, TileMap, WarpKind,
+    FacingDirection, GameState, Item, Location, Object, ObjectKind,
+    StaticState, TileMap, WarpKind,
 };
 
 use super::{
@@ -29,10 +32,12 @@ pub struct MovementGoal {
     target_room: String,
     target_position: Vector<f32>,
     tolerance: f32,
+    clear_breakables: bool,
 }
 
 pub struct GoToRoomGoal {
     target_room: String,
+    clear_breakables: bool,
 }
 
 pub struct LocalMovementGoal {
@@ -40,9 +45,20 @@ pub struct LocalMovementGoal {
     target_position: Vector<f32>,
     tolerance: f32,
 
+    /// If true and if the player has a suitable weapon, objects that
+    /// are breakable without using stamina (e.g. fiber, barrels in
+    /// the mine) will be broken in order to follow a shorter path.
+    ///
+    /// Otherwise, these objects will be walked around instead.
+    clear_breakables: bool,
+
     /// A lookup specifying the direction to move, given the tile on
     /// which the player is standing.
     direction_map: Option<TileMap<Direction>>,
+
+    /// A lookup of breakable objects, to avoid per-frame iteration
+    /// over all objects in the location.
+    breakable_objects: Option<HashSet<Vector<isize>>>,
 
     /// The type of warp to be used at the end of the movement, if
     /// any.  Used to determine if the final tile should be clicked
@@ -64,6 +80,7 @@ struct ConnectedRoomGraph<'a> {
     statics: &'a StaticState,
     in_game_time: i32,
     events: &'a HashSet<String>,
+    clear_breakables: bool,
 }
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone)]
@@ -92,8 +109,10 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
             .get(node.current_room_index)
             .into_iter()
             .flat_map(move |loc| {
-                let reachable =
-                    loc.pathfinding(self.statics).reachable(node.current_pos);
+                let reachable = loc
+                    .pathfinding(self.statics)
+                    .clear_breakables(self.clear_breakables)
+                    .reachable(node.current_pos);
 
                 let is_on_warp = loc
                     .warps
@@ -162,12 +181,20 @@ impl MovementGoal {
             target_room,
             target_position,
             tolerance: WAYPOINT_TOLERANCE,
+            clear_breakables: false,
         }
     }
 
     #[allow(dead_code)]
     pub fn with_tolerance(self, tolerance: f32) -> Self {
         Self { tolerance, ..self }
+    }
+
+    pub fn clear_breakables(self, clear_breakables: bool) -> Self {
+        Self {
+            clear_breakables,
+            ..self
+        }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
@@ -180,6 +207,15 @@ impl MovementGoal {
         let is_correct_location_within_room = goal_dist < self.tolerance;
 
         is_correct_room && is_correct_location_within_room
+    }
+
+    fn can_clear_breakables(&self, game_state: &GameState) -> bool {
+        self.clear_breakables
+            && game_state
+                .player
+                .inventory
+                .iter_items()
+                .any(|item| item.as_weapon().is_some())
     }
 
     fn room_to_room_iter_dijkstra<'a>(
@@ -226,6 +262,7 @@ impl MovementGoal {
             statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
             events: &game_state.globals.events_triggered,
+            clear_breakables: self.can_clear_breakables(game_state),
         };
 
         // Dijkstra's algorithm to search for connections between rooms
@@ -269,7 +306,8 @@ impl MovementGoal {
                     loc.name.clone(),
                     tile.map(|x| x as f32),
                     warp_kind,
-                );
+                )
+                .clear_breakables(self.clear_breakables);
                 if let Some(tolerance) = opt_tolerance {
                     goal.with_tolerance(tolerance)
                 } else {
@@ -286,6 +324,7 @@ impl MovementGoal {
     pub(crate) fn closest_entrance(
         game_state: &GameState,
         target_room: &str,
+        clear_breakables: bool,
     ) -> Result<Vector<isize>, Error> {
         let goal = MovementGoal::new(target_room, Vector::new(0.0, 0.0));
 
@@ -294,6 +333,7 @@ impl MovementGoal {
             statics: &game_state.statics,
             in_game_time: game_state.globals.in_game_time,
             events: &game_state.globals.events_triggered,
+            clear_breakables,
         };
 
         let (target_room_index, mut iter_search) =
@@ -323,7 +363,8 @@ impl MovementGoal {
                     self.target_position,
                     None,
                 )
-                .with_tolerance(self.tolerance),
+                .with_tolerance(self.tolerance)
+                .clear_breakables(self.clear_breakables),
             ),
         )
         .filter(|_| self.target_room == player.room_name)
@@ -338,12 +379,29 @@ impl MovementGoal {
 impl GoToRoomGoal {
     pub fn new(target_room: impl Into<String>) -> Self {
         let target_room = target_room.into();
-        Self { target_room }
+        Self {
+            target_room,
+            clear_breakables: false,
+        }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         self.target_room == game_state.player.room_name
     }
+
+    pub fn clear_breakables(self, clear_breakables: bool) -> Self {
+        Self {
+            clear_breakables,
+            ..self
+        }
+    }
+}
+
+fn object_is_breakable(obj: &Object) -> bool {
+    // TODO: Extract a helper function, so this function and
+    // `Pathfinding::movement_cost_component` can share the
+    // same definition of "breakable" objects.
+    matches!(obj.kind, ObjectKind::Fiber | ObjectKind::MineBarrel)
 }
 
 impl LocalMovementGoal {
@@ -359,11 +417,20 @@ impl LocalMovementGoal {
             tolerance: WAYPOINT_TOLERANCE,
             warp_kind,
             previous_position: None,
+            breakable_objects: None,
+            clear_breakables: false,
         }
     }
 
     fn with_tolerance(self, tolerance: f32) -> Self {
         Self { tolerance, ..self }
+    }
+
+    pub fn clear_breakables(self, clear_breakables: bool) -> Self {
+        Self {
+            clear_breakables,
+            ..self
+        }
     }
 
     fn activate_endpoint(&self) -> bool {
@@ -415,6 +482,23 @@ impl LocalMovementGoal {
         }
     }
 
+    fn can_clear_breakables(&self, game_state: &GameState) -> bool {
+        self.clear_breakables && Self::preferred_weapon(game_state).is_some()
+    }
+
+    fn preferred_weapon(game_state: &GameState) -> Option<&Item> {
+        let player = &game_state.player;
+        player
+            .selected_item()
+            .filter(|item| item.as_weapon().is_some())
+            .or_else(|| {
+                player
+                    .inventory
+                    .iter_items()
+                    .find(|item| item.as_weapon().is_some())
+            })
+    }
+
     fn generate_plan(
         &mut self,
         game_state: &GameState,
@@ -455,9 +539,24 @@ impl LocalMovementGoal {
 
         let map = location
             .pathfinding(&game_state.statics)
+            .clear_breakables(self.can_clear_breakables(game_state))
             .direction_map(target_tile);
 
         Ok(map)
+    }
+
+    fn collect_breakables(
+        &self,
+        game_state: &GameState,
+    ) -> Result<HashSet<Vector<isize>>, Error> {
+        let location = game_state.current_room()?;
+        let breakables = location
+            .objects
+            .iter()
+            .filter(|obj| object_is_breakable(obj))
+            .map(|obj| obj.tile)
+            .collect();
+        Ok(breakables)
     }
 }
 
@@ -514,7 +613,8 @@ impl BotGoal for GoToRoomGoal {
         } else {
             let entrance = game_state.closest_entrance(&self.target_room)?;
             let goal =
-                MovementGoal::new(self.target_room.clone(), entrance.into());
+                MovementGoal::new(self.target_room.clone(), entrance.into())
+                    .clear_breakables(self.clear_breakables);
             Ok(goal.into())
         }
     }
@@ -631,6 +731,62 @@ impl BotGoal for LocalMovementGoal {
         };
 
         actions.do_action(GameAction::Move(dir));
+
+        if self.clear_breakables
+            && player_tile != target_tile
+            && let Some(core_dir) = map.get(player_tile).cloned()
+            && let Some(weapon) = Self::preferred_weapon(game_state)
+        {
+            'breakable: {
+                // We are allowed to clear out breakables, and have the
+                // tools required to do so.
+                let next_tile = player_tile + core_dir.offset();
+                if self.breakable_objects.is_none() {
+                    self.breakable_objects =
+                        Some(self.collect_breakables(game_state)?);
+                }
+                let breakables =
+                    self.breakable_objects.as_mut().expect("Just populated");
+
+                if !breakables.contains(&next_tile) {
+                    break 'breakable;
+                }
+
+                // Last time we checked, there was a breakable object
+                // on the next tile, but it may have been destroyed
+                // since then.  If it no longer exists, we can bail
+                // out.
+                let still_exists =
+                    game_state.current_room()?.objects.iter().any(|obj| {
+                        object_is_breakable(obj) && obj.tile == next_tile
+                    });
+                if !still_exists {
+                    breakables.remove(&next_tile);
+                    break 'breakable;
+                }
+
+                actions.do_action(GameAction::MouseOverTile(next_tile));
+
+                let select_item = SelectItemGoal::new(weapon.id.clone());
+                if !select_item.is_completed(game_state) {
+                    return Ok(select_item.into());
+                }
+
+                if game_state.inputs.mouse_tile_location != next_tile {
+                    // Wait for the mouse to be over the correct tile
+                    // before starting the swing.
+                    return Ok(BotGoalResult::InProgress);
+                }
+
+                return Ok(SwingWithAnimationCancel::new()
+                    .prevent_interrupts()
+                    .into());
+            }
+        }
+
+        // Most of the time, keep the mouse hovering over the target
+        // tile, to give a visual indication of where the bot is
+        // moving.
         actions.do_action(GameAction::MouseOverTile(target_tile));
 
         let must_open_door = self.activate_endpoint()

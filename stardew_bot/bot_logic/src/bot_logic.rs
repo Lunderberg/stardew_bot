@@ -139,6 +139,15 @@ pub trait BotGoal: Any {
             .into_iter()
             .collect()
     }
+
+    fn prevent_interrupts(self) -> LogicStack
+    where
+        Self: Sized,
+    {
+        [LogicStackItem::PreventInterrupt, self.into()]
+            .into_iter()
+            .collect()
+    }
 }
 
 pub enum BotGoalResult {

@@ -213,6 +213,12 @@ impl<'a> Pathfinding<'a> {
             ..self
         }
     }
+    pub fn clear_breakables(self, clear_breakables: bool) -> Self {
+        Self {
+            clear_breakables: clear_breakables.then(|| 0),
+            ..self
+        }
+    }
     pub fn breakable_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_breakables: Some(cost),
