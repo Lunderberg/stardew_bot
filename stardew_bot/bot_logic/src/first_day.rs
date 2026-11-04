@@ -4,7 +4,10 @@ use env_var_flag::env_var_flag;
 use geometry::Vector;
 use itertools::Itertools as _;
 
-use crate::{Error, GameAction, GiveGiftGoal, bot_logic::BotInterrupt};
+use crate::{
+    ActivateTile, Error, GameAction, GiveGiftGoal, GoToRoomGoal,
+    bot_logic::BotInterrupt,
+};
 use game_state::{
     CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season,
 };
@@ -48,21 +51,27 @@ impl BotGoal for FirstDay {
 
         let farm = game_state.get_room("Farm")?;
         let farmhouse = game_state.get_room("FarmHouse")?;
-        let goal = ClearFarmGoal::new()
-            .use_priority_tiles(false)
-            .use_stamina(false)
-            .target_tile(
-                farm.warps
-                    .iter()
-                    .find(|warp| warp.target_room == "BusStop")
-                    .map(|warp| warp.location)
-                    .map_or_else(|| game_state.get_farm_door(), Ok)?,
-            )
-            .relative_weights((4, 1))
-            .stop_time(620);
 
-        if !goal.is_completed(game_state)? {
-            return Ok(goal.into());
+        if let Some(spring_onion) = game_state
+            .get_room("Forest")?
+            .objects
+            .iter()
+            .find_map(|obj| {
+                obj.kind
+                    .as_hoe_dirt()
+                    .and_then(|hoe_dirt| hoe_dirt.crop.as_ref())
+                    .map(|crop| crop.seed == ItemId::SPRING_ONION)
+                    .unwrap_or(false)
+                    .then(|| obj.tile)
+            })
+        {
+            let room_movement =
+                GoToRoomGoal::new("Forest").clear_breakables(true);
+            if !room_movement.is_completed(game_state) {
+                return Ok(room_movement.into());
+            }
+
+            return Ok(ActivateTile::new("Forest", spring_onion).into());
         }
 
         let in_game_time = game_state.globals.in_game_time;
