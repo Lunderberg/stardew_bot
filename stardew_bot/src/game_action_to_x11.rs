@@ -111,14 +111,27 @@ pub fn apply_game_action(
             handler.send_click(false, MOUSE_RIGHT)?
         }
         GameAction::ScrollDown => {
-            handler.send_click(true, MOUSE_SCROLL_DOWN)?
+            // From what I can see, it looks like the mouse scrolling
+            // should follow the same press/wait/release logic as is
+            // used for the left/right clicks.  However, if I do that,
+            // the scroll state doesn't state depressed, and
+            // subsequent frames keep sending the press events with no
+            // release event.  If I send the press/release together
+            // without a wait, then I get the correct behavior for
+            // scrolling.
+            handler.send_click(true, MOUSE_SCROLL_DOWN)?;
+            handler.send_click(false, MOUSE_SCROLL_DOWN)?;
         }
         GameAction::StopScrollingDown => {
-            handler.send_click(false, MOUSE_SCROLL_DOWN)?
+            //handler.send_click(false, MOUSE_SCROLL_DOWN)?
         }
-        GameAction::ScrollUp => handler.send_click(true, MOUSE_SCROLL_UP)?,
+        GameAction::ScrollUp => {
+            handler.send_click(true, MOUSE_SCROLL_UP)?;
+            handler.send_click(false, MOUSE_SCROLL_UP)?;
+        }
+
         GameAction::StopScrollingUp => {
-            handler.send_click(false, MOUSE_SCROLL_UP)?
+            //handler.send_click(false, MOUSE_SCROLL_UP)?
         }
 
         GameAction::ExitMenu => handler.send_keystroke(true, KEY_ESCAPE)?,
