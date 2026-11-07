@@ -641,6 +641,17 @@ impl LocalMovementGoal {
             }
         };
 
+        let stand_up_tile = chair_tile + facing.offset();
+        if self.tolerance > 1.0 && stand_up_tile == target_tile {
+            // We're trying to get next to a tile, not directly on top
+            // of it.  The proposed chair jump would move directly
+            // onto the target tile, without an opportunity to stop
+            // adjacent to it.  For some cases, such as hoeing a tile,
+            // then would then require repositiong to get off the
+            // target tile.
+            return Ok(None);
+        }
+
         let goal = ChairJumpGoal {
             chair_tile,
             facing,
