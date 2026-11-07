@@ -408,6 +408,7 @@ impl GameStateReader {
         let read_items = !env_var_flag("SKIP_ITEMS");
         let read_characters = !env_var_flag("SKIP_CHARACTERS");
         let read_bombs = !env_var_flag("SKIP_BOMBS");
+        let read_furniture = !env_var_flag("SKIP_FURNITURE");
 
         let read_flags: u64 = (read_rng_state as u64)
             + 0x02 * (read_location_delta as u64)
@@ -416,7 +417,8 @@ impl GameStateReader {
             + 0x10 * (read_objects as u64)
             + 0x20 * (read_items as u64)
             + 0x40 * (read_characters as u64)
-            + 0x80 * (read_bombs as u64);
+            + 0x80 * (read_bombs as u64)
+            + 0x100 * (read_furniture as u64);
 
         self.vm
             .get_function("read_delta_state")?

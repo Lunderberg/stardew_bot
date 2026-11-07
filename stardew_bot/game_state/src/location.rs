@@ -7,7 +7,7 @@ use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::{Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::{Error, Item, StaticState};
+use crate::{Error, FacingDirection, Item, StaticState};
 
 use super::{Inventory, ItemCategory, ItemId, TileMap};
 
@@ -61,6 +61,10 @@ pub struct Location {
     /// property in the "Back" layer.
     pub diggable: TileMap<bool>,
 
+    /// Which tiles are marked as not allowing furniture placement, by
+    /// having the "NoFurniture" property in the "Back" layer.
+    pub no_furniture: TileMap<bool>,
+
     /// Tiles that can have some action performed on them.
     pub action_tiles: Vec<(Vector<isize>, String)>,
 
@@ -95,6 +99,7 @@ pub struct LocationDelta {
     near_player: bool,
     resource_clumps: Option<Vec<ResourceClump>>,
     objects: Option<Vec<Object>>,
+    furniture: Option<Vec<Furniture>>,
     items: Option<Vec<FloatingItem>>,
     characters: Option<Vec<Character>>,
     bombs: Option<Vec<Bomb>>,
@@ -452,7 +457,7 @@ pub struct Furniture {
 
 #[derive(RustNativeObject, Debug, Clone, Copy)]
 pub enum FurnitureKind {
-    Chair,
+    Chair(FacingDirection),
     Bench,
     Couch,
     Armchair,
@@ -549,6 +554,7 @@ struct MapTileSheets {
     passable: HashSet<(Pointer, usize)>,
     shadow: HashSet<(Pointer, usize)>,
     diggable: HashSet<(Pointer, usize)>,
+    no_furniture: HashSet<(Pointer, usize)>,
     tiles: Vec<MapTile>,
 }
 
@@ -971,8 +977,8 @@ impl Location {
 
         graph.named_native_function(
             "new_furniture_kind",
-            |kind: i32| -> FurnitureKind {
-                kind.try_into().expect(
+            |kind: i32, rotation: i32| -> FurnitureKind {
+                FurnitureKind::unpack(kind, rotation).expect(
                     "TODO: Allow NativeFunction to propagate \
                      user-defined error types",
                 )
@@ -1196,6 +1202,7 @@ impl Location {
 
                 let blocked = tiles.collect_blocked_tiles(*shape);
                 let diggable = tiles.collect_diggable_tiles(*shape);
+                let no_furniture = tiles.collect_no_furniture_tiles(*shape);
                 let action_tiles = tiles.collect_action_tiles();
                 let warps = warps
                     .iter()
@@ -1248,6 +1255,7 @@ impl Location {
                     buildings: buildings.clone(),
                     blocked,
                     diggable,
+                    no_furniture,
                     action_tiles,
                     characters: characters.clone(),
                     mineshaft_details: mineshaft_details.cloned(),
@@ -1262,6 +1270,7 @@ impl Location {
             |name: &str,
              resource_clumps: Option<&Vec<ResourceClump>>,
              objects: Option<&Vec<Object>>,
+             furniture: Option<&Vec<Furniture>>,
              items: Option<&Vec<FloatingItem>>,
              characters: Option<&Vec<Character>>,
              bombs: Option<&Vec<Bomb>>,
@@ -1271,6 +1280,7 @@ impl Location {
                     near_player: true,
                     resource_clumps: resource_clumps.cloned(),
                     objects: objects.cloned(),
+                    furniture: furniture.cloned(),
                     items: items.cloned(),
                     characters: characters.cloned(),
                     bombs: bombs.cloned(),
@@ -1287,6 +1297,7 @@ impl Location {
                 characters: Some(characters.clone()),
                 resource_clumps: Default::default(),
                 objects: Default::default(),
+                furniture: Default::default(),
                 items: Default::default(),
                 bombs: Default::default(),
                 current_event: None,
@@ -1721,7 +1732,8 @@ impl Location {
                         };
 
                         let kind = new_furniture_kind(
-                            piece.furniture_type.value
+                            piece.furniture_type.value,
+                            piece.currentRotation.value,
                         );
 
                         new_furniture(shape, kind)
@@ -2389,12 +2401,19 @@ impl Location {
                     None
                 };
 
+                let furniture = if read_flags & 0x100u64 > 0u64 {
+                    read_location_furniture(location, None)
+                } else {
+                    None
+                };
+
                 let current_event = read_location_current_event(location);
 
                 new_location_delta(
                     name,
                     resource_clumps,
                     objects,
+                    furniture,
                     items,
                     characters,
                     bombs,
@@ -2632,9 +2651,10 @@ impl Location {
             .flat_map(|building| building.iter_tiles())
     }
 
-    pub fn collect_clear_tiles(&self, statics: &StaticState) -> TileMap<bool> {
-        let mut map = self.blocked.map(|b| !b);
-
+    fn iter_obstructions<'a>(
+        &'a self,
+        statics: &'a StaticState,
+    ) -> impl Iterator<Item = Vector<isize>> + 'a {
         let iter_water = self.iter_water_tiles();
 
         let iter_clumps = self
@@ -2665,9 +2685,23 @@ impl Location {
             .chain(iter_objects)
             .chain(iter_furniture)
             .chain(iter_buildings)
-            .for_each(|tile| {
-                map[tile] = false;
-            });
+    }
+
+    pub fn iter_obstructed_tiles<'a>(
+        &'a self,
+        statics: &'a StaticState,
+    ) -> impl Iterator<Item = Vector<isize>> + 'a {
+        self.blocked
+            .iter_true()
+            .chain(self.iter_obstructions(statics))
+    }
+
+    pub fn collect_clear_tiles(&self, statics: &StaticState) -> TileMap<bool> {
+        let mut map = self.blocked.map(|b| !b);
+
+        self.iter_obstructions(statics).for_each(|tile| {
+            map[tile] = false;
+        });
 
         map
     }
@@ -2773,6 +2807,12 @@ impl Location {
                 )
                 .unique_by(|obj| obj.tile)
                 .collect();
+        }
+        if let Some(furniture) = delta.furniture {
+            // Furniture has relatively few fields to read, and so I
+            // don't currently filter it.  For the current room's
+            // update, all furniture gets read out.
+            self.furniture = furniture;
         }
 
         if let Some(items) = delta.items {
@@ -2969,6 +3009,10 @@ impl Furniture {
             _ => false,
         }
     }
+
+    pub fn is_chair(&self) -> bool {
+        matches!(self.kind, FurnitureKind::Chair(_))
+    }
 }
 
 impl std::str::FromStr for TreeKind {
@@ -3041,32 +3085,39 @@ impl TryFrom<i32> for ResourceClumpKind {
     }
 }
 
-impl TryFrom<i32> for FurnitureKind {
-    type Error = Error;
+impl FurnitureKind {
+    fn unpack(kind: i32, rotation: i32) -> Result<Self, Error> {
+        Ok(match kind {
+            0 => {
+                let facing = match rotation {
+                    0 => FacingDirection::South,
+                    1 => FacingDirection::East,
+                    2 => FacingDirection::North,
+                    3 => FacingDirection::West,
+                    other => panic!("Invalid chair rotation: {other}"),
+                };
+                Self::Chair(facing)
+            }
+            1 => Self::Bench,
+            2 => Self::Couch,
+            3 => Self::Armchair,
+            4 => Self::Dresser,
+            5 => Self::LongTable,
+            6 => Self::Painting,
+            7 => Self::Lamp,
+            8 => Self::Decor,
+            9 => Self::Other,
+            10 => Self::Bookcase,
+            11 => Self::Table,
+            12 => Self::Rug,
+            13 => Self::Window,
+            14 => Self::Fireplace,
+            15 => Self::Bed,
+            16 => Self::Torch,
+            17 => Self::Sconce,
 
-    fn try_from(value: i32) -> Result<Self, Self::Error> {
-        match value {
-            0 => Ok(Self::Chair),
-            1 => Ok(Self::Bench),
-            2 => Ok(Self::Couch),
-            3 => Ok(Self::Armchair),
-            4 => Ok(Self::Dresser),
-            5 => Ok(Self::LongTable),
-            6 => Ok(Self::Painting),
-            7 => Ok(Self::Lamp),
-            8 => Ok(Self::Decor),
-            9 => Ok(Self::Other),
-            10 => Ok(Self::Bookcase),
-            11 => Ok(Self::Table),
-            12 => Ok(Self::Rug),
-            13 => Ok(Self::Window),
-            14 => Ok(Self::Fireplace),
-            15 => Ok(Self::Bed),
-            16 => Ok(Self::Torch),
-            17 => Ok(Self::Sconce),
-
-            other => Err(Error::UnrecognizedResourceClump(other)),
-        }
+            other => return Err(Error::UnrecognizedFurnitureType(other)),
+        })
     }
 }
 
@@ -3092,6 +3143,9 @@ impl MapTileSheets {
                 }
                 "Diggable" => {
                     self.diggable.insert((tile_sheet, index));
+                }
+                "NoFurniture" => {
+                    self.no_furniture.insert((tile_sheet, index));
                 }
                 _ => {}
             });
@@ -3123,6 +3177,27 @@ impl MapTileSheets {
             .filter(|tile| match tile.layer_num {
                 0 => self.diggable.contains(&tile.lookup_key),
                 _ => false,
+            })
+            .map(|tile| tile.location)
+            .for_each(|loc| {
+                map[loc] = true;
+            });
+        map
+    }
+
+    fn collect_no_furniture_tiles(
+        &self,
+        shape: Vector<isize>,
+    ) -> TileMap<bool> {
+        let mut map = TileMap::empty(shape.right as usize, shape.down as usize);
+        self.tiles
+            .iter()
+            .filter(|tile| {
+                tile.properties.iter().any(|(key, _)| key == "NoFurniture")
+                    || match tile.layer_num {
+                        0 => self.no_furniture.contains(&tile.lookup_key),
+                        _ => false,
+                    }
             })
             .map(|tile| tile.location)
             .for_each(|loc| {

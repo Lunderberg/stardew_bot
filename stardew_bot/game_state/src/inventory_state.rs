@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 
-use crate::Error;
+use crate::{Chair, Error, FacingDirection};
 
 use super::{
     FishingRod, Item, ItemId, Quality, Weapon, WeaponKind,
@@ -68,6 +68,17 @@ impl Inventory {
                 })
             },
         )?;
+
+        graph.named_native_function("new_chair_kind", |rotation: i32| {
+            let facing = match rotation {
+                2 => FacingDirection::North,
+                3 => FacingDirection::West,
+                0 => FacingDirection::South,
+                1 => FacingDirection::East,
+                other => panic!("Invalid chair rotation: {other}"),
+            };
+            ItemKind::Chair(Chair { facing })
+        })?;
 
         graph.named_native_function(
             "new_item",
@@ -169,6 +180,8 @@ impl Inventory {
                     .as::<StardewValley.Tools.FishingRod>();
                 let weapon = item
                     .as::<StardewValley.Tools.MeleeWeapon>();
+                let furniture = item
+                    .as::<StardewValley.Objects.Furniture>();
 
                 let kind = if watering_can.is_some() {
                     let remaining_water = watering_can
@@ -225,6 +238,10 @@ impl Inventory {
                         min_damage,
                         max_damage,
                     )
+
+                } else if furniture.is_some() &&
+                    furniture.furniture_type.value == 0i32 {
+                    new_chair_kind(furniture.currentRotation.value)
 
                 } else {
                     None

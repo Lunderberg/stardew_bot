@@ -2,7 +2,7 @@ use std::borrow::Cow;
 
 use dsl::RustNativeObject;
 
-use crate::{Error, GameState};
+use crate::{Error, FacingDirection, GameState};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
@@ -47,6 +47,7 @@ pub enum ItemKind {
     WateringCan(WateringCan),
     FishingRod(FishingRod),
     Weapon(Weapon),
+    Chair(Chair),
 }
 
 #[derive(Debug, Clone)]
@@ -84,6 +85,11 @@ pub enum WeaponKind {
     Dagger,
     Club,
     Sword,
+}
+
+#[derive(Debug, Clone)]
+pub struct Chair {
+    pub facing: FacingDirection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -457,6 +463,13 @@ impl Item {
     pub fn as_weapon(&self) -> Option<&Weapon> {
         self.kind.as_ref().and_then(|kind| match kind {
             ItemKind::Weapon(weapon) => Some(weapon),
+            _ => None,
+        })
+    }
+
+    pub fn as_chair(&self) -> Option<&Chair> {
+        self.kind.as_ref().and_then(|kind| match kind {
+            ItemKind::Chair(chair) => Some(chair),
             _ => None,
         })
     }

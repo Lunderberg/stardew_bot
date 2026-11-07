@@ -102,11 +102,6 @@ impl PlayerState {
         )?;
 
         graph.named_native_function(
-            "new_direction",
-            FacingDirection::from_value,
-        )?;
-
-        graph.named_native_function(
             "new_movement_direction",
             |directions: &Vec<i32>| -> Option<Direction> {
                 let to_dir = |value: i32| -> Option<Direction> {
@@ -212,7 +207,7 @@ impl PlayerState {
         graph.named_native_function(
             "new_player",
             |position: &Vector<f32>,
-             facing: &FacingDirection,
+             facing: i32,
              movement: Option<&Direction>,
              room_name: &str,
              skills: &PlayerSkills,
@@ -236,9 +231,17 @@ impl PlayerState {
              friendships: &Vec<Friendship>,
              // buffs: &Vec<Buff>
                 | {
+
+                    let facing = match facing {
+                        0 => FacingDirection::North,
+                        1 => FacingDirection::East,
+                        2 => FacingDirection::South,
+                        3 => FacingDirection::West,
+                        _ => panic!("Invalid value {facing} for player's facing direction"),
+                    };
                 PlayerState {
                     position: *position,
-                    facing: *facing,
+                    facing,
                     movement: movement.cloned(),
                     room_name: room_name.into(),
                     skills: skills.clone(),
@@ -342,11 +345,9 @@ impl PlayerState {
                     new_f32_vector(pos.X, pos.Y)
                 };
 
-                let facing = new_direction(
-                    player
-                        .facingDirection
-                        .value
-                );
+                let facing = player
+                    .facingDirection
+                    .value;
 
                 let num_movement_directions = player
                     .movementDirections
@@ -562,15 +563,8 @@ impl PlayerSkills {
 }
 
 impl FacingDirection {
-    fn from_value(value: usize) -> Option<FacingDirection> {
-        match value {
-            0 => Some(FacingDirection::North),
-            1 => Some(FacingDirection::East),
-            2 => Some(FacingDirection::South),
-            3 => Some(FacingDirection::West),
-            _ => None,
-        }
-    }
+    pub const VALUES: [Self; 4] =
+        [Self::South, Self::North, Self::East, Self::West];
 
     pub fn offset(self) -> Vector<isize> {
         match self {
@@ -582,13 +576,16 @@ impl FacingDirection {
     }
 
     pub fn iter() -> impl Iterator<Item = Self> {
-        [
-            FacingDirection::South,
-            FacingDirection::North,
-            FacingDirection::East,
-            FacingDirection::West,
-        ]
-        .into_iter()
+        Self::VALUES.into_iter()
+    }
+
+    pub fn opposite(self) -> Self {
+        match self {
+            Self::North => Self::South,
+            Self::East => Self::West,
+            Self::South => Self::North,
+            Self::West => Self::East,
+        }
     }
 }
 
