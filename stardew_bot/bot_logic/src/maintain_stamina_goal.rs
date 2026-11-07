@@ -137,9 +137,10 @@ impl BotGoal for MaintainStaminaGoal {
         // must find a tile that is adjacent to the player, and which
         // can have the mouse hovering over it without clicking on
         // anything.
+        let player_tile = game_state.player.tile();
         let safe_dir = FacingDirection::iter()
             .find(|dir| {
-                let facing_tile = game_state.player.tile() + dir.offset();
+                let facing_tile = player_tile + dir.offset();
                 loc.iter_activatable_tiles()
                     .all(|activatable_tile| activatable_tile != facing_tile)
             })
@@ -152,6 +153,7 @@ impl BotGoal for MaintainStaminaGoal {
             return Ok(goal.into());
         }
 
+        actions.do_action(GameAction::MouseOverTile(player_tile));
         actions.do_action(GameAction::ActivateTile);
         Ok(BotGoalResult::InProgress)
     }
