@@ -1203,7 +1203,7 @@ impl BotGoal for ChairJumpGoal {
         let opt_chair_item = self.find_held_chair(game_state);
         let Some((chair_item_id, chair_facing)) = opt_chair_item else {
             if let Some(tick) = self.chair_placement_tick
-                && game_state.globals.game_tick < tick + 2
+                && game_state.globals.game_tick < tick + 3
             {
                 actions.log("Waiting for chair to appear in GameLocation");
                 // The chair was just placed down, but the most recent
