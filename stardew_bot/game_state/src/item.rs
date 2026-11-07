@@ -250,6 +250,8 @@ impl ItemId {
     pub const CONCH: Self =
         Self::new_const("(O)FlashShifter.StardewValleyExpandedCP_Big_Conch");
 
+    pub const OAK_CHAIR: Self = Self::new_const("(F)0");
+
     pub fn new(item_id: impl Into<Cow<'static, str>>) -> Self {
         Self {
             item_id: item_id.into(),
@@ -376,6 +378,8 @@ impl ItemId {
             10
         } else if *self == ItemId::COAL {
             150
+        } else if *self == ItemId::OAK_CHAIR {
+            350
         } else {
             todo!("Handle buy price for item {self}")
         }

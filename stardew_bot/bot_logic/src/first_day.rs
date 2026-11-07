@@ -34,6 +34,7 @@ impl BotGoal for FirstDay {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
+        let player = &game_state.player;
         let current_day = game_state.globals.get_stat("daysPlayed")?;
         let in_game_time = game_state.globals.in_game_time;
         if current_day != 1 {
@@ -87,7 +88,7 @@ impl BotGoal for FirstDay {
             return Ok(ActivateTile::new("Forest", spring_onion).into());
         }
 
-        let current_money = game_state.player.current_money;
+        let current_money = player.current_money;
 
         // If we are playing StardewValleyExpanded, pick up the
         // freebie ForestSword.  The `class PlacedItem:
@@ -153,7 +154,7 @@ impl BotGoal for FirstDay {
                 .with_interrupt(ScytheNearby);
             return Ok(stack.into());
         }
-        if game_state.player.room_name == "Blacksmith" {
+        if player.room_name == "Blacksmith" {
             let sell_copper =
                 SellToMerchantGoal::new("Blacksmith", ItemId::COPPER_ORE);
             if !sell_copper.is_completed(game_state) {
@@ -184,7 +185,7 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new().stop_at_time(1440);
-        if game_state.player.room_name == "Beach"
+        if player.room_name == "Beach"
             && game_state.globals.in_game_time >= 1230
             && !clay_farming.is_completed(game_state)
         {
@@ -200,6 +201,17 @@ impl BotGoal for FirstDay {
             return Ok(stack.into());
         }
 
+        let have_chair = player
+            .inventory
+            .iter_items()
+            .any(|item| item.as_chair().is_none());
+        if !have_chair {
+            let goal = BuyFromMerchantGoal::new("Carpenter", ItemId::OAK_CHAIR);
+            if !goal.is_completed(game_state)? {
+                return Ok(goal.into());
+            }
+        }
+
         let goal =
             BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(7));
         if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
@@ -210,8 +222,7 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        if game_state.player.inventory.items.len() < 24 && current_money > 2000
-        {
+        if player.inventory.items.len() < 24 && current_money > 2000 {
             if let Some(menu) = game_state.dialogue_menu() {
                 let Some(pixel) = menu.response_pixel("Purchase") else {
                     return Ok(MenuCloser::new().into());
@@ -246,7 +257,7 @@ impl BotGoal for FirstDay {
                     chest.iter_filled_slots().map(|(_, item)| item)
                 });
 
-            let iter_held_items = game_state.player.inventory.iter_items();
+            let iter_held_items = player.inventory.iter_items();
 
             let iter_already_planted = farm.objects.iter().filter_map(|obj| {
                 let crop = obj.kind.as_hoe_dirt()?.crop.as_ref()?;
@@ -301,7 +312,7 @@ impl BotGoal for FirstDay {
                     crop_to_seed.get(id).map(|seed| (*seed, 2))
                 });
 
-            let mut remaining_gp = game_state.player.current_money;
+            let mut remaining_gp = player.current_money;
             std::iter::empty::<(&ItemId, usize)>()
                 .chain(iter_bundle_seeds)
                 .chain([(&ItemId::PARSNIP_SEEDS, 60)])
