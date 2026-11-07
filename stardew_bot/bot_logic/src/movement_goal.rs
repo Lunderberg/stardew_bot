@@ -7,8 +7,8 @@ use crate::{
     Error, GameAction, MenuCloser, SelectItemGoal, SwingWithAnimationCancel,
 };
 use game_state::{
-    FacingDirection, GameState, Item, Location, Object, ObjectKind,
-    StaticState, TileMap, WarpKind,
+    FacingDirection, FurnitureKind, GameState, Item, ItemId, Location, Object,
+    ObjectKind, StaticState, TileMap, WarpKind,
 };
 
 use super::{
@@ -74,6 +74,36 @@ pub struct LocalMovementGoal {
 pub struct FaceDirectionGoal(pub FacingDirection);
 
 pub struct StopMovingGoal;
+
+/// Use a chair to move 2 tiles without advancing in-game time
+///
+/// While getting into or out of a chair, time is paused.  A human
+/// player can take advantage of this by setting up chains of chairs,
+/// hopping from one to the next.  A bot can do even better, by
+/// placing down and picking up the same chair.
+///
+/// To use this goal, the bot must have a chair in their inventory.
+/// The goal will place the chair down with the specified
+/// location/orientation, jump into the chair, jump out of the chair,
+/// then pick up the chair.  During this time, interrupts should be
+/// suppressed, so that the bot doesn't accidentally leave the chair
+/// behind.
+struct ChairJumpGoal {
+    /// The tile on which the chair should be placed.  Must be
+    /// currently open, and adjacent to the tile the player is on.
+    chair_tile: Vector<isize>,
+
+    /// The direction the chair should be facing when placed.
+    facing: FacingDirection,
+
+    /// The tick on which the chair was placed down.  If we have just
+    /// placed the chair down, we may get an inconsistent view of the
+    /// game state, where the chair no longer exists in the player's
+    /// inventory, but hasn't yet been updated on the current
+    /// location.  To prevent this, wait a few frames to make sure the
+    /// chair shows up.
+    chair_placement_tick: Option<i32>,
+}
 
 struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
@@ -558,6 +588,76 @@ impl LocalMovementGoal {
             .collect();
         Ok(breakables)
     }
+
+    fn choose_chair_jump(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<ChairJumpGoal>, Error> {
+        let player = &game_state.player;
+
+        let player_tile = player.tile();
+        let target_tile = self.target_position.as_tile();
+
+        let map = self.direction_map.as_ref().expect(
+            "Should populate direction map before calling choose_chair_jump",
+        );
+
+        if player_tile == target_tile {
+            // We're already on the target tile, so at best the chair
+            // jump would move us to the center of the target tile.
+            return Ok(None);
+        }
+
+        let Some(placement_dir) = map.get(player_tile) else {
+            return Ok(None);
+        };
+        let chair_tile = player_tile + placement_dir.offset();
+        if chair_tile == target_tile {
+            // Using a chair jump would overshoot the target tile.
+            return Ok(None);
+        }
+
+        let Some(stand_up_dir) = map.get(chair_tile) else {
+            return Ok(None);
+        };
+        let facing = match stand_up_dir {
+            Direction::North => FacingDirection::North,
+            Direction::East => FacingDirection::East,
+            Direction::South => FacingDirection::South,
+            Direction::West => FacingDirection::West,
+            // Since the chair can only face in cardinal directions,
+            // preferred movement along a diagonal needs to be
+            // replaced with movement in a cardinal direction.  This
+            // should only occur in cases where either cardinal
+            // direction is valid, so for now I'll pick an arbitrary
+            // one of the two.  If this becomes an issue, may need to
+            // track and check for a preferred direction between the
+            // two options.
+            Direction::NorthEast | Direction::NorthWest => {
+                FacingDirection::North
+            }
+            Direction::SouthEast | Direction::SouthWest => {
+                FacingDirection::South
+            }
+        };
+
+        let goal = ChairJumpGoal {
+            chair_tile,
+            facing,
+            chair_placement_tick: None,
+        };
+
+        if goal.find_held_chair(game_state).is_none()
+            || !goal.is_allowed(game_state)?
+        {
+            return Ok(None);
+        }
+
+        // The player has a chair, and both the chair tile and the
+        // final tile are unoccupied.  Therefore, the chair jump can
+        // be started.
+        Ok(Some(goal))
+    }
 }
 
 impl BotGoal for MovementGoal {
@@ -699,6 +799,10 @@ impl BotGoal for LocalMovementGoal {
         let player_tile = player.tile();
         let player_position = player.center_pos();
         let target_tile = self.target_position.as_tile();
+
+        if let Some(chair_jump) = self.choose_chair_jump(game_state)? {
+            return Ok(chair_jump.prevent_interrupts().into());
+        }
 
         let dir = if player_tile == target_tile {
             let offset = self.target_position - player.center_pos();
@@ -888,5 +992,312 @@ impl BotGoal for StopMovingGoal {
             // becoming stationary has been achieved.
             BotGoalResult::Completed
         })
+    }
+}
+
+impl ChairJumpGoal {
+    fn find_placed_chair(
+        &self,
+        game_state: &GameState,
+    ) -> Result<Option<FacingDirection>, Error> {
+        let location = game_state.current_room()?;
+        let placed_chair: Option<FacingDirection> = location
+            .furniture
+            .iter()
+            .filter(|furniture| furniture.shape.top_left == self.chair_tile)
+            .find_map(|furniture| {
+                if let FurnitureKind::Chair(facing) = furniture.kind {
+                    Some(facing)
+                } else {
+                    None
+                }
+            });
+        Ok(placed_chair)
+    }
+
+    fn find_held_chair<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Option<(&'a ItemId, FacingDirection)> {
+        game_state.player.inventory.iter_items().find_map(|item| {
+            item.as_chair().map(|chair| (&item.id, chair.facing))
+        })
+    }
+
+    /// Returns true if the player is too close to the chair's future
+    /// location to place it down.
+    ///
+    /// The player is too close is their bounding box (0.75 x 0.5
+    /// tile) overlaps with the chair's bounding box (1.0 x 1.0 tile).
+    fn too_close_to_chair_tile(&self, game_state: &GameState) -> bool {
+        let delta =
+            game_state.player.center_pos() - self.chair_tile.map(|x| x as f32);
+        delta.right.abs() <= 0.875 && delta.down.abs() <= 0.75
+    }
+
+    /// Returns true if the player is too far from the chair's future
+    /// location to jump into it.
+    fn too_far_from_chair_tile(&self, game_state: &GameState) -> bool {
+        let delta =
+            game_state.player.center_pos() - self.chair_tile.map(|x| x as f32);
+        delta.right.abs() >= 1.0 || delta.down.abs() >= 1.0
+    }
+
+    fn is_allowed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let location = game_state.current_room()?;
+
+        if self.too_far_from_chair_tile(game_state)
+            || self.too_close_to_chair_tile(game_state)
+        {
+            return Ok(false);
+        }
+
+        let stand_up_tile = self.chair_tile + self.facing.offset();
+        let jump_is_blocked = location
+            .iter_obstructed_tiles(&game_state.statics)
+            .chain(location.characters.iter().map(|character| character.tile()))
+            .any(|blocked| {
+                blocked == self.chair_tile || blocked == stand_up_tile
+            });
+        if jump_is_blocked {
+            return Ok(false);
+        }
+
+        let chair_placement_allowed =
+            location.no_furniture.is_unset(self.chair_tile);
+        if !chair_placement_allowed {
+            return Ok(false);
+        }
+
+        // TODO: Unpack the no-furniture map on buildings, as some
+        // tiles do allow chair placement.  (The stairs on the
+        // farmhouse prevent placement, but the top of the stairs
+        // allows placement.)
+        let overlaps_building = location
+            .buildings
+            .iter()
+            .any(|building| building.shape.contains(self.chair_tile));
+        if overlaps_building {
+            return Ok(false);
+        }
+
+        let blocked_but_walkable_tile = location
+            .objects
+            .iter()
+            .filter(|obj| obj.tile == self.chair_tile)
+            .any(|obj| match &obj.kind {
+                ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
+                ObjectKind::HoeDirt(dirt) => dirt.crop.is_some(),
+                _ => false,
+            });
+        if blocked_but_walkable_tile {
+            return Ok(false);
+        }
+
+        let too_close_to_warp = location
+            .warps
+            .iter()
+            .filter(|warp| matches!(warp.kind, WarpKind::Automatic))
+            .map(|warp| warp.location)
+            .any(|tile| {
+                self.chair_tile.chessboard_dist(tile) <= 1
+                    || stand_up_tile.chessboard_dist(tile) <= 1
+            });
+        if too_close_to_warp {
+            return Ok(false);
+        }
+
+        Ok(true)
+    }
+}
+
+impl BotGoal for ChairJumpGoal {
+    fn description(&self) -> Cow<'static, str> {
+        format!("Chair jump over {} to {}", self.chair_tile, self.facing).into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        let player = &game_state.player;
+        let player_tile = player.tile();
+
+        if player_tile.chessboard_dist(self.chair_tile) > 1 {
+            actions.log("Too far from chair tile");
+            // Something has gone wrong in the setup, so bail out and
+            // let something else figure out what to do.
+            return Ok(BotGoalResult::Completed);
+        }
+
+        if player.is_getting_up {
+            // Already started the stand-up animation, now need to
+            // wait for it to complete.
+            actions.log("Waiting for stand-up animation to complete");
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        if player.is_sitting {
+            // Currently sitting down, so whatever else we do
+            // afterwards, the first step is to stand up.  Uses a
+            // left-click instead of a right-click, so that any
+            // accidental double clicks would result in picking the
+            // chair up (the intended next step), rather than sitting
+            // back down.
+            actions.log("Standing up");
+            actions.do_action(GameAction::MouseOverTile(player_tile));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        let placed_chair = self.find_placed_chair(game_state)?;
+
+        let goal_tile = self.chair_tile + self.facing.offset();
+
+        if let Some(facing) = placed_chair
+            && facing == self.facing
+            && player_tile != goal_tile
+        {
+            // The chair is in place, facing the correct direction,
+            // and we have not yet completed the chair jump.
+            // Therefore, sit on the chair.
+            actions.log(format!(
+                "Sitting down (player at {player_tile}, not {goal_tile}"
+            ));
+            actions.do_action(GameAction::MouseOverTile(self.chair_tile));
+            actions.do_action(GameAction::RightClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        if placed_chair.is_some() {
+            // The chair is placed down, but we aren't going to sit
+            // down in it.  This can either occur because we have
+            // already stood up from the chair, or because it happens
+            // to be placed in the wrong orientation.  Either way, we
+            // should pick up the chair.
+            actions.log("Picking up chair");
+            actions.do_action(GameAction::MouseOverTile(self.chair_tile));
+            actions.do_action(GameAction::LeftClick);
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        if player_tile == goal_tile {
+            actions.log("Successfully completed chair jump");
+            // We've reached the goal tile, and the chair is no longer
+            // placed down, so the chair jump is completed.
+            return Ok(BotGoalResult::Completed);
+        }
+
+        let opt_chair_item = self.find_held_chair(game_state);
+        let Some((chair_item_id, chair_facing)) = opt_chair_item else {
+            if let Some(tick) = self.chair_placement_tick
+                && game_state.globals.game_tick < tick + 2
+            {
+                actions.log("Waiting for chair to appear in GameLocation");
+                // The chair was just placed down, but the most recent
+                // memory read didn't find it in the GameLocation.
+                // Wait a few game ticks to see if it shows up.
+                return Ok(BotGoalResult::InProgress);
+            } else {
+                actions.log("Bailout, no chair with which to chair jump");
+                // The chair is neither placed down, nor in the inventory,
+                // so there's not much we can do at this point.  Can't
+                // really chair jump without a chair, after all.
+                return Ok(BotGoalResult::Completed);
+            }
+        };
+
+        if self.too_close_to_chair_tile(game_state) {
+            actions.log("Bailout, too close to chair tile");
+            return Ok(BotGoalResult::Completed);
+        }
+
+        if self.too_far_from_chair_tile(game_state) {
+            actions.log("Bailout, too far from chair tile");
+            return Ok(BotGoalResult::Completed);
+        }
+
+        let select_chair = SelectItemGoal::new(chair_item_id.clone());
+        if !select_chair.is_completed(game_state) {
+            actions.log("Selecting chair from inventory");
+            return Ok(select_chair.into());
+        }
+
+        actions.do_action(GameAction::MouseOverTile(self.chair_tile));
+
+        // The chair is selected, with the mouse in the correct
+        // location to place it down.  We should either rotate it
+        // (right click) or place it down (left click), depending on
+        // whether it is facing the correct direction for the jump.
+        if chair_facing == self.facing {
+            if game_state.inputs.mouse_tile_location == self.chair_tile {
+                actions.log("Placing down chair");
+                self.chair_placement_tick = Some(game_state.globals.game_tick);
+                actions.do_action(GameAction::LeftClick);
+            } else {
+                actions.log("Waiting for mouse movement to be applied");
+            }
+            return Ok(BotGoalResult::InProgress);
+        }
+
+        // Some resource clumps, such as the stones on the farm,
+        // can trigger a popup message on a right-click.  This
+        // depends on whether the player is facing the resource
+        // clump, and can take priority over furniture rotation.
+        //
+        // I've seen this occur when aligned with the upper row of
+        // the stones, facing left or right, and attempting to
+        // rotate a chair being placed just above the stone.
+        //
+        //         Setup 1                  Setup 2
+        //
+        //            C                        C
+        //          P S S                    S S P
+        //            S S                    S S
+        //
+        // For now, avoid rotating a chair while facing any
+        // resource clump.
+        let mut has_clump = [false; 4];
+        game_state
+            .current_room()?
+            .resource_clumps
+            .iter()
+            .flat_map(|clump| clump.shape.iter_points())
+            .for_each(|tile| {
+                has_clump
+                    .iter_mut()
+                    .zip(FacingDirection::VALUES)
+                    .filter(|(_, dir)| player_tile + dir.offset() == tile)
+                    .for_each(|(b, _)| {
+                        *b = true;
+                    });
+            });
+        let player_facing_clump = FacingDirection::VALUES
+            .iter()
+            .position(|dir| *dir == player.facing)
+            .map(|i| has_clump[i])
+            .expect("Player must be facing a valid direction");
+        if player_facing_clump {
+            let safe_dir = FacingDirection::VALUES
+                .into_iter()
+                .zip(has_clump)
+                .find(|(_, b)| !b)
+                .map(|(dir, _)| dir)
+                .expect(
+                    "Player somehow surrounded \
+                     on all four sides by resource clumps",
+                );
+            return Ok(FaceDirectionGoal(safe_dir).into());
+        }
+
+        // We have the chair, but cannot set it down yet because it is
+        // facing the wrong direction.  Right-click in order to rotate
+        // the chair until it is facing the desired direction for this
+        // jump.
+        actions.log("Rotating chair before placing down");
+        actions.do_action(GameAction::RightClick);
+
+        Ok(BotGoalResult::InProgress)
     }
 }
