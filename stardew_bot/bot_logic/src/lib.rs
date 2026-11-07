@@ -115,6 +115,9 @@ pub use use_item::*;
 mod use_item_on_tile;
 pub use use_item_on_tile::*;
 
+mod pick_up_furniture;
+pub use pick_up_furniture::*;
+
 mod step_count_for_luck;
 pub use step_count_for_luck::*;
 

@@ -6,7 +6,7 @@ use itertools::Itertools as _;
 
 use crate::{
     ActivateTile, Error, GameAction, GiveGiftGoal, GoToRoomGoal,
-    bot_logic::BotInterrupt,
+    PickUpFurnitureGoal, bot_logic::BotInterrupt,
 };
 use game_state::{
     CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season,
@@ -35,8 +35,24 @@ impl BotGoal for FirstDay {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         let current_day = game_state.globals.get_stat("daysPlayed")?;
+        let in_game_time = game_state.globals.in_game_time;
         if current_day != 1 {
             return Ok(BotGoalResult::Completed);
+        }
+
+        let farm = game_state.get_room("Farm")?;
+        let farmhouse = game_state.get_room("FarmHouse")?;
+        if in_game_time < 630
+            && let Some(chair_loc) = farmhouse
+                .furniture
+                .iter()
+                .find(|furniture| furniture.is_chair())
+                .map(|furniture| furniture.shape.top_left)
+        {
+            let goal = PickUpFurnitureGoal::new("FarmHouse", chair_loc);
+            if !goal.is_completed(game_state)? {
+                return Ok(goal.into());
+            }
         }
 
         // TODO: Include a maximum travel distance for the foraging.
@@ -48,9 +64,6 @@ impl BotGoal for FirstDay {
         //         .with_interrupt(CollectNearbyItems::new())
         //         .into());
         // }
-
-        let farm = game_state.get_room("Farm")?;
-        let farmhouse = game_state.get_room("FarmHouse")?;
 
         if let Some(spring_onion) = game_state
             .get_room("Forest")?
@@ -74,7 +87,6 @@ impl BotGoal for FirstDay {
             return Ok(ActivateTile::new("Forest", spring_onion).into());
         }
 
-        let in_game_time = game_state.globals.in_game_time;
         let current_money = game_state.player.current_money;
 
         // If we are playing StardewValleyExpanded, pick up the

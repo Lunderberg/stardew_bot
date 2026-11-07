@@ -81,6 +81,11 @@ impl DisplayState {
         tile_rect.center()
     }
 
+    pub fn tile_is_in_view(&self, tile: Vector<isize>) -> bool {
+        let pixel = self.center_pixel_of_tile(tile);
+        self.viewport.contains(pixel)
+    }
+
     /// The location of the "Skip" button for cutscenes
     ///
     /// It doesn't look like there is an explicit skippable button

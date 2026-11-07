@@ -7,12 +7,16 @@ use super::{
 };
 
 pub struct SelectItemGoal {
-    item: ItemId,
+    item: Option<ItemId>,
 }
 
 impl SelectItemGoal {
     pub fn new(item: ItemId) -> Self {
-        Self { item }
+        Self { item: Some(item) }
+    }
+
+    pub fn empty_slot() -> Self {
+        Self { item: None }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
@@ -24,7 +28,12 @@ impl SelectItemGoal {
         &self,
         game_state: &GameState,
     ) -> Option<usize> {
-        game_state.player.inventory.current_slot(&self.item)
+        let inventory = &game_state.player.inventory;
+        if let Some(item) = &self.item {
+            inventory.current_slot(item)
+        } else {
+            inventory.empty_slot()
+        }
     }
 
     fn key_to_hotbar(key: Key) -> Option<usize> {
@@ -48,7 +57,11 @@ impl SelectItemGoal {
 
 impl BotGoal for SelectItemGoal {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        format!("Select {}", self.item).into()
+        if let Some(item) = &self.item {
+            format!("Select {item}").into()
+        } else {
+            "Select empty slot".into()
+        }
     }
 
     fn apply(
@@ -80,7 +93,9 @@ impl BotGoal for SelectItemGoal {
             });
 
         if let Some((inventory_page, held_item)) = opt_held_item {
-            let dest_slots = if held_item.is_same_item(&self.item) {
+            let dest_slots = if let Some(item) = &self.item
+                && held_item.is_same_item(item)
+            {
                 0..12
             } else {
                 let inventory_size = game_state.player.inventory.items.len();
