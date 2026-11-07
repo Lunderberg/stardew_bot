@@ -1142,6 +1142,8 @@ impl BotGoal for ChairJumpGoal {
             return Ok(BotGoalResult::Completed);
         }
 
+        actions.do_action(GameAction::MouseOverTile(self.chair_tile));
+
         if player.is_getting_up {
             // Already started the stand-up animation, now need to
             // wait for it to complete.
