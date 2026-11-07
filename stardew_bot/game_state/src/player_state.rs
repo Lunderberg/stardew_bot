@@ -11,6 +11,8 @@ pub struct PlayerState {
     pub position: Vector<f32>,
     pub facing: FacingDirection,
     pub movement: Option<Direction>,
+    pub is_sitting: bool,
+    pub is_getting_up: bool,
     pub room_name: String,
 
     // Player's progression
@@ -209,6 +211,8 @@ impl PlayerState {
             |position: &Vector<f32>,
              facing: i32,
              movement: Option<&Direction>,
+             is_sitting: bool,
+             is_getting_up: bool,
              room_name: &str,
              skills: &PlayerSkills,
              inventory: &Inventory,
@@ -243,6 +247,8 @@ impl PlayerState {
                     position: *position,
                     facing,
                     movement: movement.cloned(),
+                    is_sitting,
+                    is_getting_up,
                     room_name: room_name.into(),
                     skills: skills.clone(),
                     inventory: inventory.clone(),
@@ -359,6 +365,8 @@ impl PlayerState {
                         ._items[i])
                     .collect();
                 let movement = new_movement_direction(directions);
+                let is_sitting = player.isSitting.value;
+                let is_getting_up = player.isStopSitting;
 
                 let room_name = player
                     .currentLocationRef
@@ -453,6 +461,8 @@ impl PlayerState {
                     position,
                     facing,
                     movement,
+                    is_sitting,
+                    is_getting_up,
                     room_name,
                     skills,
                     inventory,
