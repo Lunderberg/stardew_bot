@@ -64,6 +64,7 @@ pub enum LogicStackItem {
 
 pub struct ActionCollector {
     actions: Vec<VerboseAction>,
+    logs: Vec<String>,
     refresh_current_location: bool,
 
     forbidden: ActionForbiddenUntil,
@@ -355,6 +356,7 @@ impl ActionCollector {
 
         Self {
             actions: Vec::new(),
+            logs: Vec::new(),
             refresh_current_location: false,
             forbidden,
             game_mode_tick: game_state.globals.game_mode_tick,
@@ -437,6 +439,11 @@ impl ActionCollector {
                 .last_mut()
                 .map(|verbose_action| &mut verbose_action.detail),
         }
+    }
+
+    pub fn log(&mut self, message: impl Display) {
+        self.logs
+            .push(format!("Tick {}: {message}", self.game_mode_tick));
     }
 
     pub fn refresh_current_location(&mut self) {
@@ -549,7 +556,7 @@ impl BotLogic {
     pub fn update(
         &mut self,
         game_state: &GameState,
-    ) -> Result<(Vec<GameAction>, bool), Error> {
+    ) -> Result<(Vec<GameAction>, Vec<String>, bool), Error> {
         // Mark actions which may be repeated, now that enough time
         // has passed.
         self.action_dead_time = self
@@ -819,7 +826,11 @@ impl BotLogic {
             }
         }
 
-        Ok((output_actions, actions.refresh_current_location))
+        Ok((
+            output_actions,
+            actions.logs,
+            actions.refresh_current_location,
+        ))
     }
 
     fn reset_completed_interrupts(&mut self) {

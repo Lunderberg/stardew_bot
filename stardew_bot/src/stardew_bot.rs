@@ -741,7 +741,10 @@ impl StardewBot {
         let res = bot_logic
             .update(game_state)
             .map_err(|err| -> Error { err.into() })
-            .and_then(|(actions, refresh_current_location)| {
+            .and_then(|(actions, logs, refresh_current_location)| {
+                for message in logs {
+                    self.buffers.running_log.add_log(message);
+                }
                 self.apply_game_actions(actions)?;
                 Ok(refresh_current_location)
             });
