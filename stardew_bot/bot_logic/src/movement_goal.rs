@@ -1269,14 +1269,33 @@ impl BotGoal for ChairJumpGoal {
         //
         // For now, avoid rotating a chair while facing any
         // resource clump.
-        let mut has_clump = [false; 4];
-        game_state
-            .current_room()?
-            .resource_clumps
-            .iter()
-            .flat_map(|clump| clump.shape.iter_points())
+        //
+        // Similarly, when facing a bush, above a bush, or left/right
+        // of a bush, the right-click shakes the bush rather than
+        // rotating the chair.
+        let mut facing_misclick_risk = [false; 4];
+        let loc = game_state.current_room()?;
+
+        std::iter::empty()
+            .chain(
+                loc.resource_clumps
+                    .iter()
+                    .flat_map(|clump| clump.shape.iter_points()),
+            )
+            .chain(loc.bushes.iter().flat_map(|bush| {
+                bush.rectangle().iter_points().flat_map(|p| {
+                    [
+                        Vector::zero(),
+                        FacingDirection::North.offset(),
+                        FacingDirection::East.offset(),
+                        FacingDirection::West.offset(),
+                    ]
+                    .into_iter()
+                    .map(move |offset| p + offset)
+                })
+            }))
             .for_each(|tile| {
-                has_clump
+                facing_misclick_risk
                     .iter_mut()
                     .zip(FacingDirection::VALUES)
                     .filter(|(_, dir)| player_tile + dir.offset() == tile)
@@ -1287,12 +1306,12 @@ impl BotGoal for ChairJumpGoal {
         let player_facing_clump = FacingDirection::VALUES
             .iter()
             .position(|dir| *dir == player.facing)
-            .map(|i| has_clump[i])
+            .map(|i| facing_misclick_risk[i])
             .expect("Player must be facing a valid direction");
         if player_facing_clump {
             let safe_dir = FacingDirection::VALUES
                 .into_iter()
-                .zip(has_clump)
+                .zip(facing_misclick_risk)
                 .find(|(_, b)| !b)
                 .map(|(dir, _)| dir)
                 .expect(
