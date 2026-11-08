@@ -1147,7 +1147,6 @@ impl BotGoal for ChairJumpGoal {
         if player.is_getting_up {
             // Already started the stand-up animation, now need to
             // wait for it to complete.
-            actions.log("Waiting for stand-up animation to complete");
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -1158,7 +1157,6 @@ impl BotGoal for ChairJumpGoal {
             // accidental double clicks would result in picking the
             // chair up (the intended next step), rather than sitting
             // back down.
-            actions.log("Standing up");
             actions.do_action(GameAction::MouseOverTile(player_tile));
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
@@ -1175,9 +1173,6 @@ impl BotGoal for ChairJumpGoal {
             // The chair is in place, facing the correct direction,
             // and we have not yet completed the chair jump.
             // Therefore, sit on the chair.
-            actions.log(format!(
-                "Sitting down (player at {player_tile}, not {goal_tile}"
-            ));
             actions.do_action(GameAction::MouseOverTile(self.chair_tile));
             actions.do_action(GameAction::RightClick);
             return Ok(BotGoalResult::InProgress);
@@ -1189,14 +1184,12 @@ impl BotGoal for ChairJumpGoal {
             // already stood up from the chair, or because it happens
             // to be placed in the wrong orientation.  Either way, we
             // should pick up the chair.
-            actions.log("Picking up chair");
             actions.do_action(GameAction::MouseOverTile(self.chair_tile));
             actions.do_action(GameAction::LeftClick);
             return Ok(BotGoalResult::InProgress);
         }
 
         if player_tile == goal_tile {
-            actions.log("Successfully completed chair jump");
             // We've reached the goal tile, and the chair is no longer
             // placed down, so the chair jump is completed.
             return Ok(BotGoalResult::Completed);
@@ -1207,7 +1200,6 @@ impl BotGoal for ChairJumpGoal {
             if let Some(tick) = self.chair_placement_tick
                 && game_state.globals.game_tick < tick + 3
             {
-                actions.log("Waiting for chair to appear in GameLocation");
                 // The chair was just placed down, but the most recent
                 // memory read didn't find it in the GameLocation.
                 // Wait a few game ticks to see if it shows up.
@@ -1233,7 +1225,6 @@ impl BotGoal for ChairJumpGoal {
 
         let select_chair = SelectItemGoal::new(chair_item_id.clone());
         if !select_chair.is_completed(game_state) {
-            actions.log("Selecting chair from inventory");
             return Ok(select_chair.into());
         }
 
@@ -1245,11 +1236,8 @@ impl BotGoal for ChairJumpGoal {
         // whether it is facing the correct direction for the jump.
         if chair_facing == self.facing {
             if game_state.inputs.mouse_tile_location == self.chair_tile {
-                actions.log("Placing down chair");
                 self.chair_placement_tick = Some(game_state.globals.game_tick);
                 actions.do_action(GameAction::LeftClick);
-            } else {
-                actions.log("Waiting for mouse movement to be applied");
             }
             return Ok(BotGoalResult::InProgress);
         }
@@ -1327,7 +1315,6 @@ impl BotGoal for ChairJumpGoal {
         // facing the wrong direction.  Right-click in order to rotate
         // the chair until it is facing the desired direction for this
         // jump.
-        actions.log("Rotating chair before placing down");
         actions.do_action(GameAction::RightClick);
 
         Ok(BotGoalResult::InProgress)
