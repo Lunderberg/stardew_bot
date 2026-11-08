@@ -1319,18 +1319,36 @@ impl BotGoal for ChairJumpGoal {
                     .iter()
                     .flat_map(|clump| clump.shape.iter_points()),
             )
-            .chain(loc.bushes.iter().flat_map(|bush| {
-                bush.rectangle().iter_points().flat_map(|p| {
-                    [
-                        Vector::zero(),
-                        FacingDirection::North.offset(),
-                        FacingDirection::East.offset(),
-                        FacingDirection::West.offset(),
-                    ]
-                    .into_iter()
-                    .map(move |offset| p + offset)
-                })
-            }))
+            .chain(
+                std::iter::empty()
+                    .chain(
+                        loc.bushes
+                            .iter()
+                            .flat_map(|bush| bush.rectangle().iter_points()),
+                    )
+                    .chain(
+                        loc.objects
+                            .iter()
+                            .filter(|obj| {
+                                matches!(
+                                    obj.kind,
+                                    ObjectKind::Tree(_)
+                                        | ObjectKind::FruitTree(_)
+                                )
+                            })
+                            .map(|obj| obj.tile),
+                    )
+                    .flat_map(|p| {
+                        [
+                            Vector::zero(),
+                            FacingDirection::North.offset(),
+                            FacingDirection::East.offset(),
+                            FacingDirection::West.offset(),
+                        ]
+                        .into_iter()
+                        .map(move |offset| p + offset)
+                    }),
+            )
             .for_each(|tile| {
                 facing_misclick_risk
                     .iter_mut()
