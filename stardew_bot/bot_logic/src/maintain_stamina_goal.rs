@@ -44,14 +44,23 @@ impl MaintainStaminaGoal {
         }
     }
 
+    fn reached_goal(&self, game_state: &GameState) -> bool {
+        game_state.player.current_stamina > self.min_stamina
+            && game_state.player.current_health > self.min_health
+    }
+
+    fn was_recently_eating(&self, game_state: &GameState) -> bool {
+        if let Some(tick) = self.game_tick_eating {
+            tick + 1 < game_state.globals.game_tick
+        } else {
+            false
+        }
+    }
+
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
-        Ok((game_state.player.current_stamina > self.min_stamina
-            && game_state.player.current_health > self.min_health)
+        Ok(self.reached_goal(game_state)
             || (self.item_to_eat(game_state)?.is_none()
-                && self
-                    .game_tick_eating
-                    .map(|tick| tick + 1 < game_state.globals.game_tick)
-                    .unwrap_or(true)))
+                && !self.was_recently_eating(game_state)))
     }
 
     pub fn item_to_eat<'a>(
@@ -121,12 +130,17 @@ impl BotGoal for MaintainStaminaGoal {
             return Ok(BotGoalResult::InProgress);
         }
 
-        if self.is_completed(game_state)? {
+        if self.reached_goal(game_state) {
             return Ok(BotGoalResult::Completed);
         }
 
         let Some(item_to_eat) = self.item_to_eat(game_state)? else {
-            unreachable!("Guarded by self.is_completed() check")
+            let status = if self.was_recently_eating(game_state) {
+                BotGoalResult::InProgress
+            } else {
+                BotGoalResult::Completed
+            };
+            return Ok(status);
         };
 
         let select_item = SelectItemGoal::new(item_to_eat.id.clone());
