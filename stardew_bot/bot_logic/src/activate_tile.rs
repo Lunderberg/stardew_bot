@@ -39,8 +39,8 @@ impl BotGoal for ActivateTile {
             return Ok(BotGoalResult::Completed);
         }
 
-        let is_within_range =
-            game_state.player.tile().chessboard_dist(self.tile) <= 1;
+        let is_within_range = game_state.player.room_name == self.room
+            && game_state.player.tile().chessboard_dist(self.tile) <= 1;
         if is_within_range {
             actions.do_action(GameAction::MouseOverTile(self.tile));
             if game_state.inputs.mouse_tile_location == self.tile
