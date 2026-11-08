@@ -20,6 +20,12 @@ pub struct MaintainStaminaGoal {
     /// The maximum gold that should be spent in per energy restored.
     /// Any item that is outside of this threshold will not be eaten.
     max_gold_per_energy: f32,
+
+    /// The most recent game tick on which the player was eating.  The
+    /// food gets removed from the inventory slightly before the
+    /// stamina gets incremented, so this lets the
+    /// `MaintainStaminaGoal` wait a moment before returning.
+    game_tick_eating: Option<i32>,
 }
 
 impl Default for MaintainStaminaGoal {
@@ -34,13 +40,18 @@ impl MaintainStaminaGoal {
             min_stamina: 10.0,
             min_health: 50,
             max_gold_per_energy: 2.5,
+            game_tick_eating: None,
         }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
         Ok((game_state.player.current_stamina > self.min_stamina
             && game_state.player.current_health > self.min_health)
-            || self.item_to_eat(game_state)?.is_none())
+            || (self.item_to_eat(game_state)?.is_none()
+                && self
+                    .game_tick_eating
+                    .map(|tick| tick + 1 < game_state.globals.game_tick)
+                    .unwrap_or(true)))
     }
 
     pub fn item_to_eat<'a>(
@@ -103,14 +114,15 @@ impl BotGoal for MaintainStaminaGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        if self.is_completed(game_state)? {
-            return Ok(BotGoalResult::Completed);
-        }
-
         if game_state.player.is_eating {
             // Avoid sending additional inputs until the previous
             // consumption has completed.
+            self.game_tick_eating = Some(game_state.globals.game_tick);
             return Ok(BotGoalResult::InProgress);
+        }
+
+        if self.is_completed(game_state)? {
+            return Ok(BotGoalResult::Completed);
         }
 
         let Some(item_to_eat) = self.item_to_eat(game_state)? else {
