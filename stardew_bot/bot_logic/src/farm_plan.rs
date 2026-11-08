@@ -35,11 +35,12 @@ impl FarmPlan {
         let farm_door = game_state.get_farm_door()?;
 
         let regions = Self::size_limited_regions(game_state, 200)?;
+        let pathfinding =
+            farm.pathfinding(&game_state.statics).ignoring_obstacles();
 
-        let distance_to_water = farm
-            .pathfinding(&game_state.statics)
-            .ignoring_obstacles()
+        let distance_to_water = pathfinding
             .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
+        let distance_to_farmhouse = pathfinding.distances(farm_door);
 
         let num_regions = regions
             .iter()
@@ -53,13 +54,21 @@ impl FarmPlan {
             })
             .map(|region| {
                 let num_tiles = region.iter_true().count();
-                let sum_dist = region
+
+                let sum_dist_water = region
                     .iter_true()
                     .filter_map(|tile| distance_to_water.get_opt(tile))
                     .sum::<u64>();
+                let avg_dist_water =
+                    (sum_dist_water as f32) / (num_tiles as f32);
 
-                let avg_dist = (sum_dist as f32) / (num_tiles as f32);
-                (region, avg_dist)
+                let sum_dist_door = region
+                    .iter_true()
+                    .filter_map(|tile| distance_to_farmhouse.get_opt(tile))
+                    .sum::<u64>();
+                let avg_dist_door = (sum_dist_door as f32) / (num_tiles as f32);
+
+                (region, avg_dist_water + avg_dist_door)
             })
             .sorted_by(|(_, a), (_, b)| a.total_cmp(b))
             .map(|(region, _)| region);
