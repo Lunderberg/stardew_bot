@@ -929,26 +929,30 @@ impl BotGoal for LocalMovementGoal {
             }
         }
 
-        // Most of the time, keep the mouse hovering over the target
-        // tile, to give a visual indication of where the bot is
-        // moving.
-        actions.do_action(GameAction::MouseOverTile(target_tile));
+        if !has_chair {
+            // Most of the time, keep the mouse hovering over the target
+            // tile, to give a visual indication of where the bot is
+            // moving.  But since chair-jumping needs to move the mouse
+            // all over, just let the mouse stay where it is when
+            // chair-jumping.
+            actions.do_action(GameAction::MouseOverTile(target_tile));
+        }
 
         let must_open_door = self.activate_endpoint()
             && player_position.chessboard_dist(self.target_position) < 1.5;
-
-        if must_open_door
-            && game_state.inputs.mouse_tile_location == target_tile
-        {
-            match self.warp_kind {
-                Some(WarpKind::LockedDoor { opens, .. })
-                    if game_state.globals.in_game_time < opens =>
-                {
-                    let goal = WaitUntilTimeOfDay::new(opens);
-                    return Ok(goal.into());
-                }
-                _ => {
-                    actions.do_action(GameAction::RightClick);
+        if must_open_door {
+            actions.do_action(GameAction::MouseOverTile(target_tile));
+            if game_state.inputs.mouse_tile_location == target_tile {
+                match self.warp_kind {
+                    Some(WarpKind::LockedDoor { opens, .. })
+                        if game_state.globals.in_game_time < opens =>
+                    {
+                        let goal = WaitUntilTimeOfDay::new(opens);
+                        return Ok(goal.into());
+                    }
+                    _ => {
+                        actions.do_action(GameAction::RightClick);
+                    }
                 }
             }
         }
