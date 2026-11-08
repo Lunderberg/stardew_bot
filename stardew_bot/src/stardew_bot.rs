@@ -8,7 +8,7 @@ use crate::{
 use bot_logic::{
     BotLogic, GameAction, GameStateExt as _, GeodePredictor, ItemIterExt as _,
 };
-use game_state::{BundleIngredient, GameStateReader, ItemId, Quality};
+use game_state::{BundleIngredient, GameStateReader, ItemId};
 
 use env_var_flag::env_var_flag;
 use geometry::Vector;
@@ -336,27 +336,11 @@ impl StardewBot {
                                     println!("\t\t{done_char} {gp} GP")
                                 }
                                 BundleIngredient::Item(item) => {
-                                    let name = game_state
-                                        .statics
-                                        .object_data
-                                        .get(
-                                            &item
-                                                .id
-                                                .clone()
-                                                .with_quality(Quality::Normal),
-                                        )
-                                        .map(|data| data.name.as_str())
-                                        .unwrap_or_else(|| &*item.id.item_id);
+                                    let item = item.pretty_print(
+                                        &game_state.statics.object_data,
+                                    );
 
-                                    print!("\t\t{done_char} ");
-                                    if item.count > 1 {
-                                        print!("{} ", item.count);
-                                    }
-                                    if !item.quality().is_normal() {
-                                        print!("{} ", item.quality());
-                                    }
-
-                                    println!("{name}")
+                                    print!("\t\t{done_char} {item}");
                                 }
                             }
                         });
@@ -388,19 +372,10 @@ impl StardewBot {
             .map(|(i, geode)| {
                 let prediction =
                     predictor.predict_ahead(&game_state.statics, geode, i);
-
-                let name = game_state
-                    .statics
-                    .object_data
-                    .get(&prediction.id)
-                    .map(|data| data.name.as_str())
-                    .unwrap_or_else(|| &*prediction.id.item_id);
-
-                if prediction.count > 1 {
-                    format!("{} {name}", prediction.count)
-                } else {
-                    name.to_string()
-                }
+                format!(
+                    "{}",
+                    prediction.pretty_print(&game_state.statics.object_data)
+                )
             })
             .collect();
 
@@ -515,12 +490,9 @@ impl StardewBot {
                 if !predictions.is_empty() {
                     println!("Garbage can: {can:?}");
                     for prediction in predictions {
-                        let item = game_state
-                            .statics
-                            .object_data
-                            .get(&prediction.item)
-                            .map(|data| data.name.as_str())
-                            .unwrap_or_else(|| &prediction.item.item_id);
+                        let item = prediction
+                            .item
+                            .pretty_print(&game_state.statics.object_data);
                         if let Some(min_luck) = prediction.required_luck {
                             println!("\tif luck > {min_luck:.3}: {item}");
                         } else {

@@ -1,8 +1,8 @@
-use std::borrow::Cow;
+use std::{borrow::Cow, collections::HashMap};
 
 use dsl::RustNativeObject;
 
-use crate::{Error, FacingDirection, GameState};
+use crate::{Error, FacingDirection, GameState, ObjectData};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
@@ -19,6 +19,11 @@ pub struct Item {
     /// The numeric category of the item. (e.g. watering cans being
     /// within the Tool category).
     pub category: Option<ItemCategory>,
+}
+
+pub struct PrintableItem<'a> {
+    item: &'a Item,
+    data: Option<&'a ObjectData>,
 }
 
 /// A identfier for a type of item
@@ -510,6 +515,14 @@ impl Item {
         let per_item = ((per_item as f32) * multiplier) as i32;
         (self.count as i32) * per_item
     }
+
+    pub fn pretty_print<'a>(
+        &'a self,
+        object_data: &'a HashMap<ItemId, ObjectData>,
+    ) -> PrintableItem<'a> {
+        let data = object_data.get(&self.id);
+        PrintableItem { item: self, data }
+    }
 }
 
 impl Quality {
@@ -698,6 +711,29 @@ impl std::fmt::Display for Item {
         } else {
             write!(f, "{count} {id}")
         }
+    }
+}
+
+impl std::fmt::Display for PrintableItem<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let name = if let Some(data) = self.data {
+            data.name.as_str()
+        } else {
+            &self.item.id.item_id
+        };
+        let count = self.item.count;
+        if count != 1 {
+            write!(f, "{count} ")?;
+        }
+        let quality = self.item.id.quality;
+        if !quality.is_normal() {
+            write!(f, "{quality} ")?;
+        }
+        write!(f, "{name}")?;
+        if let Some(subtype) = &self.item.id.subtype {
+            write!(f, " {subtype}")?;
+        }
+        Ok(())
     }
 }
 
