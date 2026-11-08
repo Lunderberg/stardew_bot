@@ -360,6 +360,15 @@ impl BotGoal for FirstDay {
             return Ok(plant_crops.into());
         }
 
+        let farm_clay_farming = ClayFarmingGoal::new()
+            .room("Farm")
+            .distance_for_clear_tile(3)
+            .stop_at_time(2430)
+            .hard_stop();
+        if !farm_clay_farming.is_completed(game_state) {
+            return Ok(farm_clay_farming.into());
+        }
+
         let should_ship_clay = |game_state: &GameState| -> bool {
             let current_clay =
                 game_state.player.inventory.count_item(&ItemId::CLAY);

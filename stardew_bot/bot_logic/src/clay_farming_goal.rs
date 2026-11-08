@@ -1,8 +1,8 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use geometry::Vector;
 
-use crate::{Error, GameAction, LocationExt as _, MovementGoal};
+use crate::{Error, GameAction, GoToRoomGoal, LocationExt as _, MovementGoal};
 use game_state::{GameState, ItemId, ObjectKind, SeededRng};
 
 use super::{
@@ -11,6 +11,23 @@ use super::{
 };
 
 pub struct ClayFarmingGoal {
+    /// The room in which to farm clay.  Defaults to "Beach".
+    room: String,
+
+    /// If the closest tile would require using a tool, either to
+    /// clear out previous HoeDirt, or to clear out clutter before
+    /// using the Hoe, it may be better to go to a different tile.
+    /// This value determines how far the bot will go out of its
+    /// way in order to find a tile that can be hoed without first
+    /// requiring a use of a tool.  Defaults to 10.
+    ///
+    /// For example, if the bot is 15 tiles away from an tile that
+    /// would produce clay, but 2 tiles away from a tile with existing
+    /// HoeDirt that would produce clay, then it's worth using the
+    /// pickaxe to clear out the existing HoeDirt, spending more
+    /// stamina in order to spend less time.
+    distance_for_clear_tile: u64,
+
     // TODO: Extract these out into a more general handling that can
     // be applied to any goal.  Will require moving the cleanup
     // (e.g. releasing keys/buttons, exiting menus) outside of the
@@ -24,7 +41,7 @@ pub struct ClayFarmingGoal {
     /// clay.  If `None`, the path should be populated.  If `Some`,
     /// then the points on the path should be popped off one by one
     /// and followed.  If the vector is empty, the cleanup has been
-    /// completed and the bot should be near the exit of the beach.
+    /// completed and the bot should be near the room's exit.
     cleanup_path: Option<Vec<Vector<isize>>>,
 }
 
@@ -97,6 +114,22 @@ impl ClayFarmingGoal {
             stop_at_time: None,
             hard_stop: false,
             cleanup_path: None,
+            room: "Beach".into(),
+            distance_for_clear_tile: 10,
+        }
+    }
+
+    pub fn room(self, room: impl Into<String>) -> Self {
+        Self {
+            room: room.into(),
+            ..self
+        }
+    }
+
+    pub fn distance_for_clear_tile(self, distance_for_clear_tile: u64) -> Self {
+        Self {
+            distance_for_clear_tile,
+            ..self
         }
     }
 
@@ -136,16 +169,16 @@ impl ClayFarmingGoal {
         &mut self,
         game_state: &GameState,
     ) -> Option<Vector<f32>> {
-        if self.hard_stop || game_state.player.room_name != "Beach" {
+        if self.hard_stop || game_state.player.room_name != self.room {
             return None;
         }
         if self.cleanup_path.is_none() {
-            let beach = game_state.get_room("Beach").ok()?;
-            let pathfinding = beach.pathfinding(&game_state.statics);
+            let loc = game_state.get_room(&self.room).ok()?;
+            let pathfinding = loc.pathfinding(&game_state.statics);
 
             let player_tile = game_state.player.tile();
             let player_distance = pathfinding.distances(player_tile);
-            let exit_tile = beach
+            let exit_tile = loc
                 .warps
                 .iter()
                 .map(|warp| warp.location)
@@ -158,8 +191,7 @@ impl ClayFarmingGoal {
             let points: Vec<Vector<isize>> = std::iter::empty()
                 .chain([player_tile])
                 .chain(
-                    beach
-                        .items
+                    loc.items
                         .iter()
                         .filter(|floating_item| {
                             floating_item.id == ItemId::CLAY
@@ -257,9 +289,9 @@ impl ClayFarmingGoal {
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         self.done_digging(game_state)
             && (self.hard_stop
-                || game_state.player.room_name != "Beach"
+                || game_state.player.room_name != self.room
                 || game_state
-                    .get_room("Beach")
+                    .get_room(&self.room)
                     .ok()
                     .into_iter()
                     .flat_map(|loc| loc.items.iter())
@@ -278,22 +310,24 @@ impl BotGoal for ClayFarmingGoal {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if self.done_digging(game_state) {
-            let finalizing =
-                if let Some(clay_item_pos) = self.clay_to_pick_up(game_state) {
-                    let goal = MovementGoal::new("Beach", clay_item_pos / 64.0)
+            let finalizing = if let Some(clay_item_pos) =
+                self.clay_to_pick_up(game_state)
+            {
+                let goal =
+                    MovementGoal::new(self.room.clone(), clay_item_pos / 64.0)
                         .with_tolerance(1.0);
-                    if goal.is_completed(game_state) {
-                        BotGoalResult::InProgress
-                    } else {
-                        goal.into()
-                    }
+                if goal.is_completed(game_state) {
+                    BotGoalResult::InProgress
                 } else {
-                    BotGoalResult::Completed
-                };
+                    goal.into()
+                }
+            } else {
+                BotGoalResult::Completed
+            };
             return Ok(finalizing);
         }
 
-        let beach = game_state.get_room("Beach")?;
+        let loc = game_state.get_room(&self.room)?;
         let player = &game_state.player;
 
         // Pick up the hoe for use in the rest of the goal.
@@ -304,15 +338,10 @@ impl BotGoal for ClayFarmingGoal {
             return Ok(goal.into());
         }
 
-        // Go to the Beach
-        //
-        // TODO: Expose the room-to-room movement without requiring
-        // local movement afterwards.  In this case, I want to go to
-        // the farm, but don't care where I start out within the farm.
-        if player.room_name != "Beach" {
-            return Ok(MovementGoal::new("Beach", Vector::new(38.0, 1.0))
-                .with_tolerance(100.0)
-                .into());
+        // Go to the correct location for the clay farming.
+        let goal = GoToRoomGoal::new(self.room.clone());
+        if !goal.is_completed(game_state) {
+            return Ok(goal.into());
         }
 
         let goal = MaintainStaminaGoal::new();
@@ -324,47 +353,90 @@ impl BotGoal for ClayFarmingGoal {
 
         let clay_predictor = ClayPredictor::new(game_state);
 
+        // Tiles that we shouldn't touch as part of this clay-farming.
+        // For example, when clay-farming on the Farm, we shouldn't
+        // dig up any seeds that we've already planted.
+        let mut forbidden = HashSet::<Vector<isize>>::new();
+        // The tool that must be used on the tile prior to digging it
+        // up for clay.  For example, using the pickaxe in order to
+        // clear out stone, or clearing out previous empty hoe dirt.
+        let mut pre_hoe_tool = HashMap::<Vector<isize>, ItemId>::new();
+        for obj in &loc.objects {
+            match &obj.kind {
+                ObjectKind::Tree(_)
+                | ObjectKind::FruitTree(_)
+                | ObjectKind::Chest(_)
+                | ObjectKind::CraftingMachine(_)
+                | ObjectKind::Sprinkler(_)
+                | ObjectKind::Scarecrow
+                | ObjectKind::Unknown => {
+                    forbidden.insert(obj.tile);
+                }
+                ObjectKind::HoeDirt(dirt) if dirt.crop.is_some() => {
+                    forbidden.insert(obj.tile);
+                }
+                ObjectKind::HoeDirt(dirt) if dirt.crop.is_none() => {
+                    pre_hoe_tool.insert(obj.tile, ItemId::PICKAXE);
+                }
+                ObjectKind::Stone(_) => {
+                    pre_hoe_tool.insert(obj.tile, ItemId::PICKAXE);
+                }
+                ObjectKind::Wood => {
+                    pre_hoe_tool.insert(obj.tile, ItemId::AXE);
+                }
+                ObjectKind::Fiber | ObjectKind::Grass => {
+                    pre_hoe_tool.insert(obj.tile, ItemId::SCYTHE);
+                }
+                _ => {}
+            }
+        }
+        std::iter::empty()
+            .chain(loc.buildings.iter().map(|b| b.shape))
+            .chain(loc.resource_clumps.iter().map(|c| c.shape))
+            .chain(loc.bushes.iter().map(|b| b.rectangle()))
+            .flat_map(|shape| shape.iter_points())
+            .for_each(|tile| {
+                forbidden.insert(tile);
+            });
+
         // The set of tiles that will yield clay if the hoe is used
         // once elsewhere, and then once on the tile.  This is used to
         // avoid needing to re-predict the (N+1)-th clay tiles for
         // each possible choice of the N-th clay tile.
-        let next_clay_tiles: Vec<Vector<isize>> = beach
+        let next_clay_tiles: Vec<Vector<isize>> = loc
             .diggable
             .iter_true()
+            .filter(|tile| !forbidden.contains(tile))
             .filter(|tile| {
                 clay_predictor.will_produce_clay_with_offset(*tile, 1)
             })
             .collect();
 
-        let current_hoe_dirt: HashSet<Vector<isize>> = beach
-            .objects
-            .iter()
-            .filter(|obj| matches!(obj.kind, ObjectKind::HoeDirt(_)))
-            .map(|obj| obj.tile)
-            .collect();
+        let apply_pre_clear_penalty = |tile: Vector<isize>| -> bool {
+            if let Some(tool) = pre_hoe_tool.get(&tile)
+                && *tool != ItemId::SCYTHE
+            {
+                true
+            } else {
+                false
+            }
+        };
 
-        /// If the closest tile would require using the pickaxe to
-        /// clear out HoeDirt before using the Hoe, it may be
-        /// better to go to a different tile.  This value
-        /// determines how far the bot will go out of its way in
-        /// order to find a tile that can be hoed without first
-        /// requiring a use of the pickaxe.
-        const TILES_TO_AVOID_PICKAXE: u64 = 10;
+        let distances =
+            loc.pathfinding(&game_state.statics).distances(player_tile);
 
-        let distances = beach
-            .pathfinding(&game_state.statics)
-            .distances(player_tile);
-
-        let opt_closest_clay: Option<Vector<isize>> = beach
+        let opt_closest_clay: Option<Vector<isize>> = loc
             .diggable
             .iter_true()
             .filter(|tile| distances.is_some(*tile))
+            .filter(|tile| !forbidden.contains(tile))
             .filter(|tile| clay_predictor.will_produce_clay(*tile))
             .min_by_key(|tile| {
                 let dist =
                     distances[*tile].expect("Protected by distances.is_some()");
-                let pickaxe_penalty = if current_hoe_dirt.contains(tile) {
-                    TILES_TO_AVOID_PICKAXE
+
+                let pickaxe_penalty = if apply_pre_clear_penalty(*tile) {
+                    self.distance_for_clear_tile
                 } else {
                     0
                 };
@@ -373,13 +445,12 @@ impl BotGoal for ClayFarmingGoal {
                     .map(|next| {
                         let offset =
                             (*tile - *next).map(|x| x.unsigned_abs() as u64);
-                        let pickaxe_penalty = if next == tile
-                            || current_hoe_dirt.contains(next)
-                        {
-                            TILES_TO_AVOID_PICKAXE
-                        } else {
-                            0
-                        };
+                        let pickaxe_penalty =
+                            if next == tile || apply_pre_clear_penalty(*next) {
+                                self.distance_for_clear_tile
+                            } else {
+                                0
+                            };
                         offset.right + offset.down + pickaxe_penalty
                     })
                     .min()
@@ -394,21 +465,19 @@ impl BotGoal for ClayFarmingGoal {
         };
 
         actions.do_action(GameAction::MouseOverTile(closest_clay));
-        let tool = if current_hoe_dirt.contains(&closest_clay) {
-            ItemId::PICKAXE
-        } else {
-            ItemId::HOE
-        };
+        let tool = pre_hoe_tool
+            .get(&closest_clay)
+            .cloned()
+            .unwrap_or(ItemId::HOE);
 
         let total_dirt_hoed =
             game_state.globals.get_stat("dirtHoed").unwrap_or(0);
 
-        let goal = UseItemOnTile::new(tool, "Beach", closest_clay).cancel_if(
-            move |game_state| {
+        let goal = UseItemOnTile::new(tool, self.room.clone(), closest_clay)
+            .cancel_if(move |game_state| {
                 game_state.globals.get_stat("dirtHoed").unwrap_or(0)
                     != total_dirt_hoed
-            },
-        );
+            });
         Ok(goal.into())
     }
 }
