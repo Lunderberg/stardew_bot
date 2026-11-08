@@ -180,6 +180,7 @@ impl ItemId {
 
     pub const SALAD: Self = Self::new_const("(O)196");
     pub const COOKIES: Self = Self::new_const("(O)223");
+    pub const ENERGY_TONIC: Self = Self::new_const("(O)349");
     pub const SPRING_ONION: Self = Self::new_const("(O)399");
     pub const GINGER: Self = Self::new_const("(O)829");
 
@@ -380,6 +381,8 @@ impl ItemId {
             150
         } else if *self == ItemId::OAK_CHAIR {
             350
+        } else if *self == ItemId::ENERGY_TONIC {
+            1000
         } else {
             todo!("Handle buy price for item {self}")
         }

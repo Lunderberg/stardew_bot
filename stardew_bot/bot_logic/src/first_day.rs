@@ -131,7 +131,7 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new()
-            .stop_at_time(1130)
+            .stop_at_time(1430)
             .stop_at_stamina(4.0)
             .hard_stop();
         if !clay_farming.is_completed(game_state) {
@@ -184,7 +184,7 @@ impl BotGoal for FirstDay {
             }
         }
 
-        let clay_farming = ClayFarmingGoal::new().stop_at_time(1440);
+        let clay_farming = ClayFarmingGoal::new().stop_at_time(1540);
         if player.room_name == "Beach"
             && game_state.globals.in_game_time >= 1230
             && !clay_farming.is_completed(game_state)
@@ -212,8 +212,19 @@ impl BotGoal for FirstDay {
             }
         }
 
+        let goal = BuyFromMerchantGoal::new(
+            "HospitalShop",
+            ItemId::ENERGY_TONIC.with_count(1),
+        );
+        if player.current_stamina < 10.0
+            && in_game_time < 1200
+            && !goal.is_completed(game_state)?
+        {
+            return Ok(goal.into());
+        }
+
         let goal =
-            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(7));
+            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(18));
         if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
