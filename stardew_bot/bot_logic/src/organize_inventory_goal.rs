@@ -224,6 +224,8 @@ where
                 actions
                     .do_action(GameAction::ExitMenu)
                     .annotate("Open inventory");
+            } else if game_state.menu.is_some() {
+                return Ok(MenuCloser::new().into());
             }
             return Ok(BotGoalResult::InProgress);
         };

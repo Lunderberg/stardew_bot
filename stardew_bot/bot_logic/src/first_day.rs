@@ -250,8 +250,7 @@ impl BotGoal for FirstDay {
         if let Some(menu) = game_state.dialogue_menu()
             && menu.responses.is_empty()
         {
-            actions.do_action(GameAction::ExitMenu);
-            return Ok(BotGoalResult::InProgress);
+            return Ok(MenuCloser::new().into());
         }
 
         // Includes buying seeds as necessary.  Which, given that
