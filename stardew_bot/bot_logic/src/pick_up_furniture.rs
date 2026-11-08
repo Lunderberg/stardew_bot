@@ -6,6 +6,7 @@ use crate::{
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
+#[derive(Clone)]
 pub struct PickUpFurnitureGoal {
     room: String,
     tile: Vector<isize>,
@@ -32,6 +33,19 @@ impl PickUpFurnitureGoal {
             .iter()
             .any(|furniture| furniture.shape.contains(self.tile)))
     }
+
+    pub fn is_in_range(&self, game_state: &GameState) -> bool {
+        let player = &game_state.player;
+
+        let correct_room = player.room_name == self.room;
+        let near_furniture = if self.room == "FarmHouse" {
+            game_state.display.tile_is_in_view(self.tile)
+        } else {
+            player.tile().chessboard_dist(self.tile) <= 1
+        };
+
+        correct_room && near_furniture
+    }
 }
 
 impl BotGoal for PickUpFurnitureGoal {
@@ -53,22 +67,13 @@ impl BotGoal for PickUpFurnitureGoal {
             return Ok(select_empty.into());
         }
 
-        let room = self.room.clone();
-        let tile = self.tile;
-        let is_in_range = move |game_state: &GameState| -> bool {
-            // TODO: Use actual range whenever not in the FarmHouse.
-            // (Within the FarmHouse, the furniture just needs to be on
-            // screen.)
-            game_state.player.room_name == room
-                && game_state.display.tile_is_in_view(tile)
-        };
-
-        if !is_in_range(game_state) {
+        if !self.is_in_range(game_state) {
+            let cloned = self.clone();
             return Ok(MovementGoal::new(
                 self.room.clone(),
                 self.tile.map(|x| x as f32),
             )
-            .cancel_if(is_in_range)
+            .cancel_if(move |game_state| cloned.is_in_range(game_state))
             .into());
         }
 

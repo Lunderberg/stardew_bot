@@ -4,7 +4,8 @@ use geometry::{Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
-    Error, GameAction, MenuCloser, SelectItemGoal, SwingWithAnimationCancel,
+    Error, GameAction, MenuCloser, PickUpFurnitureGoal, SelectItemGoal,
+    SwingWithAnimationCancel,
 };
 use game_state::{
     FacingDirection, FurnitureKind, GameState, Item, ItemId, Location, Object,
@@ -813,6 +814,35 @@ impl BotGoal for LocalMovementGoal {
 
         if let Some(chair_jump) = self.choose_chair_jump(game_state)? {
             return Ok(chair_jump.prevent_interrupts().into());
+        }
+
+        let has_chair = player
+            .inventory
+            .iter_items()
+            .any(|item| item.as_chair().is_some());
+
+        if !has_chair
+            && let Some(chair_tile) = game_state
+                .current_room()?
+                .furniture
+                .iter()
+                .filter(|furniture| furniture.is_chair())
+                .map(|furniture| furniture.shape.top_left)
+                .find(|chair_tile| chair_tile.chessboard_dist(player_tile) <= 1)
+        {
+            // Error recovery path.  If we don't have a chair, but
+            // there's a chair adjacent to the player.  For example,
+            // if there's an extra click set after picking up the
+            // chair, erroneously placing it back down.
+            let pickup = PickUpFurnitureGoal::new(
+                game_state.player.room_name.clone(),
+                chair_tile,
+            );
+            if pickup.is_in_range(game_state)
+                && !pickup.is_completed(game_state)?
+            {
+                return Ok(pickup.into());
+            }
         }
 
         let dir = if player_tile == target_tile {
