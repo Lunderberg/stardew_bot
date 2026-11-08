@@ -185,9 +185,7 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new().stop_at_time(1540);
-        if player.room_name == "Beach"
-            && game_state.globals.in_game_time >= 1230
-            && !clay_farming.is_completed(game_state)
+        if player.room_name == "Beach" && !clay_farming.is_completed(game_state)
         {
             return Ok(clay_farming.into());
         }
