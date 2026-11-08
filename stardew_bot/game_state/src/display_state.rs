@@ -82,8 +82,8 @@ impl DisplayState {
     }
 
     pub fn tile_is_in_view(&self, tile: Vector<isize>) -> bool {
-        let pixel = self.center_pixel_of_tile(tile);
-        self.viewport.contains(pixel)
+        let tile_center = tile * 64 + Vector::new(32, 32);
+        self.viewport.contains(tile_center)
     }
 
     /// The location of the "Skip" button for cutscenes
