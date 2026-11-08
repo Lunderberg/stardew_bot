@@ -342,7 +342,7 @@ impl BotGoal for FirstDay {
 
                     if num_to_buy > 0 {
                         if let Some(to_plant) = seeds.get_mut(seed) {
-                            *to_plant = (*to_plant).max(num_to_buy);
+                            *to_plant += num_to_buy;
                         } else {
                             seeds.insert(seed.clone(), num_to_buy);
                         }
