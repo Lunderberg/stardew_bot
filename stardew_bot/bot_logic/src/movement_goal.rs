@@ -90,6 +90,11 @@ pub struct StopMovingGoal;
 /// suppressed, so that the bot doesn't accidentally leave the chair
 /// behind.
 struct ChairJumpGoal {
+    /// The room in which the chair jump will be performed.  Used to
+    /// bail out if not in the correct room (e.g. if a chair jump is
+    /// initiated while a screen transition is partially performed).
+    room: String,
+
     /// The tile on which the chair should be placed.  Must be
     /// currently open, and adjacent to the tile the player is on.
     chair_tile: Vector<isize>,
@@ -654,6 +659,7 @@ impl LocalMovementGoal {
         }
 
         let goal = ChairJumpGoal {
+            room: self.target_room.clone(),
             chair_tile,
             facing,
             chair_placement_tick: None,
@@ -1089,9 +1095,11 @@ impl ChairJumpGoal {
     }
 
     fn is_allowed(&self, game_state: &GameState) -> Result<bool, Error> {
+        let player = &game_state.player;
         let location = game_state.current_room()?;
 
-        if self.too_far_from_chair_tile(game_state)
+        if player.room_name != self.room
+            || self.too_far_from_chair_tile(game_state)
             || self.too_close_to_chair_tile(game_state)
         {
             return Ok(false);
@@ -1246,6 +1254,11 @@ impl BotGoal for ChairJumpGoal {
                 return Ok(BotGoalResult::Completed);
             }
         };
+
+        if player.room_name != self.room {
+            actions.log("Bailout, wrong room for chair jump");
+            return Ok(BotGoalResult::Completed);
+        }
 
         if self.too_close_to_chair_tile(game_state) {
             actions.log("Bailout, too close to chair tile");
