@@ -1085,7 +1085,7 @@ impl ChairJumpGoal {
     fn too_far_from_chair_tile(&self, game_state: &GameState) -> bool {
         let delta =
             game_state.player.center_pos() - self.chair_tile.map(|x| x as f32);
-        delta.right.abs() >= 1.0 || delta.down.abs() >= 1.0
+        delta.right.abs() > 1.0 || delta.down.abs() > 1.0
     }
 
     fn is_allowed(&self, game_state: &GameState) -> Result<bool, Error> {
