@@ -51,7 +51,7 @@ impl MaintainStaminaGoal {
 
     fn was_recently_eating(&self, game_state: &GameState) -> bool {
         if let Some(tick) = self.game_tick_eating {
-            tick + 1 < game_state.globals.game_tick
+            tick + 3 < game_state.globals.game_tick
         } else {
             false
         }
