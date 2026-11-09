@@ -1,15 +1,16 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use env_var_flag::env_var_flag;
 use geometry::Vector;
 use itertools::Itertools as _;
 
 use crate::{
-    ActivateTile, Error, GameAction, GiveGiftGoal, GoToRoomGoal,
-    PickUpFurnitureGoal, bot_logic::BotInterrupt,
+    ActivateTile, ClearTreeGoal, Error, GameAction, GiveGiftGoal, GoToRoomGoal,
+    LocationExt as _, PickUpFurnitureGoal, bot_logic::BotInterrupt,
 };
 use game_state::{
-    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season,
+    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, Tree,
+    TreeKind,
 };
 
 use super::{
@@ -356,6 +357,39 @@ impl BotGoal for FirstDay {
             PlantCropsGoal::new(iter_seeds).opportunistic_clay_farming(10);
         if !plant_crops.is_completed(game_state)? {
             return Ok(plant_crops.into());
+        }
+
+        if player.skills.foraging_level() < 1 {
+            // Cut down trees to ensure we reach Foraging Level 1 at
+            // the end of the first day.
+            let trees: HashSet<_> = farm
+                .objects
+                .iter()
+                .filter(|obj| {
+                    matches!(
+                        obj.kind,
+                        ObjectKind::Tree(Tree {
+                            kind: TreeKind::Maple | TreeKind::Pine,
+                            ..
+                        })
+                    )
+                })
+                .map(|obj| obj.tile)
+                .collect();
+            let search_from = if player.room_name == "Farm" {
+                player.tile()
+            } else {
+                game_state.get_farm_door()?
+            };
+            let opt_tree = farm
+                .pathfinding(&game_state.statics)
+                .include_border(true)
+                .iter_dijkstra(search_from)
+                .map(|(tile, _)| tile)
+                .find(|tile| trees.contains(tile));
+            if let Some(tree) = opt_tree {
+                return Ok(ClearTreeGoal::new(tree).into());
+            }
         }
 
         let farm_clay_farming = ClayFarmingGoal::new()
