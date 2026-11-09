@@ -187,6 +187,7 @@ impl BotGoal for FirstDay {
 
         let clay_farming = ClayFarmingGoal::new().stop_at_time(1540);
         if player.room_name == "Beach"
+            && (player.current_stamina > 4.0 || in_game_time > 1330)
             && !clay_farming.is_completed(game_state)?
         {
             return Ok(clay_farming.into());
