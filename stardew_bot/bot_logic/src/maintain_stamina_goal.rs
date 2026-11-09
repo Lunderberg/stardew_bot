@@ -21,11 +21,12 @@ pub struct MaintainStaminaGoal {
     /// Any item that is outside of this threshold will not be eaten.
     max_gold_per_energy: f32,
 
-    /// The most recent game tick on which the player was eating.  The
-    /// food gets removed from the inventory slightly before the
-    /// stamina gets incremented, so this lets the
-    /// `MaintainStaminaGoal` wait a moment before returning.
-    game_tick_eating: Option<i32>,
+    /// The stamina prior to eating, and the game tick on which that
+    /// was measured.  Used to determine whether the stamina has
+    /// recovered.  Otherwise, the `MaintainStaminaGoal` can exit
+    /// after the last food item has been removed from the inventory,
+    /// but before its stamina recovery effect has been applied.
+    stamina_before_eating: Option<(f32, i32)>,
 }
 
 impl Default for MaintainStaminaGoal {
@@ -40,7 +41,7 @@ impl MaintainStaminaGoal {
             min_stamina: 10.0,
             min_health: 50,
             max_gold_per_energy: 2.5,
-            game_tick_eating: None,
+            stamina_before_eating: None,
         }
     }
 
@@ -50,11 +51,14 @@ impl MaintainStaminaGoal {
     }
 
     fn was_recently_eating(&self, game_state: &GameState) -> bool {
-        if let Some(tick) = self.game_tick_eating {
-            tick + 3 < game_state.globals.game_tick
-        } else {
-            false
-        }
+        let Some((old_stamina, tick)) = self.stamina_before_eating else {
+            // The goal has not yet triggered any food consumption.
+            return false;
+        };
+        // Wait until we have recovered stamina.  To avoid potential
+        // deadlock, there's also a 2-second timeout.
+        old_stamina < game_state.player.current_stamina
+            || tick + 120 < game_state.globals.game_tick
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
@@ -124,9 +128,18 @@ impl BotGoal for MaintainStaminaGoal {
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if game_state.player.is_eating {
+            if let Some((stamina, _)) = self.stamina_before_eating {
+                // Bump the game tick used for the timeout of the
+                // "have I finished eating" check.  Keep the stamina
+                // the same as what we recorded earlier, so that we
+                // can still track whether the stamina has
+                // incremented.
+                self.stamina_before_eating =
+                    Some((stamina, game_state.globals.game_tick));
+            }
+
             // Avoid sending additional inputs until the previous
             // consumption has completed.
-            self.game_tick_eating = Some(game_state.globals.game_tick);
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -153,6 +166,10 @@ impl BotGoal for MaintainStaminaGoal {
         if game_state.dialogue_menu().is_some() {
             // The eat-food confirmation menu is open, so send the 'y'
             // keystroke to confirm.
+            self.stamina_before_eating = Some((
+                game_state.player.current_stamina,
+                game_state.globals.game_tick,
+            ));
             actions.do_action(GameAction::ConfirmMenu);
             return Ok(BotGoalResult::InProgress);
         }
