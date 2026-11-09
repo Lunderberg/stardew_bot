@@ -213,6 +213,26 @@ impl BotGoal for FirstDay {
             }
         }
 
+        // Buy wood during the last trip to Robin's.  Should keep
+        // enough cash to buy the Backpack upgrade and seeds from
+        // Pierre.
+        let reserved_cash = 1500
+            + 2000 * (player.inventory.items.len() < 24) as i32
+            + 220
+                * 10usize
+                    .checked_sub(player.inventory.count_item(ItemId::SALAD))
+                    .unwrap_or(0) as i32;
+        if current_money > reserved_cash && in_game_time < 1630 {
+            let count = (current_money - reserved_cash) / 10;
+            let goal = BuyFromMerchantGoal::new(
+                "Carpenter",
+                ItemId::WOOD.with_count(count as usize),
+            );
+            if !goal.is_completed(game_state)? {
+                return Ok(goal.into());
+            }
+        }
+
         let goal = BuyFromMerchantGoal::new(
             "HospitalShop",
             ItemId::ENERGY_TONIC.with_count(1),
