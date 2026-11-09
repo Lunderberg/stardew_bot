@@ -165,15 +165,46 @@ impl ClayFarmingGoal {
         after_stopping_time || below_stopping_stamina
     }
 
+    fn iter_reachable_clay<'a>(
+        &self,
+        game_state: &'a GameState,
+    ) -> Result<impl Iterator<Item = Vector<isize>> + 'a, Error> {
+        let loc = game_state.get_room(&self.room)?;
+        let pathfinding = loc.pathfinding(&game_state.statics);
+
+        let player_tile = game_state.player.tile();
+        let player_distance = pathfinding.distances(player_tile);
+        let exit_tile = loc
+            .warps
+            .iter()
+            .map(|warp| warp.location)
+            .map(|tile| Vector::new(tile.right, tile.down.max(0)))
+            .filter(|tile| player_distance.is_some(*tile))
+            .min_by_key(|tile| (tile.down, tile.right))
+            .expect("Exit tile not reachable");
+        let exit_distance = pathfinding.distances(exit_tile);
+
+        let iter = loc
+            .items
+            .iter()
+            .filter(|floating_item| floating_item.id == ItemId::CLAY)
+            .map(|item| (item.position / 64.0).map(|x| x.round() as isize))
+            .filter(move |&tile| {
+                player_distance.get_opt(tile).is_some()
+                    && exit_distance.get_opt(tile).is_some()
+            });
+        Ok(iter)
+    }
+
     pub fn clay_to_pick_up(
         &mut self,
         game_state: &GameState,
-    ) -> Option<Vector<f32>> {
+    ) -> Result<Option<Vector<f32>>, Error> {
         if self.hard_stop || game_state.player.room_name != self.room {
-            return None;
+            return Ok(None);
         }
         if self.cleanup_path.is_none() {
-            let loc = game_state.get_room(&self.room).ok()?;
+            let loc = game_state.get_room(&self.room)?;
             let pathfinding = loc.pathfinding(&game_state.statics);
 
             let player_tile = game_state.player.tile();
@@ -186,24 +217,10 @@ impl ClayFarmingGoal {
                 .filter(|tile| player_distance.is_some(*tile))
                 .min_by_key(|tile| (tile.down, tile.right))
                 .expect("Exit tile not reachable");
-            let exit_distance = pathfinding.distances(exit_tile);
 
             let points: Vec<Vector<isize>> = std::iter::empty()
                 .chain([player_tile])
-                .chain(
-                    loc.items
-                        .iter()
-                        .filter(|floating_item| {
-                            floating_item.id == ItemId::CLAY
-                        })
-                        .map(|item| {
-                            (item.position / 64.0).map(|x| x.round() as isize)
-                        })
-                        .filter(|&tile| {
-                            player_distance.get_opt(tile).is_some()
-                                && exit_distance.get_opt(tile).is_some()
-                        }),
-                )
+                .chain(self.iter_reachable_clay(game_state)?)
                 .chain([exit_tile])
                 .collect();
 
@@ -287,23 +304,21 @@ impl ClayFarmingGoal {
             );
         }
 
-        self.cleanup_path
+        Ok(self
+            .cleanup_path
             .as_mut()
             .expect("Just populated cleanup_path")
             .pop()
-            .map(|tile| Vector::new(tile.right as f32, tile.down as f32) * 64.0)
+            .map(|tile| {
+                Vector::new(tile.right as f32, tile.down as f32) * 64.0
+            }))
     }
 
-    pub fn is_completed(&self, game_state: &GameState) -> bool {
-        self.done_digging(game_state)
+    pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
+        Ok(self.done_digging(game_state)
             && (self.hard_stop
                 || game_state.player.room_name != self.room
-                || game_state
-                    .get_room(&self.room)
-                    .ok()
-                    .into_iter()
-                    .flat_map(|loc| loc.items.iter())
-                    .all(|floating_item| floating_item.id != ItemId::CLAY))
+                || self.iter_reachable_clay(game_state)?.next().is_none()))
     }
 }
 
@@ -319,7 +334,7 @@ impl BotGoal for ClayFarmingGoal {
     ) -> Result<BotGoalResult, Error> {
         if self.done_digging(game_state) {
             let finalizing = if let Some(clay_item_pos) =
-                self.clay_to_pick_up(game_state)
+                self.clay_to_pick_up(game_state)?
             {
                 let goal =
                     MovementGoal::new(self.room.clone(), clay_item_pos / 64.0)

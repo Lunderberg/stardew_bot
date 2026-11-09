@@ -135,7 +135,7 @@ impl BotGoal for FirstDay {
             .stop_at_time(1430)
             .stop_at_stamina(4.0)
             .hard_stop();
-        if !clay_farming.is_completed(game_state) {
+        if !clay_farming.is_completed(game_state)? {
             let stack = LogicStack::new()
                 .then(clay_farming)
                 .with_interrupt(ScytheNearby);
@@ -186,7 +186,8 @@ impl BotGoal for FirstDay {
         }
 
         let clay_farming = ClayFarmingGoal::new().stop_at_time(1540);
-        if player.room_name == "Beach" && !clay_farming.is_completed(game_state)
+        if player.room_name == "Beach"
+            && !clay_farming.is_completed(game_state)?
         {
             return Ok(clay_farming.into());
         }
@@ -228,7 +229,7 @@ impl BotGoal for FirstDay {
             return Ok(goal.into());
         }
 
-        if !clay_farming.is_completed(game_state) {
+        if !clay_farming.is_completed(game_state)? {
             return Ok(clay_farming.into());
         }
 
@@ -397,7 +398,7 @@ impl BotGoal for FirstDay {
             .distance_for_clear_tile(3)
             .stop_at_time(2430)
             .hard_stop();
-        if !farm_clay_farming.is_completed(game_state) {
+        if !farm_clay_farming.is_completed(game_state)? {
             return Ok(farm_clay_farming.into());
         }
 
