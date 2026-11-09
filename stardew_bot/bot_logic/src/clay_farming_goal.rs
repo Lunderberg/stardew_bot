@@ -275,8 +275,16 @@ impl ClayFarmingGoal {
                 }
             }
 
-            self.cleanup_path =
-                Some(path.into_iter().map(|i| points[i]).collect());
+            // Having the player's location and the exit location in
+            // the path makes the bookkeeping a lot easier.  However,
+            // now that we've finished, strip those points off.  The
+            // player's location isn't necessary since that movement
+            // goal would already be completed.  The exit location
+            // isn't necessary since whichever goal occurs next would
+            // need to go to the exit anyways.
+            self.cleanup_path = Some(
+                path[1..(n - 1)].into_iter().map(|i| points[*i]).collect(),
+            );
         }
 
         self.cleanup_path
