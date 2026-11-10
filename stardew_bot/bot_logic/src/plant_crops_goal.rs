@@ -891,19 +891,18 @@ impl BotGoal for PlantCropsGoal {
             use crate::SortedInventoryLocation as SIL;
             if item.id.item_id.starts_with("(T)")
                 || item.id.item_id.starts_with("(W)")
+                || item.as_chair().is_some()
                 || (matches!(item.category, Some(ItemCategory::Seed))
                     && !item.id.is_tree_seed()
-                    && !item.id.is_fruit_sapling())
+                    && !item.id.is_fruit_sapling()
+                    && item != &ItemId::MIXED_SEEDS)
                 || item == &ItemId::SPRINKLER
                 || item == &ItemId::SCARECROW
             {
                 SIL::HotBarLeft
             } else if item.gp_per_stamina().is_some() {
                 SIL::HotBarRight
-            } else if item.as_chair().is_some()
-                || item == &ItemId::CLAY
-                || item == &ItemId::WOOD
-            {
+            } else if item == &ItemId::CLAY || item == &ItemId::WOOD {
                 SIL::HotBar
             } else {
                 SIL::Hidden
