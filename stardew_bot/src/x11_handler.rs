@@ -3,11 +3,12 @@ use thiserror::Error;
 use x11rb::{
     connection::Connection as _,
     protocol::{
+        xkb::{self, ConnectionExt as _},
         xproto::{
             AtomEnum, BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, ButtonIndex,
             ConfigureWindowAux, ConnectionExt as _, EventMask as X11EventMask,
             KEY_PRESS_EVENT, KEY_RELEASE_EVENT, KeyPressEvent,
-            Keycode as X11KeyCode, MOTION_NOTIFY_EVENT, Window,
+            Keycode as X11KeyCode, MOTION_NOTIFY_EVENT, ModMask, Window,
         },
         xtest::ConnectionExt as _,
     },
@@ -28,6 +29,9 @@ pub enum Error {
 
     #[error("X11 error: {0}")]
     X11Error(#[from] x11rb::errors::ReplyError),
+
+    #[error("XKB extension for X11 not available")]
+    XkbExtensionNotAvailable,
 
     #[error("No root X11 window found")]
     MissingRootWindow,
@@ -71,6 +75,11 @@ pub struct X11Handler {
 impl X11Handler {
     pub fn new() -> Result<Self, Error> {
         let (conn, _screen) = x11rb::connect(None)?;
+
+        let xkb_ext = conn.xkb_use_extension(1, 0)?.reply()?;
+        if !xkb_ext.supported {
+            return Err(Error::XkbExtensionNotAvailable);
+        }
 
         let get_atom =
             |name: &str| -> Result<x11rb::protocol::xproto::Atom, Error> {
@@ -365,5 +374,14 @@ impl X11Handler {
         self.conn.flush()?;
 
         Ok(())
+    }
+
+    pub fn caps_lock_active(&self) -> Result<bool, Error> {
+        let state = self
+            .conn
+            .xkb_get_state(xkb::ID::USE_CORE_KBD.into())?
+            .reply()?;
+
+        Ok(state.locked_mods.contains(ModMask::LOCK))
     }
 }

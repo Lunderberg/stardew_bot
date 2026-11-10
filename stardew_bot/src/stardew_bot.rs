@@ -854,7 +854,9 @@ impl StardewBot {
         &mut self,
         actions: impl IntoIterator<Item = GameAction>,
     ) -> Result<(), Error> {
-        if !self.x11_handler.main_window_is_active()? {
+        let allowed_to_run = self.x11_handler.main_window_is_active()?
+            && !self.x11_handler.caps_lock_active()?;
+        if !allowed_to_run {
             return Ok(());
         }
 
