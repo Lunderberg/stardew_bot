@@ -1134,6 +1134,21 @@ impl ChairJumpGoal {
             return Ok(false);
         }
 
+        // TODO: Unpack the BuildingData.AdditionalPlacementTiles
+        // field to handle this more generically.  These are tiles
+        // outside of the building's rectangular shape, which may
+        // still have extra collision requirements (e.g. the mailbox),
+        // or which may forbid placing furniture that would impede
+        // movement (e.g. the tile just below the stairs directly in
+        // front of the farmhouse door).
+        if location.name == "Farm" {
+            let door = game_state.get_farm_door()?;
+            let must_be_passable = door + Vector::new(0, 3);
+            if self.chair_tile == must_be_passable {
+                return Ok(false);
+            }
+        }
+
         let blocked_but_walkable_tile = location
             .objects
             .iter()
