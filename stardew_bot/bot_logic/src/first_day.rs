@@ -9,8 +9,7 @@ use crate::{
     LocationExt as _, PickUpFurnitureGoal, bot_logic::BotInterrupt,
 };
 use game_state::{
-    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, Tree,
-    TreeKind,
+    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, TreeKind,
 };
 
 use super::{
@@ -387,14 +386,12 @@ impl BotGoal for FirstDay {
             let trees: HashSet<_> = farm
                 .objects
                 .iter()
-                .filter(|obj| {
-                    matches!(
-                        obj.kind,
-                        ObjectKind::Tree(Tree {
-                            kind: TreeKind::Maple | TreeKind::Pine,
-                            ..
-                        })
-                    )
+                .filter(|obj| match &obj.kind {
+                    ObjectKind::Tree(tree) => {
+                        matches!(tree.kind, TreeKind::Maple | TreeKind::Pine)
+                            && tree.health > 0.0
+                    }
+                    _ => false,
                 })
                 .map(|obj| obj.tile)
                 .collect();
