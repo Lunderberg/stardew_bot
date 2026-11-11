@@ -1,6 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
-use geometry::Vector;
+use geometry::{Rectangle, Vector};
 
 use crate::{Error, GameAction, GoToRoomGoal, LocationExt as _, MovementGoal};
 use game_state::{GameState, ItemId, ObjectKind, SeededRng};
@@ -414,7 +414,13 @@ impl BotGoal for ClayFarmingGoal {
             }
         }
         std::iter::empty()
-            .chain(loc.buildings.iter().map(|b| b.shape))
+            .chain(loc.buildings.iter().map(|b| match b.kind.as_str() {
+                "Greenhouse" => Rectangle {
+                    top_left: b.shape.top_left + Vector::new(-1, 0),
+                    shape: Vector::new(9, 8),
+                },
+                _ => b.shape,
+            }))
             .chain(loc.resource_clumps.iter().map(|c| c.shape))
             .chain(loc.bushes.iter().map(|b| b.rectangle()))
             .flat_map(|shape| shape.iter_points())
