@@ -238,7 +238,7 @@ impl BotGoal for FirstDay {
             ItemId::ENERGY_TONIC.with_count(1),
         );
         if player.current_stamina < 10.0
-            && in_game_time < 1200
+            && in_game_time < 1130
             && !goal.is_completed(game_state)?
         {
             return Ok(goal.into());
