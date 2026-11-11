@@ -1199,8 +1199,6 @@ impl BotGoal for ChairJumpGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        actions.do_action(GameAction::MouseOverTile(self.chair_tile));
-
         if player.is_getting_up {
             // Already started the stand-up animation, now need to
             // wait for it to complete.
@@ -1290,13 +1288,22 @@ impl BotGoal for ChairJumpGoal {
             return Ok(select_chair.into());
         }
 
-        actions.do_action(GameAction::MouseOverTile(self.chair_tile));
+        // When standing up from a chair, the new location is selected
+        // with the following priority.
+        //
+        // 1. The tile in front of the chair
+        // 2. The other cardinal directions, ordered by proximity to the mouse
+        // 3. Diagonals, in order [NW, NE, SE, SW]
+        //
+        // TODO: Skip rotation of the chair if the bot can exit in the
+        // desired direction with the current rotation.
 
         // The chair is selected, with the mouse in the correct
         // location to place it down.  We should either rotate it
         // (right click) or place it down (left click), depending on
         // whether it is facing the correct direction for the jump.
         if chair_facing == self.facing {
+            actions.do_action(GameAction::MouseOverTile(self.chair_tile));
             if game_state.inputs.mouse_tile_location == self.chair_tile {
                 self.chair_placement_tick = Some(game_state.globals.game_tick);
                 actions.do_action(GameAction::LeftClick);
@@ -1325,10 +1332,9 @@ impl BotGoal for ChairJumpGoal {
         // Similarly, when facing a bush, above a bush, or left/right
         // of a bush, the right-click shakes the bush rather than
         // rotating the chair.
-        let mut facing_misclick_risk = [false; 4];
-        let loc = game_state.current_room()?;
 
-        std::iter::empty()
+        let loc = game_state.current_room()?;
+        let right_click_may_activate_chair_tile = std::iter::empty()
             .chain(
                 loc.resource_clumps
                     .iter()
@@ -1364,38 +1370,28 @@ impl BotGoal for ChairJumpGoal {
                         .map(move |offset| p + offset)
                     }),
             )
-            .for_each(|tile| {
-                facing_misclick_risk
-                    .iter_mut()
-                    .zip(FacingDirection::VALUES)
-                    .filter(|(_, dir)| player_tile + dir.offset() == tile)
-                    .for_each(|(b, _)| {
-                        *b = true;
-                    });
-            });
-        let player_facing_clump = FacingDirection::VALUES
-            .iter()
-            .position(|dir| *dir == player.facing)
-            .map(|i| facing_misclick_risk[i])
-            .expect("Player must be facing a valid direction");
-        if player_facing_clump {
-            let safe_dir = FacingDirection::VALUES
-                .into_iter()
-                .zip(facing_misclick_risk)
-                .find(|(_, b)| !b)
-                .map(|(dir, _)| dir)
-                .expect(
-                    "Player somehow surrounded \
-                     on all four sides by resource clumps",
-                );
-            return Ok(FaceDirectionGoal(safe_dir).into());
-        }
+            .any(|tile| tile == self.chair_tile);
+
+        // Ideally, we'd keep the cursor hovering over the chair tile,
+        // so that it can be immediately placed down after the
+        // rotation is completed.  However, if the right-click could
+        // be misinterpreted, we need to move the mouse somewhere else
+        // in order to rotate the chair.  The player tile is a
+        // consistently safe place to hover the mouse.
+        let chair_rotate_tile = if right_click_may_activate_chair_tile {
+            player_tile
+        } else {
+            self.chair_tile
+        };
 
         // We have the chair, but cannot set it down yet because it is
         // facing the wrong direction.  Right-click in order to rotate
         // the chair until it is facing the desired direction for this
         // jump.
-        actions.do_action(GameAction::RightClick);
+        actions.do_action(GameAction::MouseOverTile(chair_rotate_tile));
+        if game_state.inputs.mouse_tile_location == chair_rotate_tile {
+            actions.do_action(GameAction::RightClick);
+        }
 
         Ok(BotGoalResult::InProgress)
     }
