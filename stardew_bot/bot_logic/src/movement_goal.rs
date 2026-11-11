@@ -1098,6 +1098,13 @@ impl ChairJumpGoal {
         let player = &game_state.player;
         let location = game_state.current_room()?;
 
+        if game_state.globals.in_game_time >= 2550 {
+            // If the day ends while the chair is placed down, we
+            // don't start the next day with it.  Therefore, disable
+            // chair-jumps in the last 10 minutes of the day.
+            return Ok(false);
+        }
+
         if player.room_name != self.room
             || self.too_far_from_chair_tile(game_state)
             || self.too_close_to_chair_tile(game_state)
