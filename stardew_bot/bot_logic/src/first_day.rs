@@ -240,7 +240,11 @@ impl BotGoal for FirstDay {
             && in_game_time < 1130
             && !goal.is_completed(game_state)?
         {
-            return Ok(goal.into());
+            return Ok(goal
+                .cancel_if(|game_state| {
+                    game_state.player.current_stamina >= 10.0
+                })
+                .into());
         }
 
         let goal =
