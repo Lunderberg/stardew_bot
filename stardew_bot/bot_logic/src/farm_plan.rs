@@ -3,7 +3,10 @@ use std::collections::{HashSet, VecDeque};
 use geometry::{Rectangle, Vector};
 use itertools::Itertools as _;
 
-use crate::{Error, GameStateExt as _, pathfinding::MovementCost};
+use crate::{
+    Error, GameStateExt as _,
+    pathfinding::{self, MovementCost},
+};
 use game_state::{GameState, ItemId, ObjectKind, ResourceClumpKind, TileMap};
 
 use super::LocationExt as _;
@@ -38,9 +41,10 @@ impl FarmPlan {
         let pathfinding =
             farm.pathfinding(&game_state.statics).ignoring_obstacles();
 
-        let distance_to_water = pathfinding
-            .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
-        let distance_to_farmhouse = pathfinding.distances(farm_door);
+        let distance_to_water = pathfinding.distances_reverse(
+            farm.iter_water_tiles().collect::<Vec<_>>().as_slice(),
+        );
+        let distance_to_farmhouse = pathfinding.distances_forward(farm_door);
 
         let num_regions = regions
             .iter()
@@ -263,7 +267,7 @@ impl FarmPlan {
                     // closest to the farmhouse.
                     let door = game_state.get_farm_door()?;
                     farm.pathfinding(&game_state.statics)
-                        .iter_dijkstra(door)
+                        .iter_dijkstra_forward(door)
                         .map(|(tile, _)| tile)
                         .find(|tile| region[*tile])
                 } else {
@@ -271,10 +275,15 @@ impl FarmPlan {
                     // furthest from all previous seeds.
                     MovementCost {
                         map: region.map(|b| if *b { Some(0) } else { None }),
-                        allow_diagonal: false,
+                        kind: pathfinding::MovementKind::UnblockedDiagonals,
                         include_border: false,
+                        walkable: region.map(|_| true),
+                        chairable: region.map(|_| false),
                     }
-                    .iter_dijkstra(&seeds)
+                    .iter_dijkstra(
+                        &seeds,
+                        pathfinding::SearchDirection::Forward,
+                    )
                     .map(|(tile, _)| tile)
                     .last()
                 };

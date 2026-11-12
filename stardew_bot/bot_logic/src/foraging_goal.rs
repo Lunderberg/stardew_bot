@@ -195,7 +195,7 @@ impl ForagingGoal {
         let distances = room
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .distances(initial);
+            .distances_forward(initial);
 
         let opt_closest_forage = room
             .objects

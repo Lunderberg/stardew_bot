@@ -15,6 +15,17 @@ pub enum Direction {
 }
 
 impl Direction {
+    pub const VALUES: [Self; 8] = [
+        Self::North,
+        Self::East,
+        Self::South,
+        Self::West,
+        Self::NorthEast,
+        Self::SouthEast,
+        Self::SouthWest,
+        Self::NorthWest,
+    ];
+
     pub fn offset(self) -> Vector<isize> {
         match self {
             Direction::North => Vector::new(0, -1),
@@ -39,17 +50,7 @@ impl Direction {
     }
 
     pub fn iter() -> impl Iterator<Item = Self> {
-        [
-            Self::North,
-            Self::East,
-            Self::South,
-            Self::West,
-            Self::NorthEast,
-            Self::SouthEast,
-            Self::SouthWest,
-            Self::NorthWest,
-        ]
-        .into_iter()
+        Self::VALUES.into_iter()
     }
 
     pub fn iter_cardinal() -> impl Iterator<Item = Self> {

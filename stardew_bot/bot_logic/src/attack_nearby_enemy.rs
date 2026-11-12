@@ -67,7 +67,7 @@ impl BotInterrupt for AttackNearbyEnemy {
         let distances = game_state
             .current_room()?
             .pathfinding(&game_state.statics)
-            .distances(player_tile);
+            .distances_forward(player_tile);
         let is_actually_nearby = distances
             .get_opt(nearby_monster.tile())
             .map(|&dist| dist <= 1)

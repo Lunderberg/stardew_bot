@@ -1,8 +1,10 @@
 use geometry::{Direction, TileSet, Vector};
+use itertools::Itertools as _;
 
 use crate::Error;
 use game_state::{
-    Location, ObjectKind, ResourceClumpKind, StaticState, TileMap,
+    FacingDirection, Location, ObjectKind, ResourceClumpKind, StaticState,
+    TileMap, WarpKind,
 };
 
 #[derive(Debug, Clone)]
@@ -10,9 +12,8 @@ pub struct Pathfinding<'a> {
     statics: &'a StaticState,
     location: &'a Location,
 
-    /// If true, select paths that include movement along diagonals.
-    /// If false, only allow movement along cardinal directions.
-    allow_diagonal: bool,
+    /// The allowed movement types for the player to make.
+    kind: MovementKind,
 
     /// If true, results will allow the final tile of a path to be on
     /// an unreachable tile.  If false, the final tile of a path must
@@ -96,15 +97,42 @@ pub struct Pathfinding<'a> {
     avoid_npcs: bool,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum MovementKind {
+    /// Only allow movement by in cardinal directions.
+    Cardinal,
+
+    /// Allow movement along unblocked diagonals.  This requires both
+    /// off-diagonal tiles to be clear, as the player's bounding box
+    /// will intersect with those tiles during the movement.  For
+    /// example, to move from NW to SE, the tiles to NE and SW must be
+    /// clear.
+    UnblockedDiagonals,
+
+    /// Allow movement by walking along unblocked diagonals, and by
+    /// performing chair jumps.
+    ChairJump,
+}
+
 #[derive(Debug, Clone)]
 pub struct MovementCost {
-    /// The traversal costs for each tile, or `None` for impassable
-    /// tiles.
+    /// Additional traversal costs for the tile.  Should be relative
+    /// to the cost of walking across a single tile, which is defined
+    /// to be 1000.
+    ///
+    /// If `None`, the tile will be used for the path.
     pub map: TileMap<Option<u64>>,
 
-    /// If true, select paths that include movement along diagonals.
-    /// If false, only allow movement along cardinal directions.
-    pub allow_diagonal: bool,
+    /// True if a chair can be placed down on the tile, false
+    /// otherwise.
+    pub chairable: TileMap<bool>,
+
+    /// True if the tile can be walked on.  Used to determine
+    /// valid exit locations when standing up from a chair.
+    pub walkable: TileMap<bool>,
+
+    /// The allowed movement types for the player to make.
+    pub kind: MovementKind,
 
     /// If true, results will allow the final tile of a path to be on
     /// an unreachable tile.  If false, the final tile of a path must
@@ -115,6 +143,33 @@ pub struct MovementCost {
     /// to the final tile.  Excluding the border is useful when
     /// identifying tiles on which the player may stand.
     pub include_border: bool,
+}
+
+/// Movement that may be taken by the bot as part of pathfinding
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct PathStep {
+    /// The chair jump that should be performed.  This is the
+    /// preferred method of movement, as in-game time doesn't pass
+    /// when sitting down or standing up.
+    pub chair_jump: Option<ChairJump>,
+
+    /// The direction that may be walked.  This is a backup, either if
+    /// a chair jump cannot be performed (e.g. not at correct location
+    /// within tile) or if no chair jump is available for that tile
+    /// (e.g. cannot place chair at any nearby location).
+    pub walk_dir: Direction,
+}
+
+/// A chair-jump that should be performed as part of moving between
+/// two locations.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ChairJump {
+    /// The tile on which the chair should be placed.  Must be
+    /// currently open, and adjacent to the tile the player is on.
+    pub chair_tile: Vector<isize>,
+
+    /// The direction the chair should be facing when placed.
+    pub facing: FacingDirection,
 }
 
 /// Tracking for points during A* search.
@@ -139,13 +194,44 @@ struct AStarEntry {
 /// `dist_plus_heuristic` and `tile` fields.  This allows them to be
 /// used as entries in a `std::collection::BTreeSet`, ordered by
 /// priority, with the tile's location as a tie-breaker.
-#[derive(PartialEq, Eq)]
+#[derive(Debug, PartialEq, Eq)]
 struct DijkstraEntry {
+    /// The tile
+    tile: Vector<isize>,
+
     /// The distance from the initial point to the current tile.
     dist: u64,
-    tile: Vector<isize>,
-    dir: Option<Direction>,
+
+    /// The step taken to reach this tile.  This is always the step
+    /// that the player would need to take, regardless of whether
+    /// using forward iteration starting at the player's location, or
+    /// using backward iteration starting at the goal location.
+    step: Option<PathStep>,
+
+    /// If true, then the player can stand on this tile, and so paths
+    /// may contain this as an intermediate.  If false, then the
+    /// player cannot stand on this tile.  This may only be true when
+    /// `include_border` is set, as that allows the search to
+    /// terminate at a tile that the player may interact with, but may
+    /// not stand on.
     should_propagate: bool,
+}
+
+/// The direction in which movement options should be searched.
+///
+/// If walking between two points, forward searches (player to goal)
+/// and reverse searches (goal to player) are equivalent.  However,
+/// chair jumps allow movement in both cardinal and diagonal
+/// directions when sitting down, but only allow movement in cardinal
+/// directions when standing up.  Therefore, the iteration must be
+/// aware of whether the search is starting from the player or
+/// starting from the goal.
+pub enum SearchDirection {
+    /// Iterate forward, from the player's position to a goal location.
+    Forward,
+
+    /// Iterate backwards, from a goal location toward the player's location.
+    Reverse,
 }
 
 /// Internal implementation, provide a lower bound on the distance
@@ -166,7 +252,7 @@ impl<'a> Pathfinding<'a> {
         Pathfinding {
             location,
             statics,
-            allow_diagonal: true,
+            kind: MovementKind::UnblockedDiagonals,
             clear_stone: None,
             clear_boulders: None,
             clear_mine_boulders: None,
@@ -182,12 +268,20 @@ impl<'a> Pathfinding<'a> {
         }
     }
 
-    pub fn allow_diagonal(self, allow_diagonal: bool) -> Self {
+    pub fn forbid_diagonals(self) -> Self {
         Self {
-            allow_diagonal,
+            kind: MovementKind::Cardinal,
             ..self
         }
     }
+
+    pub fn allow_chair_jump(self) -> Self {
+        Self {
+            kind: MovementKind::ChairJump,
+            ..self
+        }
+    }
+
     pub fn stone_clearing_cost(self, cost: u64) -> Self {
         Self {
             clear_stone: Some(cost),
@@ -389,10 +483,61 @@ impl<'a> Pathfinding<'a> {
 
     fn movement_cost(&self) -> MovementCost {
         let map = self.raw_movement_cost();
+
+        let mut walkable = self.location.blocked.map(|&b| !b);
+        self.location
+            .iter_obstructed_tiles(&self.statics)
+            .chain(
+                self.location
+                    .warps
+                    .iter()
+                    .filter(|warp| matches!(warp.kind, WarpKind::Automatic))
+                    .map(|warp| warp.location)
+                    .flat_map(|tile| {
+                        Direction::VALUES
+                            .into_iter()
+                            .map(|dir| dir.offset())
+                            .chain([Vector::zero()])
+                            .map(move |offset| tile + offset)
+                    }),
+            )
+            .for_each(|tile| {
+                if let Some(allows_stand_up) = walkable.get_mut(tile) {
+                    *allows_stand_up = false;
+                }
+            });
+
+        let mut chairable = walkable.clone();
+        std::iter::empty()
+            .chain(self.location.no_furniture.iter_true())
+            .chain(self.location.buildings.iter().flat_map(|building| {
+                let below_farmhouse_door = (building.kind == "Farmhouse")
+                    .then(|| building.shape.top_left + Vector::new(5, 5));
+                building.shape.iter_points().chain(below_farmhouse_door)
+            }))
+            .chain(
+                self.location
+                    .objects
+                    .iter()
+                    .filter(|obj| match &obj.kind {
+                        ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
+                        ObjectKind::HoeDirt(dirt) => dirt.crop.is_some(),
+                        _ => false,
+                    })
+                    .map(|obj| obj.tile),
+            )
+            .for_each(|tile| {
+                if let Some(allows_chair) = chairable.get_mut(tile) {
+                    *allows_chair = false;
+                }
+            });
+
         MovementCost {
             map,
-            allow_diagonal: self.allow_diagonal,
+            kind: self.kind,
             include_border: self.include_border,
+            walkable,
+            chairable,
         }
     }
 
@@ -440,13 +585,33 @@ impl<'a> Pathfinding<'a> {
         self.movement_cost().reachable(initial)
     }
 
-    pub fn distances(&self, initial: impl TileSet) -> TileMap<Option<u64>> {
+    pub fn distances_forward(
+        &self,
+        initial: impl TileSet,
+    ) -> TileMap<Option<u64>> {
+        self.distances(initial, SearchDirection::Forward)
+    }
+
+    pub fn distances_reverse(
+        &self,
+        goal: impl TileSet,
+    ) -> TileMap<Option<u64>> {
+        self.distances(goal, SearchDirection::Reverse)
+    }
+
+    fn distances(
+        &self,
+        tiles: impl TileSet,
+        search_dir: SearchDirection,
+    ) -> TileMap<Option<u64>> {
         let mut distances = self.location.blocked.map(|_| None);
 
-        self.iter_dijkstra(initial).for_each(|(tile, dist)| {
-            assert!(distances[tile].is_none());
-            distances[tile] = Some(dist);
-        });
+        self.movement_cost()
+            .iter_dijkstra(tiles, search_dir)
+            .for_each(|(tile, dist)| {
+                assert!(distances[tile].is_none());
+                distances[tile] = Some(dist);
+            });
 
         distances
     }
@@ -457,10 +622,11 @@ impl<'a> Pathfinding<'a> {
     ) -> TileMap<Option<u64>> {
         let mut distances = self.location.blocked.map(|_| None);
 
-        self.iter_dijkstra_entries(initial).for_each(|entry| {
-            assert!(distances[entry.tile].is_none());
-            distances[entry.tile] = Some(entry.dist);
-        });
+        self.iter_dijkstra_entries(initial, SearchDirection::Forward)
+            .for_each(|entry| {
+                assert!(distances[entry.tile].is_none());
+                distances[entry.tile] = Some(entry.dist);
+            });
 
         distances
     }
@@ -474,40 +640,29 @@ impl<'a> Pathfinding<'a> {
     /// so any waypoint-based method may have out-of-date waypoints.
     /// Using a direction map allows the local pathfinding to resume
     /// without interruption when this occurs.
-    pub fn direction_map(&self, target: impl TileSet) -> TileMap<Direction> {
-        let mut map: TileMap<Option<Direction>> =
+    pub fn direction_map(&self, target: impl TileSet) -> TileMap<PathStep> {
+        let mut map: TileMap<Option<PathStep>> =
             self.location.blocked.map(|_| None);
 
-        let walkable = self.walkable();
-        let mut updated_target = Vec::new();
-        for tile in target.iter() {
-            if walkable.is_set(tile) {
-                updated_target.push(tile);
-            } else {
-                for dir in Direction::iter() {
-                    let adj = tile + dir.offset();
-                    if walkable.is_set(adj) {
-                        updated_target.push(adj);
-                        map[adj] = Some(dir.opposite());
-                    }
-                }
+        for entry in
+            self.iter_dijkstra_entries(target, SearchDirection::Reverse)
+        {
+            if let Some(step) = entry.step {
+                map[entry.tile] = Some(step);
             }
         }
 
-        for entry in self.iter_dijkstra_entries(&updated_target) {
-            if let Some(dir) = entry.dir {
-                map[entry.tile] = Some(dir.opposite());
-            }
-        }
-
-        map.imap(|tile, opt_dir| {
-            opt_dir.unwrap_or_else(|| {
+        map.imap(|tile, opt_step| {
+            opt_step.unwrap_or_else(|| {
                 let offset = target
                     .iter()
                     .map(|target_tile| target_tile - tile)
                     .min_by_key(|offset| offset.mag2())
                     .expect("Must have at least one target tile");
-                offset.closest_direction()
+                PathStep {
+                    walk_dir: offset.closest_direction(),
+                    chair_jump: None,
+                }
             })
         })
     }
@@ -524,15 +679,38 @@ impl<'a> Pathfinding<'a> {
     fn iter_dijkstra_entries(
         &self,
         initial: impl TileSet,
+        search_dir: SearchDirection,
     ) -> impl Iterator<Item = DijkstraEntry> {
-        self.movement_cost().iter_dijkstra_entries(initial)
+        self.movement_cost()
+            .iter_dijkstra_entries(initial, search_dir)
     }
 
-    pub fn iter_dijkstra<'b, 'c, 'd>(
+    /// Starting from the specified tiles, iterate through all
+    /// reachable tiles.
+    ///
+    /// This should be used when starting at the player's location and
+    /// searching forward.  For starting at the goal location, use
+    /// `iter_dijkstra_reverse`.
+    pub fn iter_dijkstra_forward<'b, 'c, 'd>(
         &'b self,
         initial: impl TileSet,
     ) -> impl Iterator<Item = (Vector<isize>, u64)> {
-        self.movement_cost().iter_dijkstra(initial)
+        self.movement_cost()
+            .iter_dijkstra(initial, SearchDirection::Forward)
+    }
+
+    /// Starting from the specified tiles, iterate through all
+    /// reachable tiles.
+    ///
+    /// This should be used when starting at the goal location and
+    /// searching backward toward the player.  For starting at the
+    /// player location, use `iter_dijkstra_forward`.
+    pub fn iter_dijkstra_reverse<'b, 'c, 'd>(
+        &'b self,
+        goal: impl TileSet,
+    ) -> impl Iterator<Item = (Vector<isize>, u64)> {
+        self.movement_cost()
+            .iter_dijkstra(goal, SearchDirection::Reverse)
     }
 }
 
@@ -636,7 +814,10 @@ impl MovementCost {
 
             let iter_dir = Direction::iter()
                 .filter(|_| visiting.should_propagate)
-                .filter(|dir| self.allow_diagonal || dir.is_cardinal());
+                .filter(|dir| match self.kind {
+                    MovementKind::Cardinal => dir.is_cardinal(),
+                    _ => true,
+                });
 
             for dir in iter_dir {
                 let offset = dir.offset();
@@ -709,18 +890,17 @@ impl MovementCost {
 
     fn iter_dijkstra_entries(
         self,
-        initial: impl TileSet,
+        initial_or_goal: impl TileSet,
+        search_dir: SearchDirection,
     ) -> impl Iterator<Item = DijkstraEntry> {
-        let cost_map = self.map;
-
-        let mut finished: TileMap<bool> = cost_map.map(|_| false);
+        let mut finished: TileMap<bool> = self.map.map(|_| false);
 
         let mut to_visit = std::collections::BTreeSet::<DijkstraEntry>::new();
-        for initial in initial.iter() {
+        for tile in initial_or_goal.iter() {
             to_visit.insert(DijkstraEntry {
                 dist: 0,
-                tile: initial,
-                dir: None,
+                tile,
+                step: None,
                 should_propagate: true,
             });
         }
@@ -737,46 +917,145 @@ impl MovementCost {
                     }
                 }
 
-                let iter_dir = Direction::iter()
-                    .filter(|dir| self.allow_diagonal || dir.is_cardinal())
-                    .filter(|_| entry.should_propagate);
+                let iter_walking = Direction::iter()
+                    .filter(|dir| match self.kind {
+                        MovementKind::Cardinal => dir.is_cardinal(),
+                        _ => true,
+                    })
+                    .filter(|_| entry.should_propagate)
+                    .filter(|dir| finished.is_unset(entry.tile + dir.offset()))
+                    .filter(|dir| {
+                        let offset = dir.offset();
 
-                for dir in iter_dir {
-                    let offset = dir.offset();
-                    let new_tile = entry.tile + offset;
+                        let is_walkable = self.map.is_some(entry.tile + offset);
+                        let is_accessible = is_walkable
+                            && (dir.is_cardinal()
+                                || (self.map.is_some(
+                                    entry.tile + Vector::new(0, offset.down),
+                                ) && self.map.is_some(
+                                    entry.tile + Vector::new(offset.right, 0),
+                                )));
+                        is_accessible || (self.include_border && !is_walkable)
+                    })
+                    .map(|dir| {
+                        let new_tile = entry.tile + dir.offset();
 
-                    let is_walkable = cost_map.is_some(new_tile);
-                    let is_accessible = if dir.is_cardinal() {
-                        is_walkable
-                    } else {
-                        is_walkable
-                            && cost_map.is_some(
-                                entry.tile + Vector::new(0, offset.down),
-                            )
-                            && cost_map.is_some(
-                                entry.tile + Vector::new(offset.right, 0),
-                            )
-                    };
-
-                    if finished.in_bounds(new_tile)
-                        && !finished[new_tile]
-                        && (is_accessible
-                            || (self.include_border && !is_walkable))
-                    {
                         let tile_dist =
                             if dir.is_cardinal() { 1000 } else { 1414 };
                         let additional_cost =
-                            cost_map.get_opt(new_tile).cloned().unwrap_or(0);
+                            self.map.get_opt(new_tile).cloned().unwrap_or(0);
                         let new_dist = entry.dist + tile_dist + additional_cost;
 
-                        to_visit.insert(DijkstraEntry {
+                        let step = PathStep {
+                            chair_jump: None,
+                            walk_dir: match search_dir {
+                                SearchDirection::Forward => dir,
+                                SearchDirection::Reverse => dir.opposite(),
+                            },
+                        };
+
+                        DijkstraEntry {
                             dist: new_dist,
                             tile: new_tile,
-                            dir: Some(dir),
-                            should_propagate: is_accessible,
-                        });
-                    }
-                }
+                            step: Some(step),
+                            should_propagate: self.map.is_some(new_tile),
+                        }
+                    });
+
+                let iter_chair_jump = Direction::VALUES
+                    .into_iter()
+                    .cartesian_product(FacingDirection::VALUES)
+                    .filter(|_| matches!(self.kind, MovementKind::ChairJump))
+                    .filter(|(sit_down_dir, stand_up_dir)| {
+                        sit_down_dir.opposite() != *stand_up_dir
+                    })
+                    .map(|(sit_down_dir, stand_up_dir)| {
+                        let (chair_tile, next_tile) = match search_dir {
+                            SearchDirection::Forward => {
+                                let initial_tile = entry.tile;
+                                let chair_tile =
+                                    initial_tile + sit_down_dir.offset();
+                                let stand_up_tile =
+                                    chair_tile + stand_up_dir.offset();
+                                (chair_tile, stand_up_tile)
+                            }
+                            SearchDirection::Reverse => {
+                                let stand_up_tile = entry.tile;
+                                let chair_tile =
+                                    stand_up_tile - stand_up_dir.offset();
+                                let initial_tile =
+                                    chair_tile - sit_down_dir.offset();
+                                (chair_tile, initial_tile)
+                            }
+                        };
+                        let chair_jump = ChairJump {
+                            chair_tile,
+                            facing: stand_up_dir,
+                        };
+                        let step = PathStep {
+                            chair_jump: Some(chair_jump),
+                            walk_dir: sit_down_dir,
+                        };
+                        let tile_dist = match sit_down_dir {
+                            Direction::North
+                            | Direction::East
+                            | Direction::South
+                            | Direction::West => {
+                                // Best case scenario, can just move
+                                // in a straight line.
+                                100
+                            }
+
+                            Direction::NorthWest | Direction::NorthEast => {
+                                // When jumping out of a chair, the
+                                // player is centered in the stand-up
+                                // tile along the X axis, but is along
+                                // the top of the tile in Y.
+                                // Therefore, can immediately start a
+                                // NW/NE chair jump without any
+                                // movement in-between.
+                                //
+                                // But it would be silly to going left
+                                // and right, so giving it just a
+                                // little deprioritization relative to
+                                // cardinal directions.
+                                105
+                            }
+                            Direction::SouthWest | Direction::SouthEast => {
+                                // However, a chair-jump going SW/SE
+                                // requires first walking in that
+                                // direction.  Therefore, to avoid
+                                // these unless extra useful.
+                                201
+                            }
+                        };
+
+                        let new_dist = entry.dist + tile_dist;
+                        DijkstraEntry {
+                            tile: next_tile,
+                            dist: new_dist,
+                            step: Some(step),
+                            should_propagate: true,
+                        }
+                    })
+                    .filter(|next| self.map.is_some(next.tile))
+                    .filter(|next| {
+                        let chair_jump = next
+                            .step
+                            .and_then(|step| step.chair_jump)
+                            .expect("Constructed as chair jump");
+
+                        self.walkable.is_set(
+                            chair_jump.chair_tile + chair_jump.facing.offset(),
+                        ) && self.chairable.is_set(chair_jump.chair_tile)
+                    });
+
+                std::iter::empty()
+                    .chain(iter_walking)
+                    .chain(iter_chair_jump)
+                    .for_each(|entry| {
+                        to_visit.insert(entry);
+                    });
 
                 if !finished.in_bounds(entry.tile) {
                     continue;
@@ -789,9 +1068,10 @@ impl MovementCost {
 
     pub fn iter_dijkstra(
         self,
-        initial: impl TileSet,
+        tiles: impl TileSet,
+        iter_dir: SearchDirection,
     ) -> impl Iterator<Item = (Vector<isize>, u64)> {
-        self.iter_dijkstra_entries(initial)
+        self.iter_dijkstra_entries(tiles, iter_dir)
             .map(|entry| (entry.tile, entry.dist / 1000))
     }
 }

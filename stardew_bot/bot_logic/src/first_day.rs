@@ -403,7 +403,7 @@ impl BotGoal for FirstDay {
             let opt_tree = farm
                 .pathfinding(&game_state.statics)
                 .include_border(true)
-                .iter_dijkstra(search_from)
+                .iter_dijkstra_forward(search_from)
                 .map(|(tile, _)| tile)
                 .find(|tile| trees.contains(tile));
             if let Some(tree) = opt_tree {

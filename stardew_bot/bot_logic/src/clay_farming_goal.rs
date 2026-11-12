@@ -173,7 +173,7 @@ impl ClayFarmingGoal {
         let pathfinding = loc.pathfinding(&game_state.statics);
 
         let player_tile = game_state.player.tile();
-        let player_distance = pathfinding.distances(player_tile);
+        let player_distance = pathfinding.distances_forward(player_tile);
         let exit_tile = loc
             .warps
             .iter()
@@ -182,7 +182,7 @@ impl ClayFarmingGoal {
             .filter(|tile| player_distance.is_some(*tile))
             .min_by_key(|tile| (tile.down, tile.right))
             .expect("Exit tile not reachable");
-        let exit_distance = pathfinding.distances(exit_tile);
+        let exit_distance = pathfinding.distances_reverse(exit_tile);
 
         let iter = loc
             .items
@@ -208,7 +208,7 @@ impl ClayFarmingGoal {
             let pathfinding = loc.pathfinding(&game_state.statics);
 
             let player_tile = game_state.player.tile();
-            let player_distance = pathfinding.distances(player_tile);
+            let player_distance = pathfinding.distances_forward(player_tile);
             let exit_tile = loc
                 .warps
                 .iter()
@@ -451,8 +451,9 @@ impl BotGoal for ClayFarmingGoal {
             }
         };
 
-        let distances =
-            loc.pathfinding(&game_state.statics).distances(player_tile);
+        let distances = loc
+            .pathfinding(&game_state.statics)
+            .distances_forward(player_tile);
 
         let opt_closest_clay: Option<Vector<isize>> = loc
             .diggable

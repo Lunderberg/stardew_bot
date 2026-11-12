@@ -357,7 +357,9 @@ impl PlantCropsGoal {
         let distance_to_water = farm
             .pathfinding(&game_state.statics)
             .ignoring_obstacles()
-            .distances(farm.iter_water_tiles().collect::<Vec<_>>().as_slice());
+            .distances_reverse(
+                farm.iter_water_tiles().collect::<Vec<_>>().as_slice(),
+            );
 
         let mut seed_assignment: Vec<(Vector<isize>, Option<ItemId>)> = {
             let previous: HashMap<_, _> = farm
@@ -679,7 +681,7 @@ impl BotGoal for PlantCropsGoal {
         let distances = farm
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .distances(initial_tile);
+            .distances_forward(initial_tile);
 
         let clear_distances = farm
             .pathfinding(&game_state.statics)
@@ -687,17 +689,17 @@ impl BotGoal for PlantCropsGoal {
             .stone_clearing_cost(0)
             .wood_clearing_cost(0)
             .breakable_clearing_cost(0)
-            .distances(initial_tile);
+            .distances_forward(initial_tile);
 
         let obstructed_pathfinding = farm
             .pathfinding(&game_state.statics)
             .stone_clearing_cost(1000)
             .wood_clearing_cost(1000)
             .breakable_clearing_cost(1000)
-            .allow_diagonal(false);
+            .forbid_diagonals();
 
         let obstructed_distances =
-            obstructed_pathfinding.distances(initial_tile);
+            obstructed_pathfinding.distances_forward(initial_tile);
 
         let iter_tiles_to_hoe = || -> Result<_, Error> {
             let iter = self

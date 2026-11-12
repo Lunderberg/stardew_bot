@@ -66,7 +66,7 @@ impl BotGoal for FillWateringCan {
         let closest_water = loc
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .iter_dijkstra(player_tile)
+            .iter_dijkstra_forward(player_tile)
             .map(|(tile, _)| tile)
             .find(|tile| loc.is_water(*tile))
             .expect("Handle case where no water is reachable");

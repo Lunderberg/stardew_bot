@@ -76,8 +76,9 @@ impl BotGoal for ClearTreeGoal {
         let player_tile = game_state.player.tile();
         let room = game_state.get_room(&self.room)?;
 
-        let distances =
-            room.pathfinding(&game_state.statics).distances(player_tile);
+        let distances = room
+            .pathfinding(&game_state.statics)
+            .distances_forward(player_tile);
 
         // See if we want the tree to fall in a certain
         // direction for easier collection.

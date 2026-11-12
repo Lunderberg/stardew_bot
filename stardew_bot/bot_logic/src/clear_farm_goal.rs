@@ -145,7 +145,7 @@ impl ClearFarmGoal {
 
         let pathfinding = farm
             .pathfinding(&game_state.statics)
-            .allow_diagonal(false)
+            .forbid_diagonals()
             .breakable_clearing_cost(1)
             .grass_movement_cost(1);
 
@@ -436,14 +436,14 @@ impl BotGoal for ClearFarmGoal {
 
         let steps_from_player = farm
             .pathfinding(&game_state.statics)
-            .allow_diagonal(false)
+            .forbid_diagonals()
             .include_border(true)
-            .distances(player_tile);
+            .distances_forward(player_tile);
 
         let steps_from_target_tile = farm
             .pathfinding(&game_state.statics)
             .ignoring_small_obstacles()
-            .distances(target_tile);
+            .distances_reverse(target_tile);
 
         let next_clear_heuristic = |tile: Vector<isize>| {
             let (weight_player, weight_target) = self.relative_weights;
@@ -465,7 +465,7 @@ impl BotGoal for ClearFarmGoal {
         let opt_goal_tile = self
             .pathfinding(game_state)?
             .include_border(true)
-            .iter_dijkstra(player_tile)
+            .iter_dijkstra_forward(player_tile)
             .map(|(tile, _)| tile)
             .filter(|tile| next_clear_heuristic(*tile) <= min_total_steps)
             .find(|tile| clearable_tiles.contains_key(tile));

@@ -128,7 +128,7 @@ impl BotInterrupt for OpportunisticForaging {
                     distances = Some(
                         loc.pathfinding(&game_state.statics)
                             .include_border(true)
-                            .distances(game_state.player.tile()),
+                            .distances_forward(game_state.player.tile()),
                     );
                 }
                 let map = distances.as_ref().unwrap();

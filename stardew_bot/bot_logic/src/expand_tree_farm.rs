@@ -44,7 +44,7 @@ impl ExpandTreeFarm {
         let distances = farm
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .distances(initial_tile);
+            .distances_forward(initial_tile);
         let clear_tiles = farm.pathfinding(&game_state.statics).clear();
 
         let opt_tree_seed = game_state

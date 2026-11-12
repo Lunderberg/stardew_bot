@@ -609,3 +609,20 @@ impl std::fmt::Display for FacingDirection {
         }
     }
 }
+
+impl PartialEq<Direction> for FacingDirection {
+    fn eq(&self, other: &Direction) -> bool {
+        matches!(
+            (self, other),
+            (Self::North, Direction::North)
+                | (Self::South, Direction::South)
+                | (Self::East, Direction::East)
+                | (Self::West, Direction::West)
+        )
+    }
+}
+impl PartialEq<FacingDirection> for Direction {
+    fn eq(&self, other: &FacingDirection) -> bool {
+        other == self
+    }
+}

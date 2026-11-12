@@ -1063,7 +1063,7 @@ impl BotGoal for MineSingleLevel {
             .stone_clearing_cost(3000)
             .breakable_clearing_cost(500);
 
-        let distances = pathfinding.distances(player_tile);
+        let distances = pathfinding.distances_forward(player_tile);
 
         let opt_ladder_down = current_room
             .objects
@@ -1165,14 +1165,14 @@ impl BotGoal for MineSingleLevel {
             };
 
             pathfinding
-                .iter_dijkstra(player_tile)
+                .iter_dijkstra_forward(player_tile)
                 .map(|(tile, _)| tile)
                 .find(|tile| preferred_stones.contains(tile))
                 .ok_or(Error::MineLadderNotFound)?
         };
 
         let path = pathfinding
-            .allow_diagonal(false)
+            .forbid_diagonals()
             .path_between(player_tile, target_tile)?;
 
         let opt_blocked_tile_in_path = path
@@ -1630,7 +1630,7 @@ impl BotInterrupt for MineNearbyOre {
             .breakable_clearing_cost(200)
             .stone_clearing_cost((1000.0 * stone_clearing_cost) as u64)
             .include_border(true);
-        let distances = pathfinding.distances(player_tile);
+        let distances = pathfinding.distances_forward(player_tile);
 
         enum TargetKind {
             Object,
@@ -1679,7 +1679,7 @@ impl BotInterrupt for MineNearbyOre {
 
         let opt_blocked_tile_in_path = || -> Result<_, Error> {
             Ok(pathfinding
-                .allow_diagonal(false)
+                .forbid_diagonals()
                 .path_between(player_tile, target_tile)?
                 .into_iter()
                 .find(|tile| clearable_tiles.contains_key(tile)))
@@ -1830,14 +1830,14 @@ impl BotInterrupt for WaitNearBomb {
 
         let pathfinding = loc.pathfinding(&game_state.statics);
 
-        let player_dist = pathfinding.distances(player_tile);
+        let player_dist = pathfinding.distances_forward(player_tile);
 
         let opt_target_tile = bomb
             .within_range(player_tile)
             .then(|| {
                 // Within range of the bomb, so find somewhere to run.
                 pathfinding
-                    .iter_dijkstra(player_tile)
+                    .iter_dijkstra_forward(player_tile)
                     .map(|(tile, _)| tile)
                     .find(|tile| !bomb.within_range(*tile))
             })

@@ -90,7 +90,7 @@ impl BotGoal for WaterCropsGoal {
         let opt_next_tile = farm
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .iter_dijkstra(player_tile)
+            .iter_dijkstra_forward(player_tile)
             .map(|(tile, _)| tile)
             .find(|tile| needs_watering.contains(tile));
         let Some(tile) = opt_next_tile else {

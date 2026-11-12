@@ -105,7 +105,7 @@ impl BotGoal for HarvestCropsGoal {
         let distances = farm
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .distances(player_tile);
+            .distances_forward(player_tile);
         let opt_next_tile = self
             .iter_harvestable(game_state)?
             .filter(|(tile, _)| distances.is_some(*tile))
@@ -163,8 +163,9 @@ impl BotGoal for HarvestCropsGoal {
             // has already occurred, and we're frozen in place.  In
             // that case, attempt to click on the tile as it may be in
             // range.
-            let distances =
-                farm.pathfinding(&game_state.statics).distances(player_tile);
+            let distances = farm
+                .pathfinding(&game_state.statics)
+                .distances_forward(player_tile);
 
             let harvestable: HashSet<Vector<isize>> = self
                 .iter_harvestable(game_state)?

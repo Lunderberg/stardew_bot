@@ -63,7 +63,7 @@ impl BotGoal for EggFestival {
         let distances = loc
             .pathfinding(&game_state.statics)
             .include_border(true)
-            .distances(player_tile);
+            .distances_forward(player_tile);
 
         let talked_to: HashSet<_> = game_state
             .player
