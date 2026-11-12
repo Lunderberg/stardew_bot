@@ -342,7 +342,20 @@ impl BotGoal for ClayFarmingGoal {
                 if goal.is_completed(game_state) {
                     BotGoalResult::InProgress
                 } else {
-                    goal.into()
+                    let room = self.room.clone();
+                    goal.cancel_if(move |game_state| {
+                        game_state
+                            .get_room(&room)
+                            .ok()
+                            .into_iter()
+                            .flat_map(|loc| loc.items.iter())
+                            .filter(|floating_item| {
+                                floating_item.id == ItemId::CLAY
+                            })
+                            .map(|item| item.position.dist(clay_item_pos))
+                            .all(|dist| dist > 1.5 * 64.0)
+                    })
+                    .into()
                 }
             } else {
                 BotGoalResult::Completed
