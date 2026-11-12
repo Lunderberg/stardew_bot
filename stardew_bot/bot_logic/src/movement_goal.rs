@@ -1392,6 +1392,7 @@ impl BotGoal for ChairJumpGoal {
                             })
                             .map(|obj| obj.tile),
                     )
+                    .chain(loc.action_tiles.iter().map(|(tile, _)| *tile))
                     .flat_map(|p| {
                         [
                             Vector::zero(),
