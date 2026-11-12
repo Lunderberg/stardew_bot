@@ -68,6 +68,11 @@ pub struct Location {
     /// Tiles that can have some action performed on them.
     pub action_tiles: Vec<(Vector<isize>, String)>,
 
+    /// Locations that may be sat upon.  This is used for pre-existing
+    /// benches and chairs, which are part of the map and are not
+    /// distinct `Furniture` items.
+    pub map_seats: Vec<Rectangle<isize>>,
+
     /// Any Villagers or Monsters in the area
     pub characters: Vec<Character>,
 
@@ -1191,6 +1196,7 @@ impl Location {
              water_tiles: &Vec<bool>,
              tiles: &MapTileSheets,
              buildings: &Vec<Building>,
+             map_seats: &Vec<Rectangle<isize>>,
              characters: &Vec<Character>,
              mineshaft_details: Option<&MineshaftDetails>,
              bombs: &Vec<Bomb>,
@@ -1257,6 +1263,7 @@ impl Location {
                     diggable,
                     no_furniture,
                     action_tiles,
+                    map_seats: map_seats.clone(),
                     characters: characters.clone(),
                     mineshaft_details: mineshaft_details.cloned(),
                     bombs: bombs.clone(),
@@ -2282,6 +2289,21 @@ impl Location {
 
                 let items = read_location_items(location, None);
 
+                let map_seats = {
+                    let arr = location.mapSeats;
+                    let num_seats = arr.count.value.prim_cast::<usize>();
+                    (0..num_seats)
+                        .map(|i| arr.array.value.elements._items[i].value )
+                        .map(|seat| {
+                            let right = seat.tilePosition.value.X;
+                            let down = seat.tilePosition.value.Y;
+                            let width = seat.size.value.X;
+                            let height = seat.size.value.Y;
+                            new_rectangle(right,down,width,height)
+                        })
+                        .collect()
+                };
+
                 let characters = read_location_characters(location);
 
                 let mineshaft = location
@@ -2318,6 +2340,7 @@ impl Location {
                     flattened_water_tiles,
                     tile_sheets,
                     buildings,
+                    map_seats,
                     characters,
                     mineshaft_details,
                     bombs,

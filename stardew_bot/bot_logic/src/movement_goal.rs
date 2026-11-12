@@ -1376,6 +1376,11 @@ impl BotGoal for ChairJumpGoal {
                             .flat_map(|bush| bush.rectangle().iter_points()),
                     )
                     .chain(
+                        loc.map_seats
+                            .iter()
+                            .flat_map(|seat| seat.iter_points()),
+                    )
+                    .chain(
                         loc.objects
                             .iter()
                             .filter(|obj| {
