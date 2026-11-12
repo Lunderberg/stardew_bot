@@ -1083,7 +1083,7 @@ impl ChairJumpGoal {
     fn too_close_to_chair_tile(&self, game_state: &GameState) -> bool {
         let delta =
             game_state.player.center_pos() - self.chair_tile.map(|x| x as f32);
-        delta.right.abs() <= 0.875 && delta.down.abs() <= 0.75
+        delta.right.abs() < 0.875 && delta.down.abs() < 0.75
     }
 
     /// Returns true if the player is too far from the chair's future
