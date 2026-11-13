@@ -255,7 +255,7 @@ impl BotGoal for FirstDay {
         }
 
         let goal =
-            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(18));
+            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(14));
         if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
             return Ok(goal.into());
         }
