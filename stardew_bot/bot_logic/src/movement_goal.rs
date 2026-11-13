@@ -1230,7 +1230,13 @@ impl BotGoal for ChairJumpGoal {
             // chair up (the intended next step), rather than sitting
             // back down.
             actions.do_action(GameAction::MouseOverTile(player_tile));
-            actions.do_action(GameAction::LeftClick);
+            if game_state.globals.game_tick % 2 == 0 {
+                actions.do_action(GameAction::LeftClick);
+                actions.do_action(GameAction::ReleaseTool);
+            } else {
+                actions.do_action(GameAction::HoldTool);
+            }
+
             return Ok(BotGoalResult::InProgress);
         }
 
@@ -1323,7 +1329,17 @@ impl BotGoal for ChairJumpGoal {
             actions.do_action(GameAction::MouseOverTile(chair_tile));
             if game_state.inputs.mouse_tile_location == chair_tile {
                 self.chair_placement_tick = Some(game_state.globals.game_tick);
-                actions.do_action(GameAction::LeftClick);
+
+                // Alternate between GameAction::LeftClick and
+                // GameAction::UseTool (the 'C' key on the keyboard),
+                // so that the chair pickup and chair placement can
+                // occur on consecutive game ticks.
+                if game_state.globals.game_tick % 2 == 0 {
+                    actions.do_action(GameAction::LeftClick);
+                    actions.do_action(GameAction::ReleaseTool);
+                } else {
+                    actions.do_action(GameAction::HoldTool);
+                }
             }
             return Ok(BotGoalResult::InProgress);
         }
