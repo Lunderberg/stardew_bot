@@ -1388,11 +1388,20 @@ impl BotGoal for ChairJumpGoal {
                                     obj.kind,
                                     ObjectKind::Tree(_)
                                         | ObjectKind::FruitTree(_)
+                                        | ObjectKind::Chest(_),
                                 )
                             })
                             .map(|obj| obj.tile),
                     )
                     .chain(loc.action_tiles.iter().map(|(tile, _)| *tile))
+                    .chain(loc.buildings.iter().filter_map(|building| {
+                        match building.kind.as_str() {
+                            "Farmhouse" => Some(
+                                building.shape.top_left + Vector::new(9, 4),
+                            ),
+                            _ => None,
+                        }
+                    }))
                     .flat_map(|p| {
                         [
                             Vector::zero(),

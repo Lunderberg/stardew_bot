@@ -3482,7 +3482,7 @@ impl BuildingDataLookup {
 
 impl Building {
     pub fn iter_tiles(&self) -> impl Iterator<Item = Vector<isize>> + '_ {
-        if let Some(collisions) = &self.collision_map {
+        let iter_collision = if let Some(collisions) = &self.collision_map {
             Either::Left(
                 collisions
                     .iter()
@@ -3491,7 +3491,11 @@ impl Building {
             )
         } else {
             Either::Right(self.shape.iter_points())
-        }
+        };
+        let opt_mailbox = (self.kind == "Farmhouse")
+            .then(|| self.shape.top_left + Vector::new(9, 4));
+
+        iter_collision.chain(opt_mailbox)
     }
 }
 
