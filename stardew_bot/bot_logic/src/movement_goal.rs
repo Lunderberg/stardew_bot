@@ -1421,10 +1421,15 @@ impl BotGoal for ChairJumpGoal {
                     });
             });
 
+        let can_safely_rotate = safe_click
+            .into_iter()
+            .filter(|(_, is_safe)| *is_safe)
+            .any(|(tile, _)| tile == game_state.inputs.mouse_tile_location);
+
         let chair_rotate_tile = safe_click.into_iter()
             .filter(|(_,is_safe)| *is_safe)
             .map(|(tile,_)| tile)
-            .max_by_key(|&tile| tile == chair_tile)
+            .max_by_key(|&tile| (tile == chair_tile, tile==game_state.inputs.mouse_tile_location))
             .expect("Handle case where no adjacent tile can be used to rotate chair");
 
         // We have the chair, but cannot set it down yet because it is
@@ -1432,7 +1437,7 @@ impl BotGoal for ChairJumpGoal {
         // the chair until it is facing the desired direction for this
         // jump.
         actions.do_action(GameAction::MouseOverTile(chair_rotate_tile));
-        if game_state.inputs.mouse_tile_location == chair_rotate_tile {
+        if can_safely_rotate {
             actions.do_action(GameAction::RightClick);
         }
 
