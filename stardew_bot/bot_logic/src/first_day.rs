@@ -141,10 +141,11 @@ impl BotGoal for FirstDay {
             return Ok(stack.into());
         }
 
-        if !game_state
-            .globals
-            .queued_events
-            .contains("copperFound%&NL&%")
+        if in_game_time > 900
+            && !game_state
+                .globals
+                .queued_events
+                .contains("copperFound%&NL&%")
         {
             let stack = LogicStack::new()
                 .then(BuyFromMerchantGoal::new(
