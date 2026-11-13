@@ -193,8 +193,7 @@ impl BotGoal for GeodeCrackingGoal {
             reserved
         };
 
-        let to_sell = SellToMerchantGoal::new(
-            "Blacksmith",
+        let to_sell = SellToMerchantGoal::new("Blacksmith").sell_all(
             inventory
                 .iter_items()
                 .filter(|item| {

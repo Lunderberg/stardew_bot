@@ -155,8 +155,8 @@ impl BotGoal for FirstDay {
             return Ok(stack.into());
         }
         if player.room_name == "Blacksmith" {
-            let sell_copper =
-                SellToMerchantGoal::new("Blacksmith", ItemId::COPPER_ORE);
+            let sell_copper = SellToMerchantGoal::new("Blacksmith")
+                .sell_all(ItemId::COPPER_ORE);
             if !sell_copper.is_completed(game_state) {
                 return Ok(sell_copper.into());
             }
@@ -192,15 +192,6 @@ impl BotGoal for FirstDay {
             return Ok(clay_farming.into());
         }
 
-        let goal =
-            SellToMerchantGoal::new("Carpenter", [ItemId::CLAY, ItemId::FIBER])
-                .min_to_sell(100);
-        if in_game_time < 1630 && !goal.is_completed(game_state) {
-            let stack =
-                LogicStack::new().then(goal).with_interrupt(ScytheNearby);
-            return Ok(stack.into());
-        }
-
         let have_chair = player
             .inventory
             .iter_items()
@@ -212,22 +203,37 @@ impl BotGoal for FirstDay {
             }
         }
 
-        // Buy wood during the last trip to Robin's.  Should keep
-        // enough cash to buy the Backpack upgrade and seeds from
-        // Pierre.
-        let reserved_cash = 1500
+        // Sell enough clay to afford the Day1 purchases.  When
+        // passing out, we lose 10% of all cash that we're holding.
+        // Since we're planning to pass out at the end of pretty much
+        // every day, it's better to get the money overnight to
+        // minimize that penalty.
+        //
+        // TODO: Compute the exact amount needed for seeds, rather
+        // than the hardcoded 1300 gp.
+        let required_cash = 1300
             + 2000 * (player.inventory.items.len() < 24) as i32
             + 220
                 * 10usize
                     .checked_sub(player.inventory.count_item(ItemId::SALAD))
                     .unwrap_or(0) as i32;
-        if current_money > reserved_cash && in_game_time < 1630 {
-            let count = (current_money - reserved_cash) / 10;
-            let goal = BuyFromMerchantGoal::new(
-                "Carpenter",
-                ItemId::WOOD.with_count(count as usize),
-            );
-            if !goal.is_completed(game_state)? {
+        if current_money < required_cash && in_game_time < 1630 {
+            let to_sell =
+                ((required_cash - current_money) as usize).div_ceil(20);
+            let to_keep = player
+                .inventory
+                .count_item(ItemId::CLAY)
+                .checked_sub(to_sell)
+                .unwrap_or(0);
+
+            let goal = SellToMerchantGoal::new("Carpenter")
+                .sell_down_to([
+                    ItemId::CLAY.with_count(to_keep),
+                    ItemId::FIBER.with_count(0),
+                ])
+                .min_to_sell(50);
+
+            if !goal.is_completed(game_state) {
                 return Ok(goal.into());
             }
         }

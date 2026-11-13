@@ -155,7 +155,9 @@ impl<'a> FishSelling<'a> {
     }
 
     fn sell_all_fish(&self) -> LogicStack {
-        SellToMerchantGoal::new("Buy Fish", self.iter_fish().cloned()).into()
+        SellToMerchantGoal::new("Buy Fish")
+            .sell_all(self.iter_fish().cloned())
+            .into()
     }
 }
 

@@ -138,8 +138,8 @@ impl UpgradeFishingRodGoal {
         }
 
         if current_money < price {
-            let goal =
-                SellToMerchantGoal::new("Buy Fish", iter_sellable().cloned());
+            let goal = SellToMerchantGoal::new("Buy Fish")
+                .sell_all(iter_sellable().cloned());
             return Ok(Some(goal.into()));
         }
 
