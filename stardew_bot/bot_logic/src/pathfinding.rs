@@ -1026,7 +1026,7 @@ impl MovementCost {
                                 // requires first walking in that
                                 // direction.  Therefore, to avoid
                                 // these unless extra useful.
-                                201
+                                150
                             }
                         };
 
