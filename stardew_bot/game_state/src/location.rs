@@ -1496,7 +1496,7 @@ impl Location {
 
                                 let is_growing = phase < num_phases - 1;
                                 let is_regrowing = is_fully_grown && day_of_current_phase > 0i32;
-                                let has_forage = crop.whichForageCrop.is_some();
+                                let has_forage = crop.whichForageCrop.value.is_some();
                                 let can_harvest = (!is_growing && !is_regrowing) || has_forage;
 
                                 if phase==0 {
