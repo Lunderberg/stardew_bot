@@ -1424,7 +1424,7 @@ impl BotGoal for ChairJumpGoal {
         let chair_rotate_tile = safe_click.into_iter()
             .filter(|(_,is_safe)| *is_safe)
             .map(|(tile,_)| tile)
-            .max_by_key(|&tile| tile != chair_tile)
+            .max_by_key(|&tile| tile == chair_tile)
             .expect("Handle case where no adjacent tile can be used to rotate chair");
 
         // We have the chair, but cannot set it down yet because it is
