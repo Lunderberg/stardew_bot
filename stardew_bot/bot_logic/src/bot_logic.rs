@@ -450,6 +450,24 @@ impl ActionCollector {
         self.refresh_current_location = true;
     }
 
+    pub fn left_click_equiv(&mut self) {
+        if self.game_mode_tick % 2 == 0 {
+            self.do_action(GameAction::LeftClick);
+            self.do_action(GameAction::ReleaseTool);
+        } else {
+            self.do_action(GameAction::HoldTool);
+        }
+    }
+
+    pub fn right_click_equiv(&mut self) {
+        if self.game_mode_tick % 2 == 0 {
+            self.do_action(GameAction::RightClick);
+            self.do_action(GameAction::StopActivatingTile);
+        } else {
+            self.do_action(GameAction::ActivateTile);
+        }
+    }
+
     fn annotate_new(&mut self, goal: &dyn BotGoal, num_actions_before: usize) {
         let goal = goal.description();
         self.actions[num_actions_before..].iter_mut().for_each(
