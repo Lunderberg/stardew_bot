@@ -1412,13 +1412,9 @@ impl BotGoal for ChairJumpGoal {
                         }
                     }))
                     .flat_map(|p| {
-                        [
-                            Vector::zero(),
-                            FacingDirection::North.offset(),
-                            FacingDirection::South.offset(),
-                        ]
-                        .into_iter()
-                        .map(move |offset| p + offset)
+                        [Vector::zero(), FacingDirection::North.offset()]
+                            .into_iter()
+                            .map(move |offset| p + offset)
                     }),
             )
             .for_each(|tile| {
