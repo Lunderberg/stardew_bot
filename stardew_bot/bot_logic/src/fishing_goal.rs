@@ -222,6 +222,7 @@ impl BotGoal for FishingGoal {
                 .stamina_recovery_slots(2)
                 .otherwise_empty()
                 .craft_missing(true)
+                .with(ItemId::OAK_CHAIR)
                 .with_exactly(
                     ItemId::BAIT_MAKER
                         .with_count(opt_bait_maker.is_none() as usize),
