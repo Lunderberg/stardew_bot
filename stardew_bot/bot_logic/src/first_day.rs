@@ -7,6 +7,7 @@ use itertools::Itertools as _;
 use crate::{
     ActivateTile, ClearTreeGoal, Error, GameAction, GiveGiftGoal, GoToRoomGoal,
     LocationExt as _, PickUpFurnitureGoal, bot_logic::BotInterrupt,
+    predictors::FarmCoalRockPredictor,
 };
 use game_state::{
     CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, TreeKind,
@@ -23,6 +24,11 @@ use super::{
 pub struct FirstDay;
 
 struct ScytheNearby;
+
+struct CollectCoal {
+    goal: usize,
+    tile: Option<Vector<isize>>,
+}
 
 impl BotGoal for FirstDay {
     fn description(&self) -> std::borrow::Cow<'static, str> {
@@ -54,6 +60,11 @@ impl BotGoal for FirstDay {
             if !goal.is_completed(game_state)? {
                 return Ok(goal.into());
             }
+        }
+
+        let mut goal = CollectCoal::new(5);
+        if !goal.is_completed(game_state)? {
+            return Ok(goal.into());
         }
 
         // TODO: Include a maximum travel distance for the foraging.
@@ -517,5 +528,147 @@ impl BotInterrupt for ScytheNearby {
             });
 
         Ok(Some(stack))
+    }
+}
+
+impl CollectCoal {
+    pub fn new(goal: usize) -> Self {
+        Self { goal, tile: None }
+    }
+
+    pub fn is_completed(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<bool, Error> {
+        let has_enough =
+            game_state.player.inventory.count_item(ItemId::COAL) >= self.goal;
+        let next_pickaxe = self.next_pickaxe(game_state)?;
+        let next_pickup = self.next_pickup(game_state)?;
+
+        Ok(has_enough || (next_pickaxe.is_none() && next_pickup.is_none()))
+    }
+
+    fn find_coal_rock(
+        game_state: &GameState,
+    ) -> Result<Option<Vector<isize>>, Error> {
+        let player = &game_state.player;
+        let farm = game_state.get_room("Farm")?;
+        let predictor = FarmCoalRockPredictor::new(game_state);
+
+        let coal_rocks: HashSet<Vector<isize>> = farm
+            .objects
+            .iter()
+            .filter(|obj| matches!(obj.kind, game_state::ObjectKind::Stone(_)))
+            .map(|obj| obj.tile)
+            .filter(|&tile| predictor.will_produce_coal(tile))
+            .collect();
+
+        let search_from = if player.room_name == "Farm" {
+            player.tile()
+        } else {
+            game_state.get_farm_door()?
+        };
+        let opt_tile = farm
+            .pathfinding(&game_state.statics)
+            .include_border(true)
+            .allow_chair_jump()
+            .iter_dijkstra_forward(search_from)
+            .map(|(tile, _)| tile)
+            .find(|tile| coal_rocks.contains(tile));
+        Ok(opt_tile)
+    }
+
+    fn get_coal_rock(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<Vector<isize>>, Error> {
+        if self.tile.is_none() {
+            self.tile = Self::find_coal_rock(game_state)?;
+        }
+        Ok(self.tile)
+    }
+
+    fn next_pickaxe(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<Vector<isize>>, Error> {
+        let Some(tile) = self.get_coal_rock(game_state)? else {
+            return Ok(None);
+        };
+
+        let still_exists =
+            game_state.get_room("Farm")?.objects.iter().any(|obj| {
+                obj.tile == tile && matches!(obj.kind, ObjectKind::Stone(_))
+            });
+
+        Ok(still_exists.then(|| tile))
+    }
+
+    fn next_pickup(
+        &mut self,
+        game_state: &GameState,
+    ) -> Result<Option<Vector<f32>>, Error> {
+        let farm = game_state.get_room("Farm")?;
+
+        let find_near =
+            |target_pos: Vector<f32>, radius: f32| -> Option<Vector<f32>> {
+                let radius2 = radius * radius;
+                farm.items
+                    .iter()
+                    .filter(|floating_item| floating_item.id == ItemId::COAL)
+                    .map(|floating_item| floating_item.position / 64.0)
+                    .find(|item_pos| item_pos.dist2(target_pos) < radius2)
+            };
+
+        if let Some(near_player) =
+            find_near(game_state.player.center_pos(), 5.0)
+        {
+            return Ok(Some(near_player));
+        }
+
+        let Some(tile) = self.get_coal_rock(game_state)? else {
+            return Ok(None);
+        };
+
+        let opt_coal_pos = find_near(tile.map(|x| x as f32), 2.0);
+
+        Ok(opt_coal_pos)
+    }
+}
+
+impl BotGoal for CollectCoal {
+    fn description(&self) -> std::borrow::Cow<'static, str> {
+        "Gather coal".into()
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        _actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        if let Some(pos) = self.next_pickup(game_state)? {
+            let goal = MovementGoal::new("Farm", pos).with_tolerance(1.4);
+            if goal.is_completed(game_state) {
+                return Ok(BotGoalResult::InProgress.into());
+            }
+
+            let num_items = game_state.get_room("Farm")?.items.len();
+            return Ok(goal
+                .cancel_if(move |game_state| {
+                    game_state
+                        .get_room("Farm")
+                        .map(|loc| loc.items.len())
+                        .unwrap_or(0)
+                        != num_items
+                })
+                .into());
+        }
+
+        if let Some(tile) = self.next_pickaxe(game_state)? {
+            let goal = UseItemOnTile::new(ItemId::PICKAXE, "Farm", tile);
+            return Ok(goal.into());
+        }
+
+        Ok(BotGoalResult::Completed.into())
     }
 }
