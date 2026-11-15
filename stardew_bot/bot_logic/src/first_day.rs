@@ -401,6 +401,7 @@ impl BotGoal for FirstDay {
                     ObjectKind::Tree(tree) => {
                         matches!(tree.kind, TreeKind::Maple | TreeKind::Pine)
                             && tree.health > 0.0
+                            && tree.growth_stage >= 5
                     }
                     _ => false,
                 })
@@ -414,6 +415,7 @@ impl BotGoal for FirstDay {
             let opt_tree = farm
                 .pathfinding(&game_state.statics)
                 .include_border(true)
+                .allow_chair_jump()
                 .iter_dijkstra_forward(search_from)
                 .map(|(tile, _)| tile)
                 .find(|tile| trees.contains(tile));
