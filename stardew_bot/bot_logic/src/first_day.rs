@@ -141,28 +141,6 @@ impl BotGoal for FirstDay {
             return Ok(stack.into());
         }
 
-        if in_game_time > 900
-            && !game_state
-                .globals
-                .queued_events
-                .contains("copperFound%&NL&%")
-        {
-            let stack = LogicStack::new()
-                .then(BuyFromMerchantGoal::new(
-                    "Blacksmith",
-                    ItemId::COPPER_ORE,
-                ))
-                .with_interrupt(ScytheNearby);
-            return Ok(stack.into());
-        }
-        if player.room_name == "Blacksmith" {
-            let sell_copper = SellToMerchantGoal::new("Blacksmith")
-                .sell_all(ItemId::COPPER_ORE);
-            if !sell_copper.is_completed(game_state) {
-                return Ok(sell_copper.into());
-            }
-        }
-
         let need_early_battery = game_state
             .statics
             .bundles
@@ -185,7 +163,7 @@ impl BotGoal for FirstDay {
             }
         }
 
-        let clay_farming = ClayFarmingGoal::new().stop_at_time(1540);
+        let clay_farming = ClayFarmingGoal::new().stop_at_time(1610);
         if player.room_name == "Beach"
             && (player.current_stamina > 4.0 || in_game_time > 1330)
             && !clay_farming.is_completed(game_state)?
@@ -215,9 +193,16 @@ impl BotGoal for FirstDay {
         let required_cash = 1300
             + 2000 * (player.inventory.items.len() < 24) as i32
             + 220
-                * 10usize
-                    .checked_sub(player.inventory.count_item(ItemId::SALAD))
-                    .unwrap_or(0) as i32;
+                * 10i32
+                    .saturating_sub(
+                        player.inventory.count_item(ItemId::SALAD) as i32
+                    )
+                    .max(0)
+            + 75 * 45i32
+                .saturating_sub(
+                    player.inventory.count_item(ItemId::COPPER_ORE) as i32
+                )
+                .max(0);
         if current_money < required_cash && in_game_time < 1630 {
             let to_sell =
                 ((required_cash - current_money) as usize).div_ceil(20);
@@ -244,7 +229,7 @@ impl BotGoal for FirstDay {
             ItemId::ENERGY_TONIC.with_count(1),
         );
         if player.current_stamina < 10.0
-            && in_game_time < 1130
+            && in_game_time < 1030
             && !goal.is_completed(game_state)?
         {
             return Ok(goal
@@ -254,9 +239,37 @@ impl BotGoal for FirstDay {
                 .into());
         }
 
+        // Buy copper ore with which to start a Day2 pickaxe upgrade.
+        // We can't start it any earlier because (1) we don't have the
+        // Day1 money and (2) Clint hasn't given us the furnace
+        // recipe.  Technically, we don't need to buy all the ore on
+        // Day1, since we'll have more funds available on Day2, but we
+        // need at least one copper ore on Day1 so that Clint will
+        // give us the recipe on Day2.  (Finding copper ore sets
+        // `game_state.globals.queued_events.contains("copperFound%&NL&%")`,
+        // which trigger's Clint's visit the next morning.)
+        //
+        // So long as we can route in the full purchase on Day1, we
+        // only need to visit Clint once on Day2.
+        let goal = BuyFromMerchantGoal::new(
+            "Blacksmith",
+            ItemId::COPPER_ORE.with_count(45),
+        );
+        if in_game_time < 1530
+            && current_money >= 45 * 75
+            && !goal.is_completed(game_state)?
+        {
+            return Ok(goal.into());
+        }
+
+        // Handles both purchases from the Saloon.  First purchase
+        // occurs after 2nd round of clay-farming (around noon), and
+        // is limited by available funds.  Second purchase occurs
+        // after 3rd round of clay-farming (around 5 PM), and buys as
+        // much as we can at that point.
         let goal =
-            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(14));
-        if goal.item_count(game_state)? == 0 && in_game_time < 1900 {
+            BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(10));
+        if goal.item_count(game_state)? < 5 && in_game_time < 1900 {
             return Ok(goal.into());
         }
 

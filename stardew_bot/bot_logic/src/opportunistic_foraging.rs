@@ -105,8 +105,10 @@ impl BotInterrupt for OpportunisticForaging {
                     }
                     ObjectKind::Tree(tree)
                         if tree.growth_stage == 0
-                            && !plan.is_planned_tree(obj.tile)
-                            && can_hoe =>
+                            && game_state.player.skills.foraging_level()
+                                >= 1
+                            && can_hoe
+                            && !plan.is_planned_tree(obj.tile) =>
                     {
                         Some(ItemId::HOE)
                     }
