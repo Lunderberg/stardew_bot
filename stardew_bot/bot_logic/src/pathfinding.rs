@@ -522,6 +522,7 @@ impl<'a> Pathfinding<'a> {
                     .filter(|obj| match &obj.kind {
                         ObjectKind::ArtifactSpot | ObjectKind::SeedSpot => true,
                         ObjectKind::HoeDirt(dirt) => dirt.crop.is_some(),
+                        ObjectKind::Tree(_) => true,
                         _ => false,
                     })
                     .map(|obj| obj.tile),
