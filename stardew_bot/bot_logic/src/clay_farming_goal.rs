@@ -437,6 +437,11 @@ impl BotGoal for ClayFarmingGoal {
             .chain(loc.resource_clumps.iter().map(|c| c.shape))
             .chain(loc.bushes.iter().map(|b| b.rectangle()))
             .flat_map(|shape| shape.iter_points())
+            .chain(
+                loc.characters
+                    .iter()
+                    .flat_map(|character| character.tile().iter_nearby()),
+            )
             .for_each(|tile| {
                 forbidden.insert(tile);
             });
