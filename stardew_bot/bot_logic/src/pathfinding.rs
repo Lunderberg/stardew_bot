@@ -734,7 +734,10 @@ impl MovementCost {
 
         let mut to_visit = vec![initial];
         while let Some(tile) = to_visit.pop() {
-            for dir in Direction::iter_cardinal() {
+            // Technically not all directions are accessible by chair
+            // jumps in all cases, but it's a close enough
+            // approximation for now.
+            for dir in Direction::iter() {
                 let adj = tile + dir.offset();
                 if reachable.in_bounds(adj) && !reachable[adj] {
                     if walkable[adj] {

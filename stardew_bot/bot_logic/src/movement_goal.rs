@@ -154,6 +154,7 @@ impl GraphSearch<RoomSearchNode> for ConnectedRoomGraph<'_> {
                 let reachable = loc
                     .pathfinding(self.statics)
                     .clear_breakables(self.clear_breakables)
+                    .allow_chair_jump()
                     .reachable(node.current_pos);
 
                 let is_on_warp = loc
