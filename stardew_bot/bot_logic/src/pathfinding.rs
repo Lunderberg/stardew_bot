@@ -95,6 +95,10 @@ pub struct Pathfinding<'a> {
     /// If true, treat NPCs as obstacles to be avoided.  If false,
     /// ignore NPCs while pathfinding.
     avoid_npcs: bool,
+
+    /// If `Some(cost)`, impose a penalty for walking on tiles
+    /// adjacent to an NPC.  Defaults to `Some(0)`.
+    npc_proximity_cost: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -265,6 +269,7 @@ impl<'a> Pathfinding<'a> {
             clear_craftables: None,
             include_border: false,
             avoid_npcs: true,
+            npc_proximity_cost: Some(0),
         }
     }
 
@@ -380,6 +385,13 @@ impl<'a> Pathfinding<'a> {
         Self { avoid_npcs, ..self }
     }
 
+    pub fn npc_proximity_cost(self, npc_proximity_cost: u64) -> Self {
+        Self {
+            npc_proximity_cost: Some(npc_proximity_cost),
+            ..self
+        }
+    }
+
     pub fn include_border(self, include_border: bool) -> Self {
         Self {
             include_border,
@@ -415,6 +427,13 @@ impl<'a> Pathfinding<'a> {
 
         let iter_buildings = loc.iter_building_tiles();
 
+        let iter_unwalkable = std::iter::empty()
+            .chain(iter_blocked)
+            .chain(iter_bush)
+            .chain(iter_furniture)
+            .chain(iter_buildings)
+            .map(|tile| (tile, None));
+
         let iter_npcs = loc
             .characters
             .iter()
@@ -425,15 +444,14 @@ impl<'a> Pathfinding<'a> {
             )
             .filter(|_| self.avoid_npcs)
             .filter(|character| !character.is_monster())
-            .map(|character| character.tile());
-
-        let iter_unwalkable = std::iter::empty()
-            .chain(iter_blocked)
-            .chain(iter_bush)
-            .chain(iter_furniture)
-            .chain(iter_buildings)
-            .chain(iter_npcs)
-            .map(|tile| (tile, None));
+            .map(|character| character.tile())
+            .flat_map(|tile| {
+                let npc_tile = self.avoid_npcs.then(|| (tile, None));
+                let npc_region = tile
+                    .iter_nearby()
+                    .map(|adj| (adj, self.npc_proximity_cost));
+                npc_tile.into_iter().chain(npc_region)
+            });
 
         // Handle tiles that may be passable, but with an additional
         // movement cost.
@@ -479,6 +497,7 @@ impl<'a> Pathfinding<'a> {
             .chain(iter_unwalkable)
             .chain(iter_clumps)
             .chain(iter_obj)
+            .chain(iter_npcs)
     }
 
     fn movement_cost(&self) -> MovementCost {
@@ -1034,7 +1053,13 @@ impl MovementCost {
                             }
                         };
 
-                        let new_dist = entry.dist + tile_dist;
+                        let additional_cost: u64 = [chair_tile, next_tile]
+                            .into_iter()
+                            .filter_map(|tile| self.map.get_opt(tile))
+                            .cloned()
+                            .sum();
+
+                        let new_dist = entry.dist + tile_dist + additional_cost;
                         DijkstraEntry {
                             tile: next_tile,
                             dist: new_dist,

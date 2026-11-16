@@ -604,6 +604,7 @@ impl LocalMovementGoal {
             .pathfinding(&game_state.statics)
             .clear_breakables(self.can_clear_breakables(game_state))
             .allow_chair_jump()
+            .npc_proximity_cost(300)
             .direction_map(target_tiles);
 
         Ok(map)
