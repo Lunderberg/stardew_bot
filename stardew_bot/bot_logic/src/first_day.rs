@@ -647,7 +647,7 @@ impl BotGoal for CollectCoal {
         _actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
         if let Some(pos) = self.next_pickup(game_state)? {
-            let goal = MovementGoal::new("Farm", pos).with_tolerance(1.4);
+            let goal = MovementGoal::new("Farm", pos).with_tolerance(0.9);
             if goal.is_completed(game_state) {
                 return Ok(BotGoalResult::InProgress.into());
             }

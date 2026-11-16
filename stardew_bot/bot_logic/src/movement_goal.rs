@@ -585,11 +585,18 @@ impl LocalMovementGoal {
         let target_tile: Vector<isize> =
             self.target_position.map(|x| x.round() as isize);
 
-        let target_tiles = if self.tolerance > 1.0 {
-            Direction::VALUES.map(|dir| Some(target_tile + dir.offset()))
-        } else {
-            std::array::from_fn(|i| (i == 0).then(|| target_tile))
-        };
+        let target_tiles: [Option<Vector<isize>>; 9] =
+            std::array::from_fn(|i| {
+                let offset = Vector::new((i % 3) as isize, (i / 3) as isize);
+                let tile = target_tile + offset;
+                let use_as_target = if tile == target_tile {
+                    self.tolerance <= 1.0
+                } else {
+                    tile.map(|i| i as f32).dist(self.target_position)
+                        < self.tolerance
+                };
+                use_as_target.then(|| tile)
+            });
 
         let map = location
             .pathfinding(&game_state.statics)
