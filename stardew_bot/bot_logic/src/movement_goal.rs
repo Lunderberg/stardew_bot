@@ -63,9 +63,10 @@ pub struct LocalMovementGoal {
     /// Otherwise, these objects will be walked around instead.
     clear_breakables: bool,
 
-    /// A lookup specifying the next movement to be made, given the tile on
-    /// which the player is standing.
-    direction_map: Option<TileMap<PathStep>>,
+    /// A lookup specifying the next movement to be made given the
+    /// tile on which the player is standing, along with the game tick
+    /// on which the plan was made.
+    direction_map: Option<(TileMap<PathStep>, i32)>,
 
     /// A lookup of breakable objects, to avoid per-frame iteration
     /// over all objects in the location.
@@ -549,7 +550,7 @@ impl LocalMovementGoal {
     }
 
     fn generate_plan(
-        &mut self,
+        &self,
         game_state: &GameState,
     ) -> Result<TileMap<PathStep>, Error> {
         let player = &game_state.player;
@@ -631,7 +632,7 @@ impl LocalMovementGoal {
         let player_tile = player.tile();
         let target_tile = self.target_position.as_tile();
 
-        let map = self.direction_map.as_ref().expect(
+        let map = self.direction_map.as_ref().map(|(map, _)| map).expect(
             "Should populate direction map before calling choose_chair_jump",
         );
 
@@ -805,13 +806,21 @@ impl BotGoal for LocalMovementGoal {
             self.direction_map = None;
         }
 
+        if let Some((_, tick)) = &self.direction_map
+            && tick + 600 < game_state.globals.game_tick
+        {
+            self.direction_map = None;
+        }
+
         if self.direction_map.is_none() {
-            self.direction_map = Some(self.generate_plan(game_state)?);
+            let map = self.generate_plan(game_state)?;
+            self.direction_map = Some((map, game_state.globals.game_tick));
         }
 
         let map = self
             .direction_map
             .as_ref()
+            .map(|(map, _)| map)
             .expect("Just populated direction map");
 
         let player_tile = player.tile();
