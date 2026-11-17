@@ -660,7 +660,10 @@ impl<'a> Pathfinding<'a> {
     /// so any waypoint-based method may have out-of-date waypoints.
     /// Using a direction map allows the local pathfinding to resume
     /// without interruption when this occurs.
-    pub fn direction_map(&self, target: impl TileSet) -> TileMap<PathStep> {
+    pub fn direction_map(
+        &self,
+        target: impl TileSet + Copy,
+    ) -> TileMap<PathStep> {
         let mut map: TileMap<Option<PathStep>> =
             self.location.blocked.map(|_| None);
 
@@ -690,7 +693,7 @@ impl<'a> Pathfinding<'a> {
     pub fn path_between(
         &self,
         initial: Vector<isize>,
-        goal: impl TileSet,
+        goal: impl TileSet + Copy,
     ) -> Result<Vec<Vector<isize>>, Error> {
         self.movement_cost()
             .path_between(initial, goal, &self.location.name)
@@ -778,7 +781,7 @@ impl MovementCost {
     fn path_between(
         &self,
         initial: Vector<isize>,
-        goal: impl TileSet,
+        goal: impl TileSet + Copy,
         room_name: &str,
     ) -> Result<Vec<Vector<isize>>, Error> {
         let cost_map = &self.map;

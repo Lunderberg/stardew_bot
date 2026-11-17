@@ -1,6 +1,6 @@
 use crate::Vector;
 
-pub trait TileSet: Sized + Copy {
+pub trait TileSet: Sized {
     fn iter(self) -> impl Iterator<Item = Vector<isize>>;
 }
 impl TileSet for Vector<isize> {
@@ -39,7 +39,6 @@ mod sealed {
 
 impl<Iter, Item> TileSet for Iter
 where
-    Iter: Copy,
     Iter: IntoIterator<Item = Item>,
     Item: sealed::TileIter,
 {
