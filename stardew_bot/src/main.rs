@@ -20,6 +20,9 @@ struct Arguments {
 
     #[structopt(long = "--predict-garbage-cans")]
     predict_garbage_cans: Option<usize>,
+
+    #[structopt(long = "--predict-bubbles")]
+    predict_bubbles: bool,
 }
 
 fn main() -> Result<(), Error> {
@@ -36,6 +39,8 @@ fn main() -> Result<(), Error> {
         bot.show_geode_prediction(num_geodes)?;
     } else if let Some(num_days) = args.predict_garbage_cans {
         bot.show_garbage_can_prediction(num_days)?;
+    } else if args.predict_bubbles {
+        bot.show_bubble_prediction()?;
     } else {
         bot.run()?;
     }

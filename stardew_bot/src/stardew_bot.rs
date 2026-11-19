@@ -507,6 +507,35 @@ impl StardewBot {
         Ok(())
     }
 
+    pub fn show_bubble_prediction(&self) -> Result<(), Error> {
+        use bot_logic::predictors::FishingBubblePredictor;
+
+        let game_state = self
+            .tui_globals
+            .get::<GameState>()
+            .expect("Globals should always contain a GameState");
+
+        game_state.locations.iter().try_for_each(
+            |loc| -> Result<_, Error> {
+                FishingBubblePredictor::new(game_state, &loc.name)?
+                    .predict()
+                    .into_iter()
+                    .for_each(|bubbles| {
+                        println!(
+                            "In {}, bubbles at {} from {} to {}",
+                            loc.name,
+                            bubbles.tile,
+                            bubbles.duration.start,
+                            bubbles.duration.end,
+                        );
+                    });
+                Ok(())
+            },
+        )?;
+
+        Ok(())
+    }
+
     pub fn run(&mut self) -> Result<(), Error> {
         use crossterm::event;
 
