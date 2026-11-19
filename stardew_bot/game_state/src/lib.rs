@@ -14,7 +14,7 @@ mod define_utility_functions;
 pub use define_utility_functions::define_utility_functions;
 
 mod player_state;
-pub use player_state::{FacingDirection, Friendship, PlayerState};
+pub use player_state::{Friendship, PlayerState};
 
 mod fishing_state;
 pub use fishing_state::FishingState;

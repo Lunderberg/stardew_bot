@@ -1,8 +1,9 @@
 use std::{borrow::Cow, collections::HashMap};
 
 use dsl::RustNativeObject;
+use geometry::CardinalDirection;
 
-use crate::{Error, FacingDirection, GameState, ObjectData};
+use crate::{Error, GameState, ObjectData};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct Item {
@@ -94,7 +95,7 @@ pub enum WeaponKind {
 
 #[derive(Debug, Clone)]
 pub struct Chair {
-    pub facing: FacingDirection,
+    pub facing: CardinalDirection,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]

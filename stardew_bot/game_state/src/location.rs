@@ -4,10 +4,10 @@ use std::{
 };
 
 use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
-use geometry::{Rectangle, Vector};
+use geometry::{CardinalDirection, Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::{Error, FacingDirection, Item, StaticState};
+use crate::{Error, Item, StaticState};
 
 use super::{Inventory, ItemCategory, ItemId, TileMap};
 
@@ -462,7 +462,7 @@ pub struct Furniture {
 
 #[derive(RustNativeObject, Debug, Clone, Copy)]
 pub enum FurnitureKind {
-    Chair(FacingDirection),
+    Chair(CardinalDirection),
     Bench,
     Couch,
     Armchair,
@@ -3113,10 +3113,10 @@ impl FurnitureKind {
         Ok(match kind {
             0 => {
                 let facing = match rotation {
-                    0 => FacingDirection::South,
-                    1 => FacingDirection::East,
-                    2 => FacingDirection::North,
-                    3 => FacingDirection::West,
+                    0 => CardinalDirection::South,
+                    1 => CardinalDirection::East,
+                    2 => CardinalDirection::North,
+                    3 => CardinalDirection::West,
                     other => panic!("Invalid chair rotation: {other}"),
                 };
                 Self::Chair(facing)

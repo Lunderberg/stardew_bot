@@ -1,5 +1,5 @@
 use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
-use geometry::{Direction, Vector};
+use geometry::{CardinalDirection, Direction, Vector};
 
 use crate::Error;
 
@@ -9,7 +9,7 @@ use super::{Inventory, Item};
 pub struct PlayerState {
     // Position-related info
     pub position: Vector<f32>,
-    pub facing: FacingDirection,
+    pub facing: CardinalDirection,
     pub movement: Option<Direction>,
     pub is_sitting: bool,
     pub is_getting_up: bool,
@@ -62,14 +62,6 @@ pub struct Friendship {
     pub talked_today: bool,
     pub gifted_today: bool,
     pub gifts_this_week: i32,
-}
-
-#[derive(RustNativeObject, Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FacingDirection {
-    North,
-    East,
-    South,
-    West,
 }
 
 #[allow(dead_code)]
@@ -237,10 +229,10 @@ impl PlayerState {
                 | {
 
                     let facing = match facing {
-                        0 => FacingDirection::North,
-                        1 => FacingDirection::East,
-                        2 => FacingDirection::South,
-                        3 => FacingDirection::West,
+                        0 => CardinalDirection::North,
+                        1 => CardinalDirection::East,
+                        2 => CardinalDirection::South,
+                        3 => CardinalDirection::West,
                         _ => panic!("Invalid value {facing} for player's facing direction"),
                     };
                 PlayerState {
@@ -569,60 +561,5 @@ impl PlayerSkills {
 
     pub fn upcoming_farming_level(&self, upcoming_xp: usize) -> u8 {
         Self::xp_to_level(self.farming_xp + upcoming_xp)
-    }
-}
-
-impl FacingDirection {
-    pub const VALUES: [Self; 4] =
-        [Self::South, Self::North, Self::East, Self::West];
-
-    pub fn offset(self) -> Vector<isize> {
-        match self {
-            FacingDirection::North => Vector::new(0, -1),
-            FacingDirection::East => Vector::new(1, 0),
-            FacingDirection::South => Vector::new(0, 1),
-            FacingDirection::West => Vector::new(-1, 0),
-        }
-    }
-
-    pub fn iter() -> impl Iterator<Item = Self> {
-        Self::VALUES.into_iter()
-    }
-
-    pub fn opposite(self) -> Self {
-        match self {
-            Self::North => Self::South,
-            Self::East => Self::West,
-            Self::South => Self::North,
-            Self::West => Self::East,
-        }
-    }
-}
-
-impl std::fmt::Display for FacingDirection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            FacingDirection::North => write!(f, "North"),
-            FacingDirection::East => write!(f, "East"),
-            FacingDirection::South => write!(f, "South"),
-            FacingDirection::West => write!(f, "West"),
-        }
-    }
-}
-
-impl PartialEq<Direction> for FacingDirection {
-    fn eq(&self, other: &Direction) -> bool {
-        matches!(
-            (self, other),
-            (Self::North, Direction::North)
-                | (Self::South, Direction::South)
-                | (Self::East, Direction::East)
-                | (Self::West, Direction::West)
-        )
-    }
-}
-impl PartialEq<FacingDirection> for Direction {
-    fn eq(&self, other: &FacingDirection) -> bool {
-        other == self
     }
 }

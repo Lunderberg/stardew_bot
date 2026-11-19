@@ -1,5 +1,6 @@
 use crate::{Error, GameAction, SelectItemGoal};
-use game_state::{FacingDirection, GameState, Item};
+use game_state::{GameState, Item};
+use geometry::CardinalDirection;
 use itertools::Itertools as _;
 
 use super::{
@@ -181,7 +182,7 @@ impl BotGoal for MaintainStaminaGoal {
         // can have the mouse hovering over it without clicking on
         // anything.
         let player_tile = game_state.player.tile();
-        let safe_dir = FacingDirection::iter()
+        let safe_dir = CardinalDirection::iter()
             .find(|dir| {
                 let facing_tile = player_tile + dir.offset();
                 loc.iter_activatable_tiles()

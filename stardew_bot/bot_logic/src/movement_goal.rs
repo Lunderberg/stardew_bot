@@ -1,6 +1,6 @@
 use std::{borrow::Cow, collections::HashSet};
 
-use geometry::{Direction, Vector};
+use geometry::{CardinalDirection, Direction, Vector};
 use itertools::Itertools as _;
 
 use crate::{
@@ -9,8 +9,8 @@ use crate::{
     pathfinding::{ChairJump, PathStep},
 };
 use game_state::{
-    FacingDirection, FurnitureKind, GameState, Item, ItemId, Location, Object,
-    ObjectKind, StaticState, TileMap, WarpKind,
+    FurnitureKind, GameState, Item, ItemId, Location, Object, ObjectKind,
+    StaticState, TileMap, WarpKind,
 };
 
 use super::{
@@ -83,7 +83,7 @@ pub struct LocalMovementGoal {
     previous_position: Option<(Vector<f32>, i32)>,
 }
 
-pub struct FaceDirectionGoal(pub FacingDirection);
+pub struct FaceDirectionGoal(pub CardinalDirection);
 
 pub struct StopMovingGoal;
 
@@ -986,7 +986,7 @@ impl BotGoal for LocalMovementGoal {
 }
 
 impl FaceDirectionGoal {
-    pub fn new(dir: FacingDirection) -> Self {
+    pub fn new(dir: CardinalDirection) -> Self {
         Self(dir)
     }
 
@@ -1015,10 +1015,10 @@ impl BotGoal for FaceDirectionGoal {
 
         if game_state.player.facing != self.0 {
             let dir = match self.0 {
-                FacingDirection::North => Direction::North,
-                FacingDirection::East => Direction::East,
-                FacingDirection::South => Direction::South,
-                FacingDirection::West => Direction::West,
+                CardinalDirection::North => Direction::North,
+                CardinalDirection::East => Direction::East,
+                CardinalDirection::South => Direction::South,
+                CardinalDirection::West => Direction::West,
             };
             actions.do_action(GameAction::Move(dir));
         }
@@ -1060,9 +1060,9 @@ impl ChairJumpGoal {
     fn find_placed_chair(
         &self,
         game_state: &GameState,
-    ) -> Result<Option<FacingDirection>, Error> {
+    ) -> Result<Option<CardinalDirection>, Error> {
         let location = game_state.current_room()?;
-        let placed_chair: Option<FacingDirection> = location
+        let placed_chair: Option<CardinalDirection> = location
             .furniture
             .iter()
             .filter(|furniture| {
@@ -1081,7 +1081,7 @@ impl ChairJumpGoal {
     fn find_held_chair<'a>(
         &self,
         game_state: &'a GameState,
-    ) -> Option<(&'a ItemId, FacingDirection)> {
+    ) -> Option<(&'a ItemId, CardinalDirection)> {
         game_state.player.inventory.iter_items().find_map(|item| {
             item.as_chair().map(|chair| (&item.id, chair.facing))
         })
@@ -1430,7 +1430,7 @@ impl BotGoal for ChairJumpGoal {
                         }
                     }))
                     .flat_map(|p| {
-                        [Vector::zero(), FacingDirection::North.offset()]
+                        [Vector::zero(), CardinalDirection::North.offset()]
                             .into_iter()
                             .map(move |offset| p + offset)
                     }),

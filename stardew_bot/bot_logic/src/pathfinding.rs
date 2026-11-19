@@ -1,10 +1,9 @@
-use geometry::{Direction, TileSet, Vector};
+use geometry::{CardinalDirection, Direction, TileSet, Vector};
 use itertools::Itertools as _;
 
 use crate::Error;
 use game_state::{
-    FacingDirection, Location, ObjectKind, ResourceClumpKind, StaticState,
-    TileMap, WarpKind,
+    Location, ObjectKind, ResourceClumpKind, StaticState, TileMap, WarpKind,
 };
 
 #[derive(Debug, Clone)]
@@ -173,7 +172,7 @@ pub struct ChairJump {
     pub chair_tile: Vector<isize>,
 
     /// The direction the chair should be facing when placed.
-    pub facing: FacingDirection,
+    pub facing: CardinalDirection,
 }
 
 /// Tracking for points during A* search.
@@ -997,7 +996,7 @@ impl MovementCost {
 
                 let iter_chair_jump = Direction::VALUES
                     .into_iter()
-                    .cartesian_product(FacingDirection::VALUES)
+                    .cartesian_product(CardinalDirection::VALUES)
                     .filter(|_| matches!(self.kind, MovementKind::ChairJump))
                     .filter(|(sit_down_dir, stand_up_dir)| {
                         sit_down_dir.opposite() != *stand_up_dir

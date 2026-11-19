@@ -1,6 +1,6 @@
 use std::{borrow::Cow, fmt::Display};
 
-use geometry::Vector;
+use geometry::{CardinalDirection, Vector};
 
 use crate::{
     BuyFromMerchantGoal, Error, GameAction, GameStateExt as _, InventoryGoal,
@@ -8,8 +8,7 @@ use crate::{
     StepCountForLuck, UseItem, UseItemOnTile, WaitUntilTimeOfDay,
 };
 use game_state::{
-    FacingDirection, FishingRod, GameState, Inventory, Item, ItemCategory,
-    ItemId, Key,
+    FishingRod, GameState, Inventory, Item, ItemCategory, ItemId, Key,
 };
 
 use super::{
@@ -88,12 +87,12 @@ impl FishingLocation {
         }
     }
 
-    const fn facing(&self) -> FacingDirection {
+    const fn facing(&self) -> CardinalDirection {
         match self {
-            FishingLocation::River => FacingDirection::South,
-            FishingLocation::Ocean => FacingDirection::South,
-            FishingLocation::OceanByWilly => FacingDirection::South,
-            FishingLocation::Lake => FacingDirection::East,
+            FishingLocation::River => CardinalDirection::South,
+            FishingLocation::Ocean => CardinalDirection::South,
+            FishingLocation::OceanByWilly => CardinalDirection::South,
+            FishingLocation::Lake => CardinalDirection::East,
         }
     }
 

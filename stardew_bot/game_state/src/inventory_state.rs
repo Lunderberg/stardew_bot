@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 
 use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::CardinalDirection;
 
-use crate::{Chair, Error, FacingDirection};
+use crate::{Chair, Error};
 
 use super::{
     FishingRod, Item, ItemId, Quality, Weapon, WeaponKind,
@@ -71,10 +72,10 @@ impl Inventory {
 
         graph.named_native_function("new_chair_kind", |rotation: i32| {
             let facing = match rotation {
-                2 => FacingDirection::North,
-                3 => FacingDirection::West,
-                0 => FacingDirection::South,
-                1 => FacingDirection::East,
+                2 => CardinalDirection::North,
+                3 => CardinalDirection::West,
+                0 => CardinalDirection::South,
+                1 => CardinalDirection::East,
                 other => panic!("Invalid chair rotation: {other}"),
             };
             ItemKind::Chair(Chair { facing })
