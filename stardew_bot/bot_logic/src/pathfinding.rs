@@ -761,6 +761,13 @@ impl MovementCost {
             // approximation for now.
             for dir in Direction::iter() {
                 let adj = tile + dir.offset();
+                if !dir.is_cardinal() && !self.chairable.is_set(adj) {
+                    // But if we're moving diagonally, at least make
+                    // sure that the diagonal movement allows chair
+                    // placement.
+                    continue;
+                }
+
                 if reachable.in_bounds(adj) && !reachable[adj] {
                     if walkable[adj] {
                         // The player may walk through this tile.
