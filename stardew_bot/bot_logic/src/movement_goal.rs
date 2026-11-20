@@ -732,9 +732,13 @@ impl BotGoal for GoToRoomGoal {
             Ok(BotGoalResult::Completed)
         } else {
             let entrance = game_state.closest_entrance(&self.target_room)?;
+            let target_room = self.target_room.clone();
             let goal =
                 MovementGoal::new(self.target_room.clone(), entrance.into())
-                    .clear_breakables(self.clear_breakables);
+                    .clear_breakables(self.clear_breakables)
+                    .cancel_if(move |game_state| {
+                        game_state.player.room_name == target_room
+                    });
             Ok(goal.into())
         }
     }
