@@ -1,4 +1,5 @@
 use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
+use geometry::Vector;
 
 use crate::Error;
 
@@ -19,6 +20,9 @@ pub struct FishingState {
 
     /// While while the bobber is in the air.
     pub bobber_in_air: bool,
+
+    /// The location at which the bobber will land.
+    pub bobber_landing_pos: Vector<f32>,
 
     /// True if the bobber has landed in the water, and the player is
     /// waiting for a fish.  But it doesn't get reset until after the
@@ -148,6 +152,8 @@ impl FishingState {
              casting_power: f32,
              is_casting: bool,
              bobber_in_air: bool,
+             bobber_pos_x: f32,
+             bobber_pos_y: f32,
              is_fishing: bool,
              time_until_fishing_bite: f32,
              fishing_bite_accumulator: f32,
@@ -186,6 +192,7 @@ impl FishingState {
                     casting_power,
                     is_casting,
                     bobber_in_air,
+                    bobber_landing_pos: Vector::new(bobber_pos_x, bobber_pos_y),
                     is_fishing,
                     time_until_fishing_bite,
                     fishing_bite_accumulator,
@@ -248,6 +255,16 @@ impl FishingState {
                 };
                 let is_casting = fishing_rod.is_some() && fishing_rod.isCasting;
                 let bobber_in_air = fishing_rod.is_some() && fishing_rod.castedButBobberStillInAir;
+                let bobber_pos_x = if fishing_rod.is_some() {
+                    fishing_rod.bobber.Field.value.X
+                } else {
+                    nan
+                };
+                let bobber_pos_y = if fishing_rod.is_some() {
+                    fishing_rod.bobber.Field.value.Y
+                } else {
+                    nan
+                };
 
                 let is_fishing = fishing_rod.is_some() && fishing_rod.isFishing;
 
@@ -360,6 +377,8 @@ impl FishingState {
                     casting_power,
                     is_casting,
                     bobber_in_air,
+                    bobber_pos_x,
+                    bobber_pos_y,
                     is_fishing,
                     time_until_fishing_bite,
                     fishing_bite_accumulator,
