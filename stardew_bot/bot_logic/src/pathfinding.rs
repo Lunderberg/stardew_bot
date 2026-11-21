@@ -629,7 +629,7 @@ impl<'a> Pathfinding<'a> {
             .iter_dijkstra(tiles, search_dir)
             .for_each(|(tile, dist)| {
                 assert!(distances[tile].is_none());
-                distances[tile] = Some(dist);
+                distances[tile] = Some(dist / 1000);
             });
 
         distances
@@ -1110,7 +1110,7 @@ impl MovementCost {
         iter_dir: SearchDirection,
     ) -> impl Iterator<Item = (Vector<isize>, u64)> {
         self.iter_dijkstra_entries(tiles, iter_dir)
-            .map(|entry| (entry.tile, entry.dist / 1000))
+            .map(|entry| (entry.tile, entry.dist))
     }
 }
 
