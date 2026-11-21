@@ -1,6 +1,6 @@
 use dsl::RustNativeObject;
 
-use crate::Direction;
+use crate::{CardinalDirection, Direction};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Vector<T> {
@@ -126,6 +126,21 @@ impl Vector<f32> {
             })
             .expect("Direction::iter is non-empty")
     }
+
+    pub fn closest_cardinal_direction(self) -> CardinalDirection {
+        CardinalDirection::iter()
+            .max_by(|dir_a, dir_b| {
+                let do_dot_product = |dir: CardinalDirection| {
+                    let offset = dir.offset().map(|i| i as f32);
+                    let offset = offset / offset.mag();
+                    offset.dot(self)
+                };
+                let dot_a = do_dot_product(*dir_a);
+                let dot_b = do_dot_product(*dir_b);
+                num::traits::float::TotalOrder::total_cmp(&dot_a, &dot_b)
+            })
+            .expect("CardinalDirection::iter is non-empty")
+    }
 }
 
 impl Vector<isize> {
@@ -164,6 +179,12 @@ impl Vector<isize> {
 
     pub fn closest_direction(self) -> Direction {
         Direction::iter()
+            .max_by_key(|dir| self.dot(dir.offset()))
+            .expect("Direction::iter is non-empty")
+    }
+
+    pub fn closest_cardinal_direction(self) -> CardinalDirection {
+        CardinalDirection::iter()
             .max_by_key(|dir| self.dot(dir.offset()))
             .expect("Direction::iter is non-empty")
     }

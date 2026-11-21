@@ -9,7 +9,7 @@ use crate::Error;
 pub struct FishingBubblePredictor {
     game_id: u32,
     days_played: u32,
-    may_contain_bubbles: TileMap<bool>,
+    dist_from_land: TileMap<u8>,
 }
 
 pub struct FishingBubblePrediction {
@@ -29,31 +29,32 @@ impl FishingBubblePredictor {
         let loc = game_state.get_room(room)?;
 
         let dist_from_land = {
-            let w = loc.shape.right as usize;
-            let h = loc.shape.down as usize;
-            let mut dist_from_land = TileMap::<isize>::full(10, w, h);
+            let mut dist_from_land = TileMap::full(
+                5u8,
+                loc.water_tiles.width(),
+                loc.water_tiles.height(),
+            );
             loc.water_tiles
                 .iter_false()
-                .cartesian_product(-6..=6)
-                .cartesian_product(-6..=6)
+                .cartesian_product(-5..=5)
+                .cartesian_product(-5..=5)
                 .for_each(|((land, di), dj)| {
                     let offset = Vector::new(di, dj);
                     if let Some(min_dist) =
                         dist_from_land.get_mut(land + offset)
                     {
-                        let dist = di.abs().max(dj.abs());
+                        let dist = di.abs().max(dj.abs()) as u8;
                         *min_dist = (*min_dist).min(dist);
                     }
                 });
+
             dist_from_land
         };
-        let may_contain_bubbles =
-            dist_from_land.map(|&dist| dist > 1 && dist < 5);
 
         Ok(Self {
             game_id,
             days_played,
-            may_contain_bubbles,
+            dist_from_land,
         })
     }
 
@@ -77,7 +78,7 @@ impl FishingBubblePredictor {
                     self.days_played as f64,
                     (self.game_id / 2) as f64,
                     time as f64,
-                    self.may_contain_bubbles.width() as f64,
+                    self.dist_from_land.width() as f64,
                 ]);
 
                 if let Some((tile, (start_hour, start_minute))) =
@@ -102,17 +103,21 @@ impl FishingBubblePredictor {
                     let start_bubbles = rng.rand_bool();
                     let opt_new_bubbles = (0..2)
                         .map(|_| {
-                            let width = self.may_contain_bubbles.width() as i32;
+                            let width = self.dist_from_land.width() as i32;
                             let i = rng.rand_in_range(0..width) as isize;
 
-                            let height =
-                                self.may_contain_bubbles.height() as i32;
+                            let height = self.dist_from_land.height() as i32;
                             let j = rng.rand_in_range(0..height) as isize;
 
                             Vector::<isize>::new(i, j)
                         })
                         .filter(|_| start_bubbles)
-                        .find(|tile| self.may_contain_bubbles.is_set(*tile));
+                        .find(|tile| {
+                            self.dist_from_land
+                                .get(*tile)
+                                .map(|&dist| dist > 1 && dist < 5)
+                                .unwrap_or(false)
+                        });
 
                     if let Some(tile) = opt_new_bubbles {
                         current_bubbles = Some((tile, (hour, minute)));
@@ -130,5 +135,9 @@ impl FishingBubblePredictor {
         }
 
         results
+    }
+
+    pub fn dist_from_land(&self, tile: Vector<isize>) -> u8 {
+        self.dist_from_land.get(tile).cloned().unwrap_or(0)
     }
 }

@@ -1,6 +1,6 @@
 use crate::{
-    EggFestival, Error, GiveGiftGoal, GoToActionTile, SellForCashGoal,
-    TurnInBundlesGoal, UpgradeFishingRodGoal, UpgradeToolGoal,
+    EggFestival, Error, GiveGiftGoal, GoToActionTile, SecondDay,
+    SellForCashGoal, TurnInBundlesGoal, UpgradeFishingRodGoal, UpgradeToolGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId, Quality};
 
@@ -36,6 +36,11 @@ impl BotGoal for GenericDay {
                 .cancel_if(|game_state| {
                     game_state.globals.get_stat("daysPlayed").unwrap_or(0) != 1
                 });
+            return Ok(goal.into());
+        } else if current_day == 2 {
+            let goal = SecondDay.cancel_if(|game_state| {
+                game_state.globals.get_stat("daysPlayed").unwrap_or(0) != 2
+            });
             return Ok(goal.into());
         }
 

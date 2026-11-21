@@ -11,6 +11,10 @@ use super::{
 pub struct CheckAllMail;
 
 impl CheckAllMail {
+    pub fn new() -> Self {
+        Self
+    }
+
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         game_state.player.num_unread_mail == 0
     }

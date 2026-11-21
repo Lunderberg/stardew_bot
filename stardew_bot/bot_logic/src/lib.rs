@@ -18,6 +18,9 @@ pub use farm_plan::*;
 mod first_day;
 pub use first_day::*;
 
+mod second_day;
+pub use second_day::*;
+
 mod generic_day;
 pub use generic_day::*;
 
