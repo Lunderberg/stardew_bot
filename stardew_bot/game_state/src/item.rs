@@ -147,18 +147,39 @@ impl ItemId {
     pub const IRON_AXE: Self = Self::new_const("(T)IronAxe");
     pub const GOLD_AXE: Self = Self::new_const("(T)GoldAxe");
     pub const IRIDIUM_AXE: Self = Self::new_const("(T)IridumAxe");
+    pub const AXES: [Self; 5] = [
+        Self::AXE,
+        Self::COPPER_AXE,
+        Self::IRON_AXE,
+        Self::GOLD_AXE,
+        Self::IRIDIUM_AXE,
+    ];
 
     pub const PICKAXE: Self = Self::new_const("(T)Pickaxe");
     pub const COPPER_PICKAXE: Self = Self::new_const("(T)CopperPickaxe");
     pub const IRON_PICKAXE: Self = Self::new_const("(T)IronPickaxe");
     pub const GOLD_PICKAXE: Self = Self::new_const("(T)GoldPickaxe");
     pub const IRIDIUM_PICKAXE: Self = Self::new_const("(T)IridumPickaxe");
+    pub const PICKAXES: [Self; 5] = [
+        Self::PICKAXE,
+        Self::COPPER_PICKAXE,
+        Self::IRON_PICKAXE,
+        Self::GOLD_PICKAXE,
+        Self::IRIDIUM_PICKAXE,
+    ];
 
     pub const HOE: Self = Self::new_const("(T)Hoe");
     pub const COPPER_HOE: Self = Self::new_const("(T)CopperHoe");
     pub const IRON_HOE: Self = Self::new_const("(T)IronHoe");
     pub const GOLD_HOE: Self = Self::new_const("(T)GoldHoe");
     pub const IRIDIUM_HOE: Self = Self::new_const("(T)IridumHoe");
+    pub const HOES: [Self; 5] = [
+        Self::HOE,
+        Self::COPPER_HOE,
+        Self::IRON_HOE,
+        Self::GOLD_HOE,
+        Self::IRIDIUM_HOE,
+    ];
 
     pub const WATERING_CAN: Self = Self::new_const("(T)WateringCan");
     pub const COPPER_WATERING_CAN: Self =
@@ -167,6 +188,13 @@ impl ItemId {
     pub const GOLD_WATERING_CAN: Self = Self::new_const("(T)GoldWateringCan");
     pub const IRIDIUM_WATERING_CAN: Self =
         Self::new_const("(T)IridumWateringCan");
+    pub const WATERING_CANS: [Self; 5] = [
+        Self::WATERING_CAN,
+        Self::COPPER_WATERING_CAN,
+        Self::IRON_WATERING_CAN,
+        Self::GOLD_WATERING_CAN,
+        Self::IRIDIUM_WATERING_CAN,
+    ];
 
     pub const SCYTHE: Self = Self::new_const("(W)47");
 
@@ -389,6 +417,12 @@ impl ItemId {
             350
         } else if *self == ItemId::ENERGY_TONIC {
             1000
+        } else if *self == ItemId::FIBERGLASS_ROD {
+            1800
+        } else if *self == ItemId::IRIDIUM_ROD {
+            7500
+        } else if *self == ItemId::BAIT {
+            5
         } else {
             todo!("Handle buy price for item {self}")
         }

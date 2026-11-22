@@ -1,6 +1,6 @@
 use env_var_flag::env_var_flag;
 use itertools::{Either, Itertools as _};
-use std::{borrow::Cow, fmt::Display};
+use std::{borrow::Cow, fmt::Display, ops::Range};
 
 use geometry::{CardinalDirection, Vector};
 
@@ -61,7 +61,7 @@ pub struct BubbleSearchResult {
     pub bubble_tile: Vector<isize>,
 
     /// When the bubbles will stop.
-    pub bubble_end_time: i32,
+    pub bubble_duration: Range<i32>,
 
     /// Where the player should stand in order to use the bubbles.
     pub player_tile: Vector<isize>,
@@ -959,18 +959,10 @@ impl Display for FishingLocation {
 pub(crate) fn search_for_bubbles(
     game_state: &GameState,
     bubble_room: impl Into<String>,
-) -> Result<Option<BubbleSearchResult>, Error> {
+) -> Result<impl Iterator<Item = BubbleSearchResult>, Error> {
     let bubble_room = bubble_room.into();
     let loc = game_state.get_room(&bubble_room)?;
     let player = &game_state.player;
-
-    let predictor = FishingBubblePredictor::new(game_state, &bubble_room)?;
-    let opt_bubbles = predictor.predict().into_iter().find(|bubbles| {
-        bubbles.duration.contains(&game_state.globals.in_game_time)
-    });
-    let Some(bubbles) = opt_bubbles else {
-        return Ok(None);
-    };
 
     let reachable = loc.pathfinding(&game_state.statics).reachable(
         if player.room_name == bubble_room {
@@ -980,35 +972,44 @@ pub(crate) fn search_for_bubbles(
         },
     );
 
-    let fishing_level = player.skills.fishing_level();
+    let predictor = FishingBubblePredictor::new(game_state, &bubble_room)?;
+    let iter = predictor.predict().into_iter().filter_map(move |bubbles| {
+        let fishing_level = player.skills.fishing_level();
 
-    let opt_stand_on = iter_fish_in_bubbles_offset(fishing_level)
-        .map(|offset| bubbles.tile + offset)
-        .filter(|to_stand| reachable.is_set(*to_stand))
-        .min_by_key(|to_stand| to_stand.chessboard_dist(bubbles.tile));
-    let Some(stand_on) = opt_stand_on else {
-        return Ok(None);
-    };
+        let opt_stand_on = iter_fish_in_bubbles_offset(fishing_level)
+            .map(|offset| bubbles.tile + offset)
+            .filter(|to_stand| reachable.is_set(*to_stand))
+            .min_by_key(|to_stand| {
+                let offset = (*to_stand - bubbles.tile).map(|x| x.abs());
+                let chebyshev = offset.right.max(offset.down);
+                let manhattan = offset.right + offset.down;
+                (chebyshev, manhattan)
+            });
+        let Some(stand_on) = opt_stand_on else {
+            return None;
+        };
 
-    let mut target_bobber = bubbles.tile.map(|i| i as f32);
+        let mut target_bobber = bubbles.tile.map(|i| i as f32);
 
-    // If the water is deeper just past the bubbles, aim for that
-    // tile, but still within the area that uses the bubbles.
-    let cast_dir = (bubbles.tile - stand_on).closest_cardinal_direction();
-    if predictor.dist_from_land(bubbles.tile)
-        < predictor.dist_from_land(bubbles.tile + cast_dir.offset())
-    {
-        let offset = cast_dir.offset().map(|i| i as f32) * 0.75;
-        target_bobber = target_bobber + offset;
-    }
+        // If the water is deeper just past the bubbles, aim for that
+        // tile, but still within the area that uses the bubbles.
+        let cast_dir = (bubbles.tile - stand_on).closest_cardinal_direction();
+        if predictor.dist_from_land(bubbles.tile)
+            < predictor.dist_from_land(bubbles.tile + cast_dir.offset())
+        {
+            let offset = cast_dir.offset().map(|i| i as f32) * 0.75;
+            target_bobber = target_bobber + offset;
+        }
 
-    Ok(Some(BubbleSearchResult {
-        bubble_room,
-        bubble_tile: bubbles.tile,
-        bubble_end_time: bubbles.duration.end,
-        player_tile: stand_on,
-        target_bobber,
-    }))
+        Some(BubbleSearchResult {
+            bubble_room: bubble_room.clone(),
+            bubble_tile: bubbles.tile,
+            bubble_duration: bubbles.duration,
+            player_tile: stand_on,
+            target_bobber,
+        })
+    });
+    Ok(iter)
 }
 
 /// Returns relative positions where the player may stand in order to

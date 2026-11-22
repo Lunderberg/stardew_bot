@@ -1,11 +1,11 @@
 use crate::{
-    Error, GameAction, LoadBaitTackleOntoFishingRod, SellToMerchantGoal,
+    Error, GameAction, GoToRoomGoal, LoadBaitTackleOntoFishingRod,
+    SellToMerchantGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId};
 
 use super::{
     BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, MenuCloser,
-    MovementGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult, LogicStackItem},
 };
 
@@ -144,11 +144,7 @@ impl UpgradeFishingRodGoal {
         }
 
         if upgraded_rod == ItemId::BAMBOO_POLE {
-            let goal = MovementGoal::new(
-                "Beach",
-                game_state.closest_entrance("Beach")?.into(),
-            )
-            .with_tolerance(1000.0);
+            let goal = GoToRoomGoal::new("Beach");
             Ok(Some(goal.into()))
         } else {
             let goal = BuyFromMerchantGoal::new("Buy Fish", upgraded_rod);

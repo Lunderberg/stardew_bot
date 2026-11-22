@@ -80,7 +80,11 @@ impl UpgradeToolGoal {
 
         let have_gp = game_state.player.current_money >= self.gp_cost();
 
-        let can_upgrade = have_gp && have_materials && exists_somewhere;
+        let in_game_time = game_state.globals.in_game_time;
+        let blacksmith_open = in_game_time > 900 && in_game_time < 1550;
+
+        let can_upgrade =
+            have_gp && have_materials && exists_somewhere && blacksmith_open;
 
         Ok(!can_upgrade)
     }
