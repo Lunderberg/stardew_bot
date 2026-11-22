@@ -548,7 +548,12 @@ impl FishOnceGoal {
     ) -> Option<CardinalDirection> {
         let target = self.target_bobber_pos?;
 
-        let offset = target - game_state.fishing.bobber_landing_pos;
+        let landing_pos = game_state
+            .fishing
+            .bobber_landing_pos
+            .map(|x| x / 64.0 - 0.5);
+
+        let offset = target - landing_pos;
         let facing = game_state.player.facing.offset().map(|i| i as f32);
         let perp = offset - facing * offset.dot(facing);
         Some(perp.closest_cardinal_direction())
