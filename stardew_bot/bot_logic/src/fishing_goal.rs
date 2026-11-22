@@ -557,7 +557,11 @@ impl FishOnceGoal {
 
 impl BotGoal for FishOnceGoal {
     fn description(&self) -> Cow<'static, str> {
-        "Fish once".into()
+        if let Some(target) = self.target_bobber_pos {
+            format!("Fish once at {target}").into()
+        } else {
+            "Fish once".into()
+        }
     }
 
     fn apply(
