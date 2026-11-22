@@ -130,10 +130,24 @@ impl BotGoal for UseItemOnTile {
                         .unwrap_or(true));
 
         let player_pos = player.center_pos();
-        if (requires_adjacent_tile && player_tile == self.tile)
-            || (requires_noncolliding_tile
-                && player_pos.chessboard_dist(self.tile.into()) < 1.0)
-        {
+        let requires_movement = 'requires_movement: {
+            if requires_adjacent_tile && player_tile == self.tile {
+                break 'requires_movement true;
+            }
+
+            if requires_noncolliding_tile {
+                let offset = player_pos - self.tile.map(|i| i as f32);
+                // Check for overlap between tile's bbox (64x64
+                // pixels) and player's bbox (48x32 pixels).
+                if offset.down.abs() < 0.75 && offset.right.abs() < 0.625 {
+                    break 'requires_movement true;
+                }
+            }
+
+            false
+        };
+
+        if requires_movement {
             // This tool requires the player to be standing adjacent
             // to the targeted tile, and cannot be used when standing
             // on the tile itself.  Move to an adjacent clear tile.
