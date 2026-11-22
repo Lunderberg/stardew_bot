@@ -47,6 +47,8 @@ pub struct Location {
     /// Which tiles have water.
     pub water_tiles: TileMap<bool>,
 
+    pub has_building_layer: TileMap<bool>,
+
     pub buildings: Vec<Building>,
 
     /// Which tiles are blocked by impassable tiles, either in the
@@ -64,6 +66,10 @@ pub struct Location {
     /// Which tiles are marked as not allowing furniture placement, by
     /// having the "NoFurniture" property in the "Back" layer.
     pub no_furniture: TileMap<bool>,
+
+    /// Which tiles are marked as not allowing fishing, by
+    /// having the "NoFishing" property in the "Back" layer.
+    pub no_fishing: TileMap<bool>,
 
     /// Tiles that can have some action performed on them.
     pub action_tiles: Vec<(Vector<isize>, String)>,
@@ -560,6 +566,7 @@ struct MapTileSheets {
     shadow: HashSet<(Pointer, usize)>,
     diggable: HashSet<(Pointer, usize)>,
     no_furniture: HashSet<(Pointer, usize)>,
+    no_fishing: HashSet<(Pointer, usize)>,
     tiles: Vec<MapTile>,
 }
 
@@ -1209,6 +1216,9 @@ impl Location {
                 let blocked = tiles.collect_blocked_tiles(*shape);
                 let diggable = tiles.collect_diggable_tiles(*shape);
                 let no_furniture = tiles.collect_no_furniture_tiles(*shape);
+                let no_fishing = tiles.collect_no_fishing_tiles(*shape);
+                let has_building_layer =
+                    tiles.collect_has_building_layer(*shape);
                 let action_tiles = tiles.collect_action_tiles();
                 let warps = warps
                     .iter()
@@ -1258,10 +1268,12 @@ impl Location {
                     items: items.clone(),
                     furniture: furniture.clone(),
                     water_tiles,
+                    has_building_layer,
                     buildings: buildings.clone(),
                     blocked,
                     diggable,
                     no_furniture,
+                    no_fishing,
                     action_tiles,
                     map_seats: map_seats.clone(),
                     characters: characters.clone(),
@@ -3170,6 +3182,9 @@ impl MapTileSheets {
                 "NoFurniture" => {
                     self.no_furniture.insert((tile_sheet, index));
                 }
+                "NoFishing" => {
+                    self.no_fishing.insert((tile_sheet, index));
+                }
                 _ => {}
             });
     }
@@ -3222,6 +3237,39 @@ impl MapTileSheets {
                         _ => false,
                     }
             })
+            .map(|tile| tile.location)
+            .for_each(|loc| {
+                map[loc] = true;
+            });
+        map
+    }
+
+    fn collect_no_fishing_tiles(&self, shape: Vector<isize>) -> TileMap<bool> {
+        let mut map = TileMap::empty(shape.right as usize, shape.down as usize);
+        self.tiles
+            .iter()
+            .filter(|tile| {
+                tile.properties.iter().any(|(key, _)| key == "NoFishing")
+                    || match tile.layer_num {
+                        0 => self.no_fishing.contains(&tile.lookup_key),
+                        _ => false,
+                    }
+            })
+            .map(|tile| tile.location)
+            .for_each(|loc| {
+                map[loc] = true;
+            });
+        map
+    }
+
+    fn collect_has_building_layer(
+        &self,
+        shape: Vector<isize>,
+    ) -> TileMap<bool> {
+        let mut map = TileMap::empty(shape.right as usize, shape.down as usize);
+        self.tiles
+            .iter()
+            .filter(|tile| tile.layer_num == 1)
             .map(|tile| tile.location)
             .for_each(|loc| {
                 map[loc] = true;

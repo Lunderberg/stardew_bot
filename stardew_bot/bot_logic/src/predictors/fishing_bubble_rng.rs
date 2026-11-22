@@ -10,6 +10,7 @@ pub struct FishingBubblePredictor {
     game_id: u32,
     days_played: u32,
     dist_from_land: TileMap<u8>,
+    may_contain_bubbles: TileMap<bool>,
 }
 
 pub struct FishingBubblePrediction {
@@ -36,8 +37,8 @@ impl FishingBubblePredictor {
             );
             loc.water_tiles
                 .iter_false()
-                .cartesian_product(-5..=5)
-                .cartesian_product(-5..=5)
+                .cartesian_product(-6..=6)
+                .cartesian_product(-6..=6)
                 .for_each(|((land, di), dj)| {
                     let offset = Vector::new(di, dj);
                     if let Some(min_dist) =
@@ -51,10 +52,32 @@ impl FishingBubblePredictor {
             dist_from_land
         };
 
+        let may_contain_bubbles = dist_from_land.imap(|tile, &dist| {
+            // Overpredicts, dist==2 doesn't actually occur.  My
+            // Chebyshev distance check is one larger than the game's
+            // `distanceToLand` check.
+            //
+            // let passes_dist_check = dist > 1 && dist < 5;
+
+            // Overpredicts, dist==6 doesn't actually occur in-game.
+            // This is what I think it should be, to match the game's
+            // `dist > 1 && dist < 5` condition, but doing so gives
+            // inaccurate results.
+            //
+            // let passes_dist_check = dist > 2 && dist < 6
+
+            let passes_dist_check = dist > 2 && dist < 5;
+
+            passes_dist_check
+                && loc.has_building_layer.is_unset(tile)
+                && loc.no_fishing.is_unset(tile)
+        });
+
         Ok(Self {
             game_id,
             days_played,
             dist_from_land,
+            may_contain_bubbles,
         })
     }
 
@@ -112,12 +135,7 @@ impl FishingBubblePredictor {
                             Vector::<isize>::new(i, j)
                         })
                         .filter(|_| start_bubbles)
-                        .find(|tile| {
-                            self.dist_from_land
-                                .get(*tile)
-                                .map(|&dist| dist > 1 && dist < 5)
-                                .unwrap_or(false)
-                        });
+                        .find(|tile| self.may_contain_bubbles.is_set(*tile));
 
                     if let Some(tile) = opt_new_bubbles {
                         current_bubbles = Some((tile, (hour, minute)));
