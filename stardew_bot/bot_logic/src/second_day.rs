@@ -7,8 +7,8 @@ use crate::{
     ActivateTile, BuyFromMerchantGoal, CheckAllMail, Error, FishOnceGoal,
     GameStateExt as _, GoToRoomGoal, InventoryGoal,
     LoadBaitTackleOntoFishingRod, LocationExt as _, MaintainStaminaGoal,
-    MovementGoal, SelectItemGoal, SellToMerchantGoal, UpgradeFishingRodGoal,
-    UpgradeToolGoal, UseItemOnTile, WaterCropsGoal,
+    MovementGoal, SellToMerchantGoal, UpgradeFishingRodGoal, UpgradeToolGoal,
+    UseItemOnTile, WaterCropsGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
@@ -278,11 +278,6 @@ impl BotGoal for SecondDay {
             }
         } else if let Some((tile, _)) = opt_furnace {
             return Ok(PickUpMachine::new(loc.name.clone(), tile).into());
-        }
-
-        let select_pole = SelectItemGoal::new(current_pole.id.clone());
-        if !select_pole.is_completed(game_state) {
-            return Ok(select_pole.into());
         }
 
         let fish_once =

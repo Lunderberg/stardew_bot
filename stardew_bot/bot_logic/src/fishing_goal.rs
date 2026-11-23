@@ -27,6 +27,11 @@ pub struct FishingGoal {
 
 pub struct FishOnceGoal {
     target_bobber_pos: Option<Vector<f32>>,
+    started_minigame: bool,
+}
+
+struct FishingMinigameGoal {
+    target_bobber_pos: Option<Vector<f32>>,
     started_fishing: bool,
     swapped_to_treasure: bool,
     exit_tick: Option<i32>,
@@ -374,11 +379,6 @@ impl BotGoal for FishingGoal {
             return Ok(BotGoalResult::Completed);
         }
 
-        let select_pole = SelectItemGoal::new(current_pole.id.clone());
-        if !select_pole.is_completed(game_state) {
-            return Ok(select_pole.into());
-        }
-
         if opt_bait_maker.is_none()
             && has_bait_maker
             && let Some((bait_maker_tile, _)) = self.loc.bait_maker()
@@ -462,13 +462,71 @@ impl BotGoal for FishingGoal {
     }
 }
 
+impl FishOnceGoal {
+    pub fn new() -> Self {
+        Self {
+            target_bobber_pos: None,
+            started_minigame: false,
+        }
+    }
+
+    pub fn target_bobber_pos(self, target_bobber_pos: Vector<f32>) -> Self {
+        Self {
+            target_bobber_pos: Some(target_bobber_pos),
+            ..self
+        }
+    }
+}
+
+impl BotGoal for FishOnceGoal {
+    fn description(&self) -> Cow<'static, str> {
+        if let Some(target) = self.target_bobber_pos {
+            format!("Fish once at {target}").into()
+        } else {
+            "Fish once".into()
+        }
+    }
+
+    fn apply(
+        &mut self,
+        game_state: &GameState,
+        _actions: &mut ActionCollector,
+    ) -> Result<BotGoalResult, Error> {
+        if self.started_minigame {
+            return Ok(BotGoalResult::Completed);
+        }
+
+        let opt_pole = game_state
+            .player
+            .inventory
+            .iter_items()
+            .filter(|item| item.as_fishing_rod().is_some())
+            .max_by_key(|item| {
+                item.as_fishing_rod().unwrap().num_attachment_slots
+            });
+        let Some(pole) = opt_pole else {
+            return Ok(BotGoalResult::Completed);
+        };
+
+        let select_pole = SelectItemGoal::new(pole.id.clone());
+        if !select_pole.is_completed(game_state) {
+            return Ok(select_pole.into());
+        }
+
+        self.started_minigame = true;
+        let minigame = FishingMinigameGoal::new()
+            .target_bobber_pos(self.target_bobber_pos);
+        Ok(minigame.into())
+    }
+}
+
 impl Default for FishOnceGoal {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl FishOnceGoal {
+impl FishingMinigameGoal {
     pub fn new() -> Self {
         Self {
             target_bobber_pos: None,
@@ -479,9 +537,12 @@ impl FishOnceGoal {
         }
     }
 
-    pub fn target_bobber_pos(self, target_bobber_pos: Vector<f32>) -> Self {
+    pub fn target_bobber_pos(
+        self,
+        target_bobber_pos: Option<Vector<f32>>,
+    ) -> Self {
         Self {
-            target_bobber_pos: Some(target_bobber_pos),
+            target_bobber_pos,
             ..self
         }
     }
@@ -560,13 +621,9 @@ impl FishOnceGoal {
     }
 }
 
-impl BotGoal for FishOnceGoal {
+impl BotGoal for FishingMinigameGoal {
     fn description(&self) -> Cow<'static, str> {
-        if let Some(target) = self.target_bobber_pos {
-            format!("Fish once at {target}").into()
-        } else {
-            "Fish once".into()
-        }
+        "Fishing minigame".into()
     }
 
     fn apply(
@@ -574,7 +631,6 @@ impl BotGoal for FishOnceGoal {
         game_state: &GameState,
         actions: &mut ActionCollector,
     ) -> Result<BotGoalResult, Error> {
-        let _ = actions;
         let fishing = &game_state.fishing;
 
         if let Some(menu) = game_state.chest_menu() {
@@ -604,6 +660,12 @@ impl BotGoal for FishOnceGoal {
             // been emptied out, or a first-geode popup that appeared from
             // a treasure chest.
             return Ok(cleanup.into());
+        }
+
+        if !fishing.is_holding_rod {
+            // We can't start fishing unless a fishing rod has been
+            // selected, which should be done by the parent goal.
+            return Ok(BotGoalResult::Completed);
         }
 
         if fishing.showing_treasure {
@@ -718,12 +780,6 @@ impl BotGoal for FishOnceGoal {
             if !self.wait_for_treasure_chest {
                 return Ok(BotGoalResult::Completed);
             }
-        } else if !fishing.is_holding_rod {
-            // No action required, since the rod isn't currently
-            // selected.  I think this might be a holdover from some
-            // of my earliest implementations, when fishing was the
-            // only thing the bot could do, so maybe this should
-            // return instead.
         } else if let Some(required_mouse_tile) =
             self.mouse_hover_tile(game_state)
             && game_state.inputs.mouse_tile_location != required_mouse_tile
