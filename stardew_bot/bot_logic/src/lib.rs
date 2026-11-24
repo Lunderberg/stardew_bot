@@ -30,6 +30,9 @@ pub use fishing_goal::*;
 mod load_up_fishing_rod;
 pub use load_up_fishing_rod::*;
 
+mod fish_in_bubbles;
+pub use fish_in_bubbles::*;
+
 mod upgrade_fishing_rod;
 pub use upgrade_fishing_rod::*;
 

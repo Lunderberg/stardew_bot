@@ -4,10 +4,11 @@ use game_state::{
 use geometry::Vector;
 
 use crate::{
-    ActivateTile, BuyFromMerchantGoal, CheckAllMail, Error, FishOnceGoal,
-    GameStateExt as _, GoToRoomGoal, InventoryGoal, LoadUpFishingRod,
-    LocationExt as _, MaintainStaminaGoal, MovementGoal, SellToMerchantGoal,
-    UpgradeFishingRodGoal, UpgradeToolGoal, UseItemOnTile, WaterCropsGoal,
+    ActivateTile, BuyFromMerchantGoal, CheckAllMail, Error, FishInBubbles,
+    FishOnceGoal, GameStateExt as _, GoToRoomGoal, InventoryGoal,
+    LoadUpFishingRod, LocationExt as _, MaintainStaminaGoal, MovementGoal,
+    SellToMerchantGoal, UpgradeFishingRodGoal, UpgradeToolGoal, UseItemOnTile,
+    WaterCropsGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
@@ -167,7 +168,7 @@ impl BotGoal for SecondDay {
 
         let opt_bubbles = ["Beach", "Mountain", "Forest", "Town"]
             .into_iter()
-            .map(|name| crate::search_for_bubbles(game_state, name))
+            .map(|name| FishInBubbles::next_bubbles(game_state, name))
             .collect::<Result<Vec<_>, _>>()?
             .into_iter()
             .flatten()
