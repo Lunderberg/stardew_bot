@@ -1,6 +1,5 @@
 use crate::{
-    Error, GameAction, GoToRoomGoal, LoadBaitTackleOntoFishingRod,
-    SellToMerchantGoal,
+    Error, GameAction, GoToRoomGoal, LoadUpFishingRod, SellToMerchantGoal,
 };
 use game_state::{GameState, ItemCategory, ItemId};
 
@@ -67,7 +66,7 @@ impl UpgradeFishingRodGoal {
                 return Ok(Some(discard.into()));
             }
 
-            let load = LoadBaitTackleOntoFishingRod::new();
+            let load = LoadUpFishingRod::new();
             if !load.is_completed(game_state) {
                 return Ok(Some(load.into()));
             }

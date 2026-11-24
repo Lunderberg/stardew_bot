@@ -5,10 +5,9 @@ use geometry::Vector;
 
 use crate::{
     ActivateTile, BuyFromMerchantGoal, CheckAllMail, Error, FishOnceGoal,
-    GameStateExt as _, GoToRoomGoal, InventoryGoal,
-    LoadBaitTackleOntoFishingRod, LocationExt as _, MaintainStaminaGoal,
-    MovementGoal, SellToMerchantGoal, UpgradeFishingRodGoal, UpgradeToolGoal,
-    UseItemOnTile, WaterCropsGoal,
+    GameStateExt as _, GoToRoomGoal, InventoryGoal, LoadUpFishingRod,
+    LocationExt as _, MaintainStaminaGoal, MovementGoal, SellToMerchantGoal,
+    UpgradeFishingRodGoal, UpgradeToolGoal, UseItemOnTile, WaterCropsGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
 };
 
@@ -132,7 +131,7 @@ impl BotGoal for SecondDay {
             return Ok(BotGoalResult::Completed);
         };
 
-        let load_bait = LoadBaitTackleOntoFishingRod::new().bait(ItemId::BAIT);
+        let load_bait = LoadUpFishingRod::new().bait(ItemId::BAIT);
         if !load_bait.is_completed(game_state) {
             return Ok(load_bait.into());
         }
