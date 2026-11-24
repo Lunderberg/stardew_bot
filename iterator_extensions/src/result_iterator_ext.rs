@@ -255,6 +255,39 @@ pub trait ResultIteratorExt: Iterator + Sized {
         }
         Ok(true)
     }
+
+    /// Return the maximum value from an iterator of results,
+    /// propagating any error found.
+    ///
+    /// * Before: Iterator of `Result<T,E>`
+    ///
+    /// * Func: Map from `&T` to a comparison key
+    ///
+    /// * After: Single value of type `Result<Option<T>,E>`
+    fn max_by_key_or_err<Func, T, V, E>(
+        self,
+        mut func: Func,
+    ) -> Result<Option<T>, E>
+    where
+        Self: Sized,
+        Self: Iterator<Item = Result<T, E>>,
+        Func: FnMut(&T) -> V,
+        V: Ord,
+    {
+        let mut max_item: Option<(T, V)> = None;
+        for res in self {
+            let item = res?;
+            let value = func(&item);
+            let is_best = match &max_item {
+                None => true,
+                Some((_, prev)) => &value > prev,
+            };
+            if is_best {
+                max_item = Some((item, value));
+            }
+        }
+        Ok(max_item.map(|(item, _)| item))
+    }
 }
 
 impl<Iter> ResultIteratorExt for Iter where Iter: Iterator {}

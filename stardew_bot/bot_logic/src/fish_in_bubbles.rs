@@ -4,6 +4,7 @@ use game_state::GameState;
 use geometry::{CardinalDirection, Vector};
 
 use env_var_flag::env_var_flag;
+use iterator_extensions::ResultIteratorExt as _;
 use itertools::{Either, Itertools as _};
 
 use crate::{
@@ -35,11 +36,57 @@ pub struct FishInBubbles {
     pub target_bobber: Vector<f32>,
 }
 
+/// Returns the time in minutes between two timestamps
+///
+/// Stardew stores times throughout the day as (100*hour + minute), so
+/// that they show up as a human-readable HHMM when printed.  However,
+/// this means that computing the difference between two times
+/// requires separating out the hours/minutes from each, then
+/// recombining.
+///
+/// TODO: Make a wrapper type to store all times, provide
+/// `std::ops::Sub` for it.
+pub fn tdiff(time_a: i32, time_b: i32) -> i32 {
+    let total_minutes = |time: i32| -> i32 {
+        let hours = time / 100;
+        let minutes = time % 100;
+        hours * 60 + minutes
+    };
+    total_minutes(time_a) - total_minutes(time_b)
+}
+
 impl FishInBubbles {
+    pub fn choose_bubbles(
+        game_state: &GameState,
+        rooms: impl IntoIterator<Item: Into<String>>,
+    ) -> Result<Option<Self>, Error> {
+        rooms
+            .into_iter()
+            .map(|name| Self::next_bubbles(game_state, name))
+            .flatten_ok()
+            .max_by_key_or_err(|bubbles| {
+                let in_game_time = game_state.globals.in_game_time;
+
+                let in_same_room =
+                    bubbles.bubble_room == game_state.player.room_name;
+                let bubble_time = tdiff(
+                    bubbles.bubble_duration.end,
+                    in_game_time.max(bubbles.bubble_duration.start),
+                );
+                let wait_time = tdiff(
+                    bubbles.bubble_duration.start,
+                    in_game_time.min(bubbles.bubble_duration.start),
+                );
+
+                // TODO: Include distance traveled in this metric.
+                (in_same_room && wait_time < 20, bubble_time - wait_time * 3)
+            })
+    }
+
     pub fn next_bubbles(
         game_state: &GameState,
         bubble_room: impl Into<String>,
-    ) -> Result<impl Iterator<Item = Self>, Error> {
+    ) -> Result<Option<Self>, Error> {
         let bubble_room = bubble_room.into();
         let loc = game_state.get_room(&bubble_room)?;
         let player = &game_state.player;
@@ -52,45 +99,52 @@ impl FishInBubbles {
             },
         );
 
+        let in_game_time = game_state.globals.in_game_time;
+
         let predictor = FishingBubblePredictor::new(game_state, &bubble_room)?;
-        let iter = predictor.predict().into_iter().filter_map(move |bubbles| {
-            let fishing_level = player.skills.fishing_level();
+        let opt_bubbles = predictor
+            .predict()
+            .into_iter()
+            .filter(|bubbles| in_game_time < bubbles.duration.end)
+            .find_map(move |bubbles| {
+                let fishing_level = player.skills.fishing_level();
 
-            let opt_stand_on = iter_fish_in_bubbles_offset(fishing_level)
-                .map(|offset| bubbles.tile + offset)
-                .filter(|to_stand| reachable.is_set(*to_stand))
-                .min_by_key(|to_stand| {
-                    let offset = (*to_stand - bubbles.tile).map(|x| x.abs());
-                    let chebyshev = offset.right.max(offset.down);
-                    let manhattan = offset.right + offset.down;
-                    (chebyshev, manhattan)
-                });
-            let Some(stand_on) = opt_stand_on else {
-                return None;
-            };
+                let opt_stand_on = iter_fish_in_bubbles_offset(fishing_level)
+                    .map(|offset| bubbles.tile + offset)
+                    .filter(|to_stand| reachable.is_set(*to_stand))
+                    .min_by_key(|to_stand| {
+                        let offset =
+                            (*to_stand - bubbles.tile).map(|x| x.abs());
+                        let chebyshev = offset.right.max(offset.down);
+                        let manhattan = offset.right + offset.down;
+                        (chebyshev, manhattan)
+                    });
+                let Some(stand_on) = opt_stand_on else {
+                    return None;
+                };
 
-            let mut target_bobber = bubbles.tile.map(|i| i as f32);
+                let mut target_bobber = bubbles.tile.map(|i| i as f32);
 
-            // If the water is deeper just past the bubbles, aim for that
-            // tile, but still within the area that uses the bubbles.
-            let cast_dir =
-                (bubbles.tile - stand_on).closest_cardinal_direction();
-            if predictor.dist_from_land(bubbles.tile)
-                < predictor.dist_from_land(bubbles.tile + cast_dir.offset())
-            {
-                let offset = cast_dir.offset().map(|i| i as f32) * 0.75;
-                target_bobber = target_bobber + offset;
-            }
+                // If the water is deeper just past the bubbles, aim for that
+                // tile, but still within the area that uses the bubbles.
+                let cast_dir =
+                    (bubbles.tile - stand_on).closest_cardinal_direction();
+                if predictor.dist_from_land(bubbles.tile)
+                    < predictor.dist_from_land(bubbles.tile + cast_dir.offset())
+                {
+                    let offset = cast_dir.offset().map(|i| i as f32) * 0.75;
+                    target_bobber = target_bobber + offset;
+                }
 
-            Some(FishInBubbles {
-                bubble_room: bubble_room.clone(),
-                bubble_tile: bubbles.tile,
-                bubble_duration: bubbles.duration,
-                player_tile: stand_on,
-                target_bobber,
-            })
-        });
-        Ok(iter)
+                Some(FishInBubbles {
+                    bubble_room: bubble_room.clone(),
+                    bubble_tile: bubbles.tile,
+                    bubble_duration: bubbles.duration,
+                    player_tile: stand_on,
+                    target_bobber,
+                })
+            });
+        Ok(opt_bubbles)
     }
 }
 

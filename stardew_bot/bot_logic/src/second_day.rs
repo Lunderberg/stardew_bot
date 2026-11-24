@@ -10,6 +10,7 @@ use crate::{
     SellToMerchantGoal, UpgradeFishingRodGoal, UpgradeToolGoal, UseItemOnTile,
     WaterCropsGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
+    tdiff,
 };
 
 pub struct SecondDay;
@@ -166,39 +167,18 @@ impl BotGoal for SecondDay {
             }
         }
 
-        let opt_bubbles = ["Beach", "Mountain", "Forest", "Town"]
-            .into_iter()
-            .map(|name| FishInBubbles::next_bubbles(game_state, name))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .flatten()
-            .filter(|bubbles| in_game_time < bubbles.bubble_duration.end)
-            .map(|bubbles| {
-                let tdiff = |time_a: i32, time_b: i32| -> i32 {
-                    let delta_hours = (time_a / 100) - (time_b / 100);
-                    let delta_minutes = (time_a % 100) - (time_b % 100);
-                    delta_hours * 60 + delta_minutes
-                };
-                let bubble_time = tdiff(
-                    bubbles.bubble_duration.end,
-                    in_game_time.max(bubbles.bubble_duration.start),
-                );
-                let wait_time = tdiff(
-                    bubbles.bubble_duration.start.max(in_game_time),
-                    in_game_time,
-                );
-                (bubbles, bubble_time, wait_time)
-            })
-            .max_by_key(|(bubbles, bubble_time, wait_time)| {
-                (
-                    bubbles.bubble_room == player.room_name && *wait_time < 20,
-                    *bubble_time - *wait_time * 3,
-                )
-            });
-
-        let Some((bubbles, _, wait_time)) = opt_bubbles else {
+        let Some(bubbles) = FishInBubbles::choose_bubbles(
+            game_state,
+            ["Beach", "Mountain", "Forest", "Town"],
+        )?
+        else {
             return Ok(BotGoalResult::InProgress);
         };
+        let wait_time = tdiff(
+            bubbles.bubble_duration.start,
+            in_game_time.min(bubbles.bubble_duration.start),
+        );
+
         let loc = game_state.get_room(&bubbles.bubble_room)?;
 
         if current_pole.id == ItemId::FIBERGLASS_ROD
