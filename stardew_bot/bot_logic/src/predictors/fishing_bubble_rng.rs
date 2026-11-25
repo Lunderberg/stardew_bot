@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use game_state::{GameState, TileMap};
+use game_state::{GameState, TileMap, TimeDelta, Timestamp};
 use geometry::Vector;
 use itertools::Itertools as _;
 
@@ -18,7 +18,7 @@ pub struct FishingBubblePrediction {
     pub tile: Vector<isize>,
 
     /// The start/end time of the bubbles.
-    pub duration: Range<i32>,
+    pub duration: Range<Timestamp>,
 }
 
 impl FishingBubblePredictor {
@@ -90,32 +90,32 @@ impl FishingBubblePredictor {
 
     pub fn predict(&self) -> Vec<FishingBubblePrediction> {
         // The tile of bubbles, along with the time at which they started.
-        let mut current_bubbles: Option<(Vector<isize>, (i32, i32))> = None;
+        let mut current_bubbles: Option<(Vector<isize>, Timestamp)> = None;
         let mut results = Vec::<FishingBubblePrediction>::new();
 
         (6..=25)
             .flat_map(|hour| (0..6).map(move |ten_min| (hour, ten_min * 10)))
-            .for_each(|(hour, minute)| {
-                let time = hour * 100 + minute;
+            .map(|(hour, minute)| {
+                Timestamp::new(600)
+                    + TimeDelta::from_minutes(hour * 60 + minute)
+            })
+            .for_each(|time| {
                 let mut rng = game_state::SeededRng::from_stardew_seed([
                     self.days_played as f64,
                     (self.game_id / 2) as f64,
-                    time as f64,
+                    time.raw() as f64,
                     self.dist_from_land.width() as f64,
                 ]);
 
-                if let Some((tile, (start_hour, start_minute))) =
-                    current_bubbles
-                {
-                    let elapsed_minutes =
-                        (hour - start_hour) * 60 + (minute - start_minute);
-                    let stop_chance = 0.1 + (elapsed_minutes as f32) / 1800.0;
+                if let Some((tile, start_time)) = current_bubbles {
+                    let elapsed = time - start_time;
+                    let stop_chance = 0.1 + (elapsed.minutes() as f32) / 1800.0;
                     let frenzy = false; // TODO: Predict fish-frenzies.
-                    let min_duration = if frenzy { 120 } else { 60 };
+                    let min_duration =
+                        TimeDelta::from_minutes(if frenzy { 120 } else { 60 });
                     let bubbles_stop = rng.rand_float() < stop_chance
-                        && elapsed_minutes > min_duration;
+                        && elapsed > min_duration;
                     if bubbles_stop {
-                        let start_time = start_hour * 100 + start_minute;
                         results.push(FishingBubblePrediction {
                             tile,
                             duration: start_time..time,
@@ -138,14 +138,13 @@ impl FishingBubblePredictor {
                         .find(|tile| self.may_contain_bubbles.is_set(*tile));
 
                     if let Some(tile) = opt_new_bubbles {
-                        current_bubbles = Some((tile, (hour, minute)));
+                        current_bubbles = Some((tile, time));
                     }
                 }
             });
 
-        if let Some((tile, (start_hours, start_minutes))) = current_bubbles {
-            let start_time = start_hours * 100 + start_minutes;
-            let end_time = 2600;
+        if let Some((tile, start_time)) = current_bubbles {
+            let end_time = Timestamp::new(2600);
             results.push(FishingBubblePrediction {
                 tile,
                 duration: start_time..end_time,

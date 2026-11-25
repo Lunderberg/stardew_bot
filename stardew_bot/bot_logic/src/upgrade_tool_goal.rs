@@ -1,4 +1,4 @@
-use game_state::{GameState, Item, ItemId};
+use game_state::{GameState, Item, ItemId, Timestamp};
 
 use crate::{
     Error, GameAction, GameStateExt as _, GoToActionTile, InventoryGoal,
@@ -80,8 +80,10 @@ impl UpgradeToolGoal {
 
         let have_gp = game_state.player.current_money >= self.gp_cost();
 
-        let in_game_time = game_state.globals.in_game_time;
-        let blacksmith_open = in_game_time > 900 && in_game_time < 1550;
+        let time_open = Timestamp::new(900);
+        let time_close = Timestamp::new(1550);
+        let blacksmith_open =
+            (time_open..time_close).contains(&game_state.globals.in_game_time);
 
         let can_upgrade =
             have_gp && have_materials && exists_somewhere && blacksmith_open;

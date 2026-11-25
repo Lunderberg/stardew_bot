@@ -1,4 +1,4 @@
-use game_state::GameState;
+use game_state::{GameState, Timestamp};
 
 use crate::Error;
 
@@ -7,23 +7,18 @@ use super::bot_logic::{ActionCollector, BotGoal, BotGoalResult};
 pub struct WaitUntilTimeOfDay {
     /// Uses the same interpretation as
     /// `GlobalGameState.in_game_time`.
-    time_of_day: i32,
+    time_of_day: Timestamp,
 }
 
 impl WaitUntilTimeOfDay {
-    pub fn new(time_of_day: i32) -> Self {
+    pub fn new(time_of_day: Timestamp) -> Self {
         Self { time_of_day }
     }
 }
 
 impl BotGoal for WaitUntilTimeOfDay {
     fn description(&self) -> std::borrow::Cow<'static, str> {
-        format!(
-            "Wait until {:02}:{:02}",
-            self.time_of_day / 100,
-            self.time_of_day % 100
-        )
-        .into()
+        format!("Wait until {}", self.time_of_day).into()
     }
 
     fn apply(

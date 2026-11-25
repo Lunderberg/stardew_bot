@@ -4,6 +4,9 @@ pub use error::Error;
 mod game_state;
 pub use game_state::{GameState, GameStateReader};
 
+mod timestamp;
+pub use timestamp::{TimeDelta, Timestamp};
+
 mod item_set;
 pub use item_set::ItemSet;
 

@@ -1,4 +1,4 @@
-use game_state::{Bundle, GameState, Item, ItemId, Menu};
+use game_state::{Bundle, GameState, Item, ItemId, Menu, Timestamp};
 use itertools::Itertools as _;
 
 use crate::{
@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub struct TurnInBundlesGoal {
-    stop_time: i32,
+    stop_time: Timestamp,
 }
 
 impl Default for TurnInBundlesGoal {
@@ -19,7 +19,9 @@ impl Default for TurnInBundlesGoal {
 
 impl TurnInBundlesGoal {
     pub fn new() -> Self {
-        Self { stop_time: 1100 }
+        Self {
+            stop_time: 1100.into(),
+        }
     }
 
     fn to_turn_in<'a>(

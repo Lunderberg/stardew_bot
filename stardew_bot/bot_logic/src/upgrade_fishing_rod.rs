@@ -1,7 +1,7 @@
 use crate::{
     Error, GameAction, GoToRoomGoal, LoadUpFishingRod, SellToMerchantGoal,
 };
-use game_state::{GameState, ItemCategory, ItemId};
+use game_state::{GameState, ItemCategory, ItemId, Timestamp};
 
 use super::{
     BuyFromMerchantGoal, DiscardItemGoal, GameStateExt as _, MenuCloser,
@@ -188,7 +188,9 @@ impl UpgradeFishingRodGoal {
         let closed_today = days_played == 1 || days_played % 7 == 6;
 
         let in_game_time = game_state.globals.in_game_time;
-        !closed_today && (900..1700).contains(&in_game_time)
+        let open_time = Timestamp::new(900);
+        let close_time = Timestamp::new(1700);
+        !closed_today && (open_time..close_time).contains(&in_game_time)
     }
 }
 

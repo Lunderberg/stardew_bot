@@ -10,7 +10,7 @@ use crate::{
 };
 use game_state::{
     GameState, ItemCategory, ItemId, MineralKind, ObjectKind, SeededRng,
-    StoneKind, TileMap,
+    StoneKind, TileMap, TimeDelta, Timestamp,
 };
 
 use super::{
@@ -28,7 +28,7 @@ pub struct MineDelvingGoal {
     keep_previous_inventory: bool,
 
     /// Time at which mining should stop.
-    stop_time: i32,
+    stop_time: Timestamp,
 }
 
 struct GoToDepth {
@@ -46,7 +46,7 @@ struct SmeltingPlan {
 
 struct MineSingleLevel {
     mineshaft_level: i32,
-    stop_time: i32,
+    stop_time: Timestamp,
 }
 
 struct MineNearbyOre {
@@ -317,7 +317,7 @@ impl MineDelvingGoal {
     pub fn new() -> Self {
         Self {
             keep_previous_inventory: false,
-            stop_time: 2600,
+            stop_time: 2600.into(),
         }
     }
 
@@ -331,8 +331,11 @@ impl MineDelvingGoal {
         }
     }
 
-    pub fn stop_time(self, stop_time: i32) -> Self {
-        Self { stop_time, ..self }
+    pub fn stop_time(self, stop_time: impl Into<Timestamp>) -> Self {
+        Self {
+            stop_time: stop_time.into(),
+            ..self
+        }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> Result<bool, Error> {
@@ -621,7 +624,8 @@ impl MineDelvingGoal {
             .with(ItemId::OMNI_GEODE.clone().with_count(1000));
 
         let prepare = if game_state.globals.in_game_time
-            >= 2200.min(self.stop_time - 100)
+            >= Timestamp::new(2200)
+                .min(self.stop_time - TimeDelta::from_hours(1))
         {
             // If it's close to the end of the day, grab items that
             // should be brought back to the farm for the next day.

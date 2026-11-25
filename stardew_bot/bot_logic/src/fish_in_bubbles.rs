@@ -1,6 +1,6 @@
 use std::ops::Range;
 
-use game_state::GameState;
+use game_state::{GameState, TimeDelta, Timestamp};
 use geometry::{CardinalDirection, Vector};
 
 use env_var_flag::env_var_flag;
@@ -20,7 +20,7 @@ pub struct FishInBubbles {
     pub bubble_tile: Vector<isize>,
 
     /// When the bubbles will start/stop.
-    pub bubble_duration: Range<i32>,
+    pub bubble_duration: Range<Timestamp>,
 
     /// Where the player should stand in order to use the bubbles.
     pub player_tile: Vector<isize>,
@@ -34,25 +34,6 @@ pub struct FishInBubbles {
     /// bobber's center, so this allows us to catch slightly better
     /// fish while still using the bubbles.
     pub target_bobber: Vector<f32>,
-}
-
-/// Returns the time in minutes between two timestamps
-///
-/// Stardew stores times throughout the day as (100*hour + minute), so
-/// that they show up as a human-readable HHMM when printed.  However,
-/// this means that computing the difference between two times
-/// requires separating out the hours/minutes from each, then
-/// recombining.
-///
-/// TODO: Make a wrapper type to store all times, provide
-/// `std::ops::Sub` for it.
-pub fn tdiff(time_a: i32, time_b: i32) -> i32 {
-    let total_minutes = |time: i32| -> i32 {
-        let hours = time / 100;
-        let minutes = time % 100;
-        hours * 60 + minutes
-    };
-    total_minutes(time_a) - total_minutes(time_b)
 }
 
 impl FishInBubbles {
@@ -69,17 +50,16 @@ impl FishInBubbles {
 
                 let in_same_room =
                     bubbles.bubble_room == game_state.player.room_name;
-                let bubble_time = tdiff(
-                    bubbles.bubble_duration.end,
-                    in_game_time.max(bubbles.bubble_duration.start),
-                );
-                let wait_time = tdiff(
-                    bubbles.bubble_duration.start,
-                    in_game_time.min(bubbles.bubble_duration.start),
-                );
+                let bubble_time = bubbles.bubble_duration.end
+                    - in_game_time.max(bubbles.bubble_duration.start);
+                let wait_time = bubbles.bubble_duration.start
+                    - in_game_time.min(bubbles.bubble_duration.start);
 
                 // TODO: Include distance traveled in this metric.
-                (in_same_room && wait_time < 20, bubble_time - wait_time * 3)
+                (
+                    in_same_room && wait_time < TimeDelta::from_minutes(20),
+                    bubble_time - wait_time * 3,
+                )
             })
     }
 

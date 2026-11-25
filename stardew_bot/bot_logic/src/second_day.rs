@@ -1,5 +1,6 @@
 use game_state::{
     CraftingMachine, GameState, Item, ItemCategory, ItemId, Location,
+    TimeDelta, Timestamp,
 };
 use geometry::Vector;
 
@@ -10,7 +11,6 @@ use crate::{
     SellToMerchantGoal, UpgradeFishingRodGoal, UpgradeToolGoal, UseItemOnTile,
     WaterCropsGoal,
     bot_logic::{ActionCollector, BotGoal, BotGoalResult},
-    tdiff,
 };
 
 pub struct SecondDay;
@@ -49,7 +49,7 @@ impl BotGoal for SecondDay {
             return Ok(goal.into());
         }
 
-        if player.room_name == "Farm" && in_game_time < 800 {
+        if player.room_name == "Farm" && in_game_time < Timestamp::new(800) {
             let opt_furnace = farm.objects.iter().find_map(|obj| {
                 obj.kind.as_furnace().map(|furnace| (obj.tile, furnace))
             });
@@ -174,10 +174,8 @@ impl BotGoal for SecondDay {
         else {
             return Ok(BotGoalResult::InProgress);
         };
-        let wait_time = tdiff(
-            bubbles.bubble_duration.start,
-            in_game_time.min(bubbles.bubble_duration.start),
-        );
+        let wait_time = bubbles.bubble_duration.start
+            - in_game_time.min(bubbles.bubble_duration.start);
 
         let loc = game_state.get_room(&bubbles.bubble_room)?;
 
@@ -193,8 +191,9 @@ impl BotGoal for SecondDay {
             }
         }
 
-        if wait_time > 20 && player.inventory.num_empty_slots() < 5
-            || wait_time > 60
+        if wait_time > TimeDelta::from_minutes(20)
+            && player.inventory.num_empty_slots() < 5
+            || wait_time > TimeDelta::from_minutes(60)
         {
             let store_excess = InventoryGoal::empty()
                 .stamina_recovery_slots(2)

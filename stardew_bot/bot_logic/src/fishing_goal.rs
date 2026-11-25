@@ -8,7 +8,9 @@ use crate::{
     SellToMerchantGoal, StepCountForLuck, UseItem, UseItemOnTile,
     WaitUntilTimeOfDay,
 };
-use game_state::{GameState, Inventory, Item, ItemCategory, ItemId, Key};
+use game_state::{
+    GameState, Inventory, Item, ItemCategory, ItemId, Key, TimeDelta, Timestamp,
+};
 
 use super::{
     ActivateTile, OrganizeInventoryGoal, UpgradeFishingRodGoal,
@@ -18,7 +20,7 @@ use super::{
 
 pub struct FishingGoal {
     loc: FishingLocation,
-    stop_time: i32,
+    stop_time: Timestamp,
 }
 
 pub struct FishOnceGoal {
@@ -53,12 +55,15 @@ impl FishingGoal {
     pub fn new(loc: FishingLocation) -> Self {
         Self {
             loc,
-            stop_time: 2700,
+            stop_time: Timestamp::new(2700),
         }
     }
 
-    pub fn stop_time(self, stop_time: i32) -> Self {
-        Self { stop_time, ..self }
+    pub fn stop_time(self, stop_time: impl Into<Timestamp>) -> Self {
+        Self {
+            stop_time: stop_time.into(),
+            ..self
+        }
     }
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
@@ -303,13 +308,13 @@ impl BotGoal for FishingGoal {
         if fishing_rod.num_attachment_slots > 0 {
             let opt_bait = fishing_rod.bait.as_ref();
 
-            if in_game_time < 1700
+            if in_game_time < Timestamp::new(1700)
                 && opt_bait
                     .map(|bait| {
                         bait.is_same_item(&ItemId::BAIT)
                             && bait.count < 150
                             && self.loc == FishingLocation::OceanByWilly
-                            && in_game_time > 1630
+                            && in_game_time > Timestamp::new(1630)
                     })
                     .unwrap_or(true)
                 && (opt_bait_maker.is_none() && !has_bait_maker)
@@ -388,7 +393,8 @@ impl BotGoal for FishingGoal {
 
             if num_preferred_bait == 0 && bait_maker.held_item.is_some() {
                 let goal = WaitUntilTimeOfDay::new(
-                    game_state.globals.in_game_time + 10,
+                    game_state.globals.in_game_time
+                        + TimeDelta::from_minutes(10),
                 );
                 return Ok(goal.into());
             }
@@ -408,7 +414,9 @@ impl BotGoal for FishingGoal {
             return Ok(read.into());
         }
 
-        if self.stop_time > 2530 && in_game_time > 2000 {
+        if self.stop_time > Timestamp::new(2530)
+            && in_game_time > Timestamp::new(2000)
+        {
             // If there isn't enough time to passively manipulate luck
             // at the end of the day, actively walk into a wall to
             // manipulate luck.

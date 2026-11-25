@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use geometry::{Rectangle, Vector};
 
 use crate::{Error, GameAction, GoToRoomGoal, LocationExt as _, MovementGoal};
-use game_state::{GameState, ItemId, ObjectKind, SeededRng};
+use game_state::{GameState, ItemId, ObjectKind, SeededRng, Timestamp};
 
 use super::{
     InventoryGoal, MaintainStaminaGoal, UseItemOnTile,
@@ -34,7 +34,7 @@ pub struct ClayFarmingGoal {
     // goal, since an interrupted goal wouldn't be able to clean up
     // after itself.
     stop_at_stamina: f32,
-    stop_at_time: Option<i32>,
+    stop_at_time: Option<Timestamp>,
     hard_stop: bool,
 
     /// The path to be followed in order to pick up the remaining
@@ -140,9 +140,9 @@ impl ClayFarmingGoal {
         }
     }
 
-    pub fn stop_at_time(self, time: i32) -> Self {
+    pub fn stop_at_time(self, time: impl Into<Timestamp>) -> Self {
         Self {
-            stop_at_time: Some(time),
+            stop_at_time: Some(time.into()),
             ..self
         }
     }

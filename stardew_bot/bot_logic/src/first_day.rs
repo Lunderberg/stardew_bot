@@ -10,7 +10,8 @@ use crate::{
     predictors::FarmCoalRockPredictor,
 };
 use game_state::{
-    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, TreeKind,
+    CropPhase, GameState, ItemCategory, ItemId, ObjectKind, Season, Timestamp,
+    TreeKind,
 };
 
 use super::{
@@ -49,7 +50,7 @@ impl BotGoal for FirstDay {
 
         let farm = game_state.get_room("Farm")?;
         let farmhouse = game_state.get_room("FarmHouse")?;
-        if in_game_time < 630
+        if in_game_time < Timestamp::new(630)
             && let Some(chair_loc) = farmhouse
                 .furniture
                 .iter()
@@ -176,7 +177,8 @@ impl BotGoal for FirstDay {
 
         let clay_farming = ClayFarmingGoal::new().stop_at_time(1610);
         if player.room_name == "Beach"
-            && (player.current_stamina > 4.0 || in_game_time > 1330)
+            && (player.current_stamina > 4.0
+                || in_game_time > Timestamp::new(1330))
             && !clay_farming.is_completed(game_state)?
         {
             return Ok(clay_farming.into());
@@ -214,7 +216,8 @@ impl BotGoal for FirstDay {
                     player.inventory.count_item(ItemId::COPPER_ORE) as i32
                 )
                 .max(0);
-        if current_money < required_cash && in_game_time < 1630 {
+        if current_money < required_cash && in_game_time < Timestamp::new(1630)
+        {
             let to_sell =
                 ((required_cash - current_money) as usize).div_ceil(20);
             let to_keep = player
@@ -240,7 +243,7 @@ impl BotGoal for FirstDay {
             ItemId::ENERGY_TONIC.with_count(1),
         );
         if player.current_stamina < 10.0
-            && in_game_time < 1030
+            && in_game_time < Timestamp::new(1030)
             && !goal.is_completed(game_state)?
         {
             return Ok(goal
@@ -266,7 +269,7 @@ impl BotGoal for FirstDay {
             "Blacksmith",
             ItemId::COPPER_ORE.with_count(45),
         );
-        if in_game_time < 1530
+        if in_game_time < Timestamp::new(1530)
             && current_money >= 45 * 75
             && !goal.is_completed(game_state)?
         {
@@ -280,7 +283,9 @@ impl BotGoal for FirstDay {
         // much as we can at that point.
         let goal =
             BuyFromMerchantGoal::new("Saloon", ItemId::SALAD.with_count(10));
-        if goal.item_count(game_state)? < 5 && in_game_time < 1900 {
+        if goal.item_count(game_state)? < 5
+            && in_game_time < Timestamp::new(1900)
+        {
             return Ok(goal.into());
         }
 
@@ -460,7 +465,8 @@ impl BotGoal for FirstDay {
         let should_ship_clay = |game_state: &GameState| -> bool {
             let current_clay =
                 game_state.player.inventory.count_item(&ItemId::CLAY);
-            current_clay > 20 && game_state.globals.in_game_time > 2400
+            current_clay > 20
+                && game_state.globals.in_game_time > Timestamp::new(2400)
         };
 
         if should_ship_clay(game_state) {

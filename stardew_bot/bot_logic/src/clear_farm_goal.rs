@@ -5,7 +5,7 @@ use itertools::Itertools as _;
 
 use crate::{ClearTreeGoal, Error, FarmPlan, MovementGoal};
 use game_state::{
-    GameState, ItemId, ObjectKind, ResourceClumpKind, Tree, TreeKind,
+    GameState, ItemId, ObjectKind, ResourceClumpKind, Timestamp, Tree, TreeKind,
 };
 
 use super::{
@@ -15,7 +15,7 @@ use super::{
 };
 
 pub struct ClearFarmGoal {
-    stop_time: i32,
+    stop_time: Timestamp,
     clear_trees: bool,
 
     /// Clear trees types that are added by Stardew Valley Expanded.
@@ -47,7 +47,7 @@ impl Default for ClearFarmGoal {
 impl ClearFarmGoal {
     pub fn new() -> Self {
         Self {
-            stop_time: 2600,
+            stop_time: Timestamp::new(2600),
             priority_tiles: HashSet::new(),
             clear_trees: false,
             clear_expanded_trees: false,
@@ -60,8 +60,11 @@ impl ClearFarmGoal {
         }
     }
 
-    pub fn stop_time(self, stop_time: i32) -> Self {
-        Self { stop_time, ..self }
+    pub fn stop_time(self, stop_time: impl Into<Timestamp>) -> Self {
+        Self {
+            stop_time: stop_time.into(),
+            ..self
+        }
     }
 
     pub fn use_priority_tiles(self, use_priority_tiles: bool) -> Self {

@@ -4,7 +4,7 @@ use crate::{
     Error, GameAction, GameStateExt as _, ItemIterExt as _, StopMovingGoal,
     predictors::StepCountPredictor,
 };
-use game_state::{GameState, ItemId};
+use game_state::{GameState, ItemId, Timestamp};
 
 use super::{
     LocationExt as _,
@@ -18,12 +18,12 @@ use super::{
 pub struct StepCountForLuck {
     /// The time in the day when the steps should start being checked.
     /// Defaults to 2500 (1:00 AM).
-    start_time_without_gift: i32,
+    start_time_without_gift: Timestamp,
 
     /// The time in the day when the steps should start being checked,
     /// on days when a gift is being manipulated.  Defaults to 1300
     /// (1:00 PM).
-    start_time_with_gift: i32,
+    start_time_with_gift: Timestamp,
 
     /// The maximum number of steps that may be taken to manipulate
     /// the step counter, when not manipulating for a gift.
@@ -74,8 +74,8 @@ impl Default for StepCountForLuck {
 impl StepCountForLuck {
     pub fn new() -> Self {
         Self {
-            start_time_with_gift: 1300,
-            start_time_without_gift: 2500,
+            start_time_with_gift: 1300.into(),
+            start_time_without_gift: 2500.into(),
             max_lookahead_without_gift: 30,
             max_lookahead_with_gift: 500,
             preferred_gifter: None,
@@ -278,7 +278,7 @@ impl BotInterrupt for StepCountForLuck {
         }
 
         if !self.reached_lucky_step_count(game_state)? {
-            if game_state.globals.in_game_time >= 2530 {
+            if game_state.globals.in_game_time >= Timestamp::new(2530) {
                 // Running out of time, so the bot may be doing an
                 // activity that doesn't produce many steps.  Switch
                 // to a more active step-counting, to ensure that the

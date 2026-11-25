@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use game_state::{GameState, ItemId};
+use game_state::{GameState, ItemId, Timestamp};
 
 use crate::{
     ActivateTile, BuyFromMerchantGoal, Error, GameAction, GoToRoomGoal,
@@ -23,7 +23,8 @@ impl EggFestival {
 
     pub fn is_completed(&self, game_state: &GameState) -> bool {
         let current_day = game_state.globals.days_played();
-        current_day % (4 * 28) != 13 || game_state.globals.in_game_time >= 1400
+        current_day % (4 * 28) != 13
+            || game_state.globals.in_game_time >= Timestamp::new(1400)
     }
 }
 

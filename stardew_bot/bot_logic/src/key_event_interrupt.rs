@@ -1,4 +1,4 @@
-use game_state::GameState;
+use game_state::{GameState, Timestamp};
 use geometry::Vector;
 
 use crate::Error;
@@ -49,7 +49,8 @@ impl BotInterrupt for KeyEventInterrupt {
         let community_center_unlocked = check_flag("ccDoorUnlock");
         let can_unlock_community_center = current_day >= 5
             && !game_state.daily.is_raining
-            && (830..1300).contains(&game_state.globals.in_game_time);
+            && (Timestamp::new(830)..Timestamp::new(1300))
+                .contains(&game_state.globals.in_game_time);
         if !community_center_unlocked
             && can_unlock_community_center
             && game_state.player.room_name == "Backwoods"

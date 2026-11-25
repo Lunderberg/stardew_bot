@@ -7,7 +7,7 @@ use dsl::{Pointer, RustNativeObject, SymbolicGraph, SymbolicValue};
 use geometry::{CardinalDirection, Rectangle, Vector};
 use itertools::{Either, Itertools as _};
 
-use crate::{Error, Item, StaticState};
+use crate::{Error, Item, StaticState, Timestamp};
 
 use super::{Inventory, ItemCategory, ItemId, TileMap};
 
@@ -139,7 +139,7 @@ pub enum WarpKind {
     /// A door that may only be activated at certain times of the day.
     /// The times are integer values, which show the time of day.
     /// For example, 2:00 PM would be the integer 1400.
-    LockedDoor { opens: i32, closes: i32 },
+    LockedDoor { opens: Timestamp, closes: Timestamp },
 
     /// A minecart that may be activated, and can travel to the
     /// location by select the destination.
@@ -681,12 +681,16 @@ impl Location {
                                 Vector::new(right, down)
                             };
                             let target_room = iter_words.next()?.to_string();
-                            let opens: i32 = iter_words
-                                .next()
-                                .and_then(|right| right.parse().ok())?;
-                            let closes: i32 = iter_words
-                                .next()
-                                .and_then(|right| right.parse().ok())?;
+                            let opens = Timestamp::new(
+                                iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?,
+                            );
+                            let closes = Timestamp::new(
+                                iter_words
+                                    .next()
+                                    .and_then(|right| right.parse().ok())?,
+                            );
 
                             let requires_friendship =
                                 iter_words.next().map(|name| name.to_string());

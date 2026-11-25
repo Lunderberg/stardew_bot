@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use dsl::{RustNativeObject, SymbolicGraph, SymbolicValue};
 
-use crate::{Error, Inventory};
+use crate::{Error, Inventory, Timestamp};
 
 #[derive(RustNativeObject, Debug, Clone)]
 pub struct GlobalGameState {
@@ -37,7 +37,7 @@ pub struct GlobalGameState {
     /// check `Game1.gameTimeInterval`,
     /// `Game1.realMilliSecondsPerGameTenMinutes`, and the current
     /// location's `ExtraMillisecondsPerInGameMinute` field.
-    pub in_game_time: i32,
+    pub in_game_time: Timestamp,
 
     /// If the screen is currently fading to black.
     pub currently_fading_to_black: bool,
@@ -117,7 +117,7 @@ impl GlobalGameState {
                     multiplayer_id,
                     game_id,
                     game_mode_tick,
-                    in_game_time,
+                    in_game_time: Timestamp::new(in_game_time),
                     stats: stats.0.clone(),
                     currently_fading_to_black,
                     event_up,

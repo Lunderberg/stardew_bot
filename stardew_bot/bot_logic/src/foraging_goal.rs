@@ -6,7 +6,7 @@ use std::{
 use geometry::{Direction, Vector};
 
 use crate::{ActivateTile, Error, MovementGoal};
-use game_state::{GameState, ObjectKind, TileMap};
+use game_state::{GameState, ObjectKind, TileMap, Timestamp};
 
 use super::{
     GameStateExt as _, LocationExt as _, RepairBeachBridgeGoal,
@@ -19,7 +19,7 @@ pub struct ForagingGoal {
 
     // TODO: Extract these out into a more general handling that can
     // be applied to any goal.
-    stop_at_time: Option<i32>,
+    stop_at_time: Option<Timestamp>,
     stop_with_stamina: Option<i32>,
 }
 
@@ -46,9 +46,9 @@ impl ForagingGoal {
         }
     }
 
-    pub fn stop_at_time(self, time: i32) -> Self {
+    pub fn stop_at_time(self, time: impl Into<Timestamp>) -> Self {
         Self {
-            stop_at_time: Some(time),
+            stop_at_time: Some(time.into()),
             ..self
         }
     }

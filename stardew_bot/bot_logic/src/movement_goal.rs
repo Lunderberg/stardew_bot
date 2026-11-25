@@ -10,7 +10,7 @@ use crate::{
 };
 use game_state::{
     FurnitureKind, GameState, Item, ItemId, Location, Object, ObjectKind,
-    StaticState, TileMap, WarpKind,
+    StaticState, TileMap, Timestamp, WarpKind,
 };
 
 use super::{
@@ -121,7 +121,7 @@ struct ChairJumpGoal {
 struct ConnectedRoomGraph<'a> {
     locations: &'a [Location],
     statics: &'a StaticState,
-    in_game_time: i32,
+    in_game_time: Timestamp,
     events: &'a HashSet<String>,
     clear_breakables: bool,
 }
@@ -1127,7 +1127,7 @@ impl ChairJumpGoal {
         let location = game_state.current_room()?;
         let chair_tile = self.chair_jump.chair_tile;
 
-        if game_state.globals.in_game_time >= 2550 {
+        if game_state.globals.in_game_time >= Timestamp::new(2550) {
             // If the day ends while the chair is placed down, we
             // don't start the next day with it.  Therefore, disable
             // chair-jumps in the last 10 minutes of the day.

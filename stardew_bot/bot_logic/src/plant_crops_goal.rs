@@ -9,7 +9,7 @@ use crate::{
 };
 use game_state::{
     CropPhase, GameState, HoeDirt, Item, ItemCategory, ItemId, ObjectKind,
-    Quality, ResourceClumpKind, SeededRng, StaticState, TileMap,
+    Quality, ResourceClumpKind, SeededRng, StaticState, TileMap, Timestamp,
 };
 
 use super::{
@@ -29,7 +29,7 @@ pub struct PlantCropsGoal {
 
     /// The time at which this goal should stop early, if not already
     /// completed.
-    stop_time: i32,
+    stop_time: Timestamp,
 
     /// If `Some(dist)`, the maximum distance in tiles that the bot
     /// may travel to dig up clay while preparing the field.  If
@@ -106,7 +106,7 @@ impl PlantCropsGoal {
         Self {
             seeds,
             plan: None,
-            stop_time: 2600,
+            stop_time: Timestamp::new(2600),
             opportunistic_clay_farming: None,
             buy_missing_seeds: true,
             stop_after_buying_seeds: false,
@@ -144,8 +144,11 @@ impl PlantCropsGoal {
         }
     }
 
-    pub fn stop_time(self, stop_time: i32) -> Self {
-        Self { stop_time, ..self }
+    pub fn stop_time(self, stop_time: impl Into<Timestamp>) -> Self {
+        Self {
+            stop_time: stop_time.into(),
+            ..self
+        }
     }
 
     /// Returns the next step required to prepare the tile.
@@ -578,8 +581,11 @@ impl PlantCropsGoal {
             return Ok(None);
         }
 
+        let open_time = Timestamp::new(900);
+        let close_time = Timestamp::new(1700);
         let store_is_open = (game_state.globals.days_played() % 7 != 3)
-            && (900..1700).contains(&game_state.globals.in_game_time);
+            && (open_time..close_time)
+                .contains(&game_state.globals.in_game_time);
         if !store_is_open {
             return Ok(None);
         }
@@ -796,7 +802,7 @@ impl BotGoal for PlantCropsGoal {
             .min_by_key(|(tile, opt_item)| {
                 let need_clay_before_deadline =
                     self.opportunistic_clay_farming.is_some()
-                        && self.stop_time < 2600;
+                        && self.stop_time < Timestamp::new(2600);
 
                 let tile = *tile;
                 let is_adjacent = distances.get_opt(tile) == Some(&1);
